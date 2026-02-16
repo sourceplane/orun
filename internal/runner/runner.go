@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,12 +17,13 @@ import (
 
 // Runner executes a compiled plan in dependency order.
 type Runner struct {
-	WorkDir string
-	Stdout  io.Writer
-	Stderr  io.Writer
-	DryRun  bool
-	JobID   string
-	Retry   bool
+	WorkDir            string
+	UseWorkDirOverride bool
+	Stdout             io.Writer
+	Stderr             io.Writer
+	DryRun             bool
+	JobID              string
+	Retry              bool
 }
 
 type State struct {
@@ -44,14 +46,15 @@ type runSummary struct {
 	waiting   int
 }
 
-func NewRunner(workDir string, stdout, stderr io.Writer, dryRun bool, jobID string, retry bool) *Runner {
+func NewRunner(workDir string, useWorkDirOverride bool, stdout, stderr io.Writer, dryRun bool, jobID string, retry bool) *Runner {
 	return &Runner{
-		WorkDir: workDir,
-		Stdout:  stdout,
-		Stderr:  stderr,
-		DryRun:  dryRun,
-		JobID:   jobID,
-		Retry:   retry,
+		WorkDir:            workDir,
+		UseWorkDirOverride: useWorkDirOverride,
+		Stdout:             stdout,
+		Stderr:             stderr,
+		DryRun:             dryRun,
+		JobID:              jobID,
+		Retry:              retry,
 	}
 }
 
@@ -138,14 +141,19 @@ func (r *Runner) Run(plan *model.Plan) error {
 			}
 		}
 
-		fmt.Fprintf(r.Stdout, "\n▶ Job %s (%s/%s)\n", job.ID, job.Component, job.Environment)
-		fmt.Fprintf(r.Stdout, "  status: ready (all dependency conditions met)\n")
+		r.printJobHeader(job)
 
 		jobFailed := false
-		for _, step := range job.Steps {
+		currentPhase := ""
+		for idx, step := range job.Steps {
 			stepID := stepIdentifier(step)
+			stepPhase := normalizeStepPhase(step.Phase)
+			if stepPhase != currentPhase {
+				r.printPhaseHeader(stepPhase)
+				currentPhase = stepPhase
+			}
 			if jobState.Steps[stepID] == "completed" {
-				fmt.Fprintf(r.Stdout, "  ↷ Step %s (already completed)\n", stepID)
+				fmt.Fprintf(r.Stdout, "  │  ↷ Step %d/%d %s (already completed)\n", idx+1, len(job.Steps), stepID)
 				continue
 			}
 
@@ -156,26 +164,26 @@ func (r *Runner) Run(plan *model.Plan) error {
 				}
 			}
 
-			fmt.Fprintf(r.Stdout, "  • Step %s\n", stepID)
-			fmt.Fprintf(r.Stdout, "    phase=%s order=%d\n", normalizeStepPhase(step.Phase), step.Order)
+			fmt.Fprintf(r.Stdout, "  │  • Step %d/%d  %s\n", idx+1, len(job.Steps), stepID)
+			fmt.Fprintf(r.Stdout, "  │    phase: %s    order: %d\n", stepPhase, step.Order)
+			workingDir := r.resolveWorkingDir(job.Path)
+			fmt.Fprintf(r.Stdout, "  │    cwd: %s\n", workingDir)
+			fmt.Fprintf(r.Stdout, "  │    run: %s\n", step.Run)
 			if r.DryRun {
-				fmt.Fprintf(r.Stdout, "    run: %s\n", step.Run)
 				jobState.Steps[stepID] = "completed"
 				if persistState {
 					if err := r.saveState(statePath, state); err != nil {
 						return err
 					}
 				}
-				fmt.Fprintf(r.Stdout, "    ✓ completed (dry-run)\n")
+				fmt.Fprintf(r.Stdout, "  │    ✓ completed (dry-run)\n")
 				continue
 			}
 
-			cmd := exec.Command("sh", "-c", step.Run)
-			cmd.Dir = r.resolveWorkingDir(job.Path)
-			cmd.Stdout = r.Stdout
-			cmd.Stderr = r.Stderr
+			output, err := r.executeStep(step.Run, workingDir)
+			r.printStepOutput(output)
 
-			if err := cmd.Run(); err != nil {
+			if err != nil {
 				jobState.Steps[stepID] = "failed"
 				jobState.Status = "failed"
 				jobState.LastError = fmt.Sprintf("step %s: %v", stepID, err)
@@ -186,16 +194,16 @@ func (r *Runner) Run(plan *model.Plan) error {
 					}
 				}
 
-				fmt.Fprintf(r.Stdout, "    ✗ failed: %v\n", err)
+				r.printFailureBlock(err, output, workingDir)
 				if strings.EqualFold(step.OnFailure, "continue") {
-					fmt.Fprintf(r.Stdout, "    ⚠ onFailure=continue, moving to next step\n")
+					fmt.Fprintf(r.Stdout, "  │    ⚠ onFailure=continue, moving to next step\n")
 					continue
 				}
 
 				jobFailed = true
 				summary.failed++
 				if failFast {
-					return fmt.Errorf("job %s step %s failed: %w", job.ID, stepID, err)
+					return fmt.Errorf("job %s step %s failed in %s: %w", job.ID, stepID, workingDir, err)
 				}
 				break
 			}
@@ -206,7 +214,7 @@ func (r *Runner) Run(plan *model.Plan) error {
 					return err
 				}
 			}
-			fmt.Fprintf(r.Stdout, "    ✓ completed\n")
+			fmt.Fprintf(r.Stdout, "  │    ✓ completed\n")
 		}
 
 		if jobState.Status != "failed" {
@@ -219,7 +227,7 @@ func (r *Runner) Run(plan *model.Plan) error {
 				}
 			}
 			summary.completed++
-			fmt.Fprintf(r.Stdout, "  ✓ Job %s completed\n", job.ID)
+			fmt.Fprintf(r.Stdout, "  └─ ✓ Job %s completed\n", job.ID)
 		} else if !jobFailed {
 			summary.failed++
 		}
@@ -244,25 +252,30 @@ func (r *Runner) Run(plan *model.Plan) error {
 }
 
 func (r *Runner) printRunHeader(plan *model.Plan, statePath string) {
-	fmt.Fprintln(r.Stdout, "═══════════════════════════════════════════════════════════")
-	fmt.Fprintln(r.Stdout, "liteci run")
-	fmt.Fprintln(r.Stdout, "═══════════════════════════════════════════════════════════")
-	fmt.Fprintf(r.Stdout, "plan: %s (%s)\n", plan.Metadata.Name, plan.Metadata.Checksum)
-	fmt.Fprintf(r.Stdout, "jobs: %d\n", len(plan.Jobs))
-	fmt.Fprintf(r.Stdout, "state: %s\n", statePath)
+	fmt.Fprintln(r.Stdout, "┌──────────────────────────────────────────────────────────┐")
+	fmt.Fprintln(r.Stdout, "│ liteci run                                               │")
+	fmt.Fprintln(r.Stdout, "├──────────────────────────────────────────────────────────┤")
+	fmt.Fprintf(r.Stdout, "│ plan:  %s (%s)\n", plan.Metadata.Name, plan.Metadata.Checksum)
+	fmt.Fprintf(r.Stdout, "│ jobs:  %d\n", len(plan.Jobs))
+	fmt.Fprintf(r.Stdout, "│ state: %s\n", statePath)
 	mode := "execute"
 	if r.DryRun {
 		mode = "dry-run"
 	}
-	fmt.Fprintf(r.Stdout, "mode: %s\n", mode)
-	if r.JobID != "" {
-		fmt.Fprintf(r.Stdout, "target-job: %s\n", r.JobID)
+	fmt.Fprintf(r.Stdout, "│ mode:  %s\n", mode)
+	if r.UseWorkDirOverride {
+		fmt.Fprintf(r.Stdout, "│ cwd:   override (%s)\n", r.WorkDir)
+	} else {
+		fmt.Fprintln(r.Stdout, "│ cwd:   component-path (job.path)")
 	}
-	fmt.Fprintln(r.Stdout, "═══════════════════════════════════════════════════════════")
+	if r.JobID != "" {
+		fmt.Fprintf(r.Stdout, "│ target: %s\n", r.JobID)
+	}
+	fmt.Fprintln(r.Stdout, "└──────────────────────────────────────────────────────────┘")
 }
 
 func (r *Runner) printReadinessSnapshot(jobs []model.PlanJob, state *State) {
-	fmt.Fprintln(r.Stdout, "Job readiness snapshot:")
+	fmt.Fprintln(r.Stdout, "\nReadiness snapshot")
 	for _, job := range jobs {
 		if r.JobID != "" && job.ID != r.JobID {
 			continue
@@ -270,39 +283,40 @@ func (r *Runner) printReadinessSnapshot(jobs []model.PlanJob, state *State) {
 
 		jobState := state.Jobs[job.ID]
 		if jobState != nil && jobState.Status == "completed" {
-			fmt.Fprintf(r.Stdout, "  ✓ %s (completed from state)\n", job.ID)
+			fmt.Fprintf(r.Stdout, "  ├─ ✓ %s (completed from state)\n", job.ID)
 			continue
 		}
 
 		unmet := unresolvedDependencies(job, state)
 		if len(unmet) > 0 {
-			fmt.Fprintf(r.Stdout, "  ⏳ %s waiting for: %s\n", job.ID, strings.Join(unmet, ", "))
+			fmt.Fprintf(r.Stdout, "  ├─ ⏳ %s waiting for: %s\n", job.ID, strings.Join(unmet, ", "))
 			continue
 		}
 
-		fmt.Fprintf(r.Stdout, "  ▶ %s ready\n", job.ID)
+		fmt.Fprintf(r.Stdout, "  ├─ ▶ %s ready\n", job.ID)
 	}
 }
 
 func (r *Runner) printWaiting(job model.PlanJob, unmet []string, state *State) {
-	fmt.Fprintf(r.Stdout, "⏳ Job %s waiting for dependencies:\n", job.ID)
+	fmt.Fprintf(r.Stdout, "\n⏳ Job %s waiting for dependencies\n", job.ID)
 	for _, dep := range unmet {
 		status := "pending"
 		if depState, ok := state.Jobs[dep]; ok && depState != nil && depState.Status != "" {
 			status = depState.Status
 		}
-		fmt.Fprintf(r.Stdout, "   - %s (%s)\n", dep, status)
+		fmt.Fprintf(r.Stdout, "  ├─ %s (%s)\n", dep, status)
 	}
 }
 
 func (r *Runner) printRunSummary(summary *runSummary) {
-	fmt.Fprintln(r.Stdout, "\n═══════════════════════════════════════════════════════════")
-	fmt.Fprintln(r.Stdout, "Run summary")
-	fmt.Fprintln(r.Stdout, "═══════════════════════════════════════════════════════════")
-	fmt.Fprintf(r.Stdout, "completed: %d\n", summary.completed)
-	fmt.Fprintf(r.Stdout, "skipped:   %d\n", summary.skipped)
-	fmt.Fprintf(r.Stdout, "waiting:   %d\n", summary.waiting)
-	fmt.Fprintf(r.Stdout, "failed:    %d\n", summary.failed)
+	fmt.Fprintln(r.Stdout, "\n┌──────────────────────────────────────────────────────────┐")
+	fmt.Fprintln(r.Stdout, "│ run summary                                              │")
+	fmt.Fprintln(r.Stdout, "├──────────────────────────────────────────────────────────┤")
+	fmt.Fprintf(r.Stdout, "│ completed: %d\n", summary.completed)
+	fmt.Fprintf(r.Stdout, "│ skipped:   %d\n", summary.skipped)
+	fmt.Fprintf(r.Stdout, "│ waiting:   %d\n", summary.waiting)
+	fmt.Fprintf(r.Stdout, "│ failed:    %d\n", summary.failed)
+	fmt.Fprintln(r.Stdout, "└──────────────────────────────────────────────────────────┘")
 }
 
 func normalizeStepPhase(phase string) string {
@@ -417,13 +431,103 @@ func unresolvedDependencies(job model.PlanJob, state *State) []string {
 }
 
 func (r *Runner) resolveWorkingDir(path string) string {
+	if r.UseWorkDirOverride {
+		if filepath.IsAbs(r.WorkDir) {
+			return r.WorkDir
+		}
+		base, err := filepath.Abs(r.WorkDir)
+		if err == nil {
+			return base
+		}
+		return r.WorkDir
+	}
+
 	if path == "" || path == "./" {
 		return r.WorkDir
 	}
+
 	if filepath.IsAbs(path) {
 		return path
 	}
 	return filepath.Join(r.WorkDir, path)
+}
+
+func (r *Runner) executeStep(command, workingDir string) (string, error) {
+	cmd := exec.Command("sh", "-c", command)
+	cmd.Dir = workingDir
+
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	err := cmd.Run()
+	return strings.TrimRight(buf.String(), "\n"), err
+}
+
+func (r *Runner) printStepOutput(output string) {
+	if strings.TrimSpace(output) == "" {
+		return
+	}
+
+	fmt.Fprintln(r.Stdout, "  │    output:")
+	for _, line := range strings.Split(output, "\n") {
+		fmt.Fprintf(r.Stdout, "  │      %s\n", line)
+	}
+}
+
+func (r *Runner) printPhaseHeader(phase string) {
+	title := "Main commands"
+	switch phase {
+	case "pre":
+		title = "Pre-steps"
+	case "post":
+		title = "Post-steps"
+	}
+
+	fmt.Fprintf(r.Stdout, "\n  ├─ %s\n", title)
+}
+
+func (r *Runner) printJobHeader(job model.PlanJob) {
+	fmt.Fprintf(r.Stdout, "\n╭─ Job %s\n", job.ID)
+	fmt.Fprintf(r.Stdout, "│  component: %s\n", job.Component)
+	fmt.Fprintf(r.Stdout, "│  environment: %s\n", job.Environment)
+	fmt.Fprintln(r.Stdout, "│  status: ready")
+}
+
+func (r *Runner) printFailureBlock(err error, output, workingDir string) {
+	fmt.Fprintf(r.Stdout, "  │    ✗ failed: %s\n", summarizeExecError(err))
+	if hint := stepFailureHint(err, output, workingDir); hint != "" {
+		fmt.Fprintf(r.Stdout, "  │    hint: %s\n", hint)
+	}
+}
+
+func summarizeExecError(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return fmt.Sprintf("command exited with code %d", exitErr.ExitCode())
+	}
+
+	return err.Error()
+}
+
+func stepFailureHint(err error, output, workingDir string) string {
+	if err == nil {
+		return ""
+	}
+
+	combined := strings.ToLower(err.Error() + "\n" + output)
+	if strings.Contains(combined, "no such file or directory") {
+		return fmt.Sprintf("file/path not found from cwd %s. Verify component path, relative file paths, or set --workdir to override globally", workingDir)
+	}
+
+	if strings.Contains(combined, "permission denied") {
+		return "permission denied. Verify executable permissions and access to the target directory"
+	}
+
+	return ""
 }
 
 func topologicalOrder(jobs []model.PlanJob) ([]model.PlanJob, error) {

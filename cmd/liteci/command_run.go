@@ -13,11 +13,12 @@ import (
 )
 
 var (
-	runPlanFile string
-	runExecute  bool
-	runWorkDir  string
-	runJobID    string
-	runRetry    bool
+	runPlanFile           string
+	runExecute            bool
+	runWorkDir            string
+	runUseWorkDirOverride bool
+	runJobID              string
+	runRetry              bool
 )
 
 var runCmd = &cobra.Command{
@@ -26,6 +27,7 @@ var runCmd = &cobra.Command{
 	Long:         "Execute the jobs and steps from a generated plan file, similar to an apply phase.",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		runUseWorkDirOverride = cmd.Flags().Changed("workdir")
 		return runPlan()
 	},
 }
@@ -35,7 +37,7 @@ func registerRunCommand(root *cobra.Command) {
 
 	runCmd.Flags().StringVarP(&runPlanFile, "plan", "p", "plan.json", "Path to plan file (json or yaml)")
 	runCmd.Flags().BoolVarP(&runExecute, "execute", "x", false, "Actually execute commands (default is dry-run)")
-	runCmd.Flags().StringVar(&runWorkDir, "workdir", ".", "Base working directory for relative job paths")
+	runCmd.Flags().StringVar(&runWorkDir, "workdir", ".", "Override working directory for all jobs (default behavior uses each job path)")
 	runCmd.Flags().StringVar(&runJobID, "job-id", "", "Run only a specific job ID (must match plan job id)")
 	runCmd.Flags().BoolVar(&runRetry, "retry", false, "Clear existing state for selected --job-id before running")
 }
@@ -55,7 +57,7 @@ func runPlan() error {
 		return fmt.Errorf("--retry requires --job-id")
 	}
 
-	r := runner.NewRunner(runWorkDir, os.Stdout, os.Stderr, dryRun, runJobID, runRetry)
+	r := runner.NewRunner(runWorkDir, runUseWorkDirOverride, os.Stdout, os.Stderr, dryRun, runJobID, runRetry)
 	if err := r.Run(plan); err != nil {
 		return err
 	}
