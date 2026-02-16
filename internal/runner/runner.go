@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sourceplane/liteci/internal/model"
+	"github.com/sourceplane/liteci/internal/ui"
 )
 
 // Runner executes a compiled plan in dependency order.
@@ -24,6 +25,7 @@ type Runner struct {
 	DryRun             bool
 	JobID              string
 	Retry              bool
+	Color              bool
 }
 
 type State struct {
@@ -55,6 +57,7 @@ func NewRunner(workDir string, useWorkDirOverride bool, stdout, stderr io.Writer
 		DryRun:             dryRun,
 		JobID:              jobID,
 		Retry:              retry,
+		Color:              ui.ColorEnabledForWriter(stdout),
 	}
 }
 
@@ -85,11 +88,23 @@ func (r *Runner) Run(plan *model.Plan) error {
 
 	persistState := !r.DryRun
 
-	r.printRunHeader(plan, statePath)
-
 	orderedJobs, err := topologicalOrder(plan.Jobs)
 	if err != nil {
 		return err
+	}
+
+	var targetJob *model.PlanJob
+	if r.JobID != "" {
+		job, err := findJobByID(orderedJobs, r.JobID)
+		if err != nil {
+			return err
+		}
+		targetJob = &job
+	}
+
+	r.printRunHeader(plan, statePath)
+	if targetJob != nil {
+		r.printTargetJobSummary(*targetJob, state)
 	}
 
 	r.printReadinessSnapshot(orderedJobs, state)
@@ -125,7 +140,7 @@ func (r *Runner) Run(plan *model.Plan) error {
 		jobState := ensureJobState(state, job)
 		if jobState.Status == "completed" {
 			summary.skipped++
-			fmt.Fprintf(r.Stdout, "↷ Skip job %s (already completed)\n", job.ID)
+			fmt.Fprintf(r.Stdout, "%s Skip job %s (already completed)\n", ui.Yellow(r.Color, "↷"), job.ID)
 			continue
 		}
 
@@ -196,7 +211,7 @@ func (r *Runner) Run(plan *model.Plan) error {
 
 				r.printFailureBlock(err, output, workingDir)
 				if strings.EqualFold(step.OnFailure, "continue") {
-					fmt.Fprintf(r.Stdout, "  │    ⚠ onFailure=continue, moving to next step\n")
+					fmt.Fprintf(r.Stdout, "  │    %s onFailure=continue, moving to next step\n", ui.Yellow(r.Color, "⚠"))
 					continue
 				}
 
@@ -214,7 +229,7 @@ func (r *Runner) Run(plan *model.Plan) error {
 					return err
 				}
 			}
-			fmt.Fprintf(r.Stdout, "  │    ✓ completed\n")
+			fmt.Fprintf(r.Stdout, "  │    %s completed\n", ui.Green(r.Color, "✓"))
 		}
 
 		if jobState.Status != "failed" {
@@ -227,7 +242,7 @@ func (r *Runner) Run(plan *model.Plan) error {
 				}
 			}
 			summary.completed++
-			fmt.Fprintf(r.Stdout, "  └─ ✓ Job %s completed\n", job.ID)
+			fmt.Fprintf(r.Stdout, "  └─ %s Job %s completed\n", ui.Green(r.Color, "✓"), job.ID)
 		} else if !jobFailed {
 			summary.failed++
 		}
@@ -238,9 +253,6 @@ func (r *Runner) Run(plan *model.Plan) error {
 	}
 
 	if r.JobID != "" {
-		if _, exists := state.Jobs[r.JobID]; !exists {
-			return fmt.Errorf("job not found: %s", r.JobID)
-		}
 		if !executedTarget {
 			return fmt.Errorf("job not found in runnable set: %s", r.JobID)
 		}
@@ -252,11 +264,15 @@ func (r *Runner) Run(plan *model.Plan) error {
 }
 
 func (r *Runner) printRunHeader(plan *model.Plan, statePath string) {
-	fmt.Fprintln(r.Stdout, "┌──────────────────────────────────────────────────────────┐")
-	fmt.Fprintln(r.Stdout, "│ liteci run                                               │")
-	fmt.Fprintln(r.Stdout, "├──────────────────────────────────────────────────────────┤")
+	fmt.Fprintln(r.Stdout, ui.Cyan(r.Color, "┌──────────────────────────────────────────────────────────┐"))
+	fmt.Fprintln(r.Stdout, ui.BoldCyan(r.Color, "│ liteci run                                               │"))
+	fmt.Fprintln(r.Stdout, ui.Cyan(r.Color, "├──────────────────────────────────────────────────────────┤"))
 	fmt.Fprintf(r.Stdout, "│ plan:  %s (%s)\n", plan.Metadata.Name, plan.Metadata.Checksum)
-	fmt.Fprintf(r.Stdout, "│ jobs:  %d\n", len(plan.Jobs))
+	if r.JobID != "" {
+		fmt.Fprintf(r.Stdout, "│ jobs:  1 targeted (%d total in plan)\n", len(plan.Jobs))
+	} else {
+		fmt.Fprintf(r.Stdout, "│ jobs:  %d\n", len(plan.Jobs))
+	}
 	fmt.Fprintf(r.Stdout, "│ state: %s\n", statePath)
 	mode := "execute"
 	if r.DryRun {
@@ -271,11 +287,28 @@ func (r *Runner) printRunHeader(plan *model.Plan, statePath string) {
 	if r.JobID != "" {
 		fmt.Fprintf(r.Stdout, "│ target: %s\n", r.JobID)
 	}
-	fmt.Fprintln(r.Stdout, "└──────────────────────────────────────────────────────────┘")
+	fmt.Fprintln(r.Stdout, ui.Cyan(r.Color, "└──────────────────────────────────────────────────────────┘"))
+}
+
+func (r *Runner) printTargetJobSummary(job model.PlanJob, state *State) {
+	status := "pending"
+	if state != nil {
+		if st, ok := state.Jobs[job.ID]; ok && st != nil && strings.TrimSpace(st.Status) != "" {
+			status = st.Status
+		}
+	}
+
+	fmt.Fprintln(r.Stdout, "\n"+ui.BoldCyan(r.Color, "Target job summary"))
+	fmt.Fprintf(r.Stdout, "  ├─ id: %s\n", job.ID)
+	fmt.Fprintf(r.Stdout, "  ├─ component: %s\n", job.Component)
+	fmt.Fprintf(r.Stdout, "  ├─ environment: %s\n", job.Environment)
+	fmt.Fprintf(r.Stdout, "  ├─ steps: %d\n", len(job.Steps))
+	fmt.Fprintf(r.Stdout, "  ├─ dependencies: %d\n", len(job.DependsOn))
+	fmt.Fprintf(r.Stdout, "  └─ state: %s\n", status)
 }
 
 func (r *Runner) printReadinessSnapshot(jobs []model.PlanJob, state *State) {
-	fmt.Fprintln(r.Stdout, "\nReadiness snapshot")
+	fmt.Fprintln(r.Stdout, "\n"+ui.BoldCyan(r.Color, "Readiness snapshot"))
 	for _, job := range jobs {
 		if r.JobID != "" && job.ID != r.JobID {
 			continue
@@ -283,22 +316,22 @@ func (r *Runner) printReadinessSnapshot(jobs []model.PlanJob, state *State) {
 
 		jobState := state.Jobs[job.ID]
 		if jobState != nil && jobState.Status == "completed" {
-			fmt.Fprintf(r.Stdout, "  ├─ ✓ %s (completed from state)\n", job.ID)
+			fmt.Fprintf(r.Stdout, "  ├─ %s %s (completed from state)\n", ui.Green(r.Color, "✓"), job.ID)
 			continue
 		}
 
 		unmet := unresolvedDependencies(job, state)
 		if len(unmet) > 0 {
-			fmt.Fprintf(r.Stdout, "  ├─ ⏳ %s waiting for: %s\n", job.ID, strings.Join(unmet, ", "))
+			fmt.Fprintf(r.Stdout, "  ├─ %s %s waiting for: %s\n", ui.Yellow(r.Color, "⏳"), job.ID, strings.Join(unmet, ", "))
 			continue
 		}
 
-		fmt.Fprintf(r.Stdout, "  ├─ ▶ %s ready\n", job.ID)
+		fmt.Fprintf(r.Stdout, "  ├─ %s %s ready\n", ui.Cyan(r.Color, "▶"), job.ID)
 	}
 }
 
 func (r *Runner) printWaiting(job model.PlanJob, unmet []string, state *State) {
-	fmt.Fprintf(r.Stdout, "\n⏳ Job %s waiting for dependencies\n", job.ID)
+	fmt.Fprintf(r.Stdout, "\n%s Job %s waiting for dependencies\n", ui.Yellow(r.Color, "⏳"), job.ID)
 	for _, dep := range unmet {
 		status := "pending"
 		if depState, ok := state.Jobs[dep]; ok && depState != nil && depState.Status != "" {
@@ -309,14 +342,19 @@ func (r *Runner) printWaiting(job model.PlanJob, unmet []string, state *State) {
 }
 
 func (r *Runner) printRunSummary(summary *runSummary) {
-	fmt.Fprintln(r.Stdout, "\n┌──────────────────────────────────────────────────────────┐")
-	fmt.Fprintln(r.Stdout, "│ run summary                                              │")
-	fmt.Fprintln(r.Stdout, "├──────────────────────────────────────────────────────────┤")
+	title := "run summary"
+	if r.JobID != "" {
+		title = "target job summary"
+	}
+
+	fmt.Fprintln(r.Stdout, "\n"+ui.Cyan(r.Color, "┌──────────────────────────────────────────────────────────┐"))
+	fmt.Fprintln(r.Stdout, ui.BoldCyan(r.Color, fmt.Sprintf("│ %-56s │", title)))
+	fmt.Fprintln(r.Stdout, ui.Cyan(r.Color, "├──────────────────────────────────────────────────────────┤"))
 	fmt.Fprintf(r.Stdout, "│ completed: %d\n", summary.completed)
 	fmt.Fprintf(r.Stdout, "│ skipped:   %d\n", summary.skipped)
 	fmt.Fprintf(r.Stdout, "│ waiting:   %d\n", summary.waiting)
-	fmt.Fprintf(r.Stdout, "│ failed:    %d\n", summary.failed)
-	fmt.Fprintln(r.Stdout, "└──────────────────────────────────────────────────────────┘")
+	fmt.Fprintf(r.Stdout, "│ failed:    %s\n", ui.Red(r.Color, fmt.Sprintf("%d", summary.failed)))
+	fmt.Fprintln(r.Stdout, ui.Cyan(r.Color, "└──────────────────────────────────────────────────────────┘"))
 }
 
 func normalizeStepPhase(phase string) string {
@@ -484,20 +522,20 @@ func (r *Runner) printPhaseHeader(phase string) {
 		title = "Post-steps"
 	}
 
-	fmt.Fprintf(r.Stdout, "\n  ├─ %s\n", title)
+	fmt.Fprintf(r.Stdout, "\n  ├─ %s\n", ui.Cyan(r.Color, title))
 }
 
 func (r *Runner) printJobHeader(job model.PlanJob) {
-	fmt.Fprintf(r.Stdout, "\n╭─ Job %s\n", job.ID)
+	fmt.Fprintf(r.Stdout, "\n%s Job %s\n", ui.Cyan(r.Color, "╭─"), ui.Bold(r.Color, job.ID))
 	fmt.Fprintf(r.Stdout, "│  component: %s\n", job.Component)
 	fmt.Fprintf(r.Stdout, "│  environment: %s\n", job.Environment)
-	fmt.Fprintln(r.Stdout, "│  status: ready")
+	fmt.Fprintf(r.Stdout, "│  status: %s\n", ui.Green(r.Color, "ready"))
 }
 
 func (r *Runner) printFailureBlock(err error, output, workingDir string) {
-	fmt.Fprintf(r.Stdout, "  │    ✗ failed: %s\n", summarizeExecError(err))
+	fmt.Fprintf(r.Stdout, "  │    %s failed: %s\n", ui.Red(r.Color, "✗"), ui.Red(r.Color, summarizeExecError(err)))
 	if hint := stepFailureHint(err, output, workingDir); hint != "" {
-		fmt.Fprintf(r.Stdout, "  │    hint: %s\n", hint)
+		fmt.Fprintf(r.Stdout, "  │    %s %s\n", ui.Yellow(r.Color, "hint:"), hint)
 	}
 }
 
@@ -579,4 +617,13 @@ func topologicalOrder(jobs []model.PlanJob) ([]model.PlanJob, error) {
 	}
 
 	return ordered, nil
+}
+
+func findJobByID(jobs []model.PlanJob, jobID string) (model.PlanJob, error) {
+	for _, job := range jobs {
+		if job.ID == jobID {
+			return job, nil
+		}
+	}
+	return model.PlanJob{}, fmt.Errorf("job not found: %s", jobID)
 }

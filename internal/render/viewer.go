@@ -6,11 +6,13 @@ import (
 	"strings"
 
 	"github.com/sourceplane/liteci/internal/model"
+	"github.com/sourceplane/liteci/internal/ui"
 )
 
 // PlanViewer provides human-readable visualization of a plan DAG
 type PlanViewer struct {
-	plan *model.Plan
+	plan  *model.Plan
+	color bool
 }
 
 // NewPlanViewer creates a new plan viewer
@@ -18,10 +20,15 @@ func NewPlanViewer(plan *model.Plan) *PlanViewer {
 	return &PlanViewer{plan: plan}
 }
 
+func (pv *PlanViewer) SetColor(enabled bool) *PlanViewer {
+	pv.color = enabled
+	return pv
+}
+
 // ViewDAG returns a human-readable tree view of the DAG
 func (pv *PlanViewer) ViewDAG() string {
 	if len(pv.plan.Jobs) == 0 {
-		return "No jobs in plan"
+		return emptyPanel("plan view: dag", "no jobs in plan", pv.color)
 	}
 
 	// Group jobs by component and environment
@@ -42,7 +49,9 @@ func (pv *PlanViewer) ViewDAG() string {
 	sort.Strings(components)
 
 	var sb strings.Builder
-	
+	sb.WriteString(panelHeader("plan view: dag", pv.plan.Metadata.Name, len(pv.plan.Jobs), pv.color))
+	sb.WriteString("\n" + ui.BoldCyan(pv.color, "Component graph") + "\n")
+
 	// Iterate through components
 	for i, component := range components {
 		isLastComponent := i == len(components)-1
@@ -165,9 +174,10 @@ func (pv *PlanViewer) ViewDAG() string {
 		sb.WriteString("\n")
 	}
 
-	// Summary
-	sb.WriteString("═══════════════════════════════════════════════════════════\n")
-	sb.WriteString(fmt.Sprintf("Summary: %d components, %d jobs\n", len(components), len(pv.plan.Jobs)))
+	sb.WriteString(summaryPanel("dag summary", map[string]int{
+		"components": len(components),
+		"jobs":       len(pv.plan.Jobs),
+	}, pv.color))
 
 	return sb.String()
 }
@@ -182,12 +192,17 @@ func (pv *PlanViewer) ViewByComponent(componentName string) string {
 	}
 
 	if len(matchingJobs) == 0 {
-		return fmt.Sprintf("No jobs found for component: %s", componentName)
+		return emptyPanel("plan view: component", fmt.Sprintf("component: %s\nno jobs found", componentName), pv.color)
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s [%s]\n", componentName, matchingJobs[0].Composition))
-	sb.WriteString("═══════════════════════════════════════════════════════════\n\n")
+	sb.WriteString(panelHeader(
+		"plan view: component",
+		fmt.Sprintf("%s [%s]", componentName, matchingJobs[0].Composition),
+		len(matchingJobs),
+		pv.color,
+	))
+	sb.WriteString("\n" + ui.BoldCyan(pv.color, "Environment breakdown") + "\n")
 
 	// Group by environment
 	envMap := make(map[string][]*model.PlanJob)
@@ -205,45 +220,45 @@ func (pv *PlanViewer) ViewByComponent(componentName string) string {
 	// Show each environment
 	for _, env := range environments {
 		jobs := envMap[env]
-		sb.WriteString(fmt.Sprintf("%s (%d jobs)\n", env, len(jobs)))
+		sb.WriteString(fmt.Sprintf("├─ %s (%d jobs)\n", env, len(jobs)))
 
 		sort.Slice(jobs, func(a, b int) bool {
 			return jobs[a].Name < jobs[b].Name
 		})
 
 		for i, job := range jobs {
-			prefix := "├─ "
+			prefix := "│  ├─ "
 			if i == len(jobs)-1 {
-				prefix = "└─ "
+				prefix = "│  └─ "
 			}
-			connector := "│  "
+			connector := "│  │"
 			if i == len(jobs)-1 {
-				connector = "   "
+				connector = "│   "
 			}
 
 			sb.WriteString(fmt.Sprintf("%s%s\n", prefix, job.Name))
 			if job.JobRegistry != "" {
-				sb.WriteString(fmt.Sprintf("%s  Registry: %s\n", connector, job.JobRegistry))
+				sb.WriteString(fmt.Sprintf("%s  registry: %s\n", connector, job.JobRegistry))
 			}
 			if job.Job != "" {
-				sb.WriteString(fmt.Sprintf("%s  Job: %s\n", connector, job.Job))
+				sb.WriteString(fmt.Sprintf("%s  job: %s\n", connector, job.Job))
 			}
 			if job.Timeout != "" {
-				sb.WriteString(fmt.Sprintf("%s  Timeout: %s\n", connector, job.Timeout))
+				sb.WriteString(fmt.Sprintf("%s  timeout: %s\n", connector, job.Timeout))
 			}
 			if job.Retries > 0 {
-				sb.WriteString(fmt.Sprintf("%s  Retries: %d\n", connector, job.Retries))
+				sb.WriteString(fmt.Sprintf("%s  retries: %d\n", connector, job.Retries))
 			}
 
 			if len(job.DependsOn) > 0 {
-				sb.WriteString(fmt.Sprintf("%s  Dependencies:\n", connector))
+				sb.WriteString(fmt.Sprintf("%s  dependencies:\n", connector))
 				for _, dep := range job.DependsOn {
-					sb.WriteString(fmt.Sprintf("%s    %s\n", connector, dep))
+					sb.WriteString(fmt.Sprintf("%s    - %s\n", connector, dep))
 				}
 			}
 
 			if len(job.Steps) > 0 {
-				sb.WriteString(fmt.Sprintf("%s  Steps:\n", connector))
+				sb.WriteString(fmt.Sprintf("%s  steps:\n", connector))
 				for j, step := range job.Steps {
 					stepPrefix := "├─ "
 					if j == len(job.Steps)-1 {
@@ -251,7 +266,11 @@ func (pv *PlanViewer) ViewByComponent(componentName string) string {
 					}
 					sb.WriteString(fmt.Sprintf("%s    %s%s\n", connector, stepPrefix, step.Name))
 					if step.Run != "" {
-						sb.WriteString(fmt.Sprintf("%s    %s   Run: %s\n", connector, "   ", step.Run))
+						runCmd := step.Run
+						if len(runCmd) > 70 {
+							runCmd = runCmd[:67] + "..."
+						}
+						sb.WriteString(fmt.Sprintf("%s    %s   run: %s\n", connector, "   ", runCmd))
 					}
 				}
 			}
@@ -259,18 +278,22 @@ func (pv *PlanViewer) ViewByComponent(componentName string) string {
 		}
 	}
 
+	sb.WriteString(summaryPanel("component summary", map[string]int{
+		"jobs": len(matchingJobs),
+	}, pv.color))
+
 	return sb.String()
 }
 
 // ViewDependencies shows job dependencies in a focused way
 func (pv *PlanViewer) ViewDependencies() string {
 	if len(pv.plan.Jobs) == 0 {
-		return "No jobs in plan"
+		return emptyPanel("plan view: dependencies", "no jobs in plan", pv.color)
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Job Dependencies\n")
-	sb.WriteString("═══════════════════════════════════════════════════════════\n\n")
+	sb.WriteString(panelHeader("plan view: dependencies", pv.plan.Metadata.Name, len(pv.plan.Jobs), pv.color))
+	sb.WriteString("\n" + ui.BoldCyan(pv.color, "Dependency graph") + "\n")
 
 	// Sort jobs by name
 	jobs := make([]*model.PlanJob, len(pv.plan.Jobs))
@@ -290,18 +313,63 @@ func (pv *PlanViewer) ViewDependencies() string {
 		sb.WriteString(fmt.Sprintf("%s%s (%s/%s)\n", prefix, job.Name, job.Component, job.Environment))
 
 		if len(job.DependsOn) == 0 {
-			sb.WriteString("   (no dependencies)\n")
+			sb.WriteString("   └─ no dependencies\n")
 		} else {
 			for j, dep := range job.DependsOn {
 				depPrefix := "  ├─ "
 				if j == len(job.DependsOn)-1 {
 					depPrefix = "  └─ "
 				}
-				sb.WriteString(fmt.Sprintf("%s(depends on) %s\n", depPrefix, dep))
+				sb.WriteString(fmt.Sprintf("%sdepends-on: %s\n", depPrefix, dep))
 			}
 		}
 		sb.WriteString("\n")
 	}
 
+	sb.WriteString(summaryPanel("dependency summary", map[string]int{
+		"jobs": len(jobs),
+	}, pv.color))
+
+	return sb.String()
+}
+
+func panelHeader(view, planName string, jobs int, color bool) string {
+	var sb strings.Builder
+	sb.WriteString(ui.Cyan(color, "┌──────────────────────────────────────────────────────────┐") + "\n")
+	sb.WriteString(ui.BoldCyan(color, fmt.Sprintf("│ %-56s │", view)) + "\n")
+	sb.WriteString(ui.Cyan(color, "├──────────────────────────────────────────────────────────┤") + "\n")
+	sb.WriteString(fmt.Sprintf("│ plan:  %s\n", planName))
+	sb.WriteString(fmt.Sprintf("│ jobs:  %d\n", jobs))
+	sb.WriteString(ui.Cyan(color, "└──────────────────────────────────────────────────────────┘") + "\n")
+	return sb.String()
+}
+
+func summaryPanel(title string, values map[string]int, color bool) string {
+	keys := make([]string, 0, len(values))
+	for k := range values {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var sb strings.Builder
+	sb.WriteString("\n" + ui.Cyan(color, "┌──────────────────────────────────────────────────────────┐") + "\n")
+	sb.WriteString(ui.BoldCyan(color, fmt.Sprintf("│ %-56s │", title)) + "\n")
+	sb.WriteString(ui.Cyan(color, "├──────────────────────────────────────────────────────────┤") + "\n")
+	for _, key := range keys {
+		sb.WriteString(fmt.Sprintf("│ %-10s %d\n", key+":", values[key]))
+	}
+	sb.WriteString(ui.Cyan(color, "└──────────────────────────────────────────────────────────┘") + "\n")
+	return sb.String()
+}
+
+func emptyPanel(view, body string, color bool) string {
+	var sb strings.Builder
+	sb.WriteString(ui.Cyan(color, "┌──────────────────────────────────────────────────────────┐") + "\n")
+	sb.WriteString(ui.BoldCyan(color, fmt.Sprintf("│ %-56s │", view)) + "\n")
+	sb.WriteString(ui.Cyan(color, "├──────────────────────────────────────────────────────────┤") + "\n")
+	for _, line := range strings.Split(body, "\n") {
+		sb.WriteString(fmt.Sprintf("│ %s\n", line))
+	}
+	sb.WriteString(ui.Cyan(color, "└──────────────────────────────────────────────────────────┘"))
 	return sb.String()
 }

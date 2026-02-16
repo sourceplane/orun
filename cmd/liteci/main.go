@@ -13,6 +13,7 @@ import (
 	"github.com/sourceplane/liteci/internal/normalize"
 	"github.com/sourceplane/liteci/internal/planner"
 	"github.com/sourceplane/liteci/internal/render"
+	"github.com/sourceplane/liteci/internal/ui"
 )
 
 func generatePlan() error {
@@ -171,7 +172,7 @@ func generatePlan() error {
 
 	// Handle --view flag
 	if viewPlan != "" {
-		viewer := render.NewPlanViewer(plan)
+		viewer := render.NewPlanViewer(plan).SetColor(ui.ColorEnabledForWriter(os.Stdout))
 		var output string
 
 		switch {
@@ -268,7 +269,11 @@ func listCompositions(args []string) error {
 	}
 
 	// List all compositions
-	fmt.Println("Available Compositions:")
+	fmt.Println(stylePanel("┌──────────────────────────────────────────────────────────┐"))
+	fmt.Println(styleTitle("│ compositions                                             │"))
+	fmt.Println(stylePanel("├──────────────────────────────────────────────────────────┤"))
+	fmt.Println("│ source: assets/config/compositions                       │")
+	fmt.Println(stylePanel("└──────────────────────────────────────────────────────────┘"))
 
 	// Sort composition names for consistent output
 	var compositionNames []string
@@ -287,22 +292,29 @@ func listCompositions(args []string) error {
 		}
 	} else {
 		// Short format - just names and job descriptions
+		fmt.Println("\n" + styleTitle("Available"))
 		for _, compositionName := range compositionNames {
 			composition := compositionRegistry.Types[compositionName]
 			if len(composition.Jobs) > 0 {
-				fmt.Printf("  %s\n", compositionName)
+				fmt.Printf("  ├─ %s\n", compositionName)
 			}
 		}
 	}
 
 	if !longFormat {
-		fmt.Println("\nRun 'liteci composition <name>' for detailed information")
+		fmt.Println("\n" + styleTip("Tip: run 'liteci composition <name>' for detailed information"))
 	}
 
 	return nil
 }
 
 func listComponents(args []string) error {
+	fmt.Println(stylePanel("┌──────────────────────────────────────────────────────────┐"))
+	fmt.Println(styleTitle("│ components                                               │"))
+	fmt.Println(stylePanel("├──────────────────────────────────────────────────────────┤"))
+	fmt.Printf("│ intent: %s\n", intentFile)
+	fmt.Println(stylePanel("└──────────────────────────────────────────────────────────┘"))
+
 	fmt.Println("□ Loading intent...")
 	intent, err := loader.LoadIntent(intentFile)
 	if err != nil {
@@ -364,7 +376,11 @@ func listComponents(args []string) error {
 		}
 
 		if len(changedComps) == 0 {
-			fmt.Println("✓ No components have changed")
+			fmt.Println("\n" + stylePanel("┌──────────────────────────────────────────────────────────┐"))
+			fmt.Println(styleTitle("│ changed components                                       │"))
+			fmt.Println(stylePanel("├──────────────────────────────────────────────────────────┤"))
+			fmt.Println("│ none                                                     │")
+			fmt.Println(stylePanel("└──────────────────────────────────────────────────────────┘"))
 			return nil
 		}
 	}
@@ -382,7 +398,7 @@ func listComponents(args []string) error {
 		}
 
 		if changedOnly && !changedComps[componentName] {
-			fmt.Printf("Component %s has not changed\n", componentName)
+			fmt.Printf("component %s has not changed\n", componentName)
 			return nil
 		}
 
@@ -413,17 +429,18 @@ func listComponents(args []string) error {
 			includedComps[comp] = true
 		}
 
-		fmt.Println("\nComponents:")
+		fmt.Println("\n" + styleTitle("Components:"))
+		fmt.Println("\n" + styleTitle("Dependency impact"))
 
 		// Print changed components
 		if len(changed) > 0 {
-			fmt.Println("\n  [CHANGED]")
+			fmt.Println("\n  ├─ changed")
 			for _, comp := range components {
 				if changed[comp.Name] {
 					if longFormat {
 						printComponentDetails(comp)
 					} else {
-						fmt.Printf("    %s (type: %s, domain: %s, enabled: %v, environments: %d)\n",
+						fmt.Printf("  │  ├─ %s (type=%s, domain=%s, enabled=%v, envs=%d)\n",
 							comp.Name, comp.Type, comp.Domain, comp.Enabled, len(comp.Instances))
 					}
 				}
@@ -432,13 +449,13 @@ func listComponents(args []string) error {
 
 		// Print dependencies
 		if len(dependencies) > 0 {
-			fmt.Println("\n  [DEPENDENCIES]")
+			fmt.Println("\n  ├─ dependencies")
 			for _, comp := range components {
 				if dependencies[comp.Name] {
 					if longFormat {
 						printComponentDetails(comp)
 					} else {
-						fmt.Printf("    %s (type: %s, domain: %s, enabled: %v, environments: %d)\n",
+						fmt.Printf("  │  ├─ %s (type=%s, domain=%s, enabled=%v, envs=%d)\n",
 							comp.Name, comp.Type, comp.Domain, comp.Enabled, len(comp.Instances))
 					}
 				}
@@ -447,13 +464,13 @@ func listComponents(args []string) error {
 
 		// Print dependents
 		if len(dependents) > 0 {
-			fmt.Println("\n  [DEPENDENT SERVICES]")
+			fmt.Println("\n  └─ dependents")
 			for _, comp := range components {
 				if dependents[comp.Name] {
 					if longFormat {
 						printComponentDetails(comp)
 					} else {
-						fmt.Printf("    %s (type: %s, domain: %s, enabled: %v, environments: %d)\n",
+						fmt.Printf("     ├─ %s (type=%s, domain=%s, enabled=%v, envs=%d)\n",
 							comp.Name, comp.Type, comp.Domain, comp.Enabled, len(comp.Instances))
 					}
 				}
@@ -461,12 +478,12 @@ func listComponents(args []string) error {
 		}
 
 		if !longFormat {
-			fmt.Println("\nRun 'liteci component <name>' for detailed information")
+			fmt.Println("\n" + styleTip("Tip: run 'liteci component <name>' for detailed information"))
 		}
 		return nil
 	}
 
-	fmt.Println("\nComponents:")
+	fmt.Println("\n" + styleTitle("Component list"))
 	for _, comp := range components {
 		// Skip if --changed flag and component hasn't changed
 		if changedOnly && !changedComps[comp.Name] {
@@ -476,38 +493,39 @@ func listComponents(args []string) error {
 		if longFormat {
 			printComponentDetails(comp)
 		} else {
-			fmt.Printf("  %s (type: %s, domain: %s, enabled: %v, environments: %d)\n",
+			fmt.Printf("  ├─ %s (type=%s, domain=%s, enabled=%v, envs=%d)\n",
 				comp.Name, comp.Type, comp.Domain, comp.Enabled, len(comp.Instances))
 		}
 	}
 
 	if !longFormat {
-		fmt.Println("\nRun 'liteci component <name>' for detailed information")
+		fmt.Println("\n" + styleTip("Tip: run 'liteci component <name>' for detailed information"))
 	}
 
 	return nil
 }
 
 func printComponentDetails(comp *expand.ComponentMerged) {
-	fmt.Printf("\n[Component] %s\n", comp.Name)
-	fmt.Printf("  Type:       %s\n", comp.Type)
-	fmt.Printf("  Domain:     %s\n", comp.Domain)
-	fmt.Printf("  Enabled:    %v\n", comp.Enabled)
+	fmt.Printf("\n╭─ Component %s\n", comp.Name)
+	fmt.Printf("│  type: %s\n", comp.Type)
+	fmt.Printf("│  domain: %s\n", comp.Domain)
+	fmt.Printf("│  enabled: %v\n", comp.Enabled)
 
 	if len(comp.Dependencies) > 0 {
-		fmt.Printf("  Dependencies: %s\n", strings.Join(comp.Dependencies, ", "))
+		fmt.Printf("│  dependencies: %s\n", strings.Join(comp.Dependencies, ", "))
 	}
 
-	fmt.Printf("  Instances (%d):\n", len(comp.Instances))
+	fmt.Printf("│  instances (%d):\n", len(comp.Instances))
 	for _, inst := range comp.Instances {
-		fmt.Printf("    [%s] path=%s\n", inst.Environment, inst.Path)
+		fmt.Printf("│  ├─ [%s] path=%s\n", inst.Environment, inst.Path)
 		if len(inst.Inputs) > 0 {
-			fmt.Printf("      Inputs:\n")
+			fmt.Printf("│  │  inputs:\n")
 			for k, v := range inst.Inputs {
-				fmt.Printf("        %s: %v\n", k, v)
+				fmt.Printf("│  │    %s: %v\n", k, v)
 			}
 		}
 	}
+	fmt.Printf("╰─ end component %s\n", comp.Name)
 }
 
 func main() {

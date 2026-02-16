@@ -172,33 +172,37 @@ func PrintShortFormat(info *ModelInfo) {
 
 // PrintLongFormat prints composition info in long format
 func PrintLongFormat(info *ModelInfo, expandJobs bool) {
-	fmt.Printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	fmt.Printf("Composition: %s\n", info.Name)
-	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+	fmt.Printf("\n%s\n", stylePanel("┌──────────────────────────────────────────────────────────┐"))
+	fmt.Printf("%s\n", styleTitle(fmt.Sprintf("│ composition: %s", info.Name)))
+	fmt.Printf("%s\n", stylePanel("├──────────────────────────────────────────────────────────┤"))
+	fmt.Printf("│ registry: %s\n", info.JobRegistryName)
+	fmt.Printf("│ default-job: %s\n", info.DefaultJobName)
+	fmt.Printf("│ jobs: %d\n", len(info.AvailableJobs))
+	fmt.Printf("%s\n\n", stylePanel("└──────────────────────────────────────────────────────────┘"))
 
 	if info.Description != "" {
-		fmt.Printf("Description:\n  %s\n\n", info.Description)
+		fmt.Printf("%s\n  %s\n\n", styleTitle("Description:"), info.Description)
 	}
 
 	// JobRegistry Binding
-	fmt.Printf("JobRegistry Binding:\n")
+	fmt.Printf("%s\n", styleTitle("JobRegistry binding:"))
 	if info.JobRegistryName != "" {
-		fmt.Printf("  Registry Name: %s\n", info.JobRegistryName)
+		fmt.Printf("  ├─ name: %s\n", info.JobRegistryName)
 	}
 	if info.JobRegistryDesc != "" {
-		fmt.Printf("  Registry Desc: %s\n", info.JobRegistryDesc)
+		fmt.Printf("  ├─ description: %s\n", info.JobRegistryDesc)
 	}
-	fmt.Printf("  Default Job:   %s\n", info.DefaultJobName)
-	fmt.Printf("  Total Jobs:    %d\n\n", len(info.AvailableJobs))
+	fmt.Printf("  ├─ default job: %s\n", info.DefaultJobName)
+	fmt.Printf("  └─ total jobs: %d\n\n", len(info.AvailableJobs))
 
 	// Available Jobs in Registry
-	fmt.Printf("Available Jobs (from JobRegistry):\n")
+	fmt.Printf("%s\n", styleTitle("Available jobs:"))
 	for i, job := range info.AvailableJobs {
 		marker := "  "
 		if job.Name == info.DefaultJobName {
-			marker = "★ " // Mark default job
+			marker = "  ★ " // Mark default job
 		} else {
-			marker = "  "
+			marker = "  ├ "
 		}
 
 		scope := ""
@@ -206,9 +210,9 @@ func PrintLongFormat(info *ModelInfo, expandJobs bool) {
 			scope = fmt.Sprintf(" [%s]", job.Scope)
 		}
 
-		fmt.Printf("%s%d. %s%s\n", marker, i+1, job.Name, scope)
-		fmt.Printf("     Description: %s\n", job.Description)
-		fmt.Printf("     Steps: %d | Timeout: %s\n", job.Steps, job.Timeout)
+		fmt.Printf("%s%d) %s%s\n", marker, i+1, job.Name, scope)
+		fmt.Printf("      description: %s\n", job.Description)
+		fmt.Printf("      steps: %d | timeout: %s\n", job.Steps, job.Timeout)
 		fmt.Printf("\n")
 	}
 
@@ -218,27 +222,27 @@ func PrintLongFormat(info *ModelInfo, expandJobs bool) {
 	}
 
 	// Current Job Details (showing default job) - only if expandJobs
-	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	fmt.Printf("Using Default Job: %s\n", info.JobName)
-	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+	fmt.Printf("%s\n", stylePanel("┌──────────────────────────────────────────────────────────┐"))
+	fmt.Printf("%s\n", styleTitle(fmt.Sprintf("│ expanded job details: %s", info.JobName)))
+	fmt.Printf("%s\n\n", stylePanel("└──────────────────────────────────────────────────────────┘"))
 
 	// Job information
-	fmt.Printf("Job Information:\n")
-	fmt.Printf("  Name:        %s\n", info.JobName)
-	fmt.Printf("  Description: %s\n\n", info.JobDescription)
+	fmt.Printf("%s\n", styleTitle("Job information:"))
+	fmt.Printf("  ├─ name: %s\n", info.JobName)
+	fmt.Printf("  └─ description: %s\n\n", info.JobDescription)
 
 	// Required fields
 	if len(info.RequiredFields) > 0 {
-		fmt.Printf("Required Fields:\n")
+		fmt.Printf("%s\n", styleTitle("Required fields:"))
 		for _, field := range info.RequiredFields {
-			fmt.Printf("  • %s\n", field)
+			fmt.Printf("  ├─ %s\n", field)
 		}
 		fmt.Printf("\n")
 	}
 
 	// Supported input fields
 	if len(info.SupportedFields) > 0 {
-		fmt.Printf("Supported Input Fields:\n")
+		fmt.Printf("%s\n", styleTitle("Supported input fields:"))
 
 		// Sort fields for consistent output
 		fieldNames := make([]string, 0, len(info.SupportedFields))
@@ -250,9 +254,9 @@ func PrintLongFormat(info *ModelInfo, expandJobs bool) {
 		for _, name := range fieldNames {
 			desc := info.SupportedFields[name]
 			if desc != "" {
-				fmt.Printf("  • %-20s - %s\n", name, desc)
+				fmt.Printf("  ├─ %-20s - %s\n", name, desc)
 			} else {
-				fmt.Printf("  • %s\n", name)
+				fmt.Printf("  ├─ %s\n", name)
 			}
 		}
 		fmt.Printf("\n")
@@ -260,19 +264,17 @@ func PrintLongFormat(info *ModelInfo, expandJobs bool) {
 
 	// Job steps
 	if len(info.Steps) > 0 {
-		fmt.Printf("Job Steps (for %s job):\n", info.JobName)
+		fmt.Printf("%s\n", styleTitle(fmt.Sprintf("Job steps (%s):", info.JobName)))
 		for i, step := range info.Steps {
-			fmt.Printf("  %d. %s\n", i+1, step.Name)
+			fmt.Printf("  ├─ %d) %s\n", i+1, step.Name)
 			if step.Timeout != "" {
-				fmt.Printf("     Timeout: %s\n", step.Timeout)
+				fmt.Printf("  │   timeout: %s\n", step.Timeout)
 			}
 			if step.Retry > 0 {
-				fmt.Printf("     Retry: %d\n", step.Retry)
+				fmt.Printf("  │   retry: %d\n", step.Retry)
 			}
-			fmt.Printf("     Command: %s\n", step.Run)
+			fmt.Printf("  │   run: %s\n", step.Run)
 			fmt.Printf("\n")
 		}
 	}
-
-	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 }
