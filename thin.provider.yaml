@@ -15,6 +15,9 @@ distribution:
   type: oci
   ref: ghcr.io/sourceplane/lite-ci
 
+goreleaser:
+  config: .goreleaser.thin.yaml
+
 
 runtime:
   default: native

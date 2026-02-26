@@ -26,6 +26,11 @@ jobs:
         with:
           go-version: "1.22"
 
+      - name: Set up GoReleaser
+        run: |
+          curl -sSL https://github.com/goreleaser/goreleaser/releases/latest/download/goreleaser_Linux_x86_64.tar.gz | tar xz
+          sudo mv goreleaser /usr/local/bin/
+
       - name: Set up ORAS
         run: |
           curl -sSL https://github.com/oras-project/oras/releases/download/v1.1.0/oras_1.1.0_linux_amd64.tar.gz | tar xz
@@ -38,51 +43,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          version: latest
-          args: release --clean --skip=validate
+      - name: Package and publish OCI artifact
+        run: |
+          scripts/package-thin-provider.sh \
+            --provider thin.provider.yaml \
+            --build-with gorelaser \
+            --dist dist \
+            --output oci \
+            --ref ghcr.io/${{ github.repository }}:${{ github.ref_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build OCI artifact layout
-        run: |
-          mkdir -p oci/bin/linux/amd64
-          mkdir -p oci/bin/linux/arm64
-          mkdir -p oci/bin/darwin/amd64
-          mkdir -p oci/bin/darwin/arm64
-          
-          # Extract entrypoint binaries from GoReleaser release archives
-          tar -xzf dist/liteci_*_linux_amd64.tar.gz -C oci/bin/linux/amd64/
-          tar -xzf dist/liteci_*_linux_arm64.tar.gz -C oci/bin/linux/arm64/
-          tar -xzf dist/liteci_*_darwin_amd64.tar.gz -C oci/bin/darwin/amd64/
-          tar -xzf dist/liteci_*_darwin_arm64.tar.gz -C oci/bin/darwin/arm64/
-          
-          # Copy provider resources
-          cp thin.provider.yaml oci/
-          cp -r assets oci/
-          
-          # Fix permissions
-          chmod +x oci/bin/*/*/entrypoint
-
-      - name: Push all layers to OCI registry
-        run: |
-          PUSH_CMD="oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
-            --artifact-type application/vnd.thin.provider.v1 \
-            oci/thin.provider.yaml:application/vnd.sourceplane.provider.v1 \
-            oci/assets/:application/vnd.sourceplane.assets.v1 \
-            oci/bin/linux/amd64/entrypoint:application/vnd.sourceplane.bin.linux-amd64 \
-            oci/bin/linux/arm64/entrypoint:application/vnd.sourceplane.bin.linux-arm64 \
-            oci/bin/darwin/amd64/entrypoint:application/vnd.sourceplane.bin.darwin-amd64 \
-            oci/bin/darwin/arm64/entrypoint:application/vnd.sourceplane.bin.darwin-arm64"
-          
-          # Add examples layer if it exists
-          if [ -d "examples/" ] && [ "$(ls -A examples/)" ]; then
-            PUSH_CMD="$PUSH_CMD examples/:application/vnd.sourceplane.examples.v1"
-          fi
-          
-          eval "$PUSH_CMD"
 
       - name: Verify OCI artifact
         run: |
