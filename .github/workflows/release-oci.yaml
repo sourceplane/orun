@@ -33,7 +33,7 @@ jobs:
 
       - name: Set up ORAS
         run: |
-          curl -sSL https://github.com/oras-project/oras/releases/download/v1.1.0/oras_1.1.0_linux_amd64.tar.gz | tar xz
+          curl -sSL https://github.com/oras-project/oras/releases/download/v1.1.0/oras_1.1.0_linux_amd64.tar.gz | tar xz oras
           sudo mv oras /usr/local/bin/
 
       - name: Login to GHCR
