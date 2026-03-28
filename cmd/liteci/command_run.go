@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/sourceplane/liteci/internal/executor"
 	"github.com/sourceplane/liteci/internal/model"
 	"github.com/sourceplane/liteci/internal/runner"
 	"github.com/spf13/cobra"
@@ -19,6 +21,7 @@ var (
 	runUseWorkDirOverride bool
 	runJobID              string
 	runRetry              bool
+	runRunner             string
 )
 
 var runCmd = &cobra.Command{
@@ -40,9 +43,22 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().StringVar(&runWorkDir, "workdir", ".", "Override working directory for all jobs (default behavior uses each job path)")
 	runCmd.Flags().StringVar(&runJobID, "job-id", "", "Run only a specific job ID (must match plan job id)")
 	runCmd.Flags().BoolVar(&runRetry, "retry", false, "Clear existing state for selected --job-id before running")
+	runCmd.Flags().StringVar(&runRunner, "runner", "", "Execution backend: local, github-actions, docker")
 }
 
 func runPlan() error {
+	runnerName := resolveRunnerName(runRunner)
+	runtime := runtimeContextForRunner(runnerName)
+	selectedExecutor, err := executor.Get(runnerName)
+	if err != nil {
+		return err
+	}
+	if !runUseWorkDirOverride && runnerName == "github-actions" {
+		if workspace := strings.TrimSpace(os.Getenv("GITHUB_WORKSPACE")); workspace != "" {
+			runWorkDir = workspace
+		}
+	}
+
 	plan, err := loadPlan(runPlanFile)
 	if err != nil {
 		return err
@@ -57,7 +73,7 @@ func runPlan() error {
 		return fmt.Errorf("--retry requires --job-id")
 	}
 
-	r := runner.NewRunner(runWorkDir, runUseWorkDirOverride, os.Stdout, os.Stderr, dryRun, runJobID, runRetry)
+	r := runner.NewRunner(runWorkDir, runUseWorkDirOverride, os.Stdout, os.Stderr, dryRun, runJobID, runRetry, selectedExecutor, runtime)
 	if err := r.Run(plan); err != nil {
 		return err
 	}
@@ -69,6 +85,30 @@ func runPlan() error {
 	}
 
 	return nil
+}
+
+func resolveRunnerName(flagValue string) string {
+	if normalized := executor.NormalizeRunnerName(flagValue); normalized != "" {
+		return normalized
+	}
+	if normalized := executor.NormalizeRunnerName(os.Getenv("LITECI_RUNNER")); normalized != "" {
+		return normalized
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("GITHUB_ACTIONS")), "true") {
+		return "github-actions"
+	}
+	return "local"
+}
+
+func runtimeContextForRunner(runnerName string) executor.RuntimeContext {
+	switch executor.NormalizeRunnerName(runnerName) {
+	case "docker":
+		return executor.RuntimeContext{Runner: "docker", Environment: "container"}
+	case "github-actions":
+		return executor.RuntimeContext{Runner: "github-actions", Environment: "ci"}
+	default:
+		return executor.RuntimeContext{Runner: "local", Environment: "local"}
+	}
 }
 
 func loadPlan(path string) (*model.Plan, error) {

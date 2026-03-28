@@ -1,8 +1,9 @@
 package runner
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sourceplane/liteci/internal/executor"
 	"github.com/sourceplane/liteci/internal/model"
 	"github.com/sourceplane/liteci/internal/ui"
 )
@@ -26,6 +28,8 @@ type Runner struct {
 	JobID              string
 	Retry              bool
 	Color              bool
+	Executor           executor.Executor
+	Runtime            executor.RuntimeContext
 }
 
 type State struct {
@@ -48,7 +52,7 @@ type runSummary struct {
 	waiting   int
 }
 
-func NewRunner(workDir string, useWorkDirOverride bool, stdout, stderr io.Writer, dryRun bool, jobID string, retry bool) *Runner {
+func NewRunner(workDir string, useWorkDirOverride bool, stdout, stderr io.Writer, dryRun bool, jobID string, retry bool, exec executor.Executor, runtime executor.RuntimeContext) *Runner {
 	return &Runner{
 		WorkDir:            workDir,
 		UseWorkDirOverride: useWorkDirOverride,
@@ -58,15 +62,42 @@ func NewRunner(workDir string, useWorkDirOverride bool, stdout, stderr io.Writer
 		JobID:              jobID,
 		Retry:              retry,
 		Color:              ui.ColorEnabledForWriter(stdout),
+		Executor:           exec,
+		Runtime:            runtime,
 	}
 }
 
-func (r *Runner) Run(plan *model.Plan) error {
+func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	if plan == nil {
 		return fmt.Errorf("plan cannot be nil")
 	}
 	if len(plan.Jobs) == 0 {
 		return fmt.Errorf("plan has no jobs")
+	}
+	if r.Executor == nil {
+		return fmt.Errorf("runner executor cannot be nil")
+	}
+
+	workspaceDir, err := r.resolveWorkspaceDir()
+	if err != nil {
+		return err
+	}
+
+	baseExecContext := executor.ExecContext{
+		Context:            context.Background(),
+		WorkspaceDir:       workspaceDir,
+		UseWorkDirOverride: r.UseWorkDirOverride,
+		Env: executor.MergeEnvironment(
+			executor.EnvironmentFromList(os.Environ()),
+			map[string]string{
+				"LITECI_CONTEXT": r.Runtime.Environment,
+				"LITECI_RUNNER":  r.Runtime.Runner,
+			},
+		),
+		Runtime: r.Runtime,
+		Stdout:  r.Stdout,
+		Stderr:  r.Stderr,
+		DryRun:  r.DryRun,
 	}
 
 	statePath := r.resolveStateFile(plan)
@@ -108,6 +139,17 @@ func (r *Runner) Run(plan *model.Plan) error {
 	}
 
 	r.printReadinessSnapshot(orderedJobs, state)
+
+	if !r.DryRun {
+		if err := r.Executor.Prepare(baseExecContext); err != nil {
+			return fmt.Errorf("prepare runner %s: %w", r.Executor.Name(), err)
+		}
+		defer func() {
+			if cleanupErr := r.Executor.Cleanup(baseExecContext); cleanupErr != nil && runErr == nil {
+				runErr = fmt.Errorf("cleanup runner %s: %w", r.Executor.Name(), cleanupErr)
+			}
+		}()
+	}
 
 	failFast := plan.Execution.FailFast
 	if !plan.Execution.FailFast {
@@ -183,7 +225,15 @@ func (r *Runner) Run(plan *model.Plan) error {
 			fmt.Fprintf(r.Stdout, "  │    phase: %s    order: %d\n", stepPhase, step.Order)
 			workingDir := r.resolveWorkingDir(job.Path)
 			fmt.Fprintf(r.Stdout, "  │    cwd: %s\n", workingDir)
+			fmt.Fprintf(r.Stdout, "  │    runner: %s\n", r.Executor.Name())
 			fmt.Fprintf(r.Stdout, "  │    run: %s\n", step.Run)
+			retryCount := r.resolveRetryCount(job, step)
+			if retryCount > 0 {
+				fmt.Fprintf(r.Stdout, "  │    retries: %d\n", retryCount)
+			}
+			if timeoutValue := r.resolveTimeout(job, step); timeoutValue != "" {
+				fmt.Fprintf(r.Stdout, "  │    timeout: %s\n", timeoutValue)
+			}
 			if r.DryRun {
 				jobState.Steps[stepID] = "completed"
 				if persistState {
@@ -195,8 +245,32 @@ func (r *Runner) Run(plan *model.Plan) error {
 				continue
 			}
 
-			output, err := r.executeStep(step.Run, workingDir)
-			r.printStepOutput(output)
+			var output string
+			attempts := retryCount + 1
+			for attempt := 1; attempt <= attempts; attempt++ {
+				if attempts > 1 {
+					fmt.Fprintf(r.Stdout, "  │    attempt: %d/%d\n", attempt, attempts)
+				}
+
+				execContext, cancel, execErr := r.stepExecContext(baseExecContext, job, step, workingDir)
+				if execErr != nil {
+					cancel()
+					err = execErr
+					break
+				}
+
+				output, err = r.Executor.RunStep(execContext, job, step)
+				cancel()
+				r.printStepOutput(output)
+
+				if err == nil {
+					break
+				}
+
+				if attempt < attempts {
+					fmt.Fprintf(r.Stdout, "  │    %s step failed, retrying\n", ui.Yellow(r.Color, "↻"))
+				}
+			}
 
 			if err != nil {
 				jobState.Steps[stepID] = "failed"
@@ -279,6 +353,7 @@ func (r *Runner) printRunHeader(plan *model.Plan, statePath string) {
 		mode = "dry-run"
 	}
 	fmt.Fprintf(r.Stdout, "│ mode:  %s\n", mode)
+	fmt.Fprintf(r.Stdout, "│ runner: %s\n", r.Executor.Name())
 	if r.UseWorkDirOverride {
 		fmt.Fprintf(r.Stdout, "│ cwd:   override (%s)\n", r.WorkDir)
 	} else {
@@ -490,16 +565,55 @@ func (r *Runner) resolveWorkingDir(path string) string {
 	return filepath.Join(r.WorkDir, path)
 }
 
-func (r *Runner) executeStep(command, workingDir string) (string, error) {
-	cmd := exec.Command("sh", "-c", command)
-	cmd.Dir = workingDir
+func (r *Runner) resolveWorkspaceDir() (string, error) {
+	workspaceDir := r.WorkDir
+	if strings.TrimSpace(workspaceDir) == "" {
+		workspaceDir = "."
+	}
+	resolved, err := filepath.Abs(workspaceDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace directory %s: %w", workspaceDir, err)
+	}
+	return resolved, nil
+}
 
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
+func (r *Runner) resolveRetryCount(job model.PlanJob, step model.PlanStep) int {
+	if step.Retry > 0 {
+		return step.Retry
+	}
+	if job.Retries > 0 {
+		return job.Retries
+	}
+	return 0
+}
 
-	err := cmd.Run()
-	return strings.TrimRight(buf.String(), "\n"), err
+func (r *Runner) resolveTimeout(job model.PlanJob, step model.PlanStep) string {
+	if strings.TrimSpace(step.Timeout) != "" {
+		return strings.TrimSpace(step.Timeout)
+	}
+	return strings.TrimSpace(job.Timeout)
+}
+
+func (r *Runner) stepExecContext(base executor.ExecContext, job model.PlanJob, step model.PlanStep, workingDir string) (executor.ExecContext, func(), error) {
+	stepContext := base.Context
+	if stepContext == nil {
+		stepContext = context.Background()
+	}
+
+	cancel := func() {}
+	if timeoutValue := r.resolveTimeout(job, step); timeoutValue != "" {
+		duration, err := time.ParseDuration(timeoutValue)
+		if err != nil {
+			return executor.ExecContext{}, cancel, fmt.Errorf("invalid timeout %q for job %s step %s: %w", timeoutValue, job.ID, stepIdentifier(step), err)
+		}
+		stepContext, cancel = context.WithTimeout(stepContext, duration)
+	}
+
+	execContext := base
+	execContext.Context = stepContext
+	execContext.WorkDir = workingDir
+	execContext.Env = executor.MergeEnvironment(base.Env, executor.JobEnvironment(job.Env))
+	return execContext, cancel, nil
 }
 
 func (r *Runner) printStepOutput(output string) {
@@ -543,6 +657,12 @@ func summarizeExecError(err error) string {
 	if err == nil {
 		return ""
 	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "command timed out"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "command canceled"
+	}
 
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		return fmt.Sprintf("command exited with code %d", exitErr.ExitCode())
@@ -563,6 +683,18 @@ func stepFailureHint(err error, output, workingDir string) string {
 
 	if strings.Contains(combined, "permission denied") {
 		return "permission denied. Verify executable permissions and access to the target directory"
+	}
+
+	if strings.Contains(combined, "command timed out") || strings.Contains(combined, "context deadline exceeded") {
+		return "command exceeded its configured timeout. Increase step.timeout or job.timeout if the runtime is expected to take longer"
+	}
+
+	if strings.Contains(combined, "unable to find image") || strings.Contains(combined, "pull access denied") {
+		return "docker image could not be pulled. Set job.runsOn to a valid container image when using --runner docker"
+	}
+
+	if strings.Contains(combined, "executable file not found") || strings.Contains(combined, "command not found") {
+		return "required CLI is not available in this runner environment"
 	}
 
 	return ""

@@ -41,7 +41,7 @@ type PlanJob struct {
 	JobRegistry string                 `json:"jobRegistry,omitempty" yaml:"jobRegistry,omitempty"` // Name of the JobRegistry used
 	Job         string                 `json:"job,omitempty" yaml:"job,omitempty"`                 // Specific job from registry
 	RunsOn      string                 `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`
-	Path        string                 `json:"path,omitempty" yaml:"path,omitempty"`               // Working directory for job execution
+	Path        string                 `json:"path,omitempty" yaml:"path,omitempty"` // Working directory for job execution
 	Steps       []PlanStep             `json:"steps" yaml:"steps"`
 	DependsOn   []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
 	Timeout     string                 `json:"timeout,omitempty" yaml:"timeout,omitempty"`

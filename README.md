@@ -467,6 +467,12 @@ liteci run \
 liteci run \
   --plan plan.json \
   --execute
+
+# Execute using the Docker backend
+liteci run \
+  --plan plan.json \
+  --execute \
+  --runner docker
 ```
 
 **Flags:**
@@ -477,6 +483,19 @@ liteci run \
 - `--debug` - Enable verbose logging
 - `-p, --plan` - Path to compiled plan file for `run`
 - `-x, --execute` - Execute commands (without this, `run` is dry-run)
+- `--runner` - Execution backend for `run`: `local`, `github-actions`, or `docker`
+
+`run` selects its backend in this order:
+
+1. `--runner`
+2. `LITECI_RUNNER`
+3. Auto-detect `github-actions` when `GITHUB_ACTIONS=true`, otherwise `local`
+
+Runner notes:
+
+- `local` uses the host shell and installed binaries.
+- `github-actions` behaves like `local` but injects CI-friendly environment variables and defaults `--workdir` to `GITHUB_WORKSPACE` when present.
+- `docker` runs each step in a fresh container, mounts the workspace at `/workspace`, and uses `job.runsOn` as the image. Common GitHub-style labels such as `ubuntu-22.04` map to `ubuntu:22.04`. If `runsOn` is empty, `ubuntu:22.04` is used.
 
 ## Troubleshooting
 
