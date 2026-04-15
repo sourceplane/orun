@@ -49,3 +49,6 @@ Thumbs.db
 
 # Project specific
 /liteci
+/.liteci-state.json
+/.liteci-tools/
+/oci/

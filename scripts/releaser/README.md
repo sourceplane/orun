@@ -1,6 +1,6 @@
 # releaser
 
-`releaser` is a standalone-ready Go CLI that builds, packages, and optionally publishes Thin providers as OCI artifacts.
+`releaser` is a standalone-ready Go CLI that packages and optionally publishes tinx provider layouts from an existing `dist/` directory.
 
 ## Structure
 
@@ -13,11 +13,10 @@
 
 ```bash
 go run ./cmd/releaser \
-  --provider ../../thin.provider.yaml \
-  --build-with gorelaser \
+  --provider ../../provider.yaml \
   --dist ../../dist \
   --output ../../oci \
-  --ref ghcr.io/sourceplane/lite-ci:v0.2.25
+  --ref ghcr.io/sourceplane/lite-ci:<tag>
 ```
 
 ## Quick smoke test
@@ -34,18 +33,18 @@ CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o dist/darwin_amd64/entrypoint 
 CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o dist/darwin_arm64/entrypoint ./cmd/liteci
 
 cd scripts/releaser
-go run ./cmd/releaser --provider ../../thin.provider.yaml --dist ../../dist --output ../../oci
+go run ./cmd/releaser --provider ../../provider.yaml --dist ../../dist --output ../../oci
 ```
 
 This validates packaging without publishing.
 
 ## Pipeline
 
-The GitHub Actions workflow uses releaser directly:
+The GitHub Actions release workflow uses `sourceplane/tinx-release-action` directly. The standalone `releaser` remains useful when you already have a populated `dist/` directory and want to package or publish it manually:
 
 ```bash
 cd scripts/releaser
-go run ./cmd/releaser --provider ../../thin.provider.yaml --build-with gorelaser --dist ../../dist --output ../../oci --ref ghcr.io/<org>/<repo>:<tag>
+go run ./cmd/releaser --provider ../../provider.yaml --dist ../../dist --output ../../oci --ref ghcr.io/<org>/<repo>:<tag>
 ```
 
 ## Build quality
