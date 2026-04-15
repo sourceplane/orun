@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run Go tests
+        run: |
+          go test ./...
+          cd scripts/releaser
+          go test ./...
+
+      - name: Validate provider package build
+        uses: sourceplane/tinx-release-action@v1
+        with:
+          manifest: provider.yaml
+          main: ./cmd/liteci
+          output: oci
+          dist: dist
+          tag: ci
+          delegate-goreleaser: true
+
+      - name: Smoke test provider with tinx-action
+        uses: sourceplane/tinx-action@v2
+        with:
+          providers: |
+            ${{ github.workspace }}/oci as lite-ci
+          run: |
+            tinx --workspace "$TINX_WORKSPACE_ROOT" provider list
+            lite-ci validate --intent "$GITHUB_WORKSPACE/examples/intent.yaml"
+            lite-ci compositions --config-dir "$GITHUB_WORKSPACE/assets/config/compositions"
+            lite-ci plan \
+              --intent "$GITHUB_WORKSPACE/examples/intent.yaml" \
+              --config-dir "$GITHUB_WORKSPACE/assets/config/compositions" \
+              --output "$RUNNER_TEMP/liteci-plan.json"
+            test -s "$RUNNER_TEMP/liteci-plan.json"

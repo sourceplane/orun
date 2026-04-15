@@ -25,28 +25,28 @@ Intent.yaml + Job Compositions + Schemas
 
 ## Installation
 
-### Option 1: Direct Binary Download (Recommended)
+### Option 1: Direct Binary Download
 
-**Latest Release (v0.2.25):**
+Replace `<tag>` with the release you want from the GitHub releases page.
 
 ```bash
 # macOS (arm64 - Apple Silicon)
-curl -L https://github.com/sourceplane/lite-ci/releases/download/v0.2.25/liteci_v0.2.25_darwin_arm64.tar.gz | tar xz
+curl -L https://github.com/sourceplane/lite-ci/releases/download/<tag>/liteci_<tag>_darwin_arm64.tar.gz | tar xz
 sudo mv entrypoint /usr/local/bin/liteci
 chmod +x /usr/local/bin/liteci
 
 # macOS (amd64 - Intel)
-curl -L https://github.com/sourceplane/lite-ci/releases/download/v0.2.25/liteci_v0.2.25_darwin_amd64.tar.gz | tar xz
+curl -L https://github.com/sourceplane/lite-ci/releases/download/<tag>/liteci_<tag>_darwin_amd64.tar.gz | tar xz
 sudo mv entrypoint /usr/local/bin/liteci
 chmod +x /usr/local/bin/liteci
 
 # Linux (amd64)
-curl -L https://github.com/sourceplane/lite-ci/releases/download/v0.2.25/liteci_v0.2.25_linux_amd64.tar.gz | tar xz
+curl -L https://github.com/sourceplane/lite-ci/releases/download/<tag>/liteci_<tag>_linux_amd64.tar.gz | tar xz
 sudo mv entrypoint /usr/local/bin/liteci
 chmod +x /usr/local/bin/liteci
 
 # Linux (arm64)
-curl -L https://github.com/sourceplane/lite-ci/releases/download/v0.2.25/liteci_v0.2.25_linux_arm64.tar.gz | tar xz
+curl -L https://github.com/sourceplane/lite-ci/releases/download/<tag>/liteci_<tag>_linux_arm64.tar.gz | tar xz
 sudo mv entrypoint /usr/local/bin/liteci
 chmod +x /usr/local/bin/liteci
 ```
@@ -70,23 +70,33 @@ sudo mv liteci /usr/local/bin/
 
 ```bash
 # Docker
-docker run ghcr.io/sourceplane/lite-ci:v0.2.25 plan -i intent.yaml
+docker run ghcr.io/sourceplane/lite-ci:<tag> plan -i intent.yaml
 
 # Podman (recommended for CI/CD)
-podman run ghcr.io/sourceplane/lite-ci:v0.2.25 plan -i intent.yaml
+podman run ghcr.io/sourceplane/lite-ci:<tag> plan -i intent.yaml
 
 # Kubernetes
-kubectl run lite-ci --image=ghcr.io/sourceplane/lite-ci:v0.2.25
+kubectl run lite-ci --image=ghcr.io/sourceplane/lite-ci:<tag>
 ```
 
-### Option 4: Using ORAS (OCI Registry As Storage)
+### Option 4: Using tinx
+
+```bash
+repo_root="$(pwd)"
+tinx init demo -p ghcr.io/sourceplane/lite-ci:<tag> as lite-ci
+tinx --workspace demo -- lite-ci plan \
+  --intent "$repo_root/examples/intent.yaml" \
+  --config-dir "$repo_root/assets/config/compositions"
+```
+
+### Option 5: Using ORAS (OCI Registry As Storage)
 
 ```bash
 # Pull the provider artifact
-oras pull ghcr.io/sourceplane/lite-ci:v0.2.25
+oras pull ghcr.io/sourceplane/lite-ci:<tag>
 
 # Extract binaries
-tar -xzf liteci_v0.2.25_linux_amd64_oci.tar.gz
+tar -xzf liteci_<tag>_linux_amd64_oci.tar.gz
 ./entrypoint plan -i intent.yaml
 ```
 
@@ -145,7 +155,7 @@ lite-ci/
 │   ├── ARCHITECTURE.md   # Detailed design docs
 │   ├── RUNTIME_TOOLS.md  # Container runtime options
 │   └── *.md             # Additional documentation
-└── thin.provider.yaml    # Provider manifest
+└── provider.yaml         # Provider manifest
 ```
 
 ## Quick Start
@@ -195,7 +205,7 @@ Output: Fully resolved execution DAG in `plan.json`
 ```bash
 docker run \
   -v $(pwd):/workspace \
-  ghcr.io/sourceplane/lite-ci:v0.2.25 \
+  ghcr.io/sourceplane/lite-ci:<tag> \
   plan \
   --intent /workspace/intent.yaml \
   --config-dir /workspace/assets/config/compositions \
@@ -207,7 +217,7 @@ docker run \
 ```bash
 podman run \
   -v $(pwd):/workspace \
-  ghcr.io/sourceplane/lite-ci:v0.2.25 \
+  ghcr.io/sourceplane/lite-ci:<tag> \
   plan \
   --intent /workspace/intent.yaml \
   --config-dir /workspace/assets/config/compositions
@@ -217,7 +227,7 @@ podman run \
 
 ```bash
 kubectl run lite-ci-planner \
-  --image=ghcr.io/sourceplane/lite-ci:v0.2.25 \
+  --image=ghcr.io/sourceplane/lite-ci:<tag> \
   --rm -it \
   -- plan \
   --intent intent.yaml \
@@ -228,7 +238,7 @@ kubectl run lite-ci-planner \
 
 ```yaml
 - name: Generate CI Plan
-  uses: docker://ghcr.io/sourceplane/lite-ci:v0.2.25
+  uses: docker://ghcr.io/sourceplane/lite-ci:<tag>
   with:
     args: |
       plan \

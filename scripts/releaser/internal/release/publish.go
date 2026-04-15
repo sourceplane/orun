@@ -25,15 +25,15 @@ func publishOCI(opts Options, manifest config.ProviderManifest) error {
 
 	artifactType := manifest.Distribution.ArtifactType
 	if artifactType == "" {
-		artifactType = "application/vnd.thin.provider.v1"
+		artifactType = "application/vnd.tinx.provider.v1"
 	}
-	coreMediaType := manifest.Layers.Core.MediaType
-	if coreMediaType == "" {
-		coreMediaType = "application/vnd.sourceplane.provider.v1"
+	manifestMediaType := manifest.Layers.Core.MediaType
+	if manifestMediaType == "" {
+		manifestMediaType = "application/vnd.tinx.provider.manifest.v1+yaml"
 	}
 	assetsMediaType := manifest.Layers.Core.AssetsMediaType
 	if assetsMediaType == "" {
-		assetsMediaType = "application/vnd.sourceplane.assets.v1"
+		assetsMediaType = "application/vnd.tinx.provider.assets.v1+tar"
 	}
 
 	mediaByPlatform := map[string]string{}
@@ -47,7 +47,7 @@ func publishOCI(opts Options, manifest config.ProviderManifest) error {
 		"push",
 		opts.PublishRef,
 		"--artifact-type", artifactType,
-		fmt.Sprintf("%s:%s", filepath.ToSlash(filepath.Join(opts.OutputDir, providerBase)), coreMediaType),
+		fmt.Sprintf("%s:%s", filepath.ToSlash(filepath.Join(opts.OutputDir, providerBase)), manifestMediaType),
 		fmt.Sprintf("%s/:%s", filepath.ToSlash(filepath.Join(opts.OutputDir, filepath.FromSlash(assetsRel))), assetsMediaType),
 	}
 
@@ -55,20 +55,22 @@ func publishOCI(opts Options, manifest config.ProviderManifest) error {
 		platformKey := platform.OS + "/" + platform.Arch
 		mediaType := mediaByPlatform[platformKey]
 		if mediaType == "" {
-			mediaType = fmt.Sprintf("application/vnd.thin.provider.bin.%s-%s", platform.OS, platform.Arch)
+			mediaType = fmt.Sprintf("application/vnd.tinx.provider.binary.%s.%s.v1", platform.OS, platform.Arch)
 		}
 		args = append(args, fmt.Sprintf("%s:%s", filepath.ToSlash(filepath.Join(opts.OutputDir, filepath.FromSlash(platform.Binary))), mediaType))
 	}
 
-	examplesDir, examplesMediaType := examplesConfig(manifest)
-	examplesPath := examplesDir
-	if !filepath.IsAbs(examplesPath) {
-		examplesPath = filepath.Join(providerDir, examplesPath)
-	}
-	if dirExists(examplesPath) {
-		entries, err := os.ReadDir(examplesPath)
-		if err == nil && len(entries) > 0 {
-			args = append(args, fmt.Sprintf("%s/:%s", filepath.ToSlash(examplesPath), examplesMediaType))
+	examplesDir, examplesMediaType, ok := examplesConfig(manifest)
+	if ok {
+		examplesPath := examplesDir
+		if !filepath.IsAbs(examplesPath) {
+			examplesPath = filepath.Join(providerDir, examplesPath)
+		}
+		if dirExists(examplesPath) {
+			entries, err := os.ReadDir(examplesPath)
+			if err == nil && len(entries) > 0 {
+				args = append(args, fmt.Sprintf("%s/:%s", filepath.ToSlash(examplesPath), examplesMediaType))
+			}
 		}
 	}
 
@@ -83,7 +85,11 @@ func publishOCI(opts Options, manifest config.ProviderManifest) error {
 	return nil
 }
 
-func examplesConfig(manifest config.ProviderManifest) (string, string) {
+func examplesConfig(manifest config.ProviderManifest) (string, string, bool) {
+	if len(manifest.Layers.Examples.Includes) == 0 && manifest.Layers.Examples.MediaType == "" {
+		return "", "", false
+	}
+
 	examplesDir := "examples"
 	if len(manifest.Layers.Examples.Includes) > 0 {
 		v := manifest.Layers.Examples.Includes[0]
@@ -97,7 +103,7 @@ func examplesConfig(manifest config.ProviderManifest) (string, string) {
 
 	examplesMediaType := manifest.Layers.Examples.MediaType
 	if examplesMediaType == "" {
-		examplesMediaType = "application/vnd.sourceplane.examples.v1"
+		examplesMediaType = "application/vnd.tinx.provider.assets.v1+tar"
 	}
-	return examplesDir, examplesMediaType
+	return examplesDir, examplesMediaType, true
 }

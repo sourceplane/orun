@@ -1,19 +1,16 @@
 name: release-oci
 
 on:
-  release:
-    types: [published]
   push:
     tags:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
   packages: write
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+  IMAGE_REF: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
 
 jobs:
   tinx-release:
@@ -23,15 +20,35 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          fetch-tags: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run Go tests
+        run: |
+          go test ./...
+          cd scripts/releaser
+          go test ./...
+
+      - name: Stamp provider version
+        run: |
+          sed -i 's/^  version: .*/  version: ${{ github.ref_name }}/' provider.yaml
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: sourceplane/tinx-release-action@v1
         with:
-          registry: ghcr.io/sourceplane/lite-ci:${{ env.IMAGE_TAG }}
+          manifest: provider.yaml
+          main: ./cmd/liteci
+          output: oci
+          dist: dist
+          tag: ${{ github.ref_name }}
+          push: ${{ env.IMAGE_REF }}
           delegate-goreleaser: true
