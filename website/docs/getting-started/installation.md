@@ -21,8 +21,6 @@ make build
 ./arx --help
 ```
 
-The build also emits deprecated `./ciz` and `./liteci` aliases for compatibility with older workflows.
-
 ## Install directly with Go
 
 ```bash
@@ -59,13 +57,6 @@ This path is useful when you want the planner pinned as an OCI-distributed provi
 ```bash
 tinx init demo -p ghcr.io/sourceplane/arx:<tag> as arx
 tinx --workspace demo -- arx --help
-```
-
-The legacy aliases are still valid if your workspace expects `ciz` or `lite-ci`:
-
-```bash
-tinx init demo -p ghcr.io/sourceplane/arx:<tag> as ciz
-tinx init demo -p ghcr.io/sourceplane/arx:<tag> as lite-ci
 ```
 
 ## Build the docs site locally

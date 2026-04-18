@@ -1356,35 +1356,9 @@ func firstNonEmptyContext(ctx context.Context) context.Context {
 func defaultRootDir(name string) string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return preferredRootDir(os.TempDir(), name, "arx", "ciz", "liteci")
+		return filepath.Join(os.TempDir(), "arx", name)
 	}
-	return preferredRootDir(home, name, ".arx", ".ciz", ".lite-ci")
-}
-
-
-func preferredRootDir(baseDir, name string, roots ...string) string {
-	if len(roots) == 0 {
-		return filepath.Join(baseDir, name)
-	}
-
-	primaryPath := filepath.Join(baseDir, roots[0], name)
-	if pathExists(primaryPath) {
-		return primaryPath
-	}
-
-	for _, root := range roots[1:] {
-		legacyPath := filepath.Join(baseDir, root, name)
-		if pathExists(legacyPath) {
-			return legacyPath
-		}
-	}
-
-	return primaryPath
-}
-
-func pathExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+	return filepath.Join(home, ".arx", name)
 }
 
 func sanitizePathComponent(value string) string {

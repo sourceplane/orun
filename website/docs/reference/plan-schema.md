@@ -8,7 +8,7 @@ The plan schema defines the artifact produced by `arx plan` and consumed by `arx
 
 | Field | Meaning |
 | --- | --- |
-| `apiVersion` | `arx.io/v1`, or legacy `ciz.io/v1` and `liteci.io/v1` |
+| `apiVersion` | `arx.io/v1` |
 | `kind` | Always `Plan` |
 | `metadata` | Name, description, namespace, generation timestamp, checksum |
 | `execution` | Concurrency, fail-fast behavior, and state-file name |

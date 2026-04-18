@@ -17,12 +17,10 @@ import (
 )
 
 const (
-	componentKind                = "Component"
-	componentTreeCacheSource     = "discovered"
-	componentInlineSource        = "inline"
-	componentTreeCacheFile       = ".arx/component-tree.yaml"
-	legacyComponentTreeCacheFile = ".ciz/component-tree.yaml"
-	oldestComponentTreeCacheFile = ".liteci/component-tree.yaml"
+	componentKind            = "Component"
+	componentTreeCacheSource = "discovered"
+	componentInlineSource    = "inline"
+	componentTreeCacheFile   = ".arx/component-tree.yaml"
 )
 
 // LoadIntent loads and parses an intent YAML file
@@ -202,7 +200,7 @@ func discoverComponentFiles(baseDir string, roots []string) ([]string, error) {
 
 func shouldSkipDiscoveryDir(name string) bool {
 	switch name {
-	case ".git", ".arx", ".ciz", ".liteci", "node_modules":
+	case ".git", ".arx", "node_modules":
 		return true
 	default:
 		return false
@@ -368,19 +366,7 @@ func sameStrings(left, right []string) bool {
 }
 
 func componentTreeCacheReadPath(intentPath string) string {
-	cachePath := componentTreeCacheWritePath(intentPath)
-	if _, err := os.Stat(cachePath); err == nil {
-		return cachePath
-	}
-
-	for _, legacyCacheFile := range []string{legacyComponentTreeCacheFile, oldestComponentTreeCacheFile} {
-		legacyPath := cachePathFor(intentPath, legacyCacheFile)
-		if _, err := os.Stat(legacyPath); err == nil {
-			return legacyPath
-		}
-	}
-
-	return cachePath
+	return componentTreeCacheWritePath(intentPath)
 }
 
 func componentTreeCacheWritePath(intentPath string) string {

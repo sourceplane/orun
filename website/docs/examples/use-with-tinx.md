@@ -24,5 +24,3 @@ tinx --workspace demo -- arx plan \
 ## Why the paths are absolute
 
 When `arx` runs inside `tinx`, workspace-run provider commands resolve relative paths against the workspace root. Use absolute repository paths for intent files and composition directories when the source lives outside the workspace.
-
-If you need a legacy provider alias, initialize the workspace with `as ciz` or `as lite-ci` instead.

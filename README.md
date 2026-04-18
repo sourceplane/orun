@@ -86,8 +86,6 @@ go build -o arx ./cmd/arx
 sudo mv arx /usr/local/bin/
 ```
 
-`make build` also emits deprecated `ciz` and `liteci` aliases for local compatibility.
-
 ### Option 3: Docker/OCI Container
 
 ```bash
@@ -110,8 +108,6 @@ tinx --workspace demo -- arx plan \
   --intent "$repo_root/examples/intent.yaml" \
   --config-dir "$repo_root/assets/config/compositions"
 ```
-
-If you need legacy provider aliases, `tinx init demo -p ghcr.io/sourceplane/arx:<tag> as ciz` and `tinx init demo -p ghcr.io/sourceplane/arx:<tag> as lite-ci` still work.
 
 ### Option 5: Using ORAS (OCI Registry As Storage)
 
@@ -609,7 +605,7 @@ arx run \
 
 1. `--gha`
 2. `--runner`
-3. `ARX_RUNNER` (`CIZ_RUNNER` and `LITECI_RUNNER` are still accepted as deprecated aliases)
+3. `ARX_RUNNER`
 4. Auto-detect `github-actions` when `GITHUB_ACTIONS=true`
 5. Auto-detect `github-actions` when the compiled plan contains any `use:` step
 6. Otherwise `local`
