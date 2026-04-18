@@ -1,0 +1,16 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+
+metadata:
+  name: local-gha-demo
+
+spec:
+  type: gha-demo
+  domain: platform
+  subscribe:
+    environments:
+      - development
+  labels:
+    team: platform
+    tier: example
+  dependsOn: []

@@ -1,0 +1,43 @@
+apiVersion: sourceplane.io/v1
+kind: JobRegistry
+metadata:
+  name: gha-helm-jobs
+  description: Example Helm jobs that provision tooling through GitHub Actions steps
+jobs:
+  - name: deploy
+    description: Deploy Helm releases after installing helm and kubectl with setup actions
+    runsOn: ubuntu-22.04
+    timeout: 15m
+    retries: 1
+    labels:
+      scope: deployment
+      example: gha-actions
+    steps:
+      - id: setup-helm
+        name: setup-helm
+        use: azure/setup-helm@v4.3.0
+        with:
+          version: "{{.helmVersion}}"
+      - id: setup-kubectl
+        name: setup-kubectl
+        use: azure/setup-kubectl@v4
+        with:
+          version: "{{.kubectlVersion}}"
+      - name: verify-tools
+        run: |
+          helm version --short
+          kubectl version --client=true --output=yaml
+        onFailure: stop
+      - name: deploy
+        run: helm upgrade --install {{.Component}} {{.chart}} --namespace {{.namespacePrefix}}{{.Component}} --create-namespace --wait=true --timeout={{.timeout}}
+        timeout: 15m
+        onFailure: stop
+      - name: verify
+        run: kubectl get deployment -n {{.namespacePrefix}}{{.Component}} {{.Component}}
+        onFailure: continue
+    inputs:
+      chart: oci://mycompany.azurecr.io/helm/charts/default
+      namespacePrefix: default-
+      timeout: 15m
+      helmVersion: v3.15.4
+      kubectlVersion: v1.30.2

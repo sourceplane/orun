@@ -1,0 +1,15 @@
+apiVersion: sourceplane.io/v1
+kind: Intent
+
+metadata:
+  name: gha-actions-demo
+  description: Minimal example that exercises GitHub Actions use steps during liteci run
+
+discovery:
+  roots:
+    - services/
+
+environments:
+  development:
+    defaults:
+      logLevel: debug

@@ -53,8 +53,15 @@ func runPlan() error {
 		return fmt.Errorf("--gha cannot be combined with --runner %q", runRunner)
 	}
 
+	plan, err := loadPlan(runPlanFile)
+	if err != nil {
+		return err
+	}
+
 	runnerName := resolveRunnerName(runRunner)
 	if runGHACompat {
+		runnerName = "github-actions"
+	} else if shouldAutoUseGitHubActions(runRunner, plan) {
 		runnerName = "github-actions"
 	}
 	runtime := runtimeContextForRunner(runnerName)
@@ -66,11 +73,6 @@ func runPlan() error {
 		if workspace := strings.TrimSpace(os.Getenv("GITHUB_WORKSPACE")); workspace != "" {
 			runWorkDir = workspace
 		}
-	}
-
-	plan, err := loadPlan(runPlanFile)
-	if err != nil {
-		return err
 	}
 
 	dryRun := !runExecute
@@ -107,6 +109,36 @@ func resolveRunnerName(flagValue string) string {
 		return "github-actions"
 	}
 	return "local"
+}
+
+func shouldAutoUseGitHubActions(flagValue string, plan *model.Plan) bool {
+	if !planUsesGitHubActions(plan) {
+		return false
+	}
+	if executor.NormalizeRunnerName(flagValue) != "" {
+		return false
+	}
+	if executor.NormalizeRunnerName(os.Getenv("LITECI_RUNNER")) != "" {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("GITHUB_ACTIONS")), "true") {
+		return false
+	}
+	return true
+}
+
+func planUsesGitHubActions(plan *model.Plan) bool {
+	if plan == nil {
+		return false
+	}
+	for _, job := range plan.Jobs {
+		for _, step := range job.Steps {
+			if strings.TrimSpace(step.Use) != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func runtimeContextForRunner(runnerName string) executor.RuntimeContext {

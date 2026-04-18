@@ -1,0 +1,32 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: GitHub Actions Helm Component Type
+description: Example schema for Helm deployments that bootstrap tooling through GitHub Actions steps
+type: object
+properties:
+  name:
+    type: string
+    description: Component name
+  type:
+    type: string
+    const: gha-helm
+    description: Component type identifier
+  inputs:
+    type: object
+    description: GitHub Actions-driven Helm input values
+    properties:
+      chart:
+        type: string
+        description: Helm chart reference (OCI URI or repo/chart)
+      timeout:
+        type: string
+        description: Helm operation timeout
+      namespacePrefix:
+        type: string
+        description: Kubernetes namespace prefix
+      helmVersion:
+        type: string
+        description: Helm version installed by azure/setup-helm
+      kubectlVersion:
+        type: string
+        description: kubectl version installed by azure/setup-kubectl
+    additionalProperties: true

@@ -52,3 +52,6 @@ Thumbs.db
 /.liteci-state.json
 /.liteci-tools/
 /oci/
+/examples/gha-actions/.liteci/
+/examples/gha-actions/.liteci-state.json
+/examples/gha-actions/plan.json

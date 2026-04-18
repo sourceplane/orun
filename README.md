@@ -247,6 +247,8 @@ kubectl run lite-ci-planner \
       --output plan.json
 ```
 
+    This container-based usage is separate from GitHub Actions compatibility mode during `liteci run`. When a compiled plan contains `use:` steps, `liteci run` auto-selects the GitHub Actions executor unless you explicitly set `--runner` or `LITECI_RUNNER`.
+
 ## Configuration Schemas
 
 ### Intent Schema
@@ -338,19 +340,77 @@ Compositions define how to deploy components.
 **Example Composition:**
 ```yaml
 # assets/config/compositions/helm/job.yaml
-name: helm-deploy
-description: Deploy Helm charts
-timeout: 15m
-retries: 2
-steps:
-  - name: add-repo
-    run: helm repo add myrepo https://repo.example.com
+apiVersion: sourceplane.io/v1
+kind: JobRegistry
+metadata:
+  name: helm-jobs
+  description: Deploy Helm charts
+jobs:
   - name: deploy
-    run: helm install {{.ComponentName}} myrepo/chart --namespace={{.Namespace}}
-inputs:
-  chart: "myrepo/chart"
-  namespace: "default"
+    description: Deploy Helm charts
+    runsOn: ubuntu-22.04
+    timeout: 15m
+    retries: 2
+    steps:
+      - name: add-repo
+        run: helm repo add myrepo https://repo.example.com
+      - name: deploy
+        run: helm install {{.Component}} {{.chart}} --namespace={{.namespace}}
+    inputs:
+      chart: myrepo/chart
+      namespace: default
 ```
+
+### GitHub Actions Steps In Compositions
+
+`liteci` also supports GitHub Actions-style `use:` steps inside a composition. `liteci run` auto-selects the GitHub Actions executor when the compiled plan contains any `use:` step, and you can still force it with `--gha`.
+
+See the example files at:
+
+- `examples/compositions/gha-helm/job.yaml`
+- `examples/compositions/gha-helm/schema.yaml`
+
+Example step definitions:
+
+```yaml
+steps:
+  - id: setup-helm
+    use: azure/setup-helm@v4.3.0
+    with:
+      version: "{{.helmVersion}}"
+  - id: setup-kubectl
+    use: azure/setup-kubectl@v4
+    with:
+      version: "{{.kubectlVersion}}"
+  - name: deploy
+    run: helm upgrade --install {{.Component}} {{.chart}} --namespace {{.namespacePrefix}}{{.Component}}
+```
+
+To use that example composition:
+
+1. Copy `examples/compositions/gha-helm/` into your config directory.
+2. Set the component type to `gha-helm`.
+3. Execute the compiled plan with `liteci run --plan plan.json --execute`.
+
+Example component snippet:
+
+```yaml
+spec:
+  type: gha-helm
+  inputs:
+    chart: oci://mycompany.azurecr.io/helm/charts/default
+    helmVersion: v3.15.4
+    kubectlVersion: v1.30.2
+```
+
+Supported `use:` forms in GHA mode:
+
+- `owner/repo@ref`
+- `owner/repo/path/to/action@ref`
+- `./local-action`
+- `docker://image`
+
+For production usage, pin remote actions to a full commit SHA and make sure the runner machine has any required runtimes such as Node.js or Docker.
 
 ### Output Plan Schema
 
@@ -490,6 +550,12 @@ liteci run \
   --plan plan.json \
   --execute \
   --runner docker
+
+# Execute using GitHub Actions compatibility mode
+liteci run \
+  --plan plan.json \
+  --execute \
+  --gha
 ```
 
 **Flags:**
@@ -500,18 +566,22 @@ liteci run \
 - `--debug` - Enable verbose logging
 - `-p, --plan` - Path to compiled plan file for `run`
 - `-x, --execute` - Execute commands (without this, `run` is dry-run)
+- `--gha` - Shortcut for GitHub Actions compatibility mode (`--runner github-actions`)
 - `--runner` - Execution backend for `run`: `local`, `github-actions`, or `docker`
 
 `run` selects its backend in this order:
 
-1. `--runner`
-2. `LITECI_RUNNER`
-3. Auto-detect `github-actions` when `GITHUB_ACTIONS=true`, otherwise `local`
+1. `--gha`
+2. `--runner`
+3. `LITECI_RUNNER`
+4. Auto-detect `github-actions` when `GITHUB_ACTIONS=true`
+5. Auto-detect `github-actions` when the compiled plan contains any `use:` step
+6. Otherwise `local`
 
 Runner notes:
 
 - `local` uses the host shell and installed binaries.
-- `github-actions` behaves like `local` but injects CI-friendly environment variables and defaults `--workdir` to `GITHUB_WORKSPACE` when present.
+- `github-actions` enables GitHub Actions-compatible `use:` steps, expression evaluation, file commands such as `GITHUB_ENV` and `GITHUB_OUTPUT`, and post-step handling for supported actions.
 - `docker` runs each step in a fresh container, mounts the workspace at `/workspace`, and uses `job.runsOn` as the image. Common GitHub-style labels such as `ubuntu-22.04` map to `ubuntu:22.04`. If `runsOn` is empty, `ubuntu:22.04` is used.
 
 ## Troubleshooting

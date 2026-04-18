@@ -1,0 +1,24 @@
+apiVersion: sourceplane.io/v1
+kind: JobRegistry
+metadata:
+  name: gha-demo-jobs
+  description: Minimal example that installs Helm with a GitHub Action and uses it from shell steps
+jobs:
+  - name: verify
+    description: Install Helm with a GitHub Action and verify it is available in a later shell step
+    runsOn: ubuntu-22.04
+    timeout: 5m
+    retries: 0
+    labels:
+      scope: example
+    steps:
+      - id: setup-demo
+        name: setup-demo
+        use: azure/setup-helm@v4.3.0
+      - name: verify-gha-state
+        shell: bash
+        run: |
+          cat $GITHUB_PATH
+          helm version --short
+          which helm
+        onFailure: stop

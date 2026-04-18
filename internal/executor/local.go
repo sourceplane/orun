@@ -24,6 +24,10 @@ func (e *localExecutor) Prepare(ctx ExecContext) error {
 }
 
 func (e *localExecutor) RunStep(execCtx ExecContext, job model.PlanJob, step model.PlanStep) (string, error) {
+	if strings.TrimSpace(step.Use) != "" {
+		return "", fmt.Errorf("step %q uses GitHub Actions syntax (%s); rerun with --gha or --runner github-actions", step.Name, step.Use)
+	}
+
 	commandCtx := execCtx.Context
 	if commandCtx == nil {
 		commandCtx = context.Background()
