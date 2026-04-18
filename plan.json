@@ -1,5 +1,5 @@
 {
-  "apiVersion": "liteci.io/v1",
+  "apiVersion": "ciz.io/v1",
   "kind": "Plan",
   "metadata": {
     "name": "microservices-deployment",
@@ -11,7 +11,7 @@
   "execution": {
     "concurrency": 4,
     "failFast": true,
-    "stateFile": ".liteci-state.json"
+    "stateFile": ".ciz-state.json"
   },
   "spec": {
     "jobBindings": {

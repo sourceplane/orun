@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sourceplane/liteci/internal/executor"
-	"github.com/sourceplane/liteci/internal/model"
-	"github.com/sourceplane/liteci/internal/runner"
+	"github.com/sourceplane/ciz/internal/executor"
+	"github.com/sourceplane/ciz/internal/model"
+	"github.com/sourceplane/ciz/internal/runner"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -102,7 +102,7 @@ func resolveRunnerName(flagValue string) string {
 	if normalized := executor.NormalizeRunnerName(flagValue); normalized != "" {
 		return normalized
 	}
-	if normalized := executor.NormalizeRunnerName(os.Getenv("LITECI_RUNNER")); normalized != "" {
+	if normalized := executor.NormalizeRunnerName(runnerEnvValue()); normalized != "" {
 		return normalized
 	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("GITHUB_ACTIONS")), "true") {
@@ -118,7 +118,7 @@ func shouldAutoUseGitHubActions(flagValue string, plan *model.Plan) bool {
 	if executor.NormalizeRunnerName(flagValue) != "" {
 		return false
 	}
-	if executor.NormalizeRunnerName(os.Getenv("LITECI_RUNNER")) != "" {
+	if executor.NormalizeRunnerName(runnerEnvValue()) != "" {
 		return false
 	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("GITHUB_ACTIONS")), "true") {

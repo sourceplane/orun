@@ -1,8 +1,8 @@
 package executor
 
 import (
-	"github.com/sourceplane/liteci/internal/gha"
-	"github.com/sourceplane/liteci/internal/model"
+	"github.com/sourceplane/ciz/internal/gha"
+	"github.com/sourceplane/ciz/internal/model"
 )
 
 type githubActionsExecutor struct {

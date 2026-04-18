@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -10,26 +11,27 @@ func TestLoadProviderManifestNormalizesCurrentProviderShape(t *testing.T) {
 	dir := t.TempDir()
 	manifestPath := filepath.Join(dir, "provider.yaml")
 
-	content := []byte(`apiVersion: tinx.io/v1
-kind: Provider
-metadata:
-  namespace: sourceplane
-  name: lite-ci
-  version: v0.0.0
-spec:
-  runtime: binary
-  entrypoint: entrypoint
-  platforms:
-    - os: darwin
-      arch: arm64
-      binary: bin/darwin/arm64/entrypoint
-    - os: linux
-      arch: amd64
-      binary: bin/linux/amd64/entrypoint
-  layers:
-    assets:
-      root: assets
-`)
+	content := []byte(strings.Join([]string{
+		"apiVersion: tinx.io/v1",
+		"kind: Provider",
+		"metadata:",
+		"  namespace: sourceplane",
+		"  name: ciz",
+		"  version: v0.0.0",
+		"spec:",
+		"  runtime: binary",
+		"  entrypoint: entrypoint",
+		"  platforms:",
+		"    - os: darwin",
+		"      arch: arm64",
+		"      binary: bin/darwin/arm64/entrypoint",
+		"    - os: linux",
+		"      arch: amd64",
+		"      binary: bin/linux/amd64/entrypoint",
+		"  layers:",
+		"    assets:",
+		"      root: assets",
+	}, "\n") + "\n")
 
 	if err := os.WriteFile(manifestPath, content, 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)

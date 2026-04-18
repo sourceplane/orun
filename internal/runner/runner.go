@@ -13,9 +13,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sourceplane/liteci/internal/executor"
-	"github.com/sourceplane/liteci/internal/model"
-	"github.com/sourceplane/liteci/internal/ui"
+	"github.com/sourceplane/ciz/internal/executor"
+	"github.com/sourceplane/ciz/internal/model"
+	"github.com/sourceplane/ciz/internal/ui"
+)
+
+const (
+	defaultStateFileName = ".ciz-state.json"
+	legacyStateFileName  = ".liteci-state.json"
 )
 
 // Runner executes a compiled plan in dependency order.
@@ -90,6 +95,8 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		BaseEnv: executor.MergeEnvironment(
 			executor.EnvironmentFromList(os.Environ()),
 			map[string]string{
+				"CIZ_CONTEXT":    r.Runtime.Environment,
+				"CIZ_RUNNER":     r.Runtime.Runner,
 				"LITECI_CONTEXT": r.Runtime.Environment,
 				"LITECI_RUNNER":  r.Runtime.Runner,
 			},
@@ -373,7 +380,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 
 func (r *Runner) printRunHeader(plan *model.Plan, statePath string) {
 	fmt.Fprintln(r.Stdout, ui.Cyan(r.Color, "┌──────────────────────────────────────────────────────────┐"))
-	fmt.Fprintln(r.Stdout, ui.BoldCyan(r.Color, "│ liteci run                                               │"))
+	fmt.Fprintln(r.Stdout, ui.BoldCyan(r.Color, "│ ciz run                                                  │"))
 	fmt.Fprintln(r.Stdout, ui.Cyan(r.Color, "├──────────────────────────────────────────────────────────┤"))
 	fmt.Fprintf(r.Stdout, "│ plan:  %s (%s)\n", plan.Metadata.Name, plan.Metadata.Checksum)
 	if r.JobID != "" {
@@ -475,14 +482,30 @@ func normalizeStepPhase(phase string) string {
 }
 
 func (r *Runner) resolveStateFile(plan *model.Plan) string {
-	stateFile := ".liteci-state.json"
+	stateFile := defaultStateFileName
 	if plan != nil && strings.TrimSpace(plan.Execution.StateFile) != "" {
 		stateFile = strings.TrimSpace(plan.Execution.StateFile)
 	}
 	if filepath.IsAbs(stateFile) {
 		return stateFile
 	}
-	return filepath.Join(r.WorkDir, stateFile)
+
+	statePath := filepath.Join(r.WorkDir, stateFile)
+	if stateFile != defaultStateFileName {
+		return statePath
+	}
+
+	legacyPath := filepath.Join(r.WorkDir, legacyStateFileName)
+	if !fileExists(statePath) && fileExists(legacyPath) {
+		return legacyPath
+	}
+
+	return statePath
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func (r *Runner) loadState(statePath string) (*State, error) {

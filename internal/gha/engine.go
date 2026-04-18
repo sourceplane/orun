@@ -22,7 +22,7 @@ import (
 
 	actexpr "github.com/nektos/act/pkg/exprparser"
 	actmodel "github.com/nektos/act/pkg/model"
-	"github.com/sourceplane/liteci/internal/model"
+	"github.com/sourceplane/ciz/internal/model"
 )
 
 const (
@@ -251,7 +251,7 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 		return nil, fmt.Errorf("resolve workspace %s: %w", workspaceDir, err)
 	}
 
-	tempDir, err := os.MkdirTemp("", "liteci-gha-"+sanitizePathComponent(job.ID)+"-")
+	tempDir, err := os.MkdirTemp("", "ciz-gha-"+sanitizePathComponent(job.ID)+"-")
 	if err != nil {
 		return nil, fmt.Errorf("create gha temp directory: %w", err)
 	}
@@ -275,11 +275,11 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 	githubContext := &actmodel.GithubContext{
 		Event:            eventPayload,
 		EventPath:        eventPath,
-		Workflow:         firstNonEmpty(baseEnv["GITHUB_WORKFLOW"], "liteci"),
+		Workflow:         firstNonEmpty(baseEnv["GITHUB_WORKFLOW"], "ciz"),
 		RunAttempt:       firstNonEmpty(baseEnv["GITHUB_RUN_ATTEMPT"], "1"),
 		RunID:            firstNonEmpty(baseEnv["GITHUB_RUN_ID"], strconv.FormatInt(time.Now().UnixNano(), 10)),
 		RunNumber:        firstNonEmpty(baseEnv["GITHUB_RUN_NUMBER"], "1"),
-		Actor:            firstNonEmpty(baseEnv["GITHUB_ACTOR"], os.Getenv("USER"), "liteci"),
+		Actor:            firstNonEmpty(baseEnv["GITHUB_ACTOR"], os.Getenv("USER"), "ciz"),
 		Repository:       firstNonEmpty(baseEnv["GITHUB_REPOSITORY"], repository),
 		EventName:        firstNonEmpty(baseEnv["GITHUB_EVENT_NAME"], "workflow_dispatch"),
 		Sha:              sha,
@@ -310,7 +310,7 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 		"arch":       runnerArch(),
 		"temp":       tempDir,
 		"tool_cache": e.toolCacheDir,
-		"name":       "liteci",
+		"name":       "ciz",
 	}
 
 	globalEnv := copyStringMap(baseEnv)
@@ -323,7 +323,7 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 	globalEnv["RUNNER_ARCH"] = runnerArch()
 	globalEnv["CI"] = "true"
 	globalEnv["GITHUB_ACTIONS"] = "true"
-	globalEnv["ACTIONS_RUNTIME_URL"] = firstNonEmpty(globalEnv["ACTIONS_RUNTIME_URL"], "https://liteci.invalid/runtime")
+	globalEnv["ACTIONS_RUNTIME_URL"] = firstNonEmpty(globalEnv["ACTIONS_RUNTIME_URL"], "https://ciz.invalid/runtime")
 	globalEnv["ACTIONS_RESULTS_URL"] = firstNonEmpty(globalEnv["ACTIONS_RESULTS_URL"], globalEnv["ACTIONS_RUNTIME_URL"])
 	if globalEnv["ACTIONS_RUNTIME_TOKEN"] == "" {
 		token, tokenErr := randomToken(16)
@@ -1356,9 +1356,23 @@ func firstNonEmptyContext(ctx context.Context) context.Context {
 func defaultRootDir(name string) string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return filepath.Join(os.TempDir(), "liteci", name)
+		return preferredRootDir(os.TempDir(), "ciz", "liteci", name)
 	}
-	return filepath.Join(home, ".lite-ci", name)
+	return preferredRootDir(home, ".ciz", ".lite-ci", name)
+}
+
+func preferredRootDir(baseDir, primaryRoot, legacyRoot, name string) string {
+	primaryPath := filepath.Join(baseDir, primaryRoot, name)
+	legacyPath := filepath.Join(baseDir, legacyRoot, name)
+	if pathExists(primaryPath) || !pathExists(legacyPath) {
+		return primaryPath
+	}
+	return legacyPath
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func sanitizePathComponent(value string) string {

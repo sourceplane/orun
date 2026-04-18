@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sourceplane/liteci/internal/model"
+	"github.com/sourceplane/ciz/internal/model"
 )
 
 func TestParseKVFileSupportsHeredocAndBOM(t *testing.T) {

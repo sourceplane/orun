@@ -1,7 +1,7 @@
 package expand
 
 import (
-	"github.com/sourceplane/liteci/internal/model"
+	"github.com/sourceplane/ciz/internal/model"
 )
 
 // DependencyResolver provides utilities for resolving component dependencies

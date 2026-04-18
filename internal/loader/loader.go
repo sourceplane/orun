@@ -12,15 +12,16 @@ import (
 	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
-	"github.com/sourceplane/liteci/internal/model"
+	"github.com/sourceplane/ciz/internal/model"
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	componentKind            = "Component"
-	componentTreeCacheSource = "discovered"
-	componentInlineSource    = "inline"
-	componentTreeCacheFile   = ".liteci/component-tree.yaml"
+	componentKind                = "Component"
+	componentTreeCacheSource     = "discovered"
+	componentInlineSource        = "inline"
+	componentTreeCacheFile       = ".ciz/component-tree.yaml"
+	legacyComponentTreeCacheFile = ".liteci/component-tree.yaml"
 )
 
 // LoadIntent loads and parses an intent YAML file
@@ -84,7 +85,7 @@ func WriteComponentTreeCache(intentPath string, tree *model.ComponentTree) error
 		return nil
 	}
 
-	cachePath := componentTreeCachePath(intentPath)
+	cachePath := componentTreeCacheWritePath(intentPath)
 	dir := filepath.Dir(cachePath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create component tree cache directory: %w", err)
@@ -200,7 +201,7 @@ func discoverComponentFiles(baseDir string, roots []string) ([]string, error) {
 
 func shouldSkipDiscoveryDir(name string) bool {
 	switch name {
-	case ".git", ".liteci", "node_modules":
+	case ".git", ".ciz", ".liteci", "node_modules":
 		return true
 	default:
 		return false
@@ -302,7 +303,7 @@ func buildComponentTree(intentPath string, roots []string, inlineEntries, discov
 }
 
 func loadDiscoveredComponentEntriesFromCache(intentPath, baseDir string, roots, files []string) ([]model.ComponentTreeComponent, bool) {
-	cachePath := componentTreeCachePath(intentPath)
+	cachePath := componentTreeCacheReadPath(intentPath)
 	data, err := os.ReadFile(cachePath)
 	if err != nil {
 		return nil, false
@@ -365,12 +366,34 @@ func sameStrings(left, right []string) bool {
 	return true
 }
 
+func componentTreeCacheReadPath(intentPath string) string {
+	cachePath := componentTreeCacheWritePath(intentPath)
+	if _, err := os.Stat(cachePath); err == nil {
+		return cachePath
+	}
+
+	legacyPath := cachePathFor(intentPath, legacyComponentTreeCacheFile)
+	if _, err := os.Stat(legacyPath); err == nil {
+		return legacyPath
+	}
+
+	return cachePath
+}
+
+func componentTreeCacheWritePath(intentPath string) string {
+	return cachePathFor(intentPath, componentTreeCacheFile)
+}
+
 func componentTreeCachePath(intentPath string) string {
+	return componentTreeCacheWritePath(intentPath)
+}
+
+func cachePathFor(intentPath, cacheFile string) string {
 	baseDir := filepath.Dir(intentPath)
 	if baseDir == "" {
 		baseDir = "."
 	}
-	return filepath.Join(baseDir, filepath.FromSlash(componentTreeCacheFile))
+	return filepath.Join(baseDir, filepath.FromSlash(cacheFile))
 }
 
 func normalizeCachePath(path string) string {

@@ -3,11 +3,12 @@ package main
 import (
 	"testing"
 
-	"github.com/sourceplane/liteci/internal/model"
+	"github.com/sourceplane/ciz/internal/model"
 )
 
 func TestResolveRunnerNameDefaultsToLocal(t *testing.T) {
-	t.Setenv("LITECI_RUNNER", "")
+	t.Setenv(runnerEnvVar, "")
+	t.Setenv(legacyRunnerEnvVar, "")
 	t.Setenv("GITHUB_ACTIONS", "")
 
 	if got := resolveRunnerName(""); got != "local" {
@@ -15,8 +16,19 @@ func TestResolveRunnerNameDefaultsToLocal(t *testing.T) {
 	}
 }
 
-func TestResolveRunnerNameHonorsEnvThenAutoDetect(t *testing.T) {
-	t.Setenv("LITECI_RUNNER", "docker")
+func TestResolveRunnerNameHonorsPrimaryEnvThenAutoDetect(t *testing.T) {
+	t.Setenv(runnerEnvVar, "docker")
+	t.Setenv(legacyRunnerEnvVar, "")
+	t.Setenv("GITHUB_ACTIONS", "true")
+
+	if got := resolveRunnerName(""); got != "docker" {
+		t.Fatalf("resolveRunnerName() = %q, want docker", got)
+	}
+}
+
+func TestResolveRunnerNameHonorsLegacyEnvThenAutoDetect(t *testing.T) {
+	t.Setenv(runnerEnvVar, "")
+	t.Setenv(legacyRunnerEnvVar, "docker")
 	t.Setenv("GITHUB_ACTIONS", "true")
 
 	if got := resolveRunnerName(""); got != "docker" {
@@ -25,7 +37,8 @@ func TestResolveRunnerNameHonorsEnvThenAutoDetect(t *testing.T) {
 }
 
 func TestResolveRunnerNameHonorsFlag(t *testing.T) {
-	t.Setenv("LITECI_RUNNER", "docker")
+	t.Setenv(runnerEnvVar, "docker")
+	t.Setenv(legacyRunnerEnvVar, "")
 	t.Setenv("GITHUB_ACTIONS", "true")
 
 	if got := resolveRunnerName("github-actions"); got != "github-actions" {
@@ -34,7 +47,8 @@ func TestResolveRunnerNameHonorsFlag(t *testing.T) {
 }
 
 func TestShouldAutoUseGitHubActionsForPlanUseSteps(t *testing.T) {
-	t.Setenv("LITECI_RUNNER", "")
+	t.Setenv(runnerEnvVar, "")
+	t.Setenv(legacyRunnerEnvVar, "")
 	t.Setenv("GITHUB_ACTIONS", "")
 
 	plan := &model.Plan{
@@ -55,14 +69,21 @@ func TestShouldAutoUseGitHubActionsHonorsExplicitRunnerSettings(t *testing.T) {
 		}},
 	}
 
-	t.Setenv("LITECI_RUNNER", "")
+	t.Setenv(runnerEnvVar, "")
+	t.Setenv(legacyRunnerEnvVar, "")
 	t.Setenv("GITHUB_ACTIONS", "")
 	if shouldAutoUseGitHubActions("local", plan) {
 		t.Fatal("expected explicit --runner local to disable auto-detect")
 	}
 
-	t.Setenv("LITECI_RUNNER", "docker")
+	t.Setenv(legacyRunnerEnvVar, "docker")
 	if shouldAutoUseGitHubActions("", plan) {
-		t.Fatal("expected LITECI_RUNNER to disable auto-detect")
+		t.Fatal("expected legacy runner env var to disable auto-detect")
+	}
+
+	t.Setenv(legacyRunnerEnvVar, "")
+	t.Setenv(runnerEnvVar, "docker")
+	if shouldAutoUseGitHubActions("", plan) {
+		t.Fatal("expected primary runner env var to disable auto-detect")
 	}
 }

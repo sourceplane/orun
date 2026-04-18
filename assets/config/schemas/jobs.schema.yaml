@@ -1,5 +1,5 @@
 $schema: http://json-schema.org/draft-07/schema#
-title: liteci Job Registry
+title: ciz Job Registry
 description: Job execution definitions for component types
 type: object
 required:

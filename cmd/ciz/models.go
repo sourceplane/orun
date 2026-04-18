@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sourceplane/liteci/internal/loader"
+	"github.com/sourceplane/ciz/internal/loader"
 	"gopkg.in/yaml.v3"
 )
 

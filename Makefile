@@ -1,12 +1,13 @@
 .PHONY: build run validate debug plan clean test help
 
-BINARY_NAME=liteci
+BINARY_NAME=ciz
+LEGACY_BINARY_NAME=liteci
 BINARY_PATH=./cmd/$(BINARY_NAME)
 MAIN_PATH=$(BINARY_PATH)/main.go
 
 # Default target
 help:
-	@echo "liteci - Schema-Driven Planner Engine"
+	@echo "ciz - Schema-Driven Planner Engine"
 	@echo ""
 	@echo "Available targets:"
 	@echo "  build       - Build the binary"
@@ -19,8 +20,10 @@ help:
 
 build:
 	@echo "🔨 Building $(BINARY_NAME)..."
-	@go build -o $(BINARY_NAME) ./$(BINARY_PATH)
+	@go build -o $(BINARY_NAME) $(BINARY_PATH)
+	@cp $(BINARY_NAME) $(LEGACY_BINARY_NAME)
 	@echo "✅ Built: ./$(BINARY_NAME)"
+	@echo "⚠ Deprecated alias: ./$(LEGACY_BINARY_NAME)"
 
 run-plan: build
 	@echo ""
@@ -43,7 +46,7 @@ test:
 
 clean:
 	@echo "🧹 Cleaning..."
-	@rm -f $(BINARY_NAME)
+	@rm -f $(BINARY_NAME) $(LEGACY_BINARY_NAME)
 	@go clean
 	@echo "✅ Clean complete"
 
@@ -71,9 +74,9 @@ release-snapshot:
 
 release-test:
 	@echo "🧪 Testing OCI artifact structure..."
-	@mkdir -p /tmp/liteci-test
+	@mkdir -p /tmp/ciz-test
 	@for arch in linux/amd64 darwin/arm64; do \
-		if [ -f dist/liteci_snapshot_*/platform-native_*_$${arch/\//_}/liteci ]; then \
+		if [ -f dist/ciz_snapshot_*/platform-native_*_$${arch/\//_}/ciz ]; then \
 			echo "✓ Binary found: $${arch}"; \
 		fi; \
 	done

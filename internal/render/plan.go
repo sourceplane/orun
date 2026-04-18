@@ -9,8 +9,13 @@ import (
 	"sort"
 	"time"
 
-	"github.com/sourceplane/liteci/internal/model"
+	"github.com/sourceplane/ciz/internal/model"
 	"gopkg.in/yaml.v3"
+)
+
+const (
+	planAPIVersion   = "ciz.io/v1"
+	defaultStateFile = ".ciz-state.json"
 )
 
 // Renderer materializes job instances into a Plan
@@ -34,7 +39,7 @@ func (r *Renderer) RenderPlan(metadata model.Metadata, jobInstances map[string]*
 // RenderPlanWithOrder creates a plan from job instances using a caller-specified order.
 func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map[string]*model.JobInstance, jobBindings map[string]string, jobOrder []string) *model.Plan {
 	plan := &model.Plan{
-		APIVersion: "liteci.io/v1",
+		APIVersion: planAPIVersion,
 		Kind:       "Plan",
 		Metadata: model.PlanMetadata{
 			Name:        metadata.Name,
@@ -45,7 +50,7 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 		Execution: model.PlanExecution{
 			Concurrency: 4,
 			FailFast:    true,
-			StateFile:   ".liteci-state.json",
+			StateFile:   defaultStateFile,
 		},
 		Spec: model.PlanSpec{
 			JobBindings: jobBindings, // Map of model -> JobRegistry name

@@ -2,10 +2,10 @@ apiVersion: tinx.io/v1
 kind: Provider
 metadata:
   namespace: sourceplane
-  name: lite-ci
+  name: ciz
   version: v0.0.0
   description: Provider-native CI planning engine that compiles intent into deterministic execution plans
-  homepage: https://github.com/sourceplane/lite-ci
+  homepage: https://github.com/sourceplane/ciz
   license: MIT
 spec:
   runtime: binary

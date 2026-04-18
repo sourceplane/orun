@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/sourceplane/liteci/internal/ui"
+	"github.com/sourceplane/ciz/internal/ui"
 )
 
 var cliColorEnabled = ui.ColorEnabledForWriter(os.Stdout)

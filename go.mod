@@ -1,4 +1,4 @@
-module github.com/sourceplane/liteci
+module github.com/sourceplane/ciz
 
 go 1.25.0
 

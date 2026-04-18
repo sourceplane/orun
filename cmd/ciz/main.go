@@ -6,14 +6,14 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sourceplane/liteci/internal/expand"
-	"github.com/sourceplane/liteci/internal/git"
-	"github.com/sourceplane/liteci/internal/loader"
-	"github.com/sourceplane/liteci/internal/model"
-	"github.com/sourceplane/liteci/internal/normalize"
-	"github.com/sourceplane/liteci/internal/planner"
-	"github.com/sourceplane/liteci/internal/render"
-	"github.com/sourceplane/liteci/internal/ui"
+	"github.com/sourceplane/ciz/internal/expand"
+	"github.com/sourceplane/ciz/internal/git"
+	"github.com/sourceplane/ciz/internal/loader"
+	"github.com/sourceplane/ciz/internal/model"
+	"github.com/sourceplane/ciz/internal/normalize"
+	"github.com/sourceplane/ciz/internal/planner"
+	"github.com/sourceplane/ciz/internal/render"
+	"github.com/sourceplane/ciz/internal/ui"
 )
 
 func generatePlan() error {
@@ -314,7 +314,7 @@ func listCompositions(args []string) error {
 	}
 
 	if !longFormat {
-		fmt.Println("\n" + styleTip("Tip: run 'liteci composition <name>' for detailed information"))
+		fmt.Println("\n" + styleTip("Tip: run 'ciz composition <name>' for detailed information"))
 	}
 
 	return nil
@@ -496,7 +496,7 @@ func listComponents(args []string) error {
 		}
 
 		if !longFormat {
-			fmt.Println("\n" + styleTip("Tip: run 'liteci component <name>' for detailed information"))
+			fmt.Println("\n" + styleTip("Tip: run 'ciz component <name>' for detailed information"))
 		}
 		return nil
 	}
@@ -517,7 +517,7 @@ func listComponents(args []string) error {
 	}
 
 	if !longFormat {
-		fmt.Println("\n" + styleTip("Tip: run 'liteci component <name>' for detailed information"))
+		fmt.Println("\n" + styleTip("Tip: run 'ciz component <name>' for detailed information"))
 	}
 
 	return nil

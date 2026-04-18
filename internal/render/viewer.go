@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sourceplane/liteci/internal/model"
-	"github.com/sourceplane/liteci/internal/ui"
+	"github.com/sourceplane/ciz/internal/model"
+	"github.com/sourceplane/ciz/internal/ui"
 )
 
 // PlanViewer provides human-readable visualization of a plan DAG

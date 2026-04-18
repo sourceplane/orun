@@ -1,4 +1,4 @@
-# liteci - Schema-Driven Planner Engine
+# ciz - Schema-Driven Planner Engine
 
 A **policy-aware workflow compiler** that turns **intent** into executable **plan DAGs**. Built on CNCF principles.
 
@@ -31,72 +31,76 @@ Replace `<tag>` with the release you want from the GitHub releases page.
 
 ```bash
 # macOS (arm64 - Apple Silicon)
-curl -L https://github.com/sourceplane/lite-ci/releases/download/<tag>/liteci_<tag>_darwin_arm64.tar.gz | tar xz
-sudo mv entrypoint /usr/local/bin/liteci
-chmod +x /usr/local/bin/liteci
+curl -L https://github.com/sourceplane/ciz/releases/download/<tag>/ciz_<tag>_darwin_arm64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/ciz
+chmod +x /usr/local/bin/ciz
 
 # macOS (amd64 - Intel)
-curl -L https://github.com/sourceplane/lite-ci/releases/download/<tag>/liteci_<tag>_darwin_amd64.tar.gz | tar xz
-sudo mv entrypoint /usr/local/bin/liteci
-chmod +x /usr/local/bin/liteci
+curl -L https://github.com/sourceplane/ciz/releases/download/<tag>/ciz_<tag>_darwin_amd64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/ciz
+chmod +x /usr/local/bin/ciz
 
 # Linux (amd64)
-curl -L https://github.com/sourceplane/lite-ci/releases/download/<tag>/liteci_<tag>_linux_amd64.tar.gz | tar xz
-sudo mv entrypoint /usr/local/bin/liteci
-chmod +x /usr/local/bin/liteci
+curl -L https://github.com/sourceplane/ciz/releases/download/<tag>/ciz_<tag>_linux_amd64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/ciz
+chmod +x /usr/local/bin/ciz
 
 # Linux (arm64)
-curl -L https://github.com/sourceplane/lite-ci/releases/download/<tag>/liteci_<tag>_linux_arm64.tar.gz | tar xz
-sudo mv entrypoint /usr/local/bin/liteci
-chmod +x /usr/local/bin/liteci
+curl -L https://github.com/sourceplane/ciz/releases/download/<tag>/ciz_<tag>_linux_arm64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/ciz
+chmod +x /usr/local/bin/ciz
 ```
 
 Verify installation:
 ```bash
-liteci --version
-liteci --help
+ciz --version
+ciz --help
 ```
 
 ### Option 2: From Source
 
 ```bash
-git clone https://github.com/sourceplane/lite-ci.git
-cd lite-ci
-go build -o liteci ./cmd/liteci
-sudo mv liteci /usr/local/bin/
+git clone https://github.com/sourceplane/ciz.git
+cd ciz
+go build -o ciz ./cmd/ciz
+sudo mv ciz /usr/local/bin/
 ```
+
+`make build` also emits a deprecated `liteci` alias alongside `ciz` for local compatibility.
 
 ### Option 3: Docker/OCI Container
 
 ```bash
 # Docker
-docker run ghcr.io/sourceplane/lite-ci:<tag> plan -i intent.yaml
+docker run ghcr.io/sourceplane/ciz:<tag> plan -i intent.yaml
 
 # Podman (recommended for CI/CD)
-podman run ghcr.io/sourceplane/lite-ci:<tag> plan -i intent.yaml
+podman run ghcr.io/sourceplane/ciz:<tag> plan -i intent.yaml
 
 # Kubernetes
-kubectl run lite-ci --image=ghcr.io/sourceplane/lite-ci:<tag>
+kubectl run ciz --image=ghcr.io/sourceplane/ciz:<tag>
 ```
 
 ### Option 4: Using tinx
 
 ```bash
 repo_root="$(pwd)"
-tinx init demo -p ghcr.io/sourceplane/lite-ci:<tag> as lite-ci
-tinx --workspace demo -- lite-ci plan \
+tinx init demo -p ghcr.io/sourceplane/ciz:<tag> as ciz
+tinx --workspace demo -- ciz plan \
   --intent "$repo_root/examples/intent.yaml" \
   --config-dir "$repo_root/assets/config/compositions"
 ```
+
+If you need the legacy provider alias, `tinx init demo -p ghcr.io/sourceplane/ciz:<tag> as lite-ci` still works.
 
 ### Option 5: Using ORAS (OCI Registry As Storage)
 
 ```bash
 # Pull the provider artifact
-oras pull ghcr.io/sourceplane/lite-ci:<tag>
+oras pull ghcr.io/sourceplane/ciz:<tag>
 
 # Extract binaries
-tar -xzf liteci_<tag>_linux_amd64_oci.tar.gz
+tar -xzf ciz_<tag>_linux_amd64_oci.tar.gz
 ./entrypoint plan -i intent.yaml
 ```
 
@@ -124,8 +128,8 @@ tar -xzf liteci_<tag>_linux_amd64_oci.tar.gz
 ## Project Structure
 
 ```
-lite-ci/
-├── cmd/liteci/
+ciz/
+├── cmd/ciz/
 │   ├── main.go           # CLI entry point & command handlers
 │   └── models.go         # Domain models and types
 ├── internal/
@@ -163,7 +167,7 @@ lite-ci/
 ### 1. List Available Compositions
 
 ```bash
-liteci compositions --config-dir assets/config/compositions
+ciz compositions --config-dir assets/config/compositions
 ```
 
 Output shows all available job compositions (helm, terraform, charts, etc.)
@@ -171,7 +175,7 @@ Output shows all available job compositions (helm, terraform, charts, etc.)
 ### 2. Validate Intent File
 
 ```bash
-liteci validate \
+ciz validate \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions
 ```
@@ -181,7 +185,7 @@ liteci validate \
 See detailed logs of each compiler stage:
 
 ```bash
-liteci debug \
+ciz debug \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions
 ```
@@ -189,7 +193,7 @@ liteci debug \
 ### 4. Generate Execution Plan
 
 ```bash
-liteci plan \
+ciz plan \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions \
   --output plan.json \
@@ -205,7 +209,7 @@ Output: Fully resolved execution DAG in `plan.json`
 ```bash
 docker run \
   -v $(pwd):/workspace \
-  ghcr.io/sourceplane/lite-ci:<tag> \
+  ghcr.io/sourceplane/ciz:<tag> \
   plan \
   --intent /workspace/intent.yaml \
   --config-dir /workspace/assets/config/compositions \
@@ -217,7 +221,7 @@ docker run \
 ```bash
 podman run \
   -v $(pwd):/workspace \
-  ghcr.io/sourceplane/lite-ci:<tag> \
+  ghcr.io/sourceplane/ciz:<tag> \
   plan \
   --intent /workspace/intent.yaml \
   --config-dir /workspace/assets/config/compositions
@@ -226,8 +230,8 @@ podman run \
 ### Using in Kubernetes
 
 ```bash
-kubectl run lite-ci-planner \
-  --image=ghcr.io/sourceplane/lite-ci:<tag> \
+kubectl run ciz-planner \
+  --image=ghcr.io/sourceplane/ciz:<tag> \
   --rm -it \
   -- plan \
   --intent intent.yaml \
@@ -238,7 +242,7 @@ kubectl run lite-ci-planner \
 
 ```yaml
 - name: Generate CI Plan
-  uses: docker://ghcr.io/sourceplane/lite-ci:<tag>
+  uses: docker://ghcr.io/sourceplane/ciz:<tag>
   with:
     args: |
       plan \
@@ -247,7 +251,7 @@ kubectl run lite-ci-planner \
       --output plan.json
 ```
 
-    This container-based usage is separate from GitHub Actions compatibility mode during `liteci run`. When a compiled plan contains `use:` steps, `liteci run` auto-selects the GitHub Actions executor unless you explicitly set `--runner` or `LITECI_RUNNER`.
+    This container-based usage is separate from GitHub Actions compatibility mode during `ciz run`. When a compiled plan contains `use:` steps, `ciz run` auto-selects the GitHub Actions executor unless you explicitly set `--runner` or `CIZ_RUNNER`.
 
 ## Configuration Schemas
 
@@ -302,7 +306,7 @@ components:
       registry: mycompany.azurecr.io/helm/charts
 ```
 
-External components can live next to the code they own. Each `component.yaml` is loaded from the configured discovery roots, and if `spec.path` is omitted liteci defaults the job working directory to the directory containing the manifest.
+External components can live next to the code they own. Each `component.yaml` is loaded from the configured discovery roots, and if `spec.path` is omitted ciz defaults the job working directory to the directory containing the manifest.
 
 **Example component.yaml:**
 ```yaml
@@ -363,7 +367,7 @@ jobs:
 
 ### GitHub Actions Steps In Compositions
 
-`liteci` also supports GitHub Actions-style `use:` steps inside a composition. `liteci run` auto-selects the GitHub Actions executor when the compiled plan contains any `use:` step, and you can still force it with `--gha`.
+`ciz` also supports GitHub Actions-style `use:` steps inside a composition. `ciz run` auto-selects the GitHub Actions executor when the compiled plan contains any `use:` step, and you can still force it with `--gha`.
 
 See the example files at:
 
@@ -390,7 +394,7 @@ To use that example composition:
 
 1. Copy `examples/compositions/gha-helm/` into your config directory.
 2. Set the component type to `gha-helm`.
-3. Execute the compiled plan with `liteci run --plan plan.json --execute`.
+3. Execute the compiled plan with `ciz run --plan plan.json --execute`.
 
 Example component snippet:
 
@@ -419,11 +423,18 @@ The generated plan is a fully resolved DAG.
 **Structure:**
 ```json
 {
-  "apiVersion": "sourceplane.io/v1",
-  "kind": "Workflow",
+  "apiVersion": "ciz.io/v1",
+  "kind": "Plan",
   "metadata": {
     "name": "microservices-deployment",
-    "description": "..."
+    "description": "...",
+    "generatedAt": "2026-04-18T00:00:00Z",
+    "checksum": "sha256-..."
+  },
+  "execution": {
+    "concurrency": 4,
+    "failFast": true,
+    "stateFile": ".ciz-state.json"
   },
   "spec": {
     "jobBindings": {
@@ -449,6 +460,11 @@ The generated plan is a fully resolved DAG.
       "timeout": "15m",
       "retries": 2,
       "env": {
+        "image": "web-app:1.0",
+        "replicas": 3,
+        "namespace": "production"
+      },
+      "config": {
         "image": "web-app:1.0",
         "replicas": 3,
         "namespace": "production"
@@ -515,21 +531,21 @@ Low Priority  ← Overridden by ←  High Priority
 
 ```bash
 # List available compositions
-liteci compositions \
+ciz compositions \
   --config-dir assets/config/compositions
 
 # Validate intent without generating plan
-liteci validate \
+ciz validate \
   --intent intent.yaml \
   --config-dir assets/config/compositions
 
 # Debug with detailed logging
-liteci debug \
+ciz debug \
   --intent intent.yaml \
   --config-dir assets/config/compositions
 
 # Generate execution plan
-liteci plan \
+ciz plan \
   --intent intent.yaml \
   --config-dir assets/config/compositions \
   --output plan.json \
@@ -537,22 +553,22 @@ liteci plan \
   --debug
 
 # Preview execution from a compiled plan (dry-run)
-liteci run \
+ciz run \
   --plan plan.json
 
 # Execute plan steps
-liteci run \
+ciz run \
   --plan plan.json \
   --execute
 
 # Execute using the Docker backend
-liteci run \
+ciz run \
   --plan plan.json \
   --execute \
   --runner docker
 
 # Execute using GitHub Actions compatibility mode
-liteci run \
+ciz run \
   --plan plan.json \
   --execute \
   --gha
@@ -573,7 +589,7 @@ liteci run \
 
 1. `--gha`
 2. `--runner`
-3. `LITECI_RUNNER`
+3. `CIZ_RUNNER` (`LITECI_RUNNER` is still accepted as a deprecated alias)
 4. Auto-detect `github-actions` when `GITHUB_ACTIONS=true`
 5. Auto-detect `github-actions` when the compiled plan contains any `use:` step
 6. Otherwise `local`
@@ -592,19 +608,19 @@ Runner notes:
 ls -la assets/config/compositions/
 
 # Use absolute path if relative doesn't work
-liteci plan -i intent.yaml -c $(pwd)/assets/config/compositions
+ciz plan -i intent.yaml -c $(pwd)/assets/config/compositions
 ```
 
 ### "Schema validation failed"
 ```bash
 # Check your intent.yaml against the schema
-liteci validate -i intent.yaml -c assets/config/compositions
+ciz validate -i intent.yaml -c assets/config/compositions
 ```
 
 ### "Circular dependency detected"
 ```bash
 # Use debug mode to see dependency graph
-liteci debug -i intent.yaml -c assets/config/compositions
+ciz debug -i intent.yaml -c assets/config/compositions
 ```
 
 ### Container authentication errors
@@ -645,6 +661,6 @@ MIT License - See [LICENSE](LICENSE) file for details
 
 ## Support
 
-- **Issues:** [GitHub Issues](https://github.com/sourceplane/lite-ci/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/sourceplane/lite-ci/discussions)
+- **Issues:** [GitHub Issues](https://github.com/sourceplane/ciz/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/sourceplane/ciz/discussions)
 - **Email:** team@sourceplane.io

@@ -1,8 +1,8 @@
-# Liteci Architecture Guide
+# ciz Architecture Guide
 
 ## Design Philosophy
 
-**liteci** is built around three core principles:
+**ciz** is built around three core principles:
 
 1. **Separation of Concerns**: Intent, Jobs, and Plans are distinct layers
 2. **Schema-Driven Everything**: Configuration is validated against schemas
@@ -220,8 +220,13 @@ type JobInstance struct {
 
 ```json
 {
-  "apiVersion": "v1",
-  "kind": "Workflow",
+  "apiVersion": "ciz.io/v1",
+  "kind": "Plan",
+  "execution": {
+    "concurrency": 4,
+    "failFast": true,
+    "stateFile": ".ciz-state.json"
+  },
   "jobs": [
     {
       "id": "web-app@production.deploy",
@@ -586,7 +591,7 @@ Failed: template rendering in job "web-app@prod.deploy"
 Enables detailed logging of each phase:
 
 ```
-./liteci plan --debug
+./ciz plan --debug
 
 📋 Loading intent...
 📚 Loading job registry...
@@ -629,7 +634,7 @@ Enables detailed logging of each phase:
 ## Future Roadmap
 
 - [ ] Schema validation with JSON Schema v5
-- [ ] Plan diffing (liteci plan diff old.json new.json)
+- [ ] Plan diffing (ciz plan diff old.json new.json)
 - [ ] Incremental planning (--changed-only)
 - [ ] DAG visualization (--viz dot/svg)
 - [ ] Multi-file intent support

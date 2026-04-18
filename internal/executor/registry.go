@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sourceplane/liteci/internal/gha"
+	"github.com/sourceplane/ciz/internal/gha"
 )
 
 type factory func() Executor

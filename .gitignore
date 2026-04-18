@@ -48,10 +48,16 @@ temp/
 Thumbs.db
 
 # Project specific
+/ciz
 /liteci
+/.ciz/
+/.ciz-state.json
+/.ciz-tools/
 /.liteci-state.json
 /.liteci-tools/
 /oci/
+/examples/gha-actions/.ciz/
+/examples/gha-actions/.ciz-state.json
 /examples/gha-actions/.liteci/
 /examples/gha-actions/.liteci-state.json
 /examples/gha-actions/plan.json
