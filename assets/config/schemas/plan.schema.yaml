@@ -13,8 +13,6 @@ properties:
     type: string
     enum:
       - arx.io/v1
-      - ciz.io/v1
-      - liteci.io/v1
   kind:
     type: string
     enum:

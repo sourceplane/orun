@@ -8,15 +8,9 @@ import (
 )
 
 const (
-	cliName            = "arx"
-	legacyCLIName      = "ciz"
-	oldestCLIName      = "liteci"
-	configDirEnvVar    = "ARX_CONFIG_DIR"
-	legacyConfigEnvVar = "CIZ_CONFIG_DIR"
-	oldestConfigEnvVar = "LITECI_CONFIG_DIR"
-	runnerEnvVar       = "ARX_RUNNER"
-	legacyRunnerEnvVar = "CIZ_RUNNER"
-	oldestRunnerEnvVar = "LITECI_RUNNER"
+	cliName         = "arx"
+	configDirEnvVar = "ARX_CONFIG_DIR"
+	runnerEnvVar    = "ARX_RUNNER"
 )
 
 var version = "dev"
@@ -41,7 +35,6 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:     cliName,
-	Aliases: []string{legacyCLIName, oldestCLIName},
 	Short:   "Planner engine: Intent → Plan DAG",
 	Long:    "arx is a schema-driven planner that compiles policy-aware intent into deterministic execution DAGs",
 	Version: version,
@@ -50,7 +43,7 @@ var rootCmd = &cobra.Command{
 			if envConfigDir := configDirEnvValue(); envConfigDir != "" {
 				configDir = envConfigDir
 			} else {
-				fmt.Fprintf(os.Stderr, "⚠ warning: --config-dir not set and %s/%s/%s are empty; commands that need compositions may fail\n", configDirEnvVar, legacyConfigEnvVar, oldestConfigEnvVar)
+				fmt.Fprintf(os.Stderr, "⚠ warning: --config-dir not set and %s is empty; commands that need compositions may fail\n", configDirEnvVar)
 			}
 		}
 		return nil
@@ -67,11 +60,11 @@ func envValue(keys ...string) string {
 }
 
 func configDirEnvValue() string {
-	return envValue(configDirEnvVar, legacyConfigEnvVar, oldestConfigEnvVar)
+	return envValue(configDirEnvVar)
 }
 
 func runnerEnvValue() string {
-	return envValue(runnerEnvVar, legacyRunnerEnvVar, oldestRunnerEnvVar)
+	return envValue(runnerEnvVar)
 }
 
 func commandNeedsConfig(cmd *cobra.Command) bool {
@@ -94,7 +87,7 @@ func commandNeedsConfig(cmd *cobra.Command) bool {
 
 func init() {
 	rootCmd.SetVersionTemplate(cliName + " version {{.Version}}\n")
-	rootCmd.PersistentFlags().StringVarP(&configDir, "config-dir", "c", "", fmt.Sprintf("Config directory for JobRegistry definitions (or set %s; deprecated aliases: %s, %s; use * or ** for recursive scanning)", configDirEnvVar, legacyConfigEnvVar, oldestConfigEnvVar))
+	rootCmd.PersistentFlags().StringVarP(&configDir, "config-dir", "c", "", fmt.Sprintf("Config directory for JobRegistry definitions (or set %s; use * or ** for recursive scanning)", configDirEnvVar))
 
 	registerPlanCommand(rootCmd)
 	registerRunCommand(rootCmd)

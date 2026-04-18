@@ -22,8 +22,6 @@ const (
 	defaultStateFileName = ".arx-state.json"
 )
 
-var legacyStateFileNames = []string{".ciz-state.json", ".liteci-state.json"}
-
 // Runner executes a compiled plan in dependency order.
 type Runner struct {
 	WorkDir            string
@@ -96,12 +94,8 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		BaseEnv: executor.MergeEnvironment(
 			executor.EnvironmentFromList(os.Environ()),
 			map[string]string{
-				"ARX_CONTEXT":    r.Runtime.Environment,
-				"ARX_RUNNER":     r.Runtime.Runner,
-				"CIZ_CONTEXT":    r.Runtime.Environment,
-				"CIZ_RUNNER":     r.Runtime.Runner,
-				"LITECI_CONTEXT": r.Runtime.Environment,
-				"LITECI_RUNNER":  r.Runtime.Runner,
+				"ARX_CONTEXT": r.Runtime.Environment,
+				"ARX_RUNNER":  r.Runtime.Runner,
 			},
 		),
 		Runtime: r.Runtime,
@@ -493,21 +487,7 @@ func (r *Runner) resolveStateFile(plan *model.Plan) string {
 		return stateFile
 	}
 
-	statePath := filepath.Join(r.WorkDir, stateFile)
-	if stateFile != defaultStateFileName {
-		return statePath
-	}
-
-	if !fileExists(statePath) {
-		for _, legacyStateFileName := range legacyStateFileNames {
-			legacyPath := filepath.Join(r.WorkDir, legacyStateFileName)
-			if fileExists(legacyPath) {
-				return legacyPath
-			}
-		}
-	}
-
-	return statePath
+	return filepath.Join(r.WorkDir, stateFile)
 }
 
 func fileExists(path string) bool {

@@ -9,11 +9,7 @@ title: Environment variables
 | Variable | Meaning |
 | --- | --- |
 | `ARX_CONFIG_DIR` | Default value for the global `--config-dir` flag |
-| `CIZ_CONFIG_DIR` | Deprecated alias for `ARX_CONFIG_DIR` |
-| `LITECI_CONFIG_DIR` | Deprecated alias for `ARX_CONFIG_DIR` |
 | `ARX_RUNNER` | Default runner for `arx run` |
-| `CIZ_RUNNER` | Deprecated alias for `ARX_RUNNER` |
-| `LITECI_RUNNER` | Deprecated alias for `ARX_RUNNER` |
 | `GITHUB_ACTIONS` | Causes `run` to auto-select the GitHub Actions backend when set to `true` |
 | `GITHUB_WORKSPACE` | Used as the default workdir for the GitHub Actions backend when `--workdir` is not set |
 
@@ -23,10 +19,6 @@ title: Environment variables
 | --- | --- |
 | `ARX_CONTEXT` | Runtime environment label such as `local`, `container`, or `ci` |
 | `ARX_RUNNER` | Resolved runner name for the current step |
-| `CIZ_CONTEXT` | Deprecated compatibility alias |
-| `CIZ_RUNNER` | Deprecated compatibility alias |
-| `LITECI_CONTEXT` | Deprecated compatibility alias |
-| `LITECI_RUNNER` | Deprecated compatibility alias |
 
 ## GitHub Actions compatibility mode
 

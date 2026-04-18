@@ -35,7 +35,7 @@ If a step contains `use:`, the local executor fails fast and asks you to rerun w
 
 1. `--gha`
 2. `--runner`
-3. `ARX_RUNNER`, `CIZ_RUNNER`, or the deprecated `LITECI_RUNNER`
+3. `ARX_RUNNER`
 4. `GITHUB_ACTIONS=true`
 5. Auto-detection when the compiled plan contains a `use:` step
 6. Fallback to `local`
@@ -57,7 +57,7 @@ Within a phase, `arx` sorts by `order` and then preserves declaration order.
 
 ## State files and resumability
 
-Executed plans track progress in a state file. The default is `.arx-state.json`, and the legacy `.ciz-state.json` and `.liteci-state.json` names are still recognized.
+Executed plans track progress in a state file. The default is `.arx-state.json`.
 
 That state lets `run`:
 
@@ -81,9 +81,5 @@ During execution, `arx` injects runner context into the step environment:
 
 - `ARX_CONTEXT`
 - `ARX_RUNNER`
-- `CIZ_CONTEXT`
-- `CIZ_RUNNER`
-- `LITECI_CONTEXT`
-- `LITECI_RUNNER`
 
 That gives steps a consistent way to understand whether they are running locally, in a container, or through the GitHub Actions-compatible backend.

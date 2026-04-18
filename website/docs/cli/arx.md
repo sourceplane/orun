@@ -24,7 +24,7 @@ The root `arx` command is the entry point for planning, inspection, and executio
 | `--version` | Print the CLI version |
 | `--help` | Show command help |
 
-`--config-dir` can also be set through `ARX_CONFIG_DIR`. The deprecated `CIZ_CONFIG_DIR` and `LITECI_CONFIG_DIR` aliases are still accepted.
+`--config-dir` can also be set through `ARX_CONFIG_DIR`.
 
 ## Typical flow
 

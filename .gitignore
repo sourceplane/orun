@@ -49,23 +49,12 @@ Thumbs.db
 
 # Project specific
 /arx
-/ciz
-/liteci
 /.arx/
 /.arx-state.json
 /.arx-tools/
-/.ciz/
-/.ciz-state.json
-/.ciz-tools/
-/.liteci-state.json
-/.liteci-tools/
 /oci/
 /examples/gha-actions/.arx/
 /examples/gha-actions/.arx-state.json
-/examples/gha-actions/.ciz/
-/examples/gha-actions/.ciz-state.json
-/examples/gha-actions/.liteci/
-/examples/gha-actions/.liteci-state.json
 /examples/gha-actions/plan.json
 /website/.docusaurus/
 /website/docs-build/
