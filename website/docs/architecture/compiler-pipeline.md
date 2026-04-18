@@ -2,7 +2,7 @@
 title: Compiler pipeline
 ---
 
-`ciz` follows a deterministic compiler pipeline from desired state to executable plan.
+`arx` follows a deterministic compiler pipeline from desired state to executable plan.
 
 ## Stages
 

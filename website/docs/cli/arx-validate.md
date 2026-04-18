@@ -1,13 +1,13 @@
 ---
-title: ciz validate
+title: arx validate
 ---
 
-`ciz validate` checks intent, discovered component manifests, and type-specific schema constraints without generating a plan.
+`arx validate` checks intent, discovered component manifests, and type-specific schema constraints without generating a plan.
 
 ## Usage
 
 ```bash
-ciz validate \
+arx validate \
   --intent intent.yaml \
   --config-dir assets/config/compositions
 ```
@@ -23,13 +23,13 @@ ciz validate \
 Validate the repository example:
 
 ```bash
-ciz validate -i examples/intent.yaml -c assets/config/compositions
+arx validate -i examples/intent.yaml -c assets/config/compositions
 ```
 
 Enable debug output while validating:
 
 ```bash
-ciz validate -i examples/intent.yaml -c assets/config/compositions --debug
+arx validate -i examples/intent.yaml -c assets/config/compositions --debug
 ```
 
 ## Flags

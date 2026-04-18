@@ -2,7 +2,7 @@
 title: Plan DAG
 ---
 
-The plan is the compiled artifact produced by `ciz plan`. It is the boundary between planning and execution.
+The plan is the compiled artifact produced by `arx plan`. It is the boundary between planning and execution.
 
 ## What the plan contains
 
@@ -18,7 +18,7 @@ A rendered plan includes:
 
 ```json
 {
-  "apiVersion": "ciz.io/v1",
+  "apiVersion": "arx.io/v1",
   "kind": "Plan",
   "metadata": {
     "name": "microservices-deployment",
@@ -27,7 +27,7 @@ A rendered plan includes:
   "execution": {
     "concurrency": 4,
     "failFast": true,
-    "stateFile": ".ciz-state.json"
+    "stateFile": ".arx-state.json"
   },
   "jobs": [
     {
@@ -60,9 +60,9 @@ The plan is where all implicit behavior becomes explicit. That gives you a stabl
 The `plan` command can render alternate views without changing the compiled output:
 
 ```bash
-ciz plan --view dag
-ciz plan --view dependencies
-ciz plan --view component=web-app
+arx plan --view dag
+arx plan --view dependencies
+arx plan --view component=web-app
 ```
 
 Use those views for review and debugging when you need to understand the dependency graph before execution.

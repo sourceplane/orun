@@ -1,10 +1,10 @@
 # Core Architecture and Extensibility
 
-This document explains the core runtime flow and how to extend `ciz` in a CNCF-style Go CLI pattern.
+This document explains the core runtime flow and how to extend `arx` in a CNCF-style Go CLI pattern.
 
 ## Runtime Flow (Compiler Pipeline)
 
-`ciz` follows a deterministic compile pipeline:
+`arx` follows a deterministic compile pipeline:
 
 1. **Load**: parse intent and composition assets.
 2. **Normalize**: canonicalize component/environment fields and dependency defaults.
@@ -53,20 +53,20 @@ After overrides are applied, planner ordering is resolved by `phase` + `order` +
 
 CNCF-style guidance for new commands:
 
-1. Keep command wiring in dedicated command files under [cmd/ciz](../cmd/ciz).
+1. Keep command wiring in dedicated command files under [cmd/arx](../cmd/arx).
 2. Place business logic in `internal/*` packages, not in Cobra handlers.
 3. Keep each command focused on one user intent (`plan`, `validate`, `debug`, etc.).
 4. Reuse pipeline stages instead of duplicating parsing/normalization logic.
 
 Current command structure:
 
-- [cmd/ciz/commands_root.go](../cmd/ciz/commands_root.go): root command + registration.
-- [cmd/ciz/command_plan.go](../cmd/ciz/command_plan.go): `plan` command wiring.
-- [cmd/ciz/command_run.go](../cmd/ciz/command_run.go): `run` command wiring and plan loading.
-- [cmd/ciz/command_validate.go](../cmd/ciz/command_validate.go): `validate` command wiring.
-- [cmd/ciz/command_debug.go](../cmd/ciz/command_debug.go): `debug` command wiring.
-- [cmd/ciz/command_component.go](../cmd/ciz/command_component.go): `component` command wiring.
-- [cmd/ciz/command_compositions.go](../cmd/ciz/command_compositions.go): `compositions` command wiring.
+- [cmd/arx/commands_root.go](../cmd/arx/commands_root.go): root command + registration.
+- [cmd/arx/command_plan.go](../cmd/arx/command_plan.go): `plan` command wiring.
+- [cmd/arx/command_run.go](../cmd/arx/command_run.go): `run` command wiring and plan loading.
+- [cmd/arx/command_validate.go](../cmd/arx/command_validate.go): `validate` command wiring.
+- [cmd/arx/command_debug.go](../cmd/arx/command_debug.go): `debug` command wiring.
+- [cmd/arx/command_component.go](../cmd/arx/command_component.go): `component` command wiring.
+- [cmd/arx/command_compositions.go](../cmd/arx/command_compositions.go): `compositions` command wiring.
 
 ### Minimal pattern
 
@@ -82,7 +82,7 @@ Example extension targets:
 
 The new `run` flow already follows this pattern:
 
-- CLI parsing stays in [cmd/ciz/command_run.go](../cmd/ciz/command_run.go)
+- CLI parsing stays in [cmd/arx/command_run.go](../cmd/arx/command_run.go)
 - execution behavior lives in [internal/runner/runner.go](../internal/runner/runner.go)
 
 So adding future runtime commands such as `apply`, `resume`, or `cancel` can reuse the same runtime package with minimal Cobra changes.

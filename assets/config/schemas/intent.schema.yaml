@@ -1,5 +1,5 @@
 $schema: http://json-schema.org/draft-07/schema#
-title: ciz Intent
+title: arx Intent
 description: Policy-aware deployment intent specification
 type: object
 required:

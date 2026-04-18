@@ -3,7 +3,7 @@ kind: Intent
 
 metadata:
   name: gha-actions-demo
-  description: Minimal example that exercises GitHub Actions use steps during ciz run
+  description: Minimal example that exercises GitHub Actions use steps during arx run
 
 discovery:
   roots:

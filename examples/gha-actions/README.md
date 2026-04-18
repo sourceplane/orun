@@ -11,18 +11,18 @@ cd examples/gha-actions
 Generate a plan:
 
 ```bash
-go run ../../cmd/ciz plan \
+go run ../../cmd/arx plan \
   --intent intent.yaml \
   --config-dir compositions \
-  --output /tmp/ciz-gha-actions-plan.json
+  --output /tmp/arx-gha-actions-plan.json
 ```
 
 Execute the plan:
 
 ```bash
-go run ../../cmd/ciz run \
-  --plan /tmp/ciz-gha-actions-plan.json \
+go run ../../cmd/arx run \
+  --plan /tmp/arx-gha-actions-plan.json \
   --execute
 ```
 
-`ciz run` auto-selects GitHub Actions compatibility mode because the compiled plan contains a `use:` step. The run succeeds when `azure/setup-helm` provisions Helm and the following shell step can execute `helm version --short`.
+`arx run` auto-selects GitHub Actions compatibility mode because the compiled plan contains a `use:` step. The run succeeds when `azure/setup-helm` provisions Helm and the following shell step can execute `helm version --short`.

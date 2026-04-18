@@ -9,13 +9,13 @@ import (
 	"sort"
 	"time"
 
-	"github.com/sourceplane/ciz/internal/model"
+	"github.com/sourceplane/arx/internal/model"
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	planAPIVersion   = "ciz.io/v1"
-	defaultStateFile = ".ciz-state.json"
+	planAPIVersion   = "arx.io/v1"
+	defaultStateFile = ".arx-state.json"
 )
 
 // Renderer materializes job instances into a Plan

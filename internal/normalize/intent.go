@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sourceplane/ciz/internal/model"
+	"github.com/sourceplane/arx/internal/model"
 )
 
 // NormalizeIntent transforms raw intent into canonical form

@@ -1,7 +1,7 @@
 {
-  "name": "ciz-docs",
+  "name": "arx-docs",
   "version": "1.0.0",
-  "description": "Documentation site for ciz",
+  "description": "Documentation site for arx",
   "scripts": {
     "docs:start": "docusaurus start",
     "docs:build": "docusaurus build --out-dir docs-build",
@@ -9,15 +9,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sourceplane/ciz.git"
+    "url": "git+https://github.com/sourceplane/arx.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/sourceplane/ciz/issues"
+    "url": "https://github.com/sourceplane/arx/issues"
   },
-  "homepage": "https://github.com/sourceplane/ciz#readme",
+  "homepage": "https://github.com/sourceplane/arx#readme",
   "private": true,
   "overrides": {
     "webpack": "5.105.4",

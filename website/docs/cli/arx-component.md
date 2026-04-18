@@ -1,15 +1,15 @@
 ---
-title: ciz component
+title: arx component
 ---
 
-`ciz component` lists discovered components or prints the merged view for a single component.
+`arx component` lists discovered components or prints the merged view for a single component.
 
 ## Usage
 
 List components:
 
 ```bash
-ciz component \
+arx component \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions
 ```
@@ -17,7 +17,7 @@ ciz component \
 Inspect a single component:
 
 ```bash
-ciz component web-app \
+arx component web-app \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions \
   --long
@@ -28,7 +28,7 @@ The alias `components` is also supported.
 ## Change-aware examples
 
 ```bash
-ciz component \
+arx component \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions \
   --changed \

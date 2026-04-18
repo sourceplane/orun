@@ -2,7 +2,7 @@
 title: Deploying docs
 ---
 
-The `ciz` documentation site is a docs-only Docusaurus project under `website/`. The production target is Cloudflare Pages.
+The `arx` documentation site is a docs-only Docusaurus project under `website/`. The production target is Cloudflare Pages.
 
 ## Local validation
 
@@ -32,10 +32,10 @@ cd website
 npm ci
 npm run docs:build
 wrangler login
-wrangler pages deploy docs-build --project-name ciz-docs
+wrangler pages deploy docs-build --project-name arx-docs
 ```
 
-Replace `ciz-docs` if your Cloudflare Pages project name differs.
+Replace `arx-docs` if your Cloudflare Pages project name differs.
 
 ## Deployment notes
 

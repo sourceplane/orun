@@ -1,8 +1,8 @@
-# ciz Architecture Guide
+# arx Architecture Guide
 
 ## Design Philosophy
 
-**ciz** is built around three core principles:
+**arx** is built around three core principles:
 
 1. **Separation of Concerns**: Intent, Jobs, and Plans are distinct layers
 2. **Schema-Driven Everything**: Configuration is validated against schemas
@@ -220,12 +220,12 @@ type JobInstance struct {
 
 ```json
 {
-  "apiVersion": "ciz.io/v1",
+  "apiVersion": "arx.io/v1",
   "kind": "Plan",
   "execution": {
     "concurrency": 4,
     "failFast": true,
-    "stateFile": ".ciz-state.json"
+    "stateFile": ".arx-state.json"
   },
   "jobs": [
     {
@@ -591,7 +591,7 @@ Failed: template rendering in job "web-app@prod.deploy"
 Enables detailed logging of each phase:
 
 ```
-./ciz plan --debug
+./arx plan --debug
 
 📋 Loading intent...
 📚 Loading job registry...
@@ -634,7 +634,7 @@ Enables detailed logging of each phase:
 ## Future Roadmap
 
 - [ ] Schema validation with JSON Schema v5
-- [ ] Plan diffing (ciz plan diff old.json new.json)
+- [ ] Plan diffing (arx plan diff old.json new.json)
 - [ ] Incremental planning (--changed-only)
 - [ ] DAG visualization (--viz dot/svg)
 - [ ] Multi-file intent support

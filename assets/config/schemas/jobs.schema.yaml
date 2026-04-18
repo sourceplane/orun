@@ -1,5 +1,5 @@
 $schema: http://json-schema.org/draft-07/schema#
-title: ciz Job Registry
+title: arx Job Registry
 description: Job execution definitions for component types
 type: object
 required:

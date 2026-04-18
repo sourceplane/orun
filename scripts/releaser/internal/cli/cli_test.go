@@ -27,7 +27,7 @@ func TestParseOptionsAcceptsOverrides(t *testing.T) {
 		"--build-with", "goreleaser",
 		"--dist", "custom-dist",
 		"--output", "custom-oci",
-		"--ref", "ghcr.io/sourceplane/ciz:test",
+		"--ref", "ghcr.io/sourceplane/arx:test",
 	})
 	if err != nil {
 		t.Fatalf("parse options: %v", err)
@@ -49,7 +49,7 @@ func TestParseOptionsAcceptsOverrides(t *testing.T) {
 		t.Fatalf("expected custom output dir, got %q", opts.OutputDir)
 	}
 
-	if opts.PublishRef != "ghcr.io/sourceplane/ciz:test" {
+	if opts.PublishRef != "ghcr.io/sourceplane/arx:test" {
 		t.Fatalf("expected publish ref override, got %q", opts.PublishRef)
 	}
 }

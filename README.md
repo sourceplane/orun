@@ -1,4 +1,4 @@
-# ciz - Schema-Driven Planner Engine
+# arx - Schema-Driven Planner Engine
 
 A **policy-aware workflow compiler** that turns **intent** into executable **plan DAGs**. Built on CNCF principles.
 
@@ -38,10 +38,10 @@ cd website
 npm ci
 npm run docs:build
 wrangler login
-wrangler pages deploy docs-build --project-name ciz-docs
+wrangler pages deploy docs-build --project-name arx-docs
 ```
 
-Replace `ciz-docs` with your Cloudflare Pages project name if it is different.
+Replace `arx-docs` with your Cloudflare Pages project name if it is different.
 
 ## Installation
 
@@ -51,76 +51,76 @@ Replace `<tag>` with the release you want from the GitHub releases page.
 
 ```bash
 # macOS (arm64 - Apple Silicon)
-curl -L https://github.com/sourceplane/ciz/releases/download/<tag>/ciz_<tag>_darwin_arm64.tar.gz | tar xz
-sudo mv entrypoint /usr/local/bin/ciz
-chmod +x /usr/local/bin/ciz
+curl -L https://github.com/sourceplane/arx/releases/download/<tag>/arx_<tag>_darwin_arm64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/arx
+chmod +x /usr/local/bin/arx
 
 # macOS (amd64 - Intel)
-curl -L https://github.com/sourceplane/ciz/releases/download/<tag>/ciz_<tag>_darwin_amd64.tar.gz | tar xz
-sudo mv entrypoint /usr/local/bin/ciz
-chmod +x /usr/local/bin/ciz
+curl -L https://github.com/sourceplane/arx/releases/download/<tag>/arx_<tag>_darwin_amd64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/arx
+chmod +x /usr/local/bin/arx
 
 # Linux (amd64)
-curl -L https://github.com/sourceplane/ciz/releases/download/<tag>/ciz_<tag>_linux_amd64.tar.gz | tar xz
-sudo mv entrypoint /usr/local/bin/ciz
-chmod +x /usr/local/bin/ciz
+curl -L https://github.com/sourceplane/arx/releases/download/<tag>/arx_<tag>_linux_amd64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/arx
+chmod +x /usr/local/bin/arx
 
 # Linux (arm64)
-curl -L https://github.com/sourceplane/ciz/releases/download/<tag>/ciz_<tag>_linux_arm64.tar.gz | tar xz
-sudo mv entrypoint /usr/local/bin/ciz
-chmod +x /usr/local/bin/ciz
+curl -L https://github.com/sourceplane/arx/releases/download/<tag>/arx_<tag>_linux_arm64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/arx
+chmod +x /usr/local/bin/arx
 ```
 
 Verify installation:
 ```bash
-ciz --version
-ciz --help
+arx --version
+arx --help
 ```
 
 ### Option 2: From Source
 
 ```bash
-git clone https://github.com/sourceplane/ciz.git
-cd ciz
-go build -o ciz ./cmd/ciz
-sudo mv ciz /usr/local/bin/
+git clone https://github.com/sourceplane/arx.git
+cd arx
+go build -o arx ./cmd/arx
+sudo mv arx /usr/local/bin/
 ```
 
-`make build` also emits a deprecated `liteci` alias alongside `ciz` for local compatibility.
+`make build` also emits deprecated `ciz` and `liteci` aliases for local compatibility.
 
 ### Option 3: Docker/OCI Container
 
 ```bash
 # Docker
-docker run ghcr.io/sourceplane/ciz:<tag> plan -i intent.yaml
+docker run ghcr.io/sourceplane/arx:<tag> plan -i intent.yaml
 
 # Podman (recommended for CI/CD)
-podman run ghcr.io/sourceplane/ciz:<tag> plan -i intent.yaml
+podman run ghcr.io/sourceplane/arx:<tag> plan -i intent.yaml
 
 # Kubernetes
-kubectl run ciz --image=ghcr.io/sourceplane/ciz:<tag>
+kubectl run arx --image=ghcr.io/sourceplane/arx:<tag>
 ```
 
 ### Option 4: Using tinx
 
 ```bash
 repo_root="$(pwd)"
-tinx init demo -p ghcr.io/sourceplane/ciz:<tag> as ciz
-tinx --workspace demo -- ciz plan \
+tinx init demo -p ghcr.io/sourceplane/arx:<tag> as arx
+tinx --workspace demo -- arx plan \
   --intent "$repo_root/examples/intent.yaml" \
   --config-dir "$repo_root/assets/config/compositions"
 ```
 
-If you need the legacy provider alias, `tinx init demo -p ghcr.io/sourceplane/ciz:<tag> as lite-ci` still works.
+If you need legacy provider aliases, `tinx init demo -p ghcr.io/sourceplane/arx:<tag> as ciz` and `tinx init demo -p ghcr.io/sourceplane/arx:<tag> as lite-ci` still work.
 
 ### Option 5: Using ORAS (OCI Registry As Storage)
 
 ```bash
 # Pull the provider artifact
-oras pull ghcr.io/sourceplane/ciz:<tag>
+oras pull ghcr.io/sourceplane/arx:<tag>
 
 # Extract binaries
-tar -xzf ciz_<tag>_linux_amd64_oci.tar.gz
+tar -xzf arx_<tag>_linux_amd64_oci.tar.gz
 ./entrypoint plan -i intent.yaml
 ```
 
@@ -148,8 +148,8 @@ tar -xzf ciz_<tag>_linux_amd64_oci.tar.gz
 ## Project Structure
 
 ```
-ciz/
-├── cmd/ciz/
+arx/
+├── cmd/arx/
 │   ├── main.go           # CLI entry point & command handlers
 │   └── models.go         # Domain models and types
 ├── internal/
@@ -187,7 +187,7 @@ ciz/
 ### 1. List Available Compositions
 
 ```bash
-ciz compositions --config-dir assets/config/compositions
+arx compositions --config-dir assets/config/compositions
 ```
 
 Output shows all available job compositions (helm, terraform, charts, etc.)
@@ -195,7 +195,7 @@ Output shows all available job compositions (helm, terraform, charts, etc.)
 ### 2. Validate Intent File
 
 ```bash
-ciz validate \
+arx validate \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions
 ```
@@ -205,7 +205,7 @@ ciz validate \
 See detailed logs of each compiler stage:
 
 ```bash
-ciz debug \
+arx debug \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions
 ```
@@ -213,7 +213,7 @@ ciz debug \
 ### 4. Generate Execution Plan
 
 ```bash
-ciz plan \
+arx plan \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions \
   --output plan.json \
@@ -229,7 +229,7 @@ Output: Fully resolved execution DAG in `plan.json`
 ```bash
 docker run \
   -v $(pwd):/workspace \
-  ghcr.io/sourceplane/ciz:<tag> \
+  ghcr.io/sourceplane/arx:<tag> \
   plan \
   --intent /workspace/intent.yaml \
   --config-dir /workspace/assets/config/compositions \
@@ -241,7 +241,7 @@ docker run \
 ```bash
 podman run \
   -v $(pwd):/workspace \
-  ghcr.io/sourceplane/ciz:<tag> \
+  ghcr.io/sourceplane/arx:<tag> \
   plan \
   --intent /workspace/intent.yaml \
   --config-dir /workspace/assets/config/compositions
@@ -250,8 +250,8 @@ podman run \
 ### Using in Kubernetes
 
 ```bash
-kubectl run ciz-planner \
-  --image=ghcr.io/sourceplane/ciz:<tag> \
+kubectl run arx-planner \
+  --image=ghcr.io/sourceplane/arx:<tag> \
   --rm -it \
   -- plan \
   --intent intent.yaml \
@@ -262,7 +262,7 @@ kubectl run ciz-planner \
 
 ```yaml
 - name: Generate CI Plan
-  uses: docker://ghcr.io/sourceplane/ciz:<tag>
+  uses: docker://ghcr.io/sourceplane/arx:<tag>
   with:
     args: |
       plan \
@@ -271,7 +271,7 @@ kubectl run ciz-planner \
       --output plan.json
 ```
 
-    This container-based usage is separate from GitHub Actions compatibility mode during `ciz run`. When a compiled plan contains `use:` steps, `ciz run` auto-selects the GitHub Actions executor unless you explicitly set `--runner` or `CIZ_RUNNER`.
+    This container-based usage is separate from GitHub Actions compatibility mode during `arx run`. When a compiled plan contains `use:` steps, `arx run` auto-selects the GitHub Actions executor unless you explicitly set `--runner`, `ARX_RUNNER`, or a deprecated compatibility alias.
 
 ## Configuration Schemas
 
@@ -326,7 +326,7 @@ components:
       registry: mycompany.azurecr.io/helm/charts
 ```
 
-External components can live next to the code they own. Each `component.yaml` is loaded from the configured discovery roots, and if `spec.path` is omitted ciz defaults the job working directory to the directory containing the manifest.
+External components can live next to the code they own. Each `component.yaml` is loaded from the configured discovery roots, and if `spec.path` is omitted arx defaults the job working directory to the directory containing the manifest.
 
 **Example component.yaml:**
 ```yaml
@@ -387,7 +387,7 @@ jobs:
 
 ### GitHub Actions Steps In Compositions
 
-`ciz` also supports GitHub Actions-style `use:` steps inside a composition. `ciz run` auto-selects the GitHub Actions executor when the compiled plan contains any `use:` step, and you can still force it with `--gha`.
+`arx` also supports GitHub Actions-style `use:` steps inside a composition. `arx run` auto-selects the GitHub Actions executor when the compiled plan contains any `use:` step, and you can still force it with `--gha`.
 
 See the example files at:
 
@@ -414,7 +414,7 @@ To use that example composition:
 
 1. Copy `examples/compositions/gha-helm/` into your config directory.
 2. Set the component type to `gha-helm`.
-3. Execute the compiled plan with `ciz run --plan plan.json --execute`.
+3. Execute the compiled plan with `arx run --plan plan.json --execute`.
 
 Example component snippet:
 
@@ -443,7 +443,7 @@ The generated plan is a fully resolved DAG.
 **Structure:**
 ```json
 {
-  "apiVersion": "ciz.io/v1",
+  "apiVersion": "arx.io/v1",
   "kind": "Plan",
   "metadata": {
     "name": "microservices-deployment",
@@ -454,7 +454,7 @@ The generated plan is a fully resolved DAG.
   "execution": {
     "concurrency": 4,
     "failFast": true,
-    "stateFile": ".ciz-state.json"
+    "stateFile": ".arx-state.json"
   },
   "spec": {
     "jobBindings": {
@@ -551,21 +551,21 @@ Low Priority  ← Overridden by ←  High Priority
 
 ```bash
 # List available compositions
-ciz compositions \
+arx compositions \
   --config-dir assets/config/compositions
 
 # Validate intent without generating plan
-ciz validate \
+arx validate \
   --intent intent.yaml \
   --config-dir assets/config/compositions
 
 # Debug with detailed logging
-ciz debug \
+arx debug \
   --intent intent.yaml \
   --config-dir assets/config/compositions
 
 # Generate execution plan
-ciz plan \
+arx plan \
   --intent intent.yaml \
   --config-dir assets/config/compositions \
   --output plan.json \
@@ -573,22 +573,22 @@ ciz plan \
   --debug
 
 # Preview execution from a compiled plan (dry-run)
-ciz run \
+arx run \
   --plan plan.json
 
 # Execute plan steps
-ciz run \
+arx run \
   --plan plan.json \
   --execute
 
 # Execute using the Docker backend
-ciz run \
+arx run \
   --plan plan.json \
   --execute \
   --runner docker
 
 # Execute using GitHub Actions compatibility mode
-ciz run \
+arx run \
   --plan plan.json \
   --execute \
   --gha
@@ -609,7 +609,7 @@ ciz run \
 
 1. `--gha`
 2. `--runner`
-3. `CIZ_RUNNER` (`LITECI_RUNNER` is still accepted as a deprecated alias)
+3. `ARX_RUNNER` (`CIZ_RUNNER` and `LITECI_RUNNER` are still accepted as deprecated aliases)
 4. Auto-detect `github-actions` when `GITHUB_ACTIONS=true`
 5. Auto-detect `github-actions` when the compiled plan contains any `use:` step
 6. Otherwise `local`
@@ -628,19 +628,19 @@ Runner notes:
 ls -la assets/config/compositions/
 
 # Use absolute path if relative doesn't work
-ciz plan -i intent.yaml -c $(pwd)/assets/config/compositions
+arx plan -i intent.yaml -c $(pwd)/assets/config/compositions
 ```
 
 ### "Schema validation failed"
 ```bash
 # Check your intent.yaml against the schema
-ciz validate -i intent.yaml -c assets/config/compositions
+arx validate -i intent.yaml -c assets/config/compositions
 ```
 
 ### "Circular dependency detected"
 ```bash
 # Use debug mode to see dependency graph
-ciz debug -i intent.yaml -c assets/config/compositions
+arx debug -i intent.yaml -c assets/config/compositions
 ```
 
 ### Container authentication errors
@@ -681,6 +681,6 @@ MIT License - See [LICENSE](LICENSE) file for details
 
 ## Support
 
-- **Issues:** [GitHub Issues](https://github.com/sourceplane/ciz/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/sourceplane/ciz/discussions)
+- **Issues:** [GitHub Issues](https://github.com/sourceplane/arx/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/sourceplane/arx/discussions)
 - **Email:** team@sourceplane.io

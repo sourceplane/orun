@@ -1,4 +1,4 @@
-module github.com/sourceplane/ciz
+module github.com/sourceplane/arx
 
 go 1.25.0
 

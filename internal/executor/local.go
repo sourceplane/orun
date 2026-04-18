@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/sourceplane/ciz/internal/model"
+	"github.com/sourceplane/arx/internal/model"
 )
 
 type localExecutor struct{}

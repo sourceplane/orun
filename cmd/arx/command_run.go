@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sourceplane/ciz/internal/executor"
-	"github.com/sourceplane/ciz/internal/model"
-	"github.com/sourceplane/ciz/internal/runner"
+	"github.com/sourceplane/arx/internal/executor"
+	"github.com/sourceplane/arx/internal/model"
+	"github.com/sourceplane/arx/internal/runner"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )

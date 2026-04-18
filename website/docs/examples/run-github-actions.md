@@ -7,27 +7,27 @@ The repository includes a minimal example that installs Helm through a GitHub Ac
 ## Compile the example plan
 
 ```bash
-ciz plan \
+arx plan \
   --intent examples/gha-actions/intent.yaml \
   --config-dir examples/gha-actions/compositions \
-  --output /tmp/ciz-gha-actions-plan.json
+  --output /tmp/arx-gha-actions-plan.json
 ```
 
 ## Execute the plan
 
 ```bash
-ciz run \
-  --plan /tmp/ciz-gha-actions-plan.json \
+arx run \
+  --plan /tmp/arx-gha-actions-plan.json \
   --execute
 ```
 
-Because the plan contains a `use:` step, `ciz run` auto-selects the `github-actions` backend unless you explicitly override it.
+Because the plan contains a `use:` step, `arx run` auto-selects the `github-actions` backend unless you explicitly override it.
 
 ## Force the backend explicitly
 
 ```bash
-ciz run \
-  --plan /tmp/ciz-gha-actions-plan.json \
+arx run \
+  --plan /tmp/arx-gha-actions-plan.json \
   --execute \
   --gha
 ```

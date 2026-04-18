@@ -1,5 +1,5 @@
 ---
-title: ciz documentation
+title: arx documentation
 slug: /
 ---
 
@@ -7,7 +7,7 @@ slug: /
   <div className="eyebrow">CNCF-grade planning docs</div>
   <h1 className="heroTitle">Compile policy-aware intent into execution DAGs you can review, diff, and run anywhere.</h1>
   <p className="heroCopy">
-    <code>ciz</code> separates desired state, composition logic, and runtime execution. Platform teams define intent once,
+    <code>arx</code> separates desired state, composition logic, and runtime execution. Platform teams define intent once,
     validate it against schemas, bind it to reusable compositions, and materialize a deterministic plan that can run on a
     local shell, inside Docker, or through a GitHub Actions-compatible backend.
   </p>
@@ -36,9 +36,9 @@ slug: /
   </article>
 </div>
 
-## What ciz is for
+## What arx is for
 
-Use `ciz` when you need a planner that can scale from a single repository to a platform estate without collapsing intent, validation, and execution into one format.
+Use `arx` when you need a planner that can scale from a single repository to a platform estate without collapsing intent, validation, and execution into one format.
 
 - Define desired state in `intent.yaml` plus discovered `component.yaml` files.
 - Validate platform contracts through JSON schema.
@@ -83,16 +83,16 @@ intent.yaml + component.yaml + compositions/
 ## Typical workflow
 
 ```bash
-./ciz validate \
+./arx validate \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions
 
-./ciz plan \
+./arx plan \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions \
-  --output /tmp/ciz-plan.json
+  --output /tmp/arx-plan.json
 
-./ciz run --plan /tmp/ciz-plan.json
+./arx run --plan /tmp/arx-plan.json
 ```
 
 The default `run` mode is a dry-run, so teams can inspect the resolved jobs and steps before enabling `--execute`.
@@ -113,7 +113,7 @@ The default `run` mode is a dry-run, so teams can inspect the resolved jobs and 
   <article className="pathCard">
     <strong>Then operate</strong>
     <h3>CLI and reference</h3>
-    <p>Use the command reference, schema reference, and environment variable matrix when integrating `ciz` into CI or platform automation.</p>
+    <p>Use the command reference, schema reference, and environment variable matrix when integrating `arx` into CI or platform automation.</p>
   </article>
 </div>
 

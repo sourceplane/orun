@@ -10,7 +10,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE_REF: ghcr.io/sourceplane/ciz:${{ github.ref_name }}
+  IMAGE_REF: ghcr.io/sourceplane/arx:${{ github.ref_name }}
 
 jobs:
   tinx-release:
@@ -46,7 +46,7 @@ jobs:
       - uses: sourceplane/tinx-release-action@81af02d17b1fe5ec12eb54133903d305b1599312
         with:
           manifest: provider.yaml
-          main: ./cmd/ciz
+          main: ./cmd/arx
           output: oci
           dist: dist
           tag: ${{ github.ref_name }}

@@ -2,12 +2,12 @@
 title: Change detection
 ---
 
-`ciz` can narrow inspection and planning to changed files or changed components. That is useful in pull requests, preview environments, and incremental review workflows.
+`arx` can narrow inspection and planning to changed files or changed components. That is useful in pull requests, preview environments, and incremental review workflows.
 
 ## Commands that support change detection
 
-- `ciz plan`
-- `ciz component`
+- `arx plan`
+- `arx component`
 
 Use those commands when you want to focus on the parts of the platform graph that were touched by a branch, commit range, or explicit file list.
 
@@ -25,14 +25,14 @@ Use those commands when you want to focus on the parts of the platform graph tha
 ## Pull request review flow
 
 ```bash
-ciz component \
+arx component \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions \
   --changed \
   --base main \
   --long
 
-ciz plan \
+arx plan \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions \
   --changed \
@@ -42,10 +42,10 @@ ciz plan \
 
 ## Explicit file lists
 
-When your CI system already knows the changed files, pass them directly instead of asking `ciz` to compute the diff:
+When your CI system already knows the changed files, pass them directly instead of asking `arx` to compute the diff:
 
 ```bash
-ciz plan \
+arx plan \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions \
   --files examples/services/web-app/component.yaml,examples/intent.yaml \
@@ -57,7 +57,7 @@ ciz plan \
 For uncommitted work in a repository checkout:
 
 ```bash
-ciz component \
+arx component \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions \
   --changed \

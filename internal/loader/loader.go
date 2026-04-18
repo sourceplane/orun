@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
-	"github.com/sourceplane/ciz/internal/model"
+	"github.com/sourceplane/arx/internal/model"
 	"gopkg.in/yaml.v3"
 )
 
@@ -20,8 +20,9 @@ const (
 	componentKind                = "Component"
 	componentTreeCacheSource     = "discovered"
 	componentInlineSource        = "inline"
-	componentTreeCacheFile       = ".ciz/component-tree.yaml"
-	legacyComponentTreeCacheFile = ".liteci/component-tree.yaml"
+	componentTreeCacheFile       = ".arx/component-tree.yaml"
+	legacyComponentTreeCacheFile = ".ciz/component-tree.yaml"
+	oldestComponentTreeCacheFile = ".liteci/component-tree.yaml"
 )
 
 // LoadIntent loads and parses an intent YAML file
@@ -201,7 +202,7 @@ func discoverComponentFiles(baseDir string, roots []string) ([]string, error) {
 
 func shouldSkipDiscoveryDir(name string) bool {
 	switch name {
-	case ".git", ".ciz", ".liteci", "node_modules":
+	case ".git", ".arx", ".ciz", ".liteci", "node_modules":
 		return true
 	default:
 		return false
@@ -372,9 +373,11 @@ func componentTreeCacheReadPath(intentPath string) string {
 		return cachePath
 	}
 
-	legacyPath := cachePathFor(intentPath, legacyComponentTreeCacheFile)
-	if _, err := os.Stat(legacyPath); err == nil {
-		return legacyPath
+	for _, legacyCacheFile := range []string{legacyComponentTreeCacheFile, oldestComponentTreeCacheFile} {
+		legacyPath := cachePathFor(intentPath, legacyCacheFile)
+		if _, err := os.Stat(legacyPath); err == nil {
+			return legacyPath
+		}
 	}
 
 	return cachePath

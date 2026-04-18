@@ -13,15 +13,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sourceplane/ciz/internal/executor"
-	"github.com/sourceplane/ciz/internal/model"
-	"github.com/sourceplane/ciz/internal/ui"
+	"github.com/sourceplane/arx/internal/executor"
+	"github.com/sourceplane/arx/internal/model"
+	"github.com/sourceplane/arx/internal/ui"
 )
 
 const (
-	defaultStateFileName = ".ciz-state.json"
-	legacyStateFileName  = ".liteci-state.json"
+	defaultStateFileName = ".arx-state.json"
 )
+
+var legacyStateFileNames = []string{".ciz-state.json", ".liteci-state.json"}
 
 // Runner executes a compiled plan in dependency order.
 type Runner struct {
@@ -95,6 +96,8 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		BaseEnv: executor.MergeEnvironment(
 			executor.EnvironmentFromList(os.Environ()),
 			map[string]string{
+				"ARX_CONTEXT":    r.Runtime.Environment,
+				"ARX_RUNNER":     r.Runtime.Runner,
 				"CIZ_CONTEXT":    r.Runtime.Environment,
 				"CIZ_RUNNER":     r.Runtime.Runner,
 				"LITECI_CONTEXT": r.Runtime.Environment,
@@ -380,7 +383,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 
 func (r *Runner) printRunHeader(plan *model.Plan, statePath string) {
 	fmt.Fprintln(r.Stdout, ui.Cyan(r.Color, "┌──────────────────────────────────────────────────────────┐"))
-	fmt.Fprintln(r.Stdout, ui.BoldCyan(r.Color, "│ ciz run                                                  │"))
+	fmt.Fprintln(r.Stdout, ui.BoldCyan(r.Color, "│ arx run                                                  │"))
 	fmt.Fprintln(r.Stdout, ui.Cyan(r.Color, "├──────────────────────────────────────────────────────────┤"))
 	fmt.Fprintf(r.Stdout, "│ plan:  %s (%s)\n", plan.Metadata.Name, plan.Metadata.Checksum)
 	if r.JobID != "" {
@@ -495,9 +498,13 @@ func (r *Runner) resolveStateFile(plan *model.Plan) string {
 		return statePath
 	}
 
-	legacyPath := filepath.Join(r.WorkDir, legacyStateFileName)
-	if !fileExists(statePath) && fileExists(legacyPath) {
-		return legacyPath
+	if !fileExists(statePath) {
+		for _, legacyStateFileName := range legacyStateFileNames {
+			legacyPath := filepath.Join(r.WorkDir, legacyStateFileName)
+			if fileExists(legacyPath) {
+				return legacyPath
+			}
+		}
 	}
 
 	return statePath

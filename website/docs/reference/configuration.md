@@ -2,7 +2,7 @@
 title: Configuration
 ---
 
-`ciz` configuration is split across three user-facing surfaces:
+`arx` configuration is split across three user-facing surfaces:
 
 1. `intent.yaml`
 2. discovered `component.yaml` manifests
@@ -58,7 +58,7 @@ Components carry type-specific inputs, labels, overrides, and dependency declara
 Pass the composition directory through the global `--config-dir` flag:
 
 ```bash
-ciz plan --intent intent.yaml --config-dir assets/config/compositions
+arx plan --intent intent.yaml --config-dir assets/config/compositions
 ```
 
 Each type directory contains a schema and a job registry. That is where type validation and runtime job definitions live.

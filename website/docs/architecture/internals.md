@@ -2,13 +2,13 @@
 title: Internals
 ---
 
-The `ciz` codebase keeps command wiring, compilation stages, and runtime execution in separate packages so the planner remains testable and extensible.
+The `arx` codebase keeps command wiring, compilation stages, and runtime execution in separate packages so the planner remains testable and extensible.
 
 ## Top-level structure
 
 | Area | Responsibility |
 | --- | --- |
-| `cmd/ciz` | Cobra command wiring and flag definitions |
+| `cmd/arx` | Cobra command wiring and flag definitions |
 | `internal/loader` | Load intent, component manifests, and composition assets |
 | `internal/schema` | Compile and enforce JSON schema validation |
 | `internal/normalize` | Canonicalize input structures before expansion |
@@ -28,4 +28,4 @@ The `ciz` codebase keeps command wiring, compilation stages, and runtime executi
 - command handlers should stay thin
 - internal model contracts should be stable between stages
 
-That split is what lets `ciz` keep the compile boundary clean while still supporting multiple execution backends.
+That split is what lets `arx` keep the compile boundary clean while still supporting multiple execution backends.

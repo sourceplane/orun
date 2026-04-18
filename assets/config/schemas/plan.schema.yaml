@@ -1,5 +1,5 @@
 $schema: http://json-schema.org/draft-07/schema#
-title: ciz Plan
+title: arx Plan
 description: Execution plan DAG output specification
 type: object
 required:
@@ -12,6 +12,7 @@ properties:
   apiVersion:
     type: string
     enum:
+      - arx.io/v1
       - ciz.io/v1
       - liteci.io/v1
   kind:

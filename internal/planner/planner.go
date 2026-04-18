@@ -6,7 +6,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/sourceplane/ciz/internal/model"
+	"github.com/sourceplane/arx/internal/model"
 )
 
 // JobPlanner binds components to jobs and creates instances

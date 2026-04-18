@@ -16,7 +16,7 @@ go run ./cmd/releaser \
   --provider ../../provider.yaml \
   --dist ../../dist \
   --output ../../oci \
-  --ref ghcr.io/sourceplane/ciz:<tag>
+  --ref ghcr.io/sourceplane/arx:<tag>
 ```
 
 ## Quick smoke test
@@ -27,10 +27,10 @@ From repository root:
 rm -rf dist oci
 mkdir -p dist/linux_amd64 dist/linux_arm64 dist/darwin_amd64 dist/darwin_arm64
 
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/linux_amd64/entrypoint ./cmd/ciz
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o dist/linux_arm64/entrypoint ./cmd/ciz
-CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o dist/darwin_amd64/entrypoint ./cmd/ciz
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o dist/darwin_arm64/entrypoint ./cmd/ciz
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/linux_amd64/entrypoint ./cmd/arx
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o dist/linux_arm64/entrypoint ./cmd/arx
+CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o dist/darwin_amd64/entrypoint ./cmd/arx
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o dist/darwin_arm64/entrypoint ./cmd/arx
 
 cd scripts/releaser
 go run ./cmd/releaser --provider ../../provider.yaml --dist ../../dist --output ../../oci

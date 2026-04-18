@@ -1,13 +1,13 @@
 ---
-title: ciz run
+title: arx run
 ---
 
-`ciz run` consumes a compiled plan and either previews or executes it.
+`arx run` consumes a compiled plan and either previews or executes it.
 
 ## Usage
 
 ```bash
-ciz run --plan plan.json
+arx run --plan plan.json
 ```
 
 Without `--execute`, `run` stays in dry-run mode.
@@ -17,31 +17,31 @@ Without `--execute`, `run` stays in dry-run mode.
 Execute the full plan locally:
 
 ```bash
-ciz run --plan plan.json --execute --runner local
+arx run --plan plan.json --execute --runner local
 ```
 
 Execute inside Docker:
 
 ```bash
-ciz run --plan plan.json --execute --runner docker
+arx run --plan plan.json --execute --runner docker
 ```
 
 Force GitHub Actions compatibility mode:
 
 ```bash
-ciz run --plan plan.json --execute --gha
+arx run --plan plan.json --execute --gha
 ```
 
 Retry one failed job after clearing its saved state:
 
 ```bash
-ciz run --plan plan.json --execute --job-id web-app@staging.deploy --retry
+arx run --plan plan.json --execute --job-id web-app@staging.deploy --retry
 ```
 
 Override the working directory for every job:
 
 ```bash
-ciz run --plan plan.json --execute --workdir ./examples
+arx run --plan plan.json --execute --workdir ./examples
 ```
 
 ## Flags
@@ -62,11 +62,11 @@ ciz run --plan plan.json --execute --workdir ./examples
 
 1. `--gha`
 2. `--runner`
-3. `CIZ_RUNNER` or `LITECI_RUNNER`
+3. `ARX_RUNNER`, `CIZ_RUNNER`, or `LITECI_RUNNER`
 4. `GITHUB_ACTIONS=true`
 5. Auto-detection when the plan contains a `use:` step
 6. Default to `local`
 
 ## State files
 
-Executed plans record progress in the configured state file, usually `.ciz-state.json`. That allows resumable execution and job-level retries while protecting against plan checksum mismatches.
+Executed plans record progress in the configured state file, usually `.arx-state.json`. The legacy `.ciz-state.json` and `.liteci-state.json` names are still recognized for compatibility. That allows resumable execution and job-level retries while protecting against plan checksum mismatches.

@@ -2,12 +2,12 @@
 title: Review a pull request
 ---
 
-This example shows how to use `ciz` in a review flow where you want to focus on changed components before generating a plan.
+This example shows how to use `arx` in a review flow where you want to focus on changed components before generating a plan.
 
 ## Inspect changed components
 
 ```bash
-ciz component \
+arx component \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions \
   --changed \
@@ -20,7 +20,7 @@ That produces a merged view of the components affected by the current branch.
 ## Generate a review-scoped plan
 
 ```bash
-ciz plan \
+arx plan \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions \
   --changed \
@@ -34,7 +34,7 @@ ciz plan \
 If your CI platform already exposes the changed file list, pass it directly:
 
 ```bash
-ciz plan \
+arx plan \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions \
   --files examples/services/web-app/component.yaml,examples/intent.yaml \

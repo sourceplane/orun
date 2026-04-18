@@ -1,12 +1,12 @@
 ---
-title: Extending ciz
+title: Extending arx
 ---
 
-`ciz` is designed so new commands, stages, and runtime capabilities can be added without collapsing the planner architecture.
+`arx` is designed so new commands, stages, and runtime capabilities can be added without collapsing the planner architecture.
 
 ## Add a new CLI command
 
-Follow the existing command pattern under `cmd/ciz`:
+Follow the existing command pattern under `cmd/arx`:
 
 1. keep Cobra wiring in a dedicated `command_*.go` file
 2. place business logic in `internal/*`

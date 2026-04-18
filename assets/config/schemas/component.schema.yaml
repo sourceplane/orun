@@ -1,5 +1,5 @@
 $schema: http://json-schema.org/draft-07/schema#
-title: ciz Component
+title: arx Component
 description: External component manifest specification
 type: object
 required:

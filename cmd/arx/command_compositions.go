@@ -6,7 +6,7 @@ var compositionsCmd = &cobra.Command{
 	Use:     "compositions [composition]",
 	Aliases: []string{"composition"},
 	Short:   "Manage compositions",
-	Long:    "List and inspect available compositions. Use 'ciz compositions' to list all, or 'ciz compositions <name>' for details.",
+	Long:    "List and inspect available compositions. Use 'arx compositions' to list all, or 'arx compositions <name>' for details.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return listCompositions(args)
 	},

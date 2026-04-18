@@ -6,7 +6,7 @@ var componentCmd = &cobra.Command{
 	Use:     "component [component-name]",
 	Aliases: []string{"components"},
 	Short:   "List and analyze components",
-	Long:    "List all components with their merged properties. Use 'ciz component <name>' for details.",
+	Long:    "List all components with their merged properties. Use 'arx component <name>' for details.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return listComponents(args)
 	},

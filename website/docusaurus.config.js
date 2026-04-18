@@ -3,12 +3,12 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
 const config = {
-  title: 'ciz',
+  title: 'arx',
   tagline: 'Policy-aware planner that compiles intent into deterministic execution DAGs',
-  url: 'https://ciz-docs.pages.dev',
+  url: 'https://arx-docs.pages.dev',
   baseUrl: '/',
   organizationName: 'sourceplane',
-  projectName: 'ciz',
+  projectName: 'arx',
   onBrokenLinks: 'throw',
   onDuplicateRoutes: 'throw',
   markdown: {
@@ -42,7 +42,7 @@ const config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
-      title: 'ciz',
+      title: 'arx',
       items: [
         {
           to: '/',
@@ -50,7 +50,7 @@ const config = {
           position: 'left',
         },
         {
-          href: 'https://github.com/sourceplane/ciz',
+          href: 'https://github.com/sourceplane/arx',
           label: 'GitHub',
           position: 'right',
         },
@@ -77,7 +77,7 @@ const config = {
         {
           title: 'Reference',
           items: [
-            { label: 'CLI Overview', to: '/cli/ciz' },
+            { label: 'CLI Overview', to: '/cli/arx' },
             { label: 'Configuration', to: '/reference/configuration' },
             { label: 'Deploy Docs', to: '/contributing/deploying-docs' },
           ],

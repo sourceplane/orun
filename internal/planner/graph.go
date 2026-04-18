@@ -3,7 +3,7 @@ package planner
 import (
 	"fmt"
 
-	"github.com/sourceplane/ciz/internal/model"
+	"github.com/sourceplane/arx/internal/model"
 )
 
 // JobGraph represents the DAG of job instances with cycle detection and topological sorting

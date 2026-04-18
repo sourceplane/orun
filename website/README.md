@@ -1,6 +1,6 @@
-# ciz website
+# arx website
 
-This directory contains the Docusaurus-based documentation site for `ciz`.
+This directory contains the Docusaurus-based documentation site for `arx`.
 
 ## Local development
 
@@ -26,7 +26,7 @@ cd website
 npm ci
 npm run docs:build
 wrangler login
-wrangler pages deploy docs-build --project-name ciz-docs
+wrangler pages deploy docs-build --project-name arx-docs
 ```
 
-Replace `ciz-docs` with the actual Cloudflare Pages project name if it differs.
+Replace `arx-docs` with the actual Cloudflare Pages project name if it differs.

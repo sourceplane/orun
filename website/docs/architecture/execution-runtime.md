@@ -2,7 +2,7 @@
 title: Execution runtime
 ---
 
-After planning, `ciz` switches from compiler behavior to runtime behavior. The runtime reads the immutable plan, orders jobs, persists state, and delegates each step to an executor backend.
+After planning, `arx` switches from compiler behavior to runtime behavior. The runtime reads the immutable plan, orders jobs, persists state, and delegates each step to an executor backend.
 
 ## Runtime responsibilities
 

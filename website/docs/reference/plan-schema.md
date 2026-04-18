@@ -2,13 +2,13 @@
 title: Plan schema
 ---
 
-The plan schema defines the artifact produced by `ciz plan` and consumed by `ciz run`.
+The plan schema defines the artifact produced by `arx plan` and consumed by `arx run`.
 
 ## Top-level fields
 
 | Field | Meaning |
 | --- | --- |
-| `apiVersion` | `ciz.io/v1` or legacy `liteci.io/v1` |
+| `apiVersion` | `arx.io/v1`, or legacy `ciz.io/v1` and `liteci.io/v1` |
 | `kind` | Always `Plan` |
 | `metadata` | Name, description, namespace, generation timestamp, checksum |
 | `execution` | Concurrency, fail-fast behavior, and state-file name |
@@ -59,7 +59,7 @@ Steps can also declare:
 
 ```json
 {
-  "apiVersion": "ciz.io/v1",
+  "apiVersion": "arx.io/v1",
   "kind": "Plan",
   "metadata": {
     "name": "demo",
@@ -69,7 +69,7 @@ Steps can also declare:
   "execution": {
     "concurrency": 4,
     "failFast": true,
-    "stateFile": ".ciz-state.json"
+    "stateFile": ".arx-state.json"
   },
   "jobs": []
 }

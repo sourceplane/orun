@@ -7,17 +7,17 @@ The Docker backend executes each step inside a container and mounts the reposito
 ## Compile a plan first
 
 ```bash
-ciz plan \
+arx plan \
   --intent examples/intent.yaml \
   --config-dir assets/config/compositions \
-  --output /tmp/ciz-docker-plan.json
+  --output /tmp/arx-docker-plan.json
 ```
 
 ## Execute through Docker
 
 ```bash
-ciz run \
-  --plan /tmp/ciz-docker-plan.json \
+arx run \
+  --plan /tmp/arx-docker-plan.json \
   --execute \
   --runner docker
 ```

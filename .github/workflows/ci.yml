@@ -33,7 +33,7 @@ jobs:
         uses: sourceplane/tinx-release-action@81af02d17b1fe5ec12eb54133903d305b1599312
         with:
           manifest: provider.yaml
-          main: ./cmd/ciz
+          main: ./cmd/arx
           output: oci
           dist: dist
           tag: ci
@@ -42,13 +42,13 @@ jobs:
         uses: sourceplane/tinx-action@813d00a458c74b54cb12ee80eca34deeb89dcc0b
         with:
           providers: |
-            ${{ github.workspace }}/oci as ciz
+            ${{ github.workspace }}/oci as arx
           run: |
             tinx --workspace "$TINX_WORKSPACE_ROOT" provider list
-            ciz validate --intent "$GITHUB_WORKSPACE/examples/intent.yaml"
-            ciz compositions --config-dir "$GITHUB_WORKSPACE/assets/config/compositions"
-            ciz plan \
+            arx validate --intent "$GITHUB_WORKSPACE/examples/intent.yaml"
+            arx compositions --config-dir "$GITHUB_WORKSPACE/assets/config/compositions"
+            arx plan \
               --intent "$GITHUB_WORKSPACE/examples/intent.yaml" \
               --config-dir "$GITHUB_WORKSPACE/assets/config/compositions" \
-              --output "$RUNNER_TEMP/ciz-plan.json"
-            test -s "$RUNNER_TEMP/ciz-plan.json"
+              --output "$RUNNER_TEMP/arx-plan.json"
+            test -s "$RUNNER_TEMP/arx-plan.json"

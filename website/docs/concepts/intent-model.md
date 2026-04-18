@@ -2,7 +2,7 @@
 title: Intent model
 ---
 
-`ciz` treats intent as the desired-state layer. It captures the platform policy, environment defaults, component subscriptions, and discovery roots that define **what** should happen, not **how** steps should execute.
+`arx` treats intent as the desired-state layer. It captures the platform policy, environment defaults, component subscriptions, and discovery roots that define **what** should happen, not **how** steps should execute.
 
 ## Inputs that make up intent
 
@@ -95,7 +95,7 @@ spec:
 
 ## Merge model
 
-At compile time, `ciz` merges configuration in a stable order from lowest to highest precedence:
+At compile time, `arx` merges configuration in a stable order from lowest to highest precedence:
 
 1. Type defaults from the composition schema
 2. Job defaults from the job registry

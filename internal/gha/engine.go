@@ -22,7 +22,7 @@ import (
 
 	actexpr "github.com/nektos/act/pkg/exprparser"
 	actmodel "github.com/nektos/act/pkg/model"
-	"github.com/sourceplane/ciz/internal/model"
+	"github.com/sourceplane/arx/internal/model"
 )
 
 const (
@@ -251,7 +251,7 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 		return nil, fmt.Errorf("resolve workspace %s: %w", workspaceDir, err)
 	}
 
-	tempDir, err := os.MkdirTemp("", "ciz-gha-"+sanitizePathComponent(job.ID)+"-")
+	tempDir, err := os.MkdirTemp("", "arx-gha-"+sanitizePathComponent(job.ID)+"-")
 	if err != nil {
 		return nil, fmt.Errorf("create gha temp directory: %w", err)
 	}
@@ -275,11 +275,11 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 	githubContext := &actmodel.GithubContext{
 		Event:            eventPayload,
 		EventPath:        eventPath,
-		Workflow:         firstNonEmpty(baseEnv["GITHUB_WORKFLOW"], "ciz"),
+		Workflow:         firstNonEmpty(baseEnv["GITHUB_WORKFLOW"], "arx"),
 		RunAttempt:       firstNonEmpty(baseEnv["GITHUB_RUN_ATTEMPT"], "1"),
 		RunID:            firstNonEmpty(baseEnv["GITHUB_RUN_ID"], strconv.FormatInt(time.Now().UnixNano(), 10)),
 		RunNumber:        firstNonEmpty(baseEnv["GITHUB_RUN_NUMBER"], "1"),
-		Actor:            firstNonEmpty(baseEnv["GITHUB_ACTOR"], os.Getenv("USER"), "ciz"),
+		Actor:            firstNonEmpty(baseEnv["GITHUB_ACTOR"], os.Getenv("USER"), "arx"),
 		Repository:       firstNonEmpty(baseEnv["GITHUB_REPOSITORY"], repository),
 		EventName:        firstNonEmpty(baseEnv["GITHUB_EVENT_NAME"], "workflow_dispatch"),
 		Sha:              sha,
@@ -310,7 +310,7 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 		"arch":       runnerArch(),
 		"temp":       tempDir,
 		"tool_cache": e.toolCacheDir,
-		"name":       "ciz",
+		"name":       "arx",
 	}
 
 	globalEnv := copyStringMap(baseEnv)
@@ -323,7 +323,7 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 	globalEnv["RUNNER_ARCH"] = runnerArch()
 	globalEnv["CI"] = "true"
 	globalEnv["GITHUB_ACTIONS"] = "true"
-	globalEnv["ACTIONS_RUNTIME_URL"] = firstNonEmpty(globalEnv["ACTIONS_RUNTIME_URL"], "https://ciz.invalid/runtime")
+	globalEnv["ACTIONS_RUNTIME_URL"] = firstNonEmpty(globalEnv["ACTIONS_RUNTIME_URL"], "https://arx.invalid/runtime")
 	globalEnv["ACTIONS_RESULTS_URL"] = firstNonEmpty(globalEnv["ACTIONS_RESULTS_URL"], globalEnv["ACTIONS_RUNTIME_URL"])
 	if globalEnv["ACTIONS_RUNTIME_TOKEN"] == "" {
 		token, tokenErr := randomToken(16)
@@ -1356,18 +1356,30 @@ func firstNonEmptyContext(ctx context.Context) context.Context {
 func defaultRootDir(name string) string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return preferredRootDir(os.TempDir(), "ciz", "liteci", name)
+		return preferredRootDir(os.TempDir(), name, "arx", "ciz", "liteci")
 	}
-	return preferredRootDir(home, ".ciz", ".lite-ci", name)
+	return preferredRootDir(home, name, ".arx", ".ciz", ".lite-ci")
 }
 
-func preferredRootDir(baseDir, primaryRoot, legacyRoot, name string) string {
-	primaryPath := filepath.Join(baseDir, primaryRoot, name)
-	legacyPath := filepath.Join(baseDir, legacyRoot, name)
-	if pathExists(primaryPath) || !pathExists(legacyPath) {
+
+func preferredRootDir(baseDir, name string, roots ...string) string {
+	if len(roots) == 0 {
+		return filepath.Join(baseDir, name)
+	}
+
+	primaryPath := filepath.Join(baseDir, roots[0], name)
+	if pathExists(primaryPath) {
 		return primaryPath
 	}
-	return legacyPath
+
+	for _, root := range roots[1:] {
+		legacyPath := filepath.Join(baseDir, root, name)
+		if pathExists(legacyPath) {
+			return legacyPath
+		}
+	}
+
+	return primaryPath
 }
 
 func pathExists(path string) bool {

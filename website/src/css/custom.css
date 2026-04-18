@@ -18,11 +18,11 @@
   --ifm-heading-color: #0f2142;
   --ifm-line-height-base: 1.65;
   --ifm-global-radius: 18px;
-  --ciz-surface: rgba(255, 255, 255, 0.82);
-  --ciz-surface-strong: #ffffff;
-  --ciz-border: rgba(13, 91, 216, 0.14);
-  --ciz-shadow: 0 18px 48px rgba(8, 22, 46, 0.12);
-  --ciz-grid: linear-gradient(rgba(13, 91, 216, 0.04) 1px, transparent 1px),
+  --arx-surface: rgba(255, 255, 255, 0.82);
+  --arx-surface-strong: #ffffff;
+  --arx-border: rgba(13, 91, 216, 0.14);
+  --arx-shadow: 0 18px 48px rgba(8, 22, 46, 0.12);
+  --arx-grid: linear-gradient(rgba(13, 91, 216, 0.04) 1px, transparent 1px),
     linear-gradient(90deg, rgba(13, 91, 216, 0.04) 1px, transparent 1px);
 }
 
@@ -38,11 +38,11 @@
   --ifm-navbar-background-color: rgba(6, 17, 31, 0.84);
   --ifm-footer-background-color: #040b16;
   --ifm-heading-color: #f5f8ff;
-  --ciz-surface: rgba(12, 27, 49, 0.84);
-  --ciz-surface-strong: #0d1f39;
-  --ciz-border: rgba(117, 196, 255, 0.15);
-  --ciz-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
-  --ciz-grid: linear-gradient(rgba(117, 196, 255, 0.06) 1px, transparent 1px),
+  --arx-surface: rgba(12, 27, 49, 0.84);
+  --arx-surface-strong: #0d1f39;
+  --arx-border: rgba(117, 196, 255, 0.15);
+  --arx-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  --arx-grid: linear-gradient(rgba(117, 196, 255, 0.06) 1px, transparent 1px),
     linear-gradient(90deg, rgba(117, 196, 255, 0.06) 1px, transparent 1px);
 }
 
@@ -55,13 +55,13 @@ body {
 }
 
 body {
-  background-image: var(--ciz-grid), radial-gradient(circle at top left, rgba(0, 174, 239, 0.14), transparent 32%), radial-gradient(circle at top right, rgba(13, 91, 216, 0.14), transparent 28%);
+  background-image: var(--arx-grid), radial-gradient(circle at top left, rgba(0, 174, 239, 0.14), transparent 32%), radial-gradient(circle at top right, rgba(13, 91, 216, 0.14), transparent 28%);
   background-size: 28px 28px, auto, auto;
 }
 
 .navbar {
   backdrop-filter: blur(18px);
-  border-bottom: 1px solid var(--ciz-border);
+  border-bottom: 1px solid var(--arx-border);
   box-shadow: 0 10px 30px rgba(8, 22, 46, 0.06);
 }
 
@@ -120,9 +120,9 @@ table {
 
 .markdown pre,
 .theme-code-block {
-  border: 1px solid var(--ciz-border);
+  border: 1px solid var(--arx-border);
   border-radius: 18px;
-  box-shadow: var(--ciz-shadow);
+  box-shadow: var(--arx-shadow);
 }
 
 .markdown pre code {
@@ -134,12 +134,12 @@ table {
   overflow: hidden;
   margin-bottom: 2rem;
   padding: 2rem;
-  border: 1px solid var(--ciz-border);
+  border: 1px solid var(--arx-border);
   border-radius: 28px;
   background:
     radial-gradient(circle at top right, rgba(0, 174, 239, 0.18), transparent 30%),
     linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(241, 247, 255, 0.88));
-  box-shadow: var(--ciz-shadow);
+  box-shadow: var(--arx-shadow);
 }
 
 [data-theme='dark'] .heroFrame {
@@ -214,10 +214,10 @@ table {
 .signalCard,
 .pathCard {
   padding: 1.25rem;
-  border: 1px solid var(--ciz-border);
+  border: 1px solid var(--arx-border);
   border-radius: 22px;
-  background: var(--ciz-surface);
-  box-shadow: var(--ciz-shadow);
+  background: var(--arx-surface);
+  box-shadow: var(--arx-shadow);
 }
 
 .featureCard p,
@@ -245,10 +245,10 @@ table {
 .theme-doc-markdown table {
   display: table;
   width: 100%;
-  border: 1px solid var(--ciz-border);
+  border: 1px solid var(--arx-border);
   overflow: hidden;
-  background: var(--ciz-surface);
-  box-shadow: var(--ciz-shadow);
+  background: var(--arx-surface);
+  box-shadow: var(--arx-shadow);
 }
 
 .theme-doc-markdown table thead {
@@ -258,9 +258,9 @@ table {
 .theme-doc-markdown blockquote,
 .theme-doc-markdown .alert,
 .theme-admonition {
-  border: 1px solid var(--ciz-border);
-  background: var(--ciz-surface);
-  box-shadow: var(--ciz-shadow);
+  border: 1px solid var(--arx-border);
+  background: var(--arx-surface);
+  box-shadow: var(--arx-shadow);
 }
 
 @media (max-width: 996px) {

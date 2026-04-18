@@ -1,5 +1,5 @@
 {
-  "apiVersion": "ciz.io/v1",
+  "apiVersion": "arx.io/v1",
   "kind": "Plan",
   "metadata": {
     "name": "microservices-deployment",
@@ -11,7 +11,7 @@
   "execution": {
     "concurrency": 4,
     "failFast": true,
-    "stateFile": ".ciz-state.json"
+    "stateFile": ".arx-state.json"
   },
   "spec": {
     "jobBindings": {

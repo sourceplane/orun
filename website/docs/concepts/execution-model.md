@@ -2,14 +2,14 @@
 title: Execution model
 ---
 
-`ciz` keeps planning and execution separate on purpose. `plan` produces an immutable DAG, and `run` consumes that DAG through an explicit execution backend.
+`arx` keeps planning and execution separate on purpose. `plan` produces an immutable DAG, and `run` consumes that DAG through an explicit execution backend.
 
 ## Dry-run is the default
 
-`ciz run` does not execute steps unless you opt into `--execute`.
+`arx run` does not execute steps unless you opt into `--execute`.
 
 ```bash
-ciz run --plan plan.json
+arx run --plan plan.json
 ```
 
 That default matters in review-heavy environments because it lets you inspect:
@@ -35,7 +35,7 @@ If a step contains `use:`, the local executor fails fast and asks you to rerun w
 
 1. `--gha`
 2. `--runner`
-3. `CIZ_RUNNER` or the deprecated `LITECI_RUNNER`
+3. `ARX_RUNNER`, `CIZ_RUNNER`, or the deprecated `LITECI_RUNNER`
 4. `GITHUB_ACTIONS=true`
 5. Auto-detection when the compiled plan contains a `use:` step
 6. Fallback to `local`
@@ -53,11 +53,11 @@ Execution stays deterministic:
 2. all `main` steps
 3. all `post` steps
 
-Within a phase, `ciz` sorts by `order` and then preserves declaration order.
+Within a phase, `arx` sorts by `order` and then preserves declaration order.
 
 ## State files and resumability
 
-Executed plans track progress in a state file. The default is `.ciz-state.json`, and the legacy `.liteci-state.json` name is still recognized.
+Executed plans track progress in a state file. The default is `.arx-state.json`, and the legacy `.ciz-state.json` and `.liteci-state.json` names are still recognized.
 
 That state lets `run`:
 
@@ -70,15 +70,17 @@ That state lets `run`:
 By default, each job runs in its own resolved job path. Use `--workdir` to override that behavior globally:
 
 ```bash
-ciz run --plan plan.json --execute --workdir ./examples
+arx run --plan plan.json --execute --workdir ./examples
 ```
 
-When the GitHub Actions backend is selected and `--workdir` is not explicitly set, `ciz` uses `GITHUB_WORKSPACE` when that variable is available.
+When the GitHub Actions backend is selected and `--workdir` is not explicitly set, `arx` uses `GITHUB_WORKSPACE` when that variable is available.
 
 ## Runtime environment variables
 
-During execution, `ciz` injects runner context into the step environment:
+During execution, `arx` injects runner context into the step environment:
 
+- `ARX_CONTEXT`
+- `ARX_RUNNER`
 - `CIZ_CONTEXT`
 - `CIZ_RUNNER`
 - `LITECI_CONTEXT`

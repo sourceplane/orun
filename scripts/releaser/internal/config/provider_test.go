@@ -16,7 +16,7 @@ func TestLoadProviderManifestNormalizesCurrentProviderShape(t *testing.T) {
 		"kind: Provider",
 		"metadata:",
 		"  namespace: sourceplane",
-		"  name: ciz",
+		"  name: arx",
 		"  version: v0.0.0",
 		"spec:",
 		"  runtime: binary",

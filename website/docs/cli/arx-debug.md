@@ -1,13 +1,13 @@
 ---
-title: ciz debug
+title: arx debug
 ---
 
-`ciz debug` traces intent processing so you can inspect what the planner is doing before it materializes a final plan.
+`arx debug` traces intent processing so you can inspect what the planner is doing before it materializes a final plan.
 
 ## Usage
 
 ```bash
-ciz debug \
+arx debug \
   --intent intent.yaml \
   --config-dir assets/config/compositions
 ```
@@ -24,7 +24,7 @@ Use `debug` when you need to inspect:
 ## Example
 
 ```bash
-ciz debug -i examples/intent.yaml -c assets/config/compositions
+arx debug -i examples/intent.yaml -c assets/config/compositions
 ```
 
 ## Flags
@@ -34,4 +34,4 @@ ciz debug -i examples/intent.yaml -c assets/config/compositions
 | `--intent`, `-i` | Intent file path |
 | `--config-dir`, `-c` | Global flag used to load compositions |
 
-If you need a final artifact after debugging, switch back to [ciz plan](./ciz-plan.md).
+If you need a final artifact after debugging, switch back to [arx plan](./arx-plan.md).
