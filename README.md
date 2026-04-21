@@ -103,8 +103,9 @@ kubectl run gluon --image=ghcr.io/sourceplane/gluon:<tag>
 
 ```bash
 repo_root="$(pwd)"
-kiox init demo -p ghcr.io/sourceplane/gluon:<tag> as gluon
-kiox --workspace demo -- gluon plan \
+kiox init demo
+kiox --workspace demo add ghcr.io/sourceplane/gluon:<tag> as gluon
+kiox --workspace demo exec -- gluon plan \
   --intent "$repo_root/examples/intent.yaml" \
   --config-dir "$repo_root/assets/config/compositions"
 ```
