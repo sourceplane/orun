@@ -30,7 +30,7 @@ jobs:
         run: go test ./internal/gha -run 'Test(ParseKVFileSupportsHeredocAndBOM|ProcessWorkflowCommandsParsesLegacyCommands|EngineRunStepLocalCompositeActionPropagatesOutputsAndEnv)$'
 
       - name: Validate provider package build
-        uses: sourceplane/kiox-release-action@81af02d17b1fe5ec12eb54133903d305b1599312
+        uses: sourceplane/kiox-release-action@v2.0.1
         with:
           manifest: provider.yaml
           main: ./cmd/gluon
@@ -39,7 +39,7 @@ jobs:
           tag: ci
 
       - name: Smoke test provider with kiox-action
-        uses: sourceplane/kiox-action@813d00a458c74b54cb12ee80eca34deeb89dcc0b
+        uses: sourceplane/kiox-action@v2.1.2
         with:
           providers: |
             ${{ github.workspace }}/oci as gluon

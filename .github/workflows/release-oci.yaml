@@ -43,7 +43,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: sourceplane/kiox-release-action@81af02d17b1fe5ec12eb54133903d305b1599312
+      - uses: sourceplane/kiox-release-action@v2.0.1
         with:
           manifest: provider.yaml
           main: ./cmd/gluon
@@ -51,4 +51,3 @@ jobs:
           dist: dist
           tag: ${{ github.ref_name }}
           push: ${{ env.IMAGE_REF }}
-          delegate-goreleaser: true
