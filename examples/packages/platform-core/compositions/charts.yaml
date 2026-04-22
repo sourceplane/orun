@@ -1,0 +1,120 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: charts
+spec:
+  type: charts
+  description: Schema for Helm chart packaging components
+  defaultJob: package
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Charts Component Type
+    description: Schema for Helm chart packaging components
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+        description: Component name
+      type:
+        type: string
+        const: charts
+        description: Component type identifier
+      inputs:
+        type: object
+        description: Chart packaging input values
+        properties:
+          registry:
+            type: string
+            description: Chart registry path
+          pullPolicy:
+            type: string
+            enum:
+              - IfNotPresent
+              - Always
+              - Never
+            description: Image pull policy
+        additionalProperties: true
+  jobs:
+    - name: package
+      description: Package chart definitions
+      runsOn: ubuntu-22.04
+      timeout: 5m
+      retries: 1
+      labels:
+        scope: packaging
+      steps:
+        - name: lint
+          phase: main
+          order: 10
+          run: helm lint {{.registry}}/charts
+          timeout: 5m
+          onFailure: stop
+        - name: package
+          phase: main
+          order: 20
+          run: helm package {{.registry}}/charts -d dist/
+          timeout: 5m
+          onFailure: stop
+      inputs:
+        pullPolicy: Always
+    - name: publish
+      description: Publish charts to registry
+      runsOn: ubuntu-22.04
+      timeout: 10m
+      retries: 2
+      labels:
+        scope: publishing
+      steps:
+        - name: lint
+          phase: main
+          order: 10
+          run: helm lint {{.registry}}/charts
+          timeout: 5m
+          onFailure: stop
+        - name: package
+          phase: main
+          order: 20
+          run: helm package {{.registry}}/charts -d dist/
+          timeout: 5m
+          onFailure: stop
+        - name: push
+          phase: main
+          order: 30
+          run: helm push dist/*.tgz oci://{{.registry}}/helm/charts
+          timeout: 5m
+          retry: 2
+          onFailure: stop
+        - name: verify
+          phase: post
+          order: 10
+          run: helm search repo oci://{{.registry}}/helm/charts
+          onFailure: continue
+      inputs:
+        pullPolicy: Always
+        registry: oci://mycompany.azurecr.io
+    - name: test
+      description: Test chart templates and values
+      runsOn: ubuntu-22.04
+      timeout: 5m
+      retries: 1
+      labels:
+        scope: testing
+      steps:
+        - name: lint
+          phase: main
+          order: 10
+          run: helm lint {{.registry}}/charts --strict
+          timeout: 5m
+          onFailure: stop
+        - name: template-dry-run
+          phase: main
+          order: 20
+          run: helm template test {{.registry}}/charts --validate
+          timeout: 5m
+          onFailure: stop
+      inputs:
+        pullPolicy: Always

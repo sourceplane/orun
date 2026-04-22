@@ -18,6 +18,12 @@ type ModelInfo struct {
 	Description     string
 	RequiredFields  []string
 	SupportedFields map[string]string
+	SourceName      string
+	SourceKind      string
+	SourcePath      string
+	SourceRef       string
+	ExportPath      string
+	ResolvedDigest  string
 	JobRegistryName string           // Name of the JobRegistry
 	JobRegistryDesc string           // Description of the JobRegistry
 	AvailableJobs   []JobBindingInfo // All available jobs in the registry
@@ -57,89 +63,93 @@ func ExtractModelInfo(modelName string, composition *loader.Composition, configD
 
 	info.JobRegistryName = composition.JobRegistryName
 	info.JobRegistryDesc = composition.JobRegistryDesc
+	info.SourceName = composition.SourceName
+	info.SourceKind = composition.SourceKind
+	info.SourcePath = composition.SourcePath
+	info.SourceRef = composition.SourceRef
+	info.ExportPath = composition.ExportPath
+	info.ResolvedDigest = composition.ResolvedDigest
 
-	// Extract JobRegistry metadata
 	if len(composition.Jobs) > 0 {
-		// Build list of all available jobs from the registry
-		for i, job := range composition.Jobs {
+		for index, job := range composition.Jobs {
 			scope := ""
 			if len(job.Labels) > 0 {
-				if s, ok := job.Labels["scope"]; ok {
-					scope = s
+				if value, ok := job.Labels["scope"]; ok {
+					scope = value
 				}
 			}
 
-			bindingInfo := JobBindingInfo{
+			info.AvailableJobs = append(info.AvailableJobs, JobBindingInfo{
 				Name:        job.Name,
 				Description: job.Description,
 				Scope:       scope,
 				Steps:       len(job.Steps),
 				RunsOn:      job.RunsOn,
 				Timeout:     job.Timeout,
-			}
-			info.AvailableJobs = append(info.AvailableJobs, bindingInfo)
+			})
 
-			// First job is the default
-			if i == 0 {
+			if job.Name == composition.DefaultJobName || (composition.DefaultJobName == "" && index == 0) {
 				info.DefaultJobName = job.Name
 			}
 		}
 	}
 
-	// Extract schema metadata
-	if composition.Schema != nil {
-		info.Title = fmt.Sprintf("%s Model", strings.ToTitle(strings.ToLower(modelName)))
-		info.Description = fmt.Sprintf("Model: %s", modelName)
+	info.Title = fmt.Sprintf("%s Model", strings.ToTitle(strings.ToLower(modelName)))
+	info.Description = fmt.Sprintf("Model: %s", modelName)
 
-		// Try to read schema file to extract required fields and field descriptions
+	schemaObj := composition.InputSchema
+	if len(schemaObj) == 0 {
 		schemaPath := filepath.Join(configDir, modelName, "schema.yaml")
 		schemaData, err := os.ReadFile(schemaPath)
 		if err == nil {
-			var schemaObj map[string]interface{}
-			if err := yaml.Unmarshal(schemaData, &schemaObj); err == nil {
-				// Extract required fields
-				if required, ok := schemaObj["required"]; ok {
-					if reqList, ok := required.([]interface{}); ok {
-						for _, v := range reqList {
-							info.RequiredFields = append(info.RequiredFields, fmt.Sprintf("%v", v))
-						}
-					}
-				}
+			_ = yaml.Unmarshal(schemaData, &schemaObj)
+		}
+	}
 
-				// Extract supported fields from properties
-				if props, ok := schemaObj["properties"]; ok {
-					if propMap, ok := props.(map[string]interface{}); ok {
-						for fieldName, fieldSchema := range propMap {
-							if fieldMap, ok := fieldSchema.(map[string]interface{}); ok {
-								if desc, ok := fieldMap["description"]; ok {
-									info.SupportedFields[fieldName] = fmt.Sprintf("%v", desc)
-								} else {
-									info.SupportedFields[fieldName] = ""
-								}
-							}
-						}
+	if required, ok := schemaObj["required"]; ok {
+		if reqList, ok := required.([]interface{}); ok {
+			for _, value := range reqList {
+				info.RequiredFields = append(info.RequiredFields, fmt.Sprintf("%v", value))
+			}
+		}
+	}
+
+	if props, ok := schemaObj["properties"]; ok {
+		if propMap, ok := props.(map[string]interface{}); ok {
+			for fieldName, fieldSchema := range propMap {
+				if fieldMap, ok := fieldSchema.(map[string]interface{}); ok {
+					if desc, ok := fieldMap["description"]; ok {
+						info.SupportedFields[fieldName] = fmt.Sprintf("%v", desc)
+					} else {
+						info.SupportedFields[fieldName] = ""
 					}
 				}
 			}
 		}
 	}
 
-	// Extract job metadata (from first job / default job)
-	if len(composition.Jobs) > 0 {
-		job := &composition.Jobs[0] // Use first job as default
+	jobIndex := -1
+	for index := range composition.Jobs {
+		if composition.Jobs[index].Name == info.DefaultJobName {
+			jobIndex = index
+			break
+		}
+	}
+	if jobIndex == -1 && len(composition.Jobs) > 0 {
+		jobIndex = 0
+	}
+	if jobIndex >= 0 {
+		job := &composition.Jobs[jobIndex]
 		info.JobName = job.Name
 		info.JobDescription = job.Description
-
-		// Extract steps from first job
 		for _, step := range job.Steps {
-			stepInfo := StepInfo{
+			info.Steps = append(info.Steps, StepInfo{
 				Name:        step.Name,
 				Description: step.Name,
 				Run:         step.Run,
 				Timeout:     step.Timeout,
 				Retry:       step.Retry,
-			}
-			info.Steps = append(info.Steps, stepInfo)
+			})
 		}
 	}
 
@@ -179,6 +189,9 @@ func PrintLongFormat(info *ModelInfo, expandJobs bool) {
 	fmt.Printf("%s\n", stylePanel("├──────────────────────────────────────────────────────────┤"))
 	fmt.Printf("│ registry: %s\n", info.JobRegistryName)
 	fmt.Printf("│ default-job: %s\n", info.DefaultJobName)
+	if info.SourceName != "" {
+		fmt.Printf("│ source: %s (%s)\n", info.SourceName, info.SourceKind)
+	}
 	fmt.Printf("│ jobs: %d\n", len(info.AvailableJobs))
 	fmt.Printf("%s\n\n", stylePanel("└──────────────────────────────────────────────────────────┘"))
 
@@ -193,6 +206,17 @@ func PrintLongFormat(info *ModelInfo, expandJobs bool) {
 	}
 	if info.JobRegistryDesc != "" {
 		fmt.Printf("  ├─ description: %s\n", info.JobRegistryDesc)
+	}
+	if info.SourceRef != "" {
+		fmt.Printf("  ├─ source ref: %s\n", info.SourceRef)
+	} else if info.SourcePath != "" {
+		fmt.Printf("  ├─ source path: %s\n", info.SourcePath)
+	}
+	if info.ExportPath != "" {
+		fmt.Printf("  ├─ export path: %s\n", info.ExportPath)
+	}
+	if info.ResolvedDigest != "" {
+		fmt.Printf("  ├─ digest: %s\n", info.ResolvedDigest)
 	}
 	fmt.Printf("  ├─ default job: %s\n", info.DefaultJobName)
 	fmt.Printf("  └─ total jobs: %d\n\n", len(info.AvailableJobs))

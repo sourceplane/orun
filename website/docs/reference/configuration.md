@@ -6,7 +6,7 @@ title: Configuration
 
 1. `intent.yaml`
 2. discovered `component.yaml` manifests
-3. composition assets referenced by `--config-dir`
+3. composition sources declared by `intent.compositions`
 
 ## Intent file
 
@@ -31,6 +31,16 @@ environments:
 
 The intent file is where you define environments, discovery roots, groups, selectors, defaults, and optional inline components.
 
+It also declares where compositions come from:
+
+```yaml
+compositions:
+  sources:
+    - name: platform-core
+      kind: dir
+      path: ./packages/platform-core
+```
+
 ## Component manifest
 
 Minimal example:
@@ -53,15 +63,17 @@ spec:
 
 Components carry type-specific inputs, labels, overrides, and dependency declarations.
 
-## Composition assets
+## Composition sources
 
-Pass the composition directory through the global `--config-dir` flag:
+Declare composition sources in the intent and plan directly against that intent:
 
 ```bash
-gluon plan --intent intent.yaml --config-dir assets/config/compositions
+gluon plan --intent intent.yaml
 ```
 
-Each type directory contains a schema and a job registry. That is where type validation and runtime job definitions live.
+Each source can be a local package directory, a packaged archive, or an OCI reference. Gluon resolves those sources into a cache and writes a lock file under `<intent-dir>/.gluon/compositions.lock.yaml`.
+
+`--config-dir` still works as a compatibility fallback for legacy folder-shaped compositions.
 
 ## Environment-specific control
 

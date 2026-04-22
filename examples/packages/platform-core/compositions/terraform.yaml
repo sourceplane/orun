@@ -1,0 +1,115 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: terraform
+spec:
+  type: terraform
+  description: Schema for Terraform infrastructure components
+  defaultJob: plan
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Terraform Component Type
+    description: Schema for Terraform infrastructure components
+    type: object
+    properties:
+      name:
+        type: string
+        description: Component name
+      type:
+        type: string
+        const: terraform
+        description: Component type identifier
+      inputs:
+        type: object
+        description: Terraform-specific input values
+        properties:
+          workspace:
+            type: string
+            description: Terraform workspace name
+          autoApprove:
+            type: string
+            enum:
+              - "true"
+              - "false"
+            description: Auto-approve terraform apply
+          parallelism:
+            type: integer
+            minimum: 1
+            description: Terraform parallelism level
+        additionalProperties: true
+  jobs:
+    - name: plan
+      description: Plan Terraform configuration
+      runsOn: ubuntu-22.04
+      timeout: 20m
+      retries: 1
+      labels:
+        scope: analysis
+      steps:
+        - name: init
+          run: terraform init -backend=true
+          onFailure: stop
+        - name: fmt-check
+          run: terraform fmt -check
+          onFailure: continue
+        - name: validate
+          run: terraform validate
+          timeout: 5m
+          onFailure: stop
+        - name: plan
+          run: terraform plan -workspace={{.workspace}} -out=tfplan
+          timeout: 15m
+          onFailure: stop
+      inputs:
+        autoApprove: "false"
+        parallelism: 10
+    - name: apply
+      description: Apply Terraform configuration
+      runsOn: ubuntu-22.04
+      timeout: 30m
+      retries: 1
+      labels:
+        scope: deployment
+      steps:
+        - name: init
+          run: terraform init -backend=true
+          onFailure: stop
+        - name: validate
+          run: terraform validate
+          timeout: 5m
+          onFailure: stop
+        - name: plan
+          run: terraform plan -workspace={{.workspace}} -out=tfplan
+          timeout: 15m
+          onFailure: stop
+        - name: apply
+          run: terraform apply -auto-approve tfplan
+          timeout: 20m
+          onFailure: stop
+        - name: output
+          run: terraform output -json > outputs.json
+          onFailure: continue
+      inputs:
+        autoApprove: "false"
+        parallelism: 10
+    - name: destroy
+      description: Destroy Terraform managed infrastructure
+      runsOn: ubuntu-22.04
+      timeout: 25m
+      retries: 0
+      labels:
+        scope: cleanup
+      steps:
+        - name: init
+          run: terraform init -backend=true
+          onFailure: stop
+        - name: destroy
+          run: terraform destroy -workspace={{.workspace}} -auto-approve
+          timeout: 20m
+          onFailure: stop
+        - name: workspace-delete
+          run: terraform workspace delete {{.workspace}}
+          onFailure: continue
+      inputs:
+        autoApprove: "false"
+        parallelism: 10

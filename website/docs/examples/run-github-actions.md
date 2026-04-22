@@ -9,9 +9,10 @@ The repository includes a minimal example that installs Helm through a GitHub Ac
 ```bash
 gluon plan \
   --intent examples/gha-actions/intent.yaml \
-  --config-dir examples/gha-actions/compositions \
   --output /tmp/gluon-gha-actions-plan.json
 ```
+
+The example intent declares its packaged `gha-demo` composition source, so no extra composition path flag is required.
 
 ## Execute the plan
 

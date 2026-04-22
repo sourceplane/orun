@@ -13,8 +13,13 @@ Generate a plan:
 ```bash
 go run ../../cmd/gluon plan \
   --intent intent.yaml \
-  --config-dir compositions \
   --output /tmp/gluon-gha-actions-plan.json
+```
+
+Inspect the packaged example composition:
+
+```bash
+go run ../../cmd/gluon compositions --intent intent.yaml
 ```
 
 Execute the plan:
@@ -26,5 +31,7 @@ go run ../../cmd/gluon run \
 ```
 
 `gluon run` auto-selects GitHub Actions compatibility mode because the compiled plan contains a `use:` step. The run succeeds when `azure/setup-helm` provisions Helm and the following shell step can execute `helm version --short`.
+
+Planning also writes `examples/gha-actions/.gluon/compositions.lock.yaml`, so the example records exactly which composition source was resolved.
 
 Successful runs use the compact `run` output by default. Add `--verbose` if you want the full GitHub Actions-compatible step logs inline.

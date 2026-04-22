@@ -5,6 +5,12 @@ metadata:
   name: gha-actions-demo
   description: Minimal example that exercises GitHub Actions use steps during gluon run
 
+compositions:
+  sources:
+    - name: gha-demo
+      kind: dir
+      path: ./packages/gha-demo
+
 discovery:
   roots:
     - services/

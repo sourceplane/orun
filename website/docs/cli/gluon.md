@@ -20,17 +20,18 @@ The root `gluon` command is the entry point for planning, inspection, and execut
 
 | Flag | Meaning |
 | --- | --- |
-| `--config-dir`, `-c` | Path or glob used to load composition assets |
+| `--config-dir`, `-c` | Legacy fallback path or glob for folder-shaped compositions |
 | `--version` | Print the CLI version |
 | `--help` | Show command help |
 
-`--config-dir` can also be set through `GLUON_CONFIG_DIR`.
+`--config-dir` can also be set through `GLUON_CONFIG_DIR`, but packaged composition sources declared in the intent are the recommended path.
 
 ## Typical flow
 
 ```bash
-gluon validate --intent intent.yaml --config-dir assets/config/compositions
-gluon plan --intent intent.yaml --config-dir assets/config/compositions --output plan.json
+gluon compositions lock --intent intent.yaml
+gluon validate --intent intent.yaml
+gluon plan --intent intent.yaml --output plan.json
 gluon run --plan plan.json
 ```
 

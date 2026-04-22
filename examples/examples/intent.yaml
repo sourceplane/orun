@@ -6,6 +6,12 @@ metadata:
   description: Example multi-environment microservices deployment
   namespace: default
 
+compositions:
+  sources:
+    - name: platform-core
+      kind: dir
+      path: ../packages/platform-core
+
 discovery:
   roots:
     - ../services/

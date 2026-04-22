@@ -1,0 +1,105 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: helmCommon
+spec:
+  type: helmCommon
+  description: Schema for common/shared Helm deployment components
+  defaultJob: deploy
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Helm Common Component Type
+    description: Schema for common/shared Helm deployment components
+    type: object
+    properties:
+      name:
+        type: string
+        description: Component name
+      type:
+        type: string
+        const: helmCommon
+        description: Component type identifier
+      inputs:
+        type: object
+        description: Helm-specific input values for common services
+        properties:
+          chart:
+            type: string
+            description: Helm chart reference
+          timeout:
+            type: string
+            description: Helm operation timeout
+          pullPolicy:
+            type: string
+            enum:
+              - IfNotPresent
+              - Always
+              - Never
+            description: Image pull policy
+        additionalProperties: true
+  jobs:
+    - name: deploy
+      description: Deploy common services using Helm
+      runsOn: ubuntu-22.04
+      timeout: 10m
+      retries: 2
+      labels:
+        scope: deployment
+        type: common-services
+      steps:
+        - name: add-repository
+          run: helm repo add mycompany oci://mycompany.azurecr.io/helm/charts
+          retry: 3
+        - name: update-repo
+          run: helm repo update
+          retry: 2
+        - name: deploy
+          run: helm upgrade --install {{.Component}} {{.chart}} --namespace platform-common --create-namespace --wait=true --timeout={{.timeout}}
+          timeout: 15m
+          onFailure: stop
+        - name: verify
+          run: kubectl get deployment -n platform-common {{.Component}}
+          onFailure: continue
+      inputs:
+        pullPolicy: IfNotPresent
+    - name: health-check
+      description: Health check for common services
+      runsOn: ubuntu-22.04
+      timeout: 5m
+      retries: 1
+      labels:
+        scope: monitoring
+        type: common-services
+      steps:
+        - name: pod-status
+          run: kubectl get pods -n platform-common -l app={{.Component}} -o wide
+          onFailure: continue
+        - name: service-check
+          run: kubectl get svc -n platform-common {{.Component}}
+          onFailure: continue
+        - name: logs
+          run: kubectl logs -n platform-common -l app={{.Component}} --tail=20 || true
+          onFailure: continue
+      inputs:
+        pullPolicy: IfNotPresent
+    - name: rollback
+      description: Rollback common services to previous version
+      runsOn: ubuntu-22.04
+      timeout: 10m
+      retries: 1
+      labels:
+        scope: recovery
+        type: common-services
+      steps:
+        - name: get-revision
+          run: helm history {{.Component}} -n platform-common | head -2
+          onFailure: stop
+        - name: rollback
+          run: helm rollback {{.Component}} -n platform-common
+          timeout: 10m
+          onFailure: stop
+        - name: verify-rollback
+          run: kubectl rollout status deployment/{{.Component}} -n platform-common
+          onFailure: continue
+      inputs:
+        pullPolicy: IfNotPresent

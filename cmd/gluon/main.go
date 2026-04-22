@@ -24,21 +24,26 @@ func generatePlan() error {
 	}
 
 	fmt.Println("□ Loading compositions...")
-	compositionRegistry, err := loader.LoadCompositionsFromDir(configDir)
+	compositionRegistry, err := loader.LoadCompositionsForIntent(intent, intentFile, configDir)
 	if err != nil {
-		return fmt.Errorf("failed to load compositions from %s: %w", configDir, err)
+		return fmt.Errorf("failed to resolve compositions: %w", err)
+	}
+	if err := loader.WriteCompositionLockFile(intentFile, compositionRegistry.Sources); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ warning: failed to write composition lock file: %v\n", err)
 	}
 
 	// Build CompositionInfo map for the planner with default jobs
 	compositionInfos := make(map[string]*planner.CompositionInfo)
-	for typeName, composition := range compositionRegistry.Types {
-		// Use first job as default if available
+	for compositionKey, composition := range compositionRegistry.ByKey {
 		var defaultJob *model.JobSpec
-		if len(composition.Jobs) > 0 {
+		if composition.DefaultJobName != "" {
+			defaultJob = composition.JobMap[composition.DefaultJobName]
+		}
+		if defaultJob == nil && len(composition.Jobs) > 0 {
 			defaultJob = &composition.Jobs[0]
 		}
-		compositionInfos[typeName] = &planner.CompositionInfo{
-			Type:       typeName,
+		compositionInfos[compositionKey] = &planner.CompositionInfo{
+			Type:       composition.Name,
 			DefaultJob: defaultJob,
 		}
 	}
@@ -159,6 +164,7 @@ func generatePlan() error {
 
 	renderer := render.NewRenderer()
 	plan := renderer.RenderPlanWithOrder(intent.Metadata, jobInstances, jobBindings, sorted)
+	plan.Spec.CompositionSources = compositionRegistry.Sources
 
 	if debugMode {
 		fmt.Println("\n" + renderer.DebugDump(plan))
@@ -258,9 +264,20 @@ func debugIntent() error {
 }
 
 func listCompositions(args []string) error {
-	compositionRegistry, err := loader.LoadCompositionsFromDir(configDir)
-	if err != nil {
-		return fmt.Errorf("failed to load compositions from %s: %w", configDir, err)
+	intent, _, intentErr := loadResolvedIntentFile(intentFile)
+
+	var compositionRegistry *loader.CompositionRegistry
+	var err error
+	if intentErr == nil {
+		compositionRegistry, err = loader.LoadCompositionsForIntent(intent, intentFile, configDir)
+		if err != nil {
+			return fmt.Errorf("failed to resolve compositions: %w", err)
+		}
+	} else {
+		compositionRegistry, err = loader.LoadCompositionsFromDir(configDir)
+		if err != nil {
+			return fmt.Errorf("failed to load compositions from %s: %w", configDir, err)
+		}
 	}
 
 	// If a specific composition is requested, show detailed info
@@ -284,7 +301,19 @@ func listCompositions(args []string) error {
 	fmt.Println(stylePanel("┌──────────────────────────────────────────────────────────┐"))
 	fmt.Println(styleTitle("│ compositions                                             │"))
 	fmt.Println(stylePanel("├──────────────────────────────────────────────────────────┤"))
-	fmt.Println("│ source: assets/config/compositions                       │")
+	if len(compositionRegistry.Sources) > 0 {
+		firstSource := compositionRegistry.Sources[0]
+		location := firstSource.Ref
+		if location == "" {
+			location = firstSource.Path
+		}
+		fmt.Printf("│ source: %s (%s)\n", firstSource.Name, firstSource.Kind)
+		if location != "" {
+			fmt.Printf("│ location: %s\n", location)
+		}
+	} else {
+		fmt.Println("│ source: none                                             │")
+	}
 	fmt.Println(stylePanel("└──────────────────────────────────────────────────────────┘"))
 
 	// Sort composition names for consistent output

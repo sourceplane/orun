@@ -37,6 +37,49 @@ properties:
         description: Optional directories to recursively scan for component.yaml files relative to the intent file.
         items:
           type: string
+  compositions:
+    type: object
+    properties:
+      sources:
+        type: array
+        items:
+          type: object
+          required:
+            - name
+            - kind
+          properties:
+            name:
+              type: string
+              minLength: 1
+            kind:
+              type: string
+              enum:
+                - dir
+                - archive
+                - oci
+            path:
+              type: string
+            ref:
+              type: string
+            digest:
+              type: string
+            pullPolicy:
+              type: string
+            metadata:
+              type: object
+              additionalProperties:
+                type: string
+      resolution:
+        type: object
+        properties:
+          precedence:
+            type: array
+            items:
+              type: string
+          bindings:
+            type: object
+            additionalProperties:
+              type: string
   groups:
     type: object
     additionalProperties:
@@ -102,6 +145,13 @@ properties:
               type: array
               items:
                 type: string
+        compositionRef:
+          type: object
+          properties:
+            source:
+              type: string
+            name:
+              type: string
         inputs:
           type: object
           additionalProperties: true

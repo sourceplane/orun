@@ -9,40 +9,41 @@ title: gluon plan
 ```bash
 gluon plan \
   --intent intent.yaml \
-  --config-dir assets/config/compositions \
   --output plan.json
 ```
+
+When the intent declares `compositions.sources`, `plan` resolves those sources automatically and writes `<intent-dir>/.gluon/compositions.lock.yaml`.
 
 ## Common examples
 
 Generate a JSON plan:
 
 ```bash
-gluon plan -i examples/intent.yaml -c assets/config/compositions -o plan.json
+gluon plan -i examples/intent.yaml -o plan.json
 ```
 
 Generate YAML instead:
 
 ```bash
-gluon plan -i examples/intent.yaml -c assets/config/compositions -o plan.yaml -f yaml
+gluon plan -i examples/intent.yaml -o plan.yaml -f yaml
 ```
 
 Filter to one environment:
 
 ```bash
-gluon plan -i examples/intent.yaml -c assets/config/compositions --env staging
+gluon plan -i examples/intent.yaml --env staging
 ```
 
 Preview the dependency graph while compiling:
 
 ```bash
-gluon plan -i examples/intent.yaml -c assets/config/compositions --view dag
+gluon plan -i examples/intent.yaml --view dag
 ```
 
 Focus on changed components:
 
 ```bash
-gluon plan -i examples/intent.yaml -c assets/config/compositions --changed --base main
+gluon plan -i examples/intent.yaml --changed --base main
 ```
 
 ## Flags
@@ -65,3 +66,5 @@ gluon plan -i examples/intent.yaml -c assets/config/compositions --changed --bas
 ## Output contract
 
 The generated plan contains explicit jobs, dependency edges, step phases, labels, and runtime metadata. Read [plan schema](../reference/plan-schema.md) for the full structure.
+
+Use `--config-dir` only when you need to load legacy folder-shaped compositions instead of intent-declared packages.

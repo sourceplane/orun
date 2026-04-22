@@ -10,7 +10,7 @@ The planning boundary is built from four inputs:
 
 1. `intent.yaml`
 2. Discovered `component.yaml` manifests
-3. Composition assets under the configured `--config-dir`
+3. Composition sources declared under `intent.compositions`
 4. Optional CLI scoping such as `--env` or change-detection flags
 
 The output of those inputs is a compiled `plan.json`.
@@ -23,6 +23,12 @@ kind: Intent
 
 metadata:
   name: microservices-deployment
+
+compositions:
+  sources:
+    - name: platform-core
+      kind: dir
+      path: ./packages/platform-core
 
 discovery:
   roots:
@@ -97,8 +103,8 @@ spec:
 
 At compile time, `gluon` merges configuration in a stable order from lowest to highest precedence:
 
-1. Type defaults from the composition schema
-2. Job defaults from the job registry
+1. Type defaults from the composition input schema
+2. Job defaults from the resolved composition job definition
 3. Group defaults
 4. Environment defaults
 5. Component inputs and overrides
@@ -108,8 +114,10 @@ Policies are not treated as ordinary defaults. They are enforced as platform con
 ## Why this split matters
 
 - App teams can declare intent without owning runner details.
-- Platform teams can evolve schemas and job registries independently.
+- Platform teams can evolve packaged schemas and job definitions independently.
 - Reviewers can diff desired state separately from execution steps.
 - The compiled plan remains deterministic because all implicit defaults are resolved before runtime.
+
+The legacy `--config-dir` flag still works during migration, but packaged composition sources are the recommended model.
 
 Read [compositions](./compositions.md) next to see how component types bind to executable jobs.

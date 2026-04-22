@@ -9,7 +9,6 @@ This example shows how to use `gluon` in a review flow where you want to focus o
 ```bash
 gluon component \
   --intent examples/intent.yaml \
-  --config-dir assets/config/compositions \
   --changed \
   --base main \
   --long
@@ -22,7 +21,6 @@ That produces a merged view of the components affected by the current branch.
 ```bash
 gluon plan \
   --intent examples/intent.yaml \
-  --config-dir assets/config/compositions \
   --changed \
   --base main \
   --output /tmp/pr-plan.json \
@@ -36,7 +34,6 @@ If your CI platform already exposes the changed file list, pass it directly:
 ```bash
 gluon plan \
   --intent examples/intent.yaml \
-  --config-dir assets/config/compositions \
   --files examples/services/web-app/component.yaml,examples/intent.yaml \
   --output /tmp/pr-plan.json
 ```

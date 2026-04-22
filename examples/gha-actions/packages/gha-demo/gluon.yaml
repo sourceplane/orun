@@ -1,0 +1,12 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: CompositionPackage
+metadata:
+  name: gha-demo
+  description: Packaged GitHub Actions composition used by the repository example
+spec:
+  version: 1.0.0
+  gluon:
+    minVersion: ">=0.0.0"
+  exports:
+    - composition: gha-demo
+      path: compositions/gha-demo.yaml

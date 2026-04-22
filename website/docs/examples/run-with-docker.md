@@ -9,7 +9,6 @@ The Docker backend executes each step inside a container and mounts the reposito
 ```bash
 gluon plan \
   --intent examples/intent.yaml \
-  --config-dir assets/config/compositions \
   --output /tmp/gluon-docker-plan.json
 ```
 

@@ -27,14 +27,12 @@ Use those commands when you want to focus on the parts of the platform graph tha
 ```bash
 gluon component \
   --intent examples/intent.yaml \
-  --config-dir assets/config/compositions \
   --changed \
   --base main \
   --long
 
 gluon plan \
   --intent examples/intent.yaml \
-  --config-dir assets/config/compositions \
   --changed \
   --base main \
   --output /tmp/pr-plan.json
@@ -47,7 +45,6 @@ When your CI system already knows the changed files, pass them directly instead 
 ```bash
 gluon plan \
   --intent examples/intent.yaml \
-  --config-dir assets/config/compositions \
   --files examples/services/web-app/component.yaml,examples/intent.yaml \
   --output /tmp/filtered-plan.json
 ```
@@ -59,7 +56,6 @@ For uncommitted work in a repository checkout:
 ```bash
 gluon component \
   --intent examples/intent.yaml \
-  --config-dir assets/config/compositions \
   --changed \
   --uncommitted
 ```

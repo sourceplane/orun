@@ -5,11 +5,11 @@ A **policy-aware workflow compiler** that turns **intent** into executable **pla
 Transform declarative CI/CD intents into deterministic execution plans with automatic environment expansion, policy validation, and multi-platform support.
 
 ```
-Intent.yaml + Job Compositions + Schemas
+Intent.yaml + Component manifests + Composition packages
           ↓
     Planner Engine (6-stage compiler)
           ↓
-    Plan.json (Fully resolved DAG)
+      Plan.json + composition source lock
 ```
 
 ## ✨ Key Features
@@ -20,6 +20,8 @@ Intent.yaml + Job Compositions + Schemas
 - **🔗 Dependency Resolution** - Automatic DAG creation with cycle detection
 - **🐍 Cross-Platform** - Linux, macOS support (amd64, arm64)
 - **🐳 OCI Distribution** - Docker/Podman/containerd/Kubernetes compatible
+- **📦 Versioned Composition Sources** - Resolve compositions from local packages, archives, or OCI references
+- **🔒 Lockable Sources** - Resolved composition digests are written beside the intent for repeatable planning
 - **⚡ Deterministic** - Same inputs → Same outputs, every time
 - **📊 Debuggable** - Detailed phase-by-phase IR dumps
 
@@ -106,8 +108,7 @@ repo_root="$(pwd)"
 kiox init demo
 kiox --workspace demo add ghcr.io/sourceplane/gluon:<tag> as gluon
 kiox --workspace demo exec -- gluon plan \
-  --intent "$repo_root/examples/intent.yaml" \
-  --config-dir "$repo_root/assets/config/compositions"
+  --intent "$repo_root/examples/intent.yaml"
 ```
 
 ### Option 5: Using ORAS (OCI Registry As Storage)
@@ -150,9 +151,10 @@ gluon/
 │   ├── main.go           # CLI entry point & command handlers
 │   └── models.go         # Domain models and types
 ├── internal/
+│   ├── composition/      # Composition package resolution and caching
 │   ├── model/            # Data structures
 │   │   ├── intent.go     # Intent model
-│   │   ├── job.go        # Job composition model
+│   │   ├── job.go        # Job model
 │   │   └── plan.go       # Output plan model
 │   ├── loader/           # YAML parsing & loading
 │   ├── schema/           # JSON Schema validation
@@ -164,14 +166,12 @@ gluon/
 │   └── render/           # Plan materialization
 ├── assets/
 │   └── config/
-│       ├── schemas/      # JSON schemas (intent, jobs, plan)
-│       └── compositions/ # Job definitions
-│           ├── charts/   # Helm Charts composition
-│           ├── helm/     # Helm deployment composition
-│           ├── helmCommon/ # Common Helm composition
-│           └── terraform/ # Terraform composition
+│       ├── schemas/      # JSON schemas (intent, compositions, plan)
+│       └── compositions/ # Legacy folder-based compatibility fixtures
 ├── examples/
-│   └── intent.yaml       # Example intent file
+│   ├── intent.yaml       # Example intent file using packaged sources
+│   └── packages/
+│       └── platform-core/ # Example CompositionPackage root
 ├── docs/
 │   ├── ARCHITECTURE.md   # Detailed design docs
 │   ├── RUNTIME_TOOLS.md  # Container runtime options
@@ -184,40 +184,55 @@ gluon/
 ### 1. List Available Compositions
 
 ```bash
-gluon compositions --config-dir assets/config/compositions
+gluon compositions --intent examples/intent.yaml
 ```
 
-Output shows all available job compositions (helm, terraform, charts, etc.)
+Output shows the resolved compositions exported by the intent's declared sources.
 
-### 2. Validate Intent File
+### 2. Resolve And Lock Composition Sources
+
+```bash
+gluon compositions lock --intent examples/intent.yaml
+```
+
+This writes `examples/.gluon/compositions.lock.yaml` with the resolved source digests and exported composition names.
+
+### 3. Validate Intent File
 
 ```bash
 gluon validate \
-  --intent examples/intent.yaml \
-  --config-dir assets/config/compositions
+  --intent examples/intent.yaml
 ```
 
-### 3. Debug Intent Processing
+### 4. Debug Intent Processing
 
 See detailed logs of each compiler stage:
 
 ```bash
 gluon debug \
-  --intent examples/intent.yaml \
-  --config-dir assets/config/compositions
+  --intent examples/intent.yaml
 ```
 
-### 4. Generate Execution Plan
+### 5. Generate Execution Plan
 
 ```bash
 gluon plan \
   --intent examples/intent.yaml \
-  --config-dir assets/config/compositions \
   --output plan.json \
   --debug
 ```
 
 Output: Fully resolved execution DAG in `plan.json`
+
+### 6. Build A Portable Composition Package
+
+```bash
+gluon compositions package build \
+  --root examples/packages/platform-core \
+  --output dist/platform-core-1.0.0.tgz
+```
+
+Use `gluon compositions package push <archive> oci://...` when you want to publish the archive to an OCI registry.
 
 ## Usage Examples
 
@@ -229,7 +244,6 @@ docker run \
   ghcr.io/sourceplane/gluon:<tag> \
   plan \
   --intent /workspace/intent.yaml \
-  --config-dir /workspace/assets/config/compositions \
   --output /workspace/plan.json
 ```
 
@@ -240,8 +254,7 @@ podman run \
   -v $(pwd):/workspace \
   ghcr.io/sourceplane/gluon:<tag> \
   plan \
-  --intent /workspace/intent.yaml \
-  --config-dir /workspace/assets/config/compositions
+  --intent /workspace/intent.yaml
 ```
 
 ### Using in Kubernetes
@@ -251,9 +264,24 @@ kubectl run gluon-planner \
   --image=ghcr.io/sourceplane/gluon:<tag> \
   --rm -it \
   -- plan \
-  --intent intent.yaml \
-  --config-dir /config/compositions
+  --intent intent.yaml
 ```
+
+## Composition Sources
+
+Packaged compositions are the primary workflow. Declare them in the intent:
+
+```yaml
+compositions:
+  sources:
+    - name: platform-core
+      kind: dir
+      path: ./packages/platform-core
+```
+
+Supported source kinds are `dir`, `archive`, and `oci`. During planning, Gluon resolves those sources into a local cache and writes a lock file under `<intent-dir>/.gluon/compositions.lock.yaml`.
+
+The legacy `--config-dir` flag is still supported as a compatibility fallback for folder-shaped compositions under `assets/config/compositions`.
 
 ### Using in GitHub Actions
 
@@ -264,7 +292,6 @@ kubectl run gluon-planner \
     args: |
       plan \
       --intent intent.yaml \
-      --config-dir assets/config/compositions \
       --output plan.json
 ```
 
@@ -348,48 +375,57 @@ spec:
 assets/config/schemas/intent.schema.yaml
 ```
 
-### Job Composition Schema
+### Composition Package Schema
 
-Compositions define how to deploy components.
+Compositions define how to deploy components, and packages define how those compositions are exported.
 
-**Available Compositions:**
-- **helm** - Helm chart deployments
-- **terraform** - Infrastructure as code
-- **charts** - Kubernetes manifests  
-- **helmCommon** - Common Helm definitions
-
-**Example Composition:**
+**Example package manifest:**
 ```yaml
-# assets/config/compositions/helm/job.yaml
-apiVersion: sourceplane.io/v1
-kind: JobRegistry
+apiVersion: sourceplane.io/v1alpha1
+kind: CompositionPackage
 metadata:
-  name: helm-jobs
-  description: Deploy Helm charts
-jobs:
-  - name: deploy
-    description: Deploy Helm charts
-    runsOn: ubuntu-22.04
-    timeout: 15m
-    retries: 2
-    steps:
-      - name: add-repo
-        run: helm repo add myrepo https://repo.example.com
-      - name: deploy
-        run: helm install {{.Component}} {{.chart}} --namespace={{.namespace}}
-    inputs:
-      chart: myrepo/chart
-      namespace: default
+  name: platform-core
+spec:
+  version: 1.0.0
+  exports:
+    - composition: helm
+      path: compositions/helm.yaml
+    - composition: terraform
+      path: compositions/terraform.yaml
+```
+
+**Example composition document:**
+```yaml
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: helm
+spec:
+  type: helm
+  defaultJob: deploy
+  inputSchema:
+    type: object
+    properties:
+      inputs:
+        type: object
+        properties:
+          chart:
+            type: string
+  jobs:
+    - name: deploy
+      runsOn: ubuntu-22.04
+      timeout: 15m
+      retries: 2
+      steps:
+        - name: deploy
+          run: helm install {{.Component}} {{.chart}} --namespace={{.namespace}}
 ```
 
 ### GitHub Actions Steps In Compositions
 
 `gluon` also supports GitHub Actions-style `use:` steps inside a composition. `gluon run` auto-selects the GitHub Actions executor when the compiled plan contains any `use:` step, and you can still force it with `--gha`.
 
-See the example files at:
-
-- `examples/compositions/gha-helm/job.yaml`
-- `examples/compositions/gha-helm/schema.yaml`
+See the packaged example file at `examples/gha-actions/packages/gha-demo/compositions/gha-demo.yaml`.
 
 Example step definitions:
 
@@ -549,25 +585,31 @@ Low Priority  ← Overridden by ←  High Priority
 ```bash
 # List available compositions
 gluon compositions \
-  --config-dir assets/config/compositions
+  --intent examples/intent.yaml
+
+# Resolve and lock declared composition sources
+gluon compositions lock \
+  --intent examples/intent.yaml
 
 # Validate intent without generating plan
 gluon validate \
-  --intent intent.yaml \
-  --config-dir assets/config/compositions
+  --intent examples/intent.yaml
 
 # Debug with detailed logging
 gluon debug \
-  --intent intent.yaml \
-  --config-dir assets/config/compositions
+  --intent examples/intent.yaml
 
 # Generate execution plan
 gluon plan \
-  --intent intent.yaml \
-  --config-dir assets/config/compositions \
+  --intent examples/intent.yaml \
   --output plan.json \
   --format json \
   --debug
+
+# Build a portable composition package
+gluon compositions package build \
+  --root examples/packages/platform-core \
+  --output dist/platform-core-1.0.0.tgz
 
 # Preview execution from a compiled plan (dry-run)
 gluon run \
@@ -593,7 +635,7 @@ gluon run \
 
 **Flags:**
 - `-i, --intent` - Path to intent YAML file
-- `-c, --config-dir` - Path to compositions directory (required)
+- `-c, --config-dir` - Legacy fallback path to folder-shaped compositions
 - `-o, --output` - Output plan file (default: plan.json)
 - `-f, --format` - Output format: json or yaml (default: json)
 - `--debug` - Enable verbose logging

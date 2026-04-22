@@ -36,14 +36,19 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 	for envName, envInstances := range instances {
 		for _, compInst := range envInstances {
 			// Get job definition for this component type
-			compositionInfo, exists := jp.compositions[compInst.Type]
+			compositionKey := compInst.ResolvedComposition
+			if compositionKey == "" {
+				compositionKey = compInst.Type
+			}
+
+			compositionInfo, exists := jp.compositions[compositionKey]
 			if !exists {
-				return nil, fmt.Errorf("no job definition for type: %s", compInst.Type)
+				return nil, fmt.Errorf("no job definition for composition: %s", compositionKey)
 			}
 
 			jobDef := compositionInfo.DefaultJob
 			if jobDef == nil {
-				return nil, fmt.Errorf("no default job defined for type: %s", compInst.Type)
+				return nil, fmt.Errorf("no default job defined for composition: %s", compositionKey)
 			}
 
 			// Create job instance

@@ -48,6 +48,8 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 				ComponentName: compName,
 				Environment:   envName,
 				Type:          comp.Type,
+				ResolvedComposition:       comp.ResolvedComposition,
+				ResolvedCompositionSource: comp.ResolvedCompositionSource,
 				Domain:        comp.Domain,
 				Labels:        comp.Labels,
 				StepOverrides: comp.Overrides.Steps,

@@ -24,7 +24,7 @@ slug: /
   </article>
   <article className="featureCard">
     <h3>Compositions stay reusable</h3>
-    <p>Each composition pairs a schema with one or more job definitions, so platform teams can evolve execution contracts centrally.</p>
+    <p>Each composition package exports self-describing composition documents, so platform teams can evolve execution contracts centrally and ship them as local, archived, or OCI-hosted sources.</p>
   </article>
   <article className="featureCard">
     <h3>Plans stay deterministic</h3>
@@ -41,25 +41,28 @@ slug: /
 Use `gluon` when you need a planner that can scale from a single repository to a platform estate without collapsing intent, validation, and execution into one format.
 
 - Define desired state in `intent.yaml` plus discovered `component.yaml` files.
+- Declare composition sources in `intent.yaml` and lock their resolved digests beside the intent.
 - Validate platform contracts through JSON schema.
-- Bind component types to reusable job registries under a compositions directory.
+- Bind component types to reusable compositions exported from packages.
 - Render a reviewable `plan.json` before anything executes.
 - Run the plan in dry-run or execute mode with explicit backend selection.
 
 ## Mental model
 
 ```text
-intent.yaml + component.yaml + compositions/
-                  ↓
-        load, normalize, validate
-                  ↓
-      expand environment × component matrix
-                  ↓
-      bind jobs and resolve dependencies
-                  ↓
-          render immutable plan.json
-                  ↓
-       dry-run or execute with a runner
+intent.yaml + component.yaml + composition packages
+          ↓
+      load, normalize, validate
+          ↓
+    resolve and lock composition sources
+          ↓
+  expand environment × component matrix
+          ↓
+  bind jobs and resolve dependencies
+          ↓
+      render immutable plan.json
+          ↓
+   dry-run or execute with a runner
 ```
 
 <div className="signalGrid">
@@ -71,7 +74,7 @@ intent.yaml + component.yaml + compositions/
   <article className="signalCard">
     <strong>Execution contract</strong>
     <h3>Compositions and schemas</h3>
-    <p>Each composition directory contains a schema for validation and a job registry for runtime behavior. That keeps platform logic versioned and reusable.</p>
+    <p>Each composition source exports typed `Composition` documents with an input schema, explicit default job, and portable job definitions. That keeps platform logic versioned and reusable.</p>
   </article>
   <article className="signalCard">
     <strong>Compiled artifact</strong>
@@ -83,19 +86,21 @@ intent.yaml + component.yaml + compositions/
 ## Typical workflow
 
 ```bash
+./gluon compositions lock --intent examples/intent.yaml
+
 ./gluon validate \
-  --intent examples/intent.yaml \
-  --config-dir assets/config/compositions
+  --intent examples/intent.yaml
 
 ./gluon plan \
   --intent examples/intent.yaml \
-  --config-dir assets/config/compositions \
   --output /tmp/gluon-plan.json
 
 ./gluon run --plan /tmp/gluon-plan.json
 ```
 
 The default `run` mode is a dry-run, so teams can inspect the resolved jobs and steps before enabling `--execute`.
+
+The lock command and planning flow write `examples/.gluon/compositions.lock.yaml`, which records the resolved composition digests used for the compiled plan.
 
 ## How to read these docs
 

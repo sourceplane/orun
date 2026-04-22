@@ -53,6 +53,8 @@ Thumbs.db
 /.gluon-state.json
 /.gluon-tools/
 /oci/
+/examples/.gluon/
+/examples/examples/.gluon/
 /examples/gha-actions/.gluon/
 /examples/gha-actions/.gluon-state.json
 /examples/gha-actions/plan.json

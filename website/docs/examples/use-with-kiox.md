@@ -17,10 +17,9 @@ repo_root="$(pwd)"
 
 kiox --workspace demo -- gluon plan \
   --intent "$repo_root/examples/intent.yaml" \
-  --config-dir "$repo_root/assets/config/compositions" \
   --output "$repo_root/plan.json"
 ```
 
 ## Why the paths are absolute
 
-When `gluon` runs inside `kiox`, workspace-run provider commands resolve relative paths against the workspace root. Use absolute repository paths for intent files and composition directories when the source lives outside the workspace.
+When `gluon` runs inside `kiox`, workspace-run provider commands resolve relative paths against the workspace root. Use an absolute repository path for the intent file when the source lives outside the workspace. The composition package path can stay relative to the intent because it is resolved from the intent location.

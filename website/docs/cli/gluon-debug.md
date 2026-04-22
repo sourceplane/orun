@@ -8,8 +8,7 @@ title: gluon debug
 
 ```bash
 gluon debug \
-  --intent intent.yaml \
-  --config-dir assets/config/compositions
+  --intent intent.yaml
 ```
 
 ## What it is for
@@ -24,7 +23,7 @@ Use `debug` when you need to inspect:
 ## Example
 
 ```bash
-gluon debug -i examples/intent.yaml -c assets/config/compositions
+gluon debug -i examples/intent.yaml
 ```
 
 ## Flags
@@ -32,6 +31,5 @@ gluon debug -i examples/intent.yaml -c assets/config/compositions
 | Flag | Meaning |
 | --- | --- |
 | `--intent`, `-i` | Intent file path |
-| `--config-dir`, `-c` | Global flag used to load compositions |
 
-If you need a final artifact after debugging, switch back to [gluon plan](./gluon-plan.md).
+If you need a final artifact after debugging, switch back to [gluon plan](./gluon-plan.md). `--config-dir` remains available as a global legacy fallback when the intent does not declare packaged sources.

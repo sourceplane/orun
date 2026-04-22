@@ -1,0 +1,103 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: helm
+spec:
+  type: helm
+  description: Schema for Helm deployment components
+  defaultJob: deploy
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Helm Component Type
+    description: Schema for Helm deployment components
+    type: object
+    properties:
+      name:
+        type: string
+        description: Component name
+      type:
+        type: string
+        const: helm
+        description: Component type identifier
+      inputs:
+        type: object
+        description: Helm-specific input values
+        properties:
+          chart:
+            type: string
+            description: Helm chart reference (OCI URI or repo/chart)
+          timeout:
+            type: string
+            description: Helm operation timeout
+          namespacePrefix:
+            type: string
+            description: Kubernetes namespace prefix
+          pullPolicy:
+            type: string
+            enum:
+              - IfNotPresent
+              - Always
+              - Never
+            description: Image pull policy
+        additionalProperties: true
+  jobs:
+    - name: deploy
+      description: Deploy using Helm
+      runsOn: ubuntu-22.04
+      timeout: 15m
+      retries: 2
+      labels:
+        scope: deployment
+      steps:
+        - name: add-repository
+          run: helm repo add mycompany oci://mycompany.azurecr.io/helm/charts
+          retry: 3
+        - name: update-repo
+          run: helm repo update
+          retry: 2
+        - name: deploy
+          run: helm upgrade --install {{.Component}} {{.chart}} --namespace {{.namespacePrefix}}{{.Component}} --create-namespace --wait=true --timeout={{.timeout}}
+          timeout: 15m
+          onFailure: stop
+        - name: verify
+          run: kubectl get deployment -n {{.namespacePrefix}}{{.Component}} {{.Component}}
+          onFailure: continue
+      inputs:
+        pullPolicy: IfNotPresent
+        imagePullSecrets: []
+    - name: rollback
+      description: Rollback Helm release to previous version
+      runsOn: ubuntu-22.04
+      timeout: 10m
+      retries: 1
+      labels:
+        scope: recovery
+      steps:
+        - name: get-revision
+          run: helm history {{.Component}} -n {{.namespacePrefix}}{{.Component}} | head -2
+          onFailure: stop
+        - name: rollback
+          run: helm rollback {{.Component}} -n {{.namespacePrefix}}{{.Component}}
+          timeout: 10m
+          onFailure: stop
+        - name: verify-rollback
+          run: kubectl rollout status deployment/{{.Component}} -n {{.namespacePrefix}}{{.Component}}
+          onFailure: continue
+      inputs:
+        pullPolicy: IfNotPresent
+    - name: diff
+      description: Show differences between deployed and intended Helm release
+      runsOn: ubuntu-22.04
+      timeout: 5m
+      retries: 0
+      labels:
+        scope: analysis
+      steps:
+        - name: add-repository
+          run: helm repo add mycompany oci://mycompany.azurecr.io/helm/charts
+          retry: 3
+        - name: diff
+          run: helm diff release {{.Component}} {{.chart}} --namespace {{.namespacePrefix}}{{.Component}} || true
+          onFailure: continue
+      inputs:
+        pullPolicy: IfNotPresent

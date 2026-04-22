@@ -1,0 +1,40 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: gha-demo
+spec:
+  type: gha-demo
+  description: Schema for the self-contained GitHub Actions demo component that installs Helm
+  defaultJob: verify
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: GitHub Actions Demo Component Type
+    description: Schema for the self-contained GitHub Actions demo component that installs Helm
+    type: object
+    properties:
+      name:
+        type: string
+        description: Component name
+      type:
+        type: string
+        const: gha-demo
+        description: Component type identifier
+  jobs:
+    - name: verify
+      description: Install Helm with a GitHub Action and verify it is available in a later shell step
+      runsOn: ubuntu-22.04
+      timeout: 5m
+      retries: 0
+      labels:
+        scope: example
+      steps:
+        - id: setup-demo
+          name: setup-demo
+          use: azure/setup-helm@v4.3.0
+        - name: verify-gha-state
+          shell: bash
+          run: |
+            cat $GITHUB_PATH
+            helm version --short
+            which helm
+          onFailure: stop

@@ -8,8 +8,7 @@ title: gluon validate
 
 ```bash
 gluon validate \
-  --intent intent.yaml \
-  --config-dir assets/config/compositions
+  --intent intent.yaml
 ```
 
 ## When to use it
@@ -23,13 +22,13 @@ gluon validate \
 Validate the repository example:
 
 ```bash
-gluon validate -i examples/intent.yaml -c assets/config/compositions
+gluon validate -i examples/intent.yaml
 ```
 
 Enable debug output while validating:
 
 ```bash
-gluon validate -i examples/intent.yaml -c assets/config/compositions --debug
+gluon validate -i examples/intent.yaml --debug
 ```
 
 ## Flags
@@ -38,6 +37,5 @@ gluon validate -i examples/intent.yaml -c assets/config/compositions --debug
 | --- | --- |
 | `--intent`, `-i` | Intent file path |
 | `--debug` | Enable debug logging |
-| `--config-dir`, `-c` | Global flag used to load compositions |
 
-Use `validate` first when you want a fast failure signal before compiling or executing a plan.
+Use `validate` first when you want a fast failure signal before compiling or executing a plan. `--config-dir` remains available as a global legacy fallback for folder-shaped compositions.

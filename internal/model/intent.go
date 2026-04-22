@@ -6,6 +6,7 @@ type Intent struct {
 	Kind         string                 `yaml:"kind" json:"kind"`
 	Metadata     Metadata               `yaml:"metadata" json:"metadata"`
 	Discovery    Discovery              `yaml:"discovery" json:"discovery"`
+	Compositions CompositionConfig      `yaml:"compositions,omitempty" json:"compositions,omitempty"`
 	Groups       map[string]Group       `yaml:"groups" json:"groups"`
 	Environments map[string]Environment `yaml:"environments" json:"environments"`
 	Components   []Component            `yaml:"components" json:"components"`
@@ -46,17 +47,20 @@ type EnvironmentSelectors struct {
 
 // Component is execution-agnostic declaration
 type Component struct {
-	Name       string                `yaml:"name" json:"name"`
-	Type       string                `yaml:"type" json:"type"`
-	Domain     string                `yaml:"domain" json:"domain"`
-	Enabled    bool                  `yaml:"enabled" json:"enabled"`
-	Path       string                `yaml:"path" json:"path"`
-	Subscribe  ComponentSubscribe    `yaml:"subscribe" json:"subscribe"`
-	Inputs     map[string]interface{} `yaml:"inputs" json:"inputs"`
-	Overrides  ComponentOverrides    `yaml:"overrides" json:"overrides"`
-	Labels     map[string]string     `yaml:"labels" json:"labels"`
-	DependsOn  []Dependency          `yaml:"dependsOn" json:"dependsOn"`
-	SourcePath string                `yaml:"-" json:"-"`
+	Name           string                   `yaml:"name" json:"name"`
+	Type           string                   `yaml:"type" json:"type"`
+	Domain         string                   `yaml:"domain" json:"domain"`
+	Enabled        bool                     `yaml:"enabled" json:"enabled"`
+	Path           string                   `yaml:"path" json:"path"`
+	Subscribe      ComponentSubscribe       `yaml:"subscribe" json:"subscribe"`
+	CompositionRef *ComponentCompositionRef `yaml:"compositionRef,omitempty" json:"compositionRef,omitempty"`
+	Inputs         map[string]interface{}   `yaml:"inputs" json:"inputs"`
+	Overrides      ComponentOverrides       `yaml:"overrides" json:"overrides"`
+	Labels         map[string]string        `yaml:"labels" json:"labels"`
+	DependsOn      []Dependency             `yaml:"dependsOn" json:"dependsOn"`
+	ResolvedComposition       string        `yaml:"-" json:"-"`
+	ResolvedCompositionSource string        `yaml:"-" json:"-"`
+	SourcePath     string                   `yaml:"-" json:"-"`
 }
 
 // ComponentSubscribe declares which environments a component participates in.
@@ -91,6 +95,8 @@ type ComponentInstance struct {
 	ComponentName string
 	Environment   string
 	Type          string
+	ResolvedComposition       string
+	ResolvedCompositionSource string
 	Domain        string
 	Path          string
 	SourcePath    string

@@ -2,62 +2,79 @@
 title: Composition contract
 ---
 
-A composition is a directory named after a component type. The directory defines both the validation contract and the execution contract for that type.
+A composition source exports self-describing documents. The primary contract is a `Composition` document, optionally grouped under a `CompositionPackage` manifest.
 
-## Required files
+## Composition document
 
-Each composition directory is expected to contain:
+A `Composition` document defines both the validation contract and the execution contract for a type.
 
-- `schema.yaml`
-- `job.yaml`
+Required fields:
 
-## Schema contract
+- `metadata.name`
+- `spec.type`
+- `spec.defaultJob`
+- `spec.inputSchema`
+- `spec.jobs`
 
-The schema is a JSON Schema document that validates the component's type-specific inputs.
+Example:
 
 ```yaml
-$schema: http://json-schema.org/draft-07/schema#
-title: Helm Component Type
-type: object
-properties:
-  type:
-    const: helm
-  inputs:
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: helm
+spec:
+  type: helm
+  defaultJob: deploy
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
     type: object
     properties:
-      chart:
-        type: string
-      timeout:
-        type: string
+      type:
+        const: helm
+      inputs:
+        type: object
+        properties:
+          chart:
+            type: string
+          timeout:
+            type: string
+  jobs:
+    - name: deploy
+      runsOn: ubuntu-22.04
+      timeout: 15m
+      retries: 2
+      steps:
+        - name: deploy
+          run: helm upgrade --install {{.Component}} {{.chart}}
 ```
 
-Use the schema to define required fields, enums, defaults, and bounds.
+`defaultJob` must be explicit. Gluon no longer relies on implicit "first job wins" behavior for packaged compositions.
 
-## Job registry contract
+## Composition package document
 
-The job registry defines one or more executable jobs for the type.
+A `CompositionPackage` groups exported compositions and makes package contents discoverable.
 
 ```yaml
-apiVersion: sourceplane.io/v1
-kind: JobRegistry
+apiVersion: sourceplane.io/v1alpha1
+kind: CompositionPackage
 metadata:
-  name: helm-jobs
-jobs:
-  - name: deploy
-    runsOn: ubuntu-22.04
-    timeout: 15m
-    retries: 2
-    steps:
-      - name: deploy
-        run: helm upgrade --install {{.Component}} {{.chart}}
+  name: platform-core
+spec:
+  version: 1.0.0
+  exports:
+    - composition: helm
+      path: compositions/helm.yaml
+    - composition: terraform
+      path: compositions/terraform.yaml
 ```
 
 ## Template inputs
 
-Job steps resolve against merged component data. In the built-in compositions, common template values include:
+Job steps still resolve against merged component data. In the built-in examples, common template values include:
 
 - `.Component`
-- merged input fields such as `.chart` or `.namespacePrefix`
+- merged input fields such as `.chart`, `.namespacePrefix`, or `.workspace`
 
 Keep templates simple and deterministic. If the same input is required across many components, express it as schema or job defaults instead of repeating it in every component manifest.
 
@@ -80,3 +97,5 @@ Steps can declare:
 - `onFailure`
 
 The compiler resolves those fields into the plan artifact, and the runtime consumes them later.
+
+The legacy `<type>/schema.yaml` plus `<type>/job.yaml` layout is still accepted through `--config-dir`, but new authoring should target packaged `Composition` documents.

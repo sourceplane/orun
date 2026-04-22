@@ -28,7 +28,18 @@ type PlanExecution struct {
 
 // PlanSpec holds specification about the plan and its bindings
 type PlanSpec struct {
-	JobBindings map[string]string `json:"jobBindings,omitempty" yaml:"jobBindings,omitempty"` // model -> JobRegistry name mapping
+	JobBindings        map[string]string         `json:"jobBindings,omitempty" yaml:"jobBindings,omitempty"`                     // model -> JobRegistry name mapping
+	CompositionSources []ResolvedCompositionSource `json:"compositionSources,omitempty" yaml:"compositionSources,omitempty"`
+}
+
+// ResolvedCompositionSource records which sources were used to compile the plan.
+type ResolvedCompositionSource struct {
+	Name           string   `json:"name" yaml:"name"`
+	Kind           string   `json:"kind" yaml:"kind"`
+	Ref            string   `json:"ref,omitempty" yaml:"ref,omitempty"`
+	Path           string   `json:"path,omitempty" yaml:"path,omitempty"`
+	ResolvedDigest string   `json:"resolvedDigest" yaml:"resolvedDigest"`
+	Exports        []string `json:"exports,omitempty" yaml:"exports,omitempty"`
 }
 
 // PlanJob is the execution unit in the final plan

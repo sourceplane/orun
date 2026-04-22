@@ -1,0 +1,18 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: CompositionPackage
+metadata:
+  name: platform-core
+  description: Core packaged compositions used by the repository examples
+spec:
+  version: 1.0.0
+  gluon:
+    minVersion: ">=0.0.0"
+  exports:
+    - composition: charts
+      path: compositions/charts.yaml
+    - composition: helm
+      path: compositions/helm.yaml
+    - composition: helmCommon
+      path: compositions/helmCommon.yaml
+    - composition: terraform
+      path: compositions/terraform.yaml

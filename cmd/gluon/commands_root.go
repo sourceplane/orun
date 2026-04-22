@@ -31,6 +31,8 @@ var (
 	changedFiles []string
 	uncommitted  bool
 	untracked    bool
+	compositionPackageRoot   string
+	compositionPackageOutput string
 )
 
 var rootCmd = &cobra.Command{
@@ -42,8 +44,6 @@ var rootCmd = &cobra.Command{
 		if commandNeedsConfig(cmd) && configDir == "" {
 			if envConfigDir := configDirEnvValue(); envConfigDir != "" {
 				configDir = envConfigDir
-			} else {
-				fmt.Fprintf(os.Stderr, "⚠ warning: --config-dir not set and %s is empty; commands that need compositions may fail\n", configDirEnvVar)
 			}
 		}
 		return nil
