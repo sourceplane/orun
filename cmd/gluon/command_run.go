@@ -65,6 +65,26 @@ func registerRunCommand(root *cobra.Command) {
 	_ = runCmd.Flags().MarkDeprecated("job-id", "use --job instead")
 }
 
+// resolveEffectiveWorkDir returns the working directory to use for the runner.
+// When no explicit --workdir override is set, it prefers intentRootDir (the
+// project root where intent.yaml lives) over "." so that component-relative
+// paths in the plan resolve correctly regardless of where the CLI is invoked.
+func resolveEffectiveWorkDir(useOverride bool, workDir, intentRootDir string) string {
+	if useOverride {
+		return workDir
+	}
+	if workDir != "." {
+		return workDir
+	}
+	if intentRootDir != "" {
+		return intentRootDir
+	}
+	if abs, err := filepath.Abs(workDir); err == nil {
+		return abs
+	}
+	return workDir
+}
+
 func runPlan() error {
 	if runGHACompat && executor.NormalizeRunnerName(runRunner) != "" && executor.NormalizeRunnerName(runRunner) != "github-actions" {
 		return fmt.Errorf("--gha cannot be combined with --runner %q", runRunner)
@@ -99,6 +119,7 @@ func runPlan() error {
 			runWorkDir = workspace
 		}
 	}
+	runWorkDir = resolveEffectiveWorkDir(runUseWorkDirOverride, runWorkDir, intentRoot)
 
 	// Resolve execution ID
 	execID := runExecID

@@ -72,3 +72,33 @@ func TestRunCommandRegistersVerboseFlag(t *testing.T) {
 		t.Fatal("expected run command to register --verbose")
 	}
 }
+
+func TestResolveEffectiveWorkDirUsesIntentRoot(t *testing.T) {
+	got := resolveEffectiveWorkDir(false, ".", "/abs/project/root")
+	if got != "/abs/project/root" {
+		t.Fatalf("resolveEffectiveWorkDir() = %q, want /abs/project/root", got)
+	}
+}
+
+func TestResolveEffectiveWorkDirHonorsOverride(t *testing.T) {
+	got := resolveEffectiveWorkDir(true, "/explicit/dir", "/abs/project/root")
+	if got != "/explicit/dir" {
+		t.Fatalf("resolveEffectiveWorkDir() = %q, want /explicit/dir", got)
+	}
+}
+
+func TestResolveEffectiveWorkDirFallsBackToAbsCWD(t *testing.T) {
+	got := resolveEffectiveWorkDir(false, ".", "")
+	if got == "." {
+		t.Fatal("resolveEffectiveWorkDir() should resolve '.' to an absolute path when no intentRoot")
+	}
+}
+
+func TestResolveEffectiveWorkDirPreservesNonDotWorkDir(t *testing.T) {
+	// When workdir was already changed (e.g. from GITHUB_WORKSPACE) before calling,
+	// it should be preserved even without an explicit override flag.
+	got := resolveEffectiveWorkDir(false, "/github/workspace", "/abs/project/root")
+	if got != "/github/workspace" {
+		t.Fatalf("resolveEffectiveWorkDir() = %q, want /github/workspace", got)
+	}
+}
