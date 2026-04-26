@@ -11,6 +11,7 @@ import (
 	"github.com/sourceplane/gluon/internal/model"
 	"github.com/sourceplane/gluon/internal/runner"
 	"github.com/sourceplane/gluon/internal/state"
+	"github.com/sourceplane/gluon/internal/ui"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -120,6 +121,24 @@ func runPlan() error {
 	concurrency := plan.Execution.Concurrency
 	if runConcurrency > 0 {
 		concurrency = runConcurrency
+	}
+
+	// Context-aware scoping: auto-detect component from CWD
+	if len(runComponent) == 0 && !allFlag && intentRoot != "" {
+		if scopeIntent, _, loadErr := loadResolvedIntentFile(intentFile); loadErr == nil {
+			scope, _ := ResolveScope(scopeIntent, runComponent, allFlag, runJSON)
+			if scope != nil && scope.WasAutoScoped {
+				runComponent = scope.ScopedComponents
+
+				if plan.Metadata.Scope != nil && !sameStringSlice(scope.ScopedComponents, plan.Metadata.Scope.Components) {
+					color := ui.ColorEnabledForWriter(os.Stderr)
+					fmt.Fprintf(os.Stderr, "%s plan was generated for [%s] but current scope is [%s]\n",
+						ui.Yellow(color, "warning:"),
+						strings.Join(plan.Metadata.Scope.Components, ", "),
+						strings.Join(scope.ScopedComponents, ", "))
+				}
+			}
+		}
 	}
 
 	r := runner.NewRunner(

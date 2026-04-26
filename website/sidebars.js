@@ -10,6 +10,7 @@ const sidebars = {
         'concepts/plan-dag',
         'concepts/execution-model',
         'concepts/change-detection',
+        'concepts/context-discovery',
       ],
     },
     {

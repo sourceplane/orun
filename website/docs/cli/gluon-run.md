@@ -4,6 +4,8 @@ title: gluon run
 
 `gluon run` executes the jobs and steps from a compiled plan. **Execution is the default** — add `--dry-run` to preview without running.
 
+When run from inside a component directory, `gluon run` automatically scopes execution to that component and its transitive dependencies. Use `--all` to run all jobs.
+
 ## Usage
 
 ```bash
@@ -75,6 +77,12 @@ gluon run --env staging
 gluon run --component api-edge-worker
 ```
 
+Run all jobs when inside a component directory (override auto-scoping):
+
+```bash
+gluon run --all
+```
+
 Override plan concurrency:
 
 ```bash
@@ -103,6 +111,7 @@ gluon run --exec-id ci-run-${GITHUB_RUN_ID}
 | `--concurrency` | Override plan concurrency (0 uses the plan's value) |
 | `--component` | Filter jobs to a specific component (repeatable) |
 | `--env`, `-e` | Filter jobs to a specific environment |
+| `--all` | Disable CWD-based component scoping; run all jobs |
 | `--json` | Output execution summary in JSON format |
 
 :::note Deprecated flag
@@ -149,3 +158,15 @@ If a `.gluon-state.json` file exists from a pre-v0.10 installation, `gluon run` 
 | `./plan.json` | Explicit file path |
 
 When no plan exists yet, `run` automatically generates one from `intent.yaml` in the current directory before executing.
+
+## Scope mismatch warning
+
+When a plan was generated with CWD-based scoping (e.g., from the `api` component directory) and you run it from a different component directory, `gluon run` prints a warning:
+
+```
+warning: plan was generated for [api, common-services] but current scope is [web, common-services]
+```
+
+To avoid the mismatch, either regenerate the plan from your current directory or use `--all`.
+
+See [context-aware discovery](../concepts/context-discovery.md) for full details on auto-scoping behavior.

@@ -15,7 +15,6 @@ var componentCmd = &cobra.Command{
 func registerComponentCommand(root *cobra.Command) {
 	root.AddCommand(componentCmd)
 
-	componentCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
 	componentCmd.Flags().BoolVar(&changedOnly, "changed", false, "Show only changed components (requires git)")
 	componentCmd.Flags().StringVar(&baseBranch, "base", "", "Base ref for changed detection (default: main)")
 	componentCmd.Flags().StringVar(&headRef, "head", "", "Head ref for changed detection (usually HEAD)")

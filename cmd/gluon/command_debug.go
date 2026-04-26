@@ -12,6 +12,4 @@ var debugCmd = &cobra.Command{
 
 func registerDebugCommand(root *cobra.Command) {
 	root.AddCommand(debugCmd)
-
-	debugCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
 }

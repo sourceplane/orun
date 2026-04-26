@@ -68,12 +68,8 @@ func registerCompositionsCommand(root *cobra.Command) {
 	compositionsPackageCmd.AddCommand(compositionsPackageBuildCmd)
 	compositionsPackageCmd.AddCommand(compositionsPackagePushCmd)
 
-	compositionsCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
 	compositionsListCmd.Flags().BoolVarP(&longFormat, "long", "l", false, "Show detailed information")
 	compositionsListCmd.Flags().BoolVarP(&expandJobs, "expand-jobs", "e", false, "Show all job steps and details (with -l)")
-	compositionsListCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
-	compositionsPullCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
-	compositionsLockCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
 	compositionsPackageBuildCmd.Flags().StringVar(&compositionPackageRoot, "root", "", "Composition package root directory")
 	compositionsPackageBuildCmd.Flags().StringVarP(&compositionPackageOutput, "output", "o", "", "Output .tgz archive path")
 

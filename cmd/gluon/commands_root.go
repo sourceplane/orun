@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"github.com/sourceplane/gluon/internal/discovery"
 	"github.com/spf13/cobra"
 )
 
@@ -22,6 +24,8 @@ var version = "dev"
 
 var (
 	intentFile   string
+	intentRoot   string
+	allFlag      bool
 	configDir    string
 	outputFile   string
 	outputFormat string
@@ -51,6 +55,27 @@ var rootCmd = &cobra.Command{
 				configDir = envConfigDir
 			}
 		}
+
+		// Intent auto-discovery: walk up directory tree to find intent.yaml
+		if !cmd.Flags().Changed("intent") && commandUsesIntent(cmd) {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return nil
+			}
+			foundPath, foundDir, err := discovery.FindIntentFile(cwd)
+			if err == nil {
+				intentFile = foundPath
+				intentRoot = foundDir
+			}
+		} else if cmd.Flags().Changed("intent") {
+			intentRoot = filepath.Dir(intentFile)
+			if !filepath.IsAbs(intentRoot) {
+				if cwd, err := os.Getwd(); err == nil {
+					intentRoot = filepath.Join(cwd, intentRoot)
+				}
+			}
+		}
+
 		return nil
 	},
 }
@@ -90,9 +115,25 @@ func commandNeedsConfig(cmd *cobra.Command) bool {
 	return false
 }
 
+func commandUsesIntent(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	switch cmd.Name() {
+	case "plan", "run", "validate", "debug", "component", "compositions", "get", "describe", "status", "logs":
+		return true
+	}
+	if parent := cmd.Parent(); parent != nil {
+		return commandUsesIntent(parent)
+	}
+	return false
+}
+
 func init() {
 	rootCmd.SetVersionTemplate(cliName + " version {{.Version}}\n")
+	rootCmd.PersistentFlags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path (auto-discovered if not set)")
 	rootCmd.PersistentFlags().StringVarP(&configDir, "config-dir", "c", "", fmt.Sprintf("Config directory for JobRegistry definitions (or set %s; use * or ** for recursive scanning)", configDirEnvVar))
+	rootCmd.PersistentFlags().BoolVar(&allFlag, "all", false, "Disable CWD-based component scoping; process all components")
 
 	registerPlanCommand(rootCmd)
 	registerRunCommand(rootCmd)

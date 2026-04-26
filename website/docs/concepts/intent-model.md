@@ -57,6 +57,8 @@ environments:
 
 Discovery roots are scanned recursively for `component.yaml` files relative to the location of the intent file.
 
+`intent.yaml` also serves as the workspace root marker for [context-aware discovery](./context-discovery.md). When you run `gluon` from any subdirectory in your repo, it walks up the directory tree to find `intent.yaml` and uses its location to resolve all relative paths.
+
 ### `groups`
 
 Groups define platform-owned defaults and policy domains. They are the right place for non-negotiable constraints and common defaults that should apply across many components.

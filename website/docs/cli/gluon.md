@@ -25,17 +25,21 @@ The root `gluon` command is the entry point for planning, inspection, and execut
 
 | Flag | Meaning |
 | --- | --- |
+| `--intent`, `-i` | Intent file path (auto-discovered from CWD if not set) |
 | `--config-dir`, `-c` | Legacy fallback path or glob for folder-shaped compositions |
+| `--all` | Disable CWD-based component scoping; process all components |
 | `--version` | Print the CLI version |
 | `--help` | Show command help |
+
+`--intent` auto-discovers `intent.yaml` by walking up the directory tree to the git root. Pass it explicitly to override.
 
 `--config-dir` can also be set through `GLUON_CONFIG_DIR`, but packaged composition sources declared in the intent are the recommended path.
 
 ## Typical flow
 
 ```bash
-# Plan
-gluon plan --intent intent.yaml
+# Plan from anywhere in the repo
+gluon plan
 
 # Inspect what was planned
 gluon get jobs
@@ -48,6 +52,6 @@ gluon run
 gluon logs
 ```
 
-The plan is stored in `.gluon/plans/` and resolved automatically by `gluon run`. You can also pass an explicit `--plan` reference.
+When you run commands from inside a component directory, `gluon` automatically scopes to that component and its dependencies. Use `--all` to override scoping. See [context-aware discovery](../concepts/context-discovery.md) for details.
 
 Read the command-specific pages next if you need examples and flag details.

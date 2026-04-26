@@ -16,7 +16,7 @@ title: Environment variables
 | `GITHUB_ACTIONS` | Causes `run` to auto-select the GitHub Actions backend when set to `true` |
 | `GITHUB_WORKSPACE` | Used as the default workdir for the GitHub Actions backend when `--workdir` is not set |
 
-`NO_COLOR` (the standard) and `CLICOLOR=0` are also honored for disabling color output.
+`NO_COLOR` (the standard) and `CLICOLOR=0` are also honored for disabling color output. When color is disabled, the context banner printed during auto-scoping uses plain text without ANSI codes.
 
 ## Variables injected during execution
 

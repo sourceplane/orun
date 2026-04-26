@@ -40,6 +40,8 @@ List jobs from the latest (or named) plan, grouped by component and environment:
 gluon get jobs
 ```
 
+When run from inside a component directory, the job list is automatically scoped to that component and its dependencies. Use `--all` to see all jobs.
+
 Default view (tree):
 
 ```
@@ -124,6 +126,9 @@ staging        prefix=stg-
 | `--output`, `-o` | Output format: `json`, `yaml`, or `wide` |
 | `--plan` | Plan reference for `get jobs` (name, checksum prefix, or `latest`) |
 | `--view` | View mode for `get jobs`: `tree`, `compact`, or `table` |
-| `--intent`, `-i` | Intent file for `get components` and `get environments` |
+| `--intent`, `-i` | Intent file for `get components` and `get environments` (auto-discovered if not set) |
+| `--all` | Disable CWD-based scoping for `get jobs` |
 
 All subcommands support `-o json` for machine-readable output.
+
+See [context-aware discovery](../concepts/context-discovery.md) for details on automatic scoping.

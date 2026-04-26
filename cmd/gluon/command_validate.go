@@ -13,6 +13,5 @@ var validateCmd = &cobra.Command{
 func registerValidateCommand(root *cobra.Command) {
 	root.AddCommand(validateCmd)
 
-	validateCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
 	validateCmd.Flags().BoolVar(&debugMode, "debug", false, "Enable debug output")
 }

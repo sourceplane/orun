@@ -24,6 +24,12 @@ func generatePlan() error {
 		return fmt.Errorf("failed to load intent: %w", err)
 	}
 
+	// Context-aware scoping: auto-detect component from CWD
+	scope, _ := ResolveScope(intent, planComponents, allFlag, false)
+	if scope != nil && scope.WasAutoScoped {
+		planComponents = scope.ScopedComponents
+	}
+
 	fmt.Println("□ Loading compositions...")
 	compositionRegistry, err := loader.LoadCompositionsForIntent(intent, intentFile, configDir)
 	if err != nil {
@@ -203,6 +209,13 @@ func generatePlan() error {
 	renderer := render.NewRenderer()
 	plan := renderer.RenderPlanWithOrder(intent.Metadata, jobInstances, jobBindings, sorted)
 	plan.Spec.CompositionSources = compositionRegistry.Sources
+
+	if scope != nil && scope.WasAutoScoped {
+		plan.Metadata.Scope = &model.PlanScope{
+			DetectedComponent: scope.DetectedComponent,
+			Components:        scope.ScopedComponents,
+		}
+	}
 
 	if debugMode {
 		fmt.Println("\n" + renderer.DebugDump(plan))

@@ -12,11 +12,18 @@ type Plan struct {
 
 // PlanMetadata captures immutable plan generation details.
 type PlanMetadata struct {
-	Name        string `json:"name" yaml:"name"`
-	Description string `json:"description,omitempty" yaml:"description,omitempty"`
-	Namespace   string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	GeneratedAt string `json:"generatedAt,omitempty" yaml:"generatedAt,omitempty"`
-	Checksum    string `json:"checksum,omitempty" yaml:"checksum,omitempty"`
+	Name        string     `json:"name" yaml:"name"`
+	Description string     `json:"description,omitempty" yaml:"description,omitempty"`
+	Namespace   string     `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	GeneratedAt string     `json:"generatedAt,omitempty" yaml:"generatedAt,omitempty"`
+	Checksum    string     `json:"checksum,omitempty" yaml:"checksum,omitempty"`
+	Scope       *PlanScope `json:"scope,omitempty" yaml:"scope,omitempty"`
+}
+
+// PlanScope records the component scoping applied when the plan was generated.
+type PlanScope struct {
+	DetectedComponent string   `json:"detectedComponent" yaml:"detectedComponent"`
+	Components        []string `json:"components" yaml:"components"`
 }
 
 // PlanExecution defines runtime behavior for plan execution.

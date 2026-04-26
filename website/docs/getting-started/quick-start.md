@@ -78,6 +78,15 @@ Swap `local` for `docker` when you want containerized execution, or use `--gha` 
 
 `status` shows a compact execution summary. `get jobs` shows the grouped job tree with status icons. `logs` streams the raw step output.
 
+## 10. Run from a component subdirectory
+
+```bash
+cd examples/services/web-app/
+./gluon plan
+```
+
+`gluon` walks up the directory tree, finds `intent.yaml`, detects that you are in the `web-app` component, and generates a scoped plan containing only `web-app` and its dependencies. Use `--all` to generate a full plan instead.
+
 ## What happened
 
 1. `compositions lock` resolved the declared composition sources and wrote a reproducible lock file beside the intent.
@@ -89,6 +98,7 @@ Swap `local` for `docker` when you want containerized execution, or use `--gha` 
 
 ## Next steps
 
-1. Read [execution model](../concepts/execution-model.md) to understand dry-run, concurrency, retries, phases, and execution records.
-2. Explore [GitHub Actions](../examples/run-github-actions.md) and [Docker](../examples/run-with-docker.md) runtime examples.
-3. Use `gluon get`, `gluon status`, and `gluon logs` to inspect and debug ongoing or past runs.
+1. Read [context-aware discovery](../concepts/context-discovery.md) to learn how `gluon` auto-discovers the intent file and scopes to your current component.
+2. Read [execution model](../concepts/execution-model.md) to understand dry-run, concurrency, retries, phases, and execution records.
+3. Explore [GitHub Actions](../examples/run-github-actions.md) and [Docker](../examples/run-with-docker.md) runtime examples.
+4. Use `gluon get`, `gluon status`, and `gluon logs` to inspect and debug ongoing or past runs.

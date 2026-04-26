@@ -18,7 +18,6 @@ var planCmd = &cobra.Command{
 func registerPlanCommand(root *cobra.Command) {
 	root.AddCommand(planCmd)
 
-	planCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
 	planCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output plan file path (default: .gluon/plans/)")
 	planCmd.Flags().StringVarP(&outputFormat, "format", "f", "json", "Output format (json/yaml)")
 	planCmd.Flags().BoolVar(&debugMode, "debug", false, "Enable debug output")

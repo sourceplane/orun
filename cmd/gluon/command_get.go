@@ -161,6 +161,26 @@ func getJobs() error {
 		return err
 	}
 
+	// Context-aware scoping: filter jobs by detected component
+	if !allFlag && intentRoot != "" {
+		if scopeIntent, _, loadErr := loadResolvedIntentFile(intentFile); loadErr == nil {
+			scope, _ := ResolveScope(scopeIntent, nil, allFlag, getOutputFormat == "json")
+			if scope != nil && scope.WasAutoScoped {
+				scopeSet := make(map[string]bool, len(scope.ScopedComponents))
+				for _, c := range scope.ScopedComponents {
+					scopeSet[c] = true
+				}
+				var filteredJobs []model.PlanJob
+				for _, job := range plan.Jobs {
+					if scopeSet[job.Component] {
+						filteredJobs = append(filteredJobs, job)
+					}
+				}
+				plan.Jobs = filteredJobs
+			}
+		}
+	}
+
 	var execState *state.ExecState
 	execID, resolveErr := store.ResolveExecID("latest")
 	if resolveErr == nil {
