@@ -115,6 +115,16 @@ func commandNeedsConfig(cmd *cobra.Command) bool {
 	return false
 }
 
+// storeDir returns the directory to use for the .gluon/ state store.
+// When an intent file has been located, the store lives at the intent root
+// (i.e. the repo root), not at the current working directory.
+func storeDir() string {
+	if intentRoot != "" {
+		return intentRoot
+	}
+	return "."
+}
+
 func commandUsesIntent(cmd *cobra.Command) bool {
 	if cmd == nil {
 		return false

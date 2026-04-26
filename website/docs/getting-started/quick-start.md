@@ -82,10 +82,10 @@ Swap `local` for `docker` when you want containerized execution, or use `--gha` 
 
 ```bash
 cd examples/services/web-app/
-./gluon plan
+./gluon run
 ```
 
-`gluon` walks up the directory tree, finds `intent.yaml`, detects that you are in the `web-app` component, and generates a scoped plan containing only `web-app` and its dependencies. Use `--all` to generate a full plan instead.
+`gluon` walks up the directory tree, finds `intent.yaml`, and detects that you are in the `web-app` component (via `component.yaml`). `run` automatically filters to `web-app` and its dependencies — equivalent to passing `--component=web-app`. Plans are always global; only execution is scoped. Use `--all` to run all jobs.
 
 ## What happened
 

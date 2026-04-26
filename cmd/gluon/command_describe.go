@@ -89,7 +89,7 @@ func registerDescribeCommand(root *cobra.Command) {
 }
 
 func describeRun(ref string) error {
-	store := state.NewStore(".")
+	store := state.NewStore(storeDir())
 	color := ui.ColorEnabledForWriter(os.Stdout)
 
 	execID, err := store.ResolveExecID(ref)
@@ -144,7 +144,7 @@ func describeRun(ref string) error {
 }
 
 func describePlan(ref string) error {
-	store := state.NewStore(".")
+	store := state.NewStore(storeDir())
 	color := ui.ColorEnabledForWriter(os.Stdout)
 
 	path, err := store.ResolvePlanRef(ref)
@@ -193,7 +193,7 @@ func describePlan(ref string) error {
 }
 
 func describeJob(jobRef string) error {
-	store := state.NewStore(".")
+	store := state.NewStore(storeDir())
 	color := ui.ColorEnabledForWriter(os.Stdout)
 
 	// Load latest plan to find job details

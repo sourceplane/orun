@@ -33,7 +33,7 @@ func registerGCCommand(root *cobra.Command) {
 }
 
 func runGC() error {
-	store := state.NewStore(".")
+	store := state.NewStore(storeDir())
 
 	maxCount := gcMaxCount
 	maxDays := gcMaxDays

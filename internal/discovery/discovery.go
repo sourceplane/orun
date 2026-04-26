@@ -5,10 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
-
-	"github.com/sourceplane/gluon/internal/model"
 )
 
 // FindIntentFile walks from startDir upward looking for intent.yaml (or intent.yml).
@@ -48,61 +45,99 @@ func FindIntentFile(startDir string) (intentPath string, intentDir string, err e
 	return "", "", fmt.Errorf("no intent.yaml found between %s and %s", absStart, ceiling)
 }
 
-// DetectComponentContext determines which component the user is working in
-// based on their current working directory. It compares the relative CWD path
-// against known component paths and picks the longest matching prefix.
-// Components with path "./" are skipped as too broad.
-// Returns empty string (not an error) when no component matches.
-func DetectComponentContext(cwd string, intentDir string, components []model.Component) (string, error) {
-	absCwd, err := filepath.Abs(cwd)
+// FindComponentFile walks from startDir upward looking for component.yaml (or component.yml).
+// It stops at the git repository root or filesystem root.
+// Returns the component name (from metadata.name) and absolute path to the component file.
+// Returns empty strings with nil error when no component.yaml is found (not an error condition).
+func FindComponentFile(startDir string) (componentName string, componentFilePath string, err error) {
+	absStart, err := filepath.Abs(startDir)
 	if err != nil {
-		return "", fmt.Errorf("failed to resolve absolute cwd: %w", err)
+		return "", "", fmt.Errorf("failed to resolve absolute path: %w", err)
 	}
-	absIntentDir, err := filepath.Abs(intentDir)
+	if resolved, evalErr := filepath.EvalSymlinks(absStart); evalErr == nil {
+		absStart = resolved
+	}
+
+	ceiling := gitRootDir(absStart)
+
+	dir := absStart
+	for {
+		for _, name := range []string{"component.yaml", "component.yml"} {
+			candidate := filepath.Join(dir, name)
+			info, statErr := os.Stat(candidate)
+			if statErr != nil || info.IsDir() {
+				continue
+			}
+			cName, readErr := readComponentName(candidate)
+			if readErr != nil || cName == "" {
+				continue
+			}
+			return cName, candidate, nil
+		}
+
+		if dir == ceiling {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+
+	return "", "", nil
+}
+
+// readComponentName reads the metadata.name field from a component.yaml file.
+// Uses minimal YAML parsing with just the fields we need.
+func readComponentName(filePath string) (string, error) {
+	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return "", fmt.Errorf("failed to resolve absolute intent dir: %w", err)
+		return "", err
 	}
 
-	relCwd, err := filepath.Rel(absIntentDir, absCwd)
-	if err != nil {
-		return "", nil
+	// Minimal struct to decode only the metadata.name field.
+	type meta struct {
+		Name string `yaml:"name"`
 	}
-	relCwd = filepath.ToSlash(relCwd)
-
-	if strings.HasPrefix(relCwd, "..") {
-		return "", nil
+	type manifest struct {
+		Metadata meta `yaml:"metadata"`
 	}
 
-	type candidate struct {
-		name string
-		path string
-	}
-	var candidates []candidate
+	// Use line-by-line parsing to avoid importing yaml here, or use encoding/json indirection.
+	// Instead, use simple string scanning for the metadata.name pattern.
+	// This avoids adding a yaml dependency to the discovery package.
+	name := extractMetadataName(string(data))
+	return name, nil
+}
 
-	for _, comp := range components {
-		p := filepath.ToSlash(filepath.Clean(comp.Path))
-		if p == "" || p == "." || p == "./" {
+// extractMetadataName extracts `metadata.name` from a YAML document via simple line scanning.
+// Handles the common case: a top-level "metadata:" key followed by "  name: <value>".
+func extractMetadataName(content string) string {
+	inMetadata := false
+	for _, line := range strings.Split(content, "\n") {
+		stripped := strings.TrimRight(line, "\r")
+		if stripped == "metadata:" {
+			inMetadata = true
 			continue
 		}
-		p = strings.TrimSuffix(p, "/")
-
-		if relCwd == p || strings.HasPrefix(relCwd, p+"/") {
-			candidates = append(candidates, candidate{name: comp.Name, path: p})
+		if inMetadata {
+			// Any non-indented line other than "metadata:" ends the block.
+			if len(stripped) > 0 && stripped[0] != ' ' && stripped[0] != '\t' {
+				inMetadata = false
+				continue
+			}
+			trimmed := strings.TrimSpace(stripped)
+			if strings.HasPrefix(trimmed, "name:") {
+				val := strings.TrimSpace(strings.TrimPrefix(trimmed, "name:"))
+				val = strings.Trim(val, `"'`)
+				if val != "" {
+					return val
+				}
+			}
 		}
 	}
-
-	if len(candidates) == 0 {
-		return "", nil
-	}
-
-	sort.Slice(candidates, func(i, j int) bool {
-		if len(candidates[i].path) != len(candidates[j].path) {
-			return len(candidates[i].path) > len(candidates[j].path)
-		}
-		return candidates[i].name < candidates[j].name
-	})
-
-	return candidates[0].name, nil
+	return ""
 }
 
 func gitRootDir(startDir string) string {

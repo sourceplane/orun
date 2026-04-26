@@ -45,7 +45,8 @@ func ResolveScope(
 		return result, nil
 	}
 
-	componentName, err := discovery.DetectComponentContext(cwd, intentRoot, intent.Components)
+	// Walk upward from CWD looking for component.yaml on disk.
+	componentName, _, err := discovery.FindComponentFile(cwd)
 	if err != nil || componentName == "" {
 		return result, nil
 	}

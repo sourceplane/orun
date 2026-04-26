@@ -2,7 +2,7 @@
 title: Context-aware discovery
 ---
 
-`gluon` can automatically discover the intent file and detect which component you are working in based on your current directory. This means you can run `gluon plan` or `gluon run` from inside any component subdirectory without passing `--intent` or `--component`.
+`gluon` automatically discovers the intent file and detects which component you are working in based on your current directory. This means you can run `gluon` commands from anywhere in the repository without passing `--intent` or `--component`.
 
 ## Intent discovery
 
@@ -20,32 +20,33 @@ my-repo/
         └── component.yaml
 ```
 
-Running `gluon plan` from `services/api/src/` finds `intent.yaml` at the repo root automatically.
+Running any `gluon` command from `services/api/src/` finds `intent.yaml` at the repo root automatically.
 
-If no intent file is found between the current directory and the git root, the command falls back to looking for `intent.yaml` in the current directory (the original behavior).
+The `.gluon/` state directory (plans, executions, logs) is always created at the intent root — never at your current working directory.
 
 ## Component context detection
 
-Once the intent is discovered, `gluon` determines which component you are working in by comparing your current directory against the resolved component paths. It picks the component whose path is the longest prefix of your relative working directory.
+`gluon` detects which component you are working in by walking **upward** from your current directory looking for a `component.yaml` file on disk. The first `component.yaml` found is used; its `metadata.name` field gives the component name.
 
-In the example above, running from `services/api/src/` matches the `api` component (path: `services/api`).
+In the example above, running from `services/api/src/` finds `services/api/component.yaml` and detects component `api`.
 
-Components with path `"./"` (the repo root) are skipped during context detection because they are too broad to be meaningful.
+If no `component.yaml` is found between CWD and the repo root, no component context is active and all commands behave as if run from the repo root.
 
 ## Automatic scoping
 
-When a component is detected, `gluon plan`, `gluon run`, and `gluon get jobs` automatically scope to:
+Component context detection affects **runtime** behavior only — it never changes what is compiled into the plan.
 
-1. The detected component
-2. All of its **transitive dependencies**
+| Command | Effect when inside a component directory |
+| --- | --- |
+| `gluon plan` | No change — always generates a global plan for all components |
+| `gluon run` | Equivalent to passing `--component=<detected>` |
+| `gluon get jobs` | Filters displayed jobs to the detected component + its dependencies |
 
-Dependents (components that depend on yours) are **not** included by default. When you are working on `api`, you want to make `api` work — downstream components like `web` will pick it up in their own context.
-
-The dependency resolution uses the same `DependencyResolver.ResolveComponentSet` already used by `--changed`.
+When `gluon run` or `gluon get jobs` detects a component context, it resolves the **transitive dependency set** (the detected component plus all components it depends on) and filters to that set.
 
 ### Context banner
 
-When auto-scoped, `gluon` prints a context banner to stderr before other output:
+When auto-scoping is active, `gluon` prints a context banner to stderr before other output:
 
 ```
 context: auto-scoped to component api (+ 2 dependencies: common-services, shared-config)
@@ -58,49 +59,9 @@ The banner is suppressed when output is `--json` or `-o json`.
 
 | Override | Behavior |
 | --- | --- |
-| `--all` | Disables all CWD-based scoping; processes every component |
+| `--all` | Disables CWD-based scoping for `run` and `get jobs`; shows/runs all components |
 | `--component <name>` | Explicit component filter always wins over auto-detection |
 | `--intent <path>` | Skips intent discovery; uses the specified path |
-
-These flags work on all commands that support them.
-
-## Which commands are scoped
-
-| Command | Scoped? | Notes |
-| --- | --- | --- |
-| `gluon plan` | Yes | Generates a scoped plan with scope metadata |
-| `gluon run` | Yes | Filters jobs to scoped components; warns on scope mismatch |
-| `gluon get jobs` | Yes | Filters displayed jobs to scoped components |
-| `gluon validate` | **No** | Always validates the full intent — scoping validation would create false confidence |
-| `gluon get components` | No | Lists all components from intent |
-| `gluon get environments` | No | Lists all environments from intent |
-
-## Scope metadata in plans
-
-When a plan is generated with auto-scoping, the scope is recorded in the plan metadata:
-
-```json
-{
-  "metadata": {
-    "name": "my-project",
-    "checksum": "sha256-...",
-    "scope": {
-      "detectedComponent": "api",
-      "components": ["api", "common-services"]
-    }
-  }
-}
-```
-
-When `gluon run` detects a different scope than what the plan was generated for, it prints a warning:
-
-```
-warning: plan was generated for [api, common-services] but current scope is [web, common-services]
-```
-
-## Multiple components at the same path
-
-If two components share the exact same path, `gluon` picks the one with the longest matching prefix. If they are identical, the first alphabetically is chosen. In practice, well-structured repos rarely have overlapping component paths.
 
 ## End-to-end example
 
@@ -112,13 +73,17 @@ gluon plan
 # cd into a component
 cd services/api/
 
-# Auto-scoped plan
+# Plan is still global — always includes all components
 gluon plan
+# ✓ Plan generated with 38 jobs
+
+# run auto-filters to api and its dependencies
+gluon run
 # context: auto-scoped to component api (+ 1 dependency: common-services)
 # hint: pass --all to include all components
-# ✓ Plan generated with 4 jobs
+# ✓ Run complete
 
-# See only scoped jobs
+# get jobs auto-filters to scoped components
 gluon get jobs
 # context: auto-scoped to component api (+ 1 dependency: common-services)
 # PLAN: my-project (a1b2c3d) · 4 jobs
@@ -128,8 +93,7 @@ gluon get jobs
 gluon get jobs --all
 # PLAN: my-project (a1b2c3d) · 38 jobs
 
-# Run the scoped plan
-gluon run
-# context: auto-scoped to component api (+ 1 dependency: common-services)
+# Run the full plan regardless of CWD
+gluon run --all
 # ✓ Run complete
 ```

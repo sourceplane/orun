@@ -38,7 +38,7 @@ func registerStatusCommand(root *cobra.Command) {
 }
 
 func showStatus() error {
-	store := state.NewStore(".")
+	store := state.NewStore(storeDir())
 	color := ui.ColorEnabledForWriter(os.Stdout)
 
 	if statusAll {

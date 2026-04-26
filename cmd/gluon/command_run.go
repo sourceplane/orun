@@ -70,10 +70,10 @@ func runPlan() error {
 		return fmt.Errorf("--gha cannot be combined with --runner %q", runRunner)
 	}
 
-	store := state.NewStore(runWorkDir)
+	store := state.NewStore(storeDir())
 
 	// Migrate legacy state if present
-	if migrated, _ := store.MigrateLegacyState(runWorkDir); migrated {
+	if migrated, _ := store.MigrateLegacyState(storeDir()); migrated {
 		fmt.Println("✓ Migrated legacy .gluon-state.json to .gluon/executions/")
 	}
 

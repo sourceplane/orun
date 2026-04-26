@@ -80,7 +80,7 @@ func registerGetCommand(root *cobra.Command) {
 }
 
 func getPlans() error {
-	store := state.NewStore(".")
+	store := state.NewStore(storeDir())
 	plans, err := store.ListPlans()
 	if err != nil {
 		return err
@@ -140,7 +140,7 @@ func getPlans() error {
 }
 
 func getJobs() error {
-	store := state.NewStore(".")
+	store := state.NewStore(storeDir())
 
 	ref := getPlanRef
 	if ref == "" {

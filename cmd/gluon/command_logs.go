@@ -42,7 +42,7 @@ func registerLogsCommand(root *cobra.Command) {
 }
 
 func showLogs() error {
-	store := state.NewStore(".")
+	store := state.NewStore(storeDir())
 
 	execID := logsExecID
 	if execID == "" {
