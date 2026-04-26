@@ -13,6 +13,9 @@ func ColorEnabledForWriter(w io.Writer) bool {
 	if strings.TrimSpace(os.Getenv("NO_COLOR")) != "" {
 		return false
 	}
+	if strings.TrimSpace(os.Getenv("GLUON_NO_COLOR")) != "" {
+		return false
+	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("CLICOLOR")), "0") {
 		return false
 	}

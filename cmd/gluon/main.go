@@ -13,6 +13,7 @@ import (
 	"github.com/sourceplane/gluon/internal/normalize"
 	"github.com/sourceplane/gluon/internal/planner"
 	"github.com/sourceplane/gluon/internal/render"
+	"github.com/sourceplane/gluon/internal/state"
 	"github.com/sourceplane/gluon/internal/ui"
 )
 
@@ -64,6 +65,43 @@ func generatePlan() error {
 	instances, err := expander.Expand()
 	if err != nil {
 		return fmt.Errorf("failed to expand intent: %w", err)
+	}
+
+	// Filter by --env flag
+	if environment != "" {
+		envFilters := parseCommaSeparated(environment)
+		filtered := make(map[string][]*model.ComponentInstance)
+		for envName, envInsts := range instances {
+			if matchesAnyFilter(envName, envFilters) {
+				filtered[envName] = envInsts
+			}
+		}
+		if len(filtered) == 0 {
+			return fmt.Errorf("no matching environments for filter: %s", environment)
+		}
+		instances = filtered
+	}
+
+	// Filter by --component flag
+	if len(planComponents) > 0 {
+		for envName, envInsts := range instances {
+			var filtered []*model.ComponentInstance
+			for _, inst := range envInsts {
+				if matchesAnyFilter(inst.ComponentName, planComponents) {
+					filtered = append(filtered, inst)
+				}
+			}
+			instances[envName] = filtered
+		}
+		// Remove empty environments
+		for envName, envInsts := range instances {
+			if len(envInsts) == 0 {
+				delete(instances, envName)
+			}
+		}
+		if len(instances) == 0 {
+			return fmt.Errorf("no matching components for filter: %s", strings.Join(planComponents, ", "))
+		}
 	}
 
 	// Filter instances if --changed flag is set
@@ -171,12 +209,36 @@ func generatePlan() error {
 	}
 
 	// Write plan to file
-	if err := renderer.WritePlan(plan, outputFile); err != nil {
-		return fmt.Errorf("failed to write plan: %w", err)
+	store := state.NewStore(".")
+	planID := state.PlanChecksumShort(plan)
+
+	if outputFile != "" {
+		// Explicit output path (backwards compat)
+		if err := renderer.WritePlan(plan, outputFile); err != nil {
+			return fmt.Errorf("failed to write plan: %w", err)
+		}
+		fmt.Printf("✓ Plan generated with %d jobs\n", len(plan.Jobs))
+		fmt.Printf("✓ Saved to: %s\n", outputFile)
+	} else {
+		// Default: store in .gluon/plans/
+		if err := store.SavePlan(plan, planName); err != nil {
+			return fmt.Errorf("failed to save plan: %w", err)
+		}
+		fmt.Printf("✓ Plan generated with %d jobs\n", len(plan.Jobs))
+		fmt.Printf("✓ Plan ID: %s\n", planID)
+		if planName != "" {
+			fmt.Printf("✓ Named: %s\n", planName)
+		}
 	}
 
-	fmt.Printf("✓ Plan generated with %d jobs\n", len(plan.Jobs))
-	fmt.Printf("✓ Saved to: %s\n", outputFile)
+	// Print actionable hints
+	color := ui.ColorEnabledForWriter(os.Stdout)
+	if planID != "" {
+		fmt.Printf("\n%s gluon run --plan %s\n", ui.Dim(color, "→"), planID)
+	}
+	if planName != "" {
+		fmt.Printf("%s gluon run --plan %s\n", ui.Dim(color, "→"), planName)
+	}
 
 	// Handle --view flag
 	if viewPlan != "" {
@@ -676,4 +738,28 @@ func filepathBase(path string) string {
 
 func normalizeFilePath(path string) string {
 	return strings.TrimSuffix(strings.ReplaceAll(path, "\\", "/"), "/")
+}
+
+func parseCommaSeparated(s string) []string {
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func matchesAnyFilter(value string, filters []string) bool {
+	for _, f := range filters {
+		if f == value {
+			return true
+		}
+		if strings.HasSuffix(f, "*") && strings.HasPrefix(value, strings.TrimSuffix(f, "*")) {
+			return true
+		}
+	}
+	return false
 }

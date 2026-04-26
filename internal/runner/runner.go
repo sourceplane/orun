@@ -8,21 +8,19 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sourceplane/gluon/internal/executor"
 	"github.com/sourceplane/gluon/internal/model"
+	"github.com/sourceplane/gluon/internal/state"
 	"github.com/sourceplane/gluon/internal/ui"
 )
 
-const (
-	defaultStateFileName = ".gluon-state.json"
-)
-
-// Runner executes a compiled plan in dependency order.
 type Runner struct {
 	WorkDir            string
 	UseWorkDirOverride bool
@@ -35,20 +33,16 @@ type Runner struct {
 	Color              bool
 	Executor           executor.Executor
 	Runtime            executor.RuntimeContext
+	Store              *state.Store
+	ExecID             string
+	Concurrency        int
+	FilterComponents   []string
+	FilterEnv          string
 }
 
-type State struct {
-	PlanChecksum string               `json:"planChecksum"`
-	Jobs         map[string]*JobState `json:"jobs"`
-}
-
-type JobState struct {
-	Status     string            `json:"status"`
-	StartedAt  string            `json:"startedAt,omitempty"`
-	FinishedAt string            `json:"finishedAt,omitempty"`
-	Steps      map[string]string `json:"steps"`
-	LastError  string            `json:"lastError,omitempty"`
-}
+// State is kept for backwards compat with tests referencing old types.
+type State = state.ExecState
+type JobState = state.JobState
 
 type runSummary struct {
 	completed int
@@ -57,7 +51,22 @@ type runSummary struct {
 	waiting   int
 }
 
-func NewRunner(workDir string, useWorkDirOverride bool, stdout, stderr io.Writer, dryRun bool, jobID string, retry bool, verbose bool, exec executor.Executor, runtime executor.RuntimeContext) *Runner {
+func NewRunner(
+	workDir string,
+	useWorkDirOverride bool,
+	stdout, stderr io.Writer,
+	dryRun bool,
+	jobID string,
+	retry bool,
+	verbose bool,
+	exec executor.Executor,
+	runtime executor.RuntimeContext,
+	store *state.Store,
+	execID string,
+	concurrency int,
+	filterComponents []string,
+	filterEnv string,
+) *Runner {
 	return &Runner{
 		WorkDir:            workDir,
 		UseWorkDirOverride: useWorkDirOverride,
@@ -70,6 +79,11 @@ func NewRunner(workDir string, useWorkDirOverride bool, stdout, stderr io.Writer
 		Color:              ui.ColorEnabledForWriter(stdout),
 		Executor:           exec,
 		Runtime:            runtime,
+		Store:              store,
+		ExecID:             execID,
+		Concurrency:        concurrency,
+		FilterComponents:   filterComponents,
+		FilterEnv:          filterEnv,
 	}
 }
 
@@ -98,6 +112,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 			map[string]string{
 				"GLUON_CONTEXT": r.Runtime.Environment,
 				"GLUON_RUNNER":  r.Runtime.Runner,
+				"GLUON_EXEC_ID": r.ExecID,
 			},
 		),
 		Runtime: r.Runtime,
@@ -107,29 +122,43 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	}
 	baseExecContext.Env = executor.MergeEnvironment(baseExecContext.BaseEnv)
 
-	statePath := r.resolveStateFile(plan)
-	state, err := r.loadState(statePath)
-	if err != nil {
-		return err
-	}
+	// Create execution and load/create state
+	persistState := !r.DryRun
+	var execState *state.ExecState
 
-	if state.PlanChecksum == "" {
-		state.PlanChecksum = plan.Metadata.Checksum
-	}
-	if plan.Metadata.Checksum != "" && state.PlanChecksum != "" && state.PlanChecksum != plan.Metadata.Checksum {
-		return fmt.Errorf("state file checksum mismatch: expected %s, got %s", plan.Metadata.Checksum, state.PlanChecksum)
+	if r.Store != nil && r.ExecID != "" && persistState {
+		if _, err := r.Store.CreateExecution(r.ExecID, plan); err != nil {
+			return err
+		}
+		execState, err = r.Store.LoadState(r.ExecID)
+		if err != nil {
+			return err
+		}
+		if execState.PlanChecksum == "" {
+			execState.PlanChecksum = plan.Metadata.Checksum
+		}
+
+		// Write initial metadata
+		r.writeMetadata(plan, "running")
+	} else {
+		execState = &state.ExecState{
+			ExecID:       r.ExecID,
+			PlanChecksum: plan.Metadata.Checksum,
+			Jobs:         map[string]*state.JobState{},
+		}
 	}
 
 	if r.JobID != "" && r.Retry {
-		state.Jobs[r.JobID] = nil
+		execState.Jobs[r.JobID] = nil
 	}
-
-	persistState := !r.DryRun
 
 	orderedJobs, err := topologicalOrder(plan.Jobs)
 	if err != nil {
 		return err
 	}
+
+	// Apply component/env filters
+	orderedJobs = r.filterJobs(orderedJobs)
 
 	if r.JobID != "" {
 		if _, err := findJobByID(orderedJobs, r.JobID); err != nil {
@@ -138,8 +167,8 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	}
 
 	if r.shouldPrintPreflight(orderedJobs) {
-		r.printRunHeader(plan, statePath)
-		r.printReadinessSnapshot(orderedJobs, state)
+		r.printRunHeader(plan)
+		r.printReadinessSnapshot(orderedJobs, execState)
 	}
 
 	if !r.DryRun {
@@ -154,25 +183,31 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	}
 
 	failFast := plan.Execution.FailFast
-	if !plan.Execution.FailFast {
-		// keep explicit false as is
-	} else {
-		failFast = true
+	summary := &runSummary{}
+	executedTarget := false
+
+	// Determine concurrency
+	concurrency := r.Concurrency
+	if concurrency <= 0 {
+		concurrency = plan.Execution.Concurrency
+	}
+	if concurrency <= 0 {
+		concurrency = 1
 	}
 
-	summary := &runSummary{}
-
-	executedTarget := false
+	if concurrency > 1 && !r.DryRun {
+		return r.runConcurrent(orderedJobs, plan, execState, baseExecContext, persistState, failFast, summary, concurrency)
+	}
 
 	for _, job := range orderedJobs {
 		if r.JobID != "" && job.ID != r.JobID {
 			continue
 		}
 
-		unmet := unresolvedDependencies(job, state)
+		unmet := unresolvedDependencies(job, execState)
 		if len(unmet) > 0 {
 			summary.waiting++
-			r.printWaiting(job, unmet, state)
+			r.printWaiting(job, unmet, execState)
 			if r.JobID != "" {
 				return fmt.Errorf("cannot run %s: dependencies not completed (%s)", job.ID, strings.Join(unmet, ", "))
 			}
@@ -181,177 +216,17 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 
 		executedTarget = true
 
-		jobState := ensureJobState(state, job)
+		jobState := ensureJobState(execState, job)
 		if jobState.Status == "completed" {
 			summary.skipped++
 			fmt.Fprintf(r.Stdout, "%s %s already completed\n", ui.Yellow(r.Color, "↷"), job.ID)
 			continue
 		}
 
-		jobState.Status = "running"
-		jobState.FinishedAt = ""
-		jobState.LastError = ""
-		if jobState.StartedAt == "" {
-			jobState.StartedAt = time.Now().UTC().Format(time.RFC3339)
-		}
-		if persistState {
-			if err := r.saveState(statePath, state); err != nil {
-				return err
-			}
-		}
-
-		r.printJobHeader(job)
-
-		jobFailed := false
-		jobWorkingDir := r.resolveWorkingDir(job.Path)
-		currentPhase := ""
-		for idx, step := range job.Steps {
-			stepID := stepIdentifier(step)
-			stepPhase := normalizeStepPhase(step.Phase)
-			if stepPhase != currentPhase {
-				if stepPhase != "main" {
-					r.printPhaseHeader(stepPhase)
-				}
-				currentPhase = stepPhase
-			}
-			if jobState.Steps[stepID] == "completed" {
-				r.printStepSkipped(stepID, idx+1, len(job.Steps))
-				continue
-			}
-
-			jobState.Steps[stepID] = "running"
-			if persistState {
-				if err := r.saveState(statePath, state); err != nil {
-					return err
-				}
-			}
-
-			workingDir := r.resolveStepWorkingDir(jobWorkingDir, step.WorkingDirectory)
-			retryCount := r.resolveRetryCount(job, step)
-			timeoutValue := r.resolveTimeout(job, step)
-			stepStartedAt := time.Now()
-			r.printStepStart(stepID, idx+1, len(job.Steps))
-			r.printStepContext(step, workingDir, timeoutValue, retryCount)
-			if r.DryRun {
-				jobState.Steps[stepID] = "completed"
-				if persistState {
-					if err := r.saveState(statePath, state); err != nil {
-						return err
-					}
-				}
-				r.printStepDryRun()
-				continue
-			}
-
-			var output string
-			attempts := retryCount + 1
-			for attempt := 1; attempt <= attempts; attempt++ {
-				if attempts > 1 && attempt > 1 {
-					r.printStepRetry(attempt, attempts)
-				}
-
-				execContext, cancel, execErr := r.stepExecContext(baseExecContext, job, step, workingDir)
-				if execErr != nil {
-					cancel()
-					err = execErr
-					break
-				}
-
-				output, err = r.Executor.RunStep(execContext, job, step)
-				cancel()
-
-				if err == nil {
-					break
-				}
-
-				if attempt < attempts {
-					fmt.Fprintf(r.Stdout, "  │ %s retrying after failure\n", ui.Yellow(r.Color, "↻"))
-				}
-			}
-			stepDuration := time.Since(stepStartedAt)
-
-			if err != nil {
-				jobState.Steps[stepID] = "failed"
-				jobState.Status = "failed"
-				jobState.LastError = fmt.Sprintf("step %s: %v", stepID, err)
-				jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
-				if persistState {
-					if err := r.saveState(statePath, state); err != nil {
-						return err
-					}
-				}
-
-				r.printStepFailure(step, output, stepDuration, err, workingDir)
-				if strings.EqualFold(step.OnFailure, "continue") {
-					r.printStepContinuation()
-					continue
-				}
-
-				jobFailed = true
-				summary.failed++
-				if failFast {
-					return fmt.Errorf("job %s step %s failed in %s: %w", job.ID, stepID, workingDir, err)
-				}
-				break
-			}
-
-			jobState.Steps[stepID] = "completed"
-			if persistState {
-				if err := r.saveState(statePath, state); err != nil {
-					return err
-				}
-			}
-			r.printStepSuccess(step, output, stepDuration)
-		}
-
-		if !r.DryRun {
-			if finalizer, ok := r.Executor.(executor.JobFinalizer); ok {
-				jobExecContext := baseExecContext
-				jobExecContext.WorkDir = jobWorkingDir
-				jobExecContext.JobEnv = executor.JobEnvironment(job.Env)
-				jobExecContext.StepEnv = nil
-				jobExecContext.Env = executor.MergeEnvironment(jobExecContext.BaseEnv, jobExecContext.JobEnv)
-				output, finalizeErr := finalizer.FinalizeJob(jobExecContext, job)
-				if strings.TrimSpace(output) != "" {
-					if r.Verbose || finalizeErr != nil {
-						r.printBlock("post-job logs", splitDisplayLines(output))
-					} else {
-						fmt.Fprintln(r.Stdout, "  │")
-						fmt.Fprintf(r.Stdout, "  │ post-job logs: %s\n", ui.Dim(r.Color, "(collapsed; use --verbose to expand)"))
-					}
-				}
-				if finalizeErr != nil {
-					jobFailed = true
-					jobState.Status = "failed"
-					jobState.LastError = fmt.Sprintf("job finalizer: %v", finalizeErr)
-					jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
-					if persistState {
-						if err := r.saveState(statePath, state); err != nil {
-							return err
-						}
-					}
-					r.printFailureBlock(finalizeErr, output, jobWorkingDir)
-					if failFast {
-						return fmt.Errorf("job %s finalizer failed in %s: %w", job.ID, jobWorkingDir, finalizeErr)
-					}
-				}
-			}
-		}
-
-		if jobState.Status != "failed" {
-			jobState.Status = "completed"
-			jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
-			jobState.LastError = ""
-			if persistState {
-				if err := r.saveState(statePath, state); err != nil {
-					return err
-				}
-			}
-			summary.completed++
-			r.printJobFooter(true)
-		} else if !jobFailed {
-			summary.failed++
-			r.printJobFooter(false)
+		failed := r.executeJob(job, jobState, execState, baseExecContext, persistState, failFast, summary)
+		if failed && failFast {
+			r.writeMetadata(plan, "failed")
+			return fmt.Errorf("job %s failed (fail-fast enabled)", job.ID)
 		}
 
 		if r.JobID != "" {
@@ -359,20 +234,365 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		}
 	}
 
-	if r.JobID != "" {
-		if !executedTarget {
-			return fmt.Errorf("job not found in runnable set: %s", r.JobID)
-		}
+	if r.JobID != "" && !executedTarget {
+		return fmt.Errorf("job not found in runnable set: %s", r.JobID)
 	}
 
 	if r.shouldPrintRunSummary(summary) {
 		r.printRunSummary(summary)
 	}
 
+	finalStatus := "completed"
+	if summary.failed > 0 {
+		finalStatus = "failed"
+	}
+	r.writeMetadata(plan, finalStatus)
+
 	return nil
 }
 
-func (r *Runner) printRunHeader(plan *model.Plan, statePath string) {
+func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execState *state.ExecState, baseExecContext executor.ExecContext, persistState, failFast bool, summary *runSummary) bool {
+	jobState.Status = "running"
+	jobState.FinishedAt = ""
+	jobState.LastError = ""
+	if jobState.StartedAt == "" {
+		jobState.StartedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	r.persistState(persistState, execState)
+
+	r.printJobHeader(job)
+
+	jobFailed := false
+	jobWorkingDir := r.resolveWorkingDir(job.Path)
+	currentPhase := ""
+	for idx, step := range job.Steps {
+		stepID := stepIdentifier(step)
+		stepPhase := normalizeStepPhase(step.Phase)
+		if stepPhase != currentPhase {
+			if stepPhase != "main" {
+				r.printPhaseHeader(stepPhase)
+			}
+			currentPhase = stepPhase
+		}
+		if jobState.Steps[stepID] == "completed" {
+			r.printStepSkipped(stepID, idx+1, len(job.Steps))
+			continue
+		}
+
+		jobState.Steps[stepID] = "running"
+		r.persistState(persistState, execState)
+
+		workingDir := r.resolveStepWorkingDir(jobWorkingDir, step.WorkingDirectory)
+		retryCount := r.resolveRetryCount(job, step)
+		timeoutValue := r.resolveTimeout(job, step)
+		stepStartedAt := time.Now()
+		r.printStepStart(stepID, idx+1, len(job.Steps))
+		r.printStepContext(step, workingDir, timeoutValue, retryCount)
+		if r.DryRun {
+			jobState.Steps[stepID] = "completed"
+			r.persistState(persistState, execState)
+			r.printStepDryRun()
+			continue
+		}
+
+		var output string
+		var stepErr error
+		attempts := retryCount + 1
+		for attempt := 1; attempt <= attempts; attempt++ {
+			if attempts > 1 && attempt > 1 {
+				r.printStepRetry(attempt, attempts)
+			}
+
+			execContext, cancel, execErr := r.stepExecContext(baseExecContext, job, step, workingDir)
+			if execErr != nil {
+				cancel()
+				stepErr = execErr
+				break
+			}
+
+			output, stepErr = r.Executor.RunStep(execContext, job, step)
+			cancel()
+
+			if stepErr == nil {
+				break
+			}
+
+			if attempt < attempts {
+				fmt.Fprintf(r.Stdout, "  │ %s retrying after failure\n", ui.Yellow(r.Color, "↻"))
+			}
+		}
+		stepDuration := time.Since(stepStartedAt)
+
+		// Write step log
+		r.writeStepLog(job.ID, stepID, output)
+
+		if stepErr != nil {
+			jobState.Steps[stepID] = "failed"
+			jobState.Status = "failed"
+			jobState.LastError = fmt.Sprintf("step %s: %v", stepID, stepErr)
+			jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+			r.persistState(persistState, execState)
+
+			r.printStepFailure(step, output, stepDuration, stepErr, workingDir)
+			if strings.EqualFold(step.OnFailure, "continue") {
+				r.printStepContinuation()
+				continue
+			}
+
+			jobFailed = true
+			summary.failed++
+			break
+		}
+
+		jobState.Steps[stepID] = "completed"
+		r.persistState(persistState, execState)
+		r.printStepSuccess(step, output, stepDuration)
+	}
+
+	if !r.DryRun {
+		if finalizer, ok := r.Executor.(executor.JobFinalizer); ok {
+			jobExecContext := baseExecContext
+			jobExecContext.WorkDir = jobWorkingDir
+			jobExecContext.JobEnv = executor.JobEnvironment(job.Env)
+			jobExecContext.StepEnv = nil
+			jobExecContext.Env = executor.MergeEnvironment(jobExecContext.BaseEnv, jobExecContext.JobEnv)
+			output, finalizeErr := finalizer.FinalizeJob(jobExecContext, job)
+			if strings.TrimSpace(output) != "" {
+				if r.Verbose || finalizeErr != nil {
+					r.printBlock("post-job logs", splitDisplayLines(output))
+				} else {
+					fmt.Fprintln(r.Stdout, "  │")
+					fmt.Fprintf(r.Stdout, "  │ post-job logs: %s\n", ui.Dim(r.Color, "(collapsed; use --verbose to expand)"))
+				}
+			}
+			if finalizeErr != nil {
+				jobFailed = true
+				jobState.Status = "failed"
+				jobState.LastError = fmt.Sprintf("job finalizer: %v", finalizeErr)
+				jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+				r.persistState(persistState, execState)
+				r.printFailureBlock(finalizeErr, output, jobWorkingDir)
+			}
+		}
+	}
+
+	if jobState.Status != "failed" {
+		jobState.Status = "completed"
+		jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+		jobState.LastError = ""
+		r.persistState(persistState, execState)
+		summary.completed++
+		r.printJobFooter(true)
+	} else if !jobFailed {
+		summary.failed++
+		r.printJobFooter(false)
+	} else {
+		r.printJobFooter(false)
+	}
+
+	return jobFailed
+}
+
+func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState *state.ExecState, baseExecContext executor.ExecContext, persistState, failFast bool, summary *runSummary, concurrency int) error {
+	sem := make(chan struct{}, concurrency)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	var firstErr error
+
+	completed := make(map[string]bool)
+	for jobID, js := range execState.Jobs {
+		if js != nil && js.Status == "completed" {
+			completed[jobID] = true
+		}
+	}
+
+	jobMap := make(map[string]model.PlanJob)
+	for _, job := range jobs {
+		jobMap[job.ID] = job
+	}
+
+	pending := make(map[string]bool)
+	for _, job := range jobs {
+		if !completed[job.ID] {
+			pending[job.ID] = true
+		}
+	}
+
+	for len(pending) > 0 {
+		mu.Lock()
+		if failFast && firstErr != nil {
+			mu.Unlock()
+			break
+		}
+
+		var ready []model.PlanJob
+		for id := range pending {
+			job := jobMap[id]
+			allDepsMet := true
+			for _, dep := range job.DependsOn {
+				if !completed[dep] {
+					allDepsMet = false
+					break
+				}
+			}
+			if allDepsMet {
+				ready = append(ready, job)
+			}
+		}
+		mu.Unlock()
+
+		if len(ready) == 0 {
+			wg.Wait()
+			mu.Lock()
+			stillPending := len(pending) > 0
+			mu.Unlock()
+			if stillPending && firstErr == nil {
+				summary.waiting += len(pending)
+				break
+			}
+			break
+		}
+
+		for _, job := range ready {
+			mu.Lock()
+			delete(pending, job.ID)
+			mu.Unlock()
+
+			wg.Add(1)
+			sem <- struct{}{}
+
+			go func(j model.PlanJob) {
+				defer func() {
+					<-sem
+					wg.Done()
+				}()
+
+				mu.Lock()
+				if failFast && firstErr != nil {
+					mu.Unlock()
+					return
+				}
+				jobState := ensureJobState(execState, j)
+				if jobState.Status == "completed" {
+					mu.Unlock()
+					mu.Lock()
+					completed[j.ID] = true
+					summary.skipped++
+					mu.Unlock()
+					return
+				}
+				mu.Unlock()
+
+				failed := r.executeJob(j, jobState, execState, baseExecContext, persistState, failFast, summary)
+
+				mu.Lock()
+				if failed {
+					if firstErr == nil {
+						firstErr = fmt.Errorf("job %s failed", j.ID)
+					}
+				} else {
+					completed[j.ID] = true
+				}
+				mu.Unlock()
+			}(job)
+		}
+
+		wg.Wait()
+	}
+
+	wg.Wait()
+
+	if r.shouldPrintRunSummary(summary) {
+		r.printRunSummary(summary)
+	}
+
+	finalStatus := "completed"
+	if summary.failed > 0 || firstErr != nil {
+		finalStatus = "failed"
+	}
+	r.writeMetadata(plan, finalStatus)
+
+	return firstErr
+}
+
+func (r *Runner) filterJobs(jobs []model.PlanJob) []model.PlanJob {
+	if len(r.FilterComponents) == 0 && r.FilterEnv == "" {
+		return jobs
+	}
+
+	var filtered []model.PlanJob
+	for _, job := range jobs {
+		if r.FilterEnv != "" && job.Environment != r.FilterEnv {
+			continue
+		}
+		if len(r.FilterComponents) > 0 {
+			match := false
+			for _, c := range r.FilterComponents {
+				if job.Component == c {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+		filtered = append(filtered, job)
+	}
+	return filtered
+}
+
+func (r *Runner) persistState(persist bool, execState *state.ExecState) {
+	if !persist || r.Store == nil || r.ExecID == "" {
+		return
+	}
+	r.Store.SaveState(r.ExecID, execState)
+}
+
+func (r *Runner) writeMetadata(plan *model.Plan, status string) {
+	if r.Store == nil || r.ExecID == "" || r.DryRun {
+		return
+	}
+
+	u, _ := user.Current()
+	username := ""
+	if u != nil {
+		username = u.Username
+	}
+
+	meta := &state.ExecMetadata{
+		ExecID:    r.ExecID,
+		PlanID:    state.PlanChecksumShort(plan),
+		PlanName:  plan.Metadata.Name,
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+		Status:    status,
+		Trigger:   "cli",
+		User:      username,
+		DryRun:    r.DryRun,
+		JobTotal:  len(plan.Jobs),
+	}
+
+	existing, _ := r.Store.LoadMetadata(r.ExecID)
+	if existing != nil {
+		meta.StartedAt = existing.StartedAt
+		if status != "running" {
+			meta.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+		}
+	}
+
+	r.Store.SaveMetadata(r.ExecID, meta)
+}
+
+func (r *Runner) writeStepLog(jobID, stepID, output string) {
+	if r.Store == nil || r.ExecID == "" || r.DryRun || strings.TrimSpace(output) == "" {
+		return
+	}
+	logPath := r.Store.LogPath(r.ExecID, jobID, stepID)
+	os.MkdirAll(filepath.Dir(logPath), 0755)
+	os.WriteFile(logPath, []byte(output), 0644)
+}
+
+func (r *Runner) printRunHeader(plan *model.Plan) {
 	mode := "execute"
 	if r.DryRun {
 		mode = "dry-run"
@@ -381,18 +601,28 @@ func (r *Runner) printRunHeader(plan *model.Plan, statePath string) {
 	if planLabel == "" {
 		planLabel = "plan"
 	}
-	fmt.Fprintf(r.Stdout, "%s  %s   runner=%s   mode=%s\n", ui.BoldCyan(r.Color, "gluon run"), planLabel, r.Executor.Name(), mode)
-	fmt.Fprintf(r.Stdout, "%s state=%s\n", ui.Dim(r.Color, "↳"), statePath)
+	planID := state.PlanChecksumShort(plan)
+	fmt.Fprintf(r.Stdout, "%s  %s", ui.BoldCyan(r.Color, "gluon run"), planLabel)
+	if planID != "" {
+		fmt.Fprintf(r.Stdout, "  %s", ui.Dim(r.Color, "sha256:"+planID))
+	}
+	fmt.Fprintf(r.Stdout, "   runner=%s   mode=%s\n", r.Executor.Name(), mode)
+	if r.ExecID != "" && !r.DryRun {
+		fmt.Fprintf(r.Stdout, "%s exec=%s\n", ui.Dim(r.Color, "↳"), r.ExecID)
+	}
+	if r.Concurrency > 1 {
+		fmt.Fprintf(r.Stdout, "%s concurrency=%d\n", ui.Dim(r.Color, "↳"), r.Concurrency)
+	}
 	if r.JobID != "" {
 		fmt.Fprintf(r.Stdout, "%s target=%s\n", ui.Dim(r.Color, "↳"), r.JobID)
 	}
 	fmt.Fprintln(r.Stdout)
 }
 
-func (r *Runner) printTargetJobSummary(job model.PlanJob, state *State) {
+func (r *Runner) printTargetJobSummary(job model.PlanJob, execState *state.ExecState) {
 	status := "pending"
-	if state != nil {
-		if st, ok := state.Jobs[job.ID]; ok && st != nil && strings.TrimSpace(st.Status) != "" {
+	if execState != nil {
+		if st, ok := execState.Jobs[job.ID]; ok && st != nil && strings.TrimSpace(st.Status) != "" {
 			status = st.Status
 		}
 	}
@@ -406,20 +636,20 @@ func (r *Runner) printTargetJobSummary(job model.PlanJob, state *State) {
 	fmt.Fprintf(r.Stdout, "  └─ state: %s\n", status)
 }
 
-func (r *Runner) printReadinessSnapshot(jobs []model.PlanJob, state *State) {
+func (r *Runner) printReadinessSnapshot(jobs []model.PlanJob, execState *state.ExecState) {
 	fmt.Fprintln(r.Stdout, "\n"+ui.BoldCyan(r.Color, "Readiness snapshot"))
 	for _, job := range jobs {
 		if r.JobID != "" && job.ID != r.JobID {
 			continue
 		}
 
-		jobState := state.Jobs[job.ID]
+		jobState := execState.Jobs[job.ID]
 		if jobState != nil && jobState.Status == "completed" {
 			fmt.Fprintf(r.Stdout, "  ├─ %s %s (completed from state)\n", ui.Green(r.Color, "✓"), job.ID)
 			continue
 		}
 
-		unmet := unresolvedDependencies(job, state)
+		unmet := unresolvedDependencies(job, execState)
 		if len(unmet) > 0 {
 			fmt.Fprintf(r.Stdout, "  ├─ %s %s waiting for: %s\n", ui.Yellow(r.Color, "⏳"), job.ID, strings.Join(unmet, ", "))
 			continue
@@ -429,11 +659,11 @@ func (r *Runner) printReadinessSnapshot(jobs []model.PlanJob, state *State) {
 	}
 }
 
-func (r *Runner) printWaiting(job model.PlanJob, unmet []string, state *State) {
+func (r *Runner) printWaiting(job model.PlanJob, unmet []string, execState *state.ExecState) {
 	fmt.Fprintf(r.Stdout, "\n%s Job %s waiting for dependencies\n", ui.Yellow(r.Color, "⏳"), job.ID)
 	for _, dep := range unmet {
 		status := "pending"
-		if depState, ok := state.Jobs[dep]; ok && depState != nil && depState.Status != "" {
+		if depState, ok := execState.Jobs[dep]; ok && depState != nil && depState.Status != "" {
 			status = depState.Status
 		}
 		fmt.Fprintf(r.Stdout, "  ├─ %s (%s)\n", dep, status)
@@ -453,15 +683,10 @@ func normalizeStepPhase(phase string) string {
 }
 
 func (r *Runner) resolveStateFile(plan *model.Plan) string {
-	stateFile := defaultStateFileName
-	if plan != nil && strings.TrimSpace(plan.Execution.StateFile) != "" {
-		stateFile = strings.TrimSpace(plan.Execution.StateFile)
+	if r.Store != nil && r.ExecID != "" {
+		return r.Store.StatePath(r.ExecID)
 	}
-	if filepath.IsAbs(stateFile) {
-		return stateFile
-	}
-
-	return filepath.Join(r.WorkDir, stateFile)
+	return filepath.Join(r.WorkDir, ".gluon-state.json")
 }
 
 func fileExists(path string) bool {
@@ -469,28 +694,28 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-func (r *Runner) loadState(statePath string) (*State, error) {
+func (r *Runner) loadState(statePath string) (*state.ExecState, error) {
 	data, err := os.ReadFile(statePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &State{Jobs: map[string]*JobState{}}, nil
+			return &state.ExecState{Jobs: map[string]*state.JobState{}}, nil
 		}
 		return nil, fmt.Errorf("failed to read state file %s: %w", statePath, err)
 	}
 
-	var state State
-	if err := json.Unmarshal(data, &state); err != nil {
+	var st state.ExecState
+	if err := json.Unmarshal(data, &st); err != nil {
 		return nil, fmt.Errorf("failed to parse state file %s: %w", statePath, err)
 	}
-	if state.Jobs == nil {
-		state.Jobs = map[string]*JobState{}
+	if st.Jobs == nil {
+		st.Jobs = map[string]*state.JobState{}
 	}
 
-	return &state, nil
+	return &st, nil
 }
 
-func (r *Runner) saveState(statePath string, state *State) error {
-	if state == nil {
+func (r *Runner) saveState(statePath string, st *state.ExecState) error {
+	if st == nil {
 		return fmt.Errorf("state cannot be nil")
 	}
 
@@ -501,7 +726,7 @@ func (r *Runner) saveState(statePath string, state *State) error {
 		}
 	}
 
-	payload, err := json.MarshalIndent(state, "", "  ")
+	payload, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to serialize state: %w", err)
 	}
@@ -517,14 +742,14 @@ func (r *Runner) saveState(statePath string, state *State) error {
 	return nil
 }
 
-func ensureJobState(state *State, job model.PlanJob) *JobState {
-	jobState, exists := state.Jobs[job.ID]
+func ensureJobState(execState *state.ExecState, job model.PlanJob) *state.JobState {
+	jobState, exists := execState.Jobs[job.ID]
 	if !exists || jobState == nil {
-		jobState = &JobState{
+		jobState = &state.JobState{
 			Status: "pending",
 			Steps:  map[string]string{},
 		}
-		state.Jobs[job.ID] = jobState
+		execState.Jobs[job.ID] = jobState
 	}
 	if jobState.Steps == nil {
 		jobState.Steps = map[string]string{}
@@ -553,10 +778,10 @@ func stepIdentifier(step model.PlanStep) string {
 	return "unnamed-step"
 }
 
-func unresolvedDependencies(job model.PlanJob, state *State) []string {
+func unresolvedDependencies(job model.PlanJob, execState *state.ExecState) []string {
 	missing := make([]string, 0)
 	for _, dep := range job.DependsOn {
-		depState, exists := state.Jobs[dep]
+		depState, exists := execState.Jobs[dep]
 		if !exists || depState == nil || depState.Status != "completed" {
 			missing = append(missing, dep)
 		}

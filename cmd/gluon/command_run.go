@@ -10,13 +10,14 @@ import (
 	"github.com/sourceplane/gluon/internal/executor"
 	"github.com/sourceplane/gluon/internal/model"
 	"github.com/sourceplane/gluon/internal/runner"
+	"github.com/sourceplane/gluon/internal/state"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
 var (
-	runPlanFile           string
-	runExecute            bool
+	runPlanRef            string
+	runDryRun             bool
 	runVerbose            bool
 	runWorkDir            string
 	runUseWorkDirOverride bool
@@ -24,12 +25,17 @@ var (
 	runRetry              bool
 	runRunner             string
 	runGHACompat          bool
+	runExecID             string
+	runConcurrency        int
+	runComponent          []string
+	runEnv                string
+	runJSON               bool
 )
 
 var runCmd = &cobra.Command{
 	Use:          "run",
-	Short:        "Execute a compiled plan",
-	Long:         "Execute the jobs and steps from a generated plan file, similar to an apply phase.",
+	Short:        "Execute a plan",
+	Long:         "Execute the jobs and steps from a generated plan file. Runs in execute mode by default; use --dry-run for preview.",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		runUseWorkDirOverride = cmd.Flags().Changed("workdir")
@@ -40,14 +46,22 @@ var runCmd = &cobra.Command{
 func registerRunCommand(root *cobra.Command) {
 	root.AddCommand(runCmd)
 
-	runCmd.Flags().StringVarP(&runPlanFile, "plan", "p", "plan.json", "Path to plan file (json or yaml)")
-	runCmd.Flags().BoolVarP(&runExecute, "execute", "x", false, "Actually execute commands (default is dry-run)")
+	runCmd.Flags().StringVarP(&runPlanRef, "plan", "p", "", "Plan reference: file path, name, checksum prefix, or 'latest' (default: latest)")
+	runCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Preview what would run without executing")
 	runCmd.Flags().BoolVar(&runVerbose, "verbose", false, "Show full step logs instead of compact summaries")
-	runCmd.Flags().StringVar(&runWorkDir, "workdir", ".", "Override working directory for all jobs (default behavior uses each job path)")
-	runCmd.Flags().StringVar(&runJobID, "job-id", "", "Run only a specific job ID (must match plan job id)")
-	runCmd.Flags().BoolVar(&runRetry, "retry", false, "Clear existing state for selected --job-id before running")
+	runCmd.Flags().StringVar(&runWorkDir, "workdir", ".", "Override working directory for all jobs")
+	runCmd.Flags().StringVar(&runJobID, "job", "", "Run only a specific job (matches plan job ID or prefix)")
+	runCmd.Flags().StringVar(&runJobID, "job-id", "", "Run only a specific job ID (deprecated: use --job)")
+	runCmd.Flags().BoolVar(&runRetry, "retry", false, "Clear existing state for selected --job before running")
 	runCmd.Flags().StringVar(&runRunner, "runner", "", "Execution backend: local, github-actions, docker")
 	runCmd.Flags().BoolVar(&runGHACompat, "gha", false, "Enable GitHub Actions compatibility mode")
+	runCmd.Flags().StringVar(&runExecID, "exec-id", "", "Execution ID (for resume or CI). Auto-generated if not set")
+	runCmd.Flags().IntVar(&runConcurrency, "concurrency", 0, "Override plan concurrency (0 = use plan value)")
+	runCmd.Flags().StringArrayVar(&runComponent, "component", nil, "Filter jobs by component (repeatable)")
+	runCmd.Flags().StringVarP(&runEnv, "env", "e", "", "Filter jobs by environment")
+	runCmd.Flags().BoolVar(&runJSON, "json", false, "Output in JSON format")
+
+	_ = runCmd.Flags().MarkDeprecated("job-id", "use --job instead")
 }
 
 func runPlan() error {
@@ -55,7 +69,15 @@ func runPlan() error {
 		return fmt.Errorf("--gha cannot be combined with --runner %q", runRunner)
 	}
 
-	plan, err := loadPlan(runPlanFile)
+	store := state.NewStore(runWorkDir)
+
+	// Migrate legacy state if present
+	if migrated, _ := store.MigrateLegacyState(runWorkDir); migrated {
+		fmt.Println("✓ Migrated legacy .gluon-state.json to .gluon/executions/")
+	}
+
+	// Resolve plan reference
+	plan, err := resolveAndLoadPlan(store)
 	if err != nil {
 		return err
 	}
@@ -77,27 +99,94 @@ func runPlan() error {
 		}
 	}
 
-	dryRun := !runExecute
-	if dryRun {
-		fmt.Println("□ Dry-run mode enabled. Use --execute to run commands.")
+	// Resolve execution ID
+	execID := runExecID
+	if execID == "" {
+		execID = os.Getenv("GLUON_EXEC_ID")
+	}
+	if execID == "" {
+		execID = state.GenerateExecID(plan.Metadata.Name)
+	}
+
+	if runDryRun {
+		fmt.Println("□ Dry-run mode enabled. Remove --dry-run to execute.")
 	}
 
 	if runRetry && runJobID == "" {
-		return fmt.Errorf("--retry requires --job-id")
+		return fmt.Errorf("--retry requires --job")
 	}
 
-	r := runner.NewRunner(runWorkDir, runUseWorkDirOverride, os.Stdout, os.Stderr, dryRun, runJobID, runRetry, runVerbose, selectedExecutor, runtime)
+	// Concurrency override
+	concurrency := plan.Execution.Concurrency
+	if runConcurrency > 0 {
+		concurrency = runConcurrency
+	}
+
+	r := runner.NewRunner(
+		runWorkDir,
+		runUseWorkDirOverride,
+		os.Stdout,
+		os.Stderr,
+		runDryRun,
+		runJobID,
+		runRetry,
+		runVerbose,
+		selectedExecutor,
+		runtime,
+		store,
+		execID,
+		concurrency,
+		runComponent,
+		runEnv,
+	)
 	if err := r.Run(plan); err != nil {
 		return err
 	}
 
-	if dryRun {
+	if runDryRun {
 		fmt.Println("✓ Dry-run complete")
 	} else {
 		fmt.Println("✓ Run complete")
+		fmt.Printf("→ gluon status --exec-id %s\n", execID)
+		fmt.Printf("→ gluon logs   --exec-id %s\n", execID)
 	}
 
 	return nil
+}
+
+func resolveAndLoadPlan(store *state.Store) (*model.Plan, error) {
+	ref := runPlanRef
+	if ref == "" {
+		ref = os.Getenv("GLUON_PLAN_ID")
+	}
+
+	// If no plan ref given, try latest from store
+	if ref == "" {
+		path, err := store.ResolvePlanRef("latest")
+		if err != nil {
+			// No plan exists yet — auto-generate
+			fmt.Println("No plan found. Generating from intent.yaml...")
+			if genErr := generatePlan(); genErr != nil {
+				return nil, fmt.Errorf("failed to auto-generate plan: %w", genErr)
+			}
+			path, err = store.ResolvePlanRef("latest")
+			if err != nil {
+				return nil, fmt.Errorf("failed to load generated plan: %w", err)
+			}
+		}
+		return loadPlan(path)
+	}
+
+	// Try store resolution first (name, checksum prefix, latest)
+	path, err := store.ResolvePlanRef(ref)
+	if err != nil {
+		// Fall back to direct file path
+		if fileExistsCheck(ref) {
+			return loadPlan(ref)
+		}
+		return nil, fmt.Errorf("plan not found: %s", ref)
+	}
+	return loadPlan(path)
 }
 
 func resolveRunnerName(flagValue string) string {
@@ -180,4 +269,9 @@ func loadPlan(path string) (*model.Plan, error) {
 	}
 
 	return &plan, nil
+}
+
+func fileExistsCheck(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }

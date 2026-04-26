@@ -14,8 +14,7 @@ import (
 )
 
 const (
-	planAPIVersion   = "gluon.io/v1"
-	defaultStateFile = ".gluon-state.json"
+	planAPIVersion = "gluon.io/v1"
 )
 
 // Renderer materializes job instances into a Plan
@@ -50,7 +49,6 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 		Execution: model.PlanExecution{
 			Concurrency: 4,
 			FailFast:    true,
-			StateFile:   defaultStateFile,
 		},
 		Spec: model.PlanSpec{
 			JobBindings: jobBindings, // Map of model -> JobRegistry name

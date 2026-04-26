@@ -11,6 +11,11 @@ const (
 	cliName         = "gluon"
 	configDirEnvVar = "GLUON_CONFIG_DIR"
 	runnerEnvVar    = "GLUON_RUNNER"
+	execIDEnvVar    = "GLUON_EXEC_ID"
+	planIDEnvVar    = "GLUON_PLAN_ID"
+	noColorEnvVar   = "GLUON_NO_COLOR"
+	dryRunEnvVar    = "GLUON_DRY_RUN"
+	stateDirEnvVar  = "GLUON_STATE_DIR"
 )
 
 var version = "dev"
@@ -95,4 +100,9 @@ func init() {
 	registerDebugCommand(rootCmd)
 	registerCompositionsCommand(rootCmd)
 	registerComponentCommand(rootCmd)
+	registerStatusCommand(rootCmd)
+	registerLogsCommand(rootCmd)
+	registerGetCommand(rootCmd)
+	registerDescribeCommand(rootCmd)
+	registerGCCommand(rootCmd)
 }

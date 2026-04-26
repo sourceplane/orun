@@ -49,10 +49,14 @@ Thumbs.db
 
 # Project specific
 /gluon
-/.gluon/
+/.gluon/executions/
+/.gluon/plans/*.json
+!/.gluon/compositions.lock.yaml
+!/.gluon/component-tree.yaml
 /.gluon-state.json
 /.gluon-tools/
 /oci/
+/plan.json
 /examples/.gluon/
 /examples/examples/.gluon/
 /examples/gha-actions/.gluon/

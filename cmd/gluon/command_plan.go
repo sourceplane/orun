@@ -2,6 +2,11 @@ package main
 
 import "github.com/spf13/cobra"
 
+var (
+	planName       string
+	planComponents []string
+)
+
 var planCmd = &cobra.Command{
 	Use:   "plan",
 	Short: "Generate execution plan from intent",
@@ -14,10 +19,12 @@ func registerPlanCommand(root *cobra.Command) {
 	root.AddCommand(planCmd)
 
 	planCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
-	planCmd.Flags().StringVarP(&outputFile, "output", "o", "plan.json", "Output plan file path")
+	planCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output plan file path (default: .gluon/plans/)")
 	planCmd.Flags().StringVarP(&outputFormat, "format", "f", "json", "Output format (json/yaml)")
 	planCmd.Flags().BoolVar(&debugMode, "debug", false, "Enable debug output")
-	planCmd.Flags().StringVarP(&environment, "env", "e", "", "Filter by environment (optional)")
+	planCmd.Flags().StringVarP(&environment, "env", "e", "", "Filter by environment")
+	planCmd.Flags().StringArrayVar(&planComponents, "component", nil, "Filter by component (repeatable)")
+	planCmd.Flags().StringVar(&planName, "name", "", "Named plan stored in .gluon/plans/<name>.json")
 	planCmd.Flags().StringVarP(&viewPlan, "view", "v", "", "View plan (dag/dependencies/component=NAME)")
 	planCmd.Flags().BoolVar(&changedOnly, "changed", false, "Show only changed components (requires git)")
 	planCmd.Flags().StringVar(&baseBranch, "base", "", "Base ref for changed detection (default: main)")
