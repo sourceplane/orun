@@ -23,31 +23,31 @@ const (
 var version = "dev"
 
 var (
-	intentFile   string
-	intentRoot   string
-	allFlag      bool
-	configDir    string
-	outputFile   string
-	outputFormat string
-	debugMode    bool
-	environment  string
-	longFormat   bool
-	expandJobs   bool
-	viewPlan     string
-	changedOnly  bool
-	baseBranch   string
-	headRef      string
-	changedFiles []string
-	uncommitted  bool
-	untracked    bool
+	intentFile               string
+	intentRoot               string
+	allFlag                  bool
+	configDir                string
+	outputFile               string
+	outputFormat             string
+	debugMode                bool
+	environment              string
+	longFormat               bool
+	expandJobs               bool
+	viewPlan                 string
+	changedOnly              bool
+	baseBranch               string
+	headRef                  string
+	changedFiles             []string
+	uncommitted              bool
+	untracked                bool
 	compositionPackageRoot   string
 	compositionPackageOutput string
 )
 
 var rootCmd = &cobra.Command{
 	Use:     cliName,
-	Short:   "Planner engine: Intent → Plan DAG",
-	Long:    "gluon is a schema-driven planner that compiles policy-aware intent into deterministic execution DAGs",
+	Short:   "Plan and run changes from intent",
+	Long:    "gluon turns intent into deterministic plans and runs them with clear, resumable execution feedback",
 	Version: version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if commandNeedsConfig(cmd) && configDir == "" {

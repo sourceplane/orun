@@ -34,10 +34,11 @@ var (
 )
 
 var runCmd = &cobra.Command{
-	Use:          "run",
-	Short:        "Execute a plan",
-	Long:         "Execute the jobs and steps from a generated plan file. Runs in execute mode by default; use --dry-run for preview.",
-	SilenceUsage: true,
+	Use:           "run",
+	Short:         "Run a plan",
+	Long:          "Run the jobs in a plan with concise live progress. Use --dry-run to preview without executing.",
+	SilenceErrors: true,
+	SilenceUsage:  true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		runUseWorkDirOverride = cmd.Flags().Changed("workdir")
 		return runPlan()
@@ -48,8 +49,8 @@ func registerRunCommand(root *cobra.Command) {
 	root.AddCommand(runCmd)
 
 	runCmd.Flags().StringVarP(&runPlanRef, "plan", "p", "", "Plan reference: file path, name, checksum prefix, or 'latest' (default: latest)")
-	runCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Preview what would run without executing")
-	runCmd.Flags().BoolVar(&runVerbose, "verbose", false, "Show full step logs instead of compact summaries")
+	runCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Preview the run without executing jobs")
+	runCmd.Flags().BoolVar(&runVerbose, "verbose", false, "Expand step commands and raw logs inline")
 	runCmd.Flags().StringVar(&runWorkDir, "workdir", ".", "Override working directory for all jobs")
 	runCmd.Flags().StringVar(&runJobID, "job", "", "Run only a specific job (matches plan job ID or prefix)")
 	runCmd.Flags().StringVar(&runJobID, "job-id", "", "Run only a specific job ID (deprecated: use --job)")
@@ -130,10 +131,6 @@ func runPlan() error {
 		execID = state.GenerateExecID(plan.Metadata.Name)
 	}
 
-	if runDryRun {
-		fmt.Println("□ Dry-run mode enabled. Remove --dry-run to execute.")
-	}
-
 	if runRetry && runJobID == "" {
 		return fmt.Errorf("--retry requires --job")
 	}
@@ -183,14 +180,6 @@ func runPlan() error {
 		return err
 	}
 
-	if runDryRun {
-		fmt.Println("✓ Dry-run complete")
-	} else {
-		fmt.Println("✓ Run complete")
-		fmt.Printf("→ gluon status --exec-id %s\n", execID)
-		fmt.Printf("→ gluon logs   --exec-id %s\n", execID)
-	}
-
 	return nil
 }
 
@@ -205,7 +194,7 @@ func resolveAndLoadPlan(store *state.Store) (*model.Plan, error) {
 		path, err := store.ResolvePlanRef("latest")
 		if err != nil {
 			// No plan exists yet — auto-generate
-			fmt.Println("No plan found. Generating from intent.yaml...")
+			fmt.Println("No saved plan found. Generating one from intent...")
 			if genErr := generatePlan(); genErr != nil {
 				return nil, fmt.Errorf("failed to auto-generate plan: %w", genErr)
 			}

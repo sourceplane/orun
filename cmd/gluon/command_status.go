@@ -19,10 +19,18 @@ var (
 	statusJSON     bool
 )
 
+type executionCounts struct {
+	total     int
+	completed int
+	failed    int
+	running   int
+	pending   int
+}
+
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show execution status",
-	Long:  "Show the status of executions. By default shows the latest execution.",
+	Short: "Check a run",
+	Long:  "Show the current state of a run. Defaults to the latest run.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return showStatus()
 	},
@@ -31,7 +39,7 @@ var statusCmd = &cobra.Command{
 func registerStatusCommand(root *cobra.Command) {
 	root.AddCommand(statusCmd)
 
-	statusCmd.Flags().StringVar(&statusExecID, "exec-id", "", "Show specific execution")
+	statusCmd.Flags().StringVar(&statusExecID, "exec-id", "", "Show a specific execution")
 	statusCmd.Flags().BoolVar(&statusAll, "all", false, "Show all executions")
 	statusCmd.Flags().BoolVar(&statusDetailed, "detailed", false, "Show step-level detail")
 	statusCmd.Flags().BoolVar(&statusJSON, "json", false, "Output in JSON format")
@@ -50,9 +58,9 @@ func showStatus() error {
 		var err error
 		execID, err = store.ResolveExecID("latest")
 		if err != nil {
-			fmt.Println(ui.Dim(color, "No executions yet."))
+			fmt.Println(ui.Dim(color, "No runs yet."))
 			fmt.Println()
-			fmt.Printf("  Run a plan with:  %s\n", ui.Bold(color, "gluon run"))
+			fmt.Printf("  Start one with: %s\n", ui.Bold(color, "gluon run"))
 			return nil
 		}
 	} else {
@@ -72,38 +80,43 @@ func showAllExecutions(store *state.Store, color bool) error {
 		return err
 	}
 	if len(execs) == 0 {
-		fmt.Println(ui.Dim(color, "No executions yet."))
+		fmt.Println(ui.Dim(color, "No runs yet."))
 		fmt.Println()
-		fmt.Printf("  Run a plan with:  %s\n", ui.Bold(color, "gluon run"))
+		fmt.Printf("  Start one with: %s\n", ui.Bold(color, "gluon run"))
 		return nil
 	}
 
-	// Sort running executions first
 	sort.SliceStable(execs, func(i, j int) bool {
 		iRunning := strings.ToLower(execs[i].Status) == "running"
 		jRunning := strings.ToLower(execs[j].Status) == "running"
 		if iRunning != jRunning {
 			return iRunning
 		}
-		return false
+		return execs[i].StartedAt > execs[j].StartedAt
 	})
 
-	fmt.Fprintf(os.Stdout, "%s  %s  %s  %s  %s  %s\n",
-		padRight(ui.Bold(color, "EXECUTION"), 38),
-		padRight(ui.Bold(color, "STATUS"), 12),
-		padRight(ui.Bold(color, "PLAN"), 20),
-		padRight(ui.Bold(color, "JOBS"), 8),
-		padRight(ui.Bold(color, "DURATION"), 12),
+	fmt.Fprintf(os.Stdout, "%s  %s  %s  %s  %s\n",
+		padRight(ui.Bold(color, "RUN"), 38),
+		padRight(ui.Bold(color, "STATE"), 10),
+		padRight(ui.Bold(color, "PLAN"), 22),
+		padRight(ui.Bold(color, "RESULT"), 20),
 		ui.Bold(color, "AGE"))
 
 	for _, exec := range execs {
 		icon := styleStatus(exec.Status, color)
-		jobs := fmt.Sprintf("%d/%d", exec.JobDone, exec.JobTotal)
-		duration := formatDuration(exec.StartedAt, exec.FinishedAt)
-		age := formatAge(exec.StartedAt)
-
-		fmt.Fprintf(os.Stdout, "%s %-37s %-12s %-20s %-8s %-12s %s\n",
-			icon, exec.ID, exec.Status, exec.PlanName, jobs, duration, age)
+		result := formatExecutionCounts(executionCounts{
+			total:     exec.JobTotal,
+			completed: exec.JobDone,
+			failed:    exec.JobFailed,
+		})
+		fmt.Fprintf(os.Stdout, "%s %-37s %-10s %-22s %-20s %s\n",
+			icon,
+			exec.ID,
+			statusLabel(exec.Status),
+			trimDisplay(exec.PlanName, 22),
+			trimDisplay(result, 20),
+			formatAge(exec.StartedAt),
+		)
 	}
 
 	return nil
@@ -112,51 +125,54 @@ func showAllExecutions(store *state.Store, color bool) error {
 func showExecution(store *state.Store, execID string, color bool) error {
 	meta, _ := store.LoadMetadata(execID)
 	st, _ := store.LoadState(execID)
+	counts := executionCountsFromState(meta, st)
 
-	// Compact execution header
-	headerParts := []string{
-		fmt.Sprintf("EXECUTION %s", ui.Bold(color, execID)),
+	status := "unknown"
+	if meta != nil && strings.TrimSpace(meta.Status) != "" {
+		status = meta.Status
 	}
+	duration := ""
 	if meta != nil {
-		headerParts = append(headerParts,
-			fmt.Sprintf("%s %s", styleStatus(meta.Status, color), styleStatusText(meta.Status, color)),
-			fmt.Sprintf("%d/%d jobs", meta.JobDone, meta.JobTotal),
-		)
-		if meta.FinishedAt != "" {
-			headerParts = append(headerParts, formatDuration(meta.StartedAt, meta.FinishedAt))
-		} else if meta.StartedAt != "" {
-			headerParts = append(headerParts, formatAge(meta.StartedAt))
-		}
+		duration = formatDuration(meta.StartedAt, meta.FinishedAt)
+	}
+
+	headerParts := []string{ui.Bold(color, execID)}
+	if status != "" {
+		headerParts = append(headerParts, fmt.Sprintf("%s %s", styleStatus(status, color), styleStatusText(statusLabel(status), color)))
+	}
+	if summary := formatExecutionCounts(counts); summary != "" {
+		headerParts = append(headerParts, summary)
+	}
+	if duration != "" {
+		headerParts = append(headerParts, duration)
 	}
 	fmt.Println(strings.Join(headerParts, "  "))
 
-	if meta != nil && meta.PlanName != "" {
-		planLine := fmt.Sprintf("Plan: %s", meta.PlanName)
-		if meta.PlanID != "" {
-			planLine += fmt.Sprintf("  %s", ui.Dim(color, "sha256:"+meta.PlanID))
+	if meta != nil {
+		planValue := strings.TrimSpace(meta.PlanName)
+		if planValue == "" {
+			planValue = "plan"
 		}
-		fmt.Println(ui.Dim(color, planLine))
+		if strings.TrimSpace(meta.PlanID) != "" {
+			planValue = planValue + " · " + meta.PlanID
+		}
+		fmt.Fprintf(os.Stdout, "%-12s %s\n", ui.Dim(color, "Plan"), planValue)
+		for _, link := range meta.Links {
+			fmt.Fprintf(os.Stdout, "%-12s %s\n", displayLinkLabel(link.Label, color), link.URL)
+		}
+	}
+	fmt.Fprintf(os.Stdout, "%-12s gluon logs --exec-id %s\n", ui.Dim(color, "Logs"), execID)
+
+	type jobDisplay struct {
+		id     string
+		status string
+		err    string
+		dur    string
+		steps  map[string]string
 	}
 
-	if meta != nil && meta.JobFailed > 0 {
-		fmt.Printf("%s  ✓ %d  ✗ %d\n",
-			ui.Dim(color, "Jobs:"),
-			meta.JobDone-meta.JobFailed,
-			meta.JobFailed)
-	}
-
+	var jobs []jobDisplay
 	if st != nil {
-		fmt.Println()
-
-		type jobDisplay struct {
-			id     string
-			status string
-			err    string
-			dur    string
-			steps  map[string]string
-		}
-
-		var jobs []jobDisplay
 		for jobID, js := range st.Jobs {
 			if js == nil {
 				continue
@@ -173,45 +189,133 @@ func showExecution(store *state.Store, execID string, color bool) error {
 				steps:  js.Steps,
 			})
 		}
+	}
 
-		// Sort: running first, then failed, then completed, then pending
-		statusOrder := map[string]int{"running": 0, "failed": 1, "completed": 2, "pending": 3}
-		sort.Slice(jobs, func(i, j int) bool {
-			oi, ok := statusOrder[strings.ToLower(jobs[i].status)]
-			if !ok {
-				oi = 4
-			}
-			oj, ok := statusOrder[strings.ToLower(jobs[j].status)]
-			if !ok {
-				oj = 4
-			}
-			if oi != oj {
-				return oi < oj
-			}
-			return jobs[i].id < jobs[j].id
-		})
+	if len(jobs) == 0 {
+		return nil
+	}
 
-		for _, job := range jobs {
-			icon := styleStatus(job.status, color)
-			durPart := ""
-			if job.dur != "" {
-				durPart = "  " + ui.Dim(color, job.dur)
-			}
-			fmt.Fprintf(os.Stdout, "  %s %-50s%s\n", icon, job.id, durPart)
-			if job.err != "" {
-				fmt.Fprintf(os.Stdout, "    %s %s\n", ui.Dim(color, "↳"), ui.Red(color, job.err))
-			}
+	sort.Slice(jobs, func(i, j int) bool {
+		oi := statusSortKey(jobs[i].status)
+		oj := statusSortKey(jobs[j].status)
+		if oi != oj {
+			return oi < oj
+		}
+		return jobs[i].id < jobs[j].id
+	})
 
-			if statusDetailed {
-				for stepID, stepStatus := range job.steps {
-					stepIcon := styleStatus(stepStatus, color)
-					fmt.Fprintf(os.Stdout, "      %s %s\n", stepIcon, stepID)
-				}
+	fmt.Println()
+	for _, job := range jobs {
+		icon := styleStatus(job.status, color)
+		line := fmt.Sprintf("%s %-24s", icon, job.id)
+		if job.dur != "" {
+			line += " " + padRight(ui.Dim(color, job.dur), 6)
+		}
+		if job.err != "" {
+			line += "   " + ui.Red(color, job.err)
+		}
+		fmt.Println(line)
+		if statusDetailed {
+			stepIDs := make([]string, 0, len(job.steps))
+			for stepID := range job.steps {
+				stepIDs = append(stepIDs, stepID)
+			}
+			sort.Strings(stepIDs)
+			for _, stepID := range stepIDs {
+				fmt.Printf("  %s %s\n", styleStatus(job.steps[stepID], color), stepID)
 			}
 		}
 	}
 
 	return nil
+}
+
+func executionCountsFromState(meta *state.ExecMetadata, st *state.ExecState) executionCounts {
+	if counts := state.SummarizeExecutionState(st); counts.Total > 0 {
+		return executionCounts{
+			total:     counts.Total,
+			completed: counts.Completed,
+			failed:    counts.Failed,
+			running:   counts.Running,
+			pending:   counts.Pending,
+		}
+	}
+	if meta == nil {
+		return executionCounts{}
+	}
+	return executionCounts{
+		total:     meta.JobTotal,
+		completed: meta.JobDone,
+		failed:    meta.JobFailed,
+	}
+}
+
+func formatExecutionCounts(counts executionCounts) string {
+	parts := make([]string, 0, 3)
+	if counts.completed > 0 {
+		parts = append(parts, fmt.Sprintf("%d succeeded", counts.completed))
+	}
+	if counts.failed > 0 {
+		parts = append(parts, fmt.Sprintf("%d failed", counts.failed))
+	}
+	if counts.running > 0 {
+		parts = append(parts, fmt.Sprintf("%d running", counts.running))
+	}
+	if counts.pending > 0 {
+		parts = append(parts, fmt.Sprintf("%d pending", counts.pending))
+	}
+	if len(parts) == 0 && counts.total > 0 {
+		parts = append(parts, fmt.Sprintf("%d task%s", counts.total, plural(counts.total)))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func statusSortKey(status string) int {
+	switch strings.ToLower(status) {
+	case "failed":
+		return 0
+	case "running":
+		return 1
+	case "completed":
+		return 2
+	case "pending":
+		return 3
+	default:
+		return 4
+	}
+}
+
+func statusLabel(status string) string {
+	trimmed := strings.TrimSpace(strings.ToLower(status))
+	if trimmed == "" {
+		return "unknown"
+	}
+	return trimmed
+}
+
+func trimDisplay(value string, width int) string {
+	if len(value) <= width {
+		return value
+	}
+	if width <= 1 {
+		return value[:width]
+	}
+	return value[:width-1] + "…"
+}
+
+func displayLinkLabel(label string, color bool) string {
+	trimmed := strings.TrimSpace(label)
+	if trimmed == "" {
+		trimmed = "Link"
+	}
+	return ui.Dim(color, trimmed)
+}
+
+func plural(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
 }
 
 func formatDuration(start, end string) string {

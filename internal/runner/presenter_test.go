@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sourceplane/gluon/internal/model"
+	"github.com/sourceplane/gluon/internal/state"
 )
 
 func TestSummarizeUseOutputPrefersInstalledAndCacheMessages(t *testing.T) {
@@ -54,5 +57,40 @@ func TestFormatCommandPreviewSplitsMultilineScripts(t *testing.T) {
 	}
 	if lines[1] != "helm version --short" {
 		t.Fatalf("lines[1] = %q, want %q", lines[1], "helm version --short")
+	}
+}
+
+func TestAnalyzeStepOutputPromotesLinksAndHeadline(t *testing.T) {
+	t.Parallel()
+
+	view := analyzeStepOutput(model.PlanStep{
+		Name: "build",
+		Run:  "printf 'Built web app\\nPreview URL: https://preview.example.dev\\n'",
+	}, "Built web app\nPreview URL: https://preview.example.dev\n")
+
+	if got, want := view.headline, "Built web app"; got != want {
+		t.Fatalf("view.headline = %q, want %q", got, want)
+	}
+	if len(view.links) != 1 {
+		t.Fatalf("len(view.links) = %d, want 1", len(view.links))
+	}
+	if got, want := view.links[0].Label, "Preview URL"; got != want {
+		t.Fatalf("view.links[0].Label = %q, want %q", got, want)
+	}
+	if got, want := view.links[0].URL, "https://preview.example.dev"; got != want {
+		t.Fatalf("view.links[0].URL = %q, want %q", got, want)
+	}
+}
+
+func TestNewRunSummaryDedupesLinks(t *testing.T) {
+	t.Parallel()
+
+	summary := newRunSummary()
+	summary.addLinks([]state.ExecutionLink{{Label: "Preview URL", URL: "https://preview.example.dev"}})
+	summary.addLinks([]state.ExecutionLink{{Label: "Preview URL", URL: "https://preview.example.dev"}})
+
+	snap := summary.snapshot()
+	if len(snap.links) != 1 {
+		t.Fatalf("len(snap.links) = %d, want 1", len(snap.links))
 	}
 }

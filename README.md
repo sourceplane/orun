@@ -447,7 +447,7 @@ To use that example composition:
 
 1. Copy `examples/compositions/gha-helm/` into your config directory.
 2. Set the component type to `gha-helm`.
-3. Execute the compiled plan with `gluon run --plan plan.json --execute`.
+3. Run the compiled plan with `gluon run --plan plan.json`.
 
 Example component snippet:
 
@@ -613,24 +613,28 @@ gluon compositions package build \
 
 # Preview execution from a compiled plan (dry-run)
 gluon run \
+  --plan plan.json \
+  --dry-run
+
+# Run the plan
+gluon run \
   --plan plan.json
 
-# Execute plan steps
+# Run using the Docker backend
 gluon run \
   --plan plan.json \
-  --execute
-
-# Execute using the Docker backend
-gluon run \
-  --plan plan.json \
-  --execute \
   --runner docker
 
-# Execute using GitHub Actions compatibility mode
+# Run using GitHub Actions compatibility mode
 gluon run \
   --plan plan.json \
-  --execute \
   --gha
+
+# Check the latest run
+gluon status
+
+# Show only failed logs from the latest run
+gluon logs --failed
 ```
 
 **Flags:**
@@ -640,7 +644,7 @@ gluon run \
 - `-f, --format` - Output format: json or yaml (default: json)
 - `--debug` - Enable verbose logging
 - `-p, --plan` - Path to compiled plan file for `run`
-- `-x, --execute` - Execute commands (without this, `run` is dry-run)
+- `--dry-run` - Preview the run without executing jobs
 - `--verbose` - Expand full step logs for `run` instead of the compact summary view
 - `--gha` - Shortcut for GitHub Actions compatibility mode (`--runner github-actions`)
 - `--runner` - Execution backend for `run`: `local`, `github-actions`, or `docker`
@@ -660,7 +664,7 @@ Runner notes:
 - `github-actions` enables GitHub Actions-compatible `use:` steps, expression evaluation, file commands such as `GITHUB_ENV` and `GITHUB_OUTPUT`, and post-step handling for supported actions.
 - `docker` runs each step in a fresh container, mounts the workspace at `/workspace`, and uses `job.runsOn` as the image. Common GitHub-style labels such as `ubuntu-22.04` map to `ubuntu:22.04`. If `runsOn` is empty, `ubuntu:22.04` is used.
 
-`run` now defaults to a compact execution view that summarizes successful steps and collapses noisy backend logs. Add `--verbose` when you want the full raw logs inline.
+`run` defaults to a compact execution view: immediate job state, short success summaries, promoted URLs, and minimal noise. Add `--verbose` when you want full commands and raw logs inline.
 
 ## Troubleshooting
 

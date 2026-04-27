@@ -38,6 +38,8 @@ type Runner struct {
 	Concurrency        int
 	FilterComponents   []string
 	FilterEnv          string
+	printMu            sync.Mutex
+	stateMu            sync.Mutex
 }
 
 // State is kept for backwards compat with tests referencing old types.
@@ -45,10 +47,101 @@ type State = state.ExecState
 type JobState = state.JobState
 
 type runSummary struct {
+	mu        sync.Mutex
+	startedAt time.Time
 	completed int
-	skipped   int
+	resumed   int
 	failed    int
 	waiting   int
+	cacheHits int
+	links     []state.ExecutionLink
+	linkIndex map[string]struct{}
+}
+
+type runSummarySnapshot struct {
+	duration  time.Duration
+	completed int
+	resumed   int
+	failed    int
+	waiting   int
+	cacheHits int
+	links     []state.ExecutionLink
+}
+
+func newRunSummary() *runSummary {
+	return &runSummary{
+		startedAt: time.Now(),
+		linkIndex: map[string]struct{}{},
+	}
+}
+
+func (s *runSummary) addCompleted() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.completed++
+}
+
+func (s *runSummary) addResumed() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resumed++
+}
+
+func (s *runSummary) addFailed() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failed++
+}
+
+func (s *runSummary) addWaiting(n int) {
+	if n <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.waiting += n
+}
+
+func (s *runSummary) addCacheHits(n int) {
+	if n <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cacheHits += n
+}
+
+func (s *runSummary) addLinks(links []state.ExecutionLink) {
+	if len(links) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, link := range links {
+		if strings.TrimSpace(link.URL) == "" {
+			continue
+		}
+		key := strings.TrimSpace(link.URL) + "|" + strings.TrimSpace(link.Label)
+		if _, exists := s.linkIndex[key]; exists {
+			continue
+		}
+		s.linkIndex[key] = struct{}{}
+		s.links = append(s.links, link)
+	}
+}
+
+func (s *runSummary) snapshot() runSummarySnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return runSummarySnapshot{
+		duration:  time.Since(s.startedAt),
+		completed: s.completed,
+		resumed:   s.resumed,
+		failed:    s.failed,
+		waiting:   s.waiting,
+		cacheHits: s.cacheHits,
+		links:     append([]state.ExecutionLink{}, s.links...),
+	}
 }
 
 func NewRunner(
@@ -139,7 +232,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		}
 
 		// Write initial metadata
-		r.writeMetadata(plan, "running")
+		r.writeMetadata(plan, execState, "running", nil)
 	} else {
 		execState = &state.ExecState{
 			ExecID:       r.ExecID,
@@ -167,7 +260,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	}
 
 	if r.shouldPrintPreflight(orderedJobs) {
-		r.printRunHeader(plan)
+		r.printRunHeader(plan, orderedJobs)
 		r.printReadinessSnapshot(orderedJobs, execState)
 	}
 
@@ -183,7 +276,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	}
 
 	failFast := plan.Execution.FailFast
-	summary := &runSummary{}
+	summary := newRunSummary()
 	executedTarget := false
 
 	// Determine concurrency
@@ -194,6 +287,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	if concurrency <= 0 {
 		concurrency = 1
 	}
+	r.Concurrency = concurrency
 
 	if concurrency > 1 && !r.DryRun {
 		return r.runConcurrent(orderedJobs, plan, execState, baseExecContext, persistState, failFast, summary, concurrency)
@@ -206,7 +300,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 
 		unmet := unresolvedDependencies(job, execState)
 		if len(unmet) > 0 {
-			summary.waiting++
+			summary.addWaiting(1)
 			r.printWaiting(job, unmet, execState)
 			if r.JobID != "" {
 				return fmt.Errorf("cannot run %s: dependencies not completed (%s)", job.ID, strings.Join(unmet, ", "))
@@ -218,14 +312,14 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 
 		jobState := ensureJobState(execState, job)
 		if jobState.Status == "completed" {
-			summary.skipped++
-			fmt.Fprintf(r.Stdout, "%s %s already completed\n", ui.Yellow(r.Color, "↷"), job.ID)
+			summary.addResumed()
+			r.printJobResumed(job)
 			continue
 		}
 
 		failed := r.executeJob(job, jobState, execState, baseExecContext, persistState, failFast, summary)
 		if failed && failFast {
-			r.writeMetadata(plan, "failed")
+			r.writeMetadata(plan, execState, "failed", summary.snapshot().links)
 			return fmt.Errorf("job %s failed (fail-fast enabled)", job.ID)
 		}
 
@@ -238,31 +332,32 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		return fmt.Errorf("job not found in runnable set: %s", r.JobID)
 	}
 
-	if r.shouldPrintRunSummary(summary) {
-		r.printRunSummary(summary)
-	}
-
+	snap := summary.snapshot()
 	finalStatus := "completed"
-	if summary.failed > 0 {
+	if snap.failed > 0 {
 		finalStatus = "failed"
 	}
-	r.writeMetadata(plan, finalStatus)
+	r.printRunSummary(summary, finalStatus)
+	r.writeMetadata(plan, execState, finalStatus, snap.links)
 
 	return nil
 }
 
 func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execState *state.ExecState, baseExecContext executor.ExecContext, persistState, failFast bool, summary *runSummary) bool {
-	jobState.Status = "running"
-	jobState.FinishedAt = ""
-	jobState.LastError = ""
-	if jobState.StartedAt == "" {
-		jobState.StartedAt = time.Now().UTC().Format(time.RFC3339)
-	}
-	r.persistState(persistState, execState)
+	r.updateState(persistState, execState, func() {
+		jobState.Status = "running"
+		jobState.FinishedAt = ""
+		jobState.LastError = ""
+		if jobState.StartedAt == "" {
+			jobState.StartedAt = time.Now().UTC().Format(time.RFC3339)
+		}
+	})
 
 	r.printJobHeader(job)
 
 	jobFailed := false
+	jobStartedAt := time.Now()
+	jobReport := newJobReport(job, r.DryRun)
 	jobWorkingDir := r.resolveWorkingDir(job.Path)
 	currentPhase := ""
 	for idx, step := range job.Steps {
@@ -279,8 +374,9 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 			continue
 		}
 
-		jobState.Steps[stepID] = "running"
-		r.persistState(persistState, execState)
+		r.updateState(persistState, execState, func() {
+			jobState.Steps[stepID] = "running"
+		})
 
 		workingDir := r.resolveStepWorkingDir(jobWorkingDir, step.WorkingDirectory)
 		retryCount := r.resolveRetryCount(job, step)
@@ -289,8 +385,9 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 		r.printStepStart(stepID, idx+1, len(job.Steps))
 		r.printStepContext(step, workingDir, timeoutValue, retryCount)
 		if r.DryRun {
-			jobState.Steps[stepID] = "completed"
-			r.persistState(persistState, execState)
+			r.updateState(persistState, execState, func() {
+				jobState.Steps[stepID] = "completed"
+			})
 			r.printStepDryRun()
 			continue
 		}
@@ -322,31 +419,35 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 			}
 		}
 		stepDuration := time.Since(stepStartedAt)
+		view := analyzeStepOutput(step, output)
+		jobReport.observeStep(job.ID, stepID, view)
 
 		// Write step log
 		r.writeStepLog(job.ID, stepID, output)
 
 		if stepErr != nil {
-			jobState.Steps[stepID] = "failed"
-			jobState.Status = "failed"
-			jobState.LastError = fmt.Sprintf("step %s: %v", stepID, stepErr)
-			jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
-			r.persistState(persistState, execState)
+			r.updateState(persistState, execState, func() {
+				jobState.Steps[stepID] = "failed"
+				jobState.Status = "failed"
+				jobState.LastError = fmt.Sprintf("step %s: %v", stepID, stepErr)
+				jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+			})
 
-			r.printStepFailure(step, output, stepDuration, stepErr, workingDir)
+			r.printStepFailure(job, step, view, stepDuration, stepErr, workingDir)
 			if strings.EqualFold(step.OnFailure, "continue") {
 				r.printStepContinuation()
 				continue
 			}
 
 			jobFailed = true
-			summary.failed++
+			summary.addFailed()
 			break
 		}
 
-		jobState.Steps[stepID] = "completed"
-		r.persistState(persistState, execState)
-		r.printStepSuccess(step, output, stepDuration)
+		r.updateState(persistState, execState, func() {
+			jobState.Steps[stepID] = "completed"
+		})
+		r.printStepSuccess(step, view, stepDuration)
 	}
 
 	if !r.DryRun {
@@ -361,33 +462,35 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 				if r.Verbose || finalizeErr != nil {
 					r.printBlock("post-job logs", splitDisplayLines(output))
 				} else {
-					fmt.Fprintln(r.Stdout, "  │")
-					fmt.Fprintf(r.Stdout, "  │ post-job logs: %s\n", ui.Dim(r.Color, "(collapsed; use --verbose to expand)"))
+					r.printInlineDetail("post-job logs", "(collapsed; use --verbose to expand)")
 				}
 			}
 			if finalizeErr != nil {
 				jobFailed = true
-				jobState.Status = "failed"
-				jobState.LastError = fmt.Sprintf("job finalizer: %v", finalizeErr)
-				jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
-				r.persistState(persistState, execState)
+				r.updateState(persistState, execState, func() {
+					jobState.Status = "failed"
+					jobState.LastError = fmt.Sprintf("job finalizer: %v", finalizeErr)
+					jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+				})
 				r.printFailureBlock(finalizeErr, output, jobWorkingDir)
 			}
 		}
 	}
 
+	summary.addCacheHits(jobReport.cacheHits)
+	summary.addLinks(jobReport.links)
+
 	if jobState.Status != "failed" {
-		jobState.Status = "completed"
-		jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
-		jobState.LastError = ""
-		r.persistState(persistState, execState)
-		summary.completed++
-		r.printJobFooter(true)
+		r.updateState(persistState, execState, func() {
+			jobState.Status = "completed"
+			jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+			jobState.LastError = ""
+		})
+		summary.addCompleted()
+		r.printJobFooter(job, jobReport, true, time.Since(jobStartedAt))
 	} else if !jobFailed {
-		summary.failed++
-		r.printJobFooter(false)
-	} else {
-		r.printJobFooter(false)
+		summary.addFailed()
+		r.printJobFooter(job, jobReport, false, time.Since(jobStartedAt))
 	}
 
 	return jobFailed
@@ -447,7 +550,7 @@ func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState
 			stillPending := len(pending) > 0
 			mu.Unlock()
 			if stillPending && firstErr == nil {
-				summary.waiting += len(pending)
+				summary.addWaiting(len(pending))
 				break
 			}
 			break
@@ -472,12 +575,16 @@ func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState
 					mu.Unlock()
 					return
 				}
+				r.stateMu.Lock()
 				jobState := ensureJobState(execState, j)
-				if jobState.Status == "completed" {
+				alreadyCompleted := jobState.Status == "completed"
+				r.stateMu.Unlock()
+				if alreadyCompleted {
 					mu.Unlock()
 					mu.Lock()
 					completed[j.ID] = true
-					summary.skipped++
+					summary.addResumed()
+					r.printJobResumed(j)
 					mu.Unlock()
 					return
 				}
@@ -502,15 +609,13 @@ func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState
 
 	wg.Wait()
 
-	if r.shouldPrintRunSummary(summary) {
-		r.printRunSummary(summary)
-	}
-
+	snap := summary.snapshot()
 	finalStatus := "completed"
-	if summary.failed > 0 || firstErr != nil {
+	if snap.failed > 0 || firstErr != nil {
 		finalStatus = "failed"
 	}
-	r.writeMetadata(plan, finalStatus)
+	r.printRunSummary(summary, finalStatus)
+	r.writeMetadata(plan, execState, finalStatus, snap.links)
 
 	return firstErr
 }
@@ -542,14 +647,23 @@ func (r *Runner) filterJobs(jobs []model.PlanJob) []model.PlanJob {
 	return filtered
 }
 
-func (r *Runner) persistState(persist bool, execState *state.ExecState) {
+func (r *Runner) updateState(persist bool, execState *state.ExecState, update func()) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	if update != nil {
+		update()
+	}
 	if !persist || r.Store == nil || r.ExecID == "" {
 		return
 	}
 	r.Store.SaveState(r.ExecID, execState)
 }
 
-func (r *Runner) writeMetadata(plan *model.Plan, status string) {
+func (r *Runner) persistState(persist bool, execState *state.ExecState) {
+	r.updateState(persist, execState, nil)
+}
+
+func (r *Runner) writeMetadata(plan *model.Plan, execState *state.ExecState, status string, links []state.ExecutionLink) {
 	if r.Store == nil || r.ExecID == "" || r.DryRun {
 		return
 	}
@@ -558,6 +672,11 @@ func (r *Runner) writeMetadata(plan *model.Plan, status string) {
 	username := ""
 	if u != nil {
 		username = u.Username
+	}
+	counts := state.SummarizeExecutionState(execState)
+	jobTotal := len(plan.Jobs)
+	if counts.Total > 0 {
+		jobTotal = counts.Total
 	}
 
 	meta := &state.ExecMetadata{
@@ -569,12 +688,18 @@ func (r *Runner) writeMetadata(plan *model.Plan, status string) {
 		Trigger:   "cli",
 		User:      username,
 		DryRun:    r.DryRun,
-		JobTotal:  len(plan.Jobs),
+		JobTotal:  jobTotal,
+		JobDone:   counts.Completed,
+		JobFailed: counts.Failed,
+		Links:     append([]state.ExecutionLink{}, links...),
 	}
 
 	existing, _ := r.Store.LoadMetadata(r.ExecID)
 	if existing != nil {
 		meta.StartedAt = existing.StartedAt
+		if len(meta.Links) == 0 {
+			meta.Links = append([]state.ExecutionLink{}, existing.Links...)
+		}
 		if status != "running" {
 			meta.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 		}
@@ -592,31 +717,39 @@ func (r *Runner) writeStepLog(jobID, stepID, output string) {
 	os.WriteFile(logPath, []byte(output), 0644)
 }
 
-func (r *Runner) printRunHeader(plan *model.Plan) {
-	mode := "execute"
-	if r.DryRun {
-		mode = "dry-run"
-	}
+func (r *Runner) printRunHeader(plan *model.Plan, jobs []model.PlanJob) {
 	planLabel := strings.TrimSpace(plan.Metadata.Name)
 	if planLabel == "" {
 		planLabel = "plan"
 	}
 	planID := state.PlanChecksumShort(plan)
-	fmt.Fprintf(r.Stdout, "%s  %s", ui.BoldCyan(r.Color, "gluon run"), planLabel)
-	if planID != "" {
-		fmt.Fprintf(r.Stdout, "  %s", ui.Dim(r.Color, "sha256:"+planID))
+	scopeParts := make([]string, 0, 4)
+	if env := singleEnvironment(jobs); env != "" {
+		scopeParts = append(scopeParts, env)
 	}
-	fmt.Fprintf(r.Stdout, "   runner=%s   mode=%s\n", r.Executor.Name(), mode)
-	if r.ExecID != "" && !r.DryRun {
-		fmt.Fprintf(r.Stdout, "%s exec=%s\n", ui.Dim(r.Color, "↳"), r.ExecID)
-	}
+	scopeParts = append(scopeParts, fmt.Sprintf("%d task%s", len(jobs), pluralSuffix(len(jobs))))
 	if r.Concurrency > 1 {
-		fmt.Fprintf(r.Stdout, "%s concurrency=%d\n", ui.Dim(r.Color, "↳"), r.Concurrency)
+		scopeParts = append(scopeParts, fmt.Sprintf("%d-way parallel", r.Concurrency))
 	}
-	if r.JobID != "" {
-		fmt.Fprintf(r.Stdout, "%s target=%s\n", ui.Dim(r.Color, "↳"), r.JobID)
-	}
-	fmt.Fprintln(r.Stdout)
+	scopeParts = append(scopeParts, displayRunnerName(r.Executor.Name()))
+
+	r.withPrintLock(func() {
+		fmt.Fprintf(r.Stdout, "%s  %s\n", ui.BoldCyan(r.Color, "gluon run"), ui.Bold(r.Color, planLabel))
+		fmt.Fprintln(r.Stdout, ui.Dim(r.Color, strings.Join(scopeParts, " · ")))
+		fmt.Fprintln(r.Stdout)
+		if r.ExecID != "" && !r.DryRun {
+			fmt.Fprintf(r.Stdout, "%-12s %s\n", ui.Dim(r.Color, "Run"), r.ExecID)
+		}
+		planValue := planLabel
+		if planID != "" {
+			planValue = planValue + " · " + planID
+		}
+		fmt.Fprintf(r.Stdout, "%-12s %s\n", ui.Dim(r.Color, "Plan"), planValue)
+		if r.JobID != "" {
+			fmt.Fprintf(r.Stdout, "%-12s %s\n", ui.Dim(r.Color, "Target"), r.JobID)
+		}
+		fmt.Fprintln(r.Stdout)
+	})
 }
 
 func (r *Runner) printTargetJobSummary(job model.PlanJob, execState *state.ExecState) {
@@ -637,7 +770,11 @@ func (r *Runner) printTargetJobSummary(job model.PlanJob, execState *state.ExecS
 }
 
 func (r *Runner) printReadinessSnapshot(jobs []model.PlanJob, execState *state.ExecState) {
-	fmt.Fprintln(r.Stdout, "\n"+ui.BoldCyan(r.Color, "Readiness snapshot"))
+	ready := 0
+	waiting := 0
+	resumed := 0
+	waitingLines := make([]string, 0)
+	resumedLines := make([]string, 0)
 	for _, job := range jobs {
 		if r.JobID != "" && job.ID != r.JobID {
 			continue
@@ -645,33 +782,67 @@ func (r *Runner) printReadinessSnapshot(jobs []model.PlanJob, execState *state.E
 
 		jobState := execState.Jobs[job.ID]
 		if jobState != nil && jobState.Status == "completed" {
-			fmt.Fprintf(r.Stdout, "  ├─ %s %s (completed from state)\n", ui.Green(r.Color, "✓"), job.ID)
+			resumed++
+			resumedLines = append(resumedLines, fmt.Sprintf("%s reused previous run", jobDisplayName(job)))
 			continue
 		}
 
 		unmet := unresolvedDependencies(job, execState)
 		if len(unmet) > 0 {
-			fmt.Fprintf(r.Stdout, "  ├─ %s %s waiting for: %s\n", ui.Yellow(r.Color, "⏳"), job.ID, strings.Join(unmet, ", "))
+			waiting++
+			waitingLines = append(waitingLines, fmt.Sprintf("%s waiting on %s", jobDisplayName(job), strings.Join(unmet, ", ")))
 			continue
 		}
 
-		fmt.Fprintf(r.Stdout, "  ├─ %s %s ready\n", ui.Cyan(r.Color, "▶"), job.ID)
+		ready++
 	}
+	r.withPrintLock(func() {
+		fmt.Fprintf(r.Stdout, "%-12s %d ready", ui.Dim(r.Color, "State"), ready)
+		if resumed > 0 {
+			fmt.Fprintf(r.Stdout, " · %d resumed", resumed)
+		}
+		if waiting > 0 {
+			fmt.Fprintf(r.Stdout, " · %d waiting", waiting)
+		}
+		fmt.Fprintln(r.Stdout)
+		for _, line := range waitingLines {
+			fmt.Fprintf(r.Stdout, "  %s %s\n", ui.Yellow(r.Color, "⏳"), line)
+		}
+		for _, line := range resumedLines {
+			fmt.Fprintf(r.Stdout, "  %s %s\n", ui.Cyan(r.Color, "⚡"), line)
+		}
+		fmt.Fprintln(r.Stdout)
+	})
 }
 
 func (r *Runner) printWaiting(job model.PlanJob, unmet []string, execState *state.ExecState) {
-	fmt.Fprintf(r.Stdout, "\n%s Job %s waiting for dependencies\n", ui.Yellow(r.Color, "⏳"), job.ID)
+	dependencies := make([]string, 0, len(unmet))
 	for _, dep := range unmet {
 		status := "pending"
 		if depState, ok := execState.Jobs[dep]; ok && depState != nil && depState.Status != "" {
 			status = depState.Status
 		}
-		fmt.Fprintf(r.Stdout, "  ├─ %s (%s)\n", dep, status)
+		dependencies = append(dependencies, fmt.Sprintf("%s (%s)", dep, status))
 	}
+	r.withPrintLock(func() {
+		fmt.Fprintf(r.Stdout, "%s %-22s waiting on %s\n", ui.Yellow(r.Color, "⏳"), ui.Bold(r.Color, jobDisplayName(job)), strings.Join(dependencies, ", "))
+	})
 }
 
-func (r *Runner) printRunSummary(summary *runSummary) {
-	fmt.Fprintf(r.Stdout, "\n%s completed=%d  skipped=%d  waiting=%d  failed=%s\n", ui.BoldCyan(r.Color, "run summary"), summary.completed, summary.skipped, summary.waiting, ui.Red(r.Color, fmt.Sprintf("%d", summary.failed)))
+func singleEnvironment(jobs []model.PlanJob) string {
+	if len(jobs) == 0 {
+		return ""
+	}
+	env := strings.TrimSpace(jobs[0].Environment)
+	if env == "" {
+		return ""
+	}
+	for _, job := range jobs[1:] {
+		if strings.TrimSpace(job.Environment) != env {
+			return ""
+		}
+	}
+	return env
 }
 
 func normalizeStepPhase(phase string) string {
@@ -888,15 +1059,25 @@ func (r *Runner) printPhaseHeader(phase string) {
 }
 
 func (r *Runner) printJobHeader(job model.PlanJob) {
-	fmt.Fprintf(r.Stdout, "\n%s Job %s\n", ui.Cyan(r.Color, "╭─"), ui.Bold(r.Color, job.ID))
-	fmt.Fprintf(r.Stdout, "│ component: %s   env: %s\n", job.Component, job.Environment)
+	if r.Verbose {
+		r.withPrintLock(func() {
+			fmt.Fprintf(r.Stdout, "\n%s Job %s\n", ui.Cyan(r.Color, "╭─"), ui.Bold(r.Color, job.ID))
+			fmt.Fprintf(r.Stdout, "│ component: %s   env: %s\n", job.Component, job.Environment)
+		})
+		return
+	}
+	r.withPrintLock(func() {
+		fmt.Fprintf(r.Stdout, "%s %s\n", ui.Blue(r.Color, "●"), ui.Bold(r.Color, jobDisplayName(job)))
+	})
 }
 
 func (r *Runner) printFailureBlock(err error, output, workingDir string) {
-	fmt.Fprintf(r.Stdout, "  │    %s failed: %s\n", ui.Red(r.Color, "✗"), ui.Red(r.Color, summarizeExecError(err)))
-	if hint := stepFailureHint(err, output, workingDir); hint != "" {
-		fmt.Fprintf(r.Stdout, "  │    %s %s\n", ui.Yellow(r.Color, "hint:"), hint)
-	}
+	r.withPrintLock(func() {
+		fmt.Fprintf(r.Stdout, "  │    %s failed: %s\n", ui.Red(r.Color, "✗"), ui.Red(r.Color, summarizeExecError(err)))
+		if hint := stepFailureHint(err, workingDir); hint != "" {
+			fmt.Fprintf(r.Stdout, "  │    %s %s\n", ui.Yellow(r.Color, "hint:"), hint)
+		}
+	})
 }
 
 func summarizeExecError(err error) string {
@@ -917,12 +1098,12 @@ func summarizeExecError(err error) string {
 	return err.Error()
 }
 
-func stepFailureHint(err error, output, workingDir string) string {
+func stepFailureHint(err error, workingDir string) string {
 	if err == nil {
 		return ""
 	}
 
-	combined := strings.ToLower(err.Error() + "\n" + output)
+	combined := strings.ToLower(err.Error())
 	if strings.Contains(combined, "no such file or directory") {
 		return fmt.Sprintf("file/path not found from cwd %s. Verify component path, relative file paths, or set --workdir to override globally", workingDir)
 	}

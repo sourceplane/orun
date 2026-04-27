@@ -39,19 +39,27 @@ type JobState struct {
 	LastError  string            `json:"lastError,omitempty"`
 }
 
+type ExecutionLink struct {
+	Label  string `json:"label"`
+	URL    string `json:"url"`
+	JobID  string `json:"jobId,omitempty"`
+	StepID string `json:"stepId,omitempty"`
+}
+
 type ExecMetadata struct {
-	ExecID     string `json:"execId"`
-	PlanID     string `json:"planId"`
-	PlanName   string `json:"planName"`
-	StartedAt  string `json:"startedAt"`
-	FinishedAt string `json:"finishedAt,omitempty"`
-	Status     string `json:"status"`
-	Trigger    string `json:"trigger"`
-	User       string `json:"user"`
-	DryRun     bool   `json:"dryRun"`
-	JobTotal   int    `json:"jobTotal"`
-	JobDone    int    `json:"jobDone"`
-	JobFailed  int    `json:"jobFailed"`
+	ExecID     string          `json:"execId"`
+	PlanID     string          `json:"planId"`
+	PlanName   string          `json:"planName"`
+	StartedAt  string          `json:"startedAt"`
+	FinishedAt string          `json:"finishedAt,omitempty"`
+	Status     string          `json:"status"`
+	Trigger    string          `json:"trigger"`
+	User       string          `json:"user"`
+	DryRun     bool            `json:"dryRun"`
+	JobTotal   int             `json:"jobTotal"`
+	JobDone    int             `json:"jobDone"`
+	JobFailed  int             `json:"jobFailed"`
+	Links      []ExecutionLink `json:"links,omitempty"`
 }
 
 type Store struct {
@@ -355,6 +363,7 @@ func (s *Store) ListExecutions() ([]ExecEntry, error) {
 		}
 		execID := entry.Name()
 		meta, _ := s.LoadMetadata(execID)
+		st, _ := s.LoadState(execID)
 		info, _ := entry.Info()
 
 		e := ExecEntry{ID: execID}
@@ -369,6 +378,11 @@ func (s *Store) ListExecutions() ([]ExecEntry, error) {
 		} else if info != nil {
 			e.StartedAt = info.ModTime().Format(time.RFC3339)
 			e.Status = "unknown"
+		}
+		if counts := SummarizeExecutionState(st); counts.Total > 0 {
+			e.JobTotal = counts.Total
+			e.JobDone = counts.Completed
+			e.JobFailed = counts.Failed
 		}
 
 		execs = append(execs, e)
@@ -412,14 +426,47 @@ func (s *Store) ResolveExecID(ref string) (string, error) {
 }
 
 type ExecEntry struct {
-	ID        string
-	PlanName  string
-	Status    string
-	StartedAt string
+	ID         string
+	PlanName   string
+	Status     string
+	StartedAt  string
 	FinishedAt string
-	JobTotal  int
-	JobDone   int
-	JobFailed int
+	JobTotal   int
+	JobDone    int
+	JobFailed  int
+}
+
+type ExecutionCounts struct {
+	Total     int
+	Completed int
+	Failed    int
+	Running   int
+	Pending   int
+}
+
+func SummarizeExecutionState(st *ExecState) ExecutionCounts {
+	if st == nil {
+		return ExecutionCounts{}
+	}
+
+	counts := ExecutionCounts{}
+	for _, job := range st.Jobs {
+		if job == nil {
+			continue
+		}
+		counts.Total++
+		switch strings.ToLower(strings.TrimSpace(job.Status)) {
+		case "completed":
+			counts.Completed++
+		case "failed":
+			counts.Failed++
+		case "running":
+			counts.Running++
+		default:
+			counts.Pending++
+		}
+	}
+	return counts
 }
 
 // --- GC ---

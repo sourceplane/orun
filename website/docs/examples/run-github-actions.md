@@ -14,12 +14,11 @@ gluon plan \
 
 The example intent declares its packaged `gha-demo` composition source, so no extra composition path flag is required.
 
-## Execute the plan
+## Run the plan
 
 ```bash
 gluon run \
-  --plan /tmp/gluon-gha-actions-plan.json \
-  --execute
+  --plan /tmp/gluon-gha-actions-plan.json
 ```
 
 Because the plan contains a `use:` step, `gluon run` auto-selects the `github-actions` backend unless you explicitly override it.
@@ -29,7 +28,6 @@ Because the plan contains a `use:` step, `gluon run` auto-selects the `github-ac
 ```bash
 gluon run \
   --plan /tmp/gluon-gha-actions-plan.json \
-  --execute \
   --gha
 ```
 

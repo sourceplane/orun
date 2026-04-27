@@ -22,12 +22,11 @@ Inspect the packaged example composition:
 go run ../../cmd/gluon compositions --intent intent.yaml
 ```
 
-Execute the plan:
+Run the plan:
 
 ```bash
 go run ../../cmd/gluon run \
-  --plan /tmp/gluon-gha-actions-plan.json \
-  --execute
+  --plan /tmp/gluon-gha-actions-plan.json
 ```
 
 `gluon run` auto-selects GitHub Actions compatibility mode because the compiled plan contains a `use:` step. The run succeeds when `azure/setup-helm` provisions Helm and the following shell step can execute `helm version --short`.

@@ -12,12 +12,11 @@ gluon plan \
   --output /tmp/gluon-docker-plan.json
 ```
 
-## Execute through Docker
+## Run through Docker
 
 ```bash
 gluon run \
   --plan /tmp/gluon-docker-plan.json \
-  --execute \
   --runner docker
 ```
 
