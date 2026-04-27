@@ -95,19 +95,6 @@ Pin an execution ID for CI/parallel-safe tracking:
 gluon run --exec-id ci-run-${GITHUB_RUN_ID}
 ```
 
-Force per-job workspace isolation (always stage), or disable it for tight feedback loops:
-
-```bash
-gluon run --concurrency 4 --isolation workspace
-gluon run --isolation none
-```
-
-Keep staged workspaces around for debugging after a successful run:
-
-```bash
-gluon run --concurrency 4 --keep-workspaces
-```
-
 ## Flags
 
 | Flag | Meaning |
@@ -122,8 +109,6 @@ gluon run --concurrency 4 --keep-workspaces
 | `--gha` | Shortcut for `--runner github-actions` |
 | `--exec-id` | Execution ID for resume or CI tracing (auto-generated if not set) |
 | `--concurrency` | Override plan concurrency (0 uses the plan's value) |
-| `--isolation` | Per-job workspace isolation: `auto` (default), `workspace`, `none` |
-| `--keep-workspaces` | Retain staged per-job workspaces after the run (default: remove on success, keep on failure) |
 | `--component` | Filter jobs to a specific component (repeatable) |
 | `--env`, `-e` | Filter jobs to a specific environment |
 | `--all` | Disable CWD-based component scoping; run all jobs |

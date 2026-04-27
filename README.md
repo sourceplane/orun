@@ -487,7 +487,6 @@ The generated plan is a fully resolved DAG.
   "execution": {
     "concurrency": 4,
     "failFast": true,
-    "isolation": "auto",
     "stateFile": ".gluon-state.json"
   },
   "spec": {

@@ -19,7 +19,6 @@ import (
 	"github.com/sourceplane/gluon/internal/model"
 	"github.com/sourceplane/gluon/internal/state"
 	"github.com/sourceplane/gluon/internal/ui"
-	"github.com/sourceplane/gluon/internal/workspace"
 )
 
 type Runner struct {
@@ -39,8 +38,6 @@ type Runner struct {
 	Concurrency        int
 	FilterComponents   []string
 	FilterEnv          string
-	Isolation          string // "auto" (default), "workspace", "none"
-	KeepWorkspaces     bool   // retain staged workspaces after the run
 	printMu            sync.Mutex
 	stateMu            sync.Mutex
 
@@ -375,31 +372,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 	jobFailed := false
 	jobStartedAt := time.Now()
 	jobReport := newJobReport(job, r.DryRun)
-
-	// Per-job workspace isolation. When enabled (default for concurrency > 1)
-	// we stage an isolated copy of the source tree so jobs cannot collide on
-	// shared mutable state — node_modules, build outputs, lockfiles, etc.
-	jobWorkspaceDir, stagedDir, isolationErr := r.stageWorkspace(baseExecContext.WorkspaceDir, job)
-	if isolationErr != nil {
-		r.updateState(persistState, execState, func() {
-			jobState.Status = "failed"
-			jobState.LastError = fmt.Sprintf("workspace isolation: %v", isolationErr)
-			jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
-		})
-		r.printFailureBlock(isolationErr, "", baseExecContext.WorkspaceDir)
-		summary.addFailed()
-		return true
-	}
-	if stagedDir != "" {
-		baseExecContext.WorkspaceDir = stagedDir
-		defer func() {
-			if r.KeepWorkspaces || jobFailed {
-				return
-			}
-			_ = r.cleanupStagedWorkspace(stagedDir)
-		}()
-	}
-	jobWorkingDir := r.resolveWorkingDirIn(jobWorkspaceDir, job.Path)
+	jobWorkingDir := r.resolveWorkingDir(job.Path)
 	currentPhase := ""
 	for idx, step := range job.Steps {
 		stepID := stepIdentifier(step)
@@ -1015,31 +988,25 @@ func unresolvedDependencies(job model.PlanJob, execState *state.ExecState) []str
 }
 
 func (r *Runner) resolveWorkingDir(path string) string {
-	return r.resolveWorkingDirIn(r.WorkDir, path)
-}
-
-// resolveWorkingDirIn computes the job working directory rooted at base
-// rather than r.WorkDir. This lets callers redirect the per-job CWD to a
-// staged workspace without mutating the shared Runner.
-func (r *Runner) resolveWorkingDirIn(base string, path string) string {
 	if r.UseWorkDirOverride {
-		if filepath.IsAbs(base) {
+		if filepath.IsAbs(r.WorkDir) {
+			return r.WorkDir
+		}
+		base, err := filepath.Abs(r.WorkDir)
+		if err == nil {
 			return base
 		}
-		if abs, err := filepath.Abs(base); err == nil {
-			return abs
-		}
-		return base
+		return r.WorkDir
 	}
 
 	if path == "" || path == "./" {
-		return base
+		return r.WorkDir
 	}
 
 	if filepath.IsAbs(path) {
 		return path
 	}
-	return filepath.Join(base, path)
+	return filepath.Join(r.WorkDir, path)
 }
 
 func (r *Runner) resolveWorkspaceDir() (string, error) {
@@ -1052,113 +1019,6 @@ func (r *Runner) resolveWorkspaceDir() (string, error) {
 		return "", fmt.Errorf("resolve workspace directory %s: %w", workspaceDir, err)
 	}
 	return resolved, nil
-}
-
-// stageWorkspace optionally creates an isolated per-job copy of the source
-// workspace and returns (workingRoot, stagedRoot, err). When isolation is
-// disabled, stagedRoot is empty and workingRoot equals the source workspace.
-//
-// Isolation modes:
-//   - "auto" (default): stage when concurrency > 1
-//   - "workspace":      always stage
-//   - "none":           never stage
-//
-// Staged workspaces live under <workspace>/.gluon/runs/<execID>/<jobID>/work
-// and are removed when the job succeeds (retained on failure for debugging).
-func (r *Runner) stageWorkspace(sourceWorkspace string, job model.PlanJob) (string, string, error) {
-	if !r.shouldIsolateWorkspace() {
-		return sourceWorkspace, "", nil
-	}
-	if r.DryRun {
-		return sourceWorkspace, "", nil
-	}
-	source := strings.TrimSpace(sourceWorkspace)
-	if source == "" {
-		return sourceWorkspace, "", nil
-	}
-
-	execID := strings.TrimSpace(r.ExecID)
-	if execID == "" {
-		execID = "ad-hoc"
-	}
-	stagedRoot := filepath.Join(source, ".gluon", "runs", sanitizeFilename(execID), sanitizeFilename(job.ID), "work")
-	if err := os.RemoveAll(stagedRoot); err != nil {
-		return sourceWorkspace, "", fmt.Errorf("clear staged workspace %s: %w", stagedRoot, err)
-	}
-
-	stats, err := workspace.Stage(context.Background(), source, stagedRoot, workspace.Options{Mode: workspace.ModeAuto})
-	if err != nil {
-		return sourceWorkspace, "", fmt.Errorf("stage workspace for %s: %w", job.ID, err)
-	}
-	if r.Verbose {
-		r.printInlineDetail("workspace", fmt.Sprintf("staged %d files (%d cloned, %d hardlinked, %d copied) at %s", stats.Files, stats.Cloned, stats.Hardlinked, stats.Copied, stagedRoot))
-	}
-	return stagedRoot, stagedRoot, nil
-}
-
-// cleanupStagedWorkspace removes a per-job staged workspace and any now-empty
-// parent directories under <workspace>/.gluon/runs/. Errors are returned but
-// callers may safely ignore them since staged workspaces are not authoritative.
-func (r *Runner) cleanupStagedWorkspace(stagedRoot string) error {
-	if err := workspace.Cleanup(stagedRoot); err != nil {
-		return err
-	}
-	// Best-effort: peel back empty ancestors (jobID/, runs/<execID>/) so a
-	// successful run leaves no trace under .gluon/runs/.
-	parent := filepath.Dir(stagedRoot)
-	for i := 0; i < 3; i++ {
-		if entries, err := os.ReadDir(parent); err == nil && len(entries) == 0 {
-			_ = os.Remove(parent)
-			parent = filepath.Dir(parent)
-			continue
-		}
-		break
-	}
-	return nil
-}
-
-func (r *Runner) shouldIsolateWorkspace() bool {
-	mode := strings.ToLower(strings.TrimSpace(r.Isolation))
-	switch mode {
-	case "none", "off", "false", "0":
-		return false
-	case "workspace", "always", "on", "true", "1":
-		return true
-	case "", "auto":
-		return r.Concurrency > 1
-	}
-	// Unknown values fall back to auto behaviour.
-	return r.Concurrency > 1
-}
-
-// sanitizeFilename produces a filesystem-safe slug from an arbitrary string.
-// It is intentionally narrower than what most filesystems allow so that the
-// result is also safe to embed in shell arguments and in URLs.
-func sanitizeFilename(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "_"
-	}
-	var b strings.Builder
-	b.Grow(len(value))
-	for _, r := range value {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case r == '-', r == '_', r == '.':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('_')
-		}
-	}
-	out := b.String()
-	if out == "" {
-		return "_"
-	}
-	if len(out) > 120 {
-		out = out[:120]
-	}
-	return out
 }
 
 func (r *Runner) resolveRetryCount(job model.PlanJob, step model.PlanStep) int {

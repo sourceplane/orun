@@ -11,7 +11,7 @@ The plan schema defines the artifact produced by `gluon plan` and consumed by `g
 | `apiVersion` | `gluon.io/v1` |
 | `kind` | Always `Plan` |
 | `metadata` | Name, description, namespace, generation timestamp, checksum |
-| `execution` | Concurrency, fail-fast behavior, workspace isolation mode, and state-file name |
+| `execution` | Concurrency, fail-fast behavior, and state-file name |
 | `spec.jobBindings` | Optional metadata about bound jobs |
 | `jobs` | The concrete execution DAG |
 
@@ -69,7 +69,6 @@ Steps can also declare:
   "execution": {
     "concurrency": 4,
     "failFast": true,
-    "isolation": "auto",
     "stateFile": ".gluon-state.json"
   },
   "jobs": []
@@ -77,12 +76,3 @@ Steps can also declare:
 ```
 
 Treat the plan as an immutable artifact. Do not hand-edit it unless you are debugging the runtime itself.
-
-## Execution block
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `concurrency` | int | Maximum number of jobs run in parallel. `0` means strictly sequential. |
-| `failFast` | bool | When `true`, stop scheduling new jobs after the first failure. |
-| `isolation` | string | Per-job workspace isolation mode: `auto` (stage when `concurrency > 1`, default), `workspace` (always stage), `none` (share the source workspace). |
-| `stateFile` | string | Legacy field; modern runs persist state under `.gluon/executions/<exec-id>/`. |

@@ -54,18 +54,6 @@ gluon run --concurrency 4
 
 Setting `--concurrency 1` forces strictly sequential execution, which is useful for debugging.
 
-### Per-job workspace isolation
-
-When `--concurrency` is greater than `1`, gluon stages an isolated copy of the
-source workspace for each job — using APFS `clonefile` on macOS, `FICLONE`
-reflinks on Linux btrfs/xfs, hard links elsewhere, and plain copies as a last
-resort. This prevents jobs from colliding on shared mutable state such as
-`node_modules`, build outputs, or lockfiles.
-
-Override with `--isolation auto|workspace|none` or `execution.isolation` in
-the plan. See the [execution runtime](../architecture/execution-runtime.md)
-architecture page for the full caching and isolation model.
-
 ## Step phases and ordering
 
 Steps can declare `phase` and `order` attributes.

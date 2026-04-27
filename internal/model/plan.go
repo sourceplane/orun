@@ -31,11 +31,6 @@ type PlanExecution struct {
 	Concurrency int    `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
 	FailFast    bool   `json:"failFast" yaml:"failFast"`
 	StateFile   string `json:"stateFile,omitempty" yaml:"stateFile,omitempty"`
-	// Isolation controls per-job workspace staging:
-	//   "auto"      — enable when concurrency > 1 (default)
-	//   "workspace" — always stage per-job workspace
-	//   "none"      — never stage; jobs share the source workspace
-	Isolation string `json:"isolation,omitempty" yaml:"isolation,omitempty"`
 }
 
 // PlanSpec holds specification about the plan and its bindings
