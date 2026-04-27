@@ -70,6 +70,48 @@ func TestProcessWorkflowCommandsParsesLegacyCommands(t *testing.T) {
 	}
 }
 
+func TestEngineJobsGetIsolatedHomeDirectories(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	engine := NewEngine(Options{
+		CacheDir:     filepath.Join(workspaceDir, ".cache", "actions"),
+		ToolCacheDir: filepath.Join(workspaceDir, ".cache", "tools"),
+	})
+	execCtx := ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: workspaceDir,
+		WorkDir:      workspaceDir,
+		BaseEnv:      map[string]string{"PATH": os.Getenv("PATH")},
+	}
+	if err := engine.Prepare(execCtx); err != nil {
+		t.Fatalf("engine.Prepare() error = %v", err)
+	}
+
+	jobA := model.PlanJob{ID: "job-a"}
+	jobB := model.PlanJob{ID: "job-b"}
+
+	homeA, err := engine.RunStep(execCtx, jobA, model.PlanStep{ID: "home", Run: `printf '%s' "$HOME"`, Shell: "bash"})
+	if err != nil {
+		t.Fatalf("job-a RunStep() error = %v", err)
+	}
+	homeB, err := engine.RunStep(execCtx, jobB, model.PlanStep{ID: "home", Run: `printf '%s' "$HOME"`, Shell: "bash"})
+	if err != nil {
+		t.Fatalf("job-b RunStep() error = %v", err)
+	}
+
+	realHome := os.Getenv("HOME")
+	if homeA == realHome {
+		t.Fatalf("job-a HOME = %q, should not equal real HOME", homeA)
+	}
+	if homeB == realHome {
+		t.Fatalf("job-b HOME = %q, should not equal real HOME", homeB)
+	}
+	if homeA == homeB {
+		t.Fatalf("job-a and job-b share HOME = %q, should be isolated", homeA)
+	}
+}
+
 func TestEngineRunStepLocalCompositeActionPropagatesOutputsAndEnv(t *testing.T) {
 	t.Parallel()
 

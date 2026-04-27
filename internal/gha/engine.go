@@ -261,6 +261,12 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 		return nil, fmt.Errorf("create file-command directory: %w", err)
 	}
 
+	homeDir := filepath.Join(tempDir, "home")
+	if err := os.MkdirAll(homeDir, 0755); err != nil {
+		_ = os.RemoveAll(tempDir)
+		return nil, fmt.Errorf("create job home directory: %w", err)
+	}
+
 	baseEnv := copyStringMap(ctx.BaseEnv)
 	repository, owner := detectRepository(ctx.Context, resolvedWorkspace)
 	ref := firstNonEmpty(baseEnv["GITHUB_REF"], detectRef(ctx.Context, resolvedWorkspace), "refs/heads/main")
@@ -321,6 +327,12 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 	globalEnv["RUNNER_TOOL_CACHE"] = e.toolCacheDir
 	globalEnv["RUNNER_OS"] = runnerOS()
 	globalEnv["RUNNER_ARCH"] = runnerArch()
+	if runtime.GOOS == "windows" {
+		globalEnv["USERPROFILE"] = homeDir
+		globalEnv["HOMEPATH"] = homeDir
+	} else {
+		globalEnv["HOME"] = homeDir
+	}
 	globalEnv["CI"] = "true"
 	globalEnv["GITHUB_ACTIONS"] = "true"
 	globalEnv["ACTIONS_RUNTIME_URL"] = firstNonEmpty(globalEnv["ACTIONS_RUNTIME_URL"], "https://gluon.invalid/runtime")
