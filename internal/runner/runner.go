@@ -431,7 +431,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 		retryCount := r.resolveRetryCount(job, step)
 		timeoutValue := r.resolveTimeout(job, step)
 		stepStartedAt := time.Now()
-		r.updateLiveStep(job, stepID)
+		r.updateLiveStep(job, stepID, idx+1, len(job.Steps))
 		r.printStepStart(stepID, idx+1, len(job.Steps))
 		r.printStepContext(step, workingDir, timeoutValue, retryCount)
 		if r.DryRun {

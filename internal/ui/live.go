@@ -3,8 +3,12 @@ package ui
 import (
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
+	"unicode/utf8"
+
+	"golang.org/x/term"
 )
 
 // LiveRegion renders a transient block of "in flight" rows below the cursor
@@ -15,6 +19,7 @@ type LiveRegion struct {
 	w            io.Writer
 	tty          bool
 	color        bool
+	fd           int
 	mu           sync.Mutex
 	rows         []liveRow
 	rowIndex     map[string]int
@@ -33,10 +38,15 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 
 // NewLiveRegion constructs a live region.
 func NewLiveRegion(w io.Writer, tty, color bool) *LiveRegion {
+	fd := -1
+	if f, ok := w.(*os.File); ok && tty {
+		fd = int(f.Fd())
+	}
 	return &LiveRegion{
 		w:        w,
 		tty:      tty,
 		color:    color,
+		fd:       fd,
 		rowIndex: map[string]int{},
 	}
 }
@@ -97,7 +107,6 @@ func (l *LiveRegion) SetRow(key, label string) {
 		l.rowIndex[key] = len(l.rows)
 		l.rows = append(l.rows, liveRow{key: key, label: label})
 	}
-	l.draw()
 }
 
 // RemoveRow drops a row from the live region.
@@ -118,7 +127,6 @@ func (l *LiveRegion) RemoveRow(key string) {
 			l.rowIndex[k] = v - 1
 		}
 	}
-	l.draw()
 }
 
 // Print writes a persistent line above the live region.
@@ -162,9 +170,57 @@ func (l *LiveRegion) draw() {
 	if len(l.rows) == 0 {
 		return
 	}
+	width := l.termWidth()
 	frame := spinnerFrames[l.frame%len(spinnerFrames)]
 	for _, row := range l.rows {
-		fmt.Fprintf(l.w, "    %s %s\n", Cyan(l.color, frame), Dim(l.color, row.label))
+		line := fmt.Sprintf("    %s %s", Cyan(l.color, frame), Dim(l.color, row.label))
+		if width > 0 {
+			line = truncateVisible(line, width-1)
+		}
+		fmt.Fprintf(l.w, "%s\n", line)
 	}
 	l.lastRendered = len(l.rows)
+}
+
+func (l *LiveRegion) termWidth() int {
+	if l.fd < 0 {
+		return 0
+	}
+	w, _, err := term.GetSize(l.fd)
+	if err != nil || w <= 0 {
+		return 80
+	}
+	return w
+}
+
+func truncateVisible(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	visible := 0
+	i := 0
+	for i < len(s) {
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && !isAnsiTerminator(s[j]) {
+				j++
+			}
+			if j < len(s) {
+				j++
+			}
+			i = j
+			continue
+		}
+		_, size := utf8.DecodeRuneInString(s[i:])
+		visible++
+		if visible > maxWidth {
+			return s[:i] + "\x1b[0m"
+		}
+		i += size
+	}
+	return s
+}
+
+func isAnsiTerminator(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
 }

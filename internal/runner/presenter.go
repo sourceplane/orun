@@ -247,11 +247,12 @@ func (r *Runner) printStepSkipped(stepID string, index, total int) {
 }
 
 // updateLiveStep updates the spinner row label for an in-flight job.
-func (r *Runner) updateLiveStep(job model.PlanJob, stepID string) {
+func (r *Runner) updateLiveStep(job model.PlanJob, stepID string, stepIndex, stepTotal int) {
 	if r.live == nil {
 		return
 	}
-	label := fmt.Sprintf("%s  %s", r.jobLineLabel(job), ui.Dim(r.Color, stepID))
+	progress := fmt.Sprintf("(%d/%d)", stepIndex, stepTotal)
+	label := fmt.Sprintf("%s  %s %s", r.jobLineLabel(job), stepID, progress)
 	r.live.SetRow(job.ID, label)
 }
 
