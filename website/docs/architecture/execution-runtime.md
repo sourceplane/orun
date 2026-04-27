@@ -26,6 +26,23 @@ Ensures the image is available, mounts the workspace at `/workspace`, and execut
 
 Uses the internal GitHub Actions engine to support `use:` steps, workflow command files, post-step handling, and GitHub Actions environment semantics.
 
+#### Per-job environment isolation
+
+Each job gets its own temp directory, `HOME`, `RUNNER_TEMP`, and file-command directories. This prevents jobs running concurrently from colliding on environment state.
+
+#### Per-job action isolation
+
+Remote actions are materialized into each job's temp directory before execution. Files are hardlinked from the shared on-disk cache — a zero-cost operation on the same filesystem. If the cache and temp directories are on different filesystems, a full copy is made automatically.
+
+This means:
+- The shared action cache is read-only during execution.
+- A job cannot corrupt a cached action or affect a sibling job's copy.
+- Local actions (workspace-relative paths) are used directly without copying.
+
+#### Action reference caching
+
+Resolving a mutable ref (e.g., `actions/setup-node@v4`) to a pinned SHA uses a three-tier cache: an in-memory map shared across jobs in the same process (with singleflight deduplication), an on-disk file under `~/.gluon/actions/`, and the GitHub REST API as a final fallback. This eliminates redundant API calls under high concurrency.
+
 ## Phase boundaries
 
 Execution stays linear but explicit:

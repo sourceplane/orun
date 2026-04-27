@@ -119,8 +119,13 @@ func (r *Runner) groupKeyPlain(job model.PlanJob) string {
 }
 
 // emitGroupHeader prints a group header above the live region if the group
-// changed. Caller should not hold r.printMu.
+// changed. Caller should not hold r.printMu. In concurrent mode, group
+// headers are suppressed because interleaved job starts cause repeated and
+// empty headers; the group is rendered inline on each job result line instead.
 func (r *Runner) emitGroupHeader(job model.PlanJob) {
+	if r.Concurrency > 1 {
+		return
+	}
 	plain := r.groupKeyPlain(job)
 	r.groupMu.Lock()
 	changed := plain != r.currentGroup
@@ -134,6 +139,27 @@ func (r *Runner) emitGroupHeader(job model.PlanJob) {
 		return
 	}
 	r.live.PrintBlock([]string{"", "  " + ui.Bold(r.Color, header)})
+}
+
+// jobLineLabel renders the label used on a job result line. In concurrent
+// mode it includes component+env so each result line is self-describing.
+func (r *Runner) jobLineLabel(job model.PlanJob) string {
+	short := shortJobName(job)
+	if r.Concurrency <= 1 {
+		return short
+	}
+	prefix := strings.TrimSpace(job.Component)
+	if r.groupMultiEnv && strings.TrimSpace(job.Environment) != "" {
+		if prefix != "" {
+			prefix = prefix + ui.Dim(r.Color, "·"+job.Environment)
+		} else {
+			prefix = job.Environment
+		}
+	}
+	if prefix == "" {
+		return short
+	}
+	return prefix + ui.Dim(r.Color, "/") + short
 }
 
 // shortJobName returns a compact display label for the job within its group.
@@ -225,7 +251,7 @@ func (r *Runner) updateLiveStep(job model.PlanJob, stepID string) {
 	if r.live == nil {
 		return
 	}
-	label := fmt.Sprintf("%s  %s", shortJobName(job), ui.Dim(r.Color, stepID))
+	label := fmt.Sprintf("%s  %s", r.jobLineLabel(job), ui.Dim(r.Color, stepID))
 	r.live.SetRow(job.ID, label)
 }
 
@@ -285,7 +311,7 @@ func (r *Runner) printStepFailure(job model.PlanJob, step model.PlanStep, view s
 	if headline == "" {
 		headline = summarizeExecError(err)
 	}
-	label := shortJobName(job)
+	label := r.jobLineLabel(job)
 	lines := []string{
 		fmt.Sprintf("    %s %s  %s  %s",
 			ui.Red(r.Color, "✗"),
@@ -316,14 +342,14 @@ func (r *Runner) printJobResumed(job model.PlanJob) {
 	r.emitGroupHeader(job)
 	r.live.Print(fmt.Sprintf("    %s %s  %s",
 		ui.Cyan(r.Color, "⚡"),
-		ui.Bold(r.Color, shortJobName(job)),
+		ui.Bold(r.Color, r.jobLineLabel(job)),
 		ui.Dim(r.Color, "cached"),
 	))
 }
 
 func (r *Runner) printJobFooter(job model.PlanJob, report *jobReport, success bool, duration time.Duration) {
 	r.live.RemoveRow(job.ID)
-	label := shortJobName(job)
+	label := r.jobLineLabel(job)
 	if success {
 		head := report.defaultHeadline()
 		line := fmt.Sprintf("    %s %s  %s",

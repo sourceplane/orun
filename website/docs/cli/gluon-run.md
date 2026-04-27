@@ -89,6 +89,8 @@ Override plan concurrency:
 gluon run --concurrency 4
 ```
 
+When `--concurrency` is greater than 1, result lines carry inline component and environment labels (e.g., `platform-shared·production/verify-turbo-package`) so each line is self-describing without group headers.
+
 Pin an execution ID for CI/parallel-safe tracking:
 
 ```bash

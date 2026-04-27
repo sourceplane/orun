@@ -1095,7 +1095,7 @@ func (r *Runner) printJobHeader(job model.PlanJob) {
 		return
 	}
 	if r.live != nil {
-		r.live.SetRow(job.ID, shortJobName(job))
+		r.live.SetRow(job.ID, r.jobLineLabel(job))
 	}
 }
 

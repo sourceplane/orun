@@ -23,6 +23,7 @@ import (
 	actexpr "github.com/nektos/act/pkg/exprparser"
 	actmodel "github.com/nektos/act/pkg/model"
 	"github.com/sourceplane/gluon/internal/model"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -57,6 +58,14 @@ type Engine struct {
 	jobs         map[string]*jobState
 	pulledImages map[string]struct{}
 	builtImages  map[string]string
+
+	refCache     map[string]string
+	refCacheMu   sync.RWMutex
+	refResolveSF singleflight.Group
+
+	actionCache   map[string]*resolvedAction
+	actionCacheMu sync.RWMutex
+	actionFetchSF singleflight.Group
 }
 
 type jobState struct {
@@ -79,6 +88,9 @@ type jobState struct {
 	masks           []string
 	summary         strings.Builder
 	basePath        string
+
+	actionDirs   map[string]string
+	actionDirsMu sync.Mutex
 }
 
 type scope struct {
@@ -160,6 +172,8 @@ func NewEngine(options Options) *Engine {
 		jobs:         map[string]*jobState{},
 		pulledImages: map[string]struct{}{},
 		builtImages:  map[string]string{},
+		refCache:     map[string]string{},
+		actionCache:  map[string]*resolvedAction{},
 	}
 }
 
@@ -363,6 +377,7 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 		posts:           []*postAction{},
 		actionNames:     map[string]int{},
 		basePath:        globalEnv["PATH"],
+		actionDirs:      map[string]string{},
 	}
 
 	jobEvaluator := state.evaluator(state.rootScope(state.workDir), globalEnv, githubContext)
@@ -567,7 +582,15 @@ func (e *Engine) executeUsesStep(ctx ExecContext, state *jobState, scope *scope,
 		return e.executeDockerURLStep(ctx, state, scope, spec, inheritedEnv, resolved.Reference)
 	}
 
-	actionScope := scope.cloneWithAction(resolved.ActionDir, resolved.Reference.Repository(), resolved.Reference.Ref, nil, scope.workDir)
+	actionDir, err := e.materializeAction(state, resolved)
+	if err != nil {
+		return stepExecutionResult{}, err
+	}
+	if actionDir == "" {
+		actionDir = resolved.ActionDir
+	}
+
+	actionScope := scope.cloneWithAction(actionDir, resolved.Reference.Repository(), resolved.Reference.Ref, nil, scope.workDir)
 	actionName := state.nextActionName(actionBaseName(spec, resolved.Reference))
 	githubContext := state.githubForScope(actionScope, actionName)
 	actionEnvBase := mergeStringMaps(copyStringMap(state.globalEnv), inheritedEnv, githubEnv(githubContext))
@@ -586,7 +609,7 @@ func (e *Engine) executeUsesStep(ctx ExecContext, state *jobState, scope *scope,
 		displayName: firstNonEmpty(strings.TrimSpace(spec.Name), strings.TrimSpace(spec.Use), actionName),
 		actionName:  actionName,
 		reference:   resolved.Reference,
-		actionDir:   resolved.ActionDir,
+		actionDir:   actionDir,
 		metadata:    resolved.Metadata,
 		inputs:      inputs,
 		state:       map[string]string{},
@@ -667,7 +690,7 @@ func (e *Engine) runNodeStage(ctx ExecContext, state *jobState, scope *scope, in
 }
 
 func (e *Engine) executeCompositeAction(ctx ExecContext, state *jobState, parentScope *scope, resolved *resolvedAction, invocation *actionInvocation, sharedEnv map[string]string) (stepExecutionResult, error) {
-	compositeScope := parentScope.childCompositeScope(resolved.ActionDir, resolved.Reference.Repository(), resolved.Reference.Ref, invocation.inputs, parentScope.workDir)
+	compositeScope := parentScope.childCompositeScope(invocation.actionDir, resolved.Reference.Repository(), resolved.Reference.Ref, invocation.inputs, parentScope.workDir)
 
 	var combinedOutput []string
 	for index, child := range resolved.Metadata.Runs.Steps {

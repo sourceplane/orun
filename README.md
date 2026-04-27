@@ -24,6 +24,7 @@ Intent.yaml + Component manifests + Composition packages
 - **🔒 Lockable Sources** - Resolved composition digests are written beside the intent for repeatable planning
 - **⚡ Deterministic** - Same inputs → Same outputs, every time
 - **📊 Debuggable** - Detailed phase-by-phase IR dumps
+- **🚀 Safe Concurrency** - Per-job action isolation and three-tier action ref caching for reliable parallel execution
 
 ## Documentation
 
@@ -704,6 +705,8 @@ podman login ghcr.io
 - **Supported components:** Unlimited  
 - **Cycle detection:** O(V + E) with DFS
 - **Topological sort:** O(V + E)
+- **Action ref resolution:** cached in-memory and on-disk; zero API calls after first resolution per ref
+- **Concurrent action execution:** per-job hardlinked isolation; zero-copy overhead on same filesystem
 
 ## Contributing
 

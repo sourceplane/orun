@@ -52,51 +52,86 @@ func (e *Engine) fetchRemoteAction(ctx context.Context, apiURL string, token str
 		return nil, err
 	}
 
-	cacheDir := filepath.Join(e.cacheDir, reference.CachePath(), resolvedRef)
-	markerPath := filepath.Join(cacheDir, ".ready")
-	lockPath := cacheDir + ".lock"
-
-	if _, err := os.Stat(markerPath); err == nil {
-		return e.loadCachedAction(reference, resolvedRef, cacheDir)
+	actionKey := reference.CachePath() + "@" + resolvedRef + "#" + reference.Path
+	e.actionCacheMu.RLock()
+	if cached := e.actionCache[actionKey]; cached != nil {
+		e.actionCacheMu.RUnlock()
+		return cached, nil
 	}
+	e.actionCacheMu.RUnlock()
 
-	if err := os.MkdirAll(filepath.Dir(cacheDir), 0755); err != nil {
-		return nil, fmt.Errorf("create cache parent for %s: %w", reference.Repository(), err)
-	}
+	result, err, _ := e.actionFetchSF.Do(actionKey, func() (interface{}, error) {
+		e.actionCacheMu.RLock()
+		if cached := e.actionCache[actionKey]; cached != nil {
+			e.actionCacheMu.RUnlock()
+			return cached, nil
+		}
+		e.actionCacheMu.RUnlock()
 
-	if err := withLock(lockPath, 30*time.Second, func() error {
+		cacheDir := filepath.Join(e.cacheDir, reference.CachePath(), resolvedRef)
+		markerPath := filepath.Join(cacheDir, ".ready")
+		lockPath := cacheDir + ".lock"
+
 		if _, err := os.Stat(markerPath); err == nil {
+			loaded, err := e.loadCachedAction(reference, resolvedRef, cacheDir)
+			if err != nil {
+				return nil, err
+			}
+			e.actionCacheMu.Lock()
+			e.actionCache[actionKey] = loaded
+			e.actionCacheMu.Unlock()
+			return loaded, nil
+		}
+
+		if err := os.MkdirAll(filepath.Dir(cacheDir), 0755); err != nil {
+			return nil, fmt.Errorf("create cache parent for %s: %w", reference.Repository(), err)
+		}
+
+		if err := withLock(lockPath, 30*time.Second, func() error {
+			if _, err := os.Stat(markerPath); err == nil {
+				return nil
+			}
+
+			tempDir := cacheDir + ".tmp"
+			_ = os.RemoveAll(tempDir)
+			if err := os.MkdirAll(tempDir, 0755); err != nil {
+				return fmt.Errorf("create temp cache directory: %w", err)
+			}
+
+			archiveURL := strings.TrimRight(apiURL, "/") + "/repos/" + reference.Repository() + "/tarball/" + reference.Ref
+			if err := e.downloadAndExtractTarball(ctx, archiveURL, token, tempDir); err != nil {
+				_ = os.RemoveAll(tempDir)
+				return err
+			}
+
+			if err := os.WriteFile(filepath.Join(tempDir, ".ready"), []byte(resolvedRef), 0644); err != nil {
+				_ = os.RemoveAll(tempDir)
+				return fmt.Errorf("write cache marker: %w", err)
+			}
+
+			_ = os.RemoveAll(cacheDir)
+			if err := os.Rename(tempDir, cacheDir); err != nil {
+				_ = os.RemoveAll(tempDir)
+				return fmt.Errorf("promote cached action: %w", err)
+			}
 			return nil
+		}); err != nil {
+			return nil, err
 		}
 
-		tempDir := cacheDir + ".tmp"
-		_ = os.RemoveAll(tempDir)
-		if err := os.MkdirAll(tempDir, 0755); err != nil {
-			return fmt.Errorf("create temp cache directory: %w", err)
+		loaded, err := e.loadCachedAction(reference, resolvedRef, cacheDir)
+		if err != nil {
+			return nil, err
 		}
-
-		archiveURL := strings.TrimRight(apiURL, "/") + "/repos/" + reference.Repository() + "/tarball/" + reference.Ref
-		if err := e.downloadAndExtractTarball(ctx, archiveURL, token, tempDir); err != nil {
-			_ = os.RemoveAll(tempDir)
-			return err
-		}
-
-		if err := os.WriteFile(filepath.Join(tempDir, ".ready"), []byte(resolvedRef), 0644); err != nil {
-			_ = os.RemoveAll(tempDir)
-			return fmt.Errorf("write cache marker: %w", err)
-		}
-
-		_ = os.RemoveAll(cacheDir)
-		if err := os.Rename(tempDir, cacheDir); err != nil {
-			_ = os.RemoveAll(tempDir)
-			return fmt.Errorf("promote cached action: %w", err)
-		}
-		return nil
-	}); err != nil {
+		e.actionCacheMu.Lock()
+		e.actionCache[actionKey] = loaded
+		e.actionCacheMu.Unlock()
+		return loaded, nil
+	})
+	if err != nil {
 		return nil, err
 	}
-
-	return e.loadCachedAction(reference, resolvedRef, cacheDir)
+	return result.(*resolvedAction), nil
 }
 
 func (e *Engine) loadCachedAction(reference ActionReference, resolvedRef string, cacheDir string) (*resolvedAction, error) {
@@ -124,6 +159,46 @@ func (e *Engine) resolveRemoteRef(ctx context.Context, apiURL string, token stri
 		return strings.ToLower(reference.Ref), nil
 	}
 
+	cacheKey := reference.Repository() + "@" + reference.Ref
+	e.refCacheMu.RLock()
+	if sha, ok := e.refCache[cacheKey]; ok {
+		e.refCacheMu.RUnlock()
+		return sha, nil
+	}
+	e.refCacheMu.RUnlock()
+
+	if sha := e.readRefFromDisk(reference); sha != "" {
+		e.refCacheMu.Lock()
+		e.refCache[cacheKey] = sha
+		e.refCacheMu.Unlock()
+		return sha, nil
+	}
+
+	result, err, _ := e.refResolveSF.Do(cacheKey, func() (interface{}, error) {
+		e.refCacheMu.RLock()
+		if sha, ok := e.refCache[cacheKey]; ok {
+			e.refCacheMu.RUnlock()
+			return sha, nil
+		}
+		e.refCacheMu.RUnlock()
+
+		sha, err := e.resolveRemoteRefAPI(ctx, apiURL, token, reference)
+		if err != nil {
+			return "", err
+		}
+		e.refCacheMu.Lock()
+		e.refCache[cacheKey] = sha
+		e.refCacheMu.Unlock()
+		e.writeRefToDisk(reference, sha)
+		return sha, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return result.(string), nil
+}
+
+func (e *Engine) resolveRemoteRefAPI(ctx context.Context, apiURL string, token string, reference ActionReference) (string, error) {
 	url := strings.TrimRight(apiURL, "/") + "/repos/" + reference.Repository() + "/commits/" + reference.Ref
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -238,6 +313,51 @@ func (e *Engine) downloadAndExtractTarball(ctx context.Context, archiveURL strin
 	}
 
 	return nil
+}
+
+var refSlugPattern = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+func (e *Engine) refDiskPath(reference ActionReference) string {
+	slug := refSlugPattern.ReplaceAllString(reference.Ref, "_")
+	if slug == "" {
+		return ""
+	}
+	return filepath.Join(e.cacheDir, reference.CachePath(), "refs", slug)
+}
+
+func (e *Engine) readRefFromDisk(reference ActionReference) string {
+	path := e.refDiskPath(reference)
+	if path == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	sha := strings.TrimSpace(string(data))
+	if !shaPattern.MatchString(sha) {
+		return ""
+	}
+	cacheDir := filepath.Join(e.cacheDir, reference.CachePath(), strings.ToLower(sha))
+	if _, err := os.Stat(filepath.Join(cacheDir, ".ready")); err != nil {
+		return ""
+	}
+	return strings.ToLower(sha)
+}
+
+func (e *Engine) writeRefToDisk(reference ActionReference, sha string) {
+	path := e.refDiskPath(reference)
+	if path == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(sha), 0644); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, path)
 }
 
 func withLock(lockPath string, timeout time.Duration, fn func() error) error {

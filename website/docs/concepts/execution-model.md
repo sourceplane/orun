@@ -54,6 +54,30 @@ gluon run --concurrency 4
 
 Setting `--concurrency 1` forces strictly sequential execution, which is useful for debugging.
 
+### Action isolation
+
+When multiple jobs run concurrently and both use the same remote action (e.g., `actions/setup-node@v4`), each job works from its own isolated copy of that action's directory. The shared on-disk cache is never modified during execution, so jobs cannot race on the same files.
+
+Isolation is zero-cost by default: files are hardlinked from the cache into each job's temp directory. A full copy only happens when the job temp directory is on a different filesystem than the cache.
+
+Local actions (paths starting with `./`) are not isolated — they are used directly from the workspace.
+
+### Action reference caching
+
+Resolving a non-SHA action reference (e.g., `v4`) to a commit SHA requires a GitHub API call. gluon avoids redundant API calls through a three-tier cache:
+
+| Tier | Scope | What it stores |
+| --- | --- | --- |
+| In-memory | Current process | `repo@ref` → SHA map, deduplicated via singleflight |
+| On-disk | Persistent across runs | SHA written to `~/.gluon/actions/<repo>/refs/<ref>` |
+| API | Fallback | GitHub REST API `/repos/<owner>/<repo>/commits/<ref>` |
+
+This ensures that `--concurrency 4` with many jobs using the same action versions never triggers API rate limits, even with large platform repositories containing dozens of concurrent jobs.
+
+### Concurrent output
+
+When `--concurrency` is greater than 1, each result line carries its component and environment prefix inline (e.g., `platform-shared·production/verify-turbo-package`). This replaces the group-header model used in sequential mode, which produces empty or interleaved headers under concurrency.
+
 ## Step phases and ordering
 
 Steps can declare `phase` and `order` attributes.
