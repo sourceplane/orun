@@ -56,10 +56,15 @@ type Runner struct {
 	stateMu            sync.Mutex
 
 	live          *ui.LiveRegion
+	gha           *ui.GHARenderer
 	groupMu       sync.Mutex
 	currentGroup  string
 	groupMultiEnv bool
 }
+
+// inGHA reports whether output should be rendered for the GitHub Actions log
+// viewer (collapsible groups, workflow-command annotations, per-job buffering).
+func (r *Runner) inGHA() bool { return r.gha != nil }
 
 // State is kept for backwards compat with tests referencing old types.
 type State = state.ExecState
@@ -280,6 +285,9 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 
 	r.groupMultiEnv = singleEnvironment(orderedJobs) == ""
 	r.live = ui.NewLiveRegion(r.Stdout, ui.IsInteractiveWriter(r.Stdout), r.Color)
+	if ui.IsGitHubActions() {
+		r.gha = ui.NewGHARenderer(r.Stdout)
+	}
 
 	if r.shouldPrintPreflight(orderedJobs) {
 		r.printRunHeader(plan, orderedJobs)
@@ -414,12 +422,20 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 		stepPhase := normalizeStepPhase(step.Phase)
 		if stepPhase != currentPhase {
 			if stepPhase != "main" {
-				r.printPhaseHeader(stepPhase)
+				if r.inGHA() {
+					r.ghaPrintPhaseHeader(job, stepPhase)
+				} else {
+					r.printPhaseHeader(stepPhase)
+				}
 			}
 			currentPhase = stepPhase
 		}
 		if jobState.Steps[stepID] == "completed" {
-			r.printStepSkipped(stepID, idx+1, len(job.Steps))
+			if r.inGHA() {
+				r.ghaPrintStepSkipped(job, stepID, idx+1, len(job.Steps))
+			} else {
+				r.printStepSkipped(stepID, idx+1, len(job.Steps))
+			}
 			continue
 		}
 
@@ -434,11 +450,17 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 		r.updateLiveStep(job, stepID, idx+1, len(job.Steps))
 		r.printStepStart(stepID, idx+1, len(job.Steps))
 		r.printStepContext(step, workingDir, timeoutValue, retryCount)
+		if r.inGHA() {
+			r.ghaOpenStepGroup(job, stepID, idx+1, len(job.Steps))
+		}
 		if r.DryRun {
 			r.updateState(persistState, execState, func() {
 				jobState.Steps[stepID] = "completed"
 			})
 			r.printStepDryRun()
+			if r.inGHA() {
+				r.ghaCloseStepGroup(job.ID)
+			}
 			continue
 		}
 
@@ -447,7 +469,11 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 		attempts := retryCount + 1
 		for attempt := 1; attempt <= attempts; attempt++ {
 			if attempts > 1 && attempt > 1 {
-				r.printStepRetry(attempt, attempts)
+				if r.inGHA() {
+					r.ghaPrintStepRetry(job.ID, attempt, attempts)
+				} else {
+					r.printStepRetry(attempt, attempts)
+				}
 			}
 
 			execContext, cancel, execErr := r.stepExecContext(baseExecContext, job, step, workingDir)
@@ -464,7 +490,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 				break
 			}
 
-			if attempt < attempts {
+			if attempt < attempts && !r.inGHA() {
 				fmt.Fprintf(r.Stdout, "  │ %s retrying after failure\n", ui.Yellow(r.Color, "↻"))
 			}
 		}
@@ -474,6 +500,12 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 
 		// Write step log
 		r.writeStepLog(job.ID, stepID, output)
+
+		if r.inGHA() {
+			r.ghaEmitStepOutput(job.ID, output)
+			r.ghaPrintStepResult(job, stepID, stepErr == nil, stepDuration, stepErr)
+			r.ghaCloseStepGroup(job.ID)
+		}
 
 		if stepErr != nil {
 			r.updateState(persistState, execState, func() {
@@ -1146,6 +1178,10 @@ func (r *Runner) printPhaseHeader(phase string) {
 }
 
 func (r *Runner) printJobHeader(job model.PlanJob) {
+	if r.inGHA() {
+		r.ghaPrintJobHeader(job)
+		return
+	}
 	r.emitGroupHeader(job)
 	if r.Verbose {
 		r.withPrintLock(func() {

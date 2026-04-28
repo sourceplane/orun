@@ -180,6 +180,9 @@ func shortJobName(job model.PlanJob) string {
 }
 
 func (r *Runner) printStepStart(stepID string, index, total int) {
+	if r.inGHA() {
+		return
+	}
 	if !r.Verbose {
 		return
 	}
@@ -189,6 +192,9 @@ func (r *Runner) printStepStart(stepID string, index, total int) {
 }
 
 func (r *Runner) printStepContext(step model.PlanStep, workingDir, timeoutValue string, retryCount int) {
+	if r.inGHA() {
+		return
+	}
 	if !r.Verbose {
 		return
 	}
@@ -238,6 +244,9 @@ func (r *Runner) printStepDryRun() {
 }
 
 func (r *Runner) printStepSkipped(stepID string, index, total int) {
+	if r.inGHA() {
+		return
+	}
 	if !r.Verbose {
 		return
 	}
@@ -257,6 +266,9 @@ func (r *Runner) updateLiveStep(job model.PlanJob, stepID string, stepIndex, ste
 }
 
 func (r *Runner) printStepSuccess(step model.PlanStep, view stepOutputView, duration time.Duration) {
+	if r.inGHA() {
+		return
+	}
 	if !r.Verbose {
 		return
 	}
@@ -282,6 +294,9 @@ func (r *Runner) printStepSuccess(step model.PlanStep, view stepOutputView, dura
 }
 
 func (r *Runner) printStepFailure(job model.PlanJob, step model.PlanStep, view stepOutputView, duration time.Duration, err error, workingDir string) {
+	if r.inGHA() {
+		return
+	}
 	if r.Verbose {
 		printed := false
 		if len(view.summary) > 0 {
@@ -340,6 +355,10 @@ func (r *Runner) printStepContinuation() {
 }
 
 func (r *Runner) printJobResumed(job model.PlanJob) {
+	if r.inGHA() {
+		r.ghaPrintJobResumed(job)
+		return
+	}
 	r.emitGroupHeader(job)
 	r.live.Print(fmt.Sprintf("    %s %s  %s",
 		ui.Cyan(r.Color, "⚡"),
@@ -349,6 +368,10 @@ func (r *Runner) printJobResumed(job model.PlanJob) {
 }
 
 func (r *Runner) printJobFooter(job model.PlanJob, report *jobReport, success bool, duration time.Duration) {
+	if r.inGHA() {
+		r.ghaPrintJobFooter(job, report, success, duration)
+		return
+	}
 	r.live.RemoveRow(job.ID)
 	label := r.jobLineLabel(job)
 	if success {
