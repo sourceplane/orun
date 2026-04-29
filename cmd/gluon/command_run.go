@@ -28,6 +28,7 @@ var (
 	runGHACompat          bool
 	runExecID             string
 	runConcurrency        int
+	runComponentConcurrency int
 	runComponent          []string
 	runEnv                string
 	runJSON               bool
@@ -62,6 +63,7 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().BoolVar(&runGHACompat, "gha", false, "Enable GitHub Actions compatibility mode")
 	runCmd.Flags().StringVar(&runExecID, "exec-id", "", "Execution ID (for resume or CI). Auto-generated if not set")
 	runCmd.Flags().IntVar(&runConcurrency, "concurrency", 0, "Override plan concurrency (0 = use plan value)")
+	runCmd.Flags().IntVar(&runComponentConcurrency, "component-concurrency", 1, "Max number of components processed concurrently (0 = unlimited). Default 1 keeps the dashboard component-grouped.")
 	runCmd.Flags().StringArrayVar(&runComponent, "component", nil, "Filter jobs by component (repeatable)")
 	runCmd.Flags().StringVarP(&runEnv, "env", "e", "", "Filter jobs by environment")
 	runCmd.Flags().BoolVar(&runJSON, "json", false, "Output in JSON format")
@@ -198,6 +200,7 @@ func runPlan() error {
 	)
 	r.Isolation = runner.IsolationMode(strings.ToLower(strings.TrimSpace(runIsolation)))
 	r.KeepWorkspaces = runKeepWorkspaces
+	r.ComponentConcurrency = runComponentConcurrency
 	if err := r.Run(plan); err != nil {
 		return err
 	}

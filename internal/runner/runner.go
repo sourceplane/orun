@@ -62,6 +62,9 @@ type Runner struct {
 	lastFinishedGroup    string
 	finishedAny          bool
 	groupMultiEnv        bool
+	finishedHeaders      map[string]struct{}
+
+	ComponentConcurrency int
 }
 
 // inGHA reports whether output should be rendered for the GitHub Actions log
@@ -203,6 +206,7 @@ func NewRunner(
 		Concurrency:        concurrency,
 		FilterComponents:   filterComponents,
 		FilterEnv:          filterEnv,
+		ComponentConcurrency: 1,
 	}
 }
 
@@ -609,6 +613,22 @@ func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState
 		}
 	}
 
+	// Component-aware scheduling: cap how many distinct components are
+	// concurrently in-flight. activeComps tracks components with at least one
+	// running or scheduled-but-not-finished job. compRemaining counts pending
+	// jobs per component so we know when a component is fully drained.
+	activeComps := map[string]int{}
+	compRemaining := map[string]int{}
+	for _, job := range jobs {
+		if !completed[job.ID] {
+			compRemaining[job.Component]++
+		}
+	}
+	compCap := r.ComponentConcurrency
+	if compCap <= 0 {
+		compCap = 0 // 0 = unlimited
+	}
+
 	for len(pending) > 0 {
 		mu.Lock()
 		if failFast && firstErr != nil {
@@ -630,21 +650,57 @@ func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState
 				ready = append(ready, job)
 			}
 		}
-		mu.Unlock()
 
-		if len(ready) == 0 {
+		// Partition ready jobs: those for already-active components first.
+		var readyActive, readyNew []model.PlanJob
+		for _, job := range ready {
+			if _, ok := activeComps[job.Component]; ok {
+				readyActive = append(readyActive, job)
+			} else {
+				readyNew = append(readyNew, job)
+			}
+		}
+
+		// Pick which jobs to actually launch this iteration.
+		var pick []model.PlanJob
+		pick = append(pick, readyActive...)
+		// Add jobs from new components, respecting compCap. Jobs whose
+		// component becomes active in this same batch should also be picked.
+		// If no active components have ready work, allow expansion to avoid
+		// deadlock.
+		for _, job := range readyNew {
+			if _, alreadyActive := activeComps[job.Component]; alreadyActive {
+				pick = append(pick, job)
+				continue
+			}
+			if compCap > 0 && len(activeComps) >= compCap && len(readyActive) > 0 {
+				continue
+			}
+			if compCap > 0 && len(activeComps) >= compCap && len(readyActive) == 0 && len(pick) > 0 {
+				continue
+			}
+			activeComps[job.Component] = 0
+			pick = append(pick, job)
+		}
+		// Account active counts for picked jobs.
+		for _, job := range pick {
+			activeComps[job.Component]++
+		}
+
+		if len(pick) == 0 {
+			mu.Unlock()
 			wg.Wait()
 			mu.Lock()
 			stillPending := len(pending) > 0
 			mu.Unlock()
 			if stillPending && firstErr == nil {
 				summary.addWaiting(len(pending))
-				break
 			}
 			break
 		}
+		mu.Unlock()
 
-		for _, job := range ready {
+		for _, job := range pick {
 			mu.Lock()
 			delete(pending, job.ID)
 			mu.Unlock()
@@ -668,12 +724,15 @@ func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState
 				alreadyCompleted := jobState.Status == "completed"
 				r.stateMu.Unlock()
 				if alreadyCompleted {
-					mu.Unlock()
-					mu.Lock()
 					completed[j.ID] = true
 					summary.addResumed()
-					r.printJobResumed(j)
+					compRemaining[j.Component]--
+					activeComps[j.Component]--
+					if activeComps[j.Component] <= 0 {
+						delete(activeComps, j.Component)
+					}
 					mu.Unlock()
+					r.printJobResumed(j)
 					return
 				}
 				mu.Unlock()
@@ -687,6 +746,11 @@ func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState
 					}
 				} else {
 					completed[j.ID] = true
+				}
+				compRemaining[j.Component]--
+				activeComps[j.Component]--
+				if activeComps[j.Component] <= 0 {
+					delete(activeComps, j.Component)
 				}
 				mu.Unlock()
 			}(job)

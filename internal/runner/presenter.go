@@ -415,6 +415,11 @@ func (r *Runner) printJobFooter(job model.PlanJob, report *jobReport, success bo
 	groupPlain := r.groupKeyPlain(job)
 	groupChanged := groupPlain != r.lastFinishedGroup
 	firstFinished := !r.finishedAny
+	if r.finishedHeaders == nil {
+		r.finishedHeaders = map[string]struct{}{}
+	}
+	_, headerEmitted := r.finishedHeaders[groupPlain]
+	r.finishedHeaders[groupPlain] = struct{}{}
 	r.lastFinishedGroup = groupPlain
 	r.finishedAny = true
 	r.groupMu.Unlock()
@@ -425,11 +430,19 @@ func (r *Runner) printJobFooter(job model.PlanJob, report *jobReport, success bo
 	}
 
 	var lines []string
-	if groupChanged {
+	if groupChanged && !headerEmitted {
 		if !firstFinished {
 			lines = append(lines, "  "+ui.Dim(r.Color, "│"))
 		}
 		lines = append(lines, fmt.Sprintf("  %s %s", ui.Cyan(r.Color, "●"), ui.Bold(r.Color, groupTitle)))
+	} else if groupChanged && headerEmitted {
+		// Same component reappearing out of order; emit a continuation marker
+		// instead of a duplicate header to keep the tree readable.
+		lines = append(lines, "  "+ui.Dim(r.Color, "│"))
+		lines = append(lines, fmt.Sprintf("  %s %s %s",
+			ui.Dim(r.Color, "↪"),
+			ui.Bold(r.Color, groupTitle),
+			ui.Dim(r.Color, "(cont.)")))
 	}
 	lines = append(lines, fmt.Sprintf("  %s  %s %s",
 		ui.Dim(r.Color, "│"),
