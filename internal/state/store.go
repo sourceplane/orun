@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sourceplane/gluon/internal/model"
+	"github.com/sourceplane/orun/internal/model"
 )
 
 const (
-	GluonDir     = ".gluon"
+	OrunDir     = ".orun"
 	PlansDir     = "plans"
 	ExecDir      = "executions"
 	LogsDir      = "logs"
@@ -67,7 +67,7 @@ type Store struct {
 }
 
 func NewStore(workDir string) *Store {
-	return &Store{BaseDir: filepath.Join(workDir, GluonDir)}
+	return &Store{BaseDir: filepath.Join(workDir, OrunDir)}
 }
 
 func (s *Store) EnsureDirs() error {
@@ -127,7 +127,7 @@ func (s *Store) ResolvePlanRef(ref string) (string, error) {
 		if fileExists(path) {
 			return path, nil
 		}
-		return "", fmt.Errorf("no plan found; run 'gluon plan' first")
+		return "", fmt.Errorf("no plan found; run 'orun plan' first")
 	}
 
 	if fileExists(ref) {
@@ -533,7 +533,7 @@ func (s *Store) gcOrphanPlans() ([]string, error) {
 // --- Legacy migration ---
 
 func (s *Store) MigrateLegacyState(workDir string) (bool, error) {
-	legacy := filepath.Join(workDir, ".gluon-state.json")
+	legacy := filepath.Join(workDir, ".orun-state.json")
 	if !fileExists(legacy) {
 		return false, nil
 	}

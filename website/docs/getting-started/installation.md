@@ -2,7 +2,7 @@
 title: Installation
 ---
 
-Install `gluon` from source when you want the local CLI, or run it as a packaged provider through `kiox` when you want workspace-pinned execution.
+Install `orun` from source when you want the local CLI, or run it as a packaged provider through `kiox` when you want workspace-pinned execution.
 
 ## Prerequisites
 
@@ -13,25 +13,25 @@ Install `gluon` from source when you want the local CLI, or run it as a packaged
 
 ## Build from this repository
 
-Use this when you are working in the repository and want the local `./gluon` binary for examples and development.
+Use this when you are working in the repository and want the local `./orun` binary for examples and development.
 
 ```bash
 make build
-./gluon version
-./gluon --help
+./orun version
+./orun --help
 ```
 
 ## Install directly with Go
 
 ```bash
-go install github.com/sourceplane/gluon/cmd/gluon@latest
+go install github.com/sourceplane/orun/cmd/orun@latest
 ```
 
 Verify the CLI:
 
 ```bash
-gluon version
-gluon --help
+orun version
+orun --help
 ```
 
 ## Install a release binary
@@ -40,23 +40,23 @@ Replace `<tag>` with the release tag you want to install.
 
 ```bash
 # macOS arm64
-curl -L https://github.com/sourceplane/gluon/releases/download/<tag>/gluon_<tag>_darwin_arm64.tar.gz | tar xz
-sudo mv entrypoint /usr/local/bin/gluon
-chmod +x /usr/local/bin/gluon
+curl -L https://github.com/sourceplane/orun/releases/download/<tag>/orun_<tag>_darwin_arm64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/orun
+chmod +x /usr/local/bin/orun
 
 # Linux amd64
-curl -L https://github.com/sourceplane/gluon/releases/download/<tag>/gluon_<tag>_linux_amd64.tar.gz | tar xz
-sudo mv entrypoint /usr/local/bin/gluon
-chmod +x /usr/local/bin/gluon
+curl -L https://github.com/sourceplane/orun/releases/download/<tag>/orun_<tag>_linux_amd64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/orun
+chmod +x /usr/local/bin/orun
 ```
 
-## Run gluon through kiox
+## Run orun through kiox
 
 This path is useful when you want the planner pinned as an OCI-distributed provider inside a reproducible workspace.
 
 ```bash
-kiox init demo -p ghcr.io/sourceplane/gluon:<tag> as gluon
-kiox --workspace demo -- gluon --help
+kiox init demo -p ghcr.io/sourceplane/orun:<tag> as orun
+kiox --workspace demo -- orun --help
 ```
 
 ## Build the docs site locally

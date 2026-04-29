@@ -1,0 +1,114 @@
+apiVersion: sourceplane.io/v1
+kind: ComponentTree
+metadata:
+    intent: examples/intent.yaml
+    generatedAt: "2026-04-28T04:11:21Z"
+discovery:
+    roots:
+        - deploy
+        - infra
+        - services
+components:
+    - name: common-services
+      type: helmCommon
+      domain: platform
+      enabled: false
+      path: deploy/common-services
+      subscribe:
+        environments:
+            - development
+            - staging
+            - production
+      inputs:
+        chart: oci://mycompany.azurecr.io/helm/charts/common
+        imagePullPolicy: IfNotPresent
+        name: common-services
+        replicas: 1
+      labels:
+        team: platform
+        tier: backend
+      source: discovered
+      sourcePath: deploy/common-services/component.yaml
+      fileSize: 417
+      fileModTime: "2026-04-17T15:12:33.65155917Z"
+    - name: web-app-infra
+      type: terraform
+      domain: platform
+      enabled: false
+      path: infra/web-app-infra
+      subscribe:
+        environments:
+            - staging
+            - production
+      inputs:
+        autoApprove: "false"
+        backend: s3
+        environment: production-only
+        workspace: prod-infrastructure
+      labels:
+        team: platform
+        tier: infrastructure
+      dependsOn:
+        - component: common-services
+          environment: ""
+          scope: same-environment
+          condition: success
+      source: discovered
+      sourcePath: infra/web-app-infra/component.yaml
+      fileSize: 484
+      fileModTime: "2026-04-17T15:12:33.652284533Z"
+    - name: web-app
+      type: helm
+      domain: platform
+      enabled: false
+      path: services/web-app
+      subscribe:
+        environments:
+            - development
+            - staging
+            - production
+      inputs:
+        chart: oci://mycompany.azurecr.io/helm/charts/default
+        imagePullPolicy: IfNotPresent
+        replicaCount: 2
+        version: 1.0.0
+      overrides:
+        steps:
+            - name: verify
+              phase: post
+              order: 10
+              run: kubectl get deployment -n platform-web-app web-app
+              onFailure: continue
+      labels:
+        team: platform
+        tier: frontend
+      dependsOn:
+        - component: common-services
+          environment: ""
+          scope: same-environment
+          condition: success
+      source: discovered
+      sourcePath: services/web-app/component.yaml
+      fileSize: 686
+      fileModTime: "2026-04-17T15:12:33.653007605Z"
+    - name: component-charts
+      type: charts
+      domain: platform
+      enabled: true
+      subscribe:
+        environments:
+            - development
+            - staging
+            - production
+      inputs:
+        pullPolicy: Always
+        registry: mycompany.azurecr.io/helm/charts
+      labels:
+        team: platform
+        tier: utility
+      dependsOn:
+        - component: common-services
+          environment: ""
+          scope: same-environment
+          condition: success
+      source: inline

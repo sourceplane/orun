@@ -10,12 +10,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sourceplane/gluon/internal/model"
+	"github.com/sourceplane/orun/internal/model"
 )
 
 const (
-	compositionPackageArtifactType = "application/vnd.sourceplane.gluon.composition.package.v1"
-	compositionPackageLayerType    = "application/vnd.sourceplane.gluon.composition.package.layer.v1.tar+gzip"
+	compositionPackageArtifactType = "application/vnd.sourceplane.orun.composition.package.v1"
+	compositionPackageLayerType    = "application/vnd.sourceplane.orun.composition.package.layer.v1.tar+gzip"
 )
 
 // BuildPackageArchive validates a composition package directory and writes a .tgz archive.

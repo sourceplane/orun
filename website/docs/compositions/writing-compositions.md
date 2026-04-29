@@ -8,7 +8,7 @@ Author a new composition package when you want to introduce a new component type
 
 ```text
 my-platform/
-├── gluon.yaml
+├── orun.yaml
 └── compositions/
     └── mytype.yaml
 ```
@@ -88,10 +88,10 @@ spec:
 ## 5. Validate and inspect
 
 ```bash
-gluon compositions package build --root ./my-platform --output /tmp/my-platform.tgz
-gluon validate --intent examples/intent.yaml
-gluon compositions mytype --intent examples/intent.yaml
-gluon plan --intent examples/intent.yaml --output /tmp/mytype-plan.json
+orun compositions package build --root ./my-platform --output /tmp/my-platform.tgz
+orun validate --intent examples/intent.yaml
+orun compositions mytype --intent examples/intent.yaml
+orun plan --intent examples/intent.yaml --output /tmp/mytype-plan.json
 ```
 
 In the consuming intent, declare the package under `compositions.sources` using `kind: dir`, `kind: archive`, or `kind: oci`.

@@ -1,7 +1,7 @@
 package expand
 
 import (
-	"github.com/sourceplane/gluon/internal/model"
+	"github.com/sourceplane/orun/internal/model"
 )
 
 // DependencyResolver provides utilities for resolving component dependencies

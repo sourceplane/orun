@@ -2,12 +2,12 @@
 title: Change detection
 ---
 
-`gluon` can narrow inspection and planning to changed files or changed components. That is useful in pull requests, preview environments, and incremental review workflows.
+`orun` can narrow inspection and planning to changed files or changed components. That is useful in pull requests, preview environments, and incremental review workflows.
 
 ## Commands that support change detection
 
-- `gluon plan`
-- `gluon component`
+- `orun plan`
+- `orun component`
 
 Use those commands when you want to focus on the parts of the platform graph that were touched by a branch, commit range, or explicit file list.
 
@@ -25,13 +25,13 @@ Use those commands when you want to focus on the parts of the platform graph tha
 ## Pull request review flow
 
 ```bash
-gluon component \
+orun component \
   --intent examples/intent.yaml \
   --changed \
   --base main \
   --long
 
-gluon plan \
+orun plan \
   --intent examples/intent.yaml \
   --changed \
   --base main \
@@ -40,10 +40,10 @@ gluon plan \
 
 ## Explicit file lists
 
-When your CI system already knows the changed files, pass them directly instead of asking `gluon` to compute the diff:
+When your CI system already knows the changed files, pass them directly instead of asking `orun` to compute the diff:
 
 ```bash
-gluon plan \
+orun plan \
   --intent examples/intent.yaml \
   --files examples/services/web-app/component.yaml,examples/intent.yaml \
   --output /tmp/filtered-plan.json
@@ -54,7 +54,7 @@ gluon plan \
 For uncommitted work in a repository checkout:
 
 ```bash
-gluon component \
+orun component \
   --intent examples/intent.yaml \
   --changed \
   --uncommitted

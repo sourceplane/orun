@@ -205,7 +205,7 @@ func (e *Engine) resolveRemoteRefAPI(ctx context.Context, apiURL string, token s
 		return "", fmt.Errorf("create ref resolution request: %w", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "gluon")
+	req.Header.Set("User-Agent", "orun")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -239,7 +239,7 @@ func (e *Engine) downloadAndExtractTarball(ctx context.Context, archiveURL strin
 		return fmt.Errorf("create tarball request: %w", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "gluon")
+	req.Header.Set("User-Agent", "orun")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

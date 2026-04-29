@@ -2,7 +2,7 @@
 title: Intent model
 ---
 
-`gluon` treats intent as the desired-state layer. It captures the platform policy, environment defaults, component subscriptions, and discovery roots that define **what** should happen, not **how** steps should execute.
+`orun` treats intent as the desired-state layer. It captures the platform policy, environment defaults, component subscriptions, and discovery roots that define **what** should happen, not **how** steps should execute.
 
 ## Inputs that make up intent
 
@@ -57,7 +57,7 @@ environments:
 
 Discovery roots are scanned recursively for `component.yaml` files relative to the location of the intent file.
 
-`intent.yaml` also serves as the workspace root marker for [context-aware discovery](./context-discovery.md). When you run `gluon` from any subdirectory in your repo, it walks up the directory tree to find `intent.yaml` and uses its location to resolve all relative paths.
+`intent.yaml` also serves as the workspace root marker for [context-aware discovery](./context-discovery.md). When you run `orun` from any subdirectory in your repo, it walks up the directory tree to find `intent.yaml` and uses its location to resolve all relative paths.
 
 ### `groups`
 
@@ -103,7 +103,7 @@ spec:
 
 ## Merge model
 
-At compile time, `gluon` merges configuration in a stable order from lowest to highest precedence:
+At compile time, `orun` merges configuration in a stable order from lowest to highest precedence:
 
 1. Type defaults from the composition input schema
 2. Job defaults from the resolved composition job definition

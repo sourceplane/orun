@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	compositionpkg "github.com/sourceplane/gluon/internal/composition"
-	"github.com/sourceplane/gluon/internal/model"
+	compositionpkg "github.com/sourceplane/orun/internal/composition"
+	"github.com/sourceplane/orun/internal/model"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,7 +18,7 @@ const (
 	componentKind            = "Component"
 	componentTreeCacheSource = "discovered"
 	componentInlineSource    = "inline"
-	componentTreeCacheFile   = ".gluon/component-tree.yaml"
+	componentTreeCacheFile   = ".orun/component-tree.yaml"
 )
 
 // LoadIntent loads and parses an intent YAML file
@@ -198,7 +198,7 @@ func discoverComponentFiles(baseDir string, roots []string) ([]string, error) {
 
 func shouldSkipDiscoveryDir(name string) bool {
 	switch name {
-	case ".git", ".gluon", "node_modules":
+	case ".git", ".orun", "node_modules":
 		return true
 	default:
 		return false
@@ -419,7 +419,7 @@ func LoadCompositionsForIntent(intent *model.Intent, intentPath, configDir strin
 	return compositionpkg.LoadRegistry(intent, intentPath, configDir)
 }
 
-// WriteCompositionLockFile writes .gluon/compositions.lock.yaml for the resolved sources.
+// WriteCompositionLockFile writes .orun/compositions.lock.yaml for the resolved sources.
 func WriteCompositionLockFile(intentPath string, sources []model.ResolvedCompositionSource) error {
 	return compositionpkg.WriteLockFile(intentPath, sources)
 }

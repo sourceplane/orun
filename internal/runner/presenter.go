@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sourceplane/gluon/internal/model"
-	"github.com/sourceplane/gluon/internal/state"
-	"github.com/sourceplane/gluon/internal/ui"
+	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/ui"
 )
 
 var (
@@ -377,7 +377,7 @@ func (r *Runner) printStepFailure(job model.PlanJob, step model.PlanStep, view s
 		lines = append(lines, fmt.Sprintf("       %s %s", ui.Dim(r.Color, "hint"), hint))
 	}
 	if r.ExecID != "" {
-		lines = append(lines, fmt.Sprintf("       %s gluon logs --exec-id %s --job %s",
+		lines = append(lines, fmt.Sprintf("       %s orun logs --exec-id %s --job %s",
 			ui.Dim(r.Color, "logs"), r.ExecID, job.ID))
 	}
 	r.live.PrintBlock(lines)
@@ -492,7 +492,7 @@ func (r *Runner) flushFinishedComponent(compKey string, entries []finishedJobEnt
 					))
 				}
 			} else if !entry.success && r.ExecID != "" {
-				lines = append(lines, fmt.Sprintf("  %s       %s gluon logs --exec-id %s --job %s",
+				lines = append(lines, fmt.Sprintf("  %s       %s orun logs --exec-id %s --job %s",
 					ui.Dim(r.Color, "│"),
 					ui.Dim(r.Color, "logs"),
 					r.ExecID, entry.job.ID))
@@ -608,9 +608,9 @@ func (r *Runner) printRunSummary(summary *runSummary, finalStatus string) {
 		}
 		if r.ExecID != "" && !r.DryRun {
 			fmt.Fprintln(r.Stdout)
-			fmt.Fprintf(r.Stdout, "  %s  gluon status --exec-id %s\n",
+			fmt.Fprintf(r.Stdout, "  %s  orun status --exec-id %s\n",
 				ui.Dim(r.Color, "status"), r.ExecID)
-			logsCommand := fmt.Sprintf("gluon logs --exec-id %s", r.ExecID)
+			logsCommand := fmt.Sprintf("orun logs --exec-id %s", r.ExecID)
 			if strings.EqualFold(finalStatus, "failed") {
 				logsCommand += " --failed"
 			}

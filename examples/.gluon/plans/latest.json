@@ -1,0 +1,787 @@
+{
+  "apiVersion": "gluon.io/v1",
+  "kind": "Plan",
+  "metadata": {
+    "name": "microservices-deployment",
+    "description": "Example multi-environment microservices deployment",
+    "namespace": "default",
+    "generatedAt": "2026-04-28T04:11:21Z",
+    "checksum": "sha256-f23355b88dccdab847bc6d601b38414c0c23f9d1af2e2d9b5e6af22940aa76b2"
+  },
+  "execution": {
+    "concurrency": 4,
+    "failFast": true
+  },
+  "spec": {
+    "jobBindings": {
+      "charts": "platform-core",
+      "helm": "platform-core",
+      "helmCommon": "platform-core",
+      "terraform": "platform-core"
+    },
+    "compositionSources": [
+      {
+        "name": "platform-core",
+        "kind": "dir",
+        "path": "./packages/platform-core",
+        "resolvedDigest": "sha256:3455d1b4d8cd9a903e6fe301ba1b7fefd91287877e7643c959bc26eb747dda52",
+        "exports": [
+          "charts",
+          "helm",
+          "helmCommon",
+          "terraform"
+        ]
+      }
+    ]
+  },
+  "jobs": [
+    {
+      "id": "common-services@production.deploy",
+      "name": "deploy",
+      "component": "common-services",
+      "environment": "production",
+      "composition": "helmCommon",
+      "jobRegistry": "platform-core",
+      "job": "deploy",
+      "runsOn": "ubuntu-22.04",
+      "path": "deploy/common-services",
+      "steps": [
+        {
+          "id": "add-repository",
+          "name": "add-repository",
+          "phase": "main",
+          "run": "helm repo add mycompany oci://mycompany.azurecr.io/helm/charts",
+          "retry": 3
+        },
+        {
+          "id": "update-repo",
+          "name": "update-repo",
+          "phase": "main",
+          "run": "helm repo update",
+          "retry": 2
+        },
+        {
+          "id": "deploy",
+          "name": "deploy",
+          "phase": "main",
+          "run": "helm upgrade --install common-services oci://mycompany.azurecr.io/helm/charts/common --namespace platform-common --create-namespace --wait=true --timeout=\u003cno value\u003e",
+          "timeout": "15m",
+          "onFailure": "stop"
+        },
+        {
+          "id": "verify",
+          "name": "verify",
+          "phase": "main",
+          "run": "kubectl get deployment -n platform-common common-services",
+          "onFailure": "continue"
+        }
+      ],
+      "timeout": "10m",
+      "retries": 2,
+      "env": {
+        "chart": "oci://mycompany.azurecr.io/helm/charts/common",
+        "imagePullPolicy": "IfNotPresent",
+        "logLevel": "info",
+        "name": "common-services",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-west-2",
+        "replicas": 1
+      },
+      "labels": {
+        "team": "platform",
+        "tier": "backend"
+      },
+      "config": {
+        "chart": "oci://mycompany.azurecr.io/helm/charts/common",
+        "imagePullPolicy": "IfNotPresent",
+        "logLevel": "info",
+        "name": "common-services",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-west-2",
+        "replicas": 1
+      }
+    },
+    {
+      "id": "common-services@staging.deploy",
+      "name": "deploy",
+      "component": "common-services",
+      "environment": "staging",
+      "composition": "helmCommon",
+      "jobRegistry": "platform-core",
+      "job": "deploy",
+      "runsOn": "ubuntu-22.04",
+      "path": "deploy/common-services",
+      "steps": [
+        {
+          "id": "add-repository",
+          "name": "add-repository",
+          "phase": "main",
+          "run": "helm repo add mycompany oci://mycompany.azurecr.io/helm/charts",
+          "retry": 3
+        },
+        {
+          "id": "update-repo",
+          "name": "update-repo",
+          "phase": "main",
+          "run": "helm repo update",
+          "retry": 2
+        },
+        {
+          "id": "deploy",
+          "name": "deploy",
+          "phase": "main",
+          "run": "helm upgrade --install common-services oci://mycompany.azurecr.io/helm/charts/common --namespace platform-common --create-namespace --wait=true --timeout=\u003cno value\u003e",
+          "timeout": "15m",
+          "onFailure": "stop"
+        },
+        {
+          "id": "verify",
+          "name": "verify",
+          "phase": "main",
+          "run": "kubectl get deployment -n platform-common common-services",
+          "onFailure": "continue"
+        }
+      ],
+      "timeout": "10m",
+      "retries": 2,
+      "env": {
+        "chart": "oci://mycompany.azurecr.io/helm/charts/common",
+        "imagePullPolicy": "IfNotPresent",
+        "logLevel": "debug",
+        "name": "common-services",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-west-2",
+        "replicas": 1
+      },
+      "labels": {
+        "team": "platform",
+        "tier": "backend"
+      },
+      "config": {
+        "chart": "oci://mycompany.azurecr.io/helm/charts/common",
+        "imagePullPolicy": "IfNotPresent",
+        "logLevel": "debug",
+        "name": "common-services",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-west-2",
+        "replicas": 1
+      }
+    },
+    {
+      "id": "common-services@development.deploy",
+      "name": "deploy",
+      "component": "common-services",
+      "environment": "development",
+      "composition": "helmCommon",
+      "jobRegistry": "platform-core",
+      "job": "deploy",
+      "runsOn": "ubuntu-22.04",
+      "path": "deploy/common-services",
+      "steps": [
+        {
+          "id": "add-repository",
+          "name": "add-repository",
+          "phase": "main",
+          "run": "helm repo add mycompany oci://mycompany.azurecr.io/helm/charts",
+          "retry": 3
+        },
+        {
+          "id": "update-repo",
+          "name": "update-repo",
+          "phase": "main",
+          "run": "helm repo update",
+          "retry": 2
+        },
+        {
+          "id": "deploy",
+          "name": "deploy",
+          "phase": "main",
+          "run": "helm upgrade --install common-services oci://mycompany.azurecr.io/helm/charts/common --namespace platform-common --create-namespace --wait=true --timeout=\u003cno value\u003e",
+          "timeout": "15m",
+          "onFailure": "stop"
+        },
+        {
+          "id": "verify",
+          "name": "verify",
+          "phase": "main",
+          "run": "kubectl get deployment -n platform-common common-services",
+          "onFailure": "continue"
+        }
+      ],
+      "timeout": "10m",
+      "retries": 2,
+      "env": {
+        "chart": "oci://mycompany.azurecr.io/helm/charts/common",
+        "imagePullPolicy": "IfNotPresent",
+        "logLevel": "debug",
+        "name": "common-services",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-east-1",
+        "replicas": 1
+      },
+      "labels": {
+        "team": "platform",
+        "tier": "backend"
+      },
+      "config": {
+        "chart": "oci://mycompany.azurecr.io/helm/charts/common",
+        "imagePullPolicy": "IfNotPresent",
+        "logLevel": "debug",
+        "name": "common-services",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-east-1",
+        "replicas": 1
+      }
+    },
+    {
+      "id": "component-charts@production.package",
+      "name": "package",
+      "component": "component-charts",
+      "environment": "production",
+      "composition": "charts",
+      "jobRegistry": "platform-core",
+      "job": "package",
+      "runsOn": "ubuntu-22.04",
+      "path": "./",
+      "steps": [
+        {
+          "id": "lint",
+          "name": "lint",
+          "phase": "main",
+          "order": 10,
+          "run": "helm lint mycompany.azurecr.io/helm/charts/charts",
+          "timeout": "5m",
+          "onFailure": "stop"
+        },
+        {
+          "id": "package",
+          "name": "package",
+          "phase": "main",
+          "order": 20,
+          "run": "helm package mycompany.azurecr.io/helm/charts/charts -d dist/",
+          "timeout": "5m",
+          "onFailure": "stop"
+        }
+      ],
+      "dependsOn": [
+        "common-services@production.deploy"
+      ],
+      "timeout": "5m",
+      "retries": 1,
+      "env": {
+        "logLevel": "info",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "pullPolicy": "Always",
+        "region": "us-west-2",
+        "registry": "mycompany.azurecr.io/helm/charts",
+        "replicas": 3
+      },
+      "labels": {
+        "team": "platform",
+        "tier": "utility"
+      },
+      "config": {
+        "logLevel": "info",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "pullPolicy": "Always",
+        "region": "us-west-2",
+        "registry": "mycompany.azurecr.io/helm/charts",
+        "replicas": 3
+      }
+    },
+    {
+      "id": "web-app@production.deploy",
+      "name": "deploy",
+      "component": "web-app",
+      "environment": "production",
+      "composition": "helm",
+      "jobRegistry": "platform-core",
+      "job": "deploy",
+      "runsOn": "ubuntu-22.04",
+      "path": "services/web-app",
+      "steps": [
+        {
+          "id": "add-repository",
+          "name": "add-repository",
+          "phase": "main",
+          "run": "helm repo add mycompany oci://mycompany.azurecr.io/helm/charts",
+          "retry": 3
+        },
+        {
+          "id": "update-repo",
+          "name": "update-repo",
+          "phase": "main",
+          "run": "helm repo update",
+          "retry": 2
+        },
+        {
+          "id": "deploy",
+          "name": "deploy",
+          "phase": "main",
+          "run": "helm upgrade --install web-app oci://mycompany.azurecr.io/helm/charts/default --namespace platform-web-app --create-namespace --wait=true --timeout=\u003cno value\u003e",
+          "timeout": "15m",
+          "onFailure": "stop"
+        },
+        {
+          "id": "verify",
+          "name": "verify",
+          "phase": "post",
+          "order": 10,
+          "run": "kubectl get deployment -n platform-web-app web-app",
+          "onFailure": "continue"
+        }
+      ],
+      "dependsOn": [
+        "common-services@production.deploy"
+      ],
+      "timeout": "15m",
+      "retries": 2,
+      "env": {
+        "chart": "oci://mycompany.azurecr.io/helm/charts/default",
+        "imagePullPolicy": "IfNotPresent",
+        "logLevel": "info",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-west-2",
+        "replicaCount": 2,
+        "replicas": 3,
+        "version": "1.0.0"
+      },
+      "labels": {
+        "team": "platform",
+        "tier": "frontend"
+      },
+      "config": {
+        "chart": "oci://mycompany.azurecr.io/helm/charts/default",
+        "imagePullPolicy": "IfNotPresent",
+        "logLevel": "info",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-west-2",
+        "replicaCount": 2,
+        "replicas": 3,
+        "version": "1.0.0"
+      }
+    },
+    {
+      "id": "web-app-infra@production.plan",
+      "name": "plan",
+      "component": "web-app-infra",
+      "environment": "production",
+      "composition": "terraform",
+      "jobRegistry": "platform-core",
+      "job": "plan",
+      "runsOn": "ubuntu-22.04",
+      "path": "infra/web-app-infra",
+      "steps": [
+        {
+          "id": "init",
+          "name": "init",
+          "phase": "main",
+          "run": "terraform init -backend=true",
+          "onFailure": "stop"
+        },
+        {
+          "id": "fmt-check",
+          "name": "fmt-check",
+          "phase": "main",
+          "run": "terraform fmt -check",
+          "onFailure": "continue"
+        },
+        {
+          "id": "validate",
+          "name": "validate",
+          "phase": "main",
+          "run": "terraform validate",
+          "timeout": "5m",
+          "onFailure": "stop"
+        },
+        {
+          "id": "plan",
+          "name": "plan",
+          "phase": "main",
+          "run": "terraform plan -workspace=prod-infrastructure -out=tfplan",
+          "timeout": "15m",
+          "onFailure": "stop"
+        }
+      ],
+      "dependsOn": [
+        "common-services@production.deploy"
+      ],
+      "timeout": "20m",
+      "retries": 1,
+      "env": {
+        "autoApprove": "false",
+        "backend": "s3",
+        "environment": "production-only",
+        "logLevel": "info",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-west-2",
+        "replicas": 3,
+        "workspace": "prod-infrastructure"
+      },
+      "labels": {
+        "team": "platform",
+        "tier": "infrastructure"
+      },
+      "config": {
+        "autoApprove": "false",
+        "backend": "s3",
+        "environment": "production-only",
+        "logLevel": "info",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-west-2",
+        "replicas": 3,
+        "workspace": "prod-infrastructure"
+      }
+    },
+    {
+      "id": "web-app@staging.deploy",
+      "name": "deploy",
+      "component": "web-app",
+      "environment": "staging",
+      "composition": "helm",
+      "jobRegistry": "platform-core",
+      "job": "deploy",
+      "runsOn": "ubuntu-22.04",
+      "path": "services/web-app",
+      "steps": [
+        {
+          "id": "add-repository",
+          "name": "add-repository",
+          "phase": "main",
+          "run": "helm repo add mycompany oci://mycompany.azurecr.io/helm/charts",
+          "retry": 3
+        },
+        {
+          "id": "update-repo",
+          "name": "update-repo",
+          "phase": "main",
+          "run": "helm repo update",
+          "retry": 2
+        },
+        {
+          "id": "deploy",
+          "name": "deploy",
+          "phase": "main",
+          "run": "helm upgrade --install web-app oci://mycompany.azurecr.io/helm/charts/default --namespace platform-web-app --create-namespace --wait=true --timeout=\u003cno value\u003e",
+          "timeout": "15m",
+          "onFailure": "stop"
+        },
+        {
+          "id": "verify",
+          "name": "verify",
+          "phase": "post",
+          "order": 10,
+          "run": "kubectl get deployment -n platform-web-app web-app",
+          "onFailure": "continue"
+        }
+      ],
+      "dependsOn": [
+        "common-services@staging.deploy"
+      ],
+      "timeout": "15m",
+      "retries": 2,
+      "env": {
+        "chart": "oci://mycompany.azurecr.io/helm/charts/default",
+        "imagePullPolicy": "IfNotPresent",
+        "logLevel": "debug",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-west-2",
+        "replicaCount": 2,
+        "replicas": 1,
+        "version": "1.0.0"
+      },
+      "labels": {
+        "team": "platform",
+        "tier": "frontend"
+      },
+      "config": {
+        "chart": "oci://mycompany.azurecr.io/helm/charts/default",
+        "imagePullPolicy": "IfNotPresent",
+        "logLevel": "debug",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-west-2",
+        "replicaCount": 2,
+        "replicas": 1,
+        "version": "1.0.0"
+      }
+    },
+    {
+      "id": "web-app-infra@staging.plan",
+      "name": "plan",
+      "component": "web-app-infra",
+      "environment": "staging",
+      "composition": "terraform",
+      "jobRegistry": "platform-core",
+      "job": "plan",
+      "runsOn": "ubuntu-22.04",
+      "path": "infra/web-app-infra",
+      "steps": [
+        {
+          "id": "init",
+          "name": "init",
+          "phase": "main",
+          "run": "terraform init -backend=true",
+          "onFailure": "stop"
+        },
+        {
+          "id": "fmt-check",
+          "name": "fmt-check",
+          "phase": "main",
+          "run": "terraform fmt -check",
+          "onFailure": "continue"
+        },
+        {
+          "id": "validate",
+          "name": "validate",
+          "phase": "main",
+          "run": "terraform validate",
+          "timeout": "5m",
+          "onFailure": "stop"
+        },
+        {
+          "id": "plan",
+          "name": "plan",
+          "phase": "main",
+          "run": "terraform plan -workspace=prod-infrastructure -out=tfplan",
+          "timeout": "15m",
+          "onFailure": "stop"
+        }
+      ],
+      "dependsOn": [
+        "common-services@staging.deploy"
+      ],
+      "timeout": "20m",
+      "retries": 1,
+      "env": {
+        "autoApprove": "false",
+        "backend": "s3",
+        "environment": "production-only",
+        "logLevel": "debug",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-west-2",
+        "replicas": 1,
+        "workspace": "prod-infrastructure"
+      },
+      "labels": {
+        "team": "platform",
+        "tier": "infrastructure"
+      },
+      "config": {
+        "autoApprove": "false",
+        "backend": "s3",
+        "environment": "production-only",
+        "logLevel": "debug",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-west-2",
+        "replicas": 1,
+        "workspace": "prod-infrastructure"
+      }
+    },
+    {
+      "id": "component-charts@staging.package",
+      "name": "package",
+      "component": "component-charts",
+      "environment": "staging",
+      "composition": "charts",
+      "jobRegistry": "platform-core",
+      "job": "package",
+      "runsOn": "ubuntu-22.04",
+      "path": "./",
+      "steps": [
+        {
+          "id": "lint",
+          "name": "lint",
+          "phase": "main",
+          "order": 10,
+          "run": "helm lint mycompany.azurecr.io/helm/charts/charts",
+          "timeout": "5m",
+          "onFailure": "stop"
+        },
+        {
+          "id": "package",
+          "name": "package",
+          "phase": "main",
+          "order": 20,
+          "run": "helm package mycompany.azurecr.io/helm/charts/charts -d dist/",
+          "timeout": "5m",
+          "onFailure": "stop"
+        }
+      ],
+      "dependsOn": [
+        "common-services@staging.deploy"
+      ],
+      "timeout": "5m",
+      "retries": 1,
+      "env": {
+        "logLevel": "debug",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "pullPolicy": "Always",
+        "region": "us-west-2",
+        "registry": "mycompany.azurecr.io/helm/charts",
+        "replicas": 1
+      },
+      "labels": {
+        "team": "platform",
+        "tier": "utility"
+      },
+      "config": {
+        "logLevel": "debug",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "pullPolicy": "Always",
+        "region": "us-west-2",
+        "registry": "mycompany.azurecr.io/helm/charts",
+        "replicas": 1
+      }
+    },
+    {
+      "id": "component-charts@development.package",
+      "name": "package",
+      "component": "component-charts",
+      "environment": "development",
+      "composition": "charts",
+      "jobRegistry": "platform-core",
+      "job": "package",
+      "runsOn": "ubuntu-22.04",
+      "path": "./",
+      "steps": [
+        {
+          "id": "lint",
+          "name": "lint",
+          "phase": "main",
+          "order": 10,
+          "run": "helm lint mycompany.azurecr.io/helm/charts/charts",
+          "timeout": "5m",
+          "onFailure": "stop"
+        },
+        {
+          "id": "package",
+          "name": "package",
+          "phase": "main",
+          "order": 20,
+          "run": "helm package mycompany.azurecr.io/helm/charts/charts -d dist/",
+          "timeout": "5m",
+          "onFailure": "stop"
+        }
+      ],
+      "dependsOn": [
+        "common-services@development.deploy"
+      ],
+      "timeout": "5m",
+      "retries": 1,
+      "env": {
+        "logLevel": "debug",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "pullPolicy": "Always",
+        "region": "us-east-1",
+        "registry": "mycompany.azurecr.io/helm/charts",
+        "replicas": 1
+      },
+      "labels": {
+        "team": "platform",
+        "tier": "utility"
+      },
+      "config": {
+        "logLevel": "debug",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "pullPolicy": "Always",
+        "region": "us-east-1",
+        "registry": "mycompany.azurecr.io/helm/charts",
+        "replicas": 1
+      }
+    },
+    {
+      "id": "web-app@development.deploy",
+      "name": "deploy",
+      "component": "web-app",
+      "environment": "development",
+      "composition": "helm",
+      "jobRegistry": "platform-core",
+      "job": "deploy",
+      "runsOn": "ubuntu-22.04",
+      "path": "services/web-app",
+      "steps": [
+        {
+          "id": "add-repository",
+          "name": "add-repository",
+          "phase": "main",
+          "run": "helm repo add mycompany oci://mycompany.azurecr.io/helm/charts",
+          "retry": 3
+        },
+        {
+          "id": "update-repo",
+          "name": "update-repo",
+          "phase": "main",
+          "run": "helm repo update",
+          "retry": 2
+        },
+        {
+          "id": "deploy",
+          "name": "deploy",
+          "phase": "main",
+          "run": "helm upgrade --install web-app oci://mycompany.azurecr.io/helm/charts/default --namespace platform-web-app --create-namespace --wait=true --timeout=\u003cno value\u003e",
+          "timeout": "15m",
+          "onFailure": "stop"
+        },
+        {
+          "id": "verify",
+          "name": "verify",
+          "phase": "post",
+          "order": 10,
+          "run": "kubectl get deployment -n platform-web-app web-app",
+          "onFailure": "continue"
+        }
+      ],
+      "dependsOn": [
+        "common-services@development.deploy"
+      ],
+      "timeout": "15m",
+      "retries": 2,
+      "env": {
+        "chart": "oci://mycompany.azurecr.io/helm/charts/default",
+        "imagePullPolicy": "IfNotPresent",
+        "logLevel": "debug",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-east-1",
+        "replicaCount": 2,
+        "replicas": 1,
+        "version": "1.0.0"
+      },
+      "labels": {
+        "team": "platform",
+        "tier": "frontend"
+      },
+      "config": {
+        "chart": "oci://mycompany.azurecr.io/helm/charts/default",
+        "imagePullPolicy": "IfNotPresent",
+        "logLevel": "debug",
+        "namespacePrefix": "platform-",
+        "owner": "platform-team",
+        "region": "us-east-1",
+        "replicaCount": 2,
+        "replicas": 1,
+        "version": "1.0.0"
+      }
+    }
+  ]
+}

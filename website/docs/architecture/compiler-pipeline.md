@@ -2,7 +2,7 @@
 title: Compiler pipeline
 ---
 
-`gluon` follows a deterministic compiler pipeline from desired state to executable plan.
+`orun` follows a deterministic compiler pipeline from desired state to executable plan.
 
 ## Stages
 

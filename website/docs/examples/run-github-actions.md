@@ -7,9 +7,9 @@ The repository includes a minimal example that installs Helm through a GitHub Ac
 ## Compile the example plan
 
 ```bash
-gluon plan \
+orun plan \
   --intent examples/gha-actions/intent.yaml \
-  --output /tmp/gluon-gha-actions-plan.json
+  --output /tmp/orun-gha-actions-plan.json
 ```
 
 The example intent declares its packaged `gha-demo` composition source, so no extra composition path flag is required.
@@ -17,17 +17,17 @@ The example intent declares its packaged `gha-demo` composition source, so no ex
 ## Run the plan
 
 ```bash
-gluon run \
-  --plan /tmp/gluon-gha-actions-plan.json
+orun run \
+  --plan /tmp/orun-gha-actions-plan.json
 ```
 
-Because the plan contains a `use:` step, `gluon run` auto-selects the `github-actions` backend unless you explicitly override it.
+Because the plan contains a `use:` step, `orun run` auto-selects the `github-actions` backend unless you explicitly override it.
 
 ## Force the backend explicitly
 
 ```bash
-gluon run \
-  --plan /tmp/gluon-gha-actions-plan.json \
+orun run \
+  --plan /tmp/orun-gha-actions-plan.json \
   --gha
 ```
 

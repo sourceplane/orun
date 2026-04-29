@@ -10,7 +10,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE_REF: ghcr.io/sourceplane/gluon:${{ github.ref_name }}
+  IMAGE_REF: ghcr.io/sourceplane/orun:${{ github.ref_name }}
 
 jobs:
   kiox-release:
@@ -46,7 +46,7 @@ jobs:
       - uses: sourceplane/kiox-release-action@v2.0.1
         with:
           manifest: provider.yaml
-          main: ./cmd/gluon
+          main: ./cmd/orun
           output: oci
           dist: dist
           tag: ${{ github.ref_name }}

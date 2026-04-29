@@ -3,8 +3,8 @@ package expand
 import (
 	"testing"
 
-	"github.com/sourceplane/gluon/internal/model"
-	"github.com/sourceplane/gluon/internal/normalize"
+	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/normalize"
 )
 
 func TestExpandSupportsSubscribedComponentsAlongsideSelectorFallback(t *testing.T) {

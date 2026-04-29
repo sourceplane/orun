@@ -2,7 +2,7 @@
 title: Configuration
 ---
 
-`gluon` configuration is split across three user-facing surfaces:
+`orun` configuration is split across three user-facing surfaces:
 
 1. `intent.yaml`
 2. discovered `component.yaml` manifests
@@ -68,10 +68,10 @@ Components carry type-specific inputs, labels, overrides, and dependency declara
 Declare composition sources in the intent and plan directly against that intent:
 
 ```bash
-gluon plan --intent intent.yaml
+orun plan --intent intent.yaml
 ```
 
-Each source can be a local package directory, a packaged archive, or an OCI reference. Gluon resolves those sources into a cache and writes a lock file under `<intent-dir>/.gluon/compositions.lock.yaml`.
+Each source can be a local package directory, a packaged archive, or an OCI reference. Orun resolves those sources into a cache and writes a lock file under `<intent-dir>/.orun/compositions.lock.yaml`.
 
 `--config-dir` still works as a compatibility fallback for legacy folder-shaped compositions.
 

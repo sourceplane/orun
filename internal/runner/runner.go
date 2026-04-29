@@ -15,10 +15,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sourceplane/gluon/internal/executor"
-	"github.com/sourceplane/gluon/internal/model"
-	"github.com/sourceplane/gluon/internal/state"
-	"github.com/sourceplane/gluon/internal/ui"
+	"github.com/sourceplane/orun/internal/executor"
+	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/ui"
 )
 
 // IsolationMode controls how each job's working tree is materialized.
@@ -242,9 +242,9 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		BaseEnv: executor.MergeEnvironment(
 			executor.EnvironmentFromList(os.Environ()),
 			map[string]string{
-				"GLUON_CONTEXT": r.Runtime.Environment,
-				"GLUON_RUNNER":  r.Runtime.Runner,
-				"GLUON_EXEC_ID": r.ExecID,
+				"ORUN_CONTEXT": r.Runtime.Environment,
+				"ORUN_RUNNER":  r.Runtime.Runner,
+				"ORUN_EXEC_ID": r.ExecID,
 			},
 		),
 		Runtime: r.Runtime,
@@ -923,7 +923,7 @@ func (r *Runner) printRunHeader(plan *model.Plan, jobs []model.PlanJob) {
 
 	r.withPrintLock(func() {
 		fmt.Fprintf(r.Stdout, "\n%s %s\n",
-			ui.BoldCyan(r.Color, "▲ gluon"),
+			ui.BoldCyan(r.Color, "▲ orun"),
 			ui.Bold(r.Color, planLabel),
 		)
 		subParts := []string{}
@@ -1091,7 +1091,7 @@ func (r *Runner) resolveStateFile(plan *model.Plan) string {
 	if r.Store != nil && r.ExecID != "" {
 		return r.Store.StatePath(r.ExecID)
 	}
-	return filepath.Join(r.WorkDir, ".gluon-state.json")
+	return filepath.Join(r.WorkDir, ".orun-state.json")
 }
 
 func fileExists(path string) bool {

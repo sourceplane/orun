@@ -1,5 +1,5 @@
 $schema: http://json-schema.org/draft-07/schema#
-title: gluon Composition
+title: orun Composition
 description: Self-describing composition contract
  type: object
 required:

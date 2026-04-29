@@ -2,7 +2,7 @@
 title: Execution runtime
 ---
 
-After planning, `gluon` switches from compiler behavior to runtime behavior. The runtime reads the immutable plan, orders jobs, persists state, and delegates each step to an executor backend.
+After planning, `orun` switches from compiler behavior to runtime behavior. The runtime reads the immutable plan, orders jobs, persists state, and delegates each step to an executor backend.
 
 ## Runtime responsibilities
 
@@ -41,7 +41,7 @@ This means:
 
 #### Action reference caching
 
-Resolving a mutable ref (e.g., `actions/setup-node@v4`) to a pinned SHA uses a three-tier cache: an in-memory map shared across jobs in the same process (with singleflight deduplication), an on-disk file under `~/.gluon/actions/`, and the GitHub REST API as a final fallback. This eliminates redundant API calls under high concurrency.
+Resolving a mutable ref (e.g., `actions/setup-node@v4`) to a pinned SHA uses a three-tier cache: an in-memory map shared across jobs in the same process (with singleflight deduplication), an on-disk file under `~/.orun/actions/`, and the GitHub REST API as a final fallback. This eliminates redundant API calls under high concurrency.
 
 ## Phase boundaries
 

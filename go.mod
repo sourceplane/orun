@@ -1,4 +1,4 @@
-module github.com/sourceplane/gluon
+module github.com/sourceplane/orun
 
 go 1.25.0
 

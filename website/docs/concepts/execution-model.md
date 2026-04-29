@@ -2,18 +2,18 @@
 title: Execution model
 ---
 
-`gluon` keeps planning and execution separate on purpose. `plan` produces an immutable DAG, and `run` consumes that DAG through an explicit execution backend.
+`orun` keeps planning and execution separate on purpose. `plan` produces an immutable DAG, and `run` consumes that DAG through an explicit execution backend.
 
 ## Execute is the default
 
-`gluon run` executes steps immediately. Add `--dry-run` to preview without running.
+`orun run` executes steps immediately. Add `--dry-run` to preview without running.
 
 ```bash
 # Execute (default)
-gluon run
+orun run
 
 # Preview only
-gluon run --dry-run
+orun run --dry-run
 ```
 
 Dry-run mode is useful in review-heavy environments because it lets you inspect:
@@ -39,7 +39,7 @@ If a step contains `use:`, the local executor fails fast and asks you to rerun w
 
 1. `--gha`
 2. `--runner`
-3. `GLUON_RUNNER`
+3. `ORUN_RUNNER`
 4. `GITHUB_ACTIONS=true`
 5. Auto-detection when the compiled plan contains a `use:` step
 6. Fallback to `local`
@@ -49,7 +49,7 @@ If a step contains `use:`, the local executor fails fast and asks you to rerun w
 Jobs that have no dependency relationship execute concurrently. The degree of parallelism is controlled by `plan.execution.concurrency` in the compiled plan, and can be overridden at runtime:
 
 ```bash
-gluon run --concurrency 4
+orun run --concurrency 4
 ```
 
 Setting `--concurrency 1` forces strictly sequential execution, which is useful for debugging.
@@ -64,12 +64,12 @@ Local actions (paths starting with `./`) are not isolated — they are used dire
 
 ### Action reference caching
 
-Resolving a non-SHA action reference (e.g., `v4`) to a commit SHA requires a GitHub API call. gluon avoids redundant API calls through a three-tier cache:
+Resolving a non-SHA action reference (e.g., `v4`) to a commit SHA requires a GitHub API call. orun avoids redundant API calls through a three-tier cache:
 
 | Tier | Scope | What it stores |
 | --- | --- | --- |
 | In-memory | Current process | `repo@ref` → SHA map, deduplicated via singleflight |
-| On-disk | Persistent across runs | SHA written to `~/.gluon/actions/<repo>/refs/<ref>` |
+| On-disk | Persistent across runs | SHA written to `~/.orun/actions/<repo>/refs/<ref>` |
 | API | Fallback | GitHub REST API `/repos/<owner>/<repo>/commits/<ref>` |
 
 This ensures that `--concurrency 4` with many jobs using the same action versions never triggers API rate limits, even with large platform repositories containing dozens of concurrent jobs.
@@ -91,14 +91,14 @@ Execution stays deterministic:
 2. all `main` steps
 3. all `post` steps
 
-Within a phase, `gluon` sorts by `order` and then preserves declaration order.
+Within a phase, `orun` sorts by `order` and then preserves declaration order.
 
 ## Execution records and state
 
-Each `gluon run` creates an isolated execution record under `.gluon/executions/{exec-id}/`:
+Each `orun run` creates an isolated execution record under `.orun/executions/{exec-id}/`:
 
 ```
-.gluon/
+.orun/
   executions/
     latest          → symlink to most recent exec
     my-plan-20240601-a1b2c3/
@@ -113,30 +113,30 @@ That structure enables:
 
 - **Resumable execution** — already-completed jobs are skipped
 - **Job-level retry** — `--job <id> --retry` clears only that job's state
-- **Immutable logs** — `gluon logs` reads from the execution record
+- **Immutable logs** — `orun logs` reads from the execution record
 - **Parallel-safe CI** — each run gets its own `exec-id`, avoiding shared state collisions
 
-Use `GLUON_EXEC_ID` or `--exec-id` to pin an ID from CI for traceability.
+Use `ORUN_EXEC_ID` or `--exec-id` to pin an ID from CI for traceability.
 
 ### Migration from legacy state
 
-If you have a pre-v0.10 `.gluon-state.json` file, `gluon run` automatically migrates it into the new structure on first execution.
+If you have a pre-v0.10 `.orun-state.json` file, `orun run` automatically migrates it into the new structure on first execution.
 
 ## Working directory rules
 
 By default, each job runs in its own resolved job path. Use `--workdir` to override that behavior globally:
 
 ```bash
-gluon run --workdir ./examples
+orun run --workdir ./examples
 ```
 
-When the GitHub Actions backend is selected and `--workdir` is not explicitly set, `gluon` uses `GITHUB_WORKSPACE` when that variable is available.
+When the GitHub Actions backend is selected and `--workdir` is not explicitly set, `orun` uses `GITHUB_WORKSPACE` when that variable is available.
 
 ## Runtime environment variables
 
-During execution, `gluon` injects runner context into the step environment:
+During execution, `orun` injects runner context into the step environment:
 
-- `GLUON_CONTEXT`
-- `GLUON_RUNNER`
+- `ORUN_CONTEXT`
+- `ORUN_RUNNER`
 
 That gives steps a consistent way to understand whether they are running locally, in a container, or through the GitHub Actions-compatible backend.

@@ -1,4 +1,4 @@
-# gluon - Schema-Driven Planner Engine
+# orun - Schema-Driven Planner Engine
 
 A **policy-aware workflow compiler** that turns **intent** into executable **plan DAGs**. Built on CNCF principles.
 
@@ -41,10 +41,10 @@ cd website
 npm ci
 npm run docs:build
 wrangler login
-wrangler pages deploy docs-build --project-name gluon-docs
+wrangler pages deploy docs-build --project-name orun-docs
 ```
 
-Replace `gluon-docs` with your Cloudflare Pages project name if it is different.
+Replace `orun-docs` with your Cloudflare Pages project name if it is different.
 
 ## Installation
 
@@ -54,52 +54,52 @@ Replace `<tag>` with the release you want from the GitHub releases page.
 
 ```bash
 # macOS (arm64 - Apple Silicon)
-curl -L https://github.com/sourceplane/gluon/releases/download/<tag>/gluon_<tag>_darwin_arm64.tar.gz | tar xz
-sudo mv entrypoint /usr/local/bin/gluon
-chmod +x /usr/local/bin/gluon
+curl -L https://github.com/sourceplane/orun/releases/download/<tag>/orun_<tag>_darwin_arm64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/orun
+chmod +x /usr/local/bin/orun
 
 # macOS (amd64 - Intel)
-curl -L https://github.com/sourceplane/gluon/releases/download/<tag>/gluon_<tag>_darwin_amd64.tar.gz | tar xz
-sudo mv entrypoint /usr/local/bin/gluon
-chmod +x /usr/local/bin/gluon
+curl -L https://github.com/sourceplane/orun/releases/download/<tag>/orun_<tag>_darwin_amd64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/orun
+chmod +x /usr/local/bin/orun
 
 # Linux (amd64)
-curl -L https://github.com/sourceplane/gluon/releases/download/<tag>/gluon_<tag>_linux_amd64.tar.gz | tar xz
-sudo mv entrypoint /usr/local/bin/gluon
-chmod +x /usr/local/bin/gluon
+curl -L https://github.com/sourceplane/orun/releases/download/<tag>/orun_<tag>_linux_amd64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/orun
+chmod +x /usr/local/bin/orun
 
 # Linux (arm64)
-curl -L https://github.com/sourceplane/gluon/releases/download/<tag>/gluon_<tag>_linux_arm64.tar.gz | tar xz
-sudo mv entrypoint /usr/local/bin/gluon
-chmod +x /usr/local/bin/gluon
+curl -L https://github.com/sourceplane/orun/releases/download/<tag>/orun_<tag>_linux_arm64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/orun
+chmod +x /usr/local/bin/orun
 ```
 
 Verify installation:
 ```bash
-gluon --version
-gluon --help
+orun --version
+orun --help
 ```
 
 ### Option 2: From Source
 
 ```bash
-git clone https://github.com/sourceplane/gluon.git
-cd gluon
-go build -o gluon ./cmd/gluon
-sudo mv gluon /usr/local/bin/
+git clone https://github.com/sourceplane/orun.git
+cd orun
+go build -o orun ./cmd/orun
+sudo mv orun /usr/local/bin/
 ```
 
 ### Option 3: Docker/OCI Container
 
 ```bash
 # Docker
-docker run ghcr.io/sourceplane/gluon:<tag> plan -i intent.yaml
+docker run ghcr.io/sourceplane/orun:<tag> plan -i intent.yaml
 
 # Podman (recommended for CI/CD)
-podman run ghcr.io/sourceplane/gluon:<tag> plan -i intent.yaml
+podman run ghcr.io/sourceplane/orun:<tag> plan -i intent.yaml
 
 # Kubernetes
-kubectl run gluon --image=ghcr.io/sourceplane/gluon:<tag>
+kubectl run orun --image=ghcr.io/sourceplane/orun:<tag>
 ```
 
 ### Option 4: Using kiox
@@ -107,8 +107,8 @@ kubectl run gluon --image=ghcr.io/sourceplane/gluon:<tag>
 ```bash
 repo_root="$(pwd)"
 kiox init demo
-kiox --workspace demo add ghcr.io/sourceplane/gluon:<tag> as gluon
-kiox --workspace demo exec -- gluon plan \
+kiox --workspace demo add ghcr.io/sourceplane/orun:<tag> as orun
+kiox --workspace demo exec -- orun plan \
   --intent "$repo_root/examples/intent.yaml"
 ```
 
@@ -116,10 +116,10 @@ kiox --workspace demo exec -- gluon plan \
 
 ```bash
 # Pull the provider artifact
-oras pull ghcr.io/sourceplane/gluon:<tag>
+oras pull ghcr.io/sourceplane/orun:<tag>
 
 # Extract binaries
-tar -xzf gluon_<tag>_linux_amd64_oci.tar.gz
+tar -xzf orun_<tag>_linux_amd64_oci.tar.gz
 ./entrypoint plan -i intent.yaml
 ```
 
@@ -147,8 +147,8 @@ tar -xzf gluon_<tag>_linux_amd64_oci.tar.gz
 ## Project Structure
 
 ```
-gluon/
-├── cmd/gluon/
+orun/
+├── cmd/orun/
 │   ├── main.go           # CLI entry point & command handlers
 │   └── models.go         # Domain models and types
 ├── internal/
@@ -185,7 +185,7 @@ gluon/
 ### 1. List Available Compositions
 
 ```bash
-gluon compositions --intent examples/intent.yaml
+orun compositions --intent examples/intent.yaml
 ```
 
 Output shows the resolved compositions exported by the intent's declared sources.
@@ -193,15 +193,15 @@ Output shows the resolved compositions exported by the intent's declared sources
 ### 2. Resolve And Lock Composition Sources
 
 ```bash
-gluon compositions lock --intent examples/intent.yaml
+orun compositions lock --intent examples/intent.yaml
 ```
 
-This writes `examples/.gluon/compositions.lock.yaml` with the resolved source digests and exported composition names.
+This writes `examples/.orun/compositions.lock.yaml` with the resolved source digests and exported composition names.
 
 ### 3. Validate Intent File
 
 ```bash
-gluon validate \
+orun validate \
   --intent examples/intent.yaml
 ```
 
@@ -210,14 +210,14 @@ gluon validate \
 See detailed logs of each compiler stage:
 
 ```bash
-gluon debug \
+orun debug \
   --intent examples/intent.yaml
 ```
 
 ### 5. Generate Execution Plan
 
 ```bash
-gluon plan \
+orun plan \
   --intent examples/intent.yaml \
   --output plan.json \
   --debug
@@ -228,12 +228,12 @@ Output: Fully resolved execution DAG in `plan.json`
 ### 6. Build A Portable Composition Package
 
 ```bash
-gluon compositions package build \
+orun compositions package build \
   --root examples/packages/platform-core \
   --output dist/platform-core-1.0.0.tgz
 ```
 
-Use `gluon compositions package push <archive> oci://...` when you want to publish the archive to an OCI registry.
+Use `orun compositions package push <archive> oci://...` when you want to publish the archive to an OCI registry.
 
 ## Usage Examples
 
@@ -242,7 +242,7 @@ Use `gluon compositions package push <archive> oci://...` when you want to publi
 ```bash
 docker run \
   -v $(pwd):/workspace \
-  ghcr.io/sourceplane/gluon:<tag> \
+  ghcr.io/sourceplane/orun:<tag> \
   plan \
   --intent /workspace/intent.yaml \
   --output /workspace/plan.json
@@ -253,7 +253,7 @@ docker run \
 ```bash
 podman run \
   -v $(pwd):/workspace \
-  ghcr.io/sourceplane/gluon:<tag> \
+  ghcr.io/sourceplane/orun:<tag> \
   plan \
   --intent /workspace/intent.yaml
 ```
@@ -261,8 +261,8 @@ podman run \
 ### Using in Kubernetes
 
 ```bash
-kubectl run gluon-planner \
-  --image=ghcr.io/sourceplane/gluon:<tag> \
+kubectl run orun-planner \
+  --image=ghcr.io/sourceplane/orun:<tag> \
   --rm -it \
   -- plan \
   --intent intent.yaml
@@ -280,7 +280,7 @@ compositions:
       path: ./packages/platform-core
 ```
 
-Supported source kinds are `dir`, `archive`, and `oci`. During planning, Gluon resolves those sources into a local cache and writes a lock file under `<intent-dir>/.gluon/compositions.lock.yaml`.
+Supported source kinds are `dir`, `archive`, and `oci`. During planning, Orun resolves those sources into a local cache and writes a lock file under `<intent-dir>/.orun/compositions.lock.yaml`.
 
 The legacy `--config-dir` flag is still supported as a compatibility fallback for folder-shaped compositions under `assets/config/compositions`.
 
@@ -288,7 +288,7 @@ The legacy `--config-dir` flag is still supported as a compatibility fallback fo
 
 ```yaml
 - name: Generate CI Plan
-  uses: docker://ghcr.io/sourceplane/gluon:<tag>
+  uses: docker://ghcr.io/sourceplane/orun:<tag>
   with:
     args: |
       plan \
@@ -296,7 +296,7 @@ The legacy `--config-dir` flag is still supported as a compatibility fallback fo
       --output plan.json
 ```
 
-    This container-based usage is separate from GitHub Actions compatibility mode during `gluon run`. When a compiled plan contains `use:` steps, `gluon run` auto-selects the GitHub Actions executor unless you explicitly set `--runner`, `GLUON_RUNNER`, or a deprecated compatibility alias.
+    This container-based usage is separate from GitHub Actions compatibility mode during `orun run`. When a compiled plan contains `use:` steps, `orun run` auto-selects the GitHub Actions executor unless you explicitly set `--runner`, `ORUN_RUNNER`, or a deprecated compatibility alias.
 
 ## Configuration Schemas
 
@@ -351,7 +351,7 @@ components:
       registry: mycompany.azurecr.io/helm/charts
 ```
 
-External components can live next to the code they own. Each `component.yaml` is loaded from the configured discovery roots, and if `spec.path` is omitted gluon defaults the job working directory to the directory containing the manifest.
+External components can live next to the code they own. Each `component.yaml` is loaded from the configured discovery roots, and if `spec.path` is omitted orun defaults the job working directory to the directory containing the manifest.
 
 **Example component.yaml:**
 ```yaml
@@ -424,7 +424,7 @@ spec:
 
 ### GitHub Actions Steps In Compositions
 
-`gluon` also supports GitHub Actions-style `use:` steps inside a composition. `gluon run` auto-selects the GitHub Actions executor when the compiled plan contains any `use:` step, and you can still force it with `--gha`.
+`orun` also supports GitHub Actions-style `use:` steps inside a composition. `orun run` auto-selects the GitHub Actions executor when the compiled plan contains any `use:` step, and you can still force it with `--gha`.
 
 See the packaged example file at `examples/gha-actions/packages/gha-demo/compositions/gha-demo.yaml`.
 
@@ -448,7 +448,7 @@ To use that example composition:
 
 1. Copy `examples/compositions/gha-helm/` into your config directory.
 2. Set the component type to `gha-helm`.
-3. Run the compiled plan with `gluon run --plan plan.json`.
+3. Run the compiled plan with `orun run --plan plan.json`.
 
 Example component snippet:
 
@@ -477,7 +477,7 @@ The generated plan is a fully resolved DAG.
 **Structure:**
 ```json
 {
-  "apiVersion": "gluon.io/v1",
+  "apiVersion": "orun.io/v1",
   "kind": "Plan",
   "metadata": {
     "name": "microservices-deployment",
@@ -488,7 +488,7 @@ The generated plan is a fully resolved DAG.
   "execution": {
     "concurrency": 4,
     "failFast": true,
-    "stateFile": ".gluon-state.json"
+    "stateFile": ".orun-state.json"
   },
   "spec": {
     "jobBindings": {
@@ -585,57 +585,57 @@ Low Priority  ← Overridden by ←  High Priority
 
 ```bash
 # List available compositions
-gluon compositions \
+orun compositions \
   --intent examples/intent.yaml
 
 # Resolve and lock declared composition sources
-gluon compositions lock \
+orun compositions lock \
   --intent examples/intent.yaml
 
 # Validate intent without generating plan
-gluon validate \
+orun validate \
   --intent examples/intent.yaml
 
 # Debug with detailed logging
-gluon debug \
+orun debug \
   --intent examples/intent.yaml
 
 # Generate execution plan
-gluon plan \
+orun plan \
   --intent examples/intent.yaml \
   --output plan.json \
   --format json \
   --debug
 
 # Build a portable composition package
-gluon compositions package build \
+orun compositions package build \
   --root examples/packages/platform-core \
   --output dist/platform-core-1.0.0.tgz
 
 # Preview execution from a compiled plan (dry-run)
-gluon run \
+orun run \
   --plan plan.json \
   --dry-run
 
 # Run the plan
-gluon run \
+orun run \
   --plan plan.json
 
 # Run using the Docker backend
-gluon run \
+orun run \
   --plan plan.json \
   --runner docker
 
 # Run using GitHub Actions compatibility mode
-gluon run \
+orun run \
   --plan plan.json \
   --gha
 
 # Check the latest run
-gluon status
+orun status
 
 # Show only failed logs from the latest run
-gluon logs --failed
+orun logs --failed
 ```
 
 **Flags:**
@@ -654,7 +654,7 @@ gluon logs --failed
 
 1. `--gha`
 2. `--runner`
-3. `GLUON_RUNNER`
+3. `ORUN_RUNNER`
 4. Auto-detect `github-actions` when `GITHUB_ACTIONS=true`
 5. Auto-detect `github-actions` when the compiled plan contains any `use:` step
 6. Otherwise `local`
@@ -675,19 +675,19 @@ Runner notes:
 ls -la assets/config/compositions/
 
 # Use absolute path if relative doesn't work
-gluon plan -i intent.yaml -c $(pwd)/assets/config/compositions
+orun plan -i intent.yaml -c $(pwd)/assets/config/compositions
 ```
 
 ### "Schema validation failed"
 ```bash
 # Check your intent.yaml against the schema
-gluon validate -i intent.yaml -c assets/config/compositions
+orun validate -i intent.yaml -c assets/config/compositions
 ```
 
 ### "Circular dependency detected"
 ```bash
 # Use debug mode to see dependency graph
-gluon debug -i intent.yaml -c assets/config/compositions
+orun debug -i intent.yaml -c assets/config/compositions
 ```
 
 ### Container authentication errors
@@ -730,6 +730,6 @@ MIT License - See [LICENSE](LICENSE) file for details
 
 ## Support
 
-- **Issues:** [GitHub Issues](https://github.com/sourceplane/gluon/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/sourceplane/gluon/discussions)
+- **Issues:** [GitHub Issues](https://github.com/sourceplane/orun/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/sourceplane/orun/discussions)
 - **Email:** team@sourceplane.io

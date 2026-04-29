@@ -24,7 +24,7 @@ The repository quick-start package looks like this:
 
 ```text
 examples/packages/platform-core/
-├── gluon.yaml
+├── orun.yaml
 ├── compositions/
 │   ├── charts.yaml
 │   ├── helm.yaml
@@ -34,7 +34,7 @@ examples/packages/platform-core/
     └── README.md
 ```
 
-`gluon.yaml` is a `CompositionPackage` document that maps exported composition names to files inside the package.
+`orun.yaml` is a `CompositionPackage` document that maps exported composition names to files inside the package.
 
 ## What lives in a composition
 
@@ -83,9 +83,9 @@ spec:
 ## Inspecting compositions from the CLI
 
 ```bash
-gluon compositions --intent examples/intent.yaml
-gluon compositions helm --intent examples/intent.yaml
-gluon compositions package build --root examples/packages/platform-core --output /tmp/platform-core.tgz
+orun compositions --intent examples/intent.yaml
+orun compositions helm --intent examples/intent.yaml
+orun compositions package build --root examples/packages/platform-core --output /tmp/platform-core.tgz
 ```
 
 The legacy `--config-dir` flag still works for folder-shaped compositions during migration, but packaged sources are the recommended path.

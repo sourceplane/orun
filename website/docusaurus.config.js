@@ -3,12 +3,12 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
 const config = {
-  title: 'gluon',
+  title: 'orun',
   tagline: 'Policy-aware planner that compiles intent into deterministic execution DAGs',
-  url: 'https://gluon-docs.pages.dev',
+  url: 'https://orun-docs.pages.dev',
   baseUrl: '/',
   organizationName: 'sourceplane',
-  projectName: 'gluon',
+  projectName: 'orun',
   onBrokenLinks: 'throw',
   onDuplicateRoutes: 'throw',
   markdown: {
@@ -42,7 +42,7 @@ const config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
-      title: 'gluon',
+      title: 'orun',
       items: [
         {
           to: '/',
@@ -50,7 +50,7 @@ const config = {
           position: 'left',
         },
         {
-          href: 'https://github.com/sourceplane/gluon',
+          href: 'https://github.com/sourceplane/orun',
           label: 'GitHub',
           position: 'right',
         },
@@ -77,7 +77,7 @@ const config = {
         {
           title: 'Reference',
           items: [
-            { label: 'CLI Overview', to: '/cli/gluon' },
+            { label: 'CLI Overview', to: '/cli/orun' },
             { label: 'Configuration', to: '/reference/configuration' },
             { label: 'Deploy Docs', to: '/contributing/deploying-docs' },
           ],

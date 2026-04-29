@@ -1,5 +1,5 @@
 {
-  "apiVersion": "gluon.io/v1",
+  "apiVersion": "orun.io/v1",
   "kind": "Plan",
   "metadata": {
     "name": "microservices-deployment",
@@ -11,7 +11,7 @@
   "execution": {
     "concurrency": 4,
     "failFast": true,
-    "stateFile": ".gluon-state.json"
+    "stateFile": ".orun-state.json"
   },
   "spec": {
     "jobBindings": {

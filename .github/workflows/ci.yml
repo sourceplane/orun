@@ -33,7 +33,7 @@ jobs:
         uses: sourceplane/kiox-release-action@v2.0.1
         with:
           manifest: provider.yaml
-          main: ./cmd/gluon
+          main: ./cmd/orun
           output: oci
           dist: dist
           tag: ci
@@ -44,13 +44,13 @@ jobs:
         with:
           version: v0.4.3
           providers: |
-            ${{ github.workspace }}/oci as gluon
+            ${{ github.workspace }}/oci as orun
           run: |
             kiox --workspace "$KIOX_WORKSPACE_ROOT" provider list
-            gluon validate --intent "$GITHUB_WORKSPACE/examples/intent.yaml"
-            gluon compositions --config-dir "$GITHUB_WORKSPACE/assets/config/compositions"
-            gluon plan \
+            orun validate --intent "$GITHUB_WORKSPACE/examples/intent.yaml"
+            orun compositions --config-dir "$GITHUB_WORKSPACE/assets/config/compositions"
+            orun plan \
               --intent "$GITHUB_WORKSPACE/examples/intent.yaml" \
               --config-dir "$GITHUB_WORKSPACE/assets/config/compositions" \
-              --output "$RUNNER_TEMP/gluon-plan.json"
-            test -s "$RUNNER_TEMP/gluon-plan.json"
+              --output "$RUNNER_TEMP/orun-plan.json"
+            test -s "$RUNNER_TEMP/orun-plan.json"

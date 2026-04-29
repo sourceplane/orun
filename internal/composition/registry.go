@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
-	"github.com/sourceplane/gluon/internal/model"
+	"github.com/sourceplane/orun/internal/model"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,7 +23,7 @@ const (
 	lockKind               = "CompositionLock"
 	legacySourceName       = "legacy-config-dir"
 	legacySourceKind       = "legacy-dir"
-	lockFilePath           = ".gluon/compositions.lock.yaml"
+	lockFilePath           = ".orun/compositions.lock.yaml"
 )
 
 // Composition is the resolved internal representation used by planning and validation.
@@ -660,7 +660,7 @@ func resolveOCISource(source model.CompositionSource, index int) (*sourcePackage
 }
 
 func loadPackageSource(rootDir string, source model.CompositionSource, digest string, index int) (*sourcePackage, error) {
-	manifestPath := filepath.Join(rootDir, "gluon.yaml")
+	manifestPath := filepath.Join(rootDir, "orun.yaml")
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read package manifest for source %s: %w", source.Name, err)
@@ -916,7 +916,7 @@ func cacheRoot() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to determine user home directory: %w", err)
 	}
-	root := filepath.Join(homeDir, ".gluon", "cache", "compositions")
+	root := filepath.Join(homeDir, ".orun", "cache", "compositions")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return "", err
 	}
@@ -929,7 +929,7 @@ func ensureCachedDirectory(srcDir, digest string) (string, error) {
 		return "", err
 	}
 	cacheDir := filepath.Join(root, strings.TrimPrefix(digest, "sha256:"))
-	manifestPath := filepath.Join(cacheDir, "gluon.yaml")
+	manifestPath := filepath.Join(cacheDir, "orun.yaml")
 	if _, err := os.Stat(manifestPath); err == nil {
 		return cacheDir, nil
 	}
@@ -958,7 +958,7 @@ func ensureCachedArchive(archivePath, digest string) (string, error) {
 		return "", err
 	}
 	cacheDir := filepath.Join(root, strings.TrimPrefix(digest, "sha256:"))
-	manifestPath := filepath.Join(cacheDir, "gluon.yaml")
+	manifestPath := filepath.Join(cacheDir, "orun.yaml")
 	if _, err := os.Stat(manifestPath); err == nil {
 		return cacheDir, nil
 	}
@@ -987,7 +987,7 @@ func ensureCachedOCI(remoteRef, digest string) (string, error) {
 		return "", err
 	}
 	cacheDir := filepath.Join(root, strings.TrimPrefix(digest, "sha256:"))
-	manifestPath := filepath.Join(cacheDir, "gluon.yaml")
+	manifestPath := filepath.Join(cacheDir, "orun.yaml")
 	if _, err := os.Stat(manifestPath); err == nil {
 		return cacheDir, nil
 	}

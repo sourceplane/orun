@@ -49,7 +49,7 @@ spec:
           run: helm upgrade --install {{.Component}} {{.chart}}
 ```
 
-`defaultJob` must be explicit. Gluon no longer relies on implicit "first job wins" behavior for packaged compositions.
+`defaultJob` must be explicit. Orun no longer relies on implicit "first job wins" behavior for packaged compositions.
 
 ## Composition package document
 

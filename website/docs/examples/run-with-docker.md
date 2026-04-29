@@ -7,16 +7,16 @@ The Docker backend executes each step inside a container and mounts the reposito
 ## Compile a plan first
 
 ```bash
-gluon plan \
+orun plan \
   --intent examples/intent.yaml \
-  --output /tmp/gluon-docker-plan.json
+  --output /tmp/orun-docker-plan.json
 ```
 
 ## Run through Docker
 
 ```bash
-gluon run \
-  --plan /tmp/gluon-docker-plan.json \
+orun run \
+  --plan /tmp/orun-docker-plan.json \
   --runner docker
 ```
 

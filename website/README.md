@@ -1,6 +1,6 @@
-# gluon website
+# orun website
 
-This directory contains the Docusaurus-based documentation site for `gluon`.
+This directory contains the Docusaurus-based documentation site for `orun`.
 
 ## Local development
 
@@ -26,7 +26,7 @@ cd website
 npm ci
 npm run docs:build
 wrangler login
-wrangler pages deploy docs-build --project-name gluon-docs
+wrangler pages deploy docs-build --project-name orun-docs
 ```
 
-Replace `gluon-docs` with the actual Cloudflare Pages project name if it differs.
+Replace `orun-docs` with the actual Cloudflare Pages project name if it differs.

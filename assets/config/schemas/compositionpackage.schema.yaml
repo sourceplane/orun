@@ -1,5 +1,5 @@
 $schema: http://json-schema.org/draft-07/schema#
-title: gluon CompositionPackage
+title: orun CompositionPackage
 description: Composition package manifest
 type: object
 required:
@@ -32,7 +32,7 @@ properties:
     properties:
       version:
         type: string
-      gluon:
+      orun:
         type: object
         properties:
           minVersion:

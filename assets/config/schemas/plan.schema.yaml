@@ -1,5 +1,5 @@
 $schema: http://json-schema.org/draft-07/schema#
-title: gluon Plan
+title: orun Plan
 description: Execution plan DAG output specification
 type: object
 required:
@@ -12,7 +12,7 @@ properties:
   apiVersion:
     type: string
     enum:
-      - gluon.io/v1
+      - orun.io/v1
   kind:
     type: string
     enum:

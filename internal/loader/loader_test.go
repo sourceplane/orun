@@ -90,7 +90,7 @@ spec:
 		t.Fatalf("WriteComponentTreeCache returned error: %v", err)
 	}
 
-	cachePath := filepath.Join(rootDir, ".gluon", "component-tree.yaml")
+	cachePath := filepath.Join(rootDir, ".orun", "component-tree.yaml")
 	if _, err := os.Stat(cachePath); err != nil {
 		t.Fatalf("expected component tree cache to be written: %v", err)
 	}

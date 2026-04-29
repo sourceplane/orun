@@ -1,7 +1,7 @@
 {
-  "name": "gluon-docs",
+  "name": "orun-docs",
   "version": "1.0.0",
-  "description": "Documentation site for gluon",
+  "description": "Documentation site for orun",
   "scripts": {
     "docs:start": "docusaurus start",
     "docs:build": "docusaurus build --out-dir docs-build",
@@ -9,15 +9,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sourceplane/gluon.git"
+    "url": "git+https://github.com/sourceplane/orun.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/sourceplane/gluon/issues"
+    "url": "https://github.com/sourceplane/orun/issues"
   },
-  "homepage": "https://github.com/sourceplane/gluon#readme",
+  "homepage": "https://github.com/sourceplane/orun#readme",
   "private": true,
   "overrides": {
     "webpack": "5.105.4",

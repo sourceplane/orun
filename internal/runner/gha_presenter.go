@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sourceplane/gluon/internal/model"
-	"github.com/sourceplane/gluon/internal/ui"
+	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/ui"
 )
 
 // GitHub Actions output mode.

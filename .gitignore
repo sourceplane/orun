@@ -48,19 +48,19 @@ temp/
 Thumbs.db
 
 # Project specific
-/gluon
-/.gluon/executions/
-/.gluon/plans/*.json
-!/.gluon/compositions.lock.yaml
-!/.gluon/component-tree.yaml
-/.gluon-state.json
-/.gluon-tools/
+/orun
+/.orun/executions/
+/.orun/plans/*.json
+!/.orun/compositions.lock.yaml
+!/.orun/component-tree.yaml
+/.orun-state.json
+/.orun-tools/
 /oci/
 /plan.json
-/examples/.gluon/
-/examples/examples/.gluon/
-/examples/gha-actions/.gluon/
-/examples/gha-actions/.gluon-state.json
+/examples/.orun/
+/examples/examples/.orun/
+/examples/gha-actions/.orun/
+/examples/gha-actions/.orun-state.json
 /examples/gha-actions/plan.json
 /website/.docusaurus/
 /website/docs-build/

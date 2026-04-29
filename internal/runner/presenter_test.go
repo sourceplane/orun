@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sourceplane/gluon/internal/model"
-	"github.com/sourceplane/gluon/internal/state"
+	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/state"
 )
 
 func TestSummarizeUseOutputPrefersInstalledAndCacheMessages(t *testing.T) {
@@ -15,7 +15,7 @@ func TestSummarizeUseOutputPrefersInstalledAndCacheMessages(t *testing.T) {
 
 	lines := []string{
 		"Restoring 'v4.1.4' from cache",
-		"Helm tool version 'v4.1.4' has been cached at /Users/test/.gluon/tool-cache/helm/4.1.4/arm64/darwin-arm64/helm",
+		"Helm tool version 'v4.1.4' has been cached at /Users/test/.orun/tool-cache/helm/4.1.4/arm64/darwin-arm64/helm",
 	}
 
 	summary := summarizeUseOutput(lines)
@@ -38,12 +38,12 @@ func TestSplitDisplayLinesShortensAbsolutePaths(t *testing.T) {
 		t.Fatalf("os.UserHomeDir() error = %v", err)
 	}
 
-	longPath := filepath.Join(homeDir, ".gluon", "tool-cache", "helm", "4.1.4", "arm64", "darwin-arm64", "helm")
+	longPath := filepath.Join(homeDir, ".orun", "tool-cache", "helm", "4.1.4", "arm64", "darwin-arm64", "helm")
 	lines := splitDisplayLines(fmt.Sprintf("%s\n", longPath))
 	if len(lines) != 1 {
 		t.Fatalf("len(lines) = %d, want 1", len(lines))
 	}
-	if got, want := lines[0], filepath.Join("~", ".gluon", "tool-cache", "helm", "4.1.4")+string(filepath.Separator)+"..."+string(filepath.Separator)+"helm"; got != want {
+	if got, want := lines[0], filepath.Join("~", ".orun", "tool-cache", "helm", "4.1.4")+string(filepath.Separator)+"..."+string(filepath.Separator)+"helm"; got != want {
 		t.Fatalf("lines[0] = %q, want %q", got, want)
 	}
 }

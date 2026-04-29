@@ -2,7 +2,7 @@
 title: Plan DAG
 ---
 
-The plan is the compiled artifact produced by `gluon plan`. It is the boundary between planning and execution.
+The plan is the compiled artifact produced by `orun plan`. It is the boundary between planning and execution.
 
 ## What the plan contains
 
@@ -18,7 +18,7 @@ A rendered plan includes:
 
 ```json
 {
-  "apiVersion": "gluon.io/v1",
+  "apiVersion": "orun.io/v1",
   "kind": "Plan",
   "metadata": {
     "name": "microservices-deployment",
@@ -27,7 +27,7 @@ A rendered plan includes:
   "execution": {
     "concurrency": 4,
     "failFast": true,
-    "stateFile": ".gluon-state.json"
+    "stateFile": ".orun-state.json"
   },
   "jobs": [
     {
@@ -60,9 +60,9 @@ The plan is where all implicit behavior becomes explicit. That gives you a stabl
 The `plan` command can render alternate views without changing the compiled output:
 
 ```bash
-gluon plan --view dag
-gluon plan --view dependencies
-gluon plan --view component=web-app
+orun plan --view dag
+orun plan --view dependencies
+orun plan --view component=web-app
 ```
 
 Use those views for review and debugging when you need to understand the dependency graph before execution.

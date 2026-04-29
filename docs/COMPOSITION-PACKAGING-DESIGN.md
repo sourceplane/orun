@@ -1,8 +1,8 @@
-# Gluon Composition Packaging and Resolution Design
+# Orun Composition Packaging and Resolution Design
 
 ## Executive Summary
 
-The current Gluon composition model is easy to understand but it will not scale well for multi-team reuse, version pinning, remote distribution, or reproducible planning:
+The current Orun composition model is easy to understand but it will not scale well for multi-team reuse, version pinning, remote distribution, or reproducible planning:
 
 - compositions are discovered from an ambient `--config-dir`
 - the contract is folder-shaped (`<type>/schema.yaml` + `<type>/job.yaml`)
@@ -17,7 +17,7 @@ The recommended direction is:
 4. Package composition sets as a tar+gzip archive for local use and as an OCI artifact for registry distribution.
 5. Resolve sources into a local cache, record the resolved digests in a lock file and in the generated plan, and keep `--config-dir` as a backward-compatible fallback.
 
-This gives Gluon a Helm/Crossplane-style packaging story without forcing each component to carry a raw artifact URL.
+This gives Orun a Helm/Crossplane-style packaging story without forcing each component to carry a raw artifact URL.
 
 ## Why Not Put A Raw `compositionRef` On Every Component?
 
@@ -71,7 +71,7 @@ compositions:
   sources:
     - name: core
       kind: oci
-      ref: oci://ghcr.io/sourceplane/gluon-compositions/platform-core:v1.2.0
+      ref: oci://ghcr.io/sourceplane/orun-compositions/platform-core:v1.2.0
     - name: team-overrides
       kind: archive
       path: ./dist/platform-overrides-0.3.0.tgz
@@ -241,7 +241,7 @@ metadata:
   name: platform-core
 spec:
   version: 1.2.0
-  gluon:
+  orun:
     minVersion: ">=0.6.0"
   exports:
     - composition: helm
@@ -250,7 +250,7 @@ spec:
       path: compositions/terraform.yaml
   dependencies:
     - name: base
-      ref: oci://ghcr.io/sourceplane/gluon-compositions/base:v1.0.0
+      ref: oci://ghcr.io/sourceplane/orun-compositions/base:v1.0.0
       optional: true
 ```
 
@@ -262,7 +262,7 @@ Recommended package root:
 
 ```text
 platform-core/
-├── gluon.yaml
+├── orun.yaml
 ├── compositions/
 │   ├── helm.yaml
 │   ├── helmCommon.yaml
@@ -275,7 +275,7 @@ platform-core/
 
 Where:
 
-- `gluon.yaml` is the `CompositionPackage` document
+- `orun.yaml` is the `CompositionPackage` document
 - `compositions/*.yaml` are `Composition` documents
 
 This is intentionally similar to other CNCF package ecosystems:
@@ -291,9 +291,9 @@ Use a tar+gzip archive for local/offline workflows.
 
 Recommendations:
 
-- the archive content must contain `gluon.yaml` at its root
+- the archive content must contain `orun.yaml` at its root
 - file extension can default to `.tgz`
-- Gluon should not rely only on the extension; it should inspect the contents
+- Orun should not rely only on the extension; it should inspect the contents
 
 ### OCI package format
 
@@ -302,9 +302,9 @@ Use an OCI artifact stored with a standard OCI manifest so it works with ordinar
 Recommended OCI settings:
 
 - manifest media type: standard OCI image manifest
-- artifact type: `application/vnd.sourceplane.gluon.composition.package.v1`
-- main layer media type: `application/vnd.sourceplane.gluon.composition.package.layer.v1.tar+gzip`
-- config media type: `application/vnd.oci.empty.v1+json` or a small Gluon package config JSON
+- artifact type: `application/vnd.sourceplane.orun.composition.package.v1`
+- main layer media type: `application/vnd.sourceplane.orun.composition.package.layer.v1.tar+gzip`
+- config media type: `application/vnd.oci.empty.v1+json` or a small Orun package config JSON
 
 Why this is the right trade-off:
 
@@ -319,7 +319,7 @@ There are two different discovery problems. They should not be conflated.
 
 ### 1. Discovering package contents
 
-This should happen from the package manifest (`gluon.yaml`) and the `exports` list, not from registry tag crawling and not from directory names.
+This should happen from the package manifest (`orun.yaml`) and the `exports` list, not from registry tag crawling and not from directory names.
 
 ### 2. Discovering which package to use for a component type
 
@@ -330,18 +330,18 @@ This should happen from explicit resolution rules in the intent, in this order:
 3. first matching export found in `resolution.precedence`
 4. legacy `--config-dir` fallback
 
-If multiple sources export the same composition type and no explicit rule resolves the conflict, Gluon should fail fast with a deterministic error.
+If multiple sources export the same composition type and no explicit rule resolves the conflict, Orun should fail fast with a deterministic error.
 
 ## Caching, Locking, And Reproducibility
 
-To keep planning deterministic, Gluon should resolve sources into a local cache and write a lock file.
+To keep planning deterministic, Orun should resolve sources into a local cache and write a lock file.
 
 ### Cache
 
 Recommended cache location:
 
 ```text
-$HOME/.gluon/cache/compositions/<resolved-digest>/
+$HOME/.orun/cache/compositions/<resolved-digest>/
 ```
 
 Behavior:
@@ -355,7 +355,7 @@ Behavior:
 Recommended lock file:
 
 ```text
-.gluon/compositions.lock.yaml
+.orun/compositions.lock.yaml
 ```
 
 Example:
@@ -366,7 +366,7 @@ kind: CompositionLock
 sources:
   - name: core
     kind: oci
-    ref: oci://ghcr.io/sourceplane/gluon-compositions/platform-core:v1.2.0
+    ref: oci://ghcr.io/sourceplane/orun-compositions/platform-core:v1.2.0
     resolvedDigest: sha256:abc123...
     exports:
       - helm
@@ -474,16 +474,16 @@ This separation matters because package fetching, package loading, and compiler 
 
 Recommended new CLI capabilities:
 
-- `gluon compositions pull --intent intent.yaml`
-- `gluon compositions lock --intent intent.yaml`
-- `gluon compositions package build --root ./platform-core --output ./dist/platform-core-1.2.0.tgz`
-- `gluon compositions package push ./dist/platform-core-1.2.0.tgz oci://ghcr.io/sourceplane/gluon-compositions`
+- `orun compositions pull --intent intent.yaml`
+- `orun compositions lock --intent intent.yaml`
+- `orun compositions package build --root ./platform-core --output ./dist/platform-core-1.2.0.tgz`
+- `orun compositions package push ./dist/platform-core-1.2.0.tgz oci://ghcr.io/sourceplane/orun-compositions`
 
 The existing inspection command should also evolve:
 
-- `gluon compositions --intent intent.yaml`
+- `orun compositions --intent intent.yaml`
   - lists resolved compositions from declared sources
-- `gluon compositions helm --intent intent.yaml`
+- `orun compositions helm --intent intent.yaml`
   - shows the resolved source, digest, jobs, and schema info
 
 `--config-dir` can remain available as an override and fallback during migration.
@@ -504,7 +504,7 @@ Add explicit validation around the new model:
 
 ## Security And Supply Chain
 
-The package model should be designed so Gluon can adopt stronger verification without redesigning the format later.
+The package model should be designed so Orun can adopt stronger verification without redesigning the format later.
 
 Recommended near-term behavior:
 
@@ -559,7 +559,7 @@ It makes component declarations noisy, couples authoring to distribution, and we
 
 ### Phase 3: Local packages
 
-- load package directories with `gluon.yaml`
+- load package directories with `orun.yaml`
 - load tar+gzip archives
 - resolve and cache local sources
 
@@ -574,7 +574,7 @@ It makes component declarations noisy, couples authoring to distribution, and we
 
 - add lock/pull/build/push commands
 - add resolved source data to `plan`
-- update `gluon compositions` output to show source and digest
+- update `orun compositions` output to show source and digest
 
 ### Phase 6: Docs and migration
 
@@ -611,7 +611,7 @@ If this work is delegated, split it into these implementation tracks:
    - add resolved composition source metadata to the rendered plan
 
 6. CLI and docs track
-   - update `gluon compositions`
+   - update `orun compositions`
    - add package build/pull/push/lock commands
    - update website docs and examples
 
@@ -628,7 +628,7 @@ The best scalable design is:
 - resolve them into a lockable, digest-addressed cache
 - preserve `--config-dir` through a compatibility layer while the ecosystem migrates
 
-That gives Gluon a clean authoring model, a strong packaging story, and a migration path that can be implemented incrementally.
+That gives Orun a clean authoring model, a strong packaging story, and a migration path that can be implemented incrementally.
 
 ## External References
 

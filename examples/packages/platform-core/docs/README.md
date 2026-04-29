@@ -5,7 +5,7 @@ This package exports the packaged `charts`, `helm`, `helmCommon`, and `terraform
 Build a portable archive with:
 
 ```bash
-gluon compositions package build \
+orun compositions package build \
   --root examples/packages/platform-core \
   --output dist/platform-core-1.0.0.tgz
 ```

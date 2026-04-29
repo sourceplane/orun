@@ -9,12 +9,12 @@ import (
 	"sort"
 	"time"
 
-	"github.com/sourceplane/gluon/internal/model"
+	"github.com/sourceplane/orun/internal/model"
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	planAPIVersion = "gluon.io/v1"
+	planAPIVersion = "orun.io/v1"
 )
 
 // Renderer materializes job instances into a Plan

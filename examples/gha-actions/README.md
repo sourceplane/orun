@@ -11,26 +11,26 @@ cd examples/gha-actions
 Generate a plan:
 
 ```bash
-go run ../../cmd/gluon plan \
+go run ../../cmd/orun plan \
   --intent intent.yaml \
-  --output /tmp/gluon-gha-actions-plan.json
+  --output /tmp/orun-gha-actions-plan.json
 ```
 
 Inspect the packaged example composition:
 
 ```bash
-go run ../../cmd/gluon compositions --intent intent.yaml
+go run ../../cmd/orun compositions --intent intent.yaml
 ```
 
 Run the plan:
 
 ```bash
-go run ../../cmd/gluon run \
-  --plan /tmp/gluon-gha-actions-plan.json
+go run ../../cmd/orun run \
+  --plan /tmp/orun-gha-actions-plan.json
 ```
 
-`gluon run` auto-selects GitHub Actions compatibility mode because the compiled plan contains a `use:` step. The run succeeds when `azure/setup-helm` provisions Helm and the following shell step can execute `helm version --short`.
+`orun run` auto-selects GitHub Actions compatibility mode because the compiled plan contains a `use:` step. The run succeeds when `azure/setup-helm` provisions Helm and the following shell step can execute `helm version --short`.
 
-Planning also writes `examples/gha-actions/.gluon/compositions.lock.yaml`, so the example records exactly which composition source was resolved.
+Planning also writes `examples/gha-actions/.orun/compositions.lock.yaml`, so the example records exactly which composition source was resolved.
 
 Successful runs use the compact `run` output by default. Add `--verbose` if you want the full GitHub Actions-compatible step logs inline.

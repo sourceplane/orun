@@ -2,7 +2,7 @@
 title: Contributing
 ---
 
-Contributions to `gluon` should preserve deterministic planning, clear stage boundaries, and thin command handlers.
+Contributions to `orun` should preserve deterministic planning, clear stage boundaries, and thin command handlers.
 
 ## Local development loop
 
@@ -42,4 +42,4 @@ npm run docs:start
 - avoid mixing Cobra wiring with business logic
 - update docs when CLI behavior or contracts change
 
-Read [extending gluon](./extending-gluon.md) if your change affects commands, stages, or runtime backends.
+Read [extending orun](./extending-orun.md) if your change affects commands, stages, or runtime backends.

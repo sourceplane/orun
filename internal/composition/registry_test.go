@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sourceplane/gluon/internal/expand"
-	"github.com/sourceplane/gluon/internal/model"
-	"github.com/sourceplane/gluon/internal/normalize"
-	"github.com/sourceplane/gluon/internal/planner"
+	"github.com/sourceplane/orun/internal/expand"
+	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/normalize"
+	"github.com/sourceplane/orun/internal/planner"
 	"gopkg.in/yaml.v3"
 )
 
@@ -275,7 +275,7 @@ func writeCompositionPackage(t *testing.T, rootDir, packageName string, composit
 		writeFile(t, filepath.Join(rootDir, "compositions", name+".yaml"), compositionDocumentYAML(name, compositions[name]))
 	}
 
-	writeFile(t, filepath.Join(rootDir, "gluon.yaml"), fmt.Sprintf(`apiVersion: sourceplane.io/v1alpha1
+	writeFile(t, filepath.Join(rootDir, "orun.yaml"), fmt.Sprintf(`apiVersion: sourceplane.io/v1alpha1
 kind: CompositionPackage
 metadata:
   name: %s

@@ -55,23 +55,23 @@ var skipDirs = map[string]struct{}{
 }
 
 // stageJobWorkspace creates an isolated working copy of sourceDir under
-// <sourceDir>/.gluon/runs/<execID>/<safeJobID>/work and returns the path. The
+// <sourceDir>/.orun/runs/<execID>/<safeJobID>/work and returns the path. The
 // directory layout intentionally lives inside the source repo (per user choice)
 // so .git operations and tool discovery (workspace-relative configs, package.json
-// hoisting, etc.) keep working. We auto-add .gluon/runs/ to .gitignore so the
+// hoisting, etc.) keep working. We auto-add .orun/runs/ to .gitignore so the
 // staged trees never leak into commits.
 func stageJobWorkspace(sourceDir, execID, jobID string, keep bool) (*stagedWorkspace, error) {
 	src, err := filepath.Abs(sourceDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve workspace source: %w", err)
 	}
-	if err := ensureGluonGitignore(src); err != nil {
+	if err := ensureOrunGitignore(src); err != nil {
 		// Non-fatal — staging still works without it, user just sees noise in git status.
 		_ = err
 	}
 
 	safe := safeJobID(jobID)
-	root := filepath.Join(src, ".gluon", "runs", execID, safe, "work")
+	root := filepath.Join(src, ".orun", "runs", execID, safe, "work")
 	if err := os.RemoveAll(root); err != nil {
 		return nil, fmt.Errorf("clear stale stage %s: %w", root, err)
 	}
@@ -101,7 +101,7 @@ func stageJobWorkspace(sourceDir, execID, jobID string, keep bool) (*stagedWorks
 // materializeTree walks src and recreates it under dst. It tries the fastest
 // available cloning primitive (clonefile/FICLONE on supported filesystems),
 // falls back to hardlink for plain files, and finally to byte copy. The skip
-// set above is honored at every directory level. The .gluon directory itself
+// set above is honored at every directory level. The .orun directory itself
 // is skipped to avoid recursive staging.
 func materializeTree(src, dst string) error {
 	if err := os.MkdirAll(dst, 0o755); err != nil {
@@ -113,7 +113,7 @@ func materializeTree(src, dst string) error {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if name == ".gluon" {
+		if name == ".orun" {
 			continue
 		}
 		srcPath := filepath.Join(src, name)
@@ -199,19 +199,19 @@ func safeJobID(id string) string {
 	return cleaned
 }
 
-// ensureGluonGitignore adds a .gluon/runs/ ignore line to .gitignore if the
+// ensureOrunGitignore adds a .orun/runs/ ignore line to .gitignore if the
 // repo has one and it's not already there. Idempotent. We deliberately don't
 // create .gitignore if missing — that would surprise users with a brand-new
 // file appearing.
-func ensureGluonGitignore(repoRoot string) error {
+func ensureOrunGitignore(repoRoot string) error {
 	path := filepath.Join(repoRoot, ".gitignore")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	const marker = ".gluon/runs/"
+	const marker = ".orun/runs/"
 	for _, line := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(line) == marker || strings.TrimSpace(line) == "/.gluon/runs/" {
+		if strings.TrimSpace(line) == marker || strings.TrimSpace(line) == "/.orun/runs/" {
 			return nil
 		}
 	}
@@ -219,6 +219,6 @@ func ensureGluonGitignore(repoRoot string) error {
 	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
 		suffix = "\n"
 	}
-	appended := suffix + "\n# gluon per-job staged workspaces\n" + marker + "\n"
+	appended := suffix + "\n# orun per-job staged workspaces\n" + marker + "\n"
 	return os.WriteFile(path, append(data, []byte(appended)...), 0o644)
 }

@@ -65,13 +65,13 @@ type CompositionPackage struct {
 // CompositionPackageSpec defines versioned exported compositions.
 type CompositionPackageSpec struct {
 	Version      string                   `yaml:"version" json:"version"`
-	Gluon        CompositionPackageGluon `yaml:"gluon,omitempty" json:"gluon,omitempty"`
+	Orun        CompositionPackageOrun `yaml:"orun,omitempty" json:"orun,omitempty"`
 	Exports      []CompositionExport      `yaml:"exports" json:"exports"`
 	Dependencies []CompositionDependency  `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
 }
 
-// CompositionPackageGluon constrains compatible gluon versions.
-type CompositionPackageGluon struct {
+// CompositionPackageOrun constrains compatible orun versions.
+type CompositionPackageOrun struct {
 	MinVersion string `yaml:"minVersion,omitempty" json:"minVersion,omitempty"`
 }
 
