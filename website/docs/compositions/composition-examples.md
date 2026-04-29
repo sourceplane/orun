@@ -2,30 +2,32 @@
 title: Composition examples
 ---
 
-The repository ships packaged composition examples for the main quick start and the GitHub Actions-compatible runner.
+The repository ships one packaged example-platform composition set that covers the quick start, GitHub Actions-compatible execution, and multi-root repository discovery.
 
 ## Packaged examples
 
 | Package | Exports | Purpose |
 | --- | --- | --- |
-| `examples/packages/platform-core` | `charts`, `helm`, `helmCommon`, `terraform` | Repository quick-start package used by `examples/intent.yaml` |
-| `examples/gha-actions/packages/gha-demo` | `gha-demo` | Minimal package that exercises `use:` steps and the GitHub Actions backend |
+| `examples/compositions` | `terraform`, `helm-values`, `helm-chart`, `cloudflare-worker-turbo`, `cloudflare-worker`, `cloudflare-pages`, `cloudflare-pages-turbo`, `cloudflare-pages-terraform`, `cloudflare-pages-turbo-terraform`, `turbo-package`, `workspace` | Embedded example-platform package used by `examples/intent.yaml` |
 
-## Example-only GitHub Actions composition
+## GitHub Actions-compatible composition
 
-The GitHub Actions example package exports a `gha-demo` composition that installs Helm with a GitHub Action and then uses the binary in a later shell step.
+The embedded example package includes several compositions that install tools with GitHub Actions before running shell commands. The smallest smoke path is the Terraform example used by `network-foundation`.
 
 That example shows how a job can include a GitHub Actions `use:` step followed by ordinary shell commands:
 
 ```yaml
 steps:
-  - id: setup-demo
-    name: setup-demo
-    use: azure/setup-helm@v4.3.0
-  - name: verify-gha-state
+  - id: setup-terraform
+    name: setup-terraform
+    use: hashicorp/setup-terraform@v4
+    with:
+      terraform_version: "{{.terraformVersion}}"
+      terraform_wrapper: "false"
+  - name: terraform-context
     run: |
-      helm version --short
-      which helm
+      terraform version
+      terraform -chdir={{.terraformDir}} validate -no-color
 ```
 
 Use that example as a reference when you need Actions-style setup behavior in a compiled plan.

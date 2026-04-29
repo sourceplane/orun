@@ -45,7 +45,7 @@ When your CI system already knows the changed files, pass them directly instead 
 ```bash
 orun plan \
   --intent examples/intent.yaml \
-  --files examples/services/web-app/component.yaml,examples/intent.yaml \
+  --files examples/infra/infra-1/component.yaml,examples/intent.yaml \
   --output /tmp/filtered-plan.json
 ```
 

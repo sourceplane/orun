@@ -59,14 +59,16 @@ A `CompositionPackage` groups exported compositions and makes package contents d
 apiVersion: sourceplane.io/v1alpha1
 kind: CompositionPackage
 metadata:
-  name: platform-core
+  name: example-platform-compositions
 spec:
-  version: 1.0.0
+  version: 0.9.2
+  orun:
+    minVersion: ">=0.20.0"
   exports:
-    - composition: helm
-      path: compositions/helm.yaml
     - composition: terraform
-      path: compositions/terraform.yaml
+      path: terraform/job.yaml
+    - composition: helm-chart
+      path: helm-chart/job.yaml
 ```
 
 ## Template inputs

@@ -2,23 +2,26 @@
 title: Run with GitHub Actions compatibility
 ---
 
-The repository includes a minimal example that installs Helm through a GitHub Action and then uses the resulting binary from a later shell step.
+The repository example includes packaged compositions that use GitHub Actions `use:` steps for tool setup. A small dependency-free smoke path is the Terraform-backed `network-foundation` component.
 
 ## Compile the example plan
 
 ```bash
 orun plan \
-  --intent examples/gha-actions/intent.yaml \
-  --output /tmp/orun-gha-actions-plan.json
+  --intent examples/intent.yaml \
+  --component network-foundation \
+  --env development \
+  --output /tmp/orun-github-actions-plan.json
 ```
 
-The example intent declares its packaged `gha-demo` composition source, so no extra composition path flag is required.
+The example intent declares its packaged composition source directly, so no extra composition path flag is required.
 
 ## Run the plan
 
 ```bash
 orun run \
-  --plan /tmp/orun-gha-actions-plan.json
+  --plan /tmp/orun-github-actions-plan.json \
+  --workdir examples
 ```
 
 Because the plan contains a `use:` step, `orun run` auto-selects the `github-actions` backend unless you explicitly override it.
@@ -27,7 +30,8 @@ Because the plan contains a `use:` step, `orun run` auto-selects the `github-act
 
 ```bash
 orun run \
-  --plan /tmp/orun-gha-actions-plan.json \
+  --plan /tmp/orun-github-actions-plan.json \
+  --workdir examples \
   --gha
 ```
 

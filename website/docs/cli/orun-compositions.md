@@ -13,7 +13,7 @@ orun compositions --intent examples/intent.yaml
 The command also accepts a composition name directly:
 
 ```bash
-orun compositions helm --intent examples/intent.yaml
+orun compositions terraform --intent examples/intent.yaml
 ```
 
 The alias `composition` is also supported.
@@ -23,7 +23,7 @@ The alias `composition` is also supported.
 For detailed output, use the explicit `list` subcommand:
 
 ```bash
-orun compositions list helm \
+orun compositions list terraform \
   --intent examples/intent.yaml \
   --long \
   --expand-jobs
@@ -39,8 +39,8 @@ orun compositions lock --intent examples/intent.yaml
 Build and publish a composition package:
 
 ```bash
-orun compositions package build --root examples/packages/platform-core --output /tmp/platform-core.tgz
-orun compositions package push /tmp/platform-core.tgz oci://ghcr.io/sourceplane/orun-compositions/platform-core
+orun compositions package build --root examples/compositions --output /tmp/example-platform-compositions.tgz
+orun compositions package push /tmp/example-platform-compositions.tgz oci://ghcr.io/sourceplane/orun-compositions/example-platform
 ```
 
 ## Flags

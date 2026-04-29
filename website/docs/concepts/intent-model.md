@@ -26,15 +26,18 @@ metadata:
 
 compositions:
   sources:
-    - name: platform-core
+    - name: example-platform
       kind: dir
-      path: ./packages/platform-core
+      path: ./compositions
 
 discovery:
   roots:
-    - services/
+    - apps/
     - infra/
     - deploy/
+    - charts/
+    - packages/
+    - website/
 
 groups:
   platform:
@@ -80,25 +83,17 @@ apiVersion: sourceplane.io/v1
 kind: Component
 
 metadata:
-  name: web-app
+  name: network-foundation
 
 spec:
-  type: helm
-  domain: platform
+  type: terraform
+  domain: platform-foundation
   subscribe:
     environments: [development, staging, production]
   inputs:
-    chart: oci://mycompany.azurecr.io/helm/charts/default
-  overrides:
-    steps:
-      - name: verify
-        phase: post
-        order: 10
-        run: kubectl get deployment -n platform-web-app web-app
-  dependsOn:
-    - component: common-services
-      scope: same-environment
-      condition: success
+    stackName: network-foundation
+    terraformDir: .
+    terraformVersion: 1.9.8
 ```
 
 ## Merge model

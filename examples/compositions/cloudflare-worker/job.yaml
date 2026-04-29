@@ -1,0 +1,116 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: cloudflare-worker
+spec:
+  type: cloudflare-worker
+  description: Verify a Cloudflare Worker app and deploy it from the production branch
+  defaultJob: verify-deploy-cloudflare-worker
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Cloudflare Worker Component
+    description: Schema for Cloudflare Workers with explicit build commands
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+        description: Component name
+      type:
+        type: string
+        const: cloudflare-worker
+        description: Component type identifier
+      inputs:
+        type: object
+        required:
+          - installCommand
+          - buildCommand
+          - deployCommand
+          - nodeVersion
+          - productionBranch
+        properties:
+          installCommand:
+            type: string
+            description: Command used to install dependencies
+          buildCommand:
+            type: string
+            description: Command used to build the Worker
+          typecheckCommand:
+            type: string
+            description: Command used to typecheck the Worker (optional)
+          deployCommand:
+            type: string
+            description: Command used to deploy the Worker to Cloudflare
+          nodeVersion:
+            type: string
+            description: Node.js version
+          pnpmVersion:
+            type: string
+            description: pnpm version (optional, installed via npm if provided)
+          productionBranch:
+            type: string
+            description: Branch that is allowed to deploy the Worker app
+        additionalProperties: false
+    additionalProperties: true
+  jobs:
+    - name: verify-deploy-cloudflare-worker
+      description: Verify a Worker app and deploy it from the production branch
+      runsOn: ubuntu-22.04
+      timeout: 30m
+      retries: 0
+      labels:
+        scope: delivery
+      steps:
+        - id: setup-node
+          name: setup-node
+          use: actions/setup-node@v4
+          with:
+            node-version: "{{.nodeVersion}}"
+        - name: install-dependencies
+          shell: bash
+          run: |
+            {{if .pnpmVersion}}
+            npm install -g pnpm@{{.pnpmVersion}}
+            {{end}}
+            {{.installCommand}}
+          onFailure: stop
+        - name: verify-worker-structure
+          shell: bash
+          run: |
+            test -f package.json
+            test -f wrangler.jsonc
+          onFailure: stop
+        - name: build-worker
+          run: "{{.buildCommand}}"
+          onFailure: stop
+        - name: typecheck-worker
+          shell: bash
+          run: |
+            {{if .typecheckCommand}}
+            {{.typecheckCommand}}
+            {{else}}
+            echo "Skipping typecheck (not configured)."
+            {{end}}
+          onFailure: stop
+        - name: deploy-worker
+          shell: bash
+          run: |
+            if [ "{{.Environment}}" = "dev" ]; then
+              echo "Running wrangler deploy dry-run for {{.Component}} in dev environment."
+              pnpm exec wrangler deploy --dry-run
+              exit 0
+            fi
+
+            if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
+              echo "Skipping Cloudflare Worker deploy for {{.Component}} in {{.Environment}} on ${GITHUB_REF:-local}."
+              exit 0
+            fi
+
+            : "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required for deploy}"
+            : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required for deploy}"
+
+            {{.deployCommand}}
+          onFailure: stop

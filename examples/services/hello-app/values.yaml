@@ -1,0 +1,3 @@
+nameOverride: hello-app
+config:
+  message: workspace-provider-smoke

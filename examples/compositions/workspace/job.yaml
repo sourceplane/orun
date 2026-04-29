@@ -1,0 +1,84 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: workspace
+spec:
+  type: workspace
+  description: Workspace-backed provider smoke jobs
+  defaultJob: verify-workspace
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Workspace Provider Smoke Component
+    description: Schema for a workspace-backed provider smoke test component
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+        description: Component name
+      type:
+        type: string
+        const: workspace
+        description: Component type identifier
+      inputs:
+        type: object
+        required:
+          - chartPath
+          - valuesFile
+          - kustomizeDir
+          - terraformDir
+          - workflowFile
+        properties:
+          AZURE_CLI_VERSION:
+            type: string
+            description: Exact Azure CLI version pinned for deterministic provider setup
+          chartPath:
+            type: string
+            description: Local Helm chart path
+          valuesFile:
+            type: string
+            description: Values file passed to helm template
+          kustomizeDir:
+            type: string
+            description: Kustomize root used for render-only builds
+          terraformDir:
+            type: string
+            description: Terraform directory checked with terraform fmt
+          workflowFile:
+            type: string
+            description: Workflow file rendered by torkflow view
+        additionalProperties: false
+    additionalProperties: true
+  jobs:
+    - name: verify-workspace
+      description: Verify workspace-installed provider tools with dry-run-safe commands
+      runsOn: ubuntu-22.04
+      timeout: 15m
+      retries: 0
+      labels:
+        scope: smoke
+      steps:
+        - name: kubectl-dry-run
+          run: kubectl version --client --output=yaml
+          onFailure: stop
+        - name: helm-template
+          run: helm template {{.Component}} {{.chartPath}} --values {{.valuesFile}}
+          onFailure: stop
+        - name: terraform-fmt-check
+          run: terraform fmt -check {{.terraformDir}}
+          onFailure: stop
+        - name: kustomize-build
+          run: kustomize build {{.kustomizeDir}}
+          onFailure: stop
+        - name: torkflow-view
+          run: torkflow view --workflow {{.workflowFile}}
+          onFailure: stop
+      inputs:
+        chartPath: services/hello-app
+        valuesFile: services/hello-app/values.yaml
+        kustomizeDir: website/smoke/kustomize
+        terraformDir: website/smoke/terraform
+        workflowFile: website/smoke/provider-smoke.yaml

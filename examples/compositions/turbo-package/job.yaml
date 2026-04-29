@@ -1,0 +1,88 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: turbo-package
+spec:
+  type: turbo-package
+  description: Verify a shared package in a pnpm and Turbo monorepo
+  defaultJob: verify-turbo-package
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Turbo Package Component
+    description: Schema for shared package components validated through pnpm and Turbo
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+        description: Component name
+      type:
+        type: string
+        const: turbo-package
+        description: Component type identifier
+      inputs:
+        type: object
+        required:
+          - nodeVersion
+          - pnpmVersion
+        properties:
+          nodeVersion:
+            type: string
+            description: Node.js version
+          pnpmVersion:
+            type: string
+            description: pnpm version
+          preBuildCommand:
+            type: string
+            description: Optional command to run before the build (e.g. codegen, schema generation)
+          buildCommand:
+            type: string
+            description: Override the default turbo build command
+          typecheckCommand:
+            type: string
+            description: Override the default turbo typecheck command
+        additionalProperties: false
+    additionalProperties: true
+  jobs:
+    - name: verify-turbo-package
+      description: Install the workspace and validate a shared package
+      runsOn: ubuntu-22.04
+      timeout: 25m
+      retries: 0
+      labels:
+        scope: verify
+      steps:
+        - id: setup-node
+          name: setup-node
+          use: actions/setup-node@v4
+          with:
+            node-version: "{{.nodeVersion}}"
+        - id: setup-pnpm
+          name: setup-pnpm
+          use: pnpm/action-setup@v4
+          with:
+            version: "{{.pnpmVersion}}"
+        - name: install-workspace-dependencies
+          run: pnpm install --no-frozen-lockfile
+          onFailure: stop
+        - name: pre-build
+          shell: bash
+          run: |
+            {{if .preBuildCommand}}
+            {{.preBuildCommand}}
+            {{else}}
+            echo "Skipping pre-build."
+            {{end}}
+          onFailure: stop
+        - name: verify-package-structure
+          run: test -f package.json
+          onFailure: stop
+        - name: build-package
+          run: "{{if .buildCommand}}{{.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
+          onFailure: stop
+        - name: typecheck-package
+          run: "{{if .typecheckCommand}}{{.typecheckCommand}}{{else}}pnpm exec turbo run typecheck --filter=./{{end}}"
+          onFailure: stop

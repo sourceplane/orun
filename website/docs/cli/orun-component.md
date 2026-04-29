@@ -16,7 +16,7 @@ orun component \
 Inspect a single component:
 
 ```bash
-orun component web-app \
+orun component network-foundation \
   --intent examples/intent.yaml \
   --long
 ```

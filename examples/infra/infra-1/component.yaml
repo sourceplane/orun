@@ -1,0 +1,22 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+
+metadata:
+  name: network-foundation
+
+spec:
+  type: terraform
+  domain: platform-foundation
+  subscribe:
+    environments:
+      - development
+      - staging
+      - production
+  inputs:
+    stackName: network-foundation
+    terraformDir: .
+    terraformVersion: 1.9.8
+  labels:
+    team: platform
+    layer: foundation
+    stack: network

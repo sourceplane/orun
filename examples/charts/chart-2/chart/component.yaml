@@ -1,0 +1,25 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+
+metadata:
+  name: commerce-checkout-chart
+
+spec:
+  type: helm-chart
+  domain: commerce-checkout
+  subscribe:
+    environments:
+      - development
+      - production
+  inputs:
+    chartPath: .
+    valuesFile: ../../../deploy/deploy-service2/values.yaml
+    releaseName: commerce-checkout
+    helmVersion: v3.15.4
+  labels:
+    team: platform
+    layer: delivery
+    domain: commerce
+    release: commerce-checkout
+  dependsOn:
+    - component: commerce-checkout-values

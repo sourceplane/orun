@@ -11,9 +11,9 @@ The primary workflow is to declare sources in `intent.yaml`:
 ```yaml
 compositions:
   sources:
-    - name: platform-core
+    - name: example-platform
       kind: dir
-      path: ./packages/platform-core
+      path: ./compositions
 ```
 
 Supported source kinds are `dir`, `archive`, and `oci`.
@@ -23,15 +23,16 @@ Supported source kinds are `dir`, `archive`, and `oci`.
 The repository quick-start package looks like this:
 
 ```text
-examples/packages/platform-core/
+examples/compositions/
 ├── orun.yaml
-├── compositions/
-│   ├── charts.yaml
-│   ├── helm.yaml
-│   ├── helmCommon.yaml
-│   └── terraform.yaml
-└── docs/
-    └── README.md
+├── terraform/
+│   └── job.yaml
+├── helm-values/
+│   └── job.yaml
+├── helm-chart/
+│   └── job.yaml
+└── cloudflare-worker-turbo/
+    └── job.yaml
 ```
 
 `orun.yaml` is a `CompositionPackage` document that maps exported composition names to files inside the package.
@@ -84,8 +85,8 @@ spec:
 
 ```bash
 orun compositions --intent examples/intent.yaml
-orun compositions helm --intent examples/intent.yaml
-orun compositions package build --root examples/packages/platform-core --output /tmp/platform-core.tgz
+orun compositions terraform --intent examples/intent.yaml
+orun compositions package build --root examples/compositions --output /tmp/example-platform-compositions.tgz
 ```
 
 The legacy `--config-dir` flag still works for folder-shaped compositions during migration, but packaged sources are the recommended path.

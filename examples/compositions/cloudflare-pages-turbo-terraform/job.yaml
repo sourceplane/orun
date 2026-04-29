@@ -1,0 +1,180 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: cloudflare-pages-turbo-terraform
+spec:
+  type: cloudflare-pages-turbo-terraform
+  description: Verify a static app with Turbo locally and reconcile a Git-backed Cloudflare Pages project with Terraform
+  defaultJob: verify-reconcile-cloudflare-pages-turbo-terraform
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Cloudflare Pages Turbo Terraform Component
+    description: Schema for Git-backed Cloudflare Pages projects in a pnpm and Turbo monorepo
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+        description: Component name
+      type:
+        type: string
+        const: cloudflare-pages-turbo-terraform
+        description: Component type identifier
+      inputs:
+        type: object
+        required:
+          - cloudflareBuildCommand
+          - outputDir
+          - destinationDir
+          - rootDir
+          - nodeVersion
+          - pnpmVersion
+          - terraformDir
+          - terraformVersion
+          - projectName
+          - productionBranch
+          - repoOwner
+          - repoName
+        properties:
+          cloudflareBuildCommand:
+            type: string
+            description: Build command Cloudflare Pages runs when building the Git-backed project
+          outputDir:
+            type: string
+            description: Build output directory relative to the component directory
+          destinationDir:
+            type: string
+            description: Cloudflare rootDir-relative output directory published after the build
+          rootDir:
+            type: string
+            description: Repository-root relative directory Cloudflare Pages should build from
+          nodeVersion:
+            type: string
+            description: Node.js version
+          pnpmVersion:
+            type: string
+            description: pnpm version
+          terraformDir:
+            type: string
+            description: Terraform root directory relative to the component directory
+          terraformVersion:
+            type: string
+            description: Terraform version
+          projectName:
+            type: string
+            description: Cloudflare Pages project name managed by Terraform
+          productionBranch:
+            type: string
+            description: Branch used for production deploys in both GitHub and Cloudflare Pages
+          repoOwner:
+            type: string
+            description: GitHub owner connected to the Cloudflare Pages project
+          repoName:
+            type: string
+            description: GitHub repository name connected to the Cloudflare Pages project
+          preBuildCommand:
+            type: string
+            description: Optional command to run before the build (e.g. codegen, schema generation)
+          buildCommand:
+            type: string
+            description: Override the default turbo build command
+        additionalProperties: false
+    additionalProperties: true
+  jobs:
+    - name: verify-reconcile-cloudflare-pages-turbo-terraform
+      description: Verify a Pages app locally and reconcile the Git-backed Pages project
+      runsOn: ubuntu-22.04
+      timeout: 35m
+      retries: 0
+      labels:
+        scope: infra
+      steps:
+        - id: setup-node
+          name: setup-node
+          use: actions/setup-node@v4
+          with:
+            node-version: "{{.nodeVersion}}"
+        - id: setup-pnpm
+          name: setup-pnpm
+          use: pnpm/action-setup@v4
+          with:
+            version: "{{.pnpmVersion}}"
+        - name: install-workspace-dependencies
+          run: pnpm install --no-frozen-lockfile
+          onFailure: stop
+        - name: pre-build
+          shell: bash
+          run: |
+            {{if .preBuildCommand}}
+            {{.preBuildCommand}}
+            {{else}}
+            echo "Skipping pre-build."
+            {{end}}
+          onFailure: stop
+        - name: verify-pages-app-structure
+          run: test -f package.json
+          onFailure: stop
+        - name: build-pages-app
+          run: "{{if .buildCommand}}{{.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
+          onFailure: stop
+        - name: verify-build-output
+          shell: bash
+          run: |
+            test -d "{{.outputDir}}"
+            find "{{.outputDir}}" -maxdepth 2 -type f | head -n 20
+          onFailure: stop
+        - id: setup-terraform
+          name: setup-terraform
+          use: hashicorp/setup-terraform@v4
+          with:
+            terraform_version: "{{.terraformVersion}}"
+            terraform_wrapper: "false"
+        - name: terraform-context
+          shell: bash
+          run: |
+            terraform version
+            echo "Reconciling Cloudflare Pages project {{.projectName}} from {{.terraformDir}}"
+          onFailure: stop
+        - name: terraform-fmt-check
+          run: terraform -chdir={{.terraformDir}} fmt -check
+          onFailure: stop
+        - name: terraform-init
+          run: terraform -chdir={{.terraformDir}} init -input=false
+          onFailure: stop
+        - name: terraform-validate
+          run: terraform -chdir={{.terraformDir}} validate -no-color
+          onFailure: stop
+        - name: terraform-plan-or-apply
+          shell: bash
+          run: |
+            cloudflare_account_id="${CLOUDFLARE_ACCOUNT_ID:-00000000000000000000000000000000}"
+
+            terraform_args=(
+              "-input=false"
+              "-var=account_id=${cloudflare_account_id}"
+              "-var=project_name={{.projectName}}"
+              "-var=production_branch={{.productionBranch}}"
+              "-var=repo_owner={{.repoOwner}}"
+              "-var=repo_name={{.repoName}}"
+              "-var=build_command={{.cloudflareBuildCommand}}"
+              "-var=destination_dir={{.destinationDir}}"
+              "-var=root_dir={{.rootDir}}"
+            )
+
+            if [ "{{.Environment}}" = "production" ] && [ "${GITHUB_REF:-}" = "refs/heads/{{.productionBranch}}" ]; then
+              : "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required for apply}"
+              : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required for apply}"
+              terraform -chdir={{.terraformDir}} apply -auto-approve "${terraform_args[@]}"
+              exit 0
+            fi
+
+            if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+              echo "Skipping terraform plan because Cloudflare credentials are not available outside deployment contexts."
+              exit 0
+            fi
+
+            terraform -chdir={{.terraformDir}} plan -lock=false -no-color "${terraform_args[@]}"
+          onFailure: stop

@@ -170,9 +170,11 @@ orun/
 │       ├── schemas/      # JSON schemas (intent, compositions, plan)
 │       └── compositions/ # Legacy folder-based compatibility fixtures
 ├── examples/
-│   ├── intent.yaml       # Example intent file using packaged sources
-│   └── packages/
-│       └── platform-core/ # Example CompositionPackage root
+│   ├── intent.yaml       # Embedded example-platform intent
+│   ├── compositions/     # Example CompositionPackage and job definitions
+│   ├── apps/             # Worker and Pages example components
+│   ├── infra/            # Terraform example components
+│   └── website/          # Docs-site and provider smoke fixtures
 ├── docs/
 │   ├── ARCHITECTURE.md   # Detailed design docs
 │   ├── RUNTIME_TOOLS.md  # Container runtime options
@@ -229,8 +231,8 @@ Output: Fully resolved execution DAG in `plan.json`
 
 ```bash
 orun compositions package build \
-  --root examples/packages/platform-core \
-  --output dist/platform-core-1.0.0.tgz
+  --root examples/compositions \
+  --output dist/example-platform-compositions-0.9.2.tgz
 ```
 
 Use `orun compositions package push <archive> oci://...` when you want to publish the archive to an OCI registry.
@@ -275,9 +277,9 @@ Packaged compositions are the primary workflow. Declare them in the intent:
 ```yaml
 compositions:
   sources:
-    - name: platform-core
+    - name: example-platform
       kind: dir
-      path: ./packages/platform-core
+      path: ./compositions
 ```
 
 Supported source kinds are `dir`, `archive`, and `oci`. During planning, Orun resolves those sources into a local cache and writes a lock file under `<intent-dir>/.orun/compositions.lock.yaml`.
@@ -358,17 +360,18 @@ External components can live next to the code they own. Each `component.yaml` is
 apiVersion: sourceplane.io/v1
 kind: Component
 metadata:
-  name: web-app
+  name: network-foundation
 
 spec:
-  type: helm
-  domain: platform
+  type: terraform
+  domain: platform-foundation
   subscribe:
     environments: [development, staging, production]
   inputs:
-    chart: oci://mycompany.azurecr.io/helm/charts/default
+    stackName: network-foundation
+    terraformDir: .
   dependsOn:
-    - component: common-services
+    - component: cluster-addons
 ```
 
 **Schema validation at:**
@@ -385,14 +388,16 @@ Compositions define how to deploy components, and packages define how those comp
 apiVersion: sourceplane.io/v1alpha1
 kind: CompositionPackage
 metadata:
-  name: platform-core
+  name: example-platform-compositions
 spec:
-  version: 1.0.0
+  version: 0.9.2
+  orun:
+    minVersion: ">=0.20.0"
   exports:
-    - composition: helm
-      path: compositions/helm.yaml
     - composition: terraform
-      path: compositions/terraform.yaml
+      path: terraform/job.yaml
+    - composition: helm-chart
+      path: helm-chart/job.yaml
 ```
 
 **Example composition document:**
@@ -426,39 +431,36 @@ spec:
 
 `orun` also supports GitHub Actions-style `use:` steps inside a composition. `orun run` auto-selects the GitHub Actions executor when the compiled plan contains any `use:` step, and you can still force it with `--gha`.
 
-See the packaged example file at `examples/gha-actions/packages/gha-demo/compositions/gha-demo.yaml`.
+See the packaged example file at `examples/compositions/terraform/job.yaml`.
 
 Example step definitions:
 
 ```yaml
 steps:
-  - id: setup-helm
-    use: azure/setup-helm@v4.3.0
+  - id: setup-terraform
+    use: hashicorp/setup-terraform@v4
     with:
-      version: "{{.helmVersion}}"
-  - id: setup-kubectl
-    use: azure/setup-kubectl@v4
-    with:
-      version: "{{.kubectlVersion}}"
-  - name: deploy
-    run: helm upgrade --install {{.Component}} {{.chart}} --namespace {{.namespacePrefix}}{{.Component}}
+      terraform_version: "{{.terraformVersion}}"
+      terraform_wrapper: "false"
+  - name: terraform-validate
+    run: terraform -chdir={{.terraformDir}} validate -no-color
 ```
 
 To use that example composition:
 
-1. Copy `examples/compositions/gha-helm/` into your config directory.
-2. Set the component type to `gha-helm`.
-3. Run the compiled plan with `orun run --plan plan.json`.
+1. Compile a plan for `network-foundation` from `examples/intent.yaml`.
+2. Run it with `orun run --plan plan.json --workdir examples --gha`.
+3. Inspect `.orun/executions/` for the saved step logs and execution state.
 
 Example component snippet:
 
 ```yaml
 spec:
-  type: gha-helm
+  type: terraform
   inputs:
-    chart: oci://mycompany.azurecr.io/helm/charts/default
-    helmVersion: v3.15.4
-    kubectlVersion: v1.30.2
+    stackName: network-foundation
+    terraformDir: .
+    terraformVersion: 1.9.8
 ```
 
 Supported `use:` forms in GHA mode:
@@ -609,8 +611,8 @@ orun plan \
 
 # Build a portable composition package
 orun compositions package build \
-  --root examples/packages/platform-core \
-  --output dist/platform-core-1.0.0.tgz
+  --root examples/compositions \
+  --output dist/example-platform-compositions-0.9.2.tgz
 
 # Preview execution from a compiled plan (dry-run)
 orun run \

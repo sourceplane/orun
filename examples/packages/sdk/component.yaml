@@ -1,0 +1,23 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+
+metadata:
+  name: platform-sdk
+
+spec:
+  type: turbo-package
+  domain: platform-packages
+  subscribe:
+    environments:
+      - dev
+      - development
+      - staging
+      - production
+  inputs:
+    nodeVersion: "20"
+    pnpmVersion: "10.12.1"
+  labels:
+    team: platform
+    layer: shared
+    surface: sdk
+    runtime: node

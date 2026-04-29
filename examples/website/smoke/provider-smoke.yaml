@@ -1,0 +1,22 @@
+apiVersion: torkflow/v1
+kind: Workflow
+metadata:
+  name: provider-smoke
+  id: provider-smoke
+spec:
+  maxParallelSteps: 1
+  steps:
+    - name: Summarize_Intent
+      actionRef: core.js
+      parameters:
+        script: "({ message: 'provider-native dry-run flow' })"
+      outboundEdges:
+        - nextStepName: Print_Result
+
+    - name: Print_Result
+      actionRef: core.stdout
+      parameters:
+        title: Provider Smoke
+        format: text
+        payload:
+          message: "{{ Steps.Summarize_Intent.message }}"

@@ -1,0 +1,31 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+
+metadata:
+  name: docs-site-git-source
+
+spec:
+  type: cloudflare-pages-terraform
+  domain: platform-docs
+  subscribe:
+    environments:
+      - production
+  inputs:
+    siteDir: ../../website
+    installCommand: npm ci
+    buildCommand: npm run docs:build
+    cloudflareBuildCommand: npm ci && npm run docs:build
+    outputDir: docs-build
+    rootDir: website
+    nodeVersion: "20"
+    terraformDir: .
+    terraformVersion: 1.9.8
+    projectName: example-platform-docs-terraform
+    productionBranch: main
+    repoOwner: sourceplane
+    repoName: example-platform-repo
+  labels:
+    team: platform
+    layer: foundation
+    surface: docs
+    runtime: cloudflare

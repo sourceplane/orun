@@ -48,9 +48,18 @@ jobs:
           run: |
             kiox --workspace "$KIOX_WORKSPACE_ROOT" provider list
             orun validate --intent "$GITHUB_WORKSPACE/examples/intent.yaml"
-            orun compositions --config-dir "$GITHUB_WORKSPACE/assets/config/compositions"
+            orun compositions lock --intent "$GITHUB_WORKSPACE/examples/intent.yaml"
             orun plan \
               --intent "$GITHUB_WORKSPACE/examples/intent.yaml" \
-              --config-dir "$GITHUB_WORKSPACE/assets/config/compositions" \
               --output "$RUNNER_TEMP/orun-plan.json"
             test -s "$RUNNER_TEMP/orun-plan.json"
+            orun plan \
+              --intent "$GITHUB_WORKSPACE/examples/intent.yaml" \
+              --component network-foundation \
+              --env development \
+              --output "$RUNNER_TEMP/orun-example-smoke-plan.json"
+            test -s "$RUNNER_TEMP/orun-example-smoke-plan.json"
+            orun run \
+              --plan "$RUNNER_TEMP/orun-example-smoke-plan.json" \
+              --workdir "$GITHUB_WORKSPACE/examples" \
+              --gha

@@ -1,0 +1,31 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+
+metadata:
+  name: admin-console-pages-git
+
+spec:
+  type: cloudflare-pages-turbo-terraform
+  domain: platform-ui
+  subscribe:
+    environments:
+      - staging
+      - production
+  inputs:
+    cloudflareBuildCommand: corepack enable && pnpm turbo run build --filter=@example/admin-console
+    outputDir: dist
+    destinationDir: dist
+    rootDir: .
+    nodeVersion: "20"
+    pnpmVersion: "10.12.1"
+    terraformDir: ../../infra/cloudflare-pages-admin-console
+    terraformVersion: 1.9.8
+    projectName: example-platform-admin-console
+    productionBranch: main
+    repoOwner: sourceplane
+    repoName: example-platform-repo
+  labels:
+    team: platform
+    layer: foundation
+    surface: admin-console
+    runtime: cloudflare

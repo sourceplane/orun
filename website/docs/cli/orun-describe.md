@@ -43,13 +43,13 @@ orun describe plan a1b2c3
 Describe a job from the latest plan:
 
 ```bash
-orun describe job api-edge-worker@production.deploy
+orun describe job api-edge-worker@production.verify-deploy-cloudflare-worker-turbo
 ```
 
 Describe a component:
 
 ```bash
-orun describe component web-app
+orun describe component network-foundation
 ```
 
 ## Slash notation
@@ -59,8 +59,8 @@ orun describe component web-app
 ```bash
 orun describe run/latest
 orun describe plan/release-candidate
-orun describe job/api-edge-worker@production.deploy
-orun describe component/web-app
+orun describe job/api-edge-worker@production.verify-deploy-cloudflare-worker-turbo
+orun describe component/network-foundation
 ```
 
 ## Output
