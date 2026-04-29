@@ -59,12 +59,21 @@ type Runner struct {
 	gha           *ui.GHARenderer
 	groupMu              sync.Mutex
 	currentGroup         string
-	lastFinishedGroup    string
 	finishedAny          bool
 	groupMultiEnv        bool
-	finishedHeaders      map[string]struct{}
+
+	componentJobTotal  map[string]int
+	componentFinished  map[string][]finishedJobEntry
 
 	ComponentConcurrency int
+}
+
+type finishedJobEntry struct {
+	job      model.PlanJob
+	report   *jobReport
+	success  bool
+	duration time.Duration
+	resumed  bool
 }
 
 // inGHA reports whether output should be rendered for the GitHub Actions log
@@ -290,6 +299,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	}
 
 	r.groupMultiEnv = singleEnvironment(orderedJobs) == ""
+	r.initComponentCounts(orderedJobs)
 	r.live = ui.NewLiveRegion(r.Stdout, ui.IsInteractiveWriter(r.Stdout), r.Color)
 	if ui.IsGitHubActions() {
 		r.gha = ui.NewGHARenderer(r.Stdout)
@@ -797,6 +807,21 @@ func (r *Runner) filterJobs(jobs []model.PlanJob) []model.PlanJob {
 		filtered = append(filtered, job)
 	}
 	return filtered
+}
+
+func (r *Runner) initComponentCounts(jobs []model.PlanJob) {
+	r.componentJobTotal = make(map[string]int, len(jobs))
+	r.componentFinished = make(map[string][]finishedJobEntry)
+	for _, job := range jobs {
+		if r.JobID != "" && job.ID != r.JobID {
+			continue
+		}
+		key := strings.TrimSpace(job.Component)
+		if key == "" {
+			key = strings.TrimSpace(job.ID)
+		}
+		r.componentJobTotal[key]++
+	}
 }
 
 func (r *Runner) updateState(persist bool, execState *state.ExecState, update func()) {

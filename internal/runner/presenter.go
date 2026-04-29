@@ -394,6 +394,14 @@ func (r *Runner) printJobResumed(job model.PlanJob) {
 		r.ghaPrintJobResumed(job)
 		return
 	}
+	if r.componentJobTotal != nil {
+		r.bufferFinishedEntry(job, finishedJobEntry{
+			job:     job,
+			success: true,
+			resumed: true,
+		})
+		return
+	}
 	r.emitGroupHeader(job)
 	r.live.Print(fmt.Sprintf("    %s %s  %s",
 		ui.Cyan(r.Color, "⚡"),
@@ -409,61 +417,87 @@ func (r *Runner) printJobFooter(job model.PlanJob, report *jobReport, success bo
 	}
 	r.live.RemoveRow(job.ID)
 
-	rowLabel := r.finishedRowLabel(job, success, duration)
+	r.bufferFinishedEntry(job, finishedJobEntry{
+		job:      job,
+		report:   report,
+		success:  success,
+		duration: duration,
+	})
+}
+
+func (r *Runner) bufferFinishedEntry(job model.PlanJob, entry finishedJobEntry) {
+	compKey := strings.TrimSpace(job.Component)
+	if compKey == "" {
+		compKey = shortJobName(job)
+	}
 
 	r.groupMu.Lock()
-	groupPlain := r.groupKeyPlain(job)
-	groupChanged := groupPlain != r.lastFinishedGroup
-	firstFinished := !r.finishedAny
-	if r.finishedHeaders == nil {
-		r.finishedHeaders = map[string]struct{}{}
+	if r.componentFinished == nil {
+		r.componentFinished = make(map[string][]finishedJobEntry)
 	}
-	_, headerEmitted := r.finishedHeaders[groupPlain]
-	r.finishedHeaders[groupPlain] = struct{}{}
-	r.lastFinishedGroup = groupPlain
+	r.componentFinished[compKey] = append(r.componentFinished[compKey], entry)
+	allDone := len(r.componentFinished[compKey]) >= r.componentJobTotal[compKey]
+	var entries []finishedJobEntry
+	if allDone {
+		entries = r.componentFinished[compKey]
+	}
+	r.groupMu.Unlock()
+
+	if !allDone {
+		return
+	}
+
+	r.flushFinishedComponent(compKey, entries)
+}
+
+func (r *Runner) flushFinishedComponent(compKey string, entries []finishedJobEntry) {
+	r.groupMu.Lock()
+	firstFinished := !r.finishedAny
 	r.finishedAny = true
 	r.groupMu.Unlock()
 
-	groupTitle := strings.TrimSpace(job.Component)
-	if groupTitle == "" {
-		groupTitle = shortJobName(job)
-	}
-
 	var lines []string
-	if groupChanged && !headerEmitted {
-		if !firstFinished {
-			lines = append(lines, "  "+ui.Dim(r.Color, "│"))
-		}
-		lines = append(lines, fmt.Sprintf("  %s %s", ui.Cyan(r.Color, "●"), ui.Bold(r.Color, groupTitle)))
-	} else if groupChanged && headerEmitted {
-		// Same component reappearing out of order; emit a continuation marker
-		// instead of a duplicate header to keep the tree readable.
+	if !firstFinished {
 		lines = append(lines, "  "+ui.Dim(r.Color, "│"))
-		lines = append(lines, fmt.Sprintf("  %s %s %s",
-			ui.Dim(r.Color, "↪"),
-			ui.Bold(r.Color, groupTitle),
-			ui.Dim(r.Color, "(cont.)")))
 	}
-	lines = append(lines, fmt.Sprintf("  %s  %s %s",
-		ui.Dim(r.Color, "│"),
-		ui.Dim(r.Color, "└─"),
-		rowLabel,
-	))
+	lines = append(lines, fmt.Sprintf("  %s %s", ui.Cyan(r.Color, "●"), ui.Bold(r.Color, compKey)))
 
-	if success {
-		for _, link := range report.links {
-			lines = append(lines, fmt.Sprintf("  %s       %s %s  %s",
-				ui.Dim(r.Color, "│"),
-				ui.Cyan(r.Color, "↗"),
-				ui.Dim(r.Color, linkLabel(link.Label)),
-				link.URL,
-			))
+	for i, entry := range entries {
+		connector := "├─"
+		if i == len(entries)-1 {
+			connector = "└─"
 		}
-	} else if r.ExecID != "" {
-		lines = append(lines, fmt.Sprintf("  %s       %s gluon logs --exec-id %s --job %s",
-			ui.Dim(r.Color, "│"),
-			ui.Dim(r.Color, "logs"),
-			r.ExecID, job.ID))
+		if entry.resumed {
+			lines = append(lines, fmt.Sprintf("  %s  %s %s %s  %s",
+				ui.Dim(r.Color, "│"),
+				ui.Dim(r.Color, connector),
+				ui.Cyan(r.Color, "⚡"),
+				ui.Bold(r.Color, r.jobLineLabel(entry.job)),
+				ui.Dim(r.Color, "cached"),
+			))
+		} else {
+			rowLabel := r.finishedRowLabel(entry.job, entry.success, entry.duration)
+			lines = append(lines, fmt.Sprintf("  %s  %s %s",
+				ui.Dim(r.Color, "│"),
+				ui.Dim(r.Color, connector),
+				rowLabel,
+			))
+			if entry.success && entry.report != nil {
+				for _, link := range entry.report.links {
+					lines = append(lines, fmt.Sprintf("  %s       %s %s  %s",
+						ui.Dim(r.Color, "│"),
+						ui.Cyan(r.Color, "↗"),
+						ui.Dim(r.Color, linkLabel(link.Label)),
+						link.URL,
+					))
+				}
+			} else if !entry.success && r.ExecID != "" {
+				lines = append(lines, fmt.Sprintf("  %s       %s gluon logs --exec-id %s --job %s",
+					ui.Dim(r.Color, "│"),
+					ui.Dim(r.Color, "logs"),
+					r.ExecID, entry.job.ID))
+			}
+		}
 	}
 
 	r.live.PrintBlock(lines)
