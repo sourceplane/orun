@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example Platform Admin Console</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Cloudflare Pages via Terraform</p>
+        <h1>Admin console keeps the component in the app and the Pages project in infra.</h1>
+        <p class="lede">
+          This example is geared toward Git-backed Pages projects where Gluon should reconcile the Cloudflare contract but keep the app manifest beside the code.
+        </p>
+      </section>
+      <section class="panel">
+        <h2>What this component shows</h2>
+        <ul>
+          <li>pnpm workspace installs and Turbo builds from the repo root</li>
+          <li>Terraform-managed Cloudflare Pages projects</li>
+          <li>App-local component manifests that still point at infra code</li>
+        </ul>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

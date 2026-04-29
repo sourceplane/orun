@@ -1,0 +1,50 @@
+:root {
+  color-scheme: light;
+  font-family: "IBM Plex Sans", "Helvetica Neue", sans-serif;
+  background: radial-gradient(circle at top left, #f5efe2 0%, #e6ddd0 45%, #d8d6ce 100%);
+  color: #172534;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.shell {
+  display: grid;
+  gap: 1.5rem;
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 5rem;
+}
+
+.hero,
+.panel {
+  background: rgba(250, 249, 245, 0.82);
+  border: 1px solid rgba(23, 37, 52, 0.1);
+  border-radius: 1.25rem;
+  box-shadow: 0 18px 36px rgba(23, 37, 52, 0.1);
+  padding: 1.5rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #7a5331;
+}
+
+h1,
+h2,
+p,
+ul {
+  margin-top: 0;
+}
+
+.lede,
+.timestamp,
+li {
+  color: #415465;
+}

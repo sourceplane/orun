@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example Platform Web Console</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Cloudflare Pages</p>
+        <h1>Web console deploys from a Turbo app component.</h1>
+        <p class="lede">
+          This example stays app-local so the same component manifest can move into a larger Turbo workspace later.
+        </p>
+      </section>
+      <section class="panel">
+        <h2>What this component shows</h2>
+        <ul>
+          <li>pnpm workspace installs from the monorepo root</li>
+          <li>Turbo-filtered app builds</li>
+          <li>Cloudflare Pages direct upload from Gluon</li>
+        </ul>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

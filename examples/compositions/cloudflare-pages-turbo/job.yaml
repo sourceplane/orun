@@ -1,0 +1,153 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: cloudflare-pages-turbo
+spec:
+  type: cloudflare-pages-turbo
+  description: Build a static app with Turbo and direct-upload it to Cloudflare Pages
+  defaultJob: verify-deploy-cloudflare-pages-turbo
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Cloudflare Pages Turbo Component
+    description: Schema for Cloudflare Pages direct upload apps in a pnpm and Turbo monorepo
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+        description: Component name
+      type:
+        type: string
+        const: cloudflare-pages-turbo
+        description: Component type identifier
+      inputs:
+        type: object
+        required:
+          - outputDir
+          - projectName
+          - nodeVersion
+          - pnpmVersion
+          - productionBranch
+        properties:
+          outputDir:
+            type: string
+            description: Build output directory relative to the component directory
+          projectName:
+            type: string
+            description: Cloudflare Pages project name used for direct upload
+          nodeVersion:
+            type: string
+            description: Node.js version
+          pnpmVersion:
+            type: string
+            description: pnpm version
+          productionBranch:
+            type: string
+            description: Branch that is allowed to publish the Pages app
+          preBuildCommand:
+            type: string
+            description: Optional command to run before the build (e.g. codegen, schema generation)
+          buildCommand:
+            type: string
+            description: Override the default turbo build command
+        additionalProperties: false
+    additionalProperties: true
+  jobs:
+    - name: verify-deploy-cloudflare-pages-turbo
+      description: Build a Pages app and direct-upload it from the production branch
+      runsOn: ubuntu-22.04
+      timeout: 30m
+      retries: 0
+      labels:
+        scope: delivery
+      steps:
+        - id: setup-node
+          name: setup-node
+          use: actions/setup-node@v4
+          with:
+            node-version: "{{.nodeVersion}}"
+        - id: setup-pnpm
+          name: setup-pnpm
+          use: pnpm/action-setup@v4
+          with:
+            version: "{{.pnpmVersion}}"
+        - name: install-workspace-dependencies
+          run: pnpm install --no-frozen-lockfile
+          onFailure: stop
+        - name: pre-build
+          shell: bash
+          run: |
+            {{if .preBuildCommand}}
+            {{.preBuildCommand}}
+            {{else}}
+            echo "Skipping pre-build."
+            {{end}}
+          onFailure: stop
+        - name: verify-pages-app-structure
+          run: test -f package.json
+          onFailure: stop
+        - name: build-pages-app
+          run: "{{if .buildCommand}}{{.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
+          onFailure: stop
+        - name: verify-build-output
+          shell: bash
+          run: |
+            test -d "{{.outputDir}}"
+            find "{{.outputDir}}" -maxdepth 2 -type f | head -n 20
+          onFailure: stop
+        - name: ensure-pages-project
+          shell: bash
+          run: |
+            if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
+              echo "Skipping Cloudflare Pages project reconciliation for {{.Component}} in {{.Environment}} on ${GITHUB_REF:-local}."
+              exit 0
+            fi
+
+            : "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required for deployment}"
+            : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required for deployment}"
+
+            api_root="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects"
+            response_file="${RUNNER_TEMP:-/tmp}/cloudflare-pages-project.json"
+            status="$(curl -sS -o "${response_file}" -w "%{http_code}" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              "${api_root}/{{.projectName}}")"
+
+            if [ "${status}" = "200" ]; then
+              echo "Pages project {{.projectName}} already exists."
+            elif [ "${status}" = "404" ]; then
+              curl -sS --fail -X POST \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                -H "Content-Type: application/json" \
+                --data '{"name":"{{.projectName}}","production_branch":"{{.productionBranch}}"}' \
+                "${api_root}" >/dev/null
+              echo "Created Pages project {{.projectName}}."
+            else
+              cat "${response_file}"
+              exit 1
+            fi
+
+            curl -sS --fail -X PATCH \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data '{"production_branch":"{{.productionBranch}}"}' \
+              "${api_root}/{{.projectName}}" >/dev/null
+          onFailure: stop
+        - name: deploy-pages-artifact
+          shell: bash
+          run: |
+            if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
+              echo "Skipping Cloudflare Pages deploy for {{.Component}} in {{.Environment}} on ${GITHUB_REF:-local}."
+              exit 0
+            fi
+
+            : "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required for deployment}"
+            : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required for deployment}"
+
+            pnpm exec wrangler pages deploy "{{.outputDir}}" \
+              --project-name "{{.projectName}}" \
+              --branch "{{.productionBranch}}"
+          onFailure: stop

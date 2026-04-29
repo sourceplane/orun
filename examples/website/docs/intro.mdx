@@ -1,0 +1,31 @@
+---
+title: Example Platform Docs
+slug: /
+---
+
+<div className="heroFrame">
+  <span className="eyebrow">Cloudflare Pages Example</span>
+  <h1 className="heroTitle">One docs site, two delivery paths.</h1>
+  <p className="heroCopy">
+    This site is intentionally small. It exists to exercise two reusable Gluon compositions in the
+    example platform repository: direct upload with Wrangler and Git-backed reconciliation with
+    Terraform.
+  </p>
+</div>
+
+## What this example proves
+
+- A Docusaurus site can build deterministically inside the example repo.
+- A `cloudflare-pages` composition can verify the build and direct-upload the generated output.
+- A `cloudflare-pages-terraform` composition can validate the same site locally and manage the
+  Cloudflare Pages project configuration from Terraform.
+
+## Repository layout
+
+- `website/` contains the Docusaurus source and direct-upload component.
+- `infra/cloudflare-pages-terraform/` contains the Terraform-backed component and Cloudflare Pages resource.
+
+## CI behavior
+
+Pull requests build the site and validate both compositions. Production-side effects are gated to
+the `main` branch, so CI smoke stays safe for review branches while merge-to-main can publish.

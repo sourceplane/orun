@@ -1,0 +1,72 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: helm-chart
+spec:
+  type: helm-chart
+  description: Helm chart validation jobs for chart components
+  defaultJob: render-helm-chart
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Helm Chart Component
+    description: Schema for helm-chart components in the multi-type sample
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+        description: Component name
+      type:
+        type: string
+        const: helm-chart
+        description: Component type identifier
+      inputs:
+        type: object
+        required:
+          - chartPath
+          - valuesFile
+          - releaseName
+        properties:
+          chartPath:
+            type: string
+            description: Helm chart directory used by the job
+          valuesFile:
+            type: string
+            description: Values file used to render the chart
+          releaseName:
+            type: string
+            description: Helm release name used during template rendering
+          helmVersion:
+            type: string
+            description: Optional Helm version installed by the job registry
+        additionalProperties: false
+    additionalProperties: true
+  jobs:
+    - name: render-helm-chart
+      description: Lint and template Helm charts against their paired values files
+      runsOn: ubuntu-22.04
+      timeout: 20m
+      retries: 0
+      labels:
+        scope: delivery
+      steps:
+        - id: setup-helm
+          name: setup-helm
+          use: azure/setup-helm@v4.3.0
+          with:
+            version: "{{.helmVersion}}"
+        - name: helm-chart-context
+          shell: bash
+          run: |
+            helm version --short
+            echo "Rendering {{.releaseName}} from {{.chartPath}} with {{.valuesFile}}"
+          onFailure: stop
+        - name: helm-chart-lint
+          run: helm lint {{.chartPath}} --values {{.valuesFile}}
+          onFailure: stop
+        - name: helm-chart-template
+          run: helm template {{.releaseName}} {{.chartPath}} --values {{.valuesFile}}
+          onFailure: stop

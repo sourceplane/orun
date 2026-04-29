@@ -1,0 +1,24 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+
+metadata:
+  name: cluster-addons
+
+spec:
+  type: terraform
+  domain: platform-foundation
+  subscribe:
+    environments:
+      - development
+      - staging
+      - production
+  inputs:
+    stackName: cluster-addons
+    terraformDir: .
+    terraformVersion: 1.9.8
+  labels:
+    team: platform
+    layer: foundation
+    stack: cluster
+  dependsOn:
+    - component: network-foundation

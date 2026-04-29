@@ -18,7 +18,7 @@ The commands below assume you are running them from the repository root and usin
 ./orun compositions --intent examples/intent.yaml
 ```
 
-The example package currently exports `charts`, `helm`, `helmCommon`, and `terraform`.
+The example package exports Terraform, Helm, Cloudflare, Turbo, and workspace compositions from `examples/compositions`.
 
 ## 3. Lock the resolved composition sources
 
@@ -39,7 +39,7 @@ This loads `examples/intent.yaml`, scans the discovery roots declared there, and
 ## 5. Inspect the merged component model
 
 ```bash
-./orun component web-app --intent examples/intent.yaml --long
+./orun component network-foundation --intent examples/intent.yaml --long
 ```
 
 Use this view when you want to verify labels, overrides, subscriptions, inputs, and dependency edges before you render the final plan.
@@ -55,18 +55,19 @@ The plan is saved to `.orun/plans/` and linked as `latest`. It is the execution 
 ## 7. Preview execution
 
 ```bash
-./orun run --dry-run
+./orun plan --intent examples/intent.yaml --component network-foundation --env development --output /tmp/orun-example-terraform-plan.json
+./orun run --plan /tmp/orun-example-terraform-plan.json --workdir examples --gha --dry-run
 ```
 
-`--dry-run` prints the execution order, working directories, runner choice, and resolved steps without mutating state. `run` resolves the latest plan automatically.
+`--dry-run` prints the execution order, working directories, runner choice, and resolved steps without mutating state.
 
 ## 8. Execute the plan
 
 ```bash
-./orun run --runner local
+./orun run --plan /tmp/orun-example-terraform-plan.json --workdir examples --gha
 ```
 
-Swap `local` for `docker` when you want containerized execution, or use `--gha` when your plan includes GitHub Actions `use:` steps.
+That command runs a dependency-free GitHub Actions-compatible job from the embedded example repo. Swap `--gha` for `--runner docker` when you want containerized execution against a plan that does not contain `use:` steps.
 
 ## 9. Inspect the result
 
@@ -81,11 +82,11 @@ Swap `local` for `docker` when you want containerized execution, or use `--gha` 
 ## 10. Run from a component subdirectory
 
 ```bash
-cd examples/services/web-app/
-./orun run
+cd examples/infra/infra-1/
+../../../orun run --plan /tmp/orun-example-terraform-plan.json --workdir ../.. --gha
 ```
 
-`orun` walks up the directory tree, finds `intent.yaml`, and detects that you are in the `web-app` component (via `component.yaml`). `run` automatically filters to `web-app` and its dependencies — equivalent to passing `--component=web-app`. Plans are always global; only execution is scoped. Use `--all` to run all jobs.
+`orun` walks up the directory tree, finds `intent.yaml`, and detects that you are in the `network-foundation` component (via `component.yaml`). `run` automatically filters to `network-foundation` — equivalent to passing `--component=network-foundation`. Plans are always global; only execution is scoped. Use `--all` to run all jobs.
 
 ## What happened
 

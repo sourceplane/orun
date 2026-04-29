@@ -55,13 +55,13 @@ orun run --verbose
 Run only one job:
 
 ```bash
-orun run --job web-app@staging.deploy
+orun run --job network-foundation@development.validate-terraform
 ```
 
 Retry a failed job (clears its saved state first):
 
 ```bash
-orun run --job web-app@staging.deploy --retry
+orun run --job network-foundation@development.validate-terraform --retry
 ```
 
 Override the working directory for every job:

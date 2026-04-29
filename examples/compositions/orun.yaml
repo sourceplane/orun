@@ -1,0 +1,32 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: CompositionPackage
+metadata:
+  name: example-platform-compositions
+  description: Packaged compositions for the embedded example platform repository
+spec:
+  version: 0.9.2
+  orun:
+    minVersion: ">=0.20.0"
+  exports:
+    - composition: terraform
+      path: terraform/job.yaml
+    - composition: helm-values
+      path: helm-values/job.yaml
+    - composition: helm-chart
+      path: helm-chart/job.yaml
+    - composition: cloudflare-worker-turbo
+      path: cloudflare-worker-turbo/job.yaml
+    - composition: cloudflare-worker
+      path: cloudflare-worker/job.yaml
+    - composition: cloudflare-pages
+      path: cloudflare-pages/job.yaml
+    - composition: cloudflare-pages-turbo
+      path: cloudflare-pages-turbo/job.yaml
+    - composition: cloudflare-pages-terraform
+      path: cloudflare-pages-terraform/job.yaml
+    - composition: cloudflare-pages-turbo-terraform
+      path: cloudflare-pages-turbo-terraform/job.yaml
+    - composition: turbo-package
+      path: turbo-package/job.yaml
+    - composition: workspace
+      path: workspace/job.yaml

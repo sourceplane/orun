@@ -1,0 +1,25 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+
+metadata:
+  name: web-console-pages
+
+spec:
+  type: cloudflare-pages-turbo
+  domain: platform-ui
+  subscribe:
+    environments:
+      - preview
+      - staging
+      - production
+  inputs:
+    outputDir: dist
+    projectName: example-platform-web-console
+    nodeVersion: "20"
+    pnpmVersion: "10.12.1"
+    productionBranch: main
+  labels:
+    team: platform
+    layer: delivery
+    surface: web-console
+    runtime: cloudflare

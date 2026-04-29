@@ -1,0 +1,117 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: cloudflare-worker-turbo
+spec:
+  type: cloudflare-worker-turbo
+  description: Verify a Cloudflare Worker app and deploy it from the production branch
+  defaultJob: verify-deploy-cloudflare-worker-turbo
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Cloudflare Worker Turbo Component
+    description: Schema for Cloudflare Workers in a pnpm and Turbo monorepo
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+        description: Component name
+      type:
+        type: string
+        const: cloudflare-worker-turbo
+        description: Component type identifier
+      inputs:
+        type: object
+        required:
+          - nodeVersion
+          - pnpmVersion
+          - productionBranch
+        properties:
+          nodeVersion:
+            type: string
+            description: Node.js version
+          pnpmVersion:
+            type: string
+            description: pnpm version
+          productionBranch:
+            type: string
+            description: Branch that is allowed to deploy the Worker app
+          preBuildCommand:
+            type: string
+            description: Optional command to run before the build (e.g. codegen, schema generation)
+          buildCommand:
+            type: string
+            description: Override the default turbo build command
+          typecheckCommand:
+            type: string
+            description: Override the default turbo typecheck command
+          deployCommand:
+            type: string
+            description: Override the default deploy command
+        additionalProperties: false
+    additionalProperties: true
+  jobs:
+    - name: verify-deploy-cloudflare-worker-turbo
+      description: Verify a Worker app and deploy it from the production branch
+      runsOn: ubuntu-22.04
+      timeout: 30m
+      retries: 0
+      labels:
+        scope: delivery
+      steps:
+        - id: setup-node
+          name: setup-node
+          use: actions/setup-node@v4
+          with:
+            node-version: "{{.nodeVersion}}"
+        - id: setup-pnpm
+          name: setup-pnpm
+          use: pnpm/action-setup@v4
+          with:
+            version: "{{.pnpmVersion}}"
+        - name: install-workspace-dependencies
+          run: pnpm install --no-frozen-lockfile
+          onFailure: stop
+        - name: pre-build
+          shell: bash
+          run: |
+            {{if .preBuildCommand}}
+            {{.preBuildCommand}}
+            {{else}}
+            echo "Skipping pre-build."
+            {{end}}
+          onFailure: stop
+        - name: verify-worker-structure
+          shell: bash
+          run: |
+            test -f package.json
+            test -f wrangler.jsonc
+          onFailure: stop
+        - name: build-worker
+          run: "{{if .buildCommand}}{{.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
+          onFailure: stop
+        - name: typecheck-worker
+          run: "{{if .typecheckCommand}}{{.typecheckCommand}}{{else}}pnpm exec turbo run typecheck --filter=./{{end}}"
+          onFailure: stop
+        - name: deploy-worker
+          shell: bash
+          run: |
+            if [ "{{.Environment}}" = "dev" ]; then
+              echo "Running wrangler deploy dry-run for {{.Component}} in dev environment."
+              pnpm exec wrangler deploy --dry-run
+              exit 0
+            fi
+
+            if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
+              echo "Skipping Cloudflare Worker deploy for {{.Component}} in {{.Environment}} on ${GITHUB_REF:-local}."
+              exit 0
+            fi
+
+            : "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required for deploy}"
+            : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required for deploy}"
+
+            {{if .deployCommand}}{{.deployCommand}}{{else}}pnpm run deploy{{end}}
+          onFailure: stop

@@ -1,0 +1,84 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap');
+
+:root {
+  --ifm-color-primary: #0c7a6d;
+  --ifm-color-primary-dark: #0a665b;
+  --ifm-color-primary-darker: #095e54;
+  --ifm-color-primary-darkest: #074b42;
+  --ifm-color-primary-light: #148f80;
+  --ifm-color-primary-lighter: #1d9f8f;
+  --ifm-color-primary-lightest: #45b5a7;
+  --ifm-background-color: #f4f6ef;
+  --ifm-navbar-background-color: rgba(244, 246, 239, 0.9);
+  --ifm-footer-background-color: #102721;
+  --ifm-code-font-size: 92%;
+  --ifm-font-family-base: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+  --ifm-heading-font-family: 'Space Grotesk', 'IBM Plex Sans', sans-serif;
+  --ifm-font-family-monospace: 'IBM Plex Mono', monospace;
+  --site-surface: rgba(255, 255, 255, 0.82);
+  --site-border: rgba(12, 122, 109, 0.14);
+  --site-shadow: 0 20px 44px rgba(16, 39, 33, 0.1);
+}
+
+html,
+body {
+  background:
+    radial-gradient(circle at top left, rgba(12, 122, 109, 0.15), transparent 28%),
+    radial-gradient(circle at top right, rgba(201, 123, 61, 0.12), transparent 30%),
+    var(--ifm-background-color);
+}
+
+.navbar {
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--site-border);
+}
+
+.footer {
+  background:
+    radial-gradient(circle at top left, rgba(69, 181, 167, 0.16), transparent 24%),
+    linear-gradient(180deg, rgba(16, 39, 33, 0.96), rgba(8, 20, 16, 1));
+}
+
+.heroFrame {
+  margin: 1rem 0 2rem;
+  padding: 2rem;
+  border: 1px solid var(--site-border);
+  border-radius: 28px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 244, 0.92)),
+    var(--site-surface);
+  box-shadow: var(--site-shadow);
+}
+
+.eyebrow {
+  display: inline-flex;
+  margin-bottom: 1rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(12, 122, 109, 0.1);
+  color: #0b5a51;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.heroTitle {
+  max-width: 14ch;
+  margin-bottom: 1rem;
+  font-size: clamp(2.6rem, 5vw, 4.8rem);
+  line-height: 0.92;
+}
+
+.heroCopy {
+  max-width: 46rem;
+  margin-bottom: 0;
+  font-size: 1.08rem;
+}
+
+.markdown pre,
+.theme-code-block {
+  border: 1px solid var(--site-border);
+  border-radius: 18px;
+  box-shadow: var(--site-shadow);
+}

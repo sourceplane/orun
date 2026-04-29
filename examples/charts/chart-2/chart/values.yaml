@@ -1,0 +1,5 @@
+nameOverride: commerce-checkout
+config:
+  message: commerce checkout application configuration
+  environment: shared
+  color: green

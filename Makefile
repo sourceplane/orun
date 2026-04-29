@@ -1,8 +1,10 @@
-.PHONY: build run validate debug plan clean test help
+.PHONY: build run validate debug plan clean test help examples-validate examples-debug examples-plan examples-gha-smoke
 
 BINARY_NAME=orun
 BINARY_PATH=./cmd/$(BINARY_NAME)
 MAIN_PATH=$(BINARY_PATH)/main.go
+EXAMPLE_INTENT=examples/intent.yaml
+EXAMPLE_SMOKE_PLAN=/tmp/orun-example-gha-plan.json
 
 # Default target
 help:
@@ -25,17 +27,30 @@ build:
 run-plan: build
 	@echo ""
 	@echo "🎯 Generating plan..."
-	@./$(BINARY_NAME) plan -i examples/intent.yaml -j examples/jobs.yaml --debug
+	@./$(BINARY_NAME) plan --intent $(EXAMPLE_INTENT) --output /tmp/orun-example-plan.json --view dag
 
 run-validate: build
 	@echo ""
 	@echo "✓ Validating files..."
-	@./$(BINARY_NAME) validate -i examples/intent.yaml -j examples/jobs.yaml
+	@./$(BINARY_NAME) validate --intent $(EXAMPLE_INTENT)
 
 run-debug: build
 	@echo ""
 	@echo "🔍 Debugging intent..."
-	@./$(BINARY_NAME) debug -i examples/intent.yaml -j examples/jobs.yaml
+	@./$(BINARY_NAME) debug --intent $(EXAMPLE_INTENT)
+
+examples-validate: run-validate
+
+examples-debug: run-debug
+
+examples-plan: run-plan
+
+examples-gha-smoke: build
+	@echo ""
+	@echo "⚙️ Planning Terraform smoke example..."
+	@./$(BINARY_NAME) plan --intent $(EXAMPLE_INTENT) --component network-foundation --env development --output $(EXAMPLE_SMOKE_PLAN)
+	@echo "🚀 Running GitHub Actions compatibility smoke..."
+	@./$(BINARY_NAME) run --plan $(EXAMPLE_SMOKE_PLAN) --workdir examples --gha
 
 test:
 	@echo "🧪 Running tests..."

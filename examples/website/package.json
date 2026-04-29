@@ -1,0 +1,22 @@
+{
+  "name": "example-platform-docs",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal Docusaurus site used to verify Cloudflare Pages compositions in example-platform-repo",
+  "scripts": {
+    "docs:start": "docusaurus start",
+    "docs:build": "docusaurus build --out-dir docs-build",
+    "docs:serve": "docusaurus serve --dir docs-build"
+  },
+  "overrides": {
+    "webpack": "5.105.4",
+    "html-webpack-plugin": "5.6.6"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.9.2",
+    "@docusaurus/preset-classic": "3.9.2",
+    "@mdx-js/react": "3.1.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  }
+}

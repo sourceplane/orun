@@ -2,87 +2,57 @@ apiVersion: sourceplane.io/v1
 kind: Intent
 
 metadata:
-  name: microservices-deployment
-  description: Example multi-environment microservices deployment
+  name: multi-environment-platform
+  description: Multi-environment DevOps sample for foundation, identity, and commerce domains
   namespace: default
 
 compositions:
   sources:
-    - name: platform-core
+    - name: example-platform
       kind: dir
-      path: ./packages/platform-core
+      path: ./compositions
 
 discovery:
   roots:
-    - services/
+    - apps/
     - infra/
     - deploy/
-
-groups:
-  platform:
-    policies:
-      environment: production-only
-      isolation: strict
-    defaults:
-      namespacePrefix: platform-
-      owner: platform-team
-
-  onboarding:
-    policies:
-      approval: required
-    defaults:
-      owner: onboarding-team
-      timeout: 30m
+    - charts/
+    - packages/
+    - website/
 
 environments:
-  production:
-    selectors:
-      domains:
-        - "platform"
+  dev:
     defaults:
-      region: us-west-2
-      replicas: 3
-      logLevel: info
-    policies:
-      requireApproval: "true"
-
-  staging:
-    selectors:
-      domains:
-        - "platform"
-    defaults:
-      region: us-west-2
-      replicas: 1
-      logLevel: debug
+      lane: dry-run
+      namespacePrefix: dev-
     policies:
       requireApproval: "false"
 
   development:
     defaults:
-      region: us-east-1
-      replicas: 1
-      logLevel: debug
+      lane: dry-run
+      namespacePrefix: dev-
     policies:
       requireApproval: "false"
 
-components:
-  - name: component-charts
-    type: charts
-    domain: platform
-    enabled: true
-    subscribe:
-      environments:
-        - development
-        - staging
-        - production
-    inputs:
-      registry: mycompany.azurecr.io/helm/charts
-      pullPolicy: Always
-    labels:
-      team: platform
-      tier: utility
-    dependsOn:
-      - component: common-services
-        environment: ""
-        scope: same-environment
-        condition: success
+  preview:
+    defaults:
+      lane: verify
+      namespacePrefix: preview-
+    policies:
+      requireApproval: "false"
+
+  staging:
+    defaults:
+      lane: verify
+      namespacePrefix: stg-
+    policies:
+      requireApproval: "true"
+
+  production:
+    defaults:
+      lane: release
+      namespacePrefix: prod-
+    policies:
+      requireApproval: "true"

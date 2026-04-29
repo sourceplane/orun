@@ -1,0 +1,72 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: helm-values
+spec:
+  type: helm-values
+  description: Helm values validation jobs for deployment files
+  defaultJob: render-helm-values
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Helm Values Component
+    description: Schema for helm-values components in the multi-type sample
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+        description: Component name
+      type:
+        type: string
+        const: helm-values
+        description: Component type identifier
+      inputs:
+        type: object
+        required:
+          - chartPath
+          - valuesFile
+          - releaseName
+        properties:
+          chartPath:
+            type: string
+            description: Chart directory paired with this values file
+          valuesFile:
+            type: string
+            description: Helm values file used by the job
+          releaseName:
+            type: string
+            description: Helm release name used during template rendering
+          helmVersion:
+            type: string
+            description: Optional Helm version installed by the job registry
+        additionalProperties: false
+    additionalProperties: true
+  jobs:
+    - name: render-helm-values
+      description: Validate values files against their paired chart directories
+      runsOn: ubuntu-22.04
+      timeout: 20m
+      retries: 0
+      labels:
+        scope: delivery
+      steps:
+        - id: setup-helm
+          name: setup-helm
+          use: azure/setup-helm@v4.3.0
+          with:
+            version: "{{.helmVersion}}"
+        - name: helm-values-context
+          shell: bash
+          run: |
+            helm version --short
+            echo "Validating {{.valuesFile}} against {{.chartPath}}"
+          onFailure: stop
+        - name: helm-values-lint
+          run: helm lint {{.chartPath}} --values {{.valuesFile}}
+          onFailure: stop
+        - name: helm-values-template
+          run: helm template {{.releaseName}} {{.chartPath}} --values {{.valuesFile}}
+          onFailure: stop

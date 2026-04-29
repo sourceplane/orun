@@ -1,0 +1,17 @@
+{
+  "name": "example-platform-repo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Turbo-style Cloudflare deployment examples for gluon component discovery",
+  "packageManager": "pnpm@10.12.1",
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "deploy": "turbo run deploy"
+  },
+  "devDependencies": {
+    "turbo": "2.5.8",
+    "typescript": "5.9.3",
+    "wrangler": "4.13.2"
+  }
+}

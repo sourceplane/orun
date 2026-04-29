@@ -36,9 +36,9 @@ It also declares where compositions come from:
 ```yaml
 compositions:
   sources:
-    - name: platform-core
+    - name: example-platform
       kind: dir
-      path: ./packages/platform-core
+      path: ./compositions
 ```
 
 ## Component manifest
@@ -50,15 +50,16 @@ apiVersion: sourceplane.io/v1
 kind: Component
 
 metadata:
-  name: web-app
+  name: network-foundation
 
 spec:
-  type: helm
-  domain: platform
+  type: terraform
+  domain: platform-foundation
   subscribe:
     environments: [development, staging, production]
   inputs:
-    chart: oci://registry.example.com/charts/web-app
+    stackName: network-foundation
+    terraformDir: .
 ```
 
 Components carry type-specific inputs, labels, overrides, and dependency declarations.

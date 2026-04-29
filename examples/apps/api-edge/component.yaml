@@ -1,0 +1,23 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+
+metadata:
+  name: api-edge-worker
+
+spec:
+  type: cloudflare-worker-turbo
+  domain: platform-runtime
+  subscribe:
+    environments:
+      - dev
+      - staging
+      - production
+  inputs:
+    nodeVersion: "20"
+    pnpmVersion: "10.12.1"
+    productionBranch: main
+  labels:
+    team: platform
+    layer: runtime
+    surface: api
+    runtime: cloudflare

@@ -1,0 +1,78 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: terraform
+spec:
+  type: terraform
+  description: Terraform validation jobs for infra components
+  defaultJob: validate-terraform
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Terraform Stack Component
+    description: Schema for terraform components in the multi-type sample
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+        description: Component name
+      type:
+        type: string
+        const: terraform
+        description: Component type identifier
+      inputs:
+        type: object
+        required:
+          - stackName
+          - terraformDir
+        properties:
+          stackName:
+            type: string
+            description: Logical stack name used in job logs
+          terraformDir:
+            type: string
+            description: Terraform root directory used by the job
+          terraformVersion:
+            type: string
+            description: Optional Terraform version installed by the job registry
+          varFile:
+            type: string
+            description: Optional tfvars file for future expansion
+          backendKey:
+            type: string
+            description: Optional backend key for future expansion
+        additionalProperties: false
+    additionalProperties: true
+  jobs:
+    - name: validate-terraform
+      description: Validate Terraform stacks with fmt, init, and validate
+      runsOn: ubuntu-22.04
+      timeout: 20m
+      retries: 0
+      labels:
+        scope: infra
+      steps:
+        - id: setup-terraform
+          name: setup-terraform
+          use: hashicorp/setup-terraform@v4
+          with:
+            terraform_version: "{{.terraformVersion}}"
+            terraform_wrapper: "false"
+        - name: terraform-context
+          shell: bash
+          run: |
+            terraform version
+            echo "Validating {{.stackName}} at {{.terraformDir}}"
+          onFailure: stop
+        - name: terraform-fmt-check
+          run: terraform fmt -check {{.terraformDir}}
+          onFailure: stop
+        - name: terraform-init
+          run: terraform -chdir={{.terraformDir}} init -backend=false -input=false
+          onFailure: stop
+        - name: terraform-validate
+          run: terraform -chdir={{.terraformDir}} validate -no-color
+          onFailure: stop

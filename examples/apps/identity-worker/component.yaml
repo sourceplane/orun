@@ -1,0 +1,27 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+
+metadata:
+  name: identity-worker
+
+spec:
+  type: cloudflare-worker
+  domain: platform-identity
+  subscribe:
+    environments:
+      - dev
+      - staging
+      - production
+  inputs:
+    installCommand: pnpm install --no-frozen-lockfile
+    buildCommand: pnpm exec turbo run build --filter=./
+    typecheckCommand: pnpm exec turbo run typecheck --filter=./
+    deployCommand: pnpm run deploy
+    nodeVersion: "20"
+    pnpmVersion: "10.12.1"
+    productionBranch: main
+  labels:
+    team: platform
+    layer: runtime
+    surface: identity
+    runtime: cloudflare

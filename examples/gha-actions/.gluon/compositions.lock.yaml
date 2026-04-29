@@ -1,9 +1,0 @@
-apiVersion: sourceplane.io/v1alpha1
-kind: CompositionLock
-sources:
-    - name: gha-demo
-      kind: dir
-      path: ./packages/gha-demo
-      resolvedDigest: sha256:a3ec3f5c3881cc2462c51e718b570d1818931eb999a240db3d9bd81d9763f53a
-      exports:
-        - gha-demo
