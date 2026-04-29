@@ -260,9 +260,44 @@ func (r *Runner) updateLiveStep(job model.PlanJob, stepID string, stepIndex, ste
 	if r.live == nil {
 		return
 	}
-	progress := fmt.Sprintf("(%d/%d)", stepIndex, stepTotal)
-	label := fmt.Sprintf("%s  %s %s", r.jobLineLabel(job), stepID, progress)
-	r.live.SetRow(job.ID, label)
+	envLabel := strings.TrimSpace(job.Environment)
+	short := shortJobName(job)
+	bar := miniProgressBar(stepIndex, stepTotal, 6)
+	var label string
+	if envLabel != "" && r.groupMultiEnv {
+		label = fmt.Sprintf("%s  %s  %s  %s %d/%d",
+			ui.Bold(r.Color, envLabel),
+			ui.Dim(r.Color, short),
+			ui.Dim(r.Color, "["+bar+"]"),
+			ui.Dim(r.Color, stepID),
+			stepIndex, stepTotal)
+	} else {
+		label = fmt.Sprintf("%s  %s  %s %d/%d",
+			ui.Bold(r.Color, short),
+			ui.Dim(r.Color, "["+bar+"]"),
+			ui.Dim(r.Color, stepID),
+			stepIndex, stepTotal)
+	}
+	group := strings.TrimSpace(job.Component)
+	if group == "" {
+		group = short
+	}
+	r.live.SetRowDetail(job.ID, group, label, "")
+}
+
+// miniProgressBar renders a tiny inline progress indicator like "▓▓░░░░".
+func miniProgressBar(done, total, width int) string {
+	if total <= 0 {
+		return strings.Repeat("░", width)
+	}
+	filled := done * width / total
+	if filled > width {
+		filled = width
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	return strings.Repeat("▓", filled) + strings.Repeat("░", width-filled)
 }
 
 func (r *Runner) printStepSuccess(step model.PlanStep, view stepOutputView, duration time.Duration) {

@@ -33,6 +33,7 @@ var (
 	runJSON               bool
 	runIsolation          string
 	runKeepWorkspaces     bool
+	runBackground         bool
 )
 
 var runCmd = &cobra.Command{
@@ -66,6 +67,7 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().BoolVar(&runJSON, "json", false, "Output in JSON format")
 	runCmd.Flags().StringVar(&runIsolation, "isolation", "auto", "Per-job workspace isolation: auto (on when concurrency>1), workspace (always on), none (legacy shared tree)")
 	runCmd.Flags().BoolVar(&runKeepWorkspaces, "keep-workspaces", false, "Don't delete per-job staged workspaces after the run (debug)")
+	runCmd.Flags().BoolVar(&runBackground, "background", false, "Run the plan detached and return immediately. Track via 'gluon status --watch'")
 
 	_ = runCmd.Flags().MarkDeprecated("job-id", "use --job instead")
 }
@@ -137,6 +139,20 @@ func runPlan() error {
 
 	if runRetry && runJobID == "" {
 		return fmt.Errorf("--retry requires --job")
+	}
+
+	// If --background and we are NOT already the detached child, fork ourselves
+	// and exit. The child re-enters runPlan with the same flags minus
+	// --background and an explicit --exec-id.
+	if runBackground && !isBackgroundChild() {
+		if runDryRun {
+			return fmt.Errorf("--background cannot be combined with --dry-run")
+		}
+		if _, err := store.CreateExecution(execID, plan); err != nil {
+			return err
+		}
+		color := ui.ColorEnabledForWriter(os.Stdout)
+		return startBackgroundRun(execID, store, color)
 	}
 
 	// Concurrency override

@@ -295,6 +295,11 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 			r.printReadinessSnapshot(orderedJobs, execState)
 		}
 	}
+	totalJobs := len(orderedJobs)
+	summary := newRunSummary()
+	r.live.SetHeaderFunc(func() []string {
+		return r.dashboardHeaderLines(totalJobs, summary)
+	})
 	r.live.Start()
 	defer r.live.Stop()
 
@@ -310,7 +315,6 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	}
 
 	failFast := plan.Execution.FailFast
-	summary := newRunSummary()
 	executedTarget := false
 
 	// Determine concurrency
@@ -806,8 +810,18 @@ func (r *Runner) printRunHeader(plan *model.Plan, jobs []model.PlanJob) {
 	}
 	planID := state.PlanChecksumShort(plan)
 
-	scopeParts := make([]string, 0, 4)
-	scopeParts = append(scopeParts, fmt.Sprintf("%d task%s", len(jobs), pluralSuffix(len(jobs))))
+	componentSet := map[string]struct{}{}
+	for _, j := range jobs {
+		c := strings.TrimSpace(j.Component)
+		if c != "" {
+			componentSet[c] = struct{}{}
+		}
+	}
+	scopeParts := make([]string, 0, 5)
+	if len(componentSet) > 0 {
+		scopeParts = append(scopeParts, fmt.Sprintf("%d component%s", len(componentSet), pluralSuffix(len(componentSet))))
+	}
+	scopeParts = append(scopeParts, fmt.Sprintf("%d job%s", len(jobs), pluralSuffix(len(jobs))))
 	if r.Concurrency > 1 {
 		scopeParts = append(scopeParts, fmt.Sprintf("%d× parallel", r.Concurrency))
 	}
@@ -817,25 +831,64 @@ func (r *Runner) printRunHeader(plan *model.Plan, jobs []model.PlanJob) {
 	}
 
 	r.withPrintLock(func() {
-		fmt.Fprintf(r.Stdout, "\n%s %s   %s\n",
+		fmt.Fprintf(r.Stdout, "\n%s %s\n",
 			ui.BoldCyan(r.Color, "▲ gluon"),
 			ui.Bold(r.Color, planLabel),
-			ui.Dim(r.Color, strings.Join(scopeParts, " · ")),
 		)
 		subParts := []string{}
 		if planID != "" {
-			subParts = append(subParts, "plan "+planID)
+			subParts = append(subParts, "Plan: "+planID)
 		}
 		if r.ExecID != "" && !r.DryRun {
-			subParts = append(subParts, "run "+r.ExecID)
+			subParts = append(subParts, "Run: "+r.ExecID)
 		}
 		if r.JobID != "" {
-			subParts = append(subParts, "target "+r.JobID)
+			subParts = append(subParts, "Target: "+r.JobID)
 		}
 		if len(subParts) > 0 {
 			fmt.Fprintln(r.Stdout, "  "+ui.Dim(r.Color, strings.Join(subParts, "  ·  ")))
 		}
+		fmt.Fprintln(r.Stdout, "  "+ui.Dim(r.Color, "Scope: "+strings.Join(scopeParts, " · ")))
+		fmt.Fprintln(r.Stdout)
 	})
+}
+
+// dashboardHeaderLines builds the sticky header rendered above the active
+// section: a one-glance status legend plus a progress bar.
+func (r *Runner) dashboardHeaderLines(totalJobs int, summary *runSummary) []string {
+	if summary == nil {
+		return nil
+	}
+	snap := summary.snapshot()
+	succeeded := snap.completed + snap.resumed
+	failed := snap.failed
+	running := 0
+	if r.live != nil {
+		running = r.live.RowCount()
+	}
+	queued := totalJobs - succeeded - failed - running
+	if queued < 0 {
+		queued = 0
+	}
+
+	parts := make([]string, 0, 4)
+	parts = append(parts, fmt.Sprintf("%s %d succeeded", ui.Green(r.Color, "✓"), succeeded))
+	parts = append(parts, fmt.Sprintf("%s %d running", ui.Cyan(r.Color, "●"), running))
+	parts = append(parts, fmt.Sprintf("%s %d queued", ui.Dim(r.Color, "○"), queued))
+	if failed > 0 {
+		parts = append(parts, fmt.Sprintf("%s %d failed", ui.Red(r.Color, "✗"), failed))
+	}
+
+	pct := 0
+	if totalJobs > 0 {
+		pct = (succeeded + failed) * 100 / totalJobs
+	}
+	bar := ui.RenderProgressBar(pct, 32)
+
+	return []string{
+		"  " + ui.Dim(r.Color, "Status:   ") + strings.Join(parts, "  ·  "),
+		"  " + ui.Dim(r.Color, "Progress: ") + bar + " " + fmt.Sprintf("%3d%%", pct),
+	}
 }
 
 func (r *Runner) printTargetJobSummary(job model.PlanJob, execState *state.ExecState) {
@@ -1191,7 +1244,24 @@ func (r *Runner) printJobHeader(job model.PlanJob) {
 		return
 	}
 	if r.live != nil {
-		r.live.SetRow(job.ID, r.jobLineLabel(job))
+		group := strings.TrimSpace(job.Component)
+		short := shortJobName(job)
+		if group == "" {
+			group = short
+		}
+		envLabel := strings.TrimSpace(job.Environment)
+		var label string
+		if envLabel != "" && r.groupMultiEnv {
+			label = fmt.Sprintf("%s  %s  %s",
+				ui.Bold(r.Color, envLabel),
+				ui.Dim(r.Color, short),
+				ui.Dim(r.Color, "starting..."))
+		} else {
+			label = fmt.Sprintf("%s  %s",
+				ui.Bold(r.Color, short),
+				ui.Dim(r.Color, "starting..."))
+		}
+		r.live.SetRowDetail(job.ID, group, label, "")
 	}
 }
 
