@@ -60,7 +60,7 @@ func buildCompositionPackage() error {
 
 func pushCompositionPackage(archivePath, ref string) error {
 	fmt.Println("□ Publishing composition package...")
-	if err := compositionpkg.PushPackageArchive(archivePath, ref); err != nil {
+	if err := compositionpkg.PushArchiveFile(archivePath, ref); err != nil {
 		return err
 	}
 	fmt.Printf("✓ Package published: %s\n", ref)

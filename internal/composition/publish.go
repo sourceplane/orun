@@ -135,7 +135,7 @@ func resolveOCITarget(targetRef, root, packageName, version string) (registry, r
 		if target != "" {
 			registry = trimSlash(target)
 		}
-		repository = strings.ToLower(owner + "/" + chooseRepoName(repo, packageName))
+		repository = strings.ToLower(owner + "/" + repo + "/" + packageName)
 		tag = sanitizeTag(version)
 		return registry, repository, tag, nil
 	}
@@ -148,13 +148,6 @@ func resolveOCITarget(targetRef, root, packageName, version string) (registry, r
 		tag = sanitizeTag(version)
 	}
 	return registry, strings.ToLower(repository), tag, nil
-}
-
-func chooseRepoName(gitRepo, packageName string) string {
-	if strings.TrimSpace(gitRepo) != "" {
-		return gitRepo
-	}
-	return packageName
 }
 
 func splitRefParts(ref string) (registry, repository, tag string) {

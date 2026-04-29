@@ -2,15 +2,27 @@ package composition
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	godigest "github.com/opencontainers/go-digest"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sourceplane/orun/internal/model"
+	"oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/content/memory"
+	"oras.land/oras-go/v2/registry/remote"
+	"oras.land/oras-go/v2/registry/remote/auth"
+	"oras.land/oras-go/v2/registry/remote/credentials"
 )
 
 const (
@@ -18,7 +30,7 @@ const (
 	compositionPackageLayerType    = "application/vnd.sourceplane.orun.composition.package.layer.v1.tar+gzip"
 )
 
-// BuildPackageArchive validates a composition package directory and writes a .tgz archive.
+// BuildPackageArchive validates a composition package directory and writes a .tgz archive to disk.
 func BuildPackageArchive(rootDir, outputPath string) error {
 	rootDir = filepath.Clean(rootDir)
 	outputPath = filepath.Clean(outputPath)
@@ -49,31 +61,85 @@ func BuildPackageArchive(rootDir, outputPath string) error {
 	}
 	defer outputFile.Close()
 
-	gzipWriter := gzip.NewWriter(outputFile)
-	defer gzipWriter.Close()
-
-	tarWriter := tar.NewWriter(gzipWriter)
-	defer tarWriter.Close()
-
 	absOutput, err := filepath.Abs(outputPath)
 	if err != nil {
 		return fmt.Errorf("failed to resolve output path %s: %w", outputPath, err)
 	}
 
-	files := make([]string, 0)
-	err = filepath.Walk(rootDir, func(path string, info os.FileInfo, walkErr error) error {
+	gzipWriter := gzip.NewWriter(outputFile)
+	defer gzipWriter.Close()
+	tarWriter := tar.NewWriter(gzipWriter)
+	defer tarWriter.Close()
+
+	return writeTarEntries(tarWriter, rootDir, absOutput)
+}
+
+// StreamPublishPackage streams a composition package to an OCI registry in a single pass:
+// walk files → tar → gzip → sha256 (computed while streaming) → upload blob.
+// No temporary file is written to disk.
+func StreamPublishPackage(rootDir, ociRef string) error {
+	rootDir = filepath.Clean(rootDir)
+
+	digest, err := hashDirectory(rootDir)
+	if err != nil {
+		return fmt.Errorf("failed to hash package root %s: %w", rootDir, err)
+	}
+	if _, err := loadPackageSource(rootDir, model.CompositionSource{Name: "local", Kind: "dir", Path: rootDir}, digest, 0); err != nil {
+		return fmt.Errorf("package validation failed: %w", err)
+	}
+
+	archiveBytes, digestStr, err := buildArchiveInMemory(rootDir)
+	if err != nil {
+		return err
+	}
+
+	return pushToRegistry(archiveBytes, digestStr, ociRef)
+}
+
+// buildArchiveInMemory builds a tar+gzip archive in memory, computing the sha256 digest
+// simultaneously in a single pass. No file I/O is performed.
+func buildArchiveInMemory(rootDir string) ([]byte, string, error) {
+	var buf bytes.Buffer
+	h := sha256.New()
+	mw := io.MultiWriter(&buf, h)
+
+	gw := gzip.NewWriter(mw)
+	tw := tar.NewWriter(gw)
+
+	if err := writeTarEntries(tw, rootDir, ""); err != nil {
+		return nil, "", fmt.Errorf("failed to build archive: %w", err)
+	}
+	if err := tw.Close(); err != nil {
+		return nil, "", err
+	}
+	if err := gw.Close(); err != nil {
+		return nil, "", err
+	}
+
+	digestStr := "sha256:" + hex.EncodeToString(h.Sum(nil))
+	return buf.Bytes(), digestStr, nil
+}
+
+// writeTarEntries writes all files under rootDir into tw with relative paths.
+// skipAbsPath, if non-empty, is excluded from the archive (used by BuildPackageArchive
+// to skip the output file when it lives inside rootDir).
+func writeTarEntries(tw *tar.Writer, rootDir, skipAbsPath string) error {
+	var files []string
+	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if info.IsDir() {
 			return nil
 		}
-		absPath, err := filepath.Abs(path)
-		if err != nil {
-			return err
-		}
-		if absPath == absOutput {
-			return nil
+		if skipAbsPath != "" {
+			absPath, err := filepath.Abs(path)
+			if err != nil {
+				return err
+			}
+			if absPath == skipAbsPath {
+				return nil
+			}
 		}
 		files = append(files, path)
 		return nil
@@ -97,48 +163,87 @@ func BuildPackageArchive(rootDir, outputPath string) error {
 			return err
 		}
 		header.Name = filepath.ToSlash(relPath)
-		if err := tarWriter.WriteHeader(header); err != nil {
+		if err := tw.WriteHeader(header); err != nil {
 			return err
 		}
-
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		if _, err := tarWriter.Write(data); err != nil {
+		if _, err := tw.Write(data); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
-// PushPackageArchive publishes a package archive to an OCI registry using oras.
-func PushPackageArchive(archivePath, ref string) error {
+// PushArchiveFile reads an existing .tgz archive from disk and pushes it to an OCI registry.
+func PushArchiveFile(archivePath, ociRef string) error {
 	archivePath = filepath.Clean(archivePath)
-	if _, err := os.Stat(archivePath); err != nil {
-		return fmt.Errorf("failed to access package archive %s: %w", archivePath, err)
-	}
-	if _, err := exec.LookPath("oras"); err != nil {
-		return fmt.Errorf("oras is required to push composition packages")
-	}
-
-	remoteRef := strings.TrimPrefix(strings.TrimSpace(ref), "oci://")
-	if remoteRef == "" {
-		return fmt.Errorf("oci reference cannot be empty")
-	}
-
-	cmd := exec.Command(
-		"oras",
-		"push",
-		remoteRef,
-		"--artifact-type",
-		compositionPackageArtifactType,
-		fmt.Sprintf("%s:%s", archivePath, compositionPackageLayerType),
-	)
-	output, err := cmd.CombinedOutput()
+	data, err := os.ReadFile(archivePath)
 	if err != nil {
-		return fmt.Errorf("oras push failed: %w\n%s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("failed to read archive %s: %w", archivePath, err)
 	}
+	h := sha256.New()
+	h.Write(data)
+	digestStr := "sha256:" + hex.EncodeToString(h.Sum(nil))
+	return pushToRegistry(data, digestStr, ociRef)
+}
+
+// pushToRegistry pushes archiveBytes to the OCI registry described by ociRef using oras-go.
+// Credentials are read from the Docker credential store (~/.docker/config.json).
+func pushToRegistry(archiveBytes []byte, digestStr, ociRef string) error {
+	ctx := context.Background()
+	ociRef = strings.TrimPrefix(strings.TrimSpace(ociRef), "oci://")
+
+	registry, repository, tag := splitRefParts(ociRef)
+	if registry == "" || repository == "" {
+		return fmt.Errorf("invalid OCI ref %q: expected <registry>/<repo>[:tag]", ociRef)
+	}
+	if tag == "" {
+		tag = "latest"
+	}
+
+	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to load Docker credential store: %w", err)
+	}
+
+	repo, err := remote.NewRepository(registry + "/" + repository)
+	if err != nil {
+		return fmt.Errorf("failed to create remote repository: %w", err)
+	}
+	repo.Client = &auth.Client{
+		Client:     &http.Client{},
+		Cache:      auth.NewCache(),
+		Credential: credentials.Credential(credStore),
+	}
+
+	store := memory.New()
+
+	layerDesc := ocispec.Descriptor{
+		MediaType: compositionPackageLayerType,
+		Digest:    godigest.Digest(digestStr),
+		Size:      int64(len(archiveBytes)),
+	}
+	if err := store.Push(ctx, layerDesc, bytes.NewReader(archiveBytes)); err != nil {
+		return fmt.Errorf("failed to stage layer: %w", err)
+	}
+
+	manifestDesc, err := oras.PackManifest(ctx, store, oras.PackManifestVersion1_1, compositionPackageArtifactType, oras.PackManifestOptions{
+		Layers: []ocispec.Descriptor{layerDesc},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to pack OCI manifest: %w", err)
+	}
+
+	if err := store.Tag(ctx, manifestDesc, tag); err != nil {
+		return fmt.Errorf("failed to tag manifest: %w", err)
+	}
+
+	if _, err := oras.Copy(ctx, store, tag, repo, tag, oras.DefaultCopyOptions); err != nil {
+		return fmt.Errorf("oras push failed: %w", err)
+	}
+
 	return nil
 }

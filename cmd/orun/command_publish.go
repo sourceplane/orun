@@ -122,38 +122,29 @@ func runPublish(target string) error {
 		return err
 	}
 
-	archiveDir, err := os.MkdirTemp("", "orun-publish-")
-	if err != nil {
-		return fmt.Errorf("failed to create temp dir: %w", err)
-	}
-	if !publishKeep {
-		defer os.RemoveAll(archiveDir)
-	}
-
-	archivePath := filepath.Join(archiveDir, fmt.Sprintf("%s-%s.tgz", plan.PackageName, plan.Version))
-
 	printPublishHeader(plan)
-	fmt.Println("\n□ Building package archive...")
-	if err := compositionpkg.BuildPackageArchive(plan.PackageRoot, archivePath); err != nil {
-		return err
-	}
 
 	if publishDryRun {
-		fmt.Printf("✓ dry run: archive built at %s\n", archivePath)
+		fmt.Printf("\n✓ dry run: no files uploaded\n")
 		fmt.Printf("→ would push to %s\n", plan.OCIRef)
 		return nil
 	}
 
-	fmt.Println("□ Uploading...")
-	if err := compositionpkg.PushPackageArchive(archivePath, plan.OCIRef); err != nil {
+	fmt.Println("\n□ Packaging and uploading...")
+	if err := compositionpkg.StreamPublishPackage(plan.PackageRoot, plan.OCIRef); err != nil {
 		return err
+	}
+
+	if publishKeep {
+		archiveName := fmt.Sprintf("%s-%s.tgz", plan.PackageName, plan.Version)
+		if err := compositionpkg.BuildPackageArchive(plan.PackageRoot, archiveName); err != nil {
+			return fmt.Errorf("failed to write archive: %w", err)
+		}
+		fmt.Printf("→ archive kept at %s\n", archiveName)
 	}
 
 	fmt.Println("\n✓ published")
 	fmt.Printf("→ %s\n", plan.OCIRef)
-	if publishKeep {
-		fmt.Printf("→ archive kept at %s\n", archivePath)
-	}
 	return nil
 }
 
