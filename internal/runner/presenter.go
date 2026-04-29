@@ -408,42 +408,85 @@ func (r *Runner) printJobFooter(job model.PlanJob, report *jobReport, success bo
 		return
 	}
 	r.live.RemoveRow(job.ID)
-	label := r.jobLineLabel(job)
-	if success {
-		head := report.defaultHeadline()
-		line := fmt.Sprintf("    %s %s  %s",
-			ui.Green(r.Color, "✓"),
-			ui.Bold(r.Color, label),
-			ui.Dim(r.Color, formatStepDuration(duration)),
-		)
-		if head != "" {
-			line += "  " + ui.Dim(r.Color, head)
+
+	rowLabel := r.finishedRowLabel(job, success, duration)
+
+	r.groupMu.Lock()
+	groupPlain := r.groupKeyPlain(job)
+	groupChanged := groupPlain != r.lastFinishedGroup
+	firstFinished := !r.finishedAny
+	r.lastFinishedGroup = groupPlain
+	r.finishedAny = true
+	r.groupMu.Unlock()
+
+	groupTitle := strings.TrimSpace(job.Component)
+	if groupTitle == "" {
+		groupTitle = shortJobName(job)
+	}
+
+	var lines []string
+	if groupChanged {
+		if !firstFinished {
+			lines = append(lines, "  "+ui.Dim(r.Color, "│"))
 		}
-		lines := []string{line}
+		lines = append(lines, fmt.Sprintf("  %s %s", ui.Cyan(r.Color, "●"), ui.Bold(r.Color, groupTitle)))
+	}
+	lines = append(lines, fmt.Sprintf("  %s  %s %s",
+		ui.Dim(r.Color, "│"),
+		ui.Dim(r.Color, "└─"),
+		rowLabel,
+	))
+
+	if success {
 		for _, link := range report.links {
-			lines = append(lines, fmt.Sprintf("       %s %s  %s",
+			lines = append(lines, fmt.Sprintf("  %s       %s %s  %s",
+				ui.Dim(r.Color, "│"),
 				ui.Cyan(r.Color, "↗"),
 				ui.Dim(r.Color, linkLabel(link.Label)),
 				link.URL,
 			))
 		}
-		r.live.PrintBlock(lines)
-		return
+	} else if r.ExecID != "" {
+		lines = append(lines, fmt.Sprintf("  %s       %s gluon logs --exec-id %s --job %s",
+			ui.Dim(r.Color, "│"),
+			ui.Dim(r.Color, "logs"),
+			r.ExecID, job.ID))
 	}
 
-	lines := []string{
-		fmt.Sprintf("    %s %s  %s  %s",
-			ui.Red(r.Color, "✗"),
-			ui.Bold(r.Color, label),
-			ui.Dim(r.Color, formatStepDuration(duration)),
-			ui.Red(r.Color, "failed"),
-		),
-	}
-	if r.ExecID != "" {
-		lines = append(lines, fmt.Sprintf("       %s gluon logs --exec-id %s --job %s",
-			ui.Dim(r.Color, "logs"), r.ExecID, job.ID))
-	}
 	r.live.PrintBlock(lines)
+}
+
+// finishedRowLabel renders the inner row content for a finished job, mirroring
+// the active tree layout: "<status> <env>  <jobname>  <duration>".
+func (r *Runner) finishedRowLabel(job model.PlanJob, success bool, duration time.Duration) string {
+	short := shortJobName(job)
+	envLabel := strings.TrimSpace(job.Environment)
+	var marker string
+	if success {
+		marker = ui.Green(r.Color, "✓")
+	} else {
+		marker = ui.Red(r.Color, "✗")
+	}
+	dur := ui.Dim(r.Color, formatStepDuration(duration))
+	if envLabel != "" && r.groupMultiEnv {
+		if success {
+			return fmt.Sprintf("%s %s  %s  %s",
+				marker,
+				ui.Bold(r.Color, envLabel),
+				ui.Dim(r.Color, short),
+				dur)
+		}
+		return fmt.Sprintf("%s %s  %s  %s  %s",
+			marker,
+			ui.Bold(r.Color, envLabel),
+			ui.Dim(r.Color, short),
+			dur,
+			ui.Red(r.Color, "failed"))
+	}
+	if success {
+		return fmt.Sprintf("%s %s  %s", marker, ui.Bold(r.Color, short), dur)
+	}
+	return fmt.Sprintf("%s %s  %s  %s", marker, ui.Bold(r.Color, short), dur, ui.Red(r.Color, "failed"))
 }
 
 func (r *Runner) printBlock(title string, lines []string) {

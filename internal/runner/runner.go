@@ -57,9 +57,11 @@ type Runner struct {
 
 	live          *ui.LiveRegion
 	gha           *ui.GHARenderer
-	groupMu       sync.Mutex
-	currentGroup  string
-	groupMultiEnv bool
+	groupMu              sync.Mutex
+	currentGroup         string
+	lastFinishedGroup    string
+	finishedAny          bool
+	groupMultiEnv        bool
 }
 
 // inGHA reports whether output should be rendered for the GitHub Actions log
