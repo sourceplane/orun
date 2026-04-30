@@ -75,6 +75,14 @@ func (g *GHARenderer) FlushJob(jobID string) {
 	if len(data) == 0 {
 		return
 	}
+	// Strip ##[add-matcher] and ##[remove-matcher] lines from child-job output.
+	// When orun streams job output to a parent GitHub Actions runner, these
+	// commands reference temp paths that no longer exist, causing the runner to
+	// emit ##[error] annotations that mark the step as failed even on success.
+	data = filterMatcherCommands(data)
+	if len(data) == 0 {
+		return
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.w.Write(data)
@@ -217,4 +225,24 @@ func escapeData(s string) string {
 func escapeProperty(s string) string {
 	r := strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A", ":", "%3A", ",", "%2C")
 	return r.Replace(s)
+}
+
+// filterMatcherCommands removes ##[add-matcher] and ##[remove-matcher] lines
+// from buffered child-job output. These are legacy-format GitHub Actions
+// workflow commands emitted by actions like setup-node. When orun streams
+// child job output to a parent GHA runner, the parent tries to process them
+// but cannot find the referenced files (which lived in the child's temp dir),
+// producing ##[error] annotations that falsely fail the parent step.
+func filterMatcherCommands(data []byte) []byte {
+	lines := bytes.Split(data, []byte{'\n'})
+	out := lines[:0]
+	for _, line := range lines {
+		s := bytes.TrimSpace(line)
+		if bytes.HasPrefix(s, []byte("##[add-matcher]")) ||
+			bytes.HasPrefix(s, []byte("##[remove-matcher]")) {
+			continue
+		}
+		out = append(out, line)
+	}
+	return bytes.Join(out, []byte{'\n'})
 }
