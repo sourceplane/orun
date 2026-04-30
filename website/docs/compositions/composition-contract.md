@@ -2,11 +2,11 @@
 title: Composition contract
 ---
 
-A composition source exports self-describing documents. The primary contract is a `Composition` document, optionally grouped under a `CompositionPackage` manifest.
+A composition source exports self-describing documents. The primary contract is a `Composition` document grouped under a Stack package.
 
 ## Composition document
 
-A `Composition` document defines both the validation contract and the execution contract for a type.
+A `Composition` document defines both the validation contract and the execution contract for a type. It lives at `compositions/<type>/compositions.yaml` within a Stack package.
 
 Required fields:
 
@@ -51,29 +51,49 @@ spec:
 
 `defaultJob` must be explicit. Orun no longer relies on implicit "first job wins" behavior for packaged compositions.
 
-## Composition package document
+## Stack manifest
 
-A `CompositionPackage` groups exported compositions and makes package contents discoverable.
+A `Stack` manifest (`stack.yaml`) declares package metadata and an optional OCI registry target. Compositions are discovered automatically by walking the directory tree for `compositions.yaml` files — no explicit `spec.compositions` listing is required.
 
 ```yaml
-apiVersion: sourceplane.io/v1alpha1
-kind: CompositionPackage
+apiVersion: orun.io/v1
+kind: Stack
 metadata:
-  name: example-platform-compositions
+  name: my-platform-stack
+  version: 1.0.0
+  description: Platform compositions
+  owner: my-org
+registry:
+  host: ghcr.io
+  namespace: my-org
+  repository: my-platform-stack
+  visibility: public
+```
+
+Package layout:
+
+```text
+my-platform/
+├── stack.yaml
+└── compositions/
+    ├── terraform/
+    │   └── compositions.yaml
+    └── helm-chart/
+        └── compositions.yaml
+```
+
+To pin specific files instead of relying on auto-discovery, add an explicit `spec.compositions` list:
+
+```yaml
 spec:
-  version: 0.9.2
-  orun:
-    minVersion: ">=0.20.0"
-  exports:
-    - composition: terraform
-      path: terraform/job.yaml
-    - composition: helm-chart
-      path: helm-chart/job.yaml
+  compositions:
+    - path: compositions/terraform/compositions.yaml
+    - path: compositions/helm-chart/compositions.yaml
 ```
 
 ## Template inputs
 
-Job steps still resolve against merged component data. In the built-in examples, common template values include:
+Job steps resolve against merged component data. Common template values include:
 
 - `.Component`
 - merged input fields such as `.chart`, `.namespacePrefix`, or `.workspace`
@@ -100,4 +120,4 @@ Steps can declare:
 
 The compiler resolves those fields into the plan artifact, and the runtime consumes them later.
 
-The legacy `<type>/schema.yaml` plus `<type>/job.yaml` layout is still accepted through `--config-dir`, but new authoring should target packaged `Composition` documents.
+The legacy `<type>/schema.yaml` plus `<type>/job.yaml` layout is still accepted through `--config-dir`, but new authoring should target Stack packages with `compositions.yaml` documents.

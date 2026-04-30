@@ -7,6 +7,7 @@ const sidebars = {
       items: [
         'concepts/intent-model',
         'concepts/compositions',
+        'concepts/stacks',
         'concepts/plan-dag',
         'concepts/execution-model',
         'concepts/change-detection',

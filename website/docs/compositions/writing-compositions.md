@@ -4,34 +4,49 @@ title: Writing compositions
 
 Author a new composition package when you want to introduce a new component type without changing the core planner.
 
-## 1. Create a package root
+## 1. Create a Stack package root
+
+The recommended format is a `stack.yaml` manifest with a `compositions/` subdirectory. Each composition type lives in its own subdirectory containing a single `compositions.yaml` file.
 
 ```text
 my-platform/
-├── orun.yaml
+├── stack.yaml
 └── compositions/
-    └── mytype.yaml
+    └── mytype/
+        └── compositions.yaml
 ```
 
-The package manifest exports one or more composition documents.
+## 2. Define the Stack manifest
 
-## 2. Define the package manifest
+`stack.yaml` describes the package and an optional OCI registry target. When `spec.compositions` is omitted, the packager auto-discovers every `compositions.yaml` file by walking the directory tree — no explicit path listing is needed.
 
 ```yaml
-apiVersion: sourceplane.io/v1alpha1
-kind: CompositionPackage
+apiVersion: orun.io/v1
+kind: Stack
 metadata:
-  name: my-platform
-spec:
+  name: my-platform-stack
   version: 1.0.0
-  exports:
-    - composition: mytype
-      path: compositions/mytype.yaml
+  description: Platform compositions for my-platform
+  owner: my-org
+registry:
+  host: ghcr.io
+  namespace: my-org
+  repository: my-platform-stack
+  visibility: public
+```
+
+To pin specific files instead of using auto-discovery, add a `spec.compositions` block:
+
+```yaml
+spec:
+  compositions:
+    - path: compositions/mytype/compositions.yaml
+    - path: compositions/othertype/compositions.yaml
 ```
 
 ## 3. Define the composition document
 
-Start by expressing the type contract and jobs in a single `Composition` document.
+Start by expressing the type contract and jobs in a single `Composition` document at `compositions/mytype/compositions.yaml`.
 
 ```yaml
 apiVersion: sourceplane.io/v1alpha1
@@ -88,13 +103,34 @@ spec:
 ## 5. Validate and inspect
 
 ```bash
-orun compositions package build --root ./my-platform --output /tmp/my-platform.tgz
+orun pack --root ./my-platform
 orun validate --intent examples/intent.yaml
 orun compositions mytype --intent examples/intent.yaml
 orun plan --intent examples/intent.yaml --output /tmp/mytype-plan.json
 ```
 
 In the consuming intent, declare the package under `compositions.sources` using `kind: dir`, `kind: archive`, or `kind: oci`.
+
+## 6. Publish to a registry
+
+After validating locally, publish the Stack to an OCI registry so others can reference it remotely:
+
+```bash
+orun login ghcr.io
+orun publish --root ./my-platform
+```
+
+Teams consuming the stack reference it by OCI ref in their `intent.yaml`:
+
+```yaml
+compositions:
+  sources:
+    - name: my-platform
+      kind: oci
+      ref: oci://ghcr.io/my-org/my-platform-stack:1.0.0
+```
+
+See [Stacks](../concepts/stacks.md) for the full packaging and distribution guide.
 
 ## Authoring guidelines
 
@@ -104,4 +140,4 @@ In the consuming intent, declare the package under `compositions.sources` using 
 - Set `defaultJob` intentionally instead of depending on job order.
 - Test the composition with dry-run first, then execute through the runtime you expect to use in CI.
 
-The legacy `--config-dir` flow still works for folder-shaped compositions, but new authoring should target packaged `Composition` documents.
+The legacy `--config-dir` flow still works for folder-shaped compositions, but new authoring should target Stack packages with `compositions.yaml` documents.

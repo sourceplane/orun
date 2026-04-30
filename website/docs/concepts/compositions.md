@@ -18,24 +18,42 @@ compositions:
 
 Supported source kinds are `dir`, `archive`, and `oci`.
 
-## Package shape
+## Package shape — Stack format
 
-The repository quick-start package looks like this:
+The recommended package format uses a `stack.yaml` manifest and a `compositions/` subdirectory tree. Each composition type lives in its own subdirectory and contains a single `compositions.yaml` file:
 
 ```text
-examples/compositions/
-├── orun.yaml
-├── terraform/
-│   └── job.yaml
-├── helm-values/
-│   └── job.yaml
-├── helm-chart/
-│   └── job.yaml
-└── cloudflare-worker-turbo/
-    └── job.yaml
+my-platform/
+├── stack.yaml
+└── compositions/
+    ├── terraform/
+    │   └── compositions.yaml
+    ├── helm-values/
+    │   └── compositions.yaml
+    ├── helm-chart/
+    │   └── compositions.yaml
+    └── cloudflare-worker/
+        └── compositions.yaml
 ```
 
-`orun.yaml` is a `CompositionPackage` document that maps exported composition names to files inside the package.
+`stack.yaml` declares package metadata and an optional OCI registry target. When `spec.compositions` is omitted, the packager automatically discovers every `compositions.yaml` file by walking the directory tree — no explicit path listing is needed.
+
+```yaml
+apiVersion: orun.io/v1
+kind: Stack
+metadata:
+  name: my-platform-stack
+  version: 1.0.0
+  description: Platform compositions for my-platform
+  owner: my-org
+registry:
+  host: ghcr.io
+  namespace: my-org
+  repository: my-platform-stack
+  visibility: public
+```
+
+See [Stacks](stacks.md) for the full Stack concept guide including packaging and remote distribution.
 
 ## What lives in a composition
 
@@ -45,10 +63,6 @@ Each exported `Composition` document carries:
 - `spec.defaultJob` for explicit default job binding
 - `spec.inputSchema` for input validation
 - `spec.jobs` for portable job definitions
-
-## Example: Helm composition
-
-The repository's packaged `helm` composition still defines a deploy workflow with retries, timeouts, and templated commands:
 
 ## Example: Helm composition
 
@@ -86,9 +100,10 @@ spec:
 ```bash
 orun compositions --intent examples/intent.yaml
 orun compositions terraform --intent examples/intent.yaml
-orun compositions package build --root examples/compositions --output /tmp/example-platform-compositions.tgz
+orun pack --root examples/compositions
+orun publish --root examples/compositions
 ```
 
-The legacy `--config-dir` flag still works for folder-shaped compositions during migration, but packaged sources are the recommended path.
+The legacy `--config-dir` flag still works for folder-shaped compositions during migration, but packaged Stack sources are the recommended path.
 
-Read [composition contract](../compositions/composition-contract.md) when you are ready to author your own type.
+Read [Stacks](stacks.md) to understand the packaging and distribution model, or [composition contract](../compositions/composition-contract.md) when you are ready to author your own type.

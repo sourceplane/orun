@@ -36,11 +36,49 @@ orun compositions pull --intent examples/intent.yaml
 orun compositions lock --intent examples/intent.yaml
 ```
 
-Build and publish a composition package:
+## Packaging and publishing stacks
+
+Build a local archive from a Stack directory:
 
 ```bash
-orun compositions package build --root examples/compositions --output /tmp/example-platform-compositions.tgz
-orun compositions package push /tmp/example-platform-compositions.tgz oci://ghcr.io/sourceplane/orun-compositions/example-platform
+orun pack --root examples/compositions
+orun pack --root examples/compositions --output dist/platform-stack.tgz
+```
+
+Stream publish a Stack directly to an OCI registry (no temp file):
+
+```bash
+orun login ghcr.io
+orun publish --root examples/compositions
+orun publish --root examples/compositions --ref ghcr.io/my-org/my-platform-stack:v1.0.0
+orun publish --root examples/compositions --dry-run
+```
+
+The `stack.yaml` `registry` block is used to infer the target when `--ref` is omitted:
+
+```yaml
+registry:
+  host: ghcr.io
+  namespace: my-org
+  repository: my-platform-stack
+```
+
+## Using a remote stack from a registry
+
+Reference a published Stack directly in `intent.yaml`:
+
+```yaml
+compositions:
+  sources:
+    - name: platform
+      kind: oci
+      ref: oci://ghcr.io/my-org/my-platform-stack:v1.0.0
+```
+
+Lock the resolved digest for reproducible plans:
+
+```bash
+orun compositions lock --intent intent.yaml
 ```
 
 ## Flags

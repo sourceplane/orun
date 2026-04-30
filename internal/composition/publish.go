@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/sourceplane/orun/internal/model"
@@ -112,7 +113,7 @@ func resolvePackageRoot(packageRoot string) (string, error) {
 func readPackageManifest(root string) (*model.CompositionPackage, error) {
 	// Try stack.yaml (new format) first.
 	if data, err := os.ReadFile(filepath.Join(root, "stack.yaml")); err == nil {
-		pkg, convErr := stackYAMLToCompositionPackage(data)
+		pkg, convErr := stackYAMLToCompositionPackage(data, root)
 		if convErr != nil {
 			return nil, fmt.Errorf("failed to parse stack.yaml at %s: %w", root, convErr)
 		}
@@ -176,10 +177,16 @@ func resolveOCITarget(targetRef, root, packageName, version string) (registry, r
 }
 
 // stackYAMLToCompositionPackage parses stack.yaml bytes (kind: Stack) and converts
-// to the internal CompositionPackage representation. The composition name is derived
-// from the parent directory of each path entry (e.g.,
-// "compositions/terraform/job.yaml" → name "terraform").
-func stackYAMLToCompositionPackage(data []byte) (*model.CompositionPackage, error) {
+// to the internal CompositionPackage representation.
+//
+// When spec.compositions is non-empty the listed paths are used directly and the
+// composition name is derived from the parent directory of each path (e.g.
+// "compositions/terraform/compositions.yaml" → name "terraform").
+//
+// When spec.compositions is omitted or empty, rootDir is walked recursively and
+// every compositions.yaml file discovered becomes an export. The composition name
+// is taken from the parent directory of the discovered file.
+func stackYAMLToCompositionPackage(data []byte, rootDir string) (*model.CompositionPackage, error) {
 	var stack model.Stack
 	if err := yaml.Unmarshal(data, &stack); err != nil {
 		return nil, err
@@ -191,20 +198,35 @@ func stackYAMLToCompositionPackage(data []byte) (*model.CompositionPackage, erro
 		return nil, fmt.Errorf("stack.yaml must set metadata.name")
 	}
 
-	exports := make([]model.CompositionExport, 0, len(stack.Spec.Compositions))
-	for _, entry := range stack.Spec.Compositions {
-		p := strings.TrimSpace(entry.Path)
-		if p == "" {
-			return nil, fmt.Errorf("stack.yaml has a compositions entry with an empty path")
+	var exports []model.CompositionExport
+
+	if len(stack.Spec.Compositions) > 0 {
+		// Explicit listing: derive composition name from parent directory of each path.
+		exports = make([]model.CompositionExport, 0, len(stack.Spec.Compositions))
+		for _, entry := range stack.Spec.Compositions {
+			p := strings.TrimSpace(entry.Path)
+			if p == "" {
+				return nil, fmt.Errorf("stack.yaml has a compositions entry with an empty path")
+			}
+			name := filepath.Base(filepath.Dir(filepath.FromSlash(p)))
+			if name == "" || name == "." {
+				return nil, fmt.Errorf("stack.yaml path %q does not follow the expected compositions/<name>/compositions.yaml pattern", p)
+			}
+			exports = append(exports, model.CompositionExport{
+				Composition: name,
+				Path:        p,
+			})
 		}
-		name := filepath.Base(filepath.Dir(filepath.FromSlash(p)))
-		if name == "" || name == "." {
-			return nil, fmt.Errorf("stack.yaml path %q does not follow the expected compositions/<name>/job.yaml pattern", p)
+	} else {
+		// Auto-detect: walk rootDir looking for compositions.yaml files.
+		discovered, err := discoverCompositionFiles(rootDir)
+		if err != nil {
+			return nil, fmt.Errorf("stack.yaml at %s has no spec.compositions and auto-discovery failed: %w", rootDir, err)
 		}
-		exports = append(exports, model.CompositionExport{
-			Composition: name,
-			Path:        p,
-		})
+		if len(discovered) == 0 {
+			return nil, fmt.Errorf("stack.yaml at %s has no spec.compositions and no compositions.yaml files were found under %s", rootDir, rootDir)
+		}
+		exports = discovered
 	}
 
 	return &model.CompositionPackage{
@@ -219,6 +241,42 @@ func stackYAMLToCompositionPackage(data []byte) (*model.CompositionPackage, erro
 			Exports: exports,
 		},
 	}, nil
+}
+
+// discoverCompositionFiles walks rootDir and returns a CompositionExport for every
+// compositions.yaml file found, with the composition name taken from the parent directory.
+func discoverCompositionFiles(rootDir string) ([]model.CompositionExport, error) {
+	var exports []model.CompositionExport
+	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if info.Name() != "compositions.yaml" {
+			return nil
+		}
+		relPath, err := filepath.Rel(rootDir, path)
+		if err != nil {
+			return err
+		}
+		relPath = filepath.ToSlash(relPath)
+		name := filepath.Base(filepath.Dir(relPath))
+		if name == "" || name == "." {
+			return nil // skip compositions.yaml at root level
+		}
+		exports = append(exports, model.CompositionExport{
+			Composition: name,
+			Path:        relPath,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(exports, func(i, j int) bool { return exports[i].Composition < exports[j].Composition })
+	return exports, nil
 }
 
 // readStackRegistryRef returns the OCI ref encoded in stack.yaml's registry block, or "".

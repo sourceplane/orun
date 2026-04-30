@@ -165,12 +165,12 @@ func LoadFromDir(configDir string) (*Registry, error) {
 				}
 
 				filename := info.Name()
-				if filename != "job.yaml" && filename != "schema.yaml" {
+				if filename != "job.yaml" && filename != "compositions.yaml" && filename != "schema.yaml" {
 					return nil
 				}
 
 				typeName := filepath.Base(filepath.Dir(path))
-				if filename == "job.yaml" {
+				if filename == "job.yaml" || filename == "compositions.yaml" {
 					jobFiles[path] = typeName
 				} else {
 					schemaFiles[typeName] = path
@@ -194,7 +194,11 @@ func LoadFromDir(configDir string) (*Registry, error) {
 
 			typeName := entry.Name()
 			typeDir := filepath.Join(basePath, typeName)
-			jobPath := filepath.Join(typeDir, "job.yaml")
+			// Prefer compositions.yaml (new filename) but accept job.yaml for backward compat.
+			jobPath := filepath.Join(typeDir, "compositions.yaml")
+			if _, err := os.Stat(jobPath); err != nil {
+				jobPath = filepath.Join(typeDir, "job.yaml")
+			}
 			if _, err := os.Stat(jobPath); err == nil {
 				jobFiles[jobPath] = typeName
 			}
@@ -206,7 +210,7 @@ func LoadFromDir(configDir string) (*Registry, error) {
 	}
 
 	if len(jobFiles) == 0 {
-		return nil, fmt.Errorf("no job.yaml files found in config path: %s", configDir)
+		return nil, fmt.Errorf("no compositions.yaml files found in config path: %s", configDir)
 	}
 
 	digest, err := hashDirectories(searchPaths)
@@ -702,7 +706,7 @@ func loadPackageSource(rootDir string, source model.CompositionSource, digest st
 // converting a Stack manifest to the internal CompositionPackage representation.
 func loadManifestFromRoot(rootDir, sourceName string) (*model.CompositionPackage, error) {
 	if data, err := os.ReadFile(filepath.Join(rootDir, "stack.yaml")); err == nil {
-		pkg, convErr := stackYAMLToCompositionPackage(data)
+		pkg, convErr := stackYAMLToCompositionPackage(data, rootDir)
 		if convErr != nil {
 			return nil, fmt.Errorf("failed to parse stack.yaml for source %s: %w", sourceName, convErr)
 		}

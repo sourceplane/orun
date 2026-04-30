@@ -117,11 +117,13 @@ type StackRegistry struct {
 }
 
 // StackSpec lists the composition files included in the stack.
+// When Compositions is empty the packager auto-discovers every compositions.yaml
+// found by walking the directory that contains stack.yaml.
 type StackSpec struct {
-	Compositions []StackCompositionEntry `yaml:"compositions" json:"compositions"`
+	Compositions []StackCompositionEntry `yaml:"compositions,omitempty" json:"compositions,omitempty"`
 }
 
-// StackCompositionEntry is a path reference to a composition job.yaml within the stack.
+// StackCompositionEntry is a path reference to a compositions.yaml within the stack.
 type StackCompositionEntry struct {
 	Path string `yaml:"path" json:"path"`
 }
