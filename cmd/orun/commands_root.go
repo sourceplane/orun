@@ -42,6 +42,7 @@ var (
 	untracked                bool
 	compositionPackageRoot   string
 	compositionPackageOutput string
+	explainChanged           bool
 )
 
 var rootCmd = &cobra.Command{

@@ -21,5 +21,6 @@ func registerComponentCommand(root *cobra.Command) {
 	componentCmd.Flags().StringSliceVar(&changedFiles, "files", nil, "Comma-separated changed files (overrides git diff calculation)")
 	componentCmd.Flags().BoolVar(&uncommitted, "uncommitted", false, "Use only uncommitted changes")
 	componentCmd.Flags().BoolVar(&untracked, "untracked", false, "Use only untracked files")
+	componentCmd.Flags().BoolVar(&explainChanged, "explain", false, "Show how --changed refs were resolved")
 	componentCmd.Flags().BoolVarP(&longFormat, "long", "l", false, "Show detailed information")
 }

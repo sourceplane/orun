@@ -23,20 +23,24 @@ jobs:
       - name: Build orun
         run: go build -o orun ./cmd/orun
 
-      - name: Test --changed with PR base ref
+      - name: Test --changed with CI auto-detection
+        run: |
+          ./orun component --changed \
+            --intent examples/intent.yaml
+
+      - name: Test --changed with --explain
+        run: |
+          ./orun component --changed --explain \
+            --intent examples/intent.yaml
+
+      - name: Test --changed with explicit --base override
         run: |
           ./orun component --changed \
             --base "${{ github.event.pull_request.base.ref }}" \
             --intent examples/intent.yaml
 
-      - name: Test --changed defaults (base=main)
-        run: |
-          ./orun component --changed \
-            --intent examples/intent.yaml
-
-      - name: Test plan --changed with PR base
+      - name: Test plan --changed with CI auto-detection
         run: |
           ./orun plan --changed \
-            --base "${{ github.event.pull_request.base.ref }}" \
             --intent examples/intent.yaml \
             --output /tmp/pr-changed-plan.json || true

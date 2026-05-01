@@ -116,3 +116,7 @@ jobs:
             ! orun component --changed --files foo.txt --uncommitted \
               --intent "$GITHUB_WORKSPACE/examples/intent.yaml" 2>/dev/null
 
+            # CI auto-detection with --explain
+            orun component --changed --explain \
+              --intent "$GITHUB_WORKSPACE/examples/intent.yaml"
+

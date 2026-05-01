@@ -31,4 +31,5 @@ func registerPlanCommand(root *cobra.Command) {
 	planCmd.Flags().StringSliceVar(&changedFiles, "files", nil, "Comma-separated changed files (overrides git diff calculation)")
 	planCmd.Flags().BoolVar(&uncommitted, "uncommitted", false, "Use only uncommitted changes")
 	planCmd.Flags().BoolVar(&untracked, "untracked", false, "Use only untracked files")
+	planCmd.Flags().BoolVar(&explainChanged, "explain", false, "Show how --changed refs were resolved")
 }

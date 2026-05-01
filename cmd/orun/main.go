@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/ci"
 	"github.com/sourceplane/orun/internal/expand"
 	"github.com/sourceplane/orun/internal/git"
 	"github.com/sourceplane/orun/internal/loader"
@@ -662,9 +663,27 @@ func changedFilesSet(options git.ChangeOptions) (map[string]struct{}, error) {
 }
 
 func buildChangeOptions() (git.ChangeOptions, error) {
+	base := strings.TrimSpace(baseBranch)
+	head := strings.TrimSpace(headRef)
+
+	// Auto-detect CI refs when no explicit source flags are provided.
+	if base == "" && head == "" && len(changedFiles) == 0 && !uncommitted && !untracked {
+		detected := ci.DetectRefs(os.Getenv)
+		if detected.Provider != ci.ProviderNone {
+			base = detected.Base
+			head = detected.Head
+			printCIDetectionBanner(detected)
+		}
+		if explainChanged {
+			printExplainInfo(detected, strings.TrimSpace(baseBranch), strings.TrimSpace(headRef))
+		}
+	} else if explainChanged {
+		printExplainInfo(ci.DetectedRefs{}, strings.TrimSpace(baseBranch), strings.TrimSpace(headRef))
+	}
+
 	options := git.ChangeOptions{
-		Base:        strings.TrimSpace(baseBranch),
-		Head:        strings.TrimSpace(headRef),
+		Base:        base,
+		Head:        head,
 		Files:       changedFiles,
 		Uncommitted: uncommitted,
 		Untracked:   untracked,
@@ -675,6 +694,42 @@ func buildChangeOptions() (git.ChangeOptions, error) {
 	}
 
 	return options, nil
+}
+
+func printCIDetectionBanner(detected ci.DetectedRefs) {
+	color := ui.ColorEnabledForWriter(os.Stderr)
+	fmt.Fprintf(os.Stderr, "%s %s (%s), base: %s, head: %s\n",
+		ui.Cyan(color, "ci:"),
+		string(detected.Provider),
+		detected.EventType,
+		ui.Bold(color, detected.Base),
+		ui.Bold(color, detected.Head),
+	)
+}
+
+func printExplainInfo(detected ci.DetectedRefs, explicitBase, explicitHead string) {
+	color := ui.ColorEnabledForWriter(os.Stderr)
+	fmt.Fprintf(os.Stderr, "\n%s --changed ref resolution\n", ui.Bold(color, "explain:"))
+	fmt.Fprintf(os.Stderr, "  explicit --base flag: %s\n", valueOrNotSet(explicitBase))
+	fmt.Fprintf(os.Stderr, "  explicit --head flag: %s\n", valueOrNotSet(explicitHead))
+	if detected.Provider != ci.ProviderNone {
+		fmt.Fprintf(os.Stderr, "  CI auto-detect: %s (%s)\n", detected.Provider, detected.EventType)
+		for k, v := range detected.EnvVars {
+			fmt.Fprintf(os.Stderr, "    %s=%s\n", k, v)
+		}
+		fmt.Fprintf(os.Stderr, "  resolved base: %s\n", detected.Base)
+		fmt.Fprintf(os.Stderr, "  resolved head: %s\n\n", detected.Head)
+	} else {
+		fmt.Fprintf(os.Stderr, "  CI auto-detect: none (local or unrecognized CI)\n")
+		fmt.Fprintf(os.Stderr, "  using defaults: base=main, head=HEAD\n\n")
+	}
+}
+
+func valueOrNotSet(s string) string {
+	if s == "" {
+		return "(not set)"
+	}
+	return s
 }
 
 func isPathChanged(changedFiles map[string]struct{}, path string) bool {
