@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,9 +19,6 @@ import (
 	"github.com/sourceplane/orun/internal/model"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content/memory"
-	"oras.land/oras-go/v2/registry/remote"
-	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/credentials"
 )
 
 const (
@@ -126,19 +122,9 @@ func pushStackPackage(rootDir, ociRef string) error {
 		tag = "latest"
 	}
 
-	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
+	repo, err := newOCIRepository(registry + "/" + repository)
 	if err != nil {
-		return fmt.Errorf("failed to load Docker credential store: %w", err)
-	}
-
-	repo, err := remote.NewRepository(registry + "/" + repository)
-	if err != nil {
-		return fmt.Errorf("failed to create remote repository: %w", err)
-	}
-	repo.Client = &auth.Client{
-		Client:     &http.Client{},
-		Cache:      auth.NewCache(),
-		Credential: credentials.Credential(credStore),
+		return err
 	}
 
 	store := memory.New()
@@ -383,19 +369,9 @@ func pushToRegistry(archiveBytes []byte, digestStr, ociRef string) error {
 		tag = "latest"
 	}
 
-	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
+	repo, err := newOCIRepository(registry + "/" + repository)
 	if err != nil {
-		return fmt.Errorf("failed to load Docker credential store: %w", err)
-	}
-
-	repo, err := remote.NewRepository(registry + "/" + repository)
-	if err != nil {
-		return fmt.Errorf("failed to create remote repository: %w", err)
-	}
-	repo.Client = &auth.Client{
-		Client:     &http.Client{},
-		Cache:      auth.NewCache(),
-		Credential: credentials.Credential(credStore),
+		return err
 	}
 
 	store := memory.New()

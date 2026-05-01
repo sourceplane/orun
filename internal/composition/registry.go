@@ -1044,6 +1044,51 @@ func ensureCachedOCI(remoteRef, digest string) (string, error) {
 	return cacheDir, nil
 }
 
+// newOCIRepository creates a remote.Repository for the given ref. It reads
+// credentials from the Docker config file only (plaintext auths), avoiding
+// native credential helpers (e.g. osxkeychain) that trigger OS permission
+// dialogs. Anonymous token auth is used when no file-based credentials exist.
+func newOCIRepository(repoRef string) (*remote.Repository, error) {
+	repo, err := remote.NewRepository(repoRef)
+	if err != nil {
+		return nil, fmt.Errorf("invalid OCI ref %q: %w", repoRef, err)
+	}
+	repo.Client = &auth.Client{
+		Client:     &http.Client{},
+		Cache:      auth.NewCache(),
+		Credential: fileCredentialFunc(),
+	}
+	return repo, nil
+}
+
+// fileCredentialFunc returns a CredentialFunc that reads credentials from the
+// Docker config file without invoking native credential helpers.
+func fileCredentialFunc() func(context.Context, string) (auth.Credential, error) {
+	return func(ctx context.Context, hostport string) (auth.Credential, error) {
+		configPath, err := dockerConfigPath()
+		if err != nil {
+			return auth.EmptyCredential, nil
+		}
+		store, err := credentials.NewFileStore(configPath)
+		if err != nil {
+			return auth.EmptyCredential, nil
+		}
+		return store.Get(ctx, hostport)
+	}
+}
+
+// dockerConfigPath returns the Docker config.json path.
+func dockerConfigPath() (string, error) {
+	if dir := os.Getenv("DOCKER_CONFIG"); dir != "" {
+		return filepath.Join(dir, "config.json"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".docker", "config.json"), nil
+}
+
 // fetchAndExtractOCICompositionsLayer fetches the compositions layer from an OCI artifact
 // using the oras-go library (no external oras CLI required) and extracts it into destDir.
 // It prefers compositionsLayerMediaType, falls back to compositionPackageLayerType.
@@ -1052,18 +1097,9 @@ func fetchAndExtractOCICompositionsLayer(remoteRef, destDir string) error {
 	ref := normalizeOCIRef(remoteRef)
 
 	ctx := context.Background()
-	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
+	repo, err := newOCIRepository(repoRef)
 	if err != nil {
-		return fmt.Errorf("failed to load Docker credential store: %w", err)
-	}
-	repo, err := remote.NewRepository(repoRef)
-	if err != nil {
-		return fmt.Errorf("invalid OCI ref %q: %w", repoRef, err)
-	}
-	repo.Client = &auth.Client{
-		Client:     &http.Client{},
-		Cache:      auth.NewCache(),
-		Credential: credentials.Credential(credStore),
+		return err
 	}
 
 	// Fetch manifest to pick the compositions layer.
@@ -1179,20 +1215,10 @@ func resolveOCIDigest(remoteRef string) (string, error) {
 	ctx := context.Background()
 	ref := normalizeOCIRef(remoteRef)
 
-	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
-	if err != nil {
-		return "", fmt.Errorf("failed to load Docker credential store: %w", err)
-	}
-
 	repoRef := stripRefTagOrDigest(ref)
-	repo, err := remote.NewRepository(repoRef)
+	repo, err := newOCIRepository(repoRef)
 	if err != nil {
-		return "", fmt.Errorf("invalid OCI ref %q: %w", repoRef, err)
-	}
-	repo.Client = &auth.Client{
-		Client:     &http.Client{},
-		Cache:      auth.NewCache(),
-		Credential: credentials.Credential(credStore),
+		return "", err
 	}
 
 	desc, err := repo.Resolve(ctx, ref)

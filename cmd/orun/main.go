@@ -240,8 +240,20 @@ func generatePlan() error {
 		}
 	}
 
-	// Modern compact summary
-	numComponents := len(normalized.Components)
+	// Modern compact summary — derive component count from filtered instances
+	compSet := make(map[string]struct{})
+	for _, envInsts := range instances {
+		for _, inst := range envInsts {
+			compSet[inst.ComponentName] = struct{}{}
+		}
+	}
+	compNames := make([]string, 0, len(compSet))
+	for name := range compSet {
+		compNames = append(compNames, name)
+	}
+	sort.Strings(compNames)
+
+	numComponents := len(compNames)
 	numEnvs := len(instances)
 	numJobs := len(plan.Jobs)
 
@@ -253,6 +265,18 @@ func generatePlan() error {
 		ui.Dim(color, "→"),
 		ui.Bold(color, fmt.Sprintf("%d jobs", numJobs)),
 	)
+	if numComponents > 0 {
+		const maxShow = 4
+		displayed := compNames
+		if len(displayed) > maxShow {
+			displayed = displayed[:maxShow]
+		}
+		label := strings.Join(displayed, ", ")
+		if len(compNames) > maxShow {
+			label += fmt.Sprintf(" (+%d more)", len(compNames)-maxShow)
+		}
+		fmt.Printf("  %s components: %s\n", ui.Dim(color, "│"), label)
+	}
 	if changedOnly {
 		fmt.Printf("  %s mode: %s\n", ui.Dim(color, "│"), ui.Cyan(color, "changed-only"))
 	}
