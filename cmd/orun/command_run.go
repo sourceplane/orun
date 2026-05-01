@@ -194,6 +194,12 @@ func runPlan() error {
 		}
 	}
 
+	if len(plan.Jobs) == 0 {
+		color := ui.ColorEnabledForWriter(os.Stdout)
+		fmt.Fprintf(os.Stdout, "%s no jobs to run\n", ui.Green(color, "✓"))
+		return nil
+	}
+
 	r := runner.NewRunner(
 		runWorkDir,
 		runUseWorkDirOverride,
@@ -331,10 +337,6 @@ func loadPlan(path string) (*model.Plan, error) {
 				return nil, fmt.Errorf("failed to parse plan file as JSON or YAML: %w", err)
 			}
 		}
-	}
-
-	if len(plan.Jobs) == 0 {
-		return nil, fmt.Errorf("plan contains no jobs")
 	}
 
 	return &plan, nil
