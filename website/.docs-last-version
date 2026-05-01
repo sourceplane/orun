@@ -1,0 +1,24 @@
+# Docs last updated for version
+
+v1.10.1
+
+## How to use this file
+
+When updating docs next time, run:
+
+```bash
+# Get all changes since docs were last updated
+git log v1.10.1..HEAD --oneline
+```
+
+Then update this file to the new version after the docs PR is merged.
+
+## What was covered in this update
+
+- `orun run` positional argument `[component|planhash]` (added v1.9.0, v1.10.0)
+- `orun plan` positional argument `[component]` (added v1.10.0)
+- `orun run` new flags: `--component-concurrency`, `--background`, `--isolation`, `--keep-workspaces`
+- `orun run` change detection flags: `--changed`, `--base`, `--head`, `--files`, `--uncommitted`, `--untracked`, `--explain`
+- `orun plan` / `orun component` `--explain` flag
+- CI auto-detection for `--changed` (added v1.7.0)
+- `--plan` flag marked deprecated in favor of positional argument

@@ -44,5 +44,6 @@ orun component \
 | `--files` | Explicit changed-file list |
 | `--uncommitted` | Scope to uncommitted changes |
 | `--untracked` | Scope to untracked files |
+| `--explain` | Print how `--changed` resolved its base and head refs |
 
 Use `component` before `plan` when you want to understand how inputs, labels, and overrides were merged. `--config-dir` remains available as a global legacy fallback when the intent does not declare packaged sources.

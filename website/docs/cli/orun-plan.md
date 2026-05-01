@@ -7,10 +7,16 @@ title: orun plan
 ## Usage
 
 ```bash
-orun plan
+orun plan [component]
 ```
 
-When run without `--intent`, `orun` automatically discovers `intent.yaml` by walking up the directory tree to the git root. The plan is always **global** — it always includes all components. Use `--component` to explicitly restrict compilation to specific components.
+Pass a **component name** as a positional argument to restrict the plan to that component — equivalent to `--component <name>`:
+
+```bash
+orun plan network-foundation
+```
+
+When run without `--intent`, `orun` automatically discovers `intent.yaml` by walking up the directory tree to the git root. The plan is always **global** — it always includes all components. Use the positional argument or `--component` to explicitly restrict compilation to specific components.
 
 The generated plan is saved to `.orun/plans/{checksum}.json` and also written as `.orun/plans/latest.json`. `orun run` resolves `latest` automatically, so you rarely need to specify an output path.
 
@@ -20,6 +26,12 @@ Generate a plan (auto-discovers intent):
 
 ```bash
 orun plan
+```
+
+Generate a plan scoped to one component (positional argument):
+
+```bash
+orun plan network-foundation
 ```
 
 Generate a plan from a specific intent file:
@@ -70,6 +82,12 @@ Focus on changed components:
 orun plan -i examples/intent.yaml --changed --base main
 ```
 
+Debug how `--changed` resolved its git refs:
+
+```bash
+orun plan -i examples/intent.yaml --changed --explain
+```
+
 ## Flags
 
 | Flag | Meaning |
@@ -88,6 +106,7 @@ orun plan -i examples/intent.yaml --changed --base main
 | `--files` | Explicit changed-file list |
 | `--uncommitted` | Scope to uncommitted changes |
 | `--untracked` | Scope to untracked files |
+| `--explain` | Print how `--changed` resolved its base and head refs |
 
 ## Output contract
 
