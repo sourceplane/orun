@@ -19,13 +19,17 @@ import (
 )
 
 func generatePlan() error {
-	fmt.Println("□ Loading intent...")
+	if debugMode {
+		fmt.Println("□ Loading intent...")
+	}
 	intent, _, err := loadResolvedIntentFile(intentFile)
 	if err != nil {
 		return fmt.Errorf("failed to load intent: %w", err)
 	}
 
-	fmt.Println("□ Loading compositions...")
+	if debugMode {
+		fmt.Println("□ Loading compositions...")
+	}
 	compositionRegistry, err := loader.LoadCompositionsForIntent(intent, intentFile, configDir)
 	if err != nil {
 		return fmt.Errorf("failed to resolve compositions: %w", err)
@@ -50,18 +54,24 @@ func generatePlan() error {
 		}
 	}
 
-	fmt.Println("□ Normalizing intent...")
+	if debugMode {
+		fmt.Println("□ Normalizing intent...")
+	}
 	normalized, err := normalize.NormalizeIntent(intent)
 	if err != nil {
 		return fmt.Errorf("failed to normalize intent: %w", err)
 	}
 
-	fmt.Println("□ Validating components against composition schemas...")
+	if debugMode {
+		fmt.Println("□ Validating components against composition schemas...")
+	}
 	if err := compositionRegistry.ValidateAllComponents(normalized); err != nil {
 		return fmt.Errorf("component validation failed: %w", err)
 	}
 
-	fmt.Println("□ Expanding (env × component)...")
+	if debugMode {
+		fmt.Println("□ Expanding (env × component)...")
+	}
 	expander := expand.NewExpander(normalized)
 	instances, err := expander.Expand()
 	if err != nil {
@@ -168,20 +178,26 @@ func generatePlan() error {
 		fmt.Printf("  Generated %d component instances\n", count)
 	}
 
-	fmt.Println("□ Binding jobs and resolving dependencies...")
+	if debugMode {
+		fmt.Println("□ Binding jobs and resolving dependencies...")
+	}
 	jobPlanner := planner.NewJobPlanner(compositionInfos)
 	jobInstances, err := jobPlanner.PlanJobs(instances)
 	if err != nil {
 		return fmt.Errorf("failed to plan jobs: %w", err)
 	}
 
-	fmt.Println("□ Detecting cycles...")
+	if debugMode {
+		fmt.Println("□ Detecting cycles...")
+	}
 	dag := planner.NewJobGraph(jobInstances)
 	if err := dag.DetectCycles(); err != nil {
 		return fmt.Errorf("cycle detection failed: %w", err)
 	}
 
-	fmt.Println("□ Topologically sorting...")
+	if debugMode {
+		fmt.Println("□ Topologically sorting...")
+	}
 	sorted, err := dag.TopologicalSort()
 	if err != nil {
 		return fmt.Errorf("topological sort failed: %w", err)
@@ -189,9 +205,8 @@ func generatePlan() error {
 
 	if debugMode {
 		fmt.Printf("  Sorted %d jobs\n", len(sorted))
+		fmt.Println("□ Rendering plan...")
 	}
-
-	fmt.Println("□ Rendering plan...")
 
 	// Build JobRegistry bindings map (model -> JobRegistry name)
 	jobBindings := make(map[string]string)
@@ -213,32 +228,51 @@ func generatePlan() error {
 	store := state.NewStore(storeDir())
 	planID := state.PlanChecksumShort(plan)
 
+	color := ui.ColorEnabledForWriter(os.Stdout)
+
 	if outputFile != "" {
-		// Explicit output path (backwards compat)
 		if err := renderer.WritePlan(plan, outputFile); err != nil {
 			return fmt.Errorf("failed to write plan: %w", err)
 		}
-		fmt.Printf("✓ Plan generated with %d jobs\n", len(plan.Jobs))
-		fmt.Printf("✓ Saved to: %s\n", outputFile)
 	} else {
-		// Default: store in .orun/plans/
 		if err := store.SavePlan(plan, planName); err != nil {
 			return fmt.Errorf("failed to save plan: %w", err)
 		}
-		fmt.Printf("✓ Plan generated with %d jobs\n", len(plan.Jobs))
-		fmt.Printf("✓ Plan ID: %s\n", planID)
-		if planName != "" {
-			fmt.Printf("✓ Named: %s\n", planName)
-		}
 	}
 
-	// Print actionable hints
-	color := ui.ColorEnabledForWriter(os.Stdout)
-	if planID != "" {
-		fmt.Printf("\n%s orun run --plan %s\n", ui.Dim(color, "→"), planID)
+	// Modern compact summary
+	numComponents := len(normalized.Components)
+	numEnvs := len(instances)
+	numJobs := len(plan.Jobs)
+
+	fmt.Printf("\n  %s %d components %s %d envs %s %s\n",
+		ui.Dim(color, "│"),
+		numComponents,
+		ui.Dim(color, "×"),
+		numEnvs,
+		ui.Dim(color, "→"),
+		ui.Bold(color, fmt.Sprintf("%d jobs", numJobs)),
+	)
+	if changedOnly {
+		fmt.Printf("  %s mode: %s\n", ui.Dim(color, "│"), ui.Cyan(color, "changed-only"))
 	}
 	if planName != "" {
-		fmt.Printf("%s orun run --plan %s\n", ui.Dim(color, "→"), planName)
+		fmt.Printf("  %s name: %s\n", ui.Dim(color, "│"), planName)
+	}
+	fmt.Printf("  %s plan: %s\n", ui.Dim(color, "│"), ui.Dim(color, planID))
+	if outputFile != "" {
+		fmt.Printf("  %s file: %s\n", ui.Dim(color, "│"), outputFile)
+	}
+	fmt.Println()
+
+	// Actionable hint
+	if numJobs > 0 {
+		if planID != "" {
+			fmt.Printf("  %s orun run --plan %s\n", ui.Dim(color, "→"), planID)
+		}
+		if planName != "" {
+			fmt.Printf("  %s orun run --plan %s\n", ui.Dim(color, "→"), planName)
+		}
 	}
 
 	// Handle --view flag
@@ -737,10 +771,12 @@ func isPathChanged(changedFiles map[string]struct{}, path string) bool {
 		return len(changedFiles) > 0
 	}
 
+	path = strings.TrimPrefix(path, "./")
 	path = strings.TrimSuffix(path, "/")
 	prefix := path + "/"
 	for file := range changedFiles {
-		if file == path || strings.HasPrefix(file, prefix) {
+		normalizedFile := strings.TrimPrefix(file, "./")
+		if normalizedFile == path || strings.HasPrefix(normalizedFile, prefix) {
 			return true
 		}
 	}
@@ -757,10 +793,10 @@ func isFileChanged(changedFiles map[string]struct{}, targetPath string) bool {
 		return false
 	}
 
-	normalizedTarget := normalizeFilePath(targetPath)
+	normalizedTarget := strings.TrimPrefix(normalizeFilePath(targetPath), "./")
 	base := filepathBase(normalizedTarget)
 	for file := range changedFiles {
-		normalizedFile := normalizeFilePath(file)
+		normalizedFile := strings.TrimPrefix(normalizeFilePath(file), "./")
 		if normalizedFile == normalizedTarget || normalizedFile == base || strings.HasSuffix(normalizedFile, "/"+base) || strings.HasSuffix(normalizedTarget, "/"+normalizedFile) {
 			return true
 		}

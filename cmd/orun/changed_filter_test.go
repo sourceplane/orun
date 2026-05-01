@@ -4,6 +4,36 @@ import (
 	"testing"
 )
 
+func TestIsPathChanged_DotSlashPrefix(t *testing.T) {
+	files := map[string]struct{}{
+		"services/api/main.go":    {},
+		"services/web/src/app.js": {},
+	}
+
+	if !isPathChanged(files, "./services/api") {
+		t.Error("expected ./services/api to match services/api/main.go")
+	}
+	if !isPathChanged(files, "./services/web") {
+		t.Error("expected ./services/web to match services/web/src/app.js")
+	}
+	if isPathChanged(files, "./services/db") {
+		t.Error("expected ./services/db to not match any file")
+	}
+}
+
+func TestIsPathChanged_DotSlashInFiles(t *testing.T) {
+	files := map[string]struct{}{
+		"./services/api/main.go": {},
+	}
+
+	if !isPathChanged(files, "services/api") {
+		t.Error("expected services/api to match ./services/api/main.go")
+	}
+	if !isPathChanged(files, "./services/api") {
+		t.Error("expected ./services/api to match ./services/api/main.go")
+	}
+}
+
 func TestIsPathChanged_EmptyPath(t *testing.T) {
 	files := map[string]struct{}{
 		"some/file.go": {},
@@ -72,6 +102,16 @@ func TestIsFileChanged_BasenameMatch(t *testing.T) {
 	}
 	if !isFileChanged(files, "examples/intent.yaml") {
 		t.Error("expected exact path match")
+	}
+}
+
+func TestIsFileChanged_DotSlashPrefix(t *testing.T) {
+	files := map[string]struct{}{
+		"services/api/component.yaml": {},
+	}
+
+	if !isFileChanged(files, "./services/api/component.yaml") {
+		t.Error("expected ./services/api/component.yaml to match services/api/component.yaml")
 	}
 }
 
