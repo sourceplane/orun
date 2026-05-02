@@ -290,6 +290,8 @@ func runPlan() error {
 			}
 			return err
 		}
+	} else if !runDryRun {
+		setupLocalStateHooks(r, plan, execID)
 	}
 
 	if err := r.Run(plan); err != nil {
@@ -406,6 +408,47 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	}
 
 	return nil
+}
+
+// setupLocalStateHooks wires BeforeJob and AfterJobTerminal hooks that use
+// the file-lock-based FileStateBackend for cross-process claim safety.
+func setupLocalStateHooks(r *runner.Runner, plan *model.Plan, execID string) {
+	backend := statebackend.NewFileStateBackend(r.Store)
+	backend.InitRunPlan(plan)
+	ctx := context.Background()
+
+	r.Hooks = &runner.RunnerHooks{
+		BeforeJob: func(jobID string) (bool, error) {
+			job := findJobByIDInPlan(plan, jobID)
+			result, err := backend.ClaimJob(ctx, execID, job, "local")
+			if err != nil {
+				return false, err
+			}
+			if result.DepsBlocked {
+				return false, fmt.Errorf("job %s: upstream dependencies failed", jobID)
+			}
+			if !result.Claimed {
+				if result.CurrentStatus == "completed" || result.CurrentStatus == "running" {
+					return true, nil
+				}
+				if result.CurrentStatus == "failed" {
+					return false, fmt.Errorf("job %s: previously failed", jobID)
+				}
+				if result.DepsWaiting {
+					return false, fmt.Errorf("job %s: waiting on dependencies", jobID)
+				}
+				return true, nil
+			}
+			return false, nil
+		},
+		AfterJobTerminal: func(jobID string, success bool, errText string) {
+			status := statebackend.JobStatusSuccess
+			if !success {
+				status = statebackend.JobStatusFailed
+			}
+			_ = backend.UpdateJob(ctx, execID, jobID, "local", status, errText)
+		},
+	}
 }
 
 // performRemoteJobClaim executes the dependency-wait and claim loop for
