@@ -50,6 +50,7 @@ jobs:
           push: ${{ env.IMAGE_REF }}
           kiox-version: v0.4.3
           delegate-goreleaser: true
+          goreleaser-config: .goreleaser.kiox.yaml
 
   goreleaser-release:
     runs-on: ubuntu-latest

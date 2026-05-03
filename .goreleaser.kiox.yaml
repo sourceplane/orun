@@ -1,0 +1,32 @@
+version: 2
+
+builds:
+  - id: orun
+    main: ./cmd/orun
+    binary: orun
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    hooks:
+      post:
+        - mkdir -p dist/bin/{{ .Os }}/{{ .Arch }}
+        - cp {{ .Path }} dist/bin/{{ .Os }}/{{ .Arch }}/orun
+
+archives:
+  - formats:
+      - binary
+    name_template: "{{ .Binary }}-{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  disable: true
+
+release:
+  disable: true
+
+changelog:
+  disable: true
