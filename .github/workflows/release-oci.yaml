@@ -52,3 +52,4 @@ jobs:
           tag: ${{ github.ref_name }}
           push: ${{ env.IMAGE_REF }}
           kiox-version: v0.4.3
+          delegate-goreleaser: true
