@@ -99,6 +99,7 @@ func (r *Runner) ghaCloseStepGroup(jobID string) {
 		return
 	}
 	buf.CloseGroup()
+	r.gha.FlushStep(jobID)
 }
 
 // ghaEmitStepOutput dumps the raw step output (already mask-sanitized by the
