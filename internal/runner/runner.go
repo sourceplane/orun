@@ -656,6 +656,17 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 }
 
 func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState *state.ExecState, baseExecContext executor.ExecContext, persistState, failFast bool, summary *runSummary, concurrency int) error {
+	if r.JobID != "" {
+		var filtered []model.PlanJob
+		for _, job := range jobs {
+			if job.ID == r.JobID {
+				filtered = append(filtered, job)
+				break
+			}
+		}
+		jobs = filtered
+	}
+
 	sem := make(chan struct{}, concurrency)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
