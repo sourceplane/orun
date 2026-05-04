@@ -126,33 +126,7 @@ func generatePlan() error {
 		if err != nil {
 			return fmt.Errorf("failed to detect changed files: %w", err)
 		}
-		intentChanged := isIntentPathChanged(changedSet, intentFile)
-
-		// Build map of changed components by checking their resolved paths
-		changedComps := make(map[string]bool)
-		for _, comp := range normalized.Components {
-			if intentChanged {
-				changedComps[comp.Name] = true
-			} else if isFileChanged(changedSet, comp.SourcePath) {
-				changedComps[comp.Name] = true
-			} else {
-				// Use the expanded component instances to get resolved paths
-				// Check if any instance of this component has a changed path
-				for _, envInstances := range instances {
-					for _, inst := range envInstances {
-						if inst.ComponentName == comp.Name && inst.Path != "" && inst.Path != "./" {
-							if isPathChanged(changedSet, inst.Path) {
-								changedComps[comp.Name] = true
-								break
-							}
-						}
-					}
-					if changedComps[comp.Name] {
-						break
-					}
-				}
-			}
-		}
+		changedComps := collectChangedComponents(normalized, instances, changedSet, intentFile)
 
 		// Use dependency resolver to include all required dependencies
 		resolver := expand.NewDependencyResolver(normalized)
@@ -500,29 +474,7 @@ func listComponents(args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to detect changed files: %w", err)
 		}
-
-		intentChanged := isIntentPathChanged(changedSet, intentFile)
-
-		for _, comp := range components {
-			normalizedComp, exists := normalized.ComponentIndex[comp.Name]
-			if !exists {
-				continue
-			}
-			if intentChanged {
-				changedComps[comp.Name] = true
-			} else if isFileChanged(changedSet, normalizedComp.SourcePath) {
-				changedComps[comp.Name] = true
-			} else {
-				for _, inst := range comp.Instances {
-					if inst.Path != "" && inst.Path != "./" {
-						if isPathChanged(changedSet, inst.Path) {
-							changedComps[comp.Name] = true
-							break
-						}
-					}
-				}
-			}
-		}
+		changedComps = collectChangedComponents(normalized, instancesFromMergedComponents(components), changedSet, intentFile)
 
 		if len(changedComps) == 0 {
 			color := ui.ColorEnabledForWriter(os.Stdout)
@@ -809,8 +761,75 @@ func isPathChanged(changedFiles map[string]struct{}, path string) bool {
 	return false
 }
 
+func collectChangedComponents(
+	normalized *model.NormalizedIntent,
+	instances map[string][]*model.ComponentInstance,
+	changedFiles map[string]struct{},
+	intentPath string,
+) map[string]bool {
+	changedComponents := make(map[string]bool)
+	if normalized == nil {
+		return changedComponents
+	}
+
+	if isIntentPathChanged(changedFiles, intentPath) {
+		for _, comp := range normalized.Components {
+			changedComponents[comp.Name] = true
+		}
+		return changedComponents
+	}
+
+	for _, comp := range normalized.Components {
+		if isFileChanged(changedFiles, comp.SourcePath) {
+			changedComponents[comp.Name] = true
+			continue
+		}
+
+		for _, envInstances := range instances {
+			for _, inst := range envInstances {
+				if inst.ComponentName == comp.Name && inst.Path != "" && inst.Path != "./" && isPathChanged(changedFiles, inst.Path) {
+					changedComponents[comp.Name] = true
+					break
+				}
+			}
+			if changedComponents[comp.Name] {
+				break
+			}
+		}
+	}
+
+	return changedComponents
+}
+
+func instancesFromMergedComponents(components []*expand.ComponentMerged) map[string][]*model.ComponentInstance {
+	instances := make(map[string][]*model.ComponentInstance)
+	for _, comp := range components {
+		for _, inst := range comp.Instances {
+			instances[inst.Environment] = append(instances[inst.Environment], inst)
+		}
+	}
+	return instances
+}
+
 func isIntentPathChanged(changedFiles map[string]struct{}, intentPath string) bool {
-	return isFileChanged(changedFiles, intentPath)
+	if isFileChanged(changedFiles, intentPath) {
+		return true
+	}
+
+	normalizedIntent := strings.TrimPrefix(normalizeFilePath(intentPath), "./")
+	if normalizedIntent == "" {
+		return false
+	}
+
+	base := filepathBase(normalizedIntent)
+	for file := range changedFiles {
+		normalizedFile := strings.TrimPrefix(normalizeFilePath(file), "./")
+		if normalizedFile == base || strings.HasSuffix(normalizedFile, "/"+base) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func isFileChanged(changedFiles map[string]struct{}, targetPath string) bool {
@@ -819,10 +838,9 @@ func isFileChanged(changedFiles map[string]struct{}, targetPath string) bool {
 	}
 
 	normalizedTarget := strings.TrimPrefix(normalizeFilePath(targetPath), "./")
-	base := filepathBase(normalizedTarget)
 	for file := range changedFiles {
 		normalizedFile := strings.TrimPrefix(normalizeFilePath(file), "./")
-		if normalizedFile == normalizedTarget || normalizedFile == base || strings.HasSuffix(normalizedFile, "/"+base) || strings.HasSuffix(normalizedTarget, "/"+normalizedFile) {
+		if normalizedFile == normalizedTarget {
 			return true
 		}
 	}

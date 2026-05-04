@@ -92,19 +92,6 @@ func TestIsPathChanged_TrailingSlash(t *testing.T) {
 	}
 }
 
-func TestIsFileChanged_BasenameMatch(t *testing.T) {
-	files := map[string]struct{}{
-		"examples/intent.yaml": {},
-	}
-
-	if !isFileChanged(files, "intent.yaml") {
-		t.Error("expected basename intent.yaml to match examples/intent.yaml")
-	}
-	if !isFileChanged(files, "examples/intent.yaml") {
-		t.Error("expected exact path match")
-	}
-}
-
 func TestIsFileChanged_DotSlashPrefix(t *testing.T) {
 	files := map[string]struct{}{
 		"services/api/component.yaml": {},
@@ -135,7 +122,20 @@ func TestIsFileChanged_NoMatch(t *testing.T) {
 	}
 }
 
-func TestIsIntentPathChanged_DelegatesToFileChanged(t *testing.T) {
+func TestIsFileChanged_ComponentManifestRequiresExactPath(t *testing.T) {
+	files := map[string]struct{}{
+		"website/component.yaml": {},
+	}
+
+	if isFileChanged(files, "apps/api-edge/component.yaml") {
+		t.Error("component.yaml basename should not match a different component manifest path")
+	}
+	if !isFileChanged(files, "website/component.yaml") {
+		t.Error("exact component manifest path should match")
+	}
+}
+
+func TestIsIntentPathChanged_BasenameMatch(t *testing.T) {
 	files := map[string]struct{}{
 		"examples/intent.yaml": {},
 	}
