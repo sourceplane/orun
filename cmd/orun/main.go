@@ -810,7 +810,24 @@ func isPathChanged(changedFiles map[string]struct{}, path string) bool {
 }
 
 func isIntentPathChanged(changedFiles map[string]struct{}, intentPath string) bool {
-	return isFileChanged(changedFiles, intentPath)
+	if isFileChanged(changedFiles, intentPath) {
+		return true
+	}
+
+	normalizedIntent := strings.TrimPrefix(normalizeFilePath(intentPath), "./")
+	if normalizedIntent == "" {
+		return false
+	}
+
+	base := filepathBase(normalizedIntent)
+	for file := range changedFiles {
+		normalizedFile := strings.TrimPrefix(normalizeFilePath(file), "./")
+		if normalizedFile == base || strings.HasSuffix(normalizedFile, "/"+base) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func isFileChanged(changedFiles map[string]struct{}, targetPath string) bool {
@@ -819,10 +836,9 @@ func isFileChanged(changedFiles map[string]struct{}, targetPath string) bool {
 	}
 
 	normalizedTarget := strings.TrimPrefix(normalizeFilePath(targetPath), "./")
-	base := filepathBase(normalizedTarget)
 	for file := range changedFiles {
 		normalizedFile := strings.TrimPrefix(normalizeFilePath(file), "./")
-		if normalizedFile == normalizedTarget || normalizedFile == base || strings.HasSuffix(normalizedFile, "/"+base) || strings.HasSuffix(normalizedTarget, "/"+normalizedFile) {
+		if normalizedFile == normalizedTarget {
 			return true
 		}
 	}
