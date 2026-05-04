@@ -812,24 +812,7 @@ func instancesFromMergedComponents(components []*expand.ComponentMerged) map[str
 }
 
 func isIntentPathChanged(changedFiles map[string]struct{}, intentPath string) bool {
-	if isFileChanged(changedFiles, intentPath) {
-		return true
-	}
-
-	normalizedIntent := strings.TrimPrefix(normalizeFilePath(intentPath), "./")
-	if normalizedIntent == "" {
-		return false
-	}
-
-	base := filepathBase(normalizedIntent)
-	for file := range changedFiles {
-		normalizedFile := strings.TrimPrefix(normalizeFilePath(file), "./")
-		if normalizedFile == base || strings.HasSuffix(normalizedFile, "/"+base) {
-			return true
-		}
-	}
-
-	return false
+	return isFileChanged(changedFiles, intentPath)
 }
 
 func isFileChanged(changedFiles map[string]struct{}, targetPath string) bool {
@@ -838,9 +821,10 @@ func isFileChanged(changedFiles map[string]struct{}, targetPath string) bool {
 	}
 
 	normalizedTarget := strings.TrimPrefix(normalizeFilePath(targetPath), "./")
+	base := filepathBase(normalizedTarget)
 	for file := range changedFiles {
 		normalizedFile := strings.TrimPrefix(normalizeFilePath(file), "./")
-		if normalizedFile == normalizedTarget {
+		if normalizedFile == normalizedTarget || normalizedFile == base || strings.HasSuffix(normalizedFile, "/"+base) || strings.HasSuffix(normalizedTarget, "/"+normalizedFile) {
 			return true
 		}
 	}
