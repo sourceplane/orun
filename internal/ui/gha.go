@@ -23,7 +23,9 @@ func IsGitHubActions() bool {
 // Lifecycle:
 //   - JobBuffer(jobID) returns a per-job sink that callers write into freely.
 //   - Group(buf, title, fn) wraps fn's writes in ::group::/::endgroup::.
-//   - FlushJob(jobID) atomically copies the buffered job output to the
+//   - FlushStep(jobID) emits and clears the buffer mid-job so each step's
+//     output appears live without waiting for the whole job to finish.
+//   - FlushJob(jobID) atomically copies the remaining buffered job output to the
 //     underlying writer, guaranteeing groups never interleave across jobs.
 //
 // Color/ANSI is intentionally disabled inside groups: the GHA log viewer
@@ -54,6 +56,38 @@ func (g *GHARenderer) JobBuffer(jobID string) *GHAJobBuffer {
 	buf := &GHAJobBuffer{jobID: jobID}
 	g.bufs[jobID] = buf
 	return buf
+}
+
+// FlushStep writes and clears the job buffer's current content without
+// removing the buffer from the renderer. Called after each step's
+// ::endgroup:: so that step output appears live in the GHA log viewer
+// rather than batching until the entire job completes.
+func (g *GHARenderer) FlushStep(jobID string) {
+	g.mu.Lock()
+	buf, ok := g.bufs[jobID]
+	g.mu.Unlock()
+	if !ok || buf == nil {
+		return
+	}
+	buf.mu.Lock()
+	if buf.buf.Len() == 0 {
+		buf.mu.Unlock()
+		return
+	}
+	data := make([]byte, buf.buf.Len())
+	copy(data, buf.buf.Bytes())
+	buf.buf.Reset()
+	buf.mu.Unlock()
+	data = filterMatcherCommands(data)
+	if len(data) == 0 {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.w.Write(data)
+	if !bytes.HasSuffix(data, []byte{'\n'}) {
+		fmt.Fprintln(g.w)
+	}
 }
 
 // FlushJob writes the job buffer's accumulated content to the underlying

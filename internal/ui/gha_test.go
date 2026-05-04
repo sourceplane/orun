@@ -119,6 +119,48 @@ func TestGHARendererNestedGroupDegradesGracefully(t *testing.T) {
 	}
 }
 
+func TestGHARendererFlushStepEmitsLiveAndPreservesBuffer(t *testing.T) {
+	var sink bytes.Buffer
+	g := NewGHARenderer(&sink)
+
+	b := g.JobBuffer("job-x")
+	b.OpenGroup("job-x › build  (1/2)")
+	b.Println("compiling")
+	b.CloseGroup()
+
+	// FlushStep should emit the first step's output immediately.
+	g.FlushStep("job-x")
+	afterFirstFlush := sink.String()
+	if !strings.Contains(afterFirstFlush, "::group::job-x › build") {
+		t.Fatalf("expected first group in output after FlushStep, got %q", afterFirstFlush)
+	}
+	if !strings.Contains(afterFirstFlush, "::endgroup::") {
+		t.Fatalf("expected endgroup in output after FlushStep, got %q", afterFirstFlush)
+	}
+
+	// Buffer should be empty now; a second FlushStep is a no-op.
+	sink.Reset()
+	g.FlushStep("job-x")
+	if sink.Len() != 0 {
+		t.Fatalf("expected no output from FlushStep on empty buffer, got %q", sink.String())
+	}
+
+	// Write a second step and verify FlushJob flushes it.
+	b.OpenGroup("job-x › test  (2/2)")
+	b.Println("passed")
+	b.CloseGroup()
+	b.Println("✓ job-x  1.2s  2 steps")
+
+	g.FlushJob("job-x")
+	got := sink.String()
+	if !strings.Contains(got, "::group::job-x › test") {
+		t.Fatalf("expected second group in FlushJob output, got %q", got)
+	}
+	if !strings.Contains(got, "✓ job-x") {
+		t.Fatalf("expected footer in FlushJob output, got %q", got)
+	}
+}
+
 func TestIsGitHubActions(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "true")
 	if !IsGitHubActions() {

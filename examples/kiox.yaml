@@ -4,4 +4,4 @@ metadata:
   name: example-platform
 providers:
   orun:
-    source: ghcr.io/sourceplane/orun:v0.20.2
+    source: ghcr.io/sourceplane/orun:v1.12.4
