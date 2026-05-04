@@ -568,7 +568,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 
 		if r.inGHA() {
 			r.ghaEmitStepOutput(job.ID, output)
-			r.ghaPrintStepResult(job, stepID, stepErr == nil, stepDuration, stepErr)
+			r.ghaPrintStepResult(job, stepID, stepErr == nil, stepDuration, stepErr, view.headline)
 			r.ghaCloseStepGroup(job.ID)
 		}
 
