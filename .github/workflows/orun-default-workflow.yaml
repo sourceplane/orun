@@ -32,8 +32,7 @@ jobs:
           orun plan \
             --changed \
             --intent examples/intent.yaml \
-            --output plan.json \
-            --remote-state
+            --output plan.json
           echo "plan-checksum=$(cat plan-checksum.txt)" >> $GITHUB_OUTPUT
           echo "job-ids=$(cat job-ids.txt)" >> $GITHUB_OUTPUT
       - name: Upload plan artifact
