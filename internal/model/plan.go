@@ -18,6 +18,11 @@ type PlanMetadata struct {
 	GeneratedAt string     `json:"generatedAt,omitempty" yaml:"generatedAt,omitempty"`
 	Checksum    string     `json:"checksum,omitempty" yaml:"checksum,omitempty"`
 	Scope       *PlanScope `json:"scope,omitempty" yaml:"scope,omitempty"`
+	// WorkDir is the intent directory path relative to the workspace root
+	// (the directory where orun plan was invoked). orun run uses this when
+	// intent auto-discovery fails (e.g. in GHA where the intent lives in a
+	// subdirectory of GITHUB_WORKSPACE).
+	WorkDir string `json:"workDir,omitempty" yaml:"workDir,omitempty"`
 }
 
 // PlanScope records the component scoping applied when the plan was generated.
