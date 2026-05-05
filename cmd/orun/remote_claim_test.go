@@ -21,6 +21,7 @@ type fakeBackend struct {
 	runnableIdx   int
 	claimCalls    int
 	runnableCalls int
+	runState      *state.ExecState
 }
 
 func (f *fakeBackend) InitRun(_ context.Context, _ *model.Plan, opts statebackend.InitRunOptions) (*statebackend.RunHandle, error) {
@@ -60,7 +61,7 @@ func (f *fakeBackend) AppendStepLog(_ context.Context, _, _, _ string) error {
 }
 
 func (f *fakeBackend) LoadRunState(_ context.Context, _ string) (*state.ExecState, *state.ExecMetadata, error) {
-	return nil, nil, nil
+	return f.runState, nil, nil
 }
 
 func (f *fakeBackend) ReadJobLog(_ context.Context, _, _ string) (string, error) {
@@ -152,7 +153,7 @@ func TestWaitForJobRunnable_ReturnsWhenJobAppears(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(10 * time.Second)
-	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", time.Millisecond, deadline)
+	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", nil, time.Millisecond, deadline)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestWaitForJobRunnable_ContextCancellation(t *testing.T) {
 	cancel()
 
 	deadline := time.Now().Add(10 * time.Second)
-	err := waitForJobRunnable(ctx, backend, "run-1", "target-job", time.Millisecond, deadline)
+	err := waitForJobRunnable(ctx, backend, "run-1", "target-job", nil, time.Millisecond, deadline)
 	if err == nil {
 		t.Fatal("expected error on cancelled context")
 	}
@@ -182,7 +183,7 @@ func TestWaitForJobRunnable_DeadlineExceeded(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(-1 * time.Second) // already past
-	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", time.Millisecond, deadline)
+	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", nil, time.Millisecond, deadline)
 	if err == nil {
 		t.Fatal("expected deadline exceeded error")
 	}
@@ -204,12 +205,65 @@ func TestWaitForJobRunnable_ErrorPropagates(t *testing.T) {
 	backend := &failingRunnableBackend{}
 
 	deadline := time.Now().Add(10 * time.Second)
-	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", time.Millisecond, deadline)
+	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", nil, time.Millisecond, deadline)
 	if err == nil {
 		t.Fatal("expected error from failing backend")
 	}
 	if !contains(err.Error(), "network error") {
 		t.Fatalf("expected network error in message, got: %v", err)
+	}
+}
+
+func TestWaitForJobRunnable_DepsFailedDuringPoll(t *testing.T) {
+	execState := &state.ExecState{
+		Jobs: map[string]*state.JobState{
+			"dep-1": {Status: "failed"},
+		},
+	}
+	backend := &fakeBackend{
+		runnableJobs: [][]string{{}}, // target job never appears
+		runState:     execState,
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", []string{"dep-1"}, time.Millisecond, deadline)
+	if err == nil {
+		t.Fatal("expected error when dependency failed during poll")
+	}
+	if contains(err.Error(), "timeout") {
+		t.Fatalf("should not timeout when dep failed, got: %v", err)
+	}
+	if !contains(err.Error(), "failed") {
+		t.Fatalf("expected 'failed' in error message, got: %v", err)
+	}
+}
+
+func TestPerformRemoteJobClaim_DepsWaiting_DepFailsDuringPoll(t *testing.T) {
+	execState := &state.ExecState{
+		Jobs: map[string]*state.JobState{
+			"dep-1": {Status: "failed"},
+		},
+	}
+	backend := &fakeBackend{
+		claimResults: []statebackend.ClaimResult{
+			{Claimed: false, DepsWaiting: true},
+		},
+		runnableJobs: [][]string{{}}, // target job never appears
+		runState:     execState,
+	}
+	plan := &model.Plan{
+		Jobs: []model.PlanJob{
+			{ID: "dep-1"},
+			{ID: "job-1", DependsOn: []string{"dep-1"}},
+		},
+	}
+
+	err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false)
+	if err == nil {
+		t.Fatal("expected error when dependency fails during polling")
+	}
+	if contains(err.Error(), "timeout") {
+		t.Fatalf("should not timeout when dep failed, got: %v", err)
 	}
 }
 

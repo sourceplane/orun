@@ -507,7 +507,7 @@ func performRemoteJobClaim(
 			}
 			fmt.Fprintf(stdout, "  %s waiting for dependencies of %s...\n",
 				ui.Dim(color, "○"), jobID)
-			if waitErr := waitForJobRunnable(ctx, backend, runID, jobID, delay, deadline); waitErr != nil {
+			if waitErr := waitForJobRunnable(ctx, backend, runID, jobID, job.DependsOn, delay, deadline); waitErr != nil {
 				return waitErr
 			}
 		case strings.EqualFold(result.CurrentStatus, "running"):
@@ -540,12 +540,15 @@ func (e *jobAlreadyCompleteError) Error() string {
 }
 
 // waitForJobRunnable polls /runnable until jobID appears or deadline is exceeded.
-func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID, jobID string, delay time.Duration, deadline time.Time) error {
-	const (
-		pollInit = 2 * time.Second
-		pollMax  = 15 * time.Second
-	)
-	poll := pollInit
+// deps lists the job's declared dependencies; on each poll that doesn't find the
+// job, LoadRunState is called to detect upstream failures early and avoid waiting
+// the full depWaitTimeout when a dependency has already failed.
+func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID, jobID string, deps []string, initialDelay time.Duration, deadline time.Time) error {
+	const pollMax = 15 * time.Second
+	if initialDelay <= 0 {
+		initialDelay = 2 * time.Second
+	}
+	poll := initialDelay
 	for {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("job %s: dependency wait timeout exceeded while polling /runnable", jobID)
@@ -560,6 +563,17 @@ func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID
 		for _, id := range jobs {
 			if id == jobID {
 				return nil
+			}
+		}
+		// Check if any dependency has already failed so we don't wait the full
+		// depWaitTimeout — a failed dep means this job can never become runnable.
+		if len(deps) > 0 {
+			if execState, _, stateErr := backend.LoadRunState(ctx, runID); stateErr == nil && execState != nil {
+				for _, dep := range deps {
+					if js, ok := execState.Jobs[dep]; ok && js != nil && js.Status == "failed" {
+						return fmt.Errorf("job %s: dependency %s failed", jobID, dep)
+					}
+				}
 			}
 		}
 		poll = nextBackoff(poll, pollMax)
