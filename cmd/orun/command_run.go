@@ -384,8 +384,7 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 			if !success {
 				status = statebackend.JobStatusFailed
 			}
-			// Best-effort; ignore errors.
-			_ = backend.UpdateJob(ctx, handle.RunID, jobID, runnerID, status, errText)
+			updateJobWithRetry(ctx, backend, handle.RunID, jobID, runnerID, status, errText)
 		},
 	}
 
@@ -545,6 +544,7 @@ func (e *jobAlreadyCompleteError) Error() string {
 // the full depWaitTimeout when a dependency has already failed.
 func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID, jobID string, deps []string, initialDelay time.Duration, deadline time.Time) error {
 	const pollMax = 15 * time.Second
+	const heartbeatTimeout = 5 * time.Minute // matches coordinator HEARTBEAT_TIMEOUT_MS
 	if initialDelay <= 0 {
 		initialDelay = 2 * time.Second
 	}
@@ -565,18 +565,51 @@ func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID
 				return nil
 			}
 		}
-		// Check if any dependency has already failed so we don't wait the full
-		// depWaitTimeout — a failed dep means this job can never become runnable.
+		// Check if any dependency has already failed or is stuck (heartbeat expired)
+		// so we don't wait the full depWaitTimeout.
 		if len(deps) > 0 {
 			if execState, _, stateErr := backend.LoadRunState(ctx, runID); stateErr == nil && execState != nil {
 				for _, dep := range deps {
-					if js, ok := execState.Jobs[dep]; ok && js != nil && js.Status == "failed" {
+					js, ok := execState.Jobs[dep]
+					if !ok || js == nil {
+						continue
+					}
+					if js.Status == "failed" {
 						return fmt.Errorf("job %s: dependency %s failed", jobID, dep)
+					}
+					// Treat a "running" dep whose heartbeat has expired as failed:
+					// the coordinator's sweep alarm will mark it failed shortly anyway.
+					if js.Status == "running" && js.HeartbeatAt != "" {
+						if hb, hbErr := time.Parse(time.RFC3339, js.HeartbeatAt); hbErr == nil {
+							if time.Since(hb) > heartbeatTimeout {
+								return fmt.Errorf("job %s: dependency %s runner heartbeat timed out", jobID, dep)
+							}
+						}
 					}
 				}
 			}
 		}
 		poll = nextBackoff(poll, pollMax)
+	}
+}
+
+// updateJobWithRetry calls UpdateJob up to 3 times with exponential backoff.
+// Terminal status must reach the coordinator so dependent jobs don't get stuck.
+func updateJobWithRetry(ctx context.Context, backend statebackend.Backend, runID, jobID, runnerID string, status statebackend.JobStatus, errText string) {
+	const maxAttempts = 3
+	delay := 2 * time.Second
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+			delay *= 2
+		}
+		if err := backend.UpdateJob(ctx, runID, jobID, runnerID, status, errText); err == nil {
+			return
+		}
 	}
 }
 
