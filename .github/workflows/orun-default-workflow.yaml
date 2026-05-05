@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: read
+  id-token: write   # orun remote-state OIDC authentication
+
+env:
+  GITHUB_TOKEN: ${{ github.token }}
+  ORUN_BACKEND_URL: https://orun-api.sourceplane.ai
+
+jobs:
+  plan:
+    name: Orun Plan
+    runs-on: ubuntu-latest
+    outputs:
+      job-ids: ${{ steps.plan.outputs.job-ids }}
+      plan-checksum: ${{ steps.plan.outputs.plan-checksum }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: sourceplane/orun-action@v1.1.0
+      - name: Plan with Orun
+        id: plan
+        run: |
+          orun plan \
+            --changed \
+            --intent examples/intent.yaml \
+            --output plan.json
+          echo "plan-checksum=$(jq -r '.metadata.checksum | ltrimstr("sha256-") | .[0:12]' plan.json)" >> $GITHUB_OUTPUT
+          echo "job-ids=$(jq -c '[.jobs[].id]' plan.json)" >> $GITHUB_OUTPUT
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orun-plan
+          path: plan.json
+
+  execute:
+    name: ${{ matrix.job-id }}
+    needs: plan
+    if: needs.plan.outputs.job-ids != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        job-id: ${{ fromJson(needs.plan.outputs.job-ids) }}
+    concurrency:
+      group: orun-${{ github.ref }}-${{ matrix.job-id }}
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: orun-plan
+      - uses: sourceplane/orun-action@v1.1.0
+      - name: run job steps
+        run: |
+          orun run \
+            --plan plan.json \
+            --runner github-actions \
+            --remote-state \
+            --job "${{ matrix.job-id }}" \
+            --exec-id "${{ github.run_id }}-${{ github.run_attempt }}"

@@ -779,15 +779,18 @@ func collectChangedComponents(
 		return changedComponents
 	}
 
+	intentDir := filepathDir(intentPath)
+
 	for _, comp := range normalized.Components {
-		if isFileChanged(changedFiles, comp.SourcePath) {
+		if isFileChanged(changedFiles, joinPath(intentDir, comp.SourcePath)) {
 			changedComponents[comp.Name] = true
 			continue
 		}
 
 		for _, envInstances := range instances {
 			for _, inst := range envInstances {
-				if inst.ComponentName == comp.Name && inst.Path != "" && inst.Path != "./" && isPathChanged(changedFiles, inst.Path) {
+				instPath := joinPath(intentDir, inst.Path)
+				if inst.ComponentName == comp.Name && inst.Path != "" && inst.Path != "./" && isPathChanged(changedFiles, instPath) {
 					changedComponents[comp.Name] = true
 					break
 				}
@@ -854,6 +857,24 @@ func filepathBase(path string) string {
 		return path
 	}
 	return parts[len(parts)-1]
+}
+
+func filepathDir(path string) string {
+	parts := strings.Split(normalizeFilePath(path), "/")
+	if len(parts) <= 1 {
+		return "."
+	}
+	return strings.Join(parts[:len(parts)-1], "/")
+}
+
+func joinPath(dir, path string) string {
+	if dir == "" || dir == "." {
+		return path
+	}
+	if path == "" {
+		return dir
+	}
+	return dir + "/" + path
 }
 
 func normalizeFilePath(path string) string {
