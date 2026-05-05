@@ -192,8 +192,22 @@ func runPlan() error {
 	if err != nil {
 		return err
 	}
+
+	// When intent auto-discovery failed (intentRoot is empty), recover it from
+	// the plan's embedded workDir. This handles the common GHA case where the
+	// intent lives in a repo subdirectory and orun run is invoked from the
+	// workspace root (where walking upward doesn't find intent.yaml).
+	if intentRoot == "" && strings.TrimSpace(plan.Metadata.WorkDir) != "" {
+		if cwd, err := os.Getwd(); err == nil {
+			intentRoot = filepath.Join(cwd, filepath.FromSlash(plan.Metadata.WorkDir))
+		}
+	}
+
 	if !runUseWorkDirOverride && runnerName == "github-actions" {
-		if workspace := strings.TrimSpace(os.Getenv("GITHUB_WORKSPACE")); workspace != "" {
+		// Only use GITHUB_WORKSPACE when we have no intentRoot — if the intent lives
+		// in a subdirectory of the repo (e.g. examples/intent.yaml), intentRoot is the
+		// correct base for component paths, not the workspace root.
+		if workspace := strings.TrimSpace(os.Getenv("GITHUB_WORKSPACE")); workspace != "" && intentRoot == "" {
 			runWorkDir = workspace
 		}
 	}

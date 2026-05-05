@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -193,6 +194,17 @@ func generatePlan() error {
 	renderer := render.NewRenderer()
 	plan := renderer.RenderPlanWithOrder(intent.Metadata, jobInstances, jobBindings, sorted)
 	plan.Spec.CompositionSources = compositionRegistry.Sources
+
+	// Embed the intent directory as a workspace-relative path so that
+	// orun run can resolve component paths correctly when auto-discovery
+	// cannot walk up to find the intent (e.g. intent in a repo subdirectory).
+	if intentRoot != "" {
+		if cwd, err := os.Getwd(); err == nil {
+			if rel, err := filepath.Rel(cwd, intentRoot); err == nil && !strings.HasPrefix(rel, "..") {
+				plan.Metadata.WorkDir = filepath.ToSlash(rel)
+			}
+		}
+	}
 
 	if debugMode {
 		fmt.Println("\n" + renderer.DebugDump(plan))

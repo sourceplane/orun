@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -131,10 +133,39 @@ func TestResolveEffectiveWorkDirFallsBackToAbsCWD(t *testing.T) {
 }
 
 func TestResolveEffectiveWorkDirPreservesNonDotWorkDir(t *testing.T) {
-	// When workdir was already changed (e.g. from GITHUB_WORKSPACE) before calling,
-	// it should be preserved even without an explicit override flag.
-	got := resolveEffectiveWorkDir(false, "/github/workspace", "/abs/project/root")
+	// When workdir was already changed (e.g. from GITHUB_WORKSPACE) before calling
+	// and intentRoot is empty, the non-"." workDir should be preserved.
+	got := resolveEffectiveWorkDir(false, "/github/workspace", "")
 	if got != "/github/workspace" {
 		t.Fatalf("resolveEffectiveWorkDir() = %q, want /github/workspace", got)
+	}
+}
+
+func TestResolveEffectiveWorkDirPrefersIntentRootOverNonDotWorkDir(t *testing.T) {
+	// When intentRoot is set (intent in a subdirectory), it must win over GITHUB_WORKSPACE
+	// so component paths like "infra/infra-1" resolve relative to the intent dir.
+	got := resolveEffectiveWorkDir(false, ".", "/github/workspace/examples")
+	if got != "/github/workspace/examples" {
+		t.Fatalf("resolveEffectiveWorkDir() = %q, want /github/workspace/examples", got)
+	}
+}
+
+func TestPlanWorkDirRecoveredWhenIntentRootEmpty(t *testing.T) {
+	// Simulates: orun plan --intent examples/intent.yaml generates plan with
+	// workDir="examples"; orun run in GHA from workspace root recovers intentRoot.
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	planWorkDir := "examples"
+	got := filepath.Join(cwd, filepath.FromSlash(planWorkDir))
+	want := filepath.Join(cwd, "examples")
+	if got != want {
+		t.Fatalf("recovered intentRoot = %q, want %q", got, want)
+	}
+	// Verify resolveEffectiveWorkDir then returns the intent dir (not ".")
+	final := resolveEffectiveWorkDir(false, ".", got)
+	if final != want {
+		t.Fatalf("resolveEffectiveWorkDir() = %q, want %q", final, want)
 	}
 }
