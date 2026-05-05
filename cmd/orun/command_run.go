@@ -506,7 +506,7 @@ func performRemoteJobClaim(
 			}
 			fmt.Fprintf(stdout, "  %s waiting for dependencies of %s...\n",
 				ui.Dim(color, "○"), jobID)
-			if waitErr := waitForJobRunnable(ctx, backend, runID, jobID, job.DependsOn, delay, deadline); waitErr != nil {
+			if waitErr := waitForJobRunnable(ctx, backend, runID, jobID, job.DependsOn, plan, delay, deadline); waitErr != nil {
 				return waitErr
 			}
 		case strings.EqualFold(result.CurrentStatus, "running"):
@@ -541,8 +541,8 @@ func (e *jobAlreadyCompleteError) Error() string {
 // waitForJobRunnable polls /runnable until jobID appears or deadline is exceeded.
 // deps lists the job's declared dependencies; on each poll that doesn't find the
 // job, LoadRunState is called to detect upstream failures early and avoid waiting
-// the full depWaitTimeout when a dependency has already failed.
-func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID, jobID string, deps []string, initialDelay time.Duration, deadline time.Time) error {
+// the full depWaitTimeout when a dependency has already failed or is permanently blocked.
+func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID, jobID string, deps []string, plan *model.Plan, initialDelay time.Duration, deadline time.Time) error {
 	const pollMax = 15 * time.Second
 	const heartbeatTimeout = 5 * time.Minute // matches coordinator HEARTBEAT_TIMEOUT_MS
 	if initialDelay <= 0 {
@@ -565,8 +565,8 @@ func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID
 				return nil
 			}
 		}
-		// Check if any dependency has already failed or is stuck (heartbeat expired)
-		// so we don't wait the full depWaitTimeout.
+		// Check if any dependency has already failed, is permanently blocked (its own
+		// deps failed but it never ran), or has an expired heartbeat.
 		if len(deps) > 0 {
 			if execState, _, stateErr := backend.LoadRunState(ctx, runID); stateErr == nil && execState != nil {
 				for _, dep := range deps {
@@ -576,6 +576,11 @@ func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID
 					}
 					if js.Status == "failed" {
 						return fmt.Errorf("job %s: dependency %s failed", jobID, dep)
+					}
+					// A "pending" dep that is transitively blocked (one of its own deps
+					// failed) will never become runnable — fail fast rather than waiting.
+					if js.Status == "pending" && plan != nil && isTransitivelyBlocked(execState, plan, dep) {
+						return fmt.Errorf("job %s: dependency %s is permanently blocked (upstream failure)", jobID, dep)
 					}
 					// Treat a "running" dep whose heartbeat has expired as failed:
 					// the coordinator's sweep alarm will mark it failed shortly anyway.
@@ -591,6 +596,25 @@ func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID
 		}
 		poll = nextBackoff(poll, pollMax)
 	}
+}
+
+// isTransitivelyBlocked returns true if any dependency of depID (recursively)
+// is in "failed" status, meaning depID can never become runnable.
+func isTransitivelyBlocked(execState *state.ExecState, plan *model.Plan, depID string) bool {
+	depJob := findJobByIDInPlan(plan, depID)
+	for _, transitiveDep := range depJob.DependsOn {
+		js, ok := execState.Jobs[transitiveDep]
+		if !ok || js == nil {
+			continue
+		}
+		if js.Status == "failed" {
+			return true
+		}
+		if isTransitivelyBlocked(execState, plan, transitiveDep) {
+			return true
+		}
+	}
+	return false
 }
 
 // updateJobWithRetry calls UpdateJob up to 3 times with exponential backoff.
