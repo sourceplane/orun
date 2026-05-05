@@ -142,6 +142,9 @@ func (r *RemoteStateBackend) LoadRunState(ctx context.Context, runID string) (*s
 		if j.LastError != nil {
 			js.LastError = *j.LastError
 		}
+		if j.HeartbeatAt != nil {
+			js.HeartbeatAt = *j.HeartbeatAt
+		}
 		st.Jobs[j.JobID] = js
 	}
 
