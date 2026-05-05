@@ -33,8 +33,8 @@ jobs:
             --changed \
             --intent examples/intent.yaml \
             --output plan.json
-          echo "plan-checksum=$(cat plan-checksum.txt)" >> $GITHUB_OUTPUT
-          echo "job-ids=$(cat job-ids.txt)" >> $GITHUB_OUTPUT
+          echo "plan-checksum=$(jq -r '.metadata.checksum | ltrimstr("sha256-") | .[0:12]' plan.json)" >> $GITHUB_OUTPUT
+          echo "job-ids=$(jq -c '[.jobs[].id]' plan.json)" >> $GITHUB_OUTPUT
       - name: Upload plan artifact
         uses: actions/upload-artifact@v4
         with:
