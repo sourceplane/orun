@@ -513,27 +513,25 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 		r.updateLiveStep(job, stepID, idx+1, len(job.Steps))
 		r.printStepStart(stepID, idx+1, len(job.Steps))
 		r.printStepContext(step, workingDir, timeoutValue, retryCount)
-		if r.inGHA() {
-			r.ghaOpenStepGroup(job, stepID, idx+1, len(job.Steps))
-		}
 		if r.DryRun {
 			r.updateState(persistState, execState, func() {
 				jobState.Steps[stepID] = "completed"
 			})
 			r.printStepDryRun()
 			if r.inGHA() {
-				r.ghaCloseStepGroup(job.ID)
+				r.ghaPrintStepDryRun(job, stepID, idx+1)
 			}
 			continue
 		}
 
 		var output string
 		var stepErr error
+		var ghaOutput strings.Builder // accumulates per-attempt output for GHA
 		attempts := retryCount + 1
 		for attempt := 1; attempt <= attempts; attempt++ {
 			if attempts > 1 && attempt > 1 {
 				if r.inGHA() {
-					r.ghaPrintStepRetry(job.ID, attempt, attempts)
+					fmt.Fprintf(&ghaOutput, "\n↻ retry %d/%d\n", attempt, attempts)
 				} else {
 					r.printStepRetry(attempt, attempts)
 				}
@@ -548,6 +546,10 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 
 			output, stepErr = r.Executor.RunStep(execContext, job, step)
 			cancel()
+
+			if r.inGHA() && attempts > 1 {
+				ghaOutput.WriteString(output)
+			}
 
 			if stepErr == nil {
 				break
@@ -568,12 +570,11 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 		}
 
 		if r.inGHA() {
-			r.ghaEmitStepOutput(job.ID, output)
-			// Close the group before printing the step summary so the summary
-			// line is visible outside the collapsed logs section.
-			r.ghaCloseStepGroup(job.ID)
-			r.ghaPrintStepResult(job, stepID, idx+1, stepErr == nil, stepDuration, stepErr, view.headline)
-			r.gha.FlushStep(job.ID)
+			ghaDisplayOutput := output
+			if ghaOutput.Len() > 0 {
+				ghaDisplayOutput = ghaOutput.String()
+			}
+			r.ghaEmitStep(job, stepID, idx+1, ghaDisplayOutput, stepErr == nil, stepDuration, stepErr, view.headline)
 		}
 
 		jobReport.observeStepDone(stepID, stepErr == nil, false, stepDuration)
