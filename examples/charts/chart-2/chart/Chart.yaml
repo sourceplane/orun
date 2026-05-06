@@ -2,6 +2,6 @@ apiVersion: v2
 name: commerce-checkout
 description: Helm chart for the commerce checkout service
 type: application
-version: 0.1.8
+version: 0.1.9
 appVersion: "1.0.0"
 
