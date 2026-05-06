@@ -691,7 +691,7 @@ func buildChangeOptions() (git.ChangeOptions, error) {
 
 	// Auto-detect CI refs when no explicit source flags are provided.
 	if base == "" && head == "" && len(changedFiles) == 0 && !uncommitted && !untracked {
-		detected := ci.DetectRefs(os.Getenv)
+		detected := ci.DetectRefs(os.Getenv, os.ReadFile)
 		if detected.Provider != ci.ProviderNone {
 			base = detected.Base
 			head = detected.Head
