@@ -1,6 +1,9 @@
 package ci
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestDetectRefs(t *testing.T) {
 	tests := []struct {
@@ -218,7 +221,7 @@ func TestDetectRefs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			getenv := func(key string) string { return tt.env[key] }
-			got := DetectRefs(getenv)
+			got := DetectRefs(getenv, nil)
 
 			if got.Provider != tt.wantProv {
 				t.Errorf("Provider = %q, want %q", got.Provider, tt.wantProv)
@@ -248,7 +251,7 @@ func TestDetectedRefs_EnvVarsPopulated(t *testing.T) {
 		return m[key]
 	}
 
-	got := DetectRefs(getenv)
+	got := DetectRefs(getenv, nil)
 	if got.EnvVars == nil {
 		t.Fatal("EnvVars should not be nil")
 	}
@@ -275,10 +278,76 @@ func TestDetectedRefs_ReasonNonEmpty(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			getenv := func(key string) string { return tt.env[key] }
-			got := DetectRefs(getenv)
+			got := DetectRefs(getenv, nil)
 			if got.Reason == "" {
 				t.Error("Reason should not be empty for detected CI provider")
 			}
 		})
+	}
+}
+
+func TestDetectRefs_PushUsesBeforeSHA(t *testing.T) {
+	beforeSHA := "aaaa1111bbbb2222cccc3333dddd4444eeee5555"
+	afterSHA := "ffff6666aaaa7777bbbb8888cccc9999dddd0000"
+
+	payload, _ := json.Marshal(map[string]string{
+		"before": beforeSHA,
+		"after":  afterSHA,
+	})
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/event.json" {
+			return payload, nil
+		}
+		return nil, nil
+	}
+
+	getenv := func(key string) string {
+		m := map[string]string{
+			"GITHUB_ACTIONS":    "true",
+			"GITHUB_EVENT_NAME": "push",
+			"GITHUB_SHA":        afterSHA,
+			"GITHUB_EVENT_PATH": "/event.json",
+		}
+		return m[key]
+	}
+
+	got := DetectRefs(getenv, readFile)
+
+	if got.Base != beforeSHA {
+		t.Errorf("Base = %q, want before SHA %q", got.Base, beforeSHA)
+	}
+	if got.Head != afterSHA {
+		t.Errorf("Head = %q, want after SHA %q", got.Head, afterSHA)
+	}
+}
+
+func TestDetectRefs_PushFallsBackWhenBeforeIsZeroSHA(t *testing.T) {
+	zeroSHA := "0000000000000000000000000000000000000000"
+	afterSHA := "ffff6666aaaa7777bbbb8888cccc9999dddd0000"
+
+	payload, _ := json.Marshal(map[string]string{
+		"before": zeroSHA,
+		"after":  afterSHA,
+	})
+
+	readFile := func(path string) ([]byte, error) {
+		return payload, nil
+	}
+
+	getenv := func(key string) string {
+		m := map[string]string{
+			"GITHUB_ACTIONS":    "true",
+			"GITHUB_EVENT_NAME": "push",
+			"GITHUB_SHA":        afterSHA,
+			"GITHUB_EVENT_PATH": "/event.json",
+		}
+		return m[key]
+	}
+
+	got := DetectRefs(getenv, readFile)
+
+	if got.Base != "main" {
+		t.Errorf("Base = %q, want %q (fallback for new branch)", got.Base, "main")
 	}
 }

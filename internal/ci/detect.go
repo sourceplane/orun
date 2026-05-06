@@ -1,6 +1,9 @@
 package ci
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 type Provider string
 
@@ -20,9 +23,9 @@ type DetectedRefs struct {
 	EnvVars   map[string]string
 }
 
-func DetectRefs(getenv func(string) string) DetectedRefs {
+func DetectRefs(getenv func(string) string, readFile func(string) ([]byte, error)) DetectedRefs {
 	if strings.EqualFold(strings.TrimSpace(getenv("GITHUB_ACTIONS")), "true") {
-		return detectGitHubActions(getenv)
+		return detectGitHubActions(getenv, readFile)
 	}
 	if strings.TrimSpace(getenv("GITLAB_CI")) != "" {
 		return detectGitLabCI(getenv)
@@ -33,18 +36,19 @@ func DetectRefs(getenv func(string) string) DetectedRefs {
 	return DetectedRefs{}
 }
 
-func detectGitHubActions(getenv func(string) string) DetectedRefs {
+func detectGitHubActions(getenv func(string) string, readFile func(string) ([]byte, error)) DetectedRefs {
 	event := strings.TrimSpace(getenv("GITHUB_EVENT_NAME"))
 	baseRef := strings.TrimSpace(getenv("GITHUB_BASE_REF"))
 	headRef := strings.TrimSpace(getenv("GITHUB_HEAD_REF"))
 	sha := strings.TrimSpace(getenv("GITHUB_SHA"))
 
 	envVars := map[string]string{
-		"GITHUB_ACTIONS":    getenv("GITHUB_ACTIONS"),
-		"GITHUB_EVENT_NAME": event,
-		"GITHUB_BASE_REF":   baseRef,
-		"GITHUB_HEAD_REF":   headRef,
-		"GITHUB_SHA":        sha,
+		"GITHUB_ACTIONS":     getenv("GITHUB_ACTIONS"),
+		"GITHUB_EVENT_NAME":  event,
+		"GITHUB_BASE_REF":    baseRef,
+		"GITHUB_HEAD_REF":    headRef,
+		"GITHUB_SHA":         sha,
+		"GITHUB_EVENT_PATH":  getenv("GITHUB_EVENT_PATH"),
 	}
 
 	switch event {
@@ -75,10 +79,11 @@ func detectGitHubActions(getenv func(string) string) DetectedRefs {
 		}
 
 	case "push":
+		base := pushEventBase(getenv("GITHUB_EVENT_PATH"), readFile)
 		return DetectedRefs{
 			Provider:  ProviderGitHubActions,
 			EventType: "push",
-			Base:      "main",
+			Base:      base,
 			Head:      sha,
 			Reason:    "GitHub Actions push event",
 			EnvVars:   envVars,
@@ -178,4 +183,42 @@ func detectBuildkite(getenv func(string) string) DetectedRefs {
 		Reason:    "Buildkite push build",
 		EnvVars:   envVars,
 	}
+}
+
+// pushEventBase reads the GitHub push event payload to get the "before" SHA,
+// which is main's HEAD before the merge. This is the correct base for diffing
+// what changed in a merge — using GITHUB_SHA (after) as both base and head
+// produces an empty diff because the merge commit IS now the head of main.
+func pushEventBase(eventPath string, readFile func(string) ([]byte, error)) string {
+	if eventPath == "" || readFile == nil {
+		return "main"
+	}
+	data, err := readFile(eventPath)
+	if err != nil {
+		return "main"
+	}
+	var payload struct {
+		Before string `json:"before"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "main"
+	}
+	// All-zero SHA means the branch was just created; fall back to "main".
+	before := strings.TrimSpace(payload.Before)
+	if before == "" || isZeroSHA(before) {
+		return "main"
+	}
+	return before
+}
+
+func isZeroSHA(sha string) bool {
+	if len(sha) < 40 {
+		return false
+	}
+	for _, c := range sha {
+		if c != '0' {
+			return false
+		}
+	}
+	return true
 }
