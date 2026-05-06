@@ -175,3 +175,27 @@ func TestIsGitHubActions(t *testing.T) {
 		t.Fatal("expected IsGitHubActions=false when empty")
 	}
 }
+
+func TestGHAJobBufferStopCommands(t *testing.T) {
+	var sink bytes.Buffer
+	g := NewGHARenderer(&sink)
+	b := g.JobBuffer("job-x")
+
+	b.OpenGroup("step")
+	b.StopCommands("orun-stop-job-x")
+	b.Println("::error::this should not be processed as a command")
+	b.ResumeCommands("orun-stop-job-x")
+	b.CloseGroup()
+	g.FlushJob("job-x")
+
+	out := sink.String()
+	if !strings.Contains(out, "::stop-commands::orun-stop-job-x") {
+		t.Fatalf("expected stop-commands marker, got:\n%s", out)
+	}
+	if !strings.Contains(out, "::orun-stop-job-x::") {
+		t.Fatalf("expected resume-commands marker, got:\n%s", out)
+	}
+	if !strings.Contains(out, "::error::this should not be processed as a command") {
+		t.Fatalf("expected raw line preserved between stop/resume markers, got:\n%s", out)
+	}
+}

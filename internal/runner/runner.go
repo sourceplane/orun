@@ -380,7 +380,9 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		unmet := unresolvedDependencies(job, execState)
 		if len(unmet) > 0 {
 			summary.addWaiting(1)
-			if r.Verbose || r.JobID != "" {
+			if r.inGHA() {
+				r.ghaPrintWaiting(job, unmet)
+			} else if r.Verbose || r.JobID != "" {
 				r.printWaiting(job, unmet, execState)
 			}
 			if r.JobID != "" && !r.SkipLocalDepsForJob {
@@ -498,6 +500,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 			} else {
 				r.printStepSkipped(stepID, idx+1, len(job.Steps))
 			}
+			jobReport.observeStepDone(stepID, true, true, 0)
 			continue
 		}
 
@@ -568,9 +571,14 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 
 		if r.inGHA() {
 			r.ghaEmitStepOutput(job.ID, output)
-			r.ghaPrintStepResult(job, stepID, stepErr == nil, stepDuration, stepErr, view.headline)
+			// Close the group before printing the step summary so the summary
+			// line is visible outside the collapsed logs section.
 			r.ghaCloseStepGroup(job.ID)
+			r.ghaPrintStepResult(job, stepID, idx+1, stepErr == nil, stepDuration, stepErr, view.headline)
+			r.gha.FlushStep(job.ID)
 		}
+
+		jobReport.observeStepDone(stepID, stepErr == nil, false, stepDuration)
 
 		if stepErr != nil {
 			r.updateState(persistState, execState, func() {

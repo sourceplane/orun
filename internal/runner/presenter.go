@@ -30,12 +30,18 @@ type stepOutputView struct {
 }
 
 type jobReport struct {
-	dryRun    bool
-	stepCount int
-	headline  string
-	links     []state.ExecutionLink
-	cacheHits int
-	linkIndex map[string]struct{}
+	dryRun      bool
+	stepCount   int
+	stepPassed  int
+	stepFailed  int
+	stepSkipped int
+	failedStep  string
+	slowestStep string
+	slowestDur  time.Duration
+	headline    string
+	links       []state.ExecutionLink
+	cacheHits   int
+	linkIndex   map[string]struct{}
 }
 
 func newJobReport(job model.PlanJob, dryRun bool) *jobReport {
@@ -43,6 +49,25 @@ func newJobReport(job model.PlanJob, dryRun bool) *jobReport {
 		dryRun:    dryRun,
 		stepCount: len(job.Steps),
 		linkIndex: map[string]struct{}{},
+	}
+}
+
+func (jr *jobReport) observeStepDone(stepID string, success, skipped bool, dur time.Duration) {
+	if skipped {
+		jr.stepSkipped++
+		return
+	}
+	if success {
+		jr.stepPassed++
+	} else {
+		jr.stepFailed++
+		if jr.failedStep == "" {
+			jr.failedStep = stepID
+		}
+	}
+	if dur > jr.slowestDur {
+		jr.slowestDur = dur
+		jr.slowestStep = stepID
 	}
 }
 

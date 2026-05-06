@@ -228,6 +228,23 @@ func (b *GHAJobBuffer) CloseGroup() {
 	}
 }
 
+// StopCommands writes a ::stop-commands:: marker so that subsequent raw
+// child-process output cannot accidentally trigger GHA workflow commands
+// (e.g. ::set-output::, ::error::). Call ResumeCommands with the same token
+// when raw output is done.
+func (b *GHAJobBuffer) StopCommands(token string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	fmt.Fprintf(&b.buf, "::stop-commands::%s\n", token)
+}
+
+// ResumeCommands resumes workflow-command processing after a StopCommands call.
+func (b *GHAJobBuffer) ResumeCommands(token string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	fmt.Fprintf(&b.buf, "::%s::\n", token)
+}
+
 // Annotation writes a workflow-command annotation into the buffer so it is
 // flushed in-order with the surrounding job logs.
 func (b *GHAJobBuffer) Annotation(level, msg string, props map[string]string) {

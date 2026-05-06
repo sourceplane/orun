@@ -16,19 +16,33 @@ import (
 // viewer. The structural pattern is:
 //
 //	▶ job-name
-//	component · env · N steps
-//	01 setup-node
-//	::group::logs
-//	<raw step output>
+//	  component   cluster-addons
+//	  env         development
+//	  job         validate-terraform
+//	  job-id      cluster-addons@development.validate-terraform
+//	  workdir     infra/cluster-addons
+//	  runner      github-actions
+//	  steps       5
+//
+//	────────────────────────────────────────────────────────────
+//	steps
+//
+//	01 setup-terraform
+//	::group::logs · 01 setup-terraform · cluster-addons@development.validate-terraform
+//	<raw step output — protected by stop-commands>
 //	::endgroup::
-//	✓ 1.2s · cache hit
+//	  ✓ setup-terraform · 1.8s · terraform cached
 //	...
-//	✓ component · env
-//	job-name  completed in 33.6s · 13/13 steps
+//	────────────────────────────────────────────────────────────
+//	✓ validate-terraform completed · 7.3s
+//	  steps       5 passed, 0 failed, 0 skipped
+//	  slowest     terraform-init 4.6s
 //
 // One ::group:: per step (not per job) is the modern idiom: GHA cannot nest
 // groups, and per-step grouping matches the way the GHA UI itself collapses
 // each step independently.
+
+const ghaSeparator = "────────────────────────────────────────────────────────────"
 
 func (r *Runner) ghaJobOut(jobID string) *ui.GHAJobBuffer {
 	if r.gha == nil {
@@ -86,14 +100,33 @@ func (r *Runner) ghaPrintJobHeader(job model.PlanJob) {
 	buf.Println("")
 	buf.Println(fmt.Sprintf("▶ %s", r.ghaJobName(job)))
 
-	scope := r.ghaJobScope(job)
-	n := len(job.Steps)
-	stepStr := fmt.Sprintf("%d step%s", n, pluralSuffix(n))
-	if scope != "" {
-		buf.Println(fmt.Sprintf("%s · %s", scope, stepStr))
-	} else {
-		buf.Println(stepStr)
+	// Structured detail block — only emit non-empty fields.
+	if c := strings.TrimSpace(job.Component); c != "" {
+		buf.Println(fmt.Sprintf("  %-12s%s", "component", c))
 	}
+	if e := strings.TrimSpace(job.Environment); e != "" {
+		buf.Println(fmt.Sprintf("  %-12s%s", "env", e))
+	}
+	if name := r.ghaJobName(job); name != "" {
+		buf.Println(fmt.Sprintf("  %-12s%s", "job", name))
+	}
+	if id := strings.TrimSpace(job.ID); id != "" {
+		buf.Println(fmt.Sprintf("  %-12s%s", "job-id", id))
+	}
+	if workdir := strings.TrimSpace(job.Path); workdir != "" {
+		buf.Println(fmt.Sprintf("  %-12s%s", "workdir", workdir))
+	}
+	if r.Executor != nil {
+		if runnerName := strings.TrimSpace(r.Executor.Name()); runnerName != "" {
+			buf.Println(fmt.Sprintf("  %-12s%s", "runner", runnerName))
+		}
+	}
+	buf.Println(fmt.Sprintf("  %-12s%d", "steps", len(job.Steps)))
+
+	buf.Println("")
+	buf.Println(ghaSeparator)
+	buf.Println("steps")
+	buf.Println("")
 }
 
 func (r *Runner) ghaPrintPhaseHeader(job model.PlanJob, phase string) {
@@ -119,7 +152,10 @@ func (r *Runner) ghaOpenStepGroup(job model.PlanJob, stepID string, index, total
 	// Print the step heading before the collapsible group so it is always
 	// visible in the GHA log viewer even when the group is collapsed.
 	buf.Println(fmt.Sprintf("%02d %s", index, stepID))
-	buf.OpenGroup("logs")
+	// Include step number, name, and job-id in the group title so the
+	// collapsed "▸ logs" row identifies which step owns the content.
+	groupTitle := fmt.Sprintf("logs · %02d %s · %s", index, stepID, job.ID)
+	buf.OpenGroup(groupTitle)
 }
 
 func (r *Runner) ghaCloseStepGroup(jobID string) {
@@ -132,8 +168,8 @@ func (r *Runner) ghaCloseStepGroup(jobID string) {
 }
 
 // ghaEmitStepOutput dumps the raw step output (already mask-sanitized by the
-// executor) into the job buffer. No compaction or path shortening: CI logs
-// are archival and users want the full text.
+// executor) into the job buffer, wrapped in stop-commands markers to prevent
+// accidental workflow-command injection from child process output.
 func (r *Runner) ghaEmitStepOutput(jobID, output string) {
 	buf := r.ghaJobOut(jobID)
 	if buf == nil {
@@ -143,25 +179,44 @@ func (r *Runner) ghaEmitStepOutput(jobID, output string) {
 	if trimmed == "" {
 		return
 	}
+	// stop-commands prevents the child process output from accidentally
+	// triggering GHA workflow commands (::set-output::, ::error::, etc.).
+	token := "orun-stop-" + jobID
+	buf.StopCommands(token)
 	buf.PrintBlock(strings.Split(trimmed, "\n"))
+	buf.ResumeCommands(token)
 }
 
-func (r *Runner) ghaPrintStepResult(job model.PlanJob, stepID string, success bool, duration time.Duration, err error, summary string) {
+// ghaPrintStepResult writes the visible step summary OUTSIDE the collapsed
+// group. It must be called after ghaCloseStepGroup so the summary line is
+// always visible without expanding the logs.
+func (r *Runner) ghaPrintStepResult(job model.PlanJob, stepID string, index int, success bool, duration time.Duration, err error, summary string) {
 	buf := r.ghaJobOut(job.ID)
 	if buf == nil {
 		return
 	}
 	if success {
-		line := fmt.Sprintf("✓ %s", formatStepDuration(duration))
+		line := fmt.Sprintf("  ✓ %s · %s", stepID, formatStepDuration(duration))
 		if summary != "" {
 			line += " · " + summary
 		}
 		buf.Println(line)
 		return
 	}
+	// Failure: print error outside the collapsed group so it is immediately
+	// visible without expanding logs.
 	msg := summarizeExecError(err)
 	buf.Annotation("error", fmt.Sprintf("%s › %s: %s", r.ghaJobLabel(job), stepID, msg), nil)
-	buf.Println(fmt.Sprintf("✗ %s  %s", formatStepDuration(duration), msg))
+	buf.Println(fmt.Sprintf("  ✕ %s · %s · %s", stepID, formatStepDuration(duration), msg))
+	buf.Println("")
+	buf.Println("  error")
+	buf.Println(fmt.Sprintf("    %s", msg))
+	buf.Println("")
+	buf.Println("  next")
+	buf.Println(fmt.Sprintf("    Expand logs · %02d %s", index, stepID))
+	if jobID := strings.TrimSpace(job.ID); jobID != "" {
+		buf.Println(fmt.Sprintf("    Retry: orun run --job-id %s --retry", jobID))
+	}
 }
 
 func (r *Runner) ghaPrintStepSkipped(job model.PlanJob, stepID string, index, total int) {
@@ -187,35 +242,35 @@ func (r *Runner) ghaPrintJobFooter(job model.PlanJob, report *jobReport, success
 	}
 
 	name := r.ghaJobName(job)
-	scope := r.ghaJobScope(job)
 
-	n := 0
-	if report != nil {
-		n = report.stepCount
-	}
-	stepNote := fmt.Sprintf("%d/%d step%s", n, n, pluralSuffix(n))
-
+	buf.Println("")
+	buf.Println(ghaSeparator)
 	if success {
-		if scope != "" {
-			buf.Println(fmt.Sprintf("✓ %s", scope))
-			buf.Println(fmt.Sprintf("%s  completed in %s · %s", name, formatStepDuration(duration), stepNote))
-		} else {
-			buf.Println(fmt.Sprintf("✓ %s  %s · %s", name, formatStepDuration(duration), stepNote))
-		}
+		buf.Println(fmt.Sprintf("✓ %s completed · %s", name, formatStepDuration(duration)))
 	} else {
-		if scope != "" {
-			buf.Println(fmt.Sprintf("✗ %s", scope))
-			buf.Println(fmt.Sprintf("%s  failed in %s", name, formatStepDuration(duration)))
-		} else {
-			buf.Println(fmt.Sprintf("✗ %s  failed  %s", name, formatStepDuration(duration)))
-		}
+		buf.Println(fmt.Sprintf("✕ %s failed · %s", name, formatStepDuration(duration)))
 	}
 
 	if report != nil {
+		if c := strings.TrimSpace(job.Component); c != "" {
+			buf.Println(fmt.Sprintf("  %-12s%s", "component", c))
+		}
+		if e := strings.TrimSpace(job.Environment); e != "" {
+			buf.Println(fmt.Sprintf("  %-12s%s", "env", e))
+		}
+		buf.Println(fmt.Sprintf("  %-12s%d passed, %d failed, %d skipped",
+			"steps", report.stepPassed, report.stepFailed, report.stepSkipped))
+		if report.slowestStep != "" {
+			buf.Println(fmt.Sprintf("  %-12s%s %s", "slowest", report.slowestStep, formatStepDuration(report.slowestDur)))
+		}
+		if !success && report.failedStep != "" {
+			buf.Println(fmt.Sprintf("  %-12s%s", "failed step", report.failedStep))
+		}
 		for _, link := range report.links {
 			buf.Println(fmt.Sprintf("  ↗ %s  %s", linkLabel(link.Label), link.URL))
 		}
 	}
+
 	r.gha.FlushJob(job.ID)
 }
 
@@ -224,4 +279,13 @@ func (r *Runner) ghaPrintJobResumed(job model.PlanJob) {
 		return
 	}
 	r.gha.Print(fmt.Sprintf("⚡ %s  cached", r.ghaJobLabel(job)))
+}
+
+// ghaPrintWaiting emits waiting/dependency info directly to the GHA log
+// (not buffered in a job buffer, since the job has not started yet).
+func (r *Runner) ghaPrintWaiting(job model.PlanJob, unmet []string) {
+	if r.gha == nil {
+		return
+	}
+	r.gha.Print(fmt.Sprintf("○ %s  waiting on %s", r.ghaJobLabel(job), strings.Join(unmet, ", ")))
 }
