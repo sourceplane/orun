@@ -166,11 +166,14 @@ func (r *Runner) jobLineLabel(job model.PlanJob) string {
 // It drops the component prefix (the group header carries that) and falls back
 // to job.Name.
 func shortJobName(job model.PlanJob) string {
+	if dn := strings.TrimSpace(job.DisplayName); dn != "" {
+		return dn
+	}
 	if name := strings.TrimSpace(job.Name); name != "" {
 		return name
 	}
 	if name := strings.TrimSpace(job.ID); name != "" {
-		// Strip "<component>@<env>." prefix if present.
+		// Strip "component.env." prefix if present (new format).
 		if idx := strings.LastIndex(name, "."); idx >= 0 && idx+1 < len(name) {
 			return name[idx+1:]
 		}
@@ -858,6 +861,12 @@ func isLikelyPath(value string) bool {
 }
 
 func jobDisplayName(job model.PlanJob) string {
+	if dn := strings.TrimSpace(job.DisplayName); dn != "" {
+		if c := strings.TrimSpace(job.Component); c != "" {
+			return fmt.Sprintf("%s:%s", c, dn)
+		}
+		return dn
+	}
 	if strings.TrimSpace(job.Component) != "" && strings.TrimSpace(job.Name) != "" {
 		return fmt.Sprintf("%s:%s", job.Component, strings.TrimSpace(job.Name))
 	}

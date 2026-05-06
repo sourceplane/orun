@@ -669,25 +669,29 @@ func aggregateDuration(rows []jobView) string {
 	return longest
 }
 
-// splitJobID parses a "component@env.name" job ID into its parts. Pieces that
-// can't be inferred are returned empty.
+// splitJobID parses a job ID into component, env, and name.
+// Supports both the new format ("component.environment.job") and the legacy
+// format ("component@environment.job") for backward compatibility with old
+// state files.
 func splitJobID(id string) (component, env, name string) {
-	rest := id
-	if at := strings.Index(rest, "@"); at >= 0 {
-		component = rest[:at]
-		rest = rest[at+1:]
+	// Legacy format: component@environment.job
+	if at := strings.Index(id, "@"); at >= 0 {
+		component = id[:at]
+		rest := id[at+1:]
+		if dot := strings.Index(rest, "."); dot >= 0 {
+			return component, rest[:dot], rest[dot+1:]
+		}
+		return component, rest, ""
 	}
-	if dot := strings.Index(rest, "."); dot >= 0 {
-		env = rest[:dot]
-		name = rest[dot+1:]
-		return
+	// New format: component.environment.job
+	parts := strings.SplitN(id, ".", 3)
+	if len(parts) == 3 {
+		return parts[0], parts[1], parts[2]
 	}
-	if component != "" {
-		env = rest
-		return
+	if len(parts) == 2 {
+		return "", parts[0], parts[1]
 	}
-	name = rest
-	return
+	return "", "", id
 }
 
 func executionCountsFromState(meta *state.ExecMetadata, st *state.ExecState) executionCounts {
