@@ -26,22 +26,28 @@ import (
 //	  steps       5
 //
 //	────────────────────────────────────────────────────────────
+//	dependencies
+//
+//	  ✓  network@production.apply  completed
+//	  ✓  iam@production.apply      completed
+//
+//	✓ 2/2 ready
+//
+//	────────────────────────────────────────────────────────────
 //	steps
 //
-//	01 setup-terraform
-//	::group::logs · 01 setup-terraform · cluster-addons@development.validate-terraform
-//	<raw step output — protected by stop-commands>
+//	::group::✓  01 setup-terraform  1.8s  ·  terraform cached
+//	<raw step output>
 //	::endgroup::
-//	  ✓ setup-terraform · 1.8s · terraform cached
 //	...
 //	────────────────────────────────────────────────────────────
 //	✓ validate-terraform completed · 7.3s
 //	  steps       5 passed, 0 failed, 0 skipped
 //	  slowest     terraform-init 4.6s
 //
-// One ::group:: per step (not per job) is the modern idiom: GHA cannot nest
-// groups, and per-step grouping matches the way the GHA UI itself collapses
-// each step independently.
+// One ::group:: per step (not per job): group is opened AFTER the step
+// completes so the title can include the final result, making the collapsed
+// row fully informative without expanding the logs.
 
 const ghaSeparator = "────────────────────────────────────────────────────────────"
 
@@ -144,6 +150,12 @@ func (r *Runner) ghaPrintJobHeader(job model.PlanJob, execState *state.ExecState
 					status = js.Status
 				}
 			}
+			// In GHA matrix mode the remote coordinator (GHA needs) guarantees
+			// deps completed before this job started. If remote state hasn't
+			// propagated yet, trust the GHA guarantee and show completed.
+			if r.SkipLocalDepsForJob && (status == "pending" || status == "") {
+				status = "completed"
+			}
 			deps = append(deps, depEntry{dep, status})
 			switch status {
 			case "completed":
@@ -208,79 +220,63 @@ func (r *Runner) ghaPrintPhaseHeader(job model.PlanJob, phase string) {
 	buf.Println(fmt.Sprintf("── %s ──", title))
 }
 
-func (r *Runner) ghaOpenStepGroup(job model.PlanJob, stepID string, index, total int) {
+// ghaEmitStep emits a single collapsible group for a completed step.
+// It is called AFTER the step finishes so the group title can include the
+// final result — making the collapsed row fully informative without expanding.
+//
+// Title format: "✓/✕  01 step-name  1.3s  ·  summary/error"
+// Body: raw step output (stop-commands protected so child GHA commands are
+// not processed by the parent runner when orun is nested inside GHA).
+// For failures: a GHA ::error:: annotation is emitted AFTER ::endgroup::
+// so it surfaces in the PR check summary even when the group is collapsed.
+func (r *Runner) ghaEmitStep(job model.PlanJob, stepID string, index int, output string, success bool, duration time.Duration, err error, summary string) {
 	buf := r.ghaJobOut(job.ID)
 	if buf == nil {
 		return
 	}
-	// Print the step heading before the collapsible group so it is always
-	// visible in the GHA log viewer even when the group is collapsed.
-	buf.Println(fmt.Sprintf("%02d %s", index, stepID))
-	// Include step number, name, and job-id in the group title so the
-	// collapsed "▸ logs" row identifies which step owns the content.
-	groupTitle := fmt.Sprintf("logs · %02d %s · %s", index, stepID, job.ID)
-	buf.OpenGroup(groupTitle)
-}
+	icon := "✓"
+	if !success {
+		icon = "✕"
+	}
+	title := fmt.Sprintf("%s  %02d %s  %s", icon, index, stepID, formatStepDuration(duration))
+	if success && summary != "" {
+		title += "  ·  " + summary
+	} else if !success {
+		title += "  ·  " + summarizeExecError(err)
+	}
 
-func (r *Runner) ghaCloseStepGroup(jobID string) {
-	buf := r.ghaJobOut(jobID)
-	if buf == nil {
-		return
+	buf.OpenGroup(title)
+	trimmed := strings.TrimRight(output, "\n")
+	if trimmed != "" {
+		token := "orun-stop-" + job.ID
+		buf.StopCommands(token)
+		buf.PrintBlock(strings.Split(trimmed, "\n"))
+		buf.ResumeCommands(token)
+	}
+	if !success {
+		if jobID := strings.TrimSpace(job.ID); jobID != "" {
+			buf.Println("")
+			buf.Println("  retry:  orun run --job " + jobID + " --retry")
+		}
 	}
 	buf.CloseGroup()
-	r.gha.FlushStep(jobID)
+
+	if !success {
+		msg := summarizeExecError(err)
+		buf.Annotation("error", fmt.Sprintf("%s › %s: %s", r.ghaJobLabel(job), stepID, msg), nil)
+	}
+	r.gha.FlushStep(job.ID)
 }
 
-// ghaEmitStepOutput dumps the raw step output (already mask-sanitized by the
-// executor) into the job buffer, wrapped in stop-commands markers to prevent
-// accidental workflow-command injection from child process output.
-func (r *Runner) ghaEmitStepOutput(jobID, output string) {
-	buf := r.ghaJobOut(jobID)
-	if buf == nil {
-		return
-	}
-	trimmed := strings.TrimRight(output, "\n")
-	if trimmed == "" {
-		return
-	}
-	// stop-commands prevents the child process output from accidentally
-	// triggering GHA workflow commands (::set-output::, ::error::, etc.).
-	token := "orun-stop-" + jobID
-	buf.StopCommands(token)
-	buf.PrintBlock(strings.Split(trimmed, "\n"))
-	buf.ResumeCommands(token)
-}
-
-// ghaPrintStepResult writes the visible step summary OUTSIDE the collapsed
-// group. It must be called after ghaCloseStepGroup so the summary line is
-// always visible without expanding the logs.
-func (r *Runner) ghaPrintStepResult(job model.PlanJob, stepID string, index int, success bool, duration time.Duration, err error, summary string) {
+// ghaPrintStepDryRun emits a single visible line for a dry-run step
+// (no collapsible group since there is no output to hide).
+func (r *Runner) ghaPrintStepDryRun(job model.PlanJob, stepID string, index int) {
 	buf := r.ghaJobOut(job.ID)
 	if buf == nil {
 		return
 	}
-	if success {
-		line := fmt.Sprintf("  ✓ %s · %s", stepID, formatStepDuration(duration))
-		if summary != "" {
-			line += " · " + summary
-		}
-		buf.Println(line)
-		return
-	}
-	// Failure: print error outside the collapsed group so it is immediately
-	// visible without expanding logs.
-	msg := summarizeExecError(err)
-	buf.Annotation("error", fmt.Sprintf("%s › %s: %s", r.ghaJobLabel(job), stepID, msg), nil)
-	buf.Println(fmt.Sprintf("  ✕ %s · %s · %s", stepID, formatStepDuration(duration), msg))
-	buf.Println("")
-	buf.Println("  error")
-	buf.Println(fmt.Sprintf("    %s", msg))
-	buf.Println("")
-	buf.Println("  next")
-	buf.Println(fmt.Sprintf("    Expand logs · %02d %s", index, stepID))
-	if jobID := strings.TrimSpace(job.ID); jobID != "" {
-		buf.Println(fmt.Sprintf("    Retry: orun run --job-id %s --retry", jobID))
-	}
+	buf.Println(fmt.Sprintf("  ↷  %02d %s  dry-run", index, stepID))
+	r.gha.FlushStep(job.ID)
 }
 
 func (r *Runner) ghaPrintStepSkipped(job model.PlanJob, stepID string, index, total int) {
@@ -288,15 +284,7 @@ func (r *Runner) ghaPrintStepSkipped(job model.PlanJob, stepID string, index, to
 	if buf == nil {
 		return
 	}
-	buf.Println(fmt.Sprintf("%02d %s  ↷ cached", index, stepID))
-}
-
-func (r *Runner) ghaPrintStepRetry(jobID string, attempt, attempts int) {
-	buf := r.ghaJobOut(jobID)
-	if buf == nil {
-		return
-	}
-	buf.Println(fmt.Sprintf("↻ retry %d/%d", attempt, attempts))
+	buf.Println(fmt.Sprintf("  ↷  %02d %s  cached", index, stepID))
 }
 
 func (r *Runner) ghaPrintJobFooter(job model.PlanJob, report *jobReport, success bool, duration time.Duration) {
@@ -343,13 +331,4 @@ func (r *Runner) ghaPrintJobResumed(job model.PlanJob) {
 		return
 	}
 	r.gha.Print(fmt.Sprintf("⚡ %s  cached", r.ghaJobLabel(job)))
-}
-
-// ghaPrintWaiting emits waiting/dependency info directly to the GHA log
-// (not buffered in a job buffer, since the job has not started yet).
-func (r *Runner) ghaPrintWaiting(job model.PlanJob, unmet []string) {
-	if r.gha == nil {
-		return
-	}
-	r.gha.Print(fmt.Sprintf("○ %s  waiting on %s", r.ghaJobLabel(job), strings.Join(unmet, ", ")))
 }

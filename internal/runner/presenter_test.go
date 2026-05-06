@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/state"
@@ -95,6 +96,89 @@ func TestNewRunSummaryDedupesLinks(t *testing.T) {
 	snap := summary.snapshot()
 	if len(snap.links) != 1 {
 		t.Fatalf("len(snap.links) = %d, want 1", len(snap.links))
+	}
+}
+
+func TestGHAJobHeaderMatrixModeDefaultsDepToCompleted(t *testing.T) {
+	t.Parallel()
+
+	var sink bytes.Buffer
+	r := &Runner{
+		gha:                 ui.NewGHARenderer(&sink),
+		SkipLocalDepsForJob: true, // GHA matrix mode
+	}
+
+	job := model.PlanJob{
+		ID:        "app@production.deploy",
+		Name:      "deploy",
+		DependsOn: []string{"infra@production.apply"},
+		Steps:     []model.PlanStep{{}},
+	}
+	// Remote state has not propagated the dep's completed status yet.
+	execState := &state.ExecState{Jobs: map[string]*state.JobState{}}
+
+	r.ghaPrintJobHeader(job, execState)
+	r.gha.FlushJob(job.ID)
+	out := sink.String()
+
+	if !strings.Contains(out, "✓ 1/1 ready") {
+		t.Fatalf("expected dep to show completed in matrix mode, got:\n%s", out)
+	}
+	if strings.Contains(out, "● waiting") {
+		t.Fatalf("unexpected 'waiting' in matrix mode header:\n%s", out)
+	}
+}
+
+func TestGHAEmitStepSuccessGroupTitle(t *testing.T) {
+	t.Parallel()
+
+	var sink bytes.Buffer
+	r := &Runner{gha: ui.NewGHARenderer(&sink)}
+
+	job := model.PlanJob{ID: "api@prod.build", Name: "build"}
+	r.ghaEmitStep(job, "compile", 1, "output line\n", true, 1500*time.Millisecond, nil, "compiled ok")
+	out := sink.String()
+
+	// Group title must include result icon, step number, name, duration, summary.
+	if !strings.Contains(out, "::group::✓  01 compile  1.5s  ·  compiled ok") {
+		t.Fatalf("expected result in group title, got:\n%s", out)
+	}
+	// Raw output inside the group.
+	if !strings.Contains(out, "output line") {
+		t.Fatalf("expected raw output inside group, got:\n%s", out)
+	}
+	// Group must close.
+	if !strings.Contains(out, "::endgroup::") {
+		t.Fatalf("expected endgroup marker, got:\n%s", out)
+	}
+	// No separate result line after the group.
+	if strings.Contains(out, "✓ compile") {
+		t.Fatalf("unexpected duplicate result line after group:\n%s", out)
+	}
+}
+
+func TestGHAEmitStepFailureAnnotationOutsideGroup(t *testing.T) {
+	t.Parallel()
+
+	var sink bytes.Buffer
+	r := &Runner{gha: ui.NewGHARenderer(&sink)}
+
+	job := model.PlanJob{ID: "api@prod.build", Name: "build"}
+	r.ghaEmitStep(job, "test", 2, "FAIL: assertion error\n", false, 800*time.Millisecond, fmt.Errorf("exit code 1"), "")
+	out := sink.String()
+
+	// Title contains failure icon and error.
+	if !strings.Contains(out, "::group::✕  02 test") {
+		t.Fatalf("expected failure group title, got:\n%s", out)
+	}
+	// Error annotation must appear AFTER ::endgroup:: (outside the group).
+	endgroupIdx := strings.Index(out, "::endgroup::")
+	annotationIdx := strings.Index(out, "::error::")
+	if endgroupIdx < 0 || annotationIdx < 0 {
+		t.Fatalf("missing endgroup or error annotation:\n%s", out)
+	}
+	if annotationIdx < endgroupIdx {
+		t.Fatalf("::error:: annotation must appear after ::endgroup::, got:\n%s", out)
 	}
 }
 
