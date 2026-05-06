@@ -192,8 +192,22 @@ func runPlan() error {
 	if err != nil {
 		return err
 	}
+
+	// When intent auto-discovery failed (intentRoot is empty), recover it from
+	// the plan's embedded workDir. This handles the common GHA case where the
+	// intent lives in a repo subdirectory and orun run is invoked from the
+	// workspace root (where walking upward doesn't find intent.yaml).
+	if intentRoot == "" && strings.TrimSpace(plan.Metadata.WorkDir) != "" {
+		if cwd, err := os.Getwd(); err == nil {
+			intentRoot = filepath.Join(cwd, filepath.FromSlash(plan.Metadata.WorkDir))
+		}
+	}
+
 	if !runUseWorkDirOverride && runnerName == "github-actions" {
-		if workspace := strings.TrimSpace(os.Getenv("GITHUB_WORKSPACE")); workspace != "" {
+		// Only use GITHUB_WORKSPACE when we have no intentRoot — if the intent lives
+		// in a subdirectory of the repo (e.g. examples/intent.yaml), intentRoot is the
+		// correct base for component paths, not the workspace root.
+		if workspace := strings.TrimSpace(os.Getenv("GITHUB_WORKSPACE")); workspace != "" && intentRoot == "" {
 			runWorkDir = workspace
 		}
 	}
@@ -207,7 +221,7 @@ func runPlan() error {
 		execID = os.Getenv(execIDEnvVar)
 	}
 	if remoteActive {
-		execID = remotestate.DeriveRunID(planID, execID)
+		execID = remotestate.DeriveRunID(execID)
 	} else if execID == "" {
 		execID = state.GenerateExecID(plan.Metadata.Name)
 	}
@@ -384,8 +398,7 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 			if !success {
 				status = statebackend.JobStatusFailed
 			}
-			// Best-effort; ignore errors.
-			_ = backend.UpdateJob(ctx, handle.RunID, jobID, runnerID, status, errText)
+			updateJobWithRetry(ctx, backend, handle.RunID, jobID, runnerID, status, errText)
 		},
 	}
 
@@ -507,9 +520,12 @@ func performRemoteJobClaim(
 			}
 			fmt.Fprintf(stdout, "  %s waiting for dependencies of %s...\n",
 				ui.Dim(color, "○"), jobID)
-			if waitErr := waitForJobRunnable(ctx, backend, runID, jobID, job.DependsOn, delay, deadline); waitErr != nil {
+			waitErr := waitForJobRunnable(ctx, backend, runID, jobID, job.DependsOn, plan, delay, deadline)
+			if waitErr != nil && !errors.Is(waitErr, errDepHeartbeatStale) {
 				return waitErr
 			}
+			// errDepHeartbeatStale: a dep's heartbeat expired — retry the claim
+			// so the coordinator can sweep the stale dep and return depsBlocked.
 		case strings.EqualFold(result.CurrentStatus, "running"):
 			if time.Now().After(deadline) {
 				return fmt.Errorf("job %s: wait timeout exceeded while another runner holds the job", jobID)
@@ -539,12 +555,18 @@ func (e *jobAlreadyCompleteError) Error() string {
 	return fmt.Sprintf("job %s already completed by another runner", e.jobID)
 }
 
+// errDepHeartbeatStale is returned by waitForJobRunnable when a dependency's
+// heartbeat has expired. The caller should retry the claim so the coordinator
+// can sweep the stale dep inline and return depsBlocked.
+var errDepHeartbeatStale = errors.New("dependency heartbeat stale")
+
 // waitForJobRunnable polls /runnable until jobID appears or deadline is exceeded.
 // deps lists the job's declared dependencies; on each poll that doesn't find the
 // job, LoadRunState is called to detect upstream failures early and avoid waiting
-// the full depWaitTimeout when a dependency has already failed.
-func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID, jobID string, deps []string, initialDelay time.Duration, deadline time.Time) error {
+// the full depWaitTimeout when a dependency has already failed or is permanently blocked.
+func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID, jobID string, deps []string, plan *model.Plan, initialDelay time.Duration, deadline time.Time) error {
 	const pollMax = 15 * time.Second
+	const heartbeatTimeout = 5 * time.Minute // matches coordinator HEARTBEAT_TIMEOUT_MS
 	if initialDelay <= 0 {
 		initialDelay = 2 * time.Second
 	}
@@ -565,18 +587,83 @@ func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID
 				return nil
 			}
 		}
-		// Check if any dependency has already failed so we don't wait the full
-		// depWaitTimeout — a failed dep means this job can never become runnable.
+		// Check if any dependency has already failed, is permanently blocked (its own
+		// deps failed but it never ran), or has an expired heartbeat.
 		if len(deps) > 0 {
 			if execState, _, stateErr := backend.LoadRunState(ctx, runID); stateErr == nil && execState != nil {
 				for _, dep := range deps {
-					if js, ok := execState.Jobs[dep]; ok && js != nil && js.Status == "failed" {
+					js, ok := execState.Jobs[dep]
+					if !ok || js == nil {
+						continue
+					}
+					if js.Status == "failed" {
 						return fmt.Errorf("job %s: dependency %s failed", jobID, dep)
+					}
+					// A "pending" dep that is transitively blocked (one of its own deps
+					// failed) will never become runnable — fail fast rather than waiting.
+					if js.Status == "pending" && plan != nil && isTransitivelyBlocked(execState, plan, dep) {
+						return fmt.Errorf("job %s: dependency %s is permanently blocked (upstream failure)", jobID, dep)
+					}
+					// When a "running" dep's heartbeat has expired, exit the wait loop
+					// so performRemoteJobClaim retries the claim. The coordinator will
+					// sweep the stale dep on the next claim and return depsBlocked.
+					if js.Status == "running" && js.HeartbeatAt != "" {
+						if hb, hbErr := time.Parse(time.RFC3339, js.HeartbeatAt); hbErr == nil {
+							if time.Since(hb) > heartbeatTimeout {
+								return errDepHeartbeatStale
+							}
+						}
 					}
 				}
 			}
 		}
 		poll = nextBackoff(poll, pollMax)
+	}
+}
+
+// isTransitivelyBlocked returns true if any dependency of depID (recursively)
+// is in "failed" status, meaning depID can never become runnable.
+func isTransitivelyBlocked(execState *state.ExecState, plan *model.Plan, depID string) bool {
+	depJob := findJobByIDInPlan(plan, depID)
+	for _, transitiveDep := range depJob.DependsOn {
+		js, ok := execState.Jobs[transitiveDep]
+		if !ok || js == nil {
+			continue
+		}
+		if js.Status == "failed" {
+			return true
+		}
+		if isTransitivelyBlocked(execState, plan, transitiveDep) {
+			return true
+		}
+	}
+	return false
+}
+
+// updateJobWithRetry calls UpdateJob with exponential backoff for up to 90 s.
+// Terminal status must reach the coordinator so dependent jobs don't get stuck.
+// The heartbeat goroutine (running in the background) keeps the coordinator's
+// heartbeatAt fresh during retries, preventing false "heartbeat timed out"
+// errors in downstream dep-wait polling.
+func updateJobWithRetry(ctx context.Context, backend statebackend.Backend, runID, jobID, runnerID string, status statebackend.JobStatus, errText string) {
+	const maxDuration = 90 * time.Second
+	deadline := time.Now().Add(maxDuration)
+	delay := 2 * time.Second
+	for {
+		if err := backend.UpdateJob(ctx, runID, jobID, runnerID, status, errText); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		if delay < 30*time.Second {
+			delay *= 2
+		}
 	}
 }
 

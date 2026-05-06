@@ -380,7 +380,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		unmet := unresolvedDependencies(job, execState)
 		if len(unmet) > 0 {
 			summary.addWaiting(1)
-			if r.Verbose || r.JobID != "" {
+			if !r.inGHA() && (r.Verbose || r.JobID != "") {
 				r.printWaiting(job, unmet, execState)
 			}
 			if r.JobID != "" && !r.SkipLocalDepsForJob {
@@ -451,7 +451,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 		}
 	})
 
-	r.printJobHeader(job)
+	r.printJobHeader(job, execState)
 
 	jobFailed := false
 	jobStartedAt := time.Now()
@@ -498,6 +498,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 			} else {
 				r.printStepSkipped(stepID, idx+1, len(job.Steps))
 			}
+			jobReport.observeStepDone(stepID, true, true, 0)
 			continue
 		}
 
@@ -512,27 +513,25 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 		r.updateLiveStep(job, stepID, idx+1, len(job.Steps))
 		r.printStepStart(stepID, idx+1, len(job.Steps))
 		r.printStepContext(step, workingDir, timeoutValue, retryCount)
-		if r.inGHA() {
-			r.ghaOpenStepGroup(job, stepID, idx+1, len(job.Steps))
-		}
 		if r.DryRun {
 			r.updateState(persistState, execState, func() {
 				jobState.Steps[stepID] = "completed"
 			})
 			r.printStepDryRun()
 			if r.inGHA() {
-				r.ghaCloseStepGroup(job.ID)
+				r.ghaPrintStepDryRun(job, stepID, idx+1)
 			}
 			continue
 		}
 
 		var output string
 		var stepErr error
+		var ghaOutput strings.Builder // accumulates per-attempt output for GHA
 		attempts := retryCount + 1
 		for attempt := 1; attempt <= attempts; attempt++ {
 			if attempts > 1 && attempt > 1 {
 				if r.inGHA() {
-					r.ghaPrintStepRetry(job.ID, attempt, attempts)
+					fmt.Fprintf(&ghaOutput, "\n↻ retry %d/%d\n", attempt, attempts)
 				} else {
 					r.printStepRetry(attempt, attempts)
 				}
@@ -547,6 +546,10 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 
 			output, stepErr = r.Executor.RunStep(execContext, job, step)
 			cancel()
+
+			if r.inGHA() && attempts > 1 {
+				ghaOutput.WriteString(output)
+			}
 
 			if stepErr == nil {
 				break
@@ -567,10 +570,14 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 		}
 
 		if r.inGHA() {
-			r.ghaEmitStepOutput(job.ID, output)
-			r.ghaPrintStepResult(job, stepID, stepErr == nil, stepDuration, stepErr, view.headline)
-			r.ghaCloseStepGroup(job.ID)
+			ghaDisplayOutput := output
+			if ghaOutput.Len() > 0 {
+				ghaDisplayOutput = ghaOutput.String()
+			}
+			r.ghaEmitStep(job, stepID, idx+1, ghaDisplayOutput, stepErr == nil, stepDuration, stepErr, view.headline)
 		}
+
+		jobReport.observeStepDone(stepID, stepErr == nil, false, stepDuration)
 
 		if stepErr != nil {
 			r.updateState(persistState, execState, func() {
@@ -717,11 +724,16 @@ func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState
 		var ready []model.PlanJob
 		for id := range pending {
 			job := jobMap[id]
-			allDepsMet := true
-			for _, dep := range job.DependsOn {
-				if !completed[dep] {
-					allDepsMet = false
-					break
+			// In single-job mode with SkipLocalDepsForJob, the remote coordinator
+			// has already verified deps via the claim loop — skip the local check.
+			allDepsMet := r.JobID != "" && r.SkipLocalDepsForJob
+			if !allDepsMet {
+				allDepsMet = true
+				for _, dep := range job.DependsOn {
+					if !completed[dep] {
+						allDepsMet = false
+						break
+					}
 				}
 			}
 			if allDepsMet {
@@ -1388,7 +1400,8 @@ func (r *Runner) stepExecContext(base executor.ExecContext, job model.PlanJob, s
 	// Inject job-level runtime IDs so steps can reference the current job.
 	jobRuntimeEnv := map[string]string{
 		"ORUN_JOB_ID":     job.ID,
-		"ORUN_JOB_RUN_ID": r.PlanID + ":" + r.ExecID + ":" + job.ID,
+		"ORUN_JOB_UID":    job.UID,
+		"ORUN_JOB_RUN_ID": r.ExecID + "/" + job.UID,
 	}
 	execContext.JobEnv = executor.MergeEnvironment(execContext.JobEnv, jobRuntimeEnv)
 	execContext.StepEnv = executor.JobEnvironment(step.Env)
@@ -1420,9 +1433,9 @@ func (r *Runner) printPhaseHeader(phase string) {
 	fmt.Fprintf(r.Stdout, "\n  %s %s\n", ui.Cyan(r.Color, "◦"), ui.Cyan(r.Color, title))
 }
 
-func (r *Runner) printJobHeader(job model.PlanJob) {
+func (r *Runner) printJobHeader(job model.PlanJob, execState *state.ExecState) {
 	if r.inGHA() {
-		r.ghaPrintJobHeader(job)
+		r.ghaPrintJobHeader(job, execState)
 		return
 	}
 	r.emitGroupHeader(job)

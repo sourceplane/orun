@@ -32,11 +32,12 @@ type ExecState struct {
 }
 
 type JobState struct {
-	Status     string            `json:"status"`
-	StartedAt  string            `json:"startedAt,omitempty"`
-	FinishedAt string            `json:"finishedAt,omitempty"`
-	Steps      map[string]string `json:"steps"`
-	LastError  string            `json:"lastError,omitempty"`
+	Status      string            `json:"status"`
+	StartedAt   string            `json:"startedAt,omitempty"`
+	FinishedAt  string            `json:"finishedAt,omitempty"`
+	HeartbeatAt string            `json:"heartbeatAt,omitempty"`
+	Steps       map[string]string `json:"steps"`
+	LastError   string            `json:"lastError,omitempty"`
 }
 
 type ExecutionLink struct {

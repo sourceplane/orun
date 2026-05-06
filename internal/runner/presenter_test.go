@@ -1,13 +1,17 @@
 package runner
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/ui"
 )
 
 func TestSummarizeUseOutputPrefersInstalledAndCacheMessages(t *testing.T) {
@@ -92,5 +96,205 @@ func TestNewRunSummaryDedupesLinks(t *testing.T) {
 	snap := summary.snapshot()
 	if len(snap.links) != 1 {
 		t.Fatalf("len(snap.links) = %d, want 1", len(snap.links))
+	}
+}
+
+func TestGHAJobHeaderMatrixModeDefaultsDepToCompleted(t *testing.T) {
+	t.Parallel()
+
+	var sink bytes.Buffer
+	r := &Runner{
+		gha:                 ui.NewGHARenderer(&sink),
+		SkipLocalDepsForJob: true, // GHA matrix mode
+	}
+
+	job := model.PlanJob{
+		ID:        "app@production.deploy",
+		Name:      "deploy",
+		DependsOn: []string{"infra@production.apply"},
+		Steps:     []model.PlanStep{{}},
+	}
+	// Remote state has not propagated the dep's completed status yet.
+	execState := &state.ExecState{Jobs: map[string]*state.JobState{}}
+
+	r.ghaPrintJobHeader(job, execState)
+	r.gha.FlushJob(job.ID)
+	out := sink.String()
+
+	if !strings.Contains(out, "✓ 1/1 ready") {
+		t.Fatalf("expected dep to show completed in matrix mode, got:\n%s", out)
+	}
+	if strings.Contains(out, "● waiting") {
+		t.Fatalf("unexpected 'waiting' in matrix mode header:\n%s", out)
+	}
+}
+
+func TestGHAEmitStepSuccessGroupTitle(t *testing.T) {
+	t.Parallel()
+
+	var sink bytes.Buffer
+	r := &Runner{gha: ui.NewGHARenderer(&sink)}
+
+	job := model.PlanJob{ID: "api@prod.build", Name: "build"}
+	r.ghaEmitStep(job, "compile", 1, "output line\n", true, 1500*time.Millisecond, nil, "compiled ok")
+	out := sink.String()
+
+	// Group title must include result icon, step number, name, duration, summary.
+	if !strings.Contains(out, "::group::✓  01 compile  1.5s  ·  compiled ok") {
+		t.Fatalf("expected result in group title, got:\n%s", out)
+	}
+	// Raw output inside the group.
+	if !strings.Contains(out, "output line") {
+		t.Fatalf("expected raw output inside group, got:\n%s", out)
+	}
+	// Group must close.
+	if !strings.Contains(out, "::endgroup::") {
+		t.Fatalf("expected endgroup marker, got:\n%s", out)
+	}
+	// No separate result line after the group.
+	if strings.Contains(out, "✓ compile") {
+		t.Fatalf("unexpected duplicate result line after group:\n%s", out)
+	}
+}
+
+func TestGHAEmitStepFailureAnnotationOutsideGroup(t *testing.T) {
+	t.Parallel()
+
+	var sink bytes.Buffer
+	r := &Runner{gha: ui.NewGHARenderer(&sink)}
+
+	job := model.PlanJob{ID: "api@prod.build", Name: "build"}
+	r.ghaEmitStep(job, "test", 2, "FAIL: assertion error\n", false, 800*time.Millisecond, fmt.Errorf("exit code 1"), "")
+	out := sink.String()
+
+	// Title contains failure icon and error.
+	if !strings.Contains(out, "::group::✕  02 test") {
+		t.Fatalf("expected failure group title, got:\n%s", out)
+	}
+	// Error annotation must appear AFTER ::endgroup:: (outside the group).
+	endgroupIdx := strings.Index(out, "::endgroup::")
+	annotationIdx := strings.Index(out, "::error::")
+	if endgroupIdx < 0 || annotationIdx < 0 {
+		t.Fatalf("missing endgroup or error annotation:\n%s", out)
+	}
+	if annotationIdx < endgroupIdx {
+		t.Fatalf("::error:: annotation must appear after ::endgroup::, got:\n%s", out)
+	}
+}
+
+func TestGHAJobHeaderShowsDependencyStatus(t *testing.T) {
+	t.Parallel()
+
+	var sink bytes.Buffer
+	r := &Runner{gha: ui.NewGHARenderer(&sink)}
+
+	job := model.PlanJob{
+		ID:        "app@production.deploy",
+		Name:      "deploy",
+		Component: "app",
+		DependsOn: []string{"network@production.apply", "iam@production.apply"},
+		Steps:     []model.PlanStep{{}, {}},
+	}
+	execState := &state.ExecState{
+		Jobs: map[string]*state.JobState{
+			"network@production.apply": {Status: "completed"},
+			"iam@production.apply":     {Status: "completed"},
+		},
+	}
+
+	r.ghaPrintJobHeader(job, execState)
+	r.gha.FlushJob(job.ID)
+	out := sink.String()
+
+	for _, want := range []string{
+		"dependencies",
+		"✓  network@production.apply",
+		"✓  iam@production.apply",
+		"✓ 2/2 ready",
+		ghaSeparator,
+		"steps",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in header output, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestGHAJobHeaderShowsFailedDependency(t *testing.T) {
+	t.Parallel()
+
+	var sink bytes.Buffer
+	r := &Runner{gha: ui.NewGHARenderer(&sink)}
+
+	job := model.PlanJob{
+		ID:        "app@production.deploy",
+		Name:      "deploy",
+		DependsOn: []string{"network@production.apply", "iam@production.apply"},
+		Steps:     []model.PlanStep{{}},
+	}
+	execState := &state.ExecState{
+		Jobs: map[string]*state.JobState{
+			"network@production.apply": {Status: "completed"},
+			"iam@production.apply":     {Status: "failed"},
+		},
+	}
+
+	r.ghaPrintJobHeader(job, execState)
+	r.gha.FlushJob(job.ID)
+	out := sink.String()
+
+	if !strings.Contains(out, "✕ dependency failed · iam@production.apply") {
+		t.Fatalf("expected failed dep summary, got:\n%s", out)
+	}
+	if !strings.Contains(out, "✕  iam@production.apply") {
+		t.Fatalf("expected failed dep entry, got:\n%s", out)
+	}
+}
+
+func TestGHAJobHeaderNoDepsSection(t *testing.T) {
+	t.Parallel()
+
+	var sink bytes.Buffer
+	r := &Runner{gha: ui.NewGHARenderer(&sink)}
+
+	job := model.PlanJob{
+		ID:    "standalone",
+		Name:  "standalone",
+		Steps: []model.PlanStep{{}},
+	}
+
+	r.ghaPrintJobHeader(job, &state.ExecState{Jobs: map[string]*state.JobState{}})
+	r.gha.FlushJob(job.ID)
+	out := sink.String()
+
+	if strings.Contains(out, "dependencies") {
+		t.Fatalf("expected no deps section for job without DependsOn, got:\n%s", out)
+	}
+}
+
+func TestJobReportObserveStepDone(t *testing.T) {
+	t.Parallel()
+
+	jr := newJobReport(model.PlanJob{Steps: []model.PlanStep{{}, {}, {}, {}}}, false)
+
+	jr.observeStepDone("init", true, false, 100*1e6)    // 100ms success
+	jr.observeStepDone("build", true, false, 500*1e6)   // 500ms success (slowest)
+	jr.observeStepDone("test", false, false, 200*1e6)   // 200ms failure
+	jr.observeStepDone("publish", true, true, 0)        // skipped
+
+	if jr.stepPassed != 2 {
+		t.Fatalf("stepPassed = %d, want 2", jr.stepPassed)
+	}
+	if jr.stepFailed != 1 {
+		t.Fatalf("stepFailed = %d, want 1", jr.stepFailed)
+	}
+	if jr.stepSkipped != 1 {
+		t.Fatalf("stepSkipped = %d, want 1", jr.stepSkipped)
+	}
+	if jr.failedStep != "test" {
+		t.Fatalf("failedStep = %q, want %q", jr.failedStep, "test")
+	}
+	if jr.slowestStep != "build" {
+		t.Fatalf("slowestStep = %q, want %q", jr.slowestStep, "build")
 	}
 }

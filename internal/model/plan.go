@@ -18,6 +18,11 @@ type PlanMetadata struct {
 	GeneratedAt string     `json:"generatedAt,omitempty" yaml:"generatedAt,omitempty"`
 	Checksum    string     `json:"checksum,omitempty" yaml:"checksum,omitempty"`
 	Scope       *PlanScope `json:"scope,omitempty" yaml:"scope,omitempty"`
+	// WorkDir is the intent directory path relative to the workspace root
+	// (the directory where orun plan was invoked). orun run uses this when
+	// intent auto-discovery fails (e.g. in GHA where the intent lives in a
+	// subdirectory of GITHUB_WORKSPACE).
+	WorkDir string `json:"workDir,omitempty" yaml:"workDir,omitempty"`
 }
 
 // PlanScope records the component scoping applied when the plan was generated.
@@ -52,6 +57,9 @@ type ResolvedCompositionSource struct {
 // PlanJob is the execution unit in the final plan
 type PlanJob struct {
 	ID          string                 `json:"id" yaml:"id"`
+	UID         string                 `json:"uid,omitempty" yaml:"uid,omitempty"`
+	DisplayName string                 `json:"displayName,omitempty" yaml:"displayName,omitempty"`
+	CheckName   string                 `json:"checkName,omitempty" yaml:"checkName,omitempty"`
 	Name        string                 `json:"name" yaml:"name"`
 	Component   string                 `json:"component" yaml:"component"`
 	Environment string                 `json:"environment" yaml:"environment"`

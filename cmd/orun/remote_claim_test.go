@@ -153,7 +153,7 @@ func TestWaitForJobRunnable_ReturnsWhenJobAppears(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(10 * time.Second)
-	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", nil, time.Millisecond, deadline)
+	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", nil, nil, time.Millisecond, deadline)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestWaitForJobRunnable_ContextCancellation(t *testing.T) {
 	cancel()
 
 	deadline := time.Now().Add(10 * time.Second)
-	err := waitForJobRunnable(ctx, backend, "run-1", "target-job", nil, time.Millisecond, deadline)
+	err := waitForJobRunnable(ctx, backend, "run-1", "target-job", nil, nil, time.Millisecond, deadline)
 	if err == nil {
 		t.Fatal("expected error on cancelled context")
 	}
@@ -183,7 +183,7 @@ func TestWaitForJobRunnable_DeadlineExceeded(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(-1 * time.Second) // already past
-	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", nil, time.Millisecond, deadline)
+	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", nil, nil, time.Millisecond, deadline)
 	if err == nil {
 		t.Fatal("expected deadline exceeded error")
 	}
@@ -205,7 +205,7 @@ func TestWaitForJobRunnable_ErrorPropagates(t *testing.T) {
 	backend := &failingRunnableBackend{}
 
 	deadline := time.Now().Add(10 * time.Second)
-	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", nil, time.Millisecond, deadline)
+	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", nil, nil, time.Millisecond, deadline)
 	if err == nil {
 		t.Fatal("expected error from failing backend")
 	}
@@ -226,7 +226,7 @@ func TestWaitForJobRunnable_DepsFailedDuringPoll(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(10 * time.Second)
-	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", []string{"dep-1"}, time.Millisecond, deadline)
+	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", []string{"dep-1"}, nil, time.Millisecond, deadline)
 	if err == nil {
 		t.Fatal("expected error when dependency failed during poll")
 	}

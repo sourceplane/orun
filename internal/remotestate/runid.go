@@ -5,14 +5,16 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strconv"
+	"time"
 )
 
-// DeriveRunID computes the remote run ID according to the documented precedence:
+// DeriveRunID computes the run ID according to the documented precedence:
 //
 //  1. explicitID (from --exec-id or ORUN_EXEC_ID)
-//  2. GitHub Actions: gh-{GITHUB_RUN_ID}-{GITHUB_RUN_ATTEMPT}-{planID}
-//  3. Local fallback: local-{planID}-{randomHex6}
-func DeriveRunID(planID, explicitID string) string {
+//  2. GitHub Actions: gha_{GITHUB_RUN_ID}_{GITHUB_RUN_ATTEMPT}
+//  3. Local fallback: local_{ts_hex}_{rand_hex}
+func DeriveRunID(explicitID string) string {
 	if explicitID != "" {
 		return explicitID
 	}
@@ -24,13 +26,12 @@ func DeriveRunID(planID, explicitID string) string {
 			attempt = "1"
 		}
 		if ghaRunID != "" {
-			return fmt.Sprintf("gh-%s-%s-%s", ghaRunID, attempt, planID)
+			return fmt.Sprintf("gha_%s_%s", ghaRunID, attempt)
 		}
 	}
 
-	// Local fallback with 3-byte random suffix.
+	ts := strconv.FormatInt(time.Now().UnixMilli(), 16)
 	var b [3]byte
 	_, _ = rand.Read(b[:])
-	suffix := hex.EncodeToString(b[:])
-	return fmt.Sprintf("local-%s-%s", planID, suffix)
+	return fmt.Sprintf("local_%s_%s", ts, hex.EncodeToString(b[:]))
 }
