@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/ui"
 )
 
@@ -92,7 +93,7 @@ func (r *Runner) ghaJobScope(job model.PlanJob) string {
 	return strings.Join(parts, " · ")
 }
 
-func (r *Runner) ghaPrintJobHeader(job model.PlanJob) {
+func (r *Runner) ghaPrintJobHeader(job model.PlanJob, execState *state.ExecState) {
 	buf := r.ghaJobOut(job.ID)
 	if buf == nil {
 		return
@@ -123,7 +124,70 @@ func (r *Runner) ghaPrintJobHeader(job model.PlanJob) {
 	}
 	buf.Println(fmt.Sprintf("  %-12s%d", "steps", len(job.Steps)))
 
-	buf.Println("")
+	// Dependencies section — shown when the job declares explicit ordering.
+	if len(job.DependsOn) > 0 {
+		buf.Println("")
+		buf.Println(ghaSeparator)
+		buf.Println("dependencies")
+		buf.Println("")
+
+		type depEntry struct{ id, status string }
+		deps := make([]depEntry, 0, len(job.DependsOn))
+		completedCount := 0
+		failedDep := ""
+
+		r.stateMu.Lock()
+		for _, dep := range job.DependsOn {
+			status := "pending"
+			if execState != nil {
+				if js, ok := execState.Jobs[dep]; ok && js != nil && js.Status != "" {
+					status = js.Status
+				}
+			}
+			deps = append(deps, depEntry{dep, status})
+			switch status {
+			case "completed":
+				completedCount++
+			case "failed":
+				if failedDep == "" {
+					failedDep = dep
+				}
+			}
+		}
+		r.stateMu.Unlock()
+
+		maxLen := 0
+		for _, d := range deps {
+			if len(d.id) > maxLen {
+				maxLen = len(d.id)
+			}
+		}
+		for _, d := range deps {
+			icon := "○"
+			switch d.status {
+			case "completed":
+				icon = "✓"
+			case "running":
+				icon = "●"
+			case "failed":
+				icon = "✕"
+			}
+			buf.Println(fmt.Sprintf("  %s  %-*s  %s", icon, maxLen, d.id, d.status))
+		}
+
+		buf.Println("")
+		total := len(job.DependsOn)
+		switch {
+		case failedDep != "":
+			buf.Println(fmt.Sprintf("✕ dependency failed · %s", failedDep))
+		case completedCount == total:
+			buf.Println(fmt.Sprintf("✓ %d/%d ready", completedCount, total))
+		default:
+			buf.Println(fmt.Sprintf("● waiting · %d/%d ready", completedCount, total))
+		}
+		buf.Println("")
+	}
+
 	buf.Println(ghaSeparator)
 	buf.Println("steps")
 	buf.Println("")

@@ -1,13 +1,16 @@
 package runner
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/ui"
 )
 
 func TestSummarizeUseOutputPrefersInstalledAndCacheMessages(t *testing.T) {
@@ -92,6 +95,96 @@ func TestNewRunSummaryDedupesLinks(t *testing.T) {
 	snap := summary.snapshot()
 	if len(snap.links) != 1 {
 		t.Fatalf("len(snap.links) = %d, want 1", len(snap.links))
+	}
+}
+
+func TestGHAJobHeaderShowsDependencyStatus(t *testing.T) {
+	t.Parallel()
+
+	var sink bytes.Buffer
+	r := &Runner{gha: ui.NewGHARenderer(&sink)}
+
+	job := model.PlanJob{
+		ID:        "app@production.deploy",
+		Name:      "deploy",
+		Component: "app",
+		DependsOn: []string{"network@production.apply", "iam@production.apply"},
+		Steps:     []model.PlanStep{{}, {}},
+	}
+	execState := &state.ExecState{
+		Jobs: map[string]*state.JobState{
+			"network@production.apply": {Status: "completed"},
+			"iam@production.apply":     {Status: "completed"},
+		},
+	}
+
+	r.ghaPrintJobHeader(job, execState)
+	r.gha.FlushJob(job.ID)
+	out := sink.String()
+
+	for _, want := range []string{
+		"dependencies",
+		"✓  network@production.apply",
+		"✓  iam@production.apply",
+		"✓ 2/2 ready",
+		ghaSeparator,
+		"steps",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in header output, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestGHAJobHeaderShowsFailedDependency(t *testing.T) {
+	t.Parallel()
+
+	var sink bytes.Buffer
+	r := &Runner{gha: ui.NewGHARenderer(&sink)}
+
+	job := model.PlanJob{
+		ID:        "app@production.deploy",
+		Name:      "deploy",
+		DependsOn: []string{"network@production.apply", "iam@production.apply"},
+		Steps:     []model.PlanStep{{}},
+	}
+	execState := &state.ExecState{
+		Jobs: map[string]*state.JobState{
+			"network@production.apply": {Status: "completed"},
+			"iam@production.apply":     {Status: "failed"},
+		},
+	}
+
+	r.ghaPrintJobHeader(job, execState)
+	r.gha.FlushJob(job.ID)
+	out := sink.String()
+
+	if !strings.Contains(out, "✕ dependency failed · iam@production.apply") {
+		t.Fatalf("expected failed dep summary, got:\n%s", out)
+	}
+	if !strings.Contains(out, "✕  iam@production.apply") {
+		t.Fatalf("expected failed dep entry, got:\n%s", out)
+	}
+}
+
+func TestGHAJobHeaderNoDepsSection(t *testing.T) {
+	t.Parallel()
+
+	var sink bytes.Buffer
+	r := &Runner{gha: ui.NewGHARenderer(&sink)}
+
+	job := model.PlanJob{
+		ID:    "standalone",
+		Name:  "standalone",
+		Steps: []model.PlanStep{{}},
+	}
+
+	r.ghaPrintJobHeader(job, &state.ExecState{Jobs: map[string]*state.JobState{}})
+	r.gha.FlushJob(job.ID)
+	out := sink.String()
+
+	if strings.Contains(out, "dependencies") {
+		t.Fatalf("expected no deps section for job without DependsOn, got:\n%s", out)
 	}
 }
 

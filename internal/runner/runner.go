@@ -380,9 +380,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		unmet := unresolvedDependencies(job, execState)
 		if len(unmet) > 0 {
 			summary.addWaiting(1)
-			if r.inGHA() {
-				r.ghaPrintWaiting(job, unmet)
-			} else if r.Verbose || r.JobID != "" {
+			if !r.inGHA() && (r.Verbose || r.JobID != "") {
 				r.printWaiting(job, unmet, execState)
 			}
 			if r.JobID != "" && !r.SkipLocalDepsForJob {
@@ -453,7 +451,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 		}
 	})
 
-	r.printJobHeader(job)
+	r.printJobHeader(job, execState)
 
 	jobFailed := false
 	jobStartedAt := time.Now()
@@ -1433,9 +1431,9 @@ func (r *Runner) printPhaseHeader(phase string) {
 	fmt.Fprintf(r.Stdout, "\n  %s %s\n", ui.Cyan(r.Color, "◦"), ui.Cyan(r.Color, title))
 }
 
-func (r *Runner) printJobHeader(job model.PlanJob) {
+func (r *Runner) printJobHeader(job model.PlanJob, execState *state.ExecState) {
 	if r.inGHA() {
-		r.ghaPrintJobHeader(job)
+		r.ghaPrintJobHeader(job, execState)
 		return
 	}
 	r.emitGroupHeader(job)
