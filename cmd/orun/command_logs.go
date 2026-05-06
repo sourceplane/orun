@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/ui"
@@ -77,20 +78,13 @@ func isLogsRemoteActive() bool {
 }
 
 func resolveLogsBackendURL() string {
-	if u := strings.TrimSpace(logsBackendURL); u != "" {
-		return u
-	}
-	if u := strings.TrimSpace(os.Getenv(backendURLEnvVar)); u != "" {
-		return u
-	}
+	var intent *model.Intent
 	if intentFile != "" {
 		if si, _, err := loadResolvedIntentFile(intentFile); err == nil {
-			if si != nil && strings.TrimSpace(si.Execution.State.BackendURL) != "" {
-				return strings.TrimSpace(si.Execution.State.BackendURL)
-			}
+			intent = si
 		}
 	}
-	return ""
+	return resolveBackendURLWithConfig(intent, logsBackendURL)
 }
 
 func showLogs() error {

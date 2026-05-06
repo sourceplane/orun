@@ -7,6 +7,7 @@ title: Configuration
 1. `intent.yaml`
 2. discovered `component.yaml` manifests
 3. composition sources declared by `intent.compositions`
+4. local CLI config in `~/.orun/config.yaml` for backend defaults and repo links
 
 ## Intent file
 
@@ -103,5 +104,19 @@ execution:
 | `backendUrl` | URI | URL of the orun-backend instance (required when `mode: remote`) |
 
 The `backendUrl` can also be supplied via `--backend-url` or `ORUN_BACKEND_URL`; those take priority over the intent file.
+
+When neither the flag, environment variable, nor intent file sets a backend URL, `orun` falls back to `~/.orun/config.yaml`:
+
+```yaml
+backend:
+  url: https://orun-api.example.workers.dev
+
+repos:
+  - backendUrl: https://orun-api.example.workers.dev
+    repoFullName: sourceplane/orun
+    namespaceId: "123456789"
+```
+
+`orun cloud link` writes the `repos` entries used for local session-authenticated remote-state runs.
 
 When `mode: remote` is set, all three commands that read execution state (`run`, `status`, `logs`) automatically use the backend without requiring `--remote-state` on the command line.

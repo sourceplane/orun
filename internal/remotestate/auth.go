@@ -9,7 +9,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
+
+	"github.com/sourceplane/orun/internal/cliauth"
 )
 
 // TokenSource resolves the bearer token for backend requests.
@@ -102,23 +105,115 @@ func (s *StaticTokenSource) Token(_ context.Context) (string, error) {
 	return s.token, nil
 }
 
-// ResolveTokenSource returns the appropriate TokenSource based on the current
-// environment:
-//
-//   - GitHub Actions with id-token:write → OIDCTokenSource (audience "orun")
-//   - ORUN_TOKEN set → StaticTokenSource
-//   - Otherwise → error
-func ResolveTokenSource() (TokenSource, error) {
+// SessionTokenSource resolves and refreshes a local Orun CLI session token.
+type SessionTokenSource struct {
+	BackendURL string
+	Version    string
+}
+
+// Token returns the current access token, refreshing it if needed.
+func (s *SessionTokenSource) Token(ctx context.Context) (string, error) {
+	creds, err := cliauth.LoadSession()
+	if err != nil {
+		return "", err
+	}
+	if creds == nil {
+		return "", os.ErrNotExist
+	}
+	if creds.AccessToken != "" && !tokenExpired(creds.AccessExpiryTime()) {
+		return creds.AccessToken, nil
+	}
+	if strings.TrimSpace(creds.RefreshToken) == "" {
+		return "", fmt.Errorf("stored Orun login has expired; run `orun auth login` again")
+	}
+	refreshed, err := cliauth.RefreshSession(ctx, s.BackendURL, s.Version, creds)
+	if err != nil {
+		return "", fmt.Errorf("refresh Orun login: %w", err)
+	}
+	if refreshed.AccessToken == "" {
+		return "", fmt.Errorf("refreshed Orun login did not return an access token")
+	}
+	return refreshed.AccessToken, nil
+	}
+
+// ResolveOptions controls token and namespace resolution.
+type ResolveOptions struct {
+	BackendURL   string
+	Version      string
+	Interactive  bool
+	RequireLogin bool
+	NamespaceID  string
+}
+
+// ResolvedAuth describes the selected auth source and optional local namespace.
+type ResolvedAuth struct {
+	TokenSource  TokenSource
+	NamespaceID  string
+	GitHubLogin  string
+	ResolvedMode string
+}
+
+// ResolveAuth returns the appropriate remote-state auth information.
+func ResolveAuth(ctx context.Context, opts ResolveOptions) (*ResolvedAuth, error) {
 	if isGitHubActionsOIDC() {
-		return NewOIDCTokenSource("orun"), nil
+		return &ResolvedAuth{
+			TokenSource:  NewOIDCTokenSource("orun"),
+			ResolvedMode: "oidc",
+		}, nil
 	}
-	if token := os.Getenv("ORUN_TOKEN"); token != "" {
-		return NewStaticTokenSource(token), nil
+	if token := strings.TrimSpace(os.Getenv("ORUN_TOKEN")); token != "" {
+		return &ResolvedAuth{
+			TokenSource:  NewStaticTokenSource(token),
+			NamespaceID:  strings.TrimSpace(opts.NamespaceID),
+			ResolvedMode: "static",
+		}, nil
 	}
-	return nil, fmt.Errorf(
-		"no authentication token available: " +
-			"in GitHub Actions add `id-token: write` to workflow permissions; " +
-			"outside GitHub Actions set ORUN_TOKEN")
+	if strings.TrimSpace(opts.BackendURL) == "" {
+		return nil, fmt.Errorf("missing backend URL for local Orun session auth")
+	}
+	creds, err := cliauth.LoadSession()
+	if err != nil {
+		if opts.Interactive {
+			return nil, fmt.Errorf("no local Orun login found; run `orun auth login` or `orun auth login --device`")
+		}
+		return nil, fmt.Errorf("no local Orun login found; run `orun auth login --device` or set ORUN_TOKEN")
+	}
+	if creds == nil {
+		if opts.Interactive {
+			return nil, fmt.Errorf("no local Orun login found; run `orun auth login` or `orun auth login --device`")
+		}
+		return nil, fmt.Errorf("no local Orun login found; run `orun auth login --device` or set ORUN_TOKEN")
+	}
+	if strings.TrimSpace(creds.BackendURL) != "" && !sameURL(creds.BackendURL, opts.BackendURL) {
+		return nil, fmt.Errorf("stored Orun login targets %s; run `orun auth login --backend-url %s`", creds.BackendURL, opts.BackendURL)
+	}
+	namespaceID := strings.TrimSpace(opts.NamespaceID)
+	if namespaceID != "" && !containsString(creds.AllowedNamespaceIDs, namespaceID) {
+		cfgLink, linkErr := cliauth.FindRepoLink(opts.BackendURL, "", "")
+		if linkErr == nil && cfgLink != nil && cfgLink.NamespaceID == namespaceID {
+			// linked repo allowed via backend account links; token claims may lag.
+		} else {
+			return nil, fmt.Errorf("current Orun login is not authorized for namespace %s; run `orun auth login` again or relink the repo", namespaceID)
+		}
+	}
+	return &ResolvedAuth{
+		TokenSource: &SessionTokenSource{
+			BackendURL: opts.BackendURL,
+			Version:    opts.Version,
+		},
+		NamespaceID:  namespaceID,
+		GitHubLogin:  creds.GitHubLogin,
+		ResolvedMode: "session",
+	}, nil
+}
+
+// ResolveTokenSource returns the remote-state token source plus local namespace.
+func ResolveTokenSource(ctx context.Context, opts ResolveOptions) (TokenSource, string, string, error) {
+	resolved, err := ResolveAuth(ctx, opts)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return resolved.TokenSource, resolved.NamespaceID, resolved.GitHubLogin, nil
 }
 
 // isGitHubActionsOIDC reports whether OIDC token acquisition is possible.
@@ -126,4 +221,24 @@ func isGitHubActionsOIDC() bool {
 	return os.Getenv("GITHUB_ACTIONS") == "true" &&
 		os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL") != "" &&
 		os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN") != ""
+}
+
+func tokenExpired(exp time.Time) bool {
+	if exp.IsZero() {
+		return false
+	}
+	return time.Now().Add(30 * time.Second).After(exp)
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func sameURL(a, b string) bool {
+	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(a), "/"), strings.TrimRight(strings.TrimSpace(b), "/"))
 }

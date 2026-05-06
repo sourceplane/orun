@@ -56,6 +56,7 @@ func (r *RemoteStateBackend) InitRun(ctx context.Context, plan *model.Plan, opts
 	req := remotestate.CreateRunRequest{
 		Plan:        bp,
 		RunID:       opts.RunID,
+		NamespaceID: opts.NamespaceID,
 		DryRun:      opts.DryRun,
 		TriggerType: triggerType,
 		Actor:       opts.Actor,
