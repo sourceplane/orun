@@ -94,3 +94,30 @@ func TestNewRunSummaryDedupesLinks(t *testing.T) {
 		t.Fatalf("len(snap.links) = %d, want 1", len(snap.links))
 	}
 }
+
+func TestJobReportObserveStepDone(t *testing.T) {
+	t.Parallel()
+
+	jr := newJobReport(model.PlanJob{Steps: []model.PlanStep{{}, {}, {}, {}}}, false)
+
+	jr.observeStepDone("init", true, false, 100*1e6)    // 100ms success
+	jr.observeStepDone("build", true, false, 500*1e6)   // 500ms success (slowest)
+	jr.observeStepDone("test", false, false, 200*1e6)   // 200ms failure
+	jr.observeStepDone("publish", true, true, 0)        // skipped
+
+	if jr.stepPassed != 2 {
+		t.Fatalf("stepPassed = %d, want 2", jr.stepPassed)
+	}
+	if jr.stepFailed != 1 {
+		t.Fatalf("stepFailed = %d, want 1", jr.stepFailed)
+	}
+	if jr.stepSkipped != 1 {
+		t.Fatalf("stepSkipped = %d, want 1", jr.stepSkipped)
+	}
+	if jr.failedStep != "test" {
+		t.Fatalf("failedStep = %q, want %q", jr.failedStep, "test")
+	}
+	if jr.slowestStep != "build" {
+		t.Fatalf("slowestStep = %q, want %q", jr.slowestStep, "build")
+	}
+}
