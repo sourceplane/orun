@@ -717,11 +717,16 @@ func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState
 		var ready []model.PlanJob
 		for id := range pending {
 			job := jobMap[id]
-			allDepsMet := true
-			for _, dep := range job.DependsOn {
-				if !completed[dep] {
-					allDepsMet = false
-					break
+			// In single-job mode with SkipLocalDepsForJob, the remote coordinator
+			// has already verified deps via the claim loop — skip the local check.
+			allDepsMet := r.JobID != "" && r.SkipLocalDepsForJob
+			if !allDepsMet {
+				allDepsMet = true
+				for _, dep := range job.DependsOn {
+					if !completed[dep] {
+						allDepsMet = false
+						break
+					}
 				}
 			}
 			if allDepsMet {
