@@ -2,11 +2,13 @@ package render
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/sourceplane/orun/internal/model"
@@ -92,6 +94,7 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 	}
 
 	r.attachChecksum(plan)
+	r.fillJobIdentity(plan)
 
 	return plan
 }
@@ -121,6 +124,40 @@ func (r *Renderer) convertSteps(steps []model.RenderedStep) []model.PlanStep {
 		}
 	}
 	return planSteps
+}
+
+func (r *Renderer) fillJobIdentity(plan *model.Plan) {
+	digest := strings.TrimPrefix(plan.Metadata.Checksum, "sha256-")
+	planShort := digest
+	if len(planShort) > 7 {
+		planShort = planShort[:7]
+	}
+	for i, job := range plan.Jobs {
+		plan.Jobs[i].UID = computeJobUID(planShort, job.ID, digest)
+		plan.Jobs[i].DisplayName = jobDisplayNameFromKey(job.Name)
+		plan.Jobs[i].CheckName = jobCheckName(job.Component, job.Environment, plan.Jobs[i].DisplayName)
+	}
+}
+
+func computeJobUID(planShort, jobKey, planDigest string) string {
+	h := sha256.Sum256([]byte(planDigest + "\x00" + jobKey))
+	jobHash := hex.EncodeToString(h[:])
+	if len(jobHash) > 12 {
+		jobHash = jobHash[:12]
+	}
+	return fmt.Sprintf("job_%s_%s", planShort, jobHash)
+}
+
+func jobDisplayNameFromKey(name string) string {
+	s := strings.ReplaceAll(name, "-", " ")
+	if s == "" {
+		return ""
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func jobCheckName(component, env, displayName string) string {
+	return fmt.Sprintf("%s · %s · %s", component, env, displayName)
 }
 
 func (r *Renderer) attachChecksum(plan *model.Plan) {

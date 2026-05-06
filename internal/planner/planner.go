@@ -52,7 +52,7 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 			}
 
 			// Create job instance
-			jobID := fmt.Sprintf("%s@%s.%s", compInst.ComponentName, envName, jobDef.Name)
+			jobID := fmt.Sprintf("%s.%s.%s", compInst.ComponentName, envName, jobDef.Name)
 			jobInst := &model.JobInstance{
 				ID:          jobID,
 				Name:        jobDef.Name,
@@ -285,7 +285,7 @@ func (jp *JobPlanner) resolveDependencies(jobInstances map[string]*model.JobInst
 	compToJobs := make(map[string][]string) // key: "comp@env", value: [jobIDs]
 
 	for jobID, job := range jobInstances {
-		key := fmt.Sprintf("%s@%s", job.Component, job.Environment)
+		key := fmt.Sprintf("%s.%s", job.Component, job.Environment)
 		compToJobs[key] = append(compToJobs[key], jobID)
 	}
 
@@ -293,7 +293,7 @@ func (jp *JobPlanner) resolveDependencies(jobInstances map[string]*model.JobInst
 	for envName, envInstances := range compInstances {
 		for _, compInst := range envInstances {
 			// Get all jobs for this component
-			key := fmt.Sprintf("%s@%s", compInst.ComponentName, envName)
+			key := fmt.Sprintf("%s.%s", compInst.ComponentName, envName)
 			myJobs, exists := compToJobs[key]
 			if !exists {
 				continue
@@ -301,7 +301,7 @@ func (jp *JobPlanner) resolveDependencies(jobInstances map[string]*model.JobInst
 
 			// Resolve each dependency
 			for _, dep := range compInst.DependsOn {
-				depKey := fmt.Sprintf("%s@%s", dep.ComponentName, dep.Environment)
+				depKey := fmt.Sprintf("%s.%s", dep.ComponentName, dep.Environment)
 				depJobs, exists := compToJobs[depKey]
 				if !exists {
 					return fmt.Errorf("dependency not found: %s depends on %s", key, depKey)

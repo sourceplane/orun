@@ -59,9 +59,15 @@ func (r *Runner) ghaJobOut(jobID string) *ui.GHAJobBuffer {
 }
 
 // ghaJobLabel returns the full display label used in annotations and error messages.
+// Prefers CheckName (e.g. "commerce-checkout-chart · dev · Render helm chart") when set.
 func (r *Runner) ghaJobLabel(job model.PlanJob) string {
+	if cn := strings.TrimSpace(job.CheckName); cn != "" {
+		return cn
+	}
 	parts := []string{}
-	if name := strings.TrimSpace(job.Name); name != "" {
+	if name := strings.TrimSpace(job.DisplayName); name != "" {
+		parts = append(parts, name)
+	} else if name := strings.TrimSpace(job.Name); name != "" {
 		parts = append(parts, name)
 	} else if id := strings.TrimSpace(job.ID); id != "" {
 		parts = append(parts, id)
@@ -79,8 +85,11 @@ func (r *Runner) ghaJobLabel(job model.PlanJob) string {
 	return strings.Join(parts, " ")
 }
 
-// ghaJobName returns just the job name (or ID as fallback).
+// ghaJobName returns the job display name (or ID as fallback).
 func (r *Runner) ghaJobName(job model.PlanJob) string {
+	if dn := strings.TrimSpace(job.DisplayName); dn != "" {
+		return dn
+	}
 	if name := strings.TrimSpace(job.Name); name != "" {
 		return name
 	}

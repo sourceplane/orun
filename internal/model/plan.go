@@ -57,6 +57,9 @@ type ResolvedCompositionSource struct {
 // PlanJob is the execution unit in the final plan
 type PlanJob struct {
 	ID          string                 `json:"id" yaml:"id"`
+	UID         string                 `json:"uid,omitempty" yaml:"uid,omitempty"`
+	DisplayName string                 `json:"displayName,omitempty" yaml:"displayName,omitempty"`
+	CheckName   string                 `json:"checkName,omitempty" yaml:"checkName,omitempty"`
 	Name        string                 `json:"name" yaml:"name"`
 	Component   string                 `json:"component" yaml:"component"`
 	Environment string                 `json:"environment" yaml:"environment"`

@@ -221,7 +221,7 @@ func runPlan() error {
 		execID = os.Getenv(execIDEnvVar)
 	}
 	if remoteActive {
-		execID = remotestate.DeriveRunID(planID, execID)
+		execID = remotestate.DeriveRunID(execID)
 	} else if execID == "" {
 		execID = state.GenerateExecID(plan.Metadata.Name)
 	}
