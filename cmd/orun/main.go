@@ -792,6 +792,15 @@ func collectChangedComponents(
 	}
 
 	intentDir := filepathDir(intentPath)
+	// When intentPath is absolute (e.g. from auto-discovery), convert intentDir
+	// to a CWD-relative path so it matches git diff output which is always relative.
+	if filepath.IsAbs(intentDir) {
+		if cwd, err := os.Getwd(); err == nil {
+			if rel, err := filepath.Rel(cwd, intentDir); err == nil {
+				intentDir = filepath.ToSlash(rel)
+			}
+		}
+	}
 
 	for _, comp := range normalized.Components {
 		if isFileChanged(changedFiles, joinPath(intentDir, comp.SourcePath)) {
