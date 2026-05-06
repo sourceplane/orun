@@ -414,14 +414,14 @@ func httpStatusCode(status int) string {
 	}
 }
 
-// isRetryable returns true for network errors and 5xx responses.
+// isRetryable returns true for network errors, 5xx responses, and rate limits.
 func isRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
 	apiErr, ok := err.(*APIError)
 	if ok {
-		return apiErr.Code == "INTERNAL_ERROR"
+		return apiErr.Code == "INTERNAL_ERROR" || apiErr.Code == "RATE_LIMITED"
 	}
 	// Network-level errors are retryable.
 	return true
