@@ -19,8 +19,7 @@ jobs:
     name: Orun Plan
     runs-on: ubuntu-latest
     outputs:
-      job-ids: ${{ steps.plan.outputs.job-ids }}
-      job-names: ${{ steps.plan.outputs.job-names }}
+      job-matrix: ${{ steps.plan.outputs.job-matrix }}
       plan-checksum: ${{ steps.plan.outputs.plan-checksum }}
     steps:
       - uses: actions/checkout@v4
@@ -35,8 +34,7 @@ jobs:
             --intent examples/intent.yaml \
             --output plan.json
           echo "plan-checksum=$(jq -r '.metadata.checksum | ltrimstr("sha256-") | .[0:12]' plan.json)" >> $GITHUB_OUTPUT
-          echo "job-ids=$(jq -c '[.jobs[].id]' plan.json)" >> $GITHUB_OUTPUT
-          echo "job-names=$(jq -c '[.jobs[].checkName]' plan.json)" >> $GITHUB_OUTPUT
+          echo "job-matrix=$(jq -c '[.jobs[] | {"job-id": .id, "job-name": .checkName}]' plan.json)" >> $GITHUB_OUTPUT
       - name: Upload plan artifact
         uses: actions/upload-artifact@v4
         with:
@@ -46,14 +44,13 @@ jobs:
   execute:
     name: ${{ matrix.job-name }}
     needs: plan
-    if: needs.plan.outputs.job-ids != '[]'
+    if: needs.plan.outputs.job-matrix != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       max-parallel: 10
       matrix:
-        job-id: ${{ fromJson(needs.plan.outputs.job-ids) }}
-        job-name: ${{ fromJson(needs.plan.outputs.job-names) }}
+        include: ${{ fromJson(needs.plan.outputs.job-matrix) }}
     concurrency:
       group: orun-${{ github.ref }}-${{ matrix.job-id }}
       cancel-in-progress: false
