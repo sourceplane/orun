@@ -1,0 +1,293 @@
+# remote-state-conformance.yml
+#
+# Live conformance harness for orun remote-state distributed execution.
+#
+# Proves end-to-end that:
+#   - One compiled plan drives N independent matrix runners.
+#   - Each runner claims exactly one job via orun-backend.
+#   - Duplicate runners exit cleanly when a job is already claimed/complete.
+#   - Jobs with unmet dependencies poll /runnable instead of failing.
+#   - orun status --remote-state and orun logs --remote-state work post-run.
+#
+# Triggers:
+#   - workflow_dispatch  (always available; use for manual testing)
+#   - push/PR            (only when ORUN_REMOTE_STATE_E2E repo variable is "true")
+#
+# Required repository configuration:
+#   vars.ORUN_BACKEND_URL         URL of your orun-backend instance
+#   vars.ORUN_REMOTE_STATE_E2E    Set to "true" to enable on push/PR (optional)
+#
+# Authentication:
+#   GitHub Actions OIDC (id-token: write).  No static ORUN_TOKEN needed for
+#   mutable operations — the live backend verifies the runner via OIDC JWT.
+
+name: orun remote-state conformance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "cmd/orun/**"
+      - "internal/**"
+      - "examples/remote-state-matrix/**"
+      - ".github/workflows/remote-state-conformance.yml"
+  push:
+    branches: [main]
+    paths:
+      - "cmd/orun/**"
+      - "internal/**"
+      - "examples/remote-state-matrix/**"
+      - ".github/workflows/remote-state-conformance.yml"
+
+permissions:
+  contents: read
+  id-token: write   # required for GitHub Actions OIDC authentication
+
+# ── dry-run guard ─────────────────────────────────────────────────────────────
+# Always runs — validates harness structure without credentials.
+jobs:
+  dry-run-guard:
+    name: Harness dry-run guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run dry-run guard
+        run: bash examples/remote-state-matrix/test/dry-run-guard.sh
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Go test (harness package)
+        run: go test ./examples/remote-state-matrix/test/... -v
+
+# ── live conformance ─────────────────────────────────────────────────────────
+# Skipped unless workflow_dispatch OR ORUN_REMOTE_STATE_E2E == "true".
+  plan:
+    name: Compile plan
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      vars.ORUN_REMOTE_STATE_E2E == 'true'
+    needs: dry-run-guard
+    runs-on: ubuntu-latest
+    outputs:
+      plan_id:   ${{ steps.plan.outputs.plan_id }}
+      run_id:    ${{ steps.plan.outputs.run_id }}
+      jobs:      ${{ steps.matrix.outputs.jobs }}
+      first_job: ${{ steps.matrix.outputs.first_job }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install orun
+        run: go install ./cmd/orun
+
+      - name: Compile plan
+        id: plan
+        working-directory: examples/remote-state-matrix
+        run: |
+          orun plan --name remote-state-e2e --all
+          plan_id="$(orun get plans -o json \
+            | jq -r '.[] | select(.Name == "remote-state-e2e") | .Checksum')"
+          run_id="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${plan_id}"
+          echo "plan_id=${plan_id}" >> "${GITHUB_OUTPUT}"
+          echo "run_id=${run_id}"   >> "${GITHUB_OUTPUT}"
+
+      - name: Build job matrix
+        id: matrix
+        working-directory: examples/remote-state-matrix
+        run: |
+          jobs="$(orun get jobs --plan '${{ steps.plan.outputs.plan_id }}' --all -o json \
+            | jq -c '[.[] | {job: .id, env: .environment, component: .component}]')"
+          first_job="$(printf '%s' "${jobs}" | jq -r '.[0].job')"
+          # Append a duplicate entry — proves idempotent claim / already-complete behavior.
+          jobs="$(printf '%s' "${jobs}" | \
+            jq -c --arg job "${first_job}" \
+              '. + [{job: $job, env: "duplicate", component: "duplicate"}]')"
+          echo "jobs=${jobs}"           >> "${GITHUB_OUTPUT}"
+          echo "first_job=${first_job}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload compiled plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orun-remote-state-plan
+          path: examples/remote-state-matrix/.orun/plans/
+          if-no-files-found: error
+
+  run-one-job-per-runner:
+    name: "Run: ${{ matrix.job }}"
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.jobs) }}
+    env:
+      ORUN_BACKEND_URL: ${{ vars.ORUN_BACKEND_URL }}
+      ORUN_REMOTE_STATE: "true"
+      ORUN_EXEC_ID: ${{ needs.plan.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install orun
+        run: go install ./cmd/orun
+
+      - name: Download compiled plan
+        uses: actions/download-artifact@v4
+        with:
+          name: orun-remote-state-plan
+          path: examples/remote-state-matrix/.orun/plans/
+
+      - name: Run selected job through remote state
+        working-directory: examples/remote-state-matrix
+        run: |
+          orun run '${{ needs.plan.outputs.plan_id }}' \
+            --job '${{ matrix.job }}' \
+            --remote-state \
+            --backend-url "${ORUN_BACKEND_URL}" \
+            --gha \
+            --verbose
+
+  run-env-fanout:
+    name: "Env fanout: ${{ matrix.env_name }}"
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env_name: [dev, stage]
+    env:
+      ORUN_BACKEND_URL: ${{ vars.ORUN_BACKEND_URL }}
+      ORUN_REMOTE_STATE: "true"
+      ORUN_EXEC_ID: env-${{ needs.plan.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install orun
+        run: go install ./cmd/orun
+
+      - name: Download compiled plan
+        uses: actions/download-artifact@v4
+        with:
+          name: orun-remote-state-plan
+          path: examples/remote-state-matrix/.orun/plans/
+
+      - name: Run environment slice through remote state
+        working-directory: examples/remote-state-matrix
+        run: |
+          orun run '${{ needs.plan.outputs.plan_id }}' \
+            --env '${{ matrix.env_name }}' \
+            --remote-state \
+            --backend-url "${ORUN_BACKEND_URL}" \
+            --gha
+
+  verify:
+    name: Verify remote status and logs
+    needs: [plan, run-one-job-per-runner, run-env-fanout]
+    if: always() && (github.event_name == 'workflow_dispatch' || vars.ORUN_REMOTE_STATE_E2E == 'true')
+    runs-on: ubuntu-latest
+    env:
+      ORUN_BACKEND_URL: ${{ vars.ORUN_BACKEND_URL }}
+      ORUN_REMOTE_STATE: "true"
+      ORUN_EXEC_ID: ${{ needs.plan.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install orun
+        run: go install ./cmd/orun
+
+      - name: Download compiled plan
+        uses: actions/download-artifact@v4
+        with:
+          name: orun-remote-state-plan
+          path: examples/remote-state-matrix/.orun/plans/
+
+      - name: Verify remote status
+        working-directory: examples/remote-state-matrix
+        run: |
+          orun status \
+            --remote-state \
+            --backend-url "${ORUN_BACKEND_URL}" \
+            --exec-id "${ORUN_EXEC_ID}" \
+            --json
+
+      - name: Verify remote logs (non-empty)
+        working-directory: examples/remote-state-matrix
+        run: |
+          logs="$(orun logs \
+            --remote-state \
+            --backend-url "${ORUN_BACKEND_URL}" \
+            --exec-id "${ORUN_EXEC_ID}" \
+            --job '${{ needs.plan.outputs.first_job }}')"
+          if [ -z "$(printf '%s' "${logs}" | tr -d '[:space:]')" ]; then
+            echo "ERROR: logs for '${{ needs.plan.outputs.first_job }}' are empty"
+            exit 1
+          fi
+          echo "Logs retrieved (${#logs} bytes)."
+
+      - name: Assert all expected jobs succeeded
+        working-directory: examples/remote-state-matrix
+        run: |
+          status_json="$(orun status \
+            --remote-state \
+            --backend-url "${ORUN_BACKEND_URL}" \
+            --exec-id "${ORUN_EXEC_ID}" \
+            --json)"
+          echo "${status_json}" | jq .
+
+          # Get the expected job IDs from the compiled plan.
+          expected_jobs="$(orun get jobs \
+            --plan "${ORUN_EXEC_ID#*-}" \
+            --all -o json 2>/dev/null \
+            | jq -r '.[].id' || \
+          orun get plans -o json \
+            | jq -r '.[] | select(.Name == "remote-state-e2e") | .Checksum' \
+            | head -1 \
+            | xargs -I{} orun get jobs --plan {} --all -o json \
+            | jq -r '.[].id')"
+
+          any_fail=0
+          while IFS= read -r job_id; do
+            [ -z "${job_id}" ] && continue
+            job_status="$(printf '%s' "${status_json}" \
+              | jq -r --arg j "${job_id}" '.state.jobs[$j].status // empty')"
+            if [ "${job_status}" = "success" ] || [ "${job_status}" = "completed" ]; then
+              echo "  PASS: ${job_id}: ${job_status}"
+            elif [ -z "${job_status}" ]; then
+              echo "  FAIL: ${job_id} is missing from status (not started, skipped, or not registered)"
+              any_fail=1
+            else
+              echo "  FAIL: ${job_id} has status '${job_status}' (expected success or completed)"
+              any_fail=1
+            fi
+          done <<< "${expected_jobs}"
+
+          if [ "${any_fail}" -ne 0 ]; then
+            echo ""
+            echo "ERROR: Not all expected conformance jobs reached success."
+            echo "       Pending, running, failed, blocked, or missing statuses are not acceptable."
+            exit 1
+          fi
+          echo "All expected conformance jobs passed."
