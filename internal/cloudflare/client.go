@@ -284,10 +284,10 @@ func (c *Client) UploadWorkerScript(ctx context.Context, params UploadWorkerPara
 	// Part 2: "index.js" with the Worker module bundle.
 
 	type workerMetadata struct {
-		BodyPart        string                   `json:"body_part"`
-		CompatibilityDate string                 `json:"compatibility_date,omitempty"`
-		Bindings        []WorkerBinding          `json:"bindings"`
-		Migrations      *struct {
+		MainModule        string                   `json:"main_module"`
+		CompatibilityDate string                   `json:"compatibility_date,omitempty"`
+		Bindings          []WorkerBinding          `json:"bindings"`
+		Migrations        *struct {
 			OldTag string                    `json:"old_tag,omitempty"`
 			NewTag string                    `json:"new_tag,omitempty"`
 			Steps  []DurableObjectMigration  `json:"steps"`
@@ -300,17 +300,20 @@ func (c *Client) UploadWorkerScript(ctx context.Context, params UploadWorkerPara
 	}
 
 	meta := workerMetadata{
-		BodyPart:          "index.js",
+		MainModule:        "index.js",
 		CompatibilityDate: compatDate,
 		Bindings:          params.Bindings,
 	}
 	if len(params.DOMiddleMigrations) > 0 {
+		// Use the last step's Tag as new_tag (Cloudflare tracks migration state by tag).
+		newTag := params.DOMiddleMigrations[len(params.DOMiddleMigrations)-1].Tag
 		meta.Migrations = &struct {
 			OldTag string                   `json:"old_tag,omitempty"`
 			NewTag string                   `json:"new_tag,omitempty"`
 			Steps  []DurableObjectMigration `json:"steps"`
 		}{
-			Steps: params.DOMiddleMigrations,
+			NewTag: newTag,
+			Steps:  params.DOMiddleMigrations,
 		}
 	}
 
