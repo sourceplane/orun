@@ -12,13 +12,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var cloudCmd = &cobra.Command{
-	Use:   "cloud",
-	Short: "Manage Orun Cloud workspace linkage",
-}
+var (
+	cloudCmd        = &cobra.Command{Use: "cloud", Short: "Manage Orun Cloud workspace linkage"}
+	cloudBackendURL string
+)
 
 func registerCloudCommand(root *cobra.Command) {
 	root.AddCommand(cloudCmd)
+	cloudCmd.PersistentFlags().StringVar(&cloudBackendURL, "backend-url", "", "orun-backend URL")
 	cloudCmd.AddCommand(&cobra.Command{
 		Use:   "link",
 		Short: "Link the current GitHub repo to the local Orun config via the active CLI session",
@@ -36,7 +37,7 @@ by 'orun auth login' is sufficient.`,
 }
 
 func runCloudLink() error {
-	backendURL, err := requireBackendURL(nil, authBackendURL)
+	backendURL, err := requireBackendURL(nil, cloudBackendURL)
 	if err != nil {
 		return err
 	}

@@ -192,6 +192,27 @@ func FindRepoLink(backendURL, gitRemote, repoFullName string) (*RepoLink, error)
 	return nil, nil
 }
 
+// FindRepoLinkByNamespaceID returns a stored repo link matching backendURL and
+// namespaceID. Used when we only know the namespace ID, not the slug or remote.
+func FindRepoLinkByNamespaceID(backendURL, namespaceID string) (*RepoLink, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	backendURL = strings.TrimSpace(backendURL)
+	namespaceID = strings.TrimSpace(namespaceID)
+	for i := range cfg.Repos {
+		link := cfg.Repos[i]
+		if backendURL != "" && !sameURL(link.BackendURL, backendURL) {
+			continue
+		}
+		if namespaceID != "" && link.NamespaceID == namespaceID {
+			return &link, nil
+		}
+	}
+	return nil, nil
+}
+
 func sameRepoLink(a, b RepoLink) bool {
 	if strings.TrimSpace(a.RepoFullName) != "" && strings.EqualFold(a.RepoFullName, b.RepoFullName) && sameURL(a.BackendURL, b.BackendURL) {
 		return true
