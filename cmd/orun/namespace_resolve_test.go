@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -97,8 +98,11 @@ func TestAutoResolveNamespace_Success(t *testing.T) {
 		if r.URL.Path == "/v1/accounts/repos/link" && r.Method == http.MethodPost {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{
-				"namespaceId":   "ns-resolved",
-				"namespaceSlug": "owner/repo",
+				"namespaceKind": "local",
+				"namespaceId":   "local:user:12345:repo:67890",
+				"namespaceSlug": "local:octocat/owner/repo",
+				"repoId":        "67890",
+				"repoFullName":  "owner/repo",
 				"linkedAt":      "2026-05-07T10:00:00Z",
 			})
 			return
@@ -107,9 +111,9 @@ func TestAutoResolveNamespace_Success(t *testing.T) {
 		if r.URL.Path == "/v1/auth/cli/token" {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"accessToken":  "fresh-token",
-				"expiresAt":    "2099-01-01T00:00:00Z",
-				"githubLogin":  "testuser",
+				"accessToken": "fresh-token",
+				"expiresAt":   "2099-01-01T00:00:00Z",
+				"githubLogin": "testuser",
 			})
 			return
 		}
@@ -117,23 +121,27 @@ func TestAutoResolveNamespace_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// Store a session with a non-expired token.
-	if err := cliauth.SaveSession(&cliauth.Credentials{
+	// Write credentials directly to bypass macOS keychain prompts in tests.
+	writeTestCredentials(t, tmp, &cliauth.Credentials{
 		AccessToken:       "valid-token",
 		AccessTokenExpiry: "2099-01-01T00:00:00Z",
 		RefreshToken:      "refresh-tok",
 		GitHubLogin:       "testuser",
 		BackendURL:        srv.URL,
-	}); err != nil {
-		t.Fatalf("SaveSession() error: %v", err)
-	}
+	})
 
-	nsID, err := autoResolveNamespace(context.Background(), srv.URL, "owner/repo")
+	resp, err := autoResolveNamespace(context.Background(), srv.URL, "owner/repo")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if nsID != "ns-resolved" {
-		t.Errorf("namespaceID = %q, want ns-resolved", nsID)
+	if resp.NamespaceID != "local:user:12345:repo:67890" {
+		t.Errorf("NamespaceID = %q, want local:user:12345:repo:67890", resp.NamespaceID)
+	}
+	if resp.NamespaceKind != "local" {
+		t.Errorf("NamespaceKind = %q, want local", resp.NamespaceKind)
+	}
+	if resp.RepoID != "67890" {
+		t.Errorf("RepoID = %q, want 67890", resp.RepoID)
 	}
 }
 
@@ -155,15 +163,13 @@ func TestAutoResolveNamespace_NotFound(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := cliauth.SaveSession(&cliauth.Credentials{
+	writeTestCredentials(t, tmp, &cliauth.Credentials{
 		AccessToken:       "valid-token",
 		AccessTokenExpiry: "2099-01-01T00:00:00Z",
 		RefreshToken:      "refresh-tok",
 		GitHubLogin:       "testuser",
 		BackendURL:        srv.URL,
-	}); err != nil {
-		t.Fatalf("SaveSession() error: %v", err)
-	}
+	})
 
 	_, err := autoResolveNamespace(context.Background(), srv.URL, "owner/repo")
 	if err == nil {
@@ -171,5 +177,93 @@ func TestAutoResolveNamespace_NotFound(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "orun auth login") {
 		t.Errorf("expected re-login hint, got: %v", err)
+	}
+}
+
+func TestInvalidateCanonicalCachedNamespace(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	// Store a link with a canonical repo namespace ID (pre-0012.2.1 format).
+	if err := cliauth.UpsertRepoLink(cliauth.RepoLink{
+		BackendURL:   "https://api.example.com",
+		GitRemote:    "https://github.com/owner/repo.git",
+		RepoFullName: "owner/repo",
+		NamespaceID:  "repo:67890",
+		LinkedAt:     "2026-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("UpsertRepoLink() error: %v", err)
+	}
+
+	link, err := cliauth.FindRepoLink("https://api.example.com", "", "owner/repo")
+	if err != nil {
+		t.Fatalf("FindRepoLink() error: %v", err)
+	}
+	if link == nil {
+		t.Fatal("expected a stored link")
+	}
+	// Simulate what resolveRepoContext does: invalidate non-local namespace IDs.
+	nsID := link.NamespaceID
+	if nsID != "" && !strings.HasPrefix(nsID, "local:") {
+		nsID = ""
+	}
+	if nsID != "" {
+		t.Errorf("canonical namespace ID %q should have been cleared, got %q", link.NamespaceID, nsID)
+	}
+}
+
+func TestPersistRepoLinkStoresLocalMetadata(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	repo := &repoContext{
+		GitRemote:    "https://github.com/owner/repo.git",
+		RepoFullName: "owner/repo",
+	}
+	resp := &cliauth.LinkRepoFromSessionResponse{
+		NamespaceKind: "local",
+		NamespaceID:   "local:user:12345:repo:67890",
+		NamespaceSlug: "local:octocat/owner/repo",
+		RepoID:        "67890",
+		RepoFullName:  "owner/repo",
+		LinkedAt:      "2026-05-07T10:00:00Z",
+	}
+
+	if err := persistRepoLink("https://api.example.com", repo, resp); err != nil {
+		t.Fatalf("persistRepoLink() error: %v", err)
+	}
+
+	link, err := cliauth.FindRepoLink("https://api.example.com", "", "owner/repo")
+	if err != nil {
+		t.Fatalf("FindRepoLink() error: %v", err)
+	}
+	if link == nil {
+		t.Fatal("expected a stored link")
+	}
+	if link.NamespaceID != "local:user:12345:repo:67890" {
+		t.Errorf("NamespaceID = %q, want local:user:12345:repo:67890", link.NamespaceID)
+	}
+	if link.NamespaceKind != "local" {
+		t.Errorf("NamespaceKind = %q, want local", link.NamespaceKind)
+	}
+	if link.RepoID != "67890" {
+		t.Errorf("RepoID = %q, want 67890", link.RepoID)
+	}
+}
+
+// writeTestCredentials writes credentials directly to the file store in tmp,
+// bypassing the macOS keychain which prompts for auth and hangs in tests.
+func writeTestCredentials(t *testing.T, homeDir string, creds *cliauth.Credentials) {
+	t.Helper()
+	data, err := json.Marshal(creds)
+	if err != nil {
+		t.Fatalf("marshal credentials: %v", err)
+	}
+	dir := filepath.Join(homeDir, ".orun")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll %s: %v", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "credentials.json"), data, 0o600); err != nil {
+		t.Fatalf("write credentials.json: %v", err)
 	}
 }

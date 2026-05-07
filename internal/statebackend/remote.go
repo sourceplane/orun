@@ -54,12 +54,13 @@ func (r *RemoteStateBackend) InitRun(ctx context.Context, plan *model.Plan, opts
 		triggerType = "ci"
 	}
 	req := remotestate.CreateRunRequest{
-		Plan:        bp,
-		RunID:       opts.RunID,
-		NamespaceID: opts.NamespaceID,
-		DryRun:      opts.DryRun,
-		TriggerType: triggerType,
-		Actor:       opts.Actor,
+		Plan:         bp,
+		RunID:        opts.RunID,
+		NamespaceID:  opts.NamespaceID,
+		RepoFullName: opts.RepoFullName,
+		DryRun:       opts.DryRun,
+		TriggerType:  triggerType,
+		Actor:        opts.Actor,
 	}
 	resp, err := r.client.CreateRun(ctx, req)
 	if err != nil {

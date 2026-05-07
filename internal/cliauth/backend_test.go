@@ -27,8 +27,11 @@ func TestLinkRepoFromSession_Success(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
-			"namespaceId":   "ns-abc",
-			"namespaceSlug": body.RepoFullName,
+			"namespaceKind": "local",
+			"namespaceId":   "local:user:12345:repo:67890",
+			"namespaceSlug": "local:octocat/" + body.RepoFullName,
+			"repoId":        "67890",
+			"repoFullName":  body.RepoFullName,
 			"linkedAt":      "2026-05-07T10:00:00Z",
 		})
 	}))
@@ -39,11 +42,17 @@ func TestLinkRepoFromSession_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.NamespaceID != "ns-abc" {
-		t.Errorf("NamespaceID = %q, want ns-abc", resp.NamespaceID)
+	if resp.NamespaceKind != "local" {
+		t.Errorf("NamespaceKind = %q, want local", resp.NamespaceKind)
 	}
-	if resp.NamespaceSlug != "sourceplane/orun" {
-		t.Errorf("NamespaceSlug = %q, want sourceplane/orun", resp.NamespaceSlug)
+	if resp.NamespaceID != "local:user:12345:repo:67890" {
+		t.Errorf("NamespaceID = %q, want local:user:12345:repo:67890", resp.NamespaceID)
+	}
+	if resp.RepoID != "67890" {
+		t.Errorf("RepoID = %q, want 67890", resp.RepoID)
+	}
+	if resp.RepoFullName != "sourceplane/orun" {
+		t.Errorf("RepoFullName = %q, want sourceplane/orun", resp.RepoFullName)
 	}
 }
 
@@ -103,8 +112,11 @@ func TestLinkRepoFromSession_Idempotent(t *testing.T) {
 		calls++
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
-			"namespaceId":   "ns-abc",
-			"namespaceSlug": "sourceplane/orun",
+			"namespaceKind": "local",
+			"namespaceId":   "local:user:12345:repo:67890",
+			"namespaceSlug": "local:octocat/sourceplane/orun",
+			"repoId":        "67890",
+			"repoFullName":  "sourceplane/orun",
 			"linkedAt":      "2026-05-07T10:00:00Z",
 		})
 	}))
@@ -116,11 +128,38 @@ func TestLinkRepoFromSession_Idempotent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("call %d: unexpected error: %v", i, err)
 		}
-		if resp.NamespaceID != "ns-abc" {
+		if resp.NamespaceID != "local:user:12345:repo:67890" {
 			t.Errorf("call %d: NamespaceID = %q", i, resp.NamespaceID)
 		}
 	}
 	if calls != 3 {
 		t.Errorf("expected 3 server calls, got %d", calls)
+	}
+}
+
+func TestLinkRepoFromSession_NonLocalKindRejected(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Simulates old backend returning canonical repo namespace.
+		json.NewEncoder(w).Encode(map[string]string{
+			"namespaceKind": "repo",
+			"namespaceId":   "repo:67890",
+			"namespaceSlug": "sourceplane/orun",
+			"linkedAt":      "2026-05-07T10:00:00Z",
+		})
+	}))
+	defer srv.Close()
+
+	c := NewBackendClient(srv.URL, "test")
+	_, err := c.LinkRepoFromSession(context.Background(), "tok", "sourceplane/orun")
+	if err == nil {
+		t.Fatal("expected error when namespaceKind is not local")
+	}
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected *APIError, got %T: %v", err, err)
+	}
+	if apiErr.Code != "INVALID_RESPONSE" {
+		t.Errorf("Code = %q, want INVALID_RESPONSE", apiErr.Code)
 	}
 }

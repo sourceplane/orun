@@ -17,11 +17,12 @@ const (
 
 // InitRunOptions carries options for InitRun.
 type InitRunOptions struct {
-	RunID       string
-	NamespaceID string
-	DryRun      bool
-	Actor       string
-	TriggerType string
+	RunID        string
+	NamespaceID  string
+	RepoFullName string
+	DryRun       bool
+	Actor        string
+	TriggerType  string
 }
 
 // RunHandle is returned by InitRun.

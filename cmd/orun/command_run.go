@@ -341,8 +341,8 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		if resolveErr != nil {
 			return resolveErr
 		}
-		namespaceID = resolved
-		_ = persistRepoLink(backendURL, repo, namespaceID)
+		namespaceID = resolved.NamespaceID
+		_ = persistRepoLink(backendURL, repo, resolved)
 	}
 
 	tokenSrc, resolvedNamespaceID, githubLogin, err := remotestate.ResolveTokenSource(ctx, remotestate.ResolveOptions{
@@ -367,14 +367,23 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	if actor == "" {
 		actor = githubLogin
 	}
+	repoFullName := ""
+	if os.Getenv("GITHUB_ACTIONS") != "true" && repo != nil {
+		repoFullName = repo.RepoFullName
+	}
 	handle, err := backend.InitRun(ctx, plan, statebackend.InitRunOptions{
-		RunID:       execID,
-		NamespaceID: namespaceID,
-		DryRun:      r.DryRun,
-		Actor:       actor,
-		TriggerType: triggerTypeForRemoteRun(),
+		RunID:        execID,
+		NamespaceID:  namespaceID,
+		RepoFullName: repoFullName,
+		DryRun:       r.DryRun,
+		Actor:        actor,
+		TriggerType:  triggerTypeForRemoteRun(),
 	})
 	if err != nil {
+		var apiErr *remotestate.APIError
+		if errors.As(err, &apiErr) && apiErr.Code == "INVALID_REQUEST" && strings.Contains(apiErr.Message, "namespace") {
+			return fmt.Errorf("initializing remote run: namespace not resolved; run `orun auth login` and retry, or `orun cloud link --backend-url %s`", backendURL)
+		}
 		return fmt.Errorf("initializing remote run: %w", err)
 	}
 	// Use the run ID returned by the backend (idempotent join may return existing ID).

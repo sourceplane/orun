@@ -72,11 +72,11 @@ func runCloudLink() error {
 		return translateLinkError(err, repo.RepoFullName)
 	}
 
-	if err := persistRepoLink(backendURL, repo, linked.NamespaceID); err != nil {
+	if err := persistRepoLink(backendURL, repo, linked); err != nil {
 		return err
 	}
 	color := ui.ColorEnabledForWriter(os.Stdout)
-	fmt.Printf("%s linked %s\n", ui.Green(color, "✓"), repo.RepoFullName)
+	fmt.Printf("%s linked %s (local remote-state)\n", ui.Green(color, "✓"), repo.RepoFullName)
 	fmt.Printf("  backend:   %s\n", backendURL)
 	fmt.Printf("  namespace: %s\n", linked.NamespaceID)
 	return nil

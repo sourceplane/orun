@@ -64,7 +64,13 @@ func resolveRepoContext(backendURL string) (*repoContext, error) {
 		return nil, err
 	}
 	if link != nil {
-		ctx.NamespaceID = strings.TrimSpace(link.NamespaceID)
+		nsID := strings.TrimSpace(link.NamespaceID)
+		// Invalidate canonical (non-local) namespace IDs cached from old backend versions.
+		// CLI sessions must use a local:user:... namespace; anything else forces re-link.
+		if nsID != "" && !strings.HasPrefix(nsID, "local:") {
+			nsID = ""
+		}
+		ctx.NamespaceID = nsID
 	}
 	return ctx, nil
 }
@@ -105,16 +111,22 @@ func parseGitHubRepoFullName(remoteURL string) string {
 	}
 }
 
-func persistRepoLink(backendURL string, repo *repoContext, namespaceID string) error {
-	if repo == nil || strings.TrimSpace(namespaceID) == "" {
+func persistRepoLink(backendURL string, repo *repoContext, resp *cliauth.LinkRepoFromSessionResponse) error {
+	if repo == nil || resp == nil || strings.TrimSpace(resp.NamespaceID) == "" {
 		return nil
 	}
+	repoFullName := resp.RepoFullName
+	if repoFullName == "" && repo != nil {
+		repoFullName = repo.RepoFullName
+	}
 	return cliauth.UpsertRepoLink(cliauth.RepoLink{
-		BackendURL:   backendURL,
-		GitRemote:    repo.GitRemote,
-		RepoFullName: repo.RepoFullName,
-		NamespaceID:  namespaceID,
-		LinkedAt:     timeNowRFC3339(),
+		BackendURL:    backendURL,
+		GitRemote:     repo.GitRemote,
+		RepoFullName:  repoFullName,
+		NamespaceID:   resp.NamespaceID,
+		NamespaceKind: resp.NamespaceKind,
+		RepoID:        resp.RepoID,
+		LinkedAt:      timeNowRFC3339(),
 	})
 }
 
@@ -125,11 +137,11 @@ func timeNowRFC3339() string {
 var nowFunc = func() time.Time { return time.Now().UTC() }
 
 // autoResolveNamespace calls the backend session repo link endpoint to resolve
-// repoFullName to a namespace ID. This avoids requiring a prior `orun cloud link`
-// call when the CLI session already has namespace access from login.
+// repoFullName to a local namespace. Returns the full link response so the caller
+// can persist namespace kind, repo ID, and other metadata.
 //
 // Must only be called outside GitHub Actions and when ORUN_TOKEN is not set.
-func autoResolveNamespace(ctx context.Context, backendURL, repoFullName string) (string, error) {
+func autoResolveNamespace(ctx context.Context, backendURL, repoFullName string) (*cliauth.LinkRepoFromSessionResponse, error) {
 	tokenSrc := &remotestate.SessionTokenSource{
 		BackendURL: backendURL,
 		Version:    version,
@@ -138,18 +150,18 @@ func autoResolveNamespace(ctx context.Context, backendURL, repoFullName string) 
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if termIsInteractive() {
-				return "", fmt.Errorf("no local Orun login; run `orun auth login` to authenticate and auto-resolve the repo namespace")
+				return nil, fmt.Errorf("no local Orun login; run `orun auth login` to authenticate and auto-resolve the repo namespace")
 			}
-			return "", fmt.Errorf("no local Orun login; run `orun auth login --device` or pre-link the namespace with `orun cloud link`")
+			return nil, fmt.Errorf("no local Orun login; run `orun auth login --device` or pre-link the namespace with `orun cloud link`")
 		}
-		return "", fmt.Errorf("auth for namespace resolution: %w", err)
+		return nil, fmt.Errorf("auth for namespace resolution: %w", err)
 	}
 	client := cliauth.NewBackendClient(backendURL, version)
 	linked, err := client.LinkRepoFromSession(ctx, accessToken, repoFullName)
 	if err != nil {
-		return "", translateLinkError(err, repoFullName)
+		return nil, translateLinkError(err, repoFullName)
 	}
-	return linked.NamespaceID, nil
+	return linked, nil
 }
 
 // translateLinkError converts backend API errors from the repo link endpoint
