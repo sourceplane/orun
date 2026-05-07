@@ -19,6 +19,21 @@ title: Environment variables
 | `GITHUB_ACTIONS` | Causes `run` to auto-select the GitHub Actions backend when set to `true` |
 | `GITHUB_WORKSPACE` | Used as the default workdir for the GitHub Actions backend when `--workdir` is not set |
 
+## Variables for self-hosted backend provisioning
+
+These variables are used by `orun backend init`, `orun backend status`, and `orun backend destroy`.
+
+| Variable | Description |
+| --- | --- |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID (required for `orun backend` commands) |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token with Workers/D1/R2 edit permissions |
+| `ORUN_SESSION_SECRET` | Orun session HMAC secret; generated securely if absent at init time |
+| `GITHUB_CLIENT_ID` | GitHub OAuth app client ID for dashboard/CLI auth |
+| `GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret (never stored in config) |
+| `ORUN_DASHBOARD_URL` | Dashboard URL for OAuth callback configuration |
+
+No GitHub PAT is required for `orun backend` commands.
+
 `NO_COLOR` (the standard) and `CLICOLOR=0` are also honored for disabling color output. When color is disabled, the context banner printed during auto-scoping uses plain text without ANSI codes.
 
 ## Variables injected during execution
