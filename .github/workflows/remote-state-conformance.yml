@@ -233,16 +233,21 @@ jobs:
             --exec-id "${ORUN_EXEC_ID}" \
             --json
 
-      - name: Verify remote logs
+      - name: Verify remote logs (non-empty)
         working-directory: examples/remote-state-matrix
         run: |
-          orun logs \
+          logs="$(orun logs \
             --remote-state \
             --backend-url "${ORUN_BACKEND_URL}" \
             --exec-id "${ORUN_EXEC_ID}" \
-            --job '${{ needs.plan.outputs.first_job }}'
+            --job '${{ needs.plan.outputs.first_job }}')"
+          if [ -z "$(printf '%s' "${logs}" | tr -d '[:space:]')" ]; then
+            echo "ERROR: logs for '${{ needs.plan.outputs.first_job }}' are empty"
+            exit 1
+          fi
+          echo "Logs retrieved (${#logs} bytes)."
 
-      - name: Assert all jobs succeeded
+      - name: Assert all expected jobs succeeded
         working-directory: examples/remote-state-matrix
         run: |
           status_json="$(orun status \
@@ -251,10 +256,38 @@ jobs:
             --exec-id "${ORUN_EXEC_ID}" \
             --json)"
           echo "${status_json}" | jq .
-          failed="$(echo "${status_json}" | \
-            jq '[.state.jobs | to_entries[] | select(.value.status == "failed")] | length')"
-          if [ "${failed}" -gt 0 ]; then
-            echo "ERROR: ${failed} job(s) reached failed state"
+
+          # Get the expected job IDs from the compiled plan.
+          expected_jobs="$(orun get jobs \
+            --plan "${ORUN_EXEC_ID#*-}" \
+            --all -o json 2>/dev/null \
+            | jq -r '.[].id' || \
+          orun get plans -o json \
+            | jq -r '.[] | select(.Name == "remote-state-e2e") | .Checksum' \
+            | head -1 \
+            | xargs -I{} orun get jobs --plan {} --all -o json \
+            | jq -r '.[].id')"
+
+          any_fail=0
+          while IFS= read -r job_id; do
+            [ -z "${job_id}" ] && continue
+            job_status="$(printf '%s' "${status_json}" \
+              | jq -r --arg j "${job_id}" '.state.jobs[$j].status // empty')"
+            if [ "${job_status}" = "success" ] || [ "${job_status}" = "completed" ]; then
+              echo "  PASS: ${job_id}: ${job_status}"
+            elif [ -z "${job_status}" ]; then
+              echo "  FAIL: ${job_id} is missing from status (not started, skipped, or not registered)"
+              any_fail=1
+            else
+              echo "  FAIL: ${job_id} has status '${job_status}' (expected success or completed)"
+              any_fail=1
+            fi
+          done <<< "${expected_jobs}"
+
+          if [ "${any_fail}" -ne 0 ]; then
+            echo ""
+            echo "ERROR: Not all expected conformance jobs reached success."
+            echo "       Pending, running, failed, blocked, or missing statuses are not acceptable."
             exit 1
           fi
-          echo "All jobs passed remote state verification."
+          echo "All expected conformance jobs passed."

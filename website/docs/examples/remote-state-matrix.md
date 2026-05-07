@@ -47,15 +47,16 @@ Token resolution order (for `orun run --remote-state`):
 
 ## Prerequisites
 
-| Item | Purpose |
-|---|---|
-| Go 1.22+ | Build orun from source |
-| `jq` | Workflow scripts and harness |
-| `orun auth login` | Local remote-state auth |
-| orun-backend instance | Coordinate remote state |
-| `ORUN_BACKEND_URL` | URL of the backend |
+| Item | Purpose | Required |
+|---|---|---|
+| Go 1.22+ | Build orun from source | Yes |
+| `jq` | Harness and workflow scripts | Yes |
+| `orun auth login` | Local remote-state auth | Yes |
+| `orun cloud link` | Link current repo namespace to Orun account | Yes for live remote-state runs |
+| orun-backend instance | Coordinate remote state | Yes |
+| `ORUN_BACKEND_URL` | URL of the backend | Yes |
 
-Build orun:
+### Install orun
 
 ```bash
 cd /path/to/sourceplane/orun
@@ -63,53 +64,97 @@ go build -o orun ./cmd/orun
 export PATH="$PWD:$PATH"
 ```
 
+Or from the module path:
+
+```bash
+go install github.com/sourceplane/orun/cmd/orun@latest
+```
+
+### Install jq
+
+```bash
+# macOS
+brew install jq
+
+# Ubuntu / Debian
+apt-get install -y jq
+
+# Fedora / RHEL
+dnf install -y jq
+```
+
 ## Local remote-state harness
 
 The harness at `examples/remote-state-matrix/run-local-harness.sh` proves the same backend coordination semantics as GitHub Actions without leaving your laptop.
 
-### What it proves
+### What it proves (live run)
 
 - Local CLI sessions can claim, heartbeat, update, and upload logs through the backend.
-- Two local processes targeting the same job do not both execute it (duplicate claim check).
+- Two local processes targeting the same job do not both execute it (duplicate claim check: exactly one log contains execution markers, the other contains zero).
 - Jobs with unmet dependencies poll `/runnable` instead of failing because local state is empty.
-- `orun status --remote-state` and `orun logs --remote-state` return valid data from a separate command.
+- `orun status --remote-state` returns `success` for expected jobs from a separate command.
+- `orun logs --remote-state` returns non-empty output for the executed job.
 
-### How to run
+### What ORUN_DRY_RUN=1 proves (no credentials needed)
+
+`ORUN_DRY_RUN=1 ./run-local-harness.sh` prints the full intended command sequence and exits 0 **without making any real backend calls**.
+
+Dry-run mode verifies:
+- Command construction is correct (right flags, right job IDs, right backend URL).
+- Shared `ORUN_EXEC_ID` is exported before concurrent processes launch.
+- Duplicate and dep-wait processes are included.
+- Status and log commands follow the run.
+
+Dry-run mode does **not** prove:
+- Live backend duplicate-claim enforcement.
+- Real dependency polling via `/runnable`.
+- Actual remote status or log content.
+
+Use dry-run for CI structure checks.  Use the live run (after `orun auth login` and `orun cloud link`) to prove real backend behavior.
+
+### How to run (live)
 
 ```bash
-# 1. Log in
+# 1. Log in (required)
 orun auth login
 # or headless:
 orun auth login --device
 
-# 2. Optional: link the current repo (needed for namespaceId resolution)
+# 2. Link the current repo namespace (required for remote-state runs)
 orun cloud link
 
-# 3. Run the harness from the example directory
+# 3. Run the harness
 cd examples/remote-state-matrix
 ./run-local-harness.sh
 ```
 
-Override the backend URL if needed:
+Override the backend URL:
 
 ```bash
 ORUN_BACKEND_URL=https://my-backend.example.com ./run-local-harness.sh
 ```
 
-Pin a specific exec ID (useful for resuming or re-running the same backend run):
+Pin a specific exec ID:
 
 ```bash
 ORUN_EXEC_ID=local-my-test-run ./run-local-harness.sh
 ```
 
-### Manual step-by-step equivalent
+### How to run (dry-run — no credentials)
 
-If you want to run the steps individually:
+```bash
+cd examples/remote-state-matrix
+ORUN_DRY_RUN=1 ./run-local-harness.sh
+```
+
+### Manual step-by-step equivalent
 
 ```bash
 cd examples/remote-state-matrix
 
 orun auth login
+orun cloud link
+
 orun plan --name remote-state-e2e --all
 
 PLAN_ID="$(orun get plans -o json | jq -r '.[] | select(.Name == "remote-state-e2e") | .Checksum')"
@@ -199,14 +244,20 @@ orun run <plan_id> --env dev   --remote-state
 orun run <plan_id> --env stage --remote-state
 ```
 
-### Trigger the conformance workflow manually
+### Trigger the conformance workflow
+
+**Manual trigger** (always available):
 
 1. Actions → "orun remote-state conformance" → Run workflow
 2. Select the branch
 
-### Automatic trigger
+**Automatic** (when `ORUN_REMOTE_STATE_E2E=true`):
 
-Set the repository variable `ORUN_REMOTE_STATE_E2E=true`.  The workflow then runs automatically on push to `main` or on PRs that touch remote-state code paths.
+Set the repository variable and the workflow runs automatically on push to `main` or on PRs touching remote-state code paths.
+
+**Dry-run guard** (always-on, no credentials):
+
+The `Harness dry-run guard` job always runs on every PR.  It checks harness syntax, dry-run command construction, and assertion helper correctness without requiring a live backend.
 
 ## Intent configuration
 
@@ -233,25 +284,91 @@ orun logs   --remote-state --backend-url https://… --exec-id gha-12345678-1-a1
 
 ## Troubleshooting
 
-### Missing repo access — `POST /v1/runs` returns 403
+### `orun` not found
 
-`orun run --remote-state` sends `namespaceId` in the create-run request.  If the current repo is not linked to your Orun account, `POST /v1/runs` returns 403.
+```
+'orun' not found on PATH.
+```
+
+Install:
+
+```bash
+go install github.com/sourceplane/orun/cmd/orun@latest
+# or build from source:
+go build -o orun ./cmd/orun && export PATH="$PWD:$PATH"
+# or set ORUN_BIN to the full path:
+ORUN_BIN=/path/to/orun ./run-local-harness.sh
+```
+
+### `jq` not found
+
+```
+'jq' not found on PATH.
+```
+
+Install:
+
+```bash
+brew install jq           # macOS
+apt-get install -y jq     # Debian/Ubuntu
+dnf install -y jq         # Fedora/RHEL
+```
+
+### Missing auth — not logged in
+
+```
+Not logged in to Orun.
+```
+
+Run:
+
+```bash
+orun auth login              # browser OAuth (interactive)
+orun auth login --device     # device flow (headless / SSH)
+```
+
+### Missing repo link — `orun cloud link` required
+
+```
+Current Git remote is not linked to your Orun account.
+```
+
+The harness requires namespace resolution so `POST /v1/runs` can include `namespaceId`.
 
 Fix:
 
 ```bash
+orun cloud link --backend-url https://orun-api.sourceplane.ai
+```
+
+If the repo is not yet linked on the backend, visit the Orun dashboard to link it first, then re-run `orun cloud link`.
+
+### No Git remote found
+
+```
+Could not determine the current Git remote from 'orun auth status'.
+```
+
+Ensure you are running from within a Git repository that has a GitHub remote:
+
+```bash
+git remote -v   # should show a github.com origin
 orun cloud link
 ```
 
-This looks up the backend namespace for the current Git remote and saves it to `~/.orun/config.yaml`.  If the repo is not linked yet on the backend, visit the Orun dashboard to link it first.
-
 ### Expired tokens — `401 Unauthorized`
 
-Access tokens expire.  The CLI refreshes them automatically before making requests.  If the refresh token is also expired or revoked:
+Access tokens expire.  The CLI refreshes them automatically.  If the refresh token is also expired or revoked:
 
 ```bash
 orun auth logout
 orun auth login
+```
+
+Check status:
+
+```bash
+orun auth status --backend-url https://orun-api.sourceplane.ai
 ```
 
 ### Backend URL mismatch
@@ -260,7 +377,7 @@ orun auth login
 --remote-state requires --backend-url or ORUN_BACKEND_URL
 ```
 
-Resolution order for the backend URL:
+Resolution order:
 
 1. `--backend-url` flag
 2. `ORUN_BACKEND_URL` environment variable
@@ -269,20 +386,16 @@ Resolution order for the backend URL:
 
 ### Revoked refresh tokens
 
-If you revoked your session (e.g., through `orun auth logout` on another machine) or an admin revoked it on the backend:
-
-```bash
-orun auth status           # shows "(expired)" or error
-orun auth logout           # clears local credentials
-orun auth login            # start a fresh session
+```
+orun auth status    # shows "(expired)" or error
+orun auth logout    # clears local credentials
+orun auth login     # start a fresh session
 ```
 
 ### Missing OIDC permission (GitHub Actions)
 
 ```
-GitHub Actions OIDC token not available: ACTIONS_ID_TOKEN_REQUEST_URL and
-ACTIONS_ID_TOKEN_REQUEST_TOKEN must be set; add `id-token: write` to your
-workflow permissions
+GitHub Actions OIDC token not available
 ```
 
 Add to the workflow:
@@ -299,7 +412,7 @@ permissions:
 job <id>: dependency wait timeout (30m0s) exceeded
 ```
 
-An upstream dependency did not complete within 30 minutes.  Check:
+Check:
 
 - Did the upstream job fail? (`orun status --remote-state`)
 - Is the upstream runner still running? (check GitHub Actions job)
@@ -307,21 +420,15 @@ An upstream dependency did not complete within 30 minutes.  Check:
 
 ### Logs empty after run
 
-`orun logs --remote-state` returns empty output even though jobs completed.
+`orun logs --remote-state` returns empty output.
 
 - Logs are uploaded best-effort.  If a runner crashed before uploading, logs may be missing.
-- Verify the `--exec-id` matches the run you are inspecting.
+- Verify `--exec-id` matches the run you are inspecting.
 - Re-run the harness with a fresh exec ID.
 
 ### Why not GitHub PATs?
 
-GitHub PATs are long-lived credentials with broad scopes.  Storing or using a PAT as an Orun local auth token:
-
-- Creates a credential rotation burden.
-- Gives the PAT scope to the entire backend, not just your Orun session.
-- Does not prove identity to the backend the way OIDC and Orun sessions do.
-
-`orun auth login` issues a short-lived Orun access token (and a refresh token stored in your OS keychain or `~/.orun/credentials.json` at `0600`).  This token is scoped to your Orun account, not your GitHub account.
+GitHub PATs are long-lived credentials with broad scopes.  `orun auth login` issues a short-lived Orun access token scoped to your Orun account, stored in your OS keychain or `~/.orun/credentials.json` at `0600`.  This is more secure and does not require rotation.
 
 ## Related
 
