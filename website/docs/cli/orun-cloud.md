@@ -43,7 +43,6 @@ No GitHub PAT or OAuth token is required.  The Orun CLI session from `orun auth 
 | Backend response | Message | Fix |
 |---|---|---|
 | `NOT_FOUND` | Repo not known to session | Run `orun auth login` again to refresh namespace access |
-| `FORBIDDEN` | Repo not authorized in session | Re-authenticate with `orun auth login` or verify GitHub admin access |
 | `UNAUTHORIZED` | Session expired | Run `orun auth login` |
 
 ### ORUN_TOKEN
