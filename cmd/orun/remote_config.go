@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/cliauth"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/remotestate"
 )
 
 type repoContext struct {
@@ -120,3 +123,52 @@ func timeNowRFC3339() string {
 }
 
 var nowFunc = func() time.Time { return time.Now().UTC() }
+
+// autoResolveNamespace calls the backend session repo link endpoint to resolve
+// repoFullName to a namespace ID. This avoids requiring a prior `orun cloud link`
+// call when the CLI session already has namespace access from login.
+//
+// Must only be called outside GitHub Actions and when ORUN_TOKEN is not set.
+func autoResolveNamespace(ctx context.Context, backendURL, repoFullName string) (string, error) {
+	tokenSrc := &remotestate.SessionTokenSource{
+		BackendURL: backendURL,
+		Version:    version,
+	}
+	accessToken, err := tokenSrc.Token(ctx)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if termIsInteractive() {
+				return "", fmt.Errorf("no local Orun login; run `orun auth login` to authenticate and auto-resolve the repo namespace")
+			}
+			return "", fmt.Errorf("no local Orun login; run `orun auth login --device` or pre-link the namespace with `orun cloud link`")
+		}
+		return "", fmt.Errorf("auth for namespace resolution: %w", err)
+	}
+	client := cliauth.NewBackendClient(backendURL, version)
+	linked, err := client.LinkRepoFromSession(ctx, accessToken, repoFullName)
+	if err != nil {
+		return "", translateLinkError(err, repoFullName)
+	}
+	return linked.NamespaceID, nil
+}
+
+// translateLinkError converts backend API errors from the repo link endpoint
+// into user-friendly messages.
+func translateLinkError(err error, repoFullName string) error {
+	var apiErr *cliauth.APIError
+	if !errors.As(err, &apiErr) {
+		return fmt.Errorf("resolve namespace for %s: %w", repoFullName, err)
+	}
+	switch apiErr.Code {
+	case "NOT_FOUND":
+		return fmt.Errorf("repo %s is not known to your Orun session; run `orun auth login` again to refresh namespace access", repoFullName)
+	case "FORBIDDEN":
+		return fmt.Errorf("repo %s is not authorized in your Orun session; re-authenticate with `orun auth login` or verify GitHub admin access", repoFullName)
+	case "UNAUTHORIZED":
+		return fmt.Errorf("Orun session token invalid or expired; run `orun auth login`")
+	case "HTTP_404":
+		return fmt.Errorf("backend does not support session repo linking; ensure the backend is updated to Task 0012.2")
+	default:
+		return fmt.Errorf("resolve namespace for %s: %w", repoFullName, err)
+	}
+}

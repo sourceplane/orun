@@ -81,6 +81,13 @@ type Account struct {
 	CreatedAt   string `json:"createdAt"`
 }
 
+// LinkRepoFromSessionResponse is returned by POST /v1/accounts/repos/link.
+type LinkRepoFromSessionResponse struct {
+	NamespaceID   string `json:"namespaceId"`
+	NamespaceSlug string `json:"namespaceSlug"`
+	LinkedAt      string `json:"linkedAt"`
+}
+
 // BrowserOpener opens the system browser.
 type BrowserOpener func(string) error
 
@@ -165,6 +172,21 @@ func (c *BackendClient) ListLinkedRepos(ctx context.Context, accessToken string)
 		return nil, err
 	}
 	return resp.Repos, nil
+}
+
+// LinkRepoFromSession calls POST /v1/accounts/repos/link with a CLI session token.
+// The backend resolves repoFullName to a namespace ID from session-discovered slug data.
+// Does not require a GitHub PAT or OAuth token.
+func (c *BackendClient) LinkRepoFromSession(ctx context.Context, accessToken, repoFullName string) (*LinkRepoFromSessionResponse, error) {
+	var resp LinkRepoFromSessionResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/accounts/repos/link",
+		map[string]string{"Authorization": "Bearer " + accessToken},
+		map[string]string{"repoFullName": repoFullName},
+		&resp,
+	); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // BrowserLogin performs the CLI loopback OAuth flow and stores the resulting session.

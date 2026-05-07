@@ -37,11 +37,13 @@ When your workflow has `permissions: id-token: write`, orun requests a GitHub Ac
 
 Outside GitHub Actions, orun uses the credentials stored by `orun auth login` or `orun auth login --device`.  These are Orun-issued OAuth session tokens (not GitHub PATs).  The access token is refreshed automatically when it expires.
 
+On the first `orun run --remote-state` outside GitHub Actions, the CLI auto-resolves the repo namespace from the current Git remote by calling `POST /v1/accounts/repos/link` with the active CLI session, then caches the result in `~/.orun/config.yaml`.  Subsequent runs use the cached namespace ID.
+
 Token resolution order (for `orun run --remote-state`):
 
 1. GitHub Actions OIDC (when `ACTIONS_ID_TOKEN_REQUEST_URL` is set)
-2. `ORUN_TOKEN` environment variable (short-lived machine token, explicit fallback)
-3. Stored Orun CLI session from `orun auth login`
+2. `ORUN_TOKEN` environment variable (short-lived machine token, explicit fallback — requires pre-cached namespace link)
+3. Stored Orun CLI session from `orun auth login` (auto-resolves namespace on first run)
 
 **GitHub PATs are not the normal local auth path.**  They are never stored by the Orun CLI.  Use `orun auth login` for interactive machines and `orun auth login --device` for headless environments.
 
@@ -52,7 +54,7 @@ Token resolution order (for `orun run --remote-state`):
 | Go 1.22+ | Build orun from source | Yes |
 | `jq` | Harness and workflow scripts | Yes |
 | `orun auth login` | Local remote-state auth | Yes |
-| `orun cloud link` | Link current repo namespace to Orun account | Yes for live remote-state runs |
+| `orun cloud link` | Pre-cache repo namespace (optional — auto-resolved on first run) | No |
 | orun-backend instance | Coordinate remote state | Yes |
 | `ORUN_BACKEND_URL` | URL of the backend | Yes |
 
@@ -110,7 +112,7 @@ Dry-run mode does **not** prove:
 - Real dependency polling via `/runnable`.
 - Actual remote status or log content.
 
-Use dry-run for CI structure checks.  Use the live run (after `orun auth login` and `orun cloud link`) to prove real backend behavior.
+Use dry-run for CI structure checks.  Use the live run (after `orun auth login`) to prove real backend behavior.  `orun cloud link` is optional — namespace is auto-resolved on first run.
 
 ### How to run (live)
 
@@ -120,10 +122,7 @@ orun auth login
 # or headless:
 orun auth login --device
 
-# 2. Link the current repo namespace (required for remote-state runs)
-orun cloud link
-
-# 3. Run the harness
+# 2. Run the harness — namespace is auto-resolved on first run
 cd examples/remote-state-matrix
 ./run-local-harness.sh
 ```
@@ -153,7 +152,6 @@ ORUN_DRY_RUN=1 ./run-local-harness.sh
 cd examples/remote-state-matrix
 
 orun auth login
-orun cloud link
 
 orun plan --name remote-state-e2e --all
 
@@ -162,7 +160,7 @@ export ORUN_EXEC_ID="local-$(date +%s)-${PLAN_ID}"
 export ORUN_BACKEND_URL=https://orun-api.sourceplane.ai
 export ORUN_REMOTE_STATE=true
 
-# Launch two processes for foundation@dev.smoke (duplicate claim)
+# Launch two processes for foundation@dev.smoke (duplicate claim — namespace auto-resolved on first call)
 orun run "${PLAN_ID}" --job foundation@dev.smoke --remote-state --backend-url "${ORUN_BACKEND_URL}" &
 orun run "${PLAN_ID}" --job foundation@dev.smoke --remote-state --backend-url "${ORUN_BACKEND_URL}" &
 
@@ -327,21 +325,21 @@ orun auth login              # browser OAuth (interactive)
 orun auth login --device     # device flow (headless / SSH)
 ```
 
-### Missing repo link — `orun cloud link` required
+### Missing repo link — namespace not found
 
 ```
-Current Git remote is not linked to your Orun account.
+repo sourceplane/orun is not known to your Orun session; run `orun auth login` again to refresh namespace access
 ```
 
-The harness requires namespace resolution so `POST /v1/runs` can include `namespaceId`.
+The backend does not have slug data for this repo in your session.  This typically means the session was created before the backend recorded namespace slug mappings.
 
 Fix:
 
 ```bash
-orun cloud link --backend-url https://orun-api.sourceplane.ai
+orun auth login
 ```
 
-If the repo is not yet linked on the backend, visit the Orun dashboard to link it first, then re-run `orun cloud link`.
+After re-login, re-run `orun run --remote-state` — namespace is auto-resolved from the fresh session.
 
 ### No Git remote found
 
