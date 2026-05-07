@@ -30,10 +30,25 @@ type RepoLink struct {
 	LinkedAt      string `yaml:"linkedAt,omitempty"`
 }
 
+// BackendBootstrap holds non-secret metadata written by `orun backend init`.
+// Secrets (API tokens, session secrets, GitHub client secrets) are never stored here.
+type BackendBootstrap struct {
+	// ManagedBy is always "orun-backend-init" to prevent accidental destroy of unrelated resources.
+	ManagedBy      string `yaml:"managedBy,omitempty"`
+	AccountID      string `yaml:"accountId,omitempty"`
+	WorkerName     string `yaml:"workerName,omitempty"`
+	D1DatabaseName string `yaml:"d1DatabaseName,omitempty"`
+	D1DatabaseUUID string `yaml:"d1DatabaseUUID,omitempty"`
+	R2BucketName   string `yaml:"r2BucketName,omitempty"`
+	BackendCommit  string `yaml:"backendCommit,omitempty"`
+	InitAt         string `yaml:"initAt,omitempty"`
+}
+
 // Config is the non-secret CLI config stored in ~/.orun/config.yaml.
 type Config struct {
-	Backend BackendConfig `yaml:"backend,omitempty"`
-	Repos   []RepoLink    `yaml:"repos,omitempty"`
+	Backend          BackendConfig     `yaml:"backend,omitempty"`
+	BackendBootstrap *BackendBootstrap `yaml:"backendBootstrap,omitempty"`
+	Repos            []RepoLink        `yaml:"repos,omitempty"`
 }
 
 // AccessExpiryTime parses the stored access-token expiry.

@@ -192,6 +192,40 @@ func FindRepoLink(backendURL, gitRemote, repoFullName string) (*RepoLink, error)
 	return nil, nil
 }
 
+// SaveBootstrapMetadata stores non-secret backend init metadata in ~/.orun/config.yaml.
+// It also sets backend.url when backendURL is non-empty, so auth/cloud/run commands
+// can find the default backend without extra flags.
+func SaveBootstrapMetadata(meta BackendBootstrap, backendURL string) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	cfg.BackendBootstrap = &meta
+	if strings.TrimSpace(backendURL) != "" {
+		cfg.Backend.URL = strings.TrimSpace(backendURL)
+	}
+	return SaveConfig(cfg)
+}
+
+// LoadBootstrapMetadata returns the stored backend bootstrap metadata, or nil if none.
+func LoadBootstrapMetadata() (*BackendBootstrap, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	return cfg.BackendBootstrap, nil
+}
+
+// ClearBootstrapMetadata removes stored backend bootstrap metadata.
+func ClearBootstrapMetadata() error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	cfg.BackendBootstrap = nil
+	return SaveConfig(cfg)
+}
+
 // FindRepoLinkByNamespaceID returns a stored repo link matching backendURL and
 // namespaceID. Used when we only know the namespace ID, not the slug or remote.
 func FindRepoLinkByNamespaceID(backendURL, namespaceID string) (*RepoLink, error) {

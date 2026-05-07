@@ -35,6 +35,7 @@ const sidebars = {
         'cli/orun-debug',
         'cli/orun-compositions',
         'cli/orun-component',
+        'cli/orun-backend',
       ],
     },
     {
