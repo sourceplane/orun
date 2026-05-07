@@ -73,7 +73,7 @@ if [ "${DRY_RUN}" = "1" ]; then
   echo "[dry-run] preflight: command -v ${ORUN_BIN}"
   echo "[dry-run] preflight: command -v jq"
   echo "[dry-run] preflight: ${ORUN_BIN} auth status --backend-url ${BACKEND_URL}"
-  echo "[dry-run] preflight: repo linkage check (orun auth status | grep '(linked)')"
+  echo "[dry-run] preflight: repo linkage check (informational — auto-resolved on first run if not cached)"
   echo "[dry-run] ${ORUN_BIN} plan --name remote-state-e2e --all"
   echo "[dry-run] ${ORUN_BIN} get plans -o json"
   PLAN_ID="dryrun000000"
@@ -145,18 +145,12 @@ fi
 info "Auth OK."
 
 # 1d. repo linkage
-# orun run --remote-state requires a linked repo namespace so POST /v1/runs
-# can include the namespaceId. Check this before starting concurrent runners.
+# orun run --remote-state auto-resolves the local namespace from the active CLI
+# session and Git remote on first use, so a pre-cached link is not required.
+# If the repo is not yet cached, the auto-resolve path calls POST /v1/accounts/repos/link
+# during the first --remote-state run. This check is informational only.
 if echo "${AUTH_STATUS_OUT}" | grep -q "(not linked)"; then
-  echo "" >&2
-  echo "  The current Git remote is not linked to your Orun account." >&2
-  echo "" >&2
-  echo "  Fix options:" >&2
-  echo "    1. Run: orun cloud link --backend-url ${BACKEND_URL}" >&2
-  echo "       (requires the repo to already be linked in the Orun backend)" >&2
-  echo "    2. If the repo is not yet linked on the backend, visit the Orun" >&2
-  echo "       dashboard and link it there first, then re-run orun cloud link." >&2
-  fail "Repo linkage required for remote-state runs. See above."
+  info "Note: repo namespace not pre-cached; auto-resolution will run with the first --remote-state invocation."
 fi
 
 if ! echo "${AUTH_STATUS_OUT}" | grep -q "Current Git remote:"; then
@@ -164,10 +158,9 @@ if ! echo "${AUTH_STATUS_OUT}" | grep -q "Current Git remote:"; then
   echo "  Could not determine the current Git remote from 'orun auth status'." >&2
   echo "" >&2
   echo "  Ensure you are running from within a Git repository with a GitHub remote." >&2
-  echo "  Then run: orun cloud link --backend-url ${BACKEND_URL}" >&2
-  fail "Repo linkage required for remote-state runs. See above."
+  fail "No GitHub remote detected; cannot auto-resolve repo namespace for remote-state runs."
 fi
-info "Repo linkage OK."
+info "Repo linkage preflight done."
 
 # ── 2. plan ────────────────────────────────────────────────────────────────────
 cd "${SCRIPT_DIR}"

@@ -21,11 +21,13 @@ type BackendConfig struct {
 // RepoLink records the current repo-to-namespace mapping used for local
 // session-authenticated remote-state runs.
 type RepoLink struct {
-	BackendURL   string `yaml:"backendUrl,omitempty"`
-	GitRemote    string `yaml:"gitRemote,omitempty"`
-	RepoFullName string `yaml:"repoFullName,omitempty"`
-	NamespaceID  string `yaml:"namespaceId,omitempty"`
-	LinkedAt     string `yaml:"linkedAt,omitempty"`
+	BackendURL    string `yaml:"backendUrl,omitempty"`
+	GitRemote     string `yaml:"gitRemote,omitempty"`
+	RepoFullName  string `yaml:"repoFullName,omitempty"`
+	NamespaceID   string `yaml:"namespaceId,omitempty"`
+	NamespaceKind string `yaml:"namespaceKind,omitempty"`
+	RepoID        string `yaml:"repoId,omitempty"`
+	LinkedAt      string `yaml:"linkedAt,omitempty"`
 }
 
 // Config is the non-secret CLI config stored in ~/.orun/config.yaml.

@@ -272,24 +272,29 @@ Remote state mutations (claim, heartbeat, update, log upload) require a bearer t
 Resolution order:
 
 1. **GitHub Actions OIDC** — when `GITHUB_ACTIONS=true` and the OIDC token endpoint vars are set, an OIDC token with audience `orun` is fetched automatically.
-2. **Local Orun CLI session** — outside GitHub Actions, run `orun auth login` once, then `orun cloud link` for the current repo. The CLI automatically refreshes expired Orun access tokens with the stored Orun refresh token.
-3. **`ORUN_TOKEN`** — explicit fallback for short-lived Orun machine tokens in other CI or automation.
+2. **Local Orun CLI session** — outside GitHub Actions, run `orun auth login` once. The CLI resolves the repo namespace automatically from the current Git remote using the active session, then refreshes expired Orun access tokens automatically.
+3. **`ORUN_TOKEN`** — explicit fallback for short-lived Orun machine tokens in other CI or automation. Requires a pre-cached namespace link from `orun cloud link`.
 
 Normal local remote-state usage does not require a GitHub PAT.
 
 ### Local setup
 
+The happy path requires only two steps:
+
 ```bash
 orun auth login --backend-url https://orun-api.example.workers.dev
-orun cloud link --backend-url https://orun-api.example.workers.dev
-orun run <plan_id> --remote-state
+orun run --remote-state -i examples/intent.yaml --dry-run
 ```
+
+On the first `orun run --remote-state` outside GitHub Actions, the CLI auto-resolves the repo namespace from the current Git remote and caches it in `~/.orun/config.yaml`. Subsequent runs use the cached value.
 
 For headless terminals:
 
 ```bash
 orun auth login --device --backend-url https://orun-api.example.workers.dev
 ```
+
+`orun cloud link` is available for explicit pre-caching or diagnostics but is no longer required before `orun run --remote-state`.
 
 ### Run ID derivation
 

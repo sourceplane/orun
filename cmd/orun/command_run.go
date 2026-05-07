@@ -309,6 +309,8 @@ func runPlan() error {
 // setupRemoteStateHooks initialises the backend, performs InitRun, and wires
 // hooks for per-job claim, heartbeat, log upload, and terminal update.
 func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, backendURL string) error {
+	ctx := context.Background()
+
 	repo, err := resolveRepoContext(backendURL)
 	if err != nil && os.Getenv("GITHUB_ACTIONS") != "true" {
 		return err
@@ -317,7 +319,33 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	if repo != nil {
 		namespaceID = repo.NamespaceID
 	}
-	tokenSrc, resolvedNamespaceID, githubLogin, err := remotestate.ResolveTokenSource(context.Background(), remotestate.ResolveOptions{
+
+	// Outside GitHub Actions, auto-resolve namespace ID from the CLI session when
+	// no cached link exists. ORUN_TOKEN is not a CLI session token, so it cannot
+	// call the session link endpoint — require a pre-cached namespace link instead.
+	if namespaceID == "" && os.Getenv("GITHUB_ACTIONS") != "true" {
+		if os.Getenv("ORUN_TOKEN") != "" {
+			return fmt.Errorf(
+				"local remote-state with ORUN_TOKEN requires a pre-linked namespace; " +
+					"run `orun cloud link --backend-url %s` first to cache the namespace ID",
+				backendURL,
+			)
+		}
+		if repo == nil || repo.RepoFullName == "" {
+			return fmt.Errorf(
+				"local remote-state requires a GitHub remote to resolve the namespace; " +
+					"no GitHub remote detected in this workspace",
+			)
+		}
+		resolved, resolveErr := autoResolveNamespace(ctx, backendURL, repo.RepoFullName)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		namespaceID = resolved.NamespaceID
+		_ = persistRepoLink(backendURL, repo, resolved)
+	}
+
+	tokenSrc, resolvedNamespaceID, githubLogin, err := remotestate.ResolveTokenSource(ctx, remotestate.ResolveOptions{
 		BackendURL:   backendURL,
 		Version:      version,
 		Interactive:  termIsInteractive(),
@@ -335,19 +363,27 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	runnerID := statebackend.DeriveRunnerID()
 	backend := statebackend.NewRemoteStateBackend(client, runnerID)
 
-	ctx := context.Background()
 	actor := os.Getenv("GITHUB_ACTOR")
 	if actor == "" {
 		actor = githubLogin
 	}
+	repoFullName := ""
+	if os.Getenv("GITHUB_ACTIONS") != "true" && repo != nil {
+		repoFullName = repo.RepoFullName
+	}
 	handle, err := backend.InitRun(ctx, plan, statebackend.InitRunOptions{
-		RunID:       execID,
-		NamespaceID: namespaceID,
-		DryRun:      r.DryRun,
-		Actor:       actor,
-		TriggerType: triggerTypeForRemoteRun(),
+		RunID:        execID,
+		NamespaceID:  namespaceID,
+		RepoFullName: repoFullName,
+		DryRun:       r.DryRun,
+		Actor:        actor,
+		TriggerType:  triggerTypeForRemoteRun(),
 	})
 	if err != nil {
+		var apiErr *remotestate.APIError
+		if errors.As(err, &apiErr) && apiErr.Code == "INVALID_REQUEST" && strings.Contains(apiErr.Message, "namespace") {
+			return fmt.Errorf("initializing remote run: namespace not resolved; run `orun auth login` and retry, or `orun cloud link --backend-url %s`", backendURL)
+		}
 		return fmt.Errorf("initializing remote run: %w", err)
 	}
 	// Use the run ID returned by the backend (idempotent join may return existing ID).

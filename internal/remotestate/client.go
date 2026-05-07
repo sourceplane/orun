@@ -78,12 +78,13 @@ func NewClient(baseURL, version string, tokenSrc TokenSource) *Client {
 
 // CreateRunRequest is the body for POST /v1/runs.
 type CreateRunRequest struct {
-	Plan        *BackendPlan `json:"plan"`
-	RunID       string       `json:"runId,omitempty"`
-	NamespaceID string       `json:"namespaceId,omitempty"`
-	DryRun      bool         `json:"dryRun,omitempty"`
-	TriggerType string       `json:"triggerType,omitempty"`
-	Actor       string       `json:"actor,omitempty"`
+	Plan         *BackendPlan `json:"plan"`
+	RunID        string       `json:"runId,omitempty"`
+	NamespaceID  string       `json:"namespaceId,omitempty"`
+	RepoFullName string       `json:"repoFullName,omitempty"`
+	DryRun       bool         `json:"dryRun,omitempty"`
+	TriggerType  string       `json:"triggerType,omitempty"`
+	Actor        string       `json:"actor,omitempty"`
 }
 
 // RunResponse is the backend Run object returned by /v1/runs/*.

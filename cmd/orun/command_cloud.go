@@ -5,23 +5,31 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
+	"time"
 
 	"github.com/sourceplane/orun/internal/cliauth"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
 
-var cloudCmd = &cobra.Command{
-	Use:   "cloud",
-	Short: "Manage Orun Cloud workspace linkage",
-}
+var (
+	cloudCmd        = &cobra.Command{Use: "cloud", Short: "Manage Orun Cloud workspace linkage"}
+	cloudBackendURL string
+)
 
 func registerCloudCommand(root *cobra.Command) {
 	root.AddCommand(cloudCmd)
+	cloudCmd.PersistentFlags().StringVar(&cloudBackendURL, "backend-url", "", "orun-backend URL")
 	cloudCmd.AddCommand(&cobra.Command{
 		Use:   "link",
-		Short: "Link the current GitHub repo to the local Orun config",
+		Short: "Link the current GitHub repo to the local Orun config via the active CLI session",
+		Long: `Link the current GitHub repo to the local Orun config.
+
+Detects the git remote, resolves the repo namespace through the Orun backend
+CLI session endpoint, and persists the namespace ID in ~/.orun/config.yaml.
+
+No GitHub PAT or OAuth token is required — the Orun CLI session established
+by 'orun auth login' is sufficient.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCloudLink()
 		},
@@ -29,15 +37,8 @@ func registerCloudCommand(root *cobra.Command) {
 }
 
 func runCloudLink() error {
-	backendURL, err := requireBackendURL(nil, authBackendURL)
+	backendURL, err := requireBackendURL(nil, cloudBackendURL)
 	if err != nil {
-		return err
-	}
-	creds, err := cliauth.LoadSession()
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("not logged in; run `orun auth login` first")
-		}
 		return err
 	}
 	repo, err := resolveRepoContext(backendURL)
@@ -45,29 +46,38 @@ func runCloudLink() error {
 		return err
 	}
 	if repo == nil || repo.RepoFullName == "" {
-		return fmt.Errorf("could not detect a GitHub remote for this workspace")
+		return fmt.Errorf("could not detect a GitHub remote for this workspace; local remote-state requires a GitHub remote")
 	}
-	if repo.NamespaceID == "" {
-		linked, listErr := cliauth.NewBackendClient(backendURL, version).ListLinkedRepos(context.Background(), creds.AccessToken)
-		if listErr != nil {
-			return fmt.Errorf("list linked repos: %w", listErr)
+
+	creds, err := cliauth.LoadSession()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("not logged in; run `orun auth login` first")
 		}
-		for _, candidate := range linked {
-			if strings.EqualFold(candidate.NamespaceSlug, repo.RepoFullName) {
-				repo.NamespaceID = candidate.NamespaceID
-				break
-			}
+		return err
+	}
+
+	// Refresh access token if expired.
+	exp := creds.AccessExpiryTime()
+	if creds.AccessToken == "" || (!exp.IsZero() && time.Now().After(exp)) {
+		creds, err = cliauth.RefreshSession(context.Background(), backendURL, version, creds)
+		if err != nil {
+			return fmt.Errorf("refresh login: %w; run `orun auth login` again", err)
 		}
 	}
-	if repo.NamespaceID == "" {
-		return fmt.Errorf("repo %s is not linked in this Orun session; link it in Orun Cloud first, then rerun `orun cloud link`", repo.RepoFullName)
+
+	client := cliauth.NewBackendClient(backendURL, version)
+	linked, err := client.LinkRepoFromSession(context.Background(), creds.AccessToken, repo.RepoFullName)
+	if err != nil {
+		return translateLinkError(err, repo.RepoFullName)
 	}
-	if err := persistRepoLink(backendURL, repo, repo.NamespaceID); err != nil {
+
+	if err := persistRepoLink(backendURL, repo, linked); err != nil {
 		return err
 	}
 	color := ui.ColorEnabledForWriter(os.Stdout)
-	fmt.Printf("%s linked %s\n", ui.Green(color, "✓"), repo.RepoFullName)
-	fmt.Printf("  backend: %s\n", backendURL)
-	fmt.Printf("  namespace: %s\n", repo.NamespaceID)
+	fmt.Printf("%s linked %s (local remote-state)\n", ui.Green(color, "✓"), repo.RepoFullName)
+	fmt.Printf("  backend:   %s\n", backendURL)
+	fmt.Printf("  namespace: %s\n", linked.NamespaceID)
 	return nil
 }

@@ -81,6 +81,17 @@ type Account struct {
 	CreatedAt   string `json:"createdAt"`
 }
 
+// LinkRepoFromSessionResponse is returned by POST /v1/accounts/repos/link.
+// The backend always returns namespaceKind: "local" for CLI session links.
+type LinkRepoFromSessionResponse struct {
+	NamespaceKind string `json:"namespaceKind"`
+	NamespaceID   string `json:"namespaceId"`
+	NamespaceSlug string `json:"namespaceSlug"`
+	RepoID        string `json:"repoId"`
+	RepoFullName  string `json:"repoFullName"`
+	LinkedAt      string `json:"linkedAt"`
+}
+
 // BrowserOpener opens the system browser.
 type BrowserOpener func(string) error
 
@@ -165,6 +176,27 @@ func (c *BackendClient) ListLinkedRepos(ctx context.Context, accessToken string)
 		return nil, err
 	}
 	return resp.Repos, nil
+}
+
+// LinkRepoFromSession calls POST /v1/accounts/repos/link with a CLI session token.
+// Returns an error if the response does not contain namespaceKind: "local" — this
+// guards against older backend versions that may return canonical repo namespaces.
+func (c *BackendClient) LinkRepoFromSession(ctx context.Context, accessToken, repoFullName string) (*LinkRepoFromSessionResponse, error) {
+	var resp LinkRepoFromSessionResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/accounts/repos/link",
+		map[string]string{"Authorization": "Bearer " + accessToken},
+		map[string]string{"repoFullName": repoFullName},
+		&resp,
+	); err != nil {
+		return nil, err
+	}
+	if resp.NamespaceKind != "local" {
+		return nil, &APIError{
+			Code:    "INVALID_RESPONSE",
+			Message: fmt.Sprintf("link endpoint returned namespaceKind %q, expected \"local\"; ensure the backend includes Task 0012.2.1", resp.NamespaceKind),
+		}
+	}
+	return &resp, nil
 }
 
 // BrowserLogin performs the CLI loopback OAuth flow and stores the resulting session.

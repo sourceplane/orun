@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/cliauth"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/remotestate"
 )
 
 type repoContext struct {
@@ -61,7 +64,13 @@ func resolveRepoContext(backendURL string) (*repoContext, error) {
 		return nil, err
 	}
 	if link != nil {
-		ctx.NamespaceID = strings.TrimSpace(link.NamespaceID)
+		nsID := strings.TrimSpace(link.NamespaceID)
+		// Invalidate canonical (non-local) namespace IDs cached from old backend versions.
+		// CLI sessions must use a local:user:... namespace; anything else forces re-link.
+		if nsID != "" && !strings.HasPrefix(nsID, "local:") {
+			nsID = ""
+		}
+		ctx.NamespaceID = nsID
 	}
 	return ctx, nil
 }
@@ -102,16 +111,22 @@ func parseGitHubRepoFullName(remoteURL string) string {
 	}
 }
 
-func persistRepoLink(backendURL string, repo *repoContext, namespaceID string) error {
-	if repo == nil || strings.TrimSpace(namespaceID) == "" {
+func persistRepoLink(backendURL string, repo *repoContext, resp *cliauth.LinkRepoFromSessionResponse) error {
+	if repo == nil || resp == nil || strings.TrimSpace(resp.NamespaceID) == "" {
 		return nil
 	}
+	repoFullName := resp.RepoFullName
+	if repoFullName == "" && repo != nil {
+		repoFullName = repo.RepoFullName
+	}
 	return cliauth.UpsertRepoLink(cliauth.RepoLink{
-		BackendURL:   backendURL,
-		GitRemote:    repo.GitRemote,
-		RepoFullName: repo.RepoFullName,
-		NamespaceID:  namespaceID,
-		LinkedAt:     timeNowRFC3339(),
+		BackendURL:    backendURL,
+		GitRemote:     repo.GitRemote,
+		RepoFullName:  repoFullName,
+		NamespaceID:   resp.NamespaceID,
+		NamespaceKind: resp.NamespaceKind,
+		RepoID:        resp.RepoID,
+		LinkedAt:      timeNowRFC3339(),
 	})
 }
 
@@ -120,3 +135,52 @@ func timeNowRFC3339() string {
 }
 
 var nowFunc = func() time.Time { return time.Now().UTC() }
+
+// autoResolveNamespace calls the backend session repo link endpoint to resolve
+// repoFullName to a local namespace. Returns the full link response so the caller
+// can persist namespace kind, repo ID, and other metadata.
+//
+// Must only be called outside GitHub Actions and when ORUN_TOKEN is not set.
+func autoResolveNamespace(ctx context.Context, backendURL, repoFullName string) (*cliauth.LinkRepoFromSessionResponse, error) {
+	tokenSrc := &remotestate.SessionTokenSource{
+		BackendURL: backendURL,
+		Version:    version,
+	}
+	accessToken, err := tokenSrc.Token(ctx)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if termIsInteractive() {
+				return nil, fmt.Errorf("no local Orun login; run `orun auth login` to authenticate and auto-resolve the repo namespace")
+			}
+			return nil, fmt.Errorf("no local Orun login; run `orun auth login --device` or pre-link the namespace with `orun cloud link`")
+		}
+		return nil, fmt.Errorf("auth for namespace resolution: %w", err)
+	}
+	client := cliauth.NewBackendClient(backendURL, version)
+	linked, err := client.LinkRepoFromSession(ctx, accessToken, repoFullName)
+	if err != nil {
+		return nil, translateLinkError(err, repoFullName)
+	}
+	return linked, nil
+}
+
+// translateLinkError converts backend API errors from the repo link endpoint
+// into user-friendly messages.
+func translateLinkError(err error, repoFullName string) error {
+	var apiErr *cliauth.APIError
+	if !errors.As(err, &apiErr) {
+		return fmt.Errorf("resolve namespace for %s: %w", repoFullName, err)
+	}
+	switch apiErr.Code {
+	case "NOT_FOUND":
+		return fmt.Errorf("repo %s is not known to your Orun session; run `orun auth login` again to refresh namespace access", repoFullName)
+	case "FORBIDDEN":
+		return fmt.Errorf("repo %s is not authorized in your Orun session; re-authenticate with `orun auth login` or verify GitHub admin access", repoFullName)
+	case "UNAUTHORIZED":
+		return fmt.Errorf("Orun session token invalid or expired; run `orun auth login`")
+	case "HTTP_404":
+		return fmt.Errorf("backend does not support session repo linking; ensure the backend is updated to Task 0012.2")
+	default:
+		return fmt.Errorf("resolve namespace for %s: %w", repoFullName, err)
+	}
+}

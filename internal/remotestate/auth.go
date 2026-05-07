@@ -189,9 +189,9 @@ func ResolveAuth(ctx context.Context, opts ResolveOptions) (*ResolvedAuth, error
 	}
 	namespaceID := strings.TrimSpace(opts.NamespaceID)
 	if namespaceID != "" && !containsString(creds.AllowedNamespaceIDs, namespaceID) {
-		cfgLink, linkErr := cliauth.FindRepoLink(opts.BackendURL, "", "")
-		if linkErr == nil && cfgLink != nil && cfgLink.NamespaceID == namespaceID {
-			// linked repo allowed via backend account links; token claims may lag.
+		cfgLink, linkErr := cliauth.FindRepoLinkByNamespaceID(opts.BackendURL, namespaceID)
+		if linkErr == nil && cfgLink != nil {
+			// cached link confirms this namespace; JWT claims may lag a re-login.
 		} else {
 			return nil, fmt.Errorf("current Orun login is not authorized for namespace %s; run `orun auth login` again or relink the repo", namespaceID)
 		}
