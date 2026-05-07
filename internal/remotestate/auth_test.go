@@ -75,7 +75,7 @@ func TestResolveTokenSource_OIDCAvailable(t *testing.T) {
 	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", "https://example.com/token")
 	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "req-token")
 
-	src, err := remotestate.ResolveTokenSource()
+	src, _, _, err := remotestate.ResolveTokenSource(context.Background(), remotestate.ResolveOptions{BackendURL: "https://api.example.com", Version: "test"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestResolveTokenSource_FallbackToken(t *testing.T) {
 	os.Unsetenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
 	t.Setenv("ORUN_TOKEN", "my-token")
 
-	src, err := remotestate.ResolveTokenSource()
+	src, _, _, err := remotestate.ResolveTokenSource(context.Background(), remotestate.ResolveOptions{BackendURL: "https://api.example.com", Version: "test"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestResolveTokenSource_NoToken(t *testing.T) {
 	os.Unsetenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
 	os.Unsetenv("ORUN_TOKEN")
 
-	_, err := remotestate.ResolveTokenSource()
+	_, _, _, err := remotestate.ResolveTokenSource(context.Background(), remotestate.ResolveOptions{BackendURL: "https://api.example.com", Version: "test", Interactive: false})
 	if err == nil {
 		t.Fatal("expected error when no token is available")
 	}

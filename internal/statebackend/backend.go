@@ -18,6 +18,7 @@ const (
 // InitRunOptions carries options for InitRun.
 type InitRunOptions struct {
 	RunID       string
+	NamespaceID string
 	DryRun      bool
 	Actor       string
 	TriggerType string

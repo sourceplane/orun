@@ -25,7 +25,8 @@ The live orun-backend authenticates via **GitHub Actions OIDC**. When your workf
 Auth resolution order:
 
 1. **GitHub Actions OIDC** — automatic when `GITHUB_ACTIONS=true` and OIDC endpoint vars are set. Audience: `orun`.
-2. **`ORUN_TOKEN`** — static API token. Use only with backends that explicitly accept bearer tokens. The current live orun-backend does **not** accept `ORUN_TOKEN` for mutable operations (claim, update, log upload).
+2. **Local Orun CLI session** — for laptop runs, use `orun auth login` plus `orun cloud link`.
+3. **`ORUN_TOKEN`** — explicit machine-token fallback for other automation.
 
 ## Full workflow
 
@@ -107,6 +108,21 @@ From any machine with access to the backend:
 ```bash
 orun status --remote-state --backend-url https://… --exec-id gha-12345678-1-a1b2c3 --watch
 orun logs --remote-state --backend-url https://… --exec-id gha-12345678-1-a1b2c3
+```
+
+## Local remote-state conformance
+
+```bash
+orun auth login --backend-url https://orun-api.example.workers.dev
+orun cloud link --backend-url https://orun-api.example.workers.dev
+orun plan --name remote-state-e2e --all
+export ORUN_REMOTE_STATE=true
+export ORUN_EXEC_ID=local-remote-state-e2e-$(date +%s)
+
+orun run <plan_id> --job foundation@dev.smoke --remote-state &
+orun run <plan_id> --job foundation@dev.smoke --remote-state &
+orun run <plan_id> --job api@dev.smoke --remote-state &
+wait
 ```
 
 ## Related

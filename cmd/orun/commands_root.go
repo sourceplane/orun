@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -134,7 +135,11 @@ func storeDir() string {
 
 // newRemoteBackend creates a RemoteStateBackend using the resolved token source.
 func newRemoteBackend(backendURL string) (statebackend.Backend, error) {
-	tokenSrc, err := remotestate.ResolveTokenSource()
+	tokenSrc, _, _, err := remotestate.ResolveTokenSource(context.Background(), remotestate.ResolveOptions{
+		BackendURL:  backendURL,
+		Version:     version,
+		Interactive: false,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("remote state auth: %w", err)
 	}
@@ -165,6 +170,8 @@ func init() {
 
 	registerPlanCommand(rootCmd)
 	registerRunCommand(rootCmd)
+	registerAuthCommand(rootCmd)
+	registerCloudCommand(rootCmd)
 	registerValidateCommand(rootCmd)
 	registerDebugCommand(rootCmd)
 	registerCompositionsCommand(rootCmd)

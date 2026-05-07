@@ -80,6 +80,7 @@ func NewClient(baseURL, version string, tokenSrc TokenSource) *Client {
 type CreateRunRequest struct {
 	Plan        *BackendPlan `json:"plan"`
 	RunID       string       `json:"runId,omitempty"`
+	NamespaceID string       `json:"namespaceId,omitempty"`
 	DryRun      bool         `json:"dryRun,omitempty"`
 	TriggerType string       `json:"triggerType,omitempty"`
 	Actor       string       `json:"actor,omitempty"`

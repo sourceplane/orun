@@ -267,10 +267,29 @@ Three equivalent ways, in priority order:
 
 ### Authentication
 
-Remote state mutations (claim, heartbeat, update, log upload) require a bearer token.  Two sources are tried in order:
+Remote state mutations (claim, heartbeat, update, log upload) require a bearer token.
 
-1. **GitHub Actions OIDC** (recommended) — when `GITHUB_ACTIONS=true` and the OIDC token endpoint vars are set, an OIDC token with audience `orun` is fetched automatically. This is the required method for the live orun-backend.
-2. **`ORUN_TOKEN`** — a static API token. Use only with backends that explicitly accept bearer tokens. The current live orun-backend does not accept `ORUN_TOKEN` for mutable operations.
+Resolution order:
+
+1. **GitHub Actions OIDC** — when `GITHUB_ACTIONS=true` and the OIDC token endpoint vars are set, an OIDC token with audience `orun` is fetched automatically.
+2. **Local Orun CLI session** — outside GitHub Actions, run `orun auth login` once, then `orun cloud link` for the current repo. The CLI automatically refreshes expired Orun access tokens with the stored Orun refresh token.
+3. **`ORUN_TOKEN`** — explicit fallback for short-lived Orun machine tokens in other CI or automation.
+
+Normal local remote-state usage does not require a GitHub PAT.
+
+### Local setup
+
+```bash
+orun auth login --backend-url https://orun-api.example.workers.dev
+orun cloud link --backend-url https://orun-api.example.workers.dev
+orun run <plan_id> --remote-state
+```
+
+For headless terminals:
+
+```bash
+orun auth login --device --backend-url https://orun-api.example.workers.dev
+```
 
 ### Run ID derivation
 

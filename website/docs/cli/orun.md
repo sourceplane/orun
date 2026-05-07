@@ -10,6 +10,8 @@ The root `orun` command is the entry point for planning, inspection, and executi
 | --- | --- |
 | `orun plan` | Compile intent and compositions into a deterministic execution plan |
 | `orun run` | Execute a compiled plan (executes by default; use `--dry-run` to preview) |
+| `orun auth` | Manage the local Orun CLI session for remote state |
+| `orun cloud` | Link the current GitHub repo for local remote-state runs |
 | `orun status` | Show execution status for the latest or a specific execution |
 | `orun logs` | Stream or filter per-step logs from an execution |
 | `orun get` | List resources: `plans`, `runs`, `jobs`, `components`, `environments` |

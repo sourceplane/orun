@@ -136,16 +136,7 @@ func isRemoteStateActive(intent *model.Intent) bool {
 
 // resolveBackendURL returns the backend URL from flag > env > intent.
 func resolveBackendURL(intent *model.Intent) string {
-	if u := strings.TrimSpace(runBackendURL); u != "" {
-		return u
-	}
-	if u := strings.TrimSpace(os.Getenv(backendURLEnvVar)); u != "" {
-		return u
-	}
-	if intent != nil && strings.TrimSpace(intent.Execution.State.BackendURL) != "" {
-		return strings.TrimSpace(intent.Execution.State.BackendURL)
-	}
-	return ""
+	return resolveBackendURLWithConfig(intent, runBackendURL)
 }
 
 func runPlan() error {
@@ -318,9 +309,26 @@ func runPlan() error {
 // setupRemoteStateHooks initialises the backend, performs InitRun, and wires
 // hooks for per-job claim, heartbeat, log upload, and terminal update.
 func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, backendURL string) error {
-	tokenSrc, err := remotestate.ResolveTokenSource()
+	repo, err := resolveRepoContext(backendURL)
+	if err != nil && os.Getenv("GITHUB_ACTIONS") != "true" {
+		return err
+	}
+	namespaceID := ""
+	if repo != nil {
+		namespaceID = repo.NamespaceID
+	}
+	tokenSrc, resolvedNamespaceID, githubLogin, err := remotestate.ResolveTokenSource(context.Background(), remotestate.ResolveOptions{
+		BackendURL:   backendURL,
+		Version:      version,
+		Interactive:  termIsInteractive(),
+		RequireLogin: true,
+		NamespaceID:  namespaceID,
+	})
 	if err != nil {
 		return fmt.Errorf("remote state auth: %w", err)
+	}
+	if namespaceID == "" {
+		namespaceID = resolvedNamespaceID
 	}
 
 	client := remotestate.NewClient(backendURL, version, tokenSrc)
@@ -329,11 +337,15 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 
 	ctx := context.Background()
 	actor := os.Getenv("GITHUB_ACTOR")
+	if actor == "" {
+		actor = githubLogin
+	}
 	handle, err := backend.InitRun(ctx, plan, statebackend.InitRunOptions{
 		RunID:       execID,
+		NamespaceID: namespaceID,
 		DryRun:      r.DryRun,
 		Actor:       actor,
-		TriggerType: "ci",
+		TriggerType: triggerTypeForRemoteRun(),
 	})
 	if err != nil {
 		return fmt.Errorf("initializing remote run: %w", err)
@@ -798,6 +810,21 @@ func runtimeContextForRunner(runnerName string) executor.RuntimeContext {
 	default:
 		return executor.RuntimeContext{Runner: "local", Environment: "local"}
 	}
+}
+
+func termIsInteractive() bool {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+func triggerTypeForRemoteRun() string {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("GITHUB_ACTIONS")), "true") {
+		return "ci"
+	}
+	return "local"
 }
 
 func loadPlan(path string) (*model.Plan, error) {

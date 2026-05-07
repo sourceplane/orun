@@ -92,4 +92,6 @@ orun status \
 
 The same rendering is used for local and remote state.  `--watch` polls the backend until the run reaches a terminal state (completed or failed).  `--json` returns machine-readable output.
 
+Outside GitHub Actions, remote status uses the local Orun CLI session from `orun auth login` and the backend URL from `--backend-url`, `ORUN_BACKEND_URL`, `intent.yaml`, or `~/.orun/config.yaml`.
+
 Use `orun describe run <id>` for a fuller breakdown including metadata, timing, and job-level errors.

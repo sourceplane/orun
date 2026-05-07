@@ -79,6 +79,8 @@ orun logs \
 
 Omit `--job` to fetch logs for all jobs in the run.
 
+Outside GitHub Actions, remote logs use the local Orun CLI session from `orun auth login` and the backend URL from `--backend-url`, `ORUN_BACKEND_URL`, `intent.yaml`, or `~/.orun/config.yaml`.
+
 ## Log storage
 
 Logs are written to `.orun/executions/{exec-id}/logs/{job}/{step}.log` during local execution. Each step's raw output is stored separately, making it easy to diff, archive, or forward logs from individual steps.
