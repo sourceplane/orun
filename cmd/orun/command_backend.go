@@ -17,13 +17,17 @@ import (
 )
 
 const (
-	cfAccountIDEnvVar  = "CLOUDFLARE_ACCOUNT_ID"
-	cfAPITokenEnvVar   = "CLOUDFLARE_API_TOKEN"
+	cfAccountIDEnvVar       = "CLOUDFLARE_ACCOUNT_ID"
+	cfAPITokenEnvVar        = "CLOUDFLARE_API_TOKEN"
 	orunSessionSecretEnvVar = "ORUN_SESSION_SECRET"
-	ghClientIDEnvVar   = "GITHUB_CLIENT_ID"
-	ghClientSecretEnvVar = "GITHUB_CLIENT_SECRET"
-	orunDashboardURLEnvVar = "ORUN_DASHBOARD_URL"
-	managedByValue     = "orun-backend-init"
+	ghClientIDEnvVar        = "GITHUB_CLIENT_ID"
+	ghClientSecretEnvVar    = "GITHUB_CLIENT_SECRET"
+	orunDashboardURLEnvVar  = "ORUN_DASHBOARD_URL"
+	managedByValue          = "orun-backend-init"
+
+	defaultCatalogQueue = "orun-catalog-ingest"
+	defaultCatalogDLQ   = "orun-catalog-ingest-dlq"
+	defaultCatalogCron  = "*/15 * * * *"
 )
 
 var (
@@ -33,21 +37,24 @@ var (
 	}
 
 	// shared flags
-	backendAccountID  string
-	backendAPIToken   string
+	backendAccountID string
+	backendAPIToken  string
 
 	// init flags
-	initName           string
-	initD1Name         string
-	initR2Bucket       string
-	initOIDCAudience   string
-	initPublicURL      string
-	initDashboardURL   string
-	initGitHubClientID string
+	initName               string
+	initD1Name             string
+	initR2Bucket           string
+	initCatalogQueue       string
+	initCatalogDLQ         string
+	initCatalogCron        string
+	initOIDCAudience       string
+	initPublicURL          string
+	initDashboardURL       string
+	initGitHubClientID     string
 	initGitHubClientSecret string
-	initSessionSecret  string
-	initDryRun         bool
-	initJSON           bool
+	initSessionSecret      string
+	initDryRun             bool
+	initJSON               bool
 
 	// status flags
 	backendStatusJSON bool
@@ -71,9 +78,10 @@ func registerBackendCommand(root *cobra.Command) {
 		Short: "Provision a self-hosted Orun backend on Cloudflare",
 		Long: `Provision the Orun backend on your Cloudflare account.
 
-Creates (or reuses) a D1 database, R2 bucket, and Cloudflare Worker script,
-applies database migrations, configures Worker bindings and vars, and optionally
-sets secrets. Running init twice is safe — existing resources are reused.
+Creates (or reuses) a D1 database, R2 bucket, Cloudflare Worker, catalog queue,
+DLQ, queue consumer, and cron trigger. Applies database migrations, configures
+Worker bindings and vars, and optionally sets secrets. Running init twice is
+safe — existing resources are reused idempotently.
 
 A GitHub OAuth app is required for dashboard and CLI authentication.
 Run without GitHub OAuth flags to provision the API-only backend first, then
@@ -85,6 +93,9 @@ set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET and re-run init to finish auth set
 	initCmd.Flags().StringVar(&initName, "name", "orun-api", "Worker script name")
 	initCmd.Flags().StringVar(&initD1Name, "d1-name", "orun-db", "D1 database name")
 	initCmd.Flags().StringVar(&initR2Bucket, "r2-bucket", "orun-storage", "R2 bucket name")
+	initCmd.Flags().StringVar(&initCatalogQueue, "catalog-queue", defaultCatalogQueue, "Catalog ingest queue name")
+	initCmd.Flags().StringVar(&initCatalogDLQ, "catalog-dlq", defaultCatalogDLQ, "Catalog ingest dead-letter queue name")
+	initCmd.Flags().StringVar(&initCatalogCron, "catalog-cron", defaultCatalogCron, "Cron schedule for Worker scheduled tasks")
 	initCmd.Flags().StringVar(&initOIDCAudience, "oidc-audience", "orun", "GitHub OIDC audience (GITHUB_OIDC_AUDIENCE Worker var)")
 	initCmd.Flags().StringVar(&initPublicURL, "public-url", "", "Public URL for the Worker (ORUN_PUBLIC_URL); inferred from workers.dev if omitted")
 	initCmd.Flags().StringVar(&initDashboardURL, "dashboard-url", "", "Dashboard URL (ORUN_DASHBOARD_URL; optional)")
@@ -111,8 +122,8 @@ set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET and re-run init to finish auth set
 		Short: "Remove Orun backend resources from Cloudflare (DESTRUCTIVE)",
 		Long: `Remove all Orun backend resources managed by orun backend init.
 
-This will permanently delete the Cloudflare Worker script, D1 database, and R2 bucket.
-D1 and R2 data cannot be recovered after deletion.
+This will permanently delete the Cloudflare Worker script, D1 database, R2 bucket,
+catalog queue, DLQ, consumer, and cron schedule. D1 and R2 data cannot be recovered.
 
 By default, destroy only operates on resources recorded by orun backend init.
 Use --adopted to also destroy resources by name that were not created by this CLI.
@@ -171,14 +182,18 @@ func generateSessionSecret() (string, error) {
 // ── backend init ──────────────────────────────────────────────────────────────
 
 type initResult struct {
-	DryRun         bool     `json:"dryRun"`
-	WorkerName     string   `json:"workerName"`
-	D1DatabaseName string   `json:"d1DatabaseName"`
-	D1DatabaseUUID string   `json:"d1DatabaseUUID,omitempty"`
-	R2BucketName   string   `json:"r2BucketName"`
-	BackendURL     string   `json:"backendUrl,omitempty"`
-	MigrationsApplied int  `json:"migrationsApplied"`
-	Warnings       []string `json:"warnings,omitempty"`
+	DryRun            bool     `json:"dryRun"`
+	WorkerName        string   `json:"workerName"`
+	D1DatabaseName    string   `json:"d1DatabaseName"`
+	D1DatabaseUUID    string   `json:"d1DatabaseUUID,omitempty"`
+	R2BucketName      string   `json:"r2BucketName"`
+	CatalogQueueName  string   `json:"catalogQueueName"`
+	CatalogDLQName    string   `json:"catalogDLQName"`
+	CatalogCron       string   `json:"catalogCron"`
+	BackendURL        string   `json:"backendUrl,omitempty"`
+	MigrationsApplied int      `json:"migrationsApplied"`
+	MigrationCount    int      `json:"migrationCount"`
+	Warnings          []string `json:"warnings,omitempty"`
 }
 
 func runBackendInit(ctx context.Context) error {
@@ -195,6 +210,9 @@ func runBackendInit(ctx context.Context) error {
 	workerName := initName
 	d1Name := initD1Name
 	r2Name := initR2Bucket
+	catalogQueue := initCatalogQueue
+	catalogDLQ := initCatalogDLQ
+	catalogCron := initCatalogCron
 	audience := initOIDCAudience
 	publicURL := strings.TrimSpace(initPublicURL)
 	dashboardURL := strings.TrimSpace(initDashboardURL)
@@ -215,20 +233,28 @@ func runBackendInit(ctx context.Context) error {
 	}
 
 	result := initResult{
-		DryRun:         initDryRun,
-		WorkerName:     workerName,
-		D1DatabaseName: d1Name,
-		R2BucketName:   r2Name,
+		DryRun:           initDryRun,
+		WorkerName:       workerName,
+		D1DatabaseName:   d1Name,
+		R2BucketName:     r2Name,
+		CatalogQueueName: catalogQueue,
+		CatalogDLQName:   catalogDLQ,
+		CatalogCron:      catalogCron,
+		MigrationCount:   len(migrations),
 	}
 
 	if initDryRun {
 		if !initJSON {
 			fmt.Fprintf(os.Stdout, "[dry-run] Would provision:\n")
-			fmt.Fprintf(os.Stdout, "  D1 database:   %s\n", d1Name)
-			fmt.Fprintf(os.Stdout, "  R2 bucket:     %s\n", r2Name)
-			fmt.Fprintf(os.Stdout, "  Worker script: %s\n", workerName)
-			fmt.Fprintf(os.Stdout, "  Migrations:    %d\n", len(migrations))
-			fmt.Fprintf(os.Stdout, "  Worker vars:   GITHUB_JWKS_URL, GITHUB_OIDC_AUDIENCE")
+			fmt.Fprintf(os.Stdout, "  D1 database:    %s\n", d1Name)
+			fmt.Fprintf(os.Stdout, "  R2 bucket:      %s\n", r2Name)
+			fmt.Fprintf(os.Stdout, "  Worker script:  %s\n", workerName)
+			fmt.Fprintf(os.Stdout, "  Migrations:     %d\n", len(migrations))
+			fmt.Fprintf(os.Stdout, "  Catalog queue:  %s\n", catalogQueue)
+			fmt.Fprintf(os.Stdout, "  Catalog DLQ:    %s\n", catalogDLQ)
+			fmt.Fprintf(os.Stdout, "  Queue consumer: %s (batch_size=10, max_retries=3, max_wait_ms=30000, dlq=%s)\n", workerName, catalogDLQ)
+			fmt.Fprintf(os.Stdout, "  Cron schedule:  %s\n", catalogCron)
+			fmt.Fprintf(os.Stdout, "  Worker vars:    GITHUB_JWKS_URL, GITHUB_OIDC_AUDIENCE")
 			if publicURL != "" {
 				fmt.Fprintf(os.Stdout, ", ORUN_PUBLIC_URL")
 			}
@@ -241,7 +267,7 @@ func runBackendInit(ctx context.Context) error {
 				fmt.Fprintf(os.Stdout, ", GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET")
 			}
 			fmt.Fprintln(os.Stdout)
-			fmt.Fprintf(os.Stdout, "  Bundle commit: %s\n", manifest.BackendCommitSHA)
+			fmt.Fprintf(os.Stdout, "  Bundle commit:  %s\n", manifest.BackendCommitSHA)
 		}
 		if initJSON {
 			return printJSON(result)
@@ -281,13 +307,39 @@ func runBackendInit(ctx context.Context) error {
 	}
 	fmt.Fprintln(os.Stdout, "  R2 bucket ready.")
 
-	// 4. Upload Worker script with bindings.
+	// 4. Create or reuse catalog queue.
+	fmt.Fprintf(os.Stdout, "Provisioning catalog queue %q...\n", catalogQueue)
+	q, err := client.CreateQueue(ctx, catalogQueue)
+	if err != nil {
+		return fmt.Errorf("provision catalog queue: %w", err)
+	}
+	fmt.Fprintf(os.Stdout, "  Queue ID: %s\n", q.QueueID)
+
+	// 5. Create or reuse catalog DLQ.
+	fmt.Fprintf(os.Stdout, "Provisioning catalog DLQ %q...\n", catalogDLQ)
+	dlq, err := client.CreateQueue(ctx, catalogDLQ)
+	if err != nil {
+		return fmt.Errorf("provision catalog DLQ: %w", err)
+	}
+	fmt.Fprintf(os.Stdout, "  DLQ ID: %s\n", dlq.QueueID)
+
+	// 6. Upload Worker script with all bindings (DO, D1, R2, queue, vars) in one call.
+	// Including vars as plain_text bindings avoids the PATCH /settings clobber risk.
 	fmt.Fprintf(os.Stdout, "Uploading Worker script %q...\n", workerName)
 	bindings := []cloudflare.WorkerBinding{
 		{Type: "durable_object_namespace", Name: "COORDINATOR", ClassName: "RunCoordinator", ScriptName: workerName},
 		{Type: "durable_object_namespace", Name: "RATE_LIMITER", ClassName: "RateLimitCounter", ScriptName: workerName},
 		{Type: "d1", Name: "DB", DatabaseID: db.UUID},
 		{Type: "r2_bucket", Name: "STORAGE", BucketName: r2Name},
+		{Type: "queue", Name: "CATALOG_INGEST_QUEUE", QueueName: catalogQueue},
+		{Type: "plain_text", Name: "GITHUB_JWKS_URL", Text: "https://token.actions.githubusercontent.com/.well-known/jwks"},
+		{Type: "plain_text", Name: "GITHUB_OIDC_AUDIENCE", Text: audience},
+	}
+	if publicURL != "" {
+		bindings = append(bindings, cloudflare.WorkerBinding{Type: "plain_text", Name: "ORUN_PUBLIC_URL", Text: publicURL})
+	}
+	if dashboardURL != "" {
+		bindings = append(bindings, cloudflare.WorkerBinding{Type: "plain_text", Name: "ORUN_DASHBOARD_URL", Text: dashboardURL})
 	}
 	doMigrations := []cloudflare.DurableObjectMigration{
 		{Tag: "v1", NewSQLiteClasses: []string{"RunCoordinator", "RateLimitCounter"}},
@@ -304,7 +356,7 @@ func runBackendInit(ctx context.Context) error {
 	}
 	fmt.Fprintln(os.Stdout, "  Worker uploaded.")
 
-	// 5. Enable workers.dev route and discover Worker URL.
+	// 7. Enable workers.dev route and discover Worker URL.
 	_ = client.EnableWorkerSubdomainRoute(ctx, workerName) // best-effort
 	if publicURL == "" {
 		subdomain, subErr := client.GetWorkerSubdomain(ctx)
@@ -314,23 +366,7 @@ func runBackendInit(ctx context.Context) error {
 	}
 	result.BackendURL = publicURL
 
-	// 6. Set Worker vars.
-	vars := map[string]string{
-		"GITHUB_JWKS_URL":    "https://token.actions.githubusercontent.com/.well-known/jwks",
-		"GITHUB_OIDC_AUDIENCE": audience,
-	}
-	if publicURL != "" {
-		vars["ORUN_PUBLIC_URL"] = publicURL
-	}
-	if dashboardURL != "" {
-		vars["ORUN_DASHBOARD_URL"] = dashboardURL
-	}
-	fmt.Fprintln(os.Stdout, "Setting Worker vars...")
-	if err := client.SetWorkerVars(ctx, workerName, vars); err != nil {
-		return fmt.Errorf("set Worker vars: %w", err)
-	}
-
-	// 7. Set Worker secrets.
+	// 8. Set Worker secrets.
 	if sessionSecret == "" {
 		generated, genErr := generateSessionSecret()
 		if genErr != nil {
@@ -354,33 +390,60 @@ func runBackendInit(ctx context.Context) error {
 		result.Warnings = append(result.Warnings, "GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET not set: dashboard/CLI OAuth will not work until a GitHub OAuth app is configured and orun backend init is re-run with --github-client-id and --github-client-secret")
 	}
 
-	// 8. Save non-secret bootstrap metadata.
+	// 9. Attach queue consumer.
+	fmt.Fprintf(os.Stdout, "Attaching queue consumer to %q...\n", catalogQueue)
+	consumerSettings := cloudflare.QueueConsumerSettings{
+		BatchSize:     10,
+		MaxRetries:    3,
+		MaxWaitTimeMs: 30000,
+	}
+	if err := client.CreateOrUpdateQueueConsumer(ctx, q.QueueID, workerName, catalogDLQ, consumerSettings); err != nil {
+		return fmt.Errorf("attach queue consumer: %w", err)
+	}
+	fmt.Fprintln(os.Stdout, "  Queue consumer attached.")
+
+	// 10. Set cron schedule.
+	fmt.Fprintf(os.Stdout, "Setting cron schedule %q...\n", catalogCron)
+	if err := client.UpdateWorkerSchedules(ctx, workerName, []string{catalogCron}); err != nil {
+		return fmt.Errorf("set cron schedule: %w", err)
+	}
+	fmt.Fprintln(os.Stdout, "  Cron schedule set.")
+
+	// 11. Save non-secret bootstrap metadata.
 	meta := cliauth.BackendBootstrap{
-		ManagedBy:      managedByValue,
-		AccountID:      accountID,
-		WorkerName:     workerName,
-		D1DatabaseName: d1Name,
-		D1DatabaseUUID: db.UUID,
-		R2BucketName:   r2Name,
-		BackendCommit:  manifest.BackendCommitSHA,
-		InitAt:         time.Now().UTC().Format(time.RFC3339),
+		ManagedBy:        managedByValue,
+		AccountID:        accountID,
+		WorkerName:       workerName,
+		D1DatabaseName:   d1Name,
+		D1DatabaseUUID:   db.UUID,
+		R2BucketName:     r2Name,
+		CatalogQueueName: catalogQueue,
+		CatalogQueueID:   q.QueueID,
+		CatalogDLQName:   catalogDLQ,
+		CatalogDLQID:     dlq.QueueID,
+		CatalogCron:      catalogCron,
+		BackendCommit:    manifest.BackendCommitSHA,
+		InitAt:           time.Now().UTC().Format(time.RFC3339),
 	}
 	if err := cliauth.SaveBootstrapMetadata(meta, publicURL); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not save bootstrap metadata: %v\n", err)
 	}
 
-	// 9. Print summary.
+	// 12. Print summary.
 	if initJSON {
 		return printJSON(result)
 	}
 	fmt.Fprintln(os.Stdout, "\n✓ Orun backend provisioned successfully.")
-	fmt.Fprintf(os.Stdout, "  Worker:       %s\n", workerName)
-	fmt.Fprintf(os.Stdout, "  D1 database:  %s (%s)\n", d1Name, db.UUID)
-	fmt.Fprintf(os.Stdout, "  R2 bucket:    %s\n", r2Name)
+	fmt.Fprintf(os.Stdout, "  Worker:         %s\n", workerName)
+	fmt.Fprintf(os.Stdout, "  D1 database:    %s (%s)\n", d1Name, db.UUID)
+	fmt.Fprintf(os.Stdout, "  R2 bucket:      %s\n", r2Name)
+	fmt.Fprintf(os.Stdout, "  Catalog queue:  %s\n", catalogQueue)
+	fmt.Fprintf(os.Stdout, "  Catalog DLQ:    %s\n", catalogDLQ)
+	fmt.Fprintf(os.Stdout, "  Cron schedule:  %s\n", catalogCron)
 	if publicURL != "" {
-		fmt.Fprintf(os.Stdout, "  Backend URL:  %s\n", publicURL)
+		fmt.Fprintf(os.Stdout, "  Backend URL:    %s\n", publicURL)
 	} else {
-		fmt.Fprintln(os.Stdout, "  Backend URL:  (unknown — pass --public-url or configure a custom domain)")
+		fmt.Fprintln(os.Stdout, "  Backend URL:    (unknown — pass --public-url or configure a custom domain)")
 	}
 	for _, w := range result.Warnings {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
@@ -394,7 +457,6 @@ func runBackendInit(ctx context.Context) error {
 // applyMigrations applies D1 migrations that have not yet been recorded in the
 // orun bootstrap ledger. The ledger is a simple table created on first use.
 func applyMigrations(ctx context.Context, client *cloudflare.Client, dbUUID string, migrations []backendbundle.Migration) (int, error) {
-	// Ensure the orun bootstrap ledger table exists.
 	const createLedger = `CREATE TABLE IF NOT EXISTS _orun_migrations (
 		name TEXT PRIMARY KEY,
 		applied_at TEXT NOT NULL
@@ -405,21 +467,18 @@ func applyMigrations(ctx context.Context, client *cloudflare.Client, dbUUID stri
 
 	applied := 0
 	for _, m := range migrations {
-		// Check if this migration is already applied.
 		checkSQL := fmt.Sprintf(`SELECT name FROM _orun_migrations WHERE name = '%s'`, strings.ReplaceAll(m.Name, "'", "''"))
 		result, err := client.ExecD1SQL(ctx, dbUUID, checkSQL)
 		if err != nil {
 			return applied, fmt.Errorf("check migration %s: %w", m.Name, err)
 		}
 		if len(result.Results) > 0 {
-			continue // already applied
+			continue
 		}
 
-		// Apply the migration.
 		if _, err := client.ExecD1SQL(ctx, dbUUID, m.SQL); err != nil {
 			return applied, fmt.Errorf("apply migration %s: %w", m.Name, err)
 		}
-		// Record it in the ledger.
 		recordSQL := fmt.Sprintf(`INSERT INTO _orun_migrations (name, applied_at) VALUES ('%s', '%s')`,
 			strings.ReplaceAll(m.Name, "'", "''"),
 			time.Now().UTC().Format(time.RFC3339),
@@ -435,18 +494,33 @@ func applyMigrations(ctx context.Context, client *cloudflare.Client, dbUUID stri
 
 // ── backend status ────────────────────────────────────────────────────────────
 
+type consumerStatusSummary struct {
+	BatchSize     int    `json:"batchSize"`
+	MaxRetries    int    `json:"maxRetries"`
+	MaxWaitTimeMs int    `json:"maxWaitTimeMs"`
+	DLQ           string `json:"dlq"`
+}
+
 type statusResult struct {
-	WorkerReady      bool     `json:"workerReady"`
-	WorkerName       string   `json:"workerName"`
-	D1Ready          bool     `json:"d1Ready"`
-	D1DatabaseName   string   `json:"d1DatabaseName"`
-	D1DatabaseUUID   string   `json:"d1DatabaseUUID,omitempty"`
-	R2Ready          bool     `json:"r2Ready"`
-	R2BucketName     string   `json:"r2BucketName"`
-	MigrationsReady  bool     `json:"migrationsReady"`
-	SecretsConfigured []string `json:"secretsConfigured"`
-	BackendURL        string   `json:"backendUrl,omitempty"`
-	Issues           []string `json:"issues,omitempty"`
+	WorkerReady       bool                   `json:"workerReady"`
+	WorkerName        string                 `json:"workerName"`
+	D1Ready           bool                   `json:"d1Ready"`
+	D1DatabaseName    string                 `json:"d1DatabaseName"`
+	D1DatabaseUUID    string                 `json:"d1DatabaseUUID,omitempty"`
+	R2Ready           bool                   `json:"r2Ready"`
+	R2BucketName      string                 `json:"r2BucketName"`
+	MigrationsReady   bool                   `json:"migrationsReady"`
+	CatalogQueueReady bool                   `json:"catalogQueueReady"`
+	CatalogQueueName  string                 `json:"catalogQueueName"`
+	CatalogDLQReady   bool                   `json:"catalogDLQReady"`
+	CatalogDLQName    string                 `json:"catalogDLQName"`
+	ConsumerReady     bool                   `json:"consumerReady"`
+	ConsumerSettings  *consumerStatusSummary `json:"consumerSettings,omitempty"`
+	CronReady         bool                   `json:"cronReady"`
+	CronSchedule      string                 `json:"cronSchedule,omitempty"`
+	SecretsConfigured []string               `json:"secretsConfigured"`
+	BackendURL        string                 `json:"backendUrl,omitempty"`
+	Issues            []string               `json:"issues,omitempty"`
 }
 
 func runBackendStatus(ctx context.Context) error {
@@ -470,14 +544,22 @@ func runBackendStatus(ctx context.Context) error {
 	}
 
 	result := statusResult{
-		WorkerName:     workerName,
-		D1DatabaseName: "orun-db",
-		R2BucketName:   "orun-storage",
+		WorkerName:       workerName,
+		D1DatabaseName:   "orun-db",
+		R2BucketName:     "orun-storage",
+		CatalogQueueName: defaultCatalogQueue,
+		CatalogDLQName:   defaultCatalogDLQ,
 	}
 	if meta != nil {
 		result.D1DatabaseName = meta.D1DatabaseName
 		result.D1DatabaseUUID = meta.D1DatabaseUUID
 		result.R2BucketName = meta.R2BucketName
+		if meta.CatalogQueueName != "" {
+			result.CatalogQueueName = meta.CatalogQueueName
+		}
+		if meta.CatalogDLQName != "" {
+			result.CatalogDLQName = meta.CatalogDLQName
+		}
 	}
 
 	// Check Worker.
@@ -527,6 +609,78 @@ func runBackendStatus(ctx context.Context) error {
 		}
 	}
 
+	// Check catalog queue.
+	catalogQ, err := client.FindQueueByName(ctx, result.CatalogQueueName)
+	if err != nil {
+		result.Issues = append(result.Issues, fmt.Sprintf("catalog queue check failed: %v", err))
+	} else {
+		result.CatalogQueueReady = catalogQ != nil
+		if !result.CatalogQueueReady {
+			result.Issues = append(result.Issues, fmt.Sprintf("catalog queue %q not found", result.CatalogQueueName))
+		}
+	}
+
+	// Check catalog DLQ.
+	dlqQ, err := client.FindQueueByName(ctx, result.CatalogDLQName)
+	if err != nil {
+		result.Issues = append(result.Issues, fmt.Sprintf("catalog DLQ check failed: %v", err))
+	} else {
+		result.CatalogDLQReady = dlqQ != nil
+		if !result.CatalogDLQReady {
+			result.Issues = append(result.Issues, fmt.Sprintf("catalog DLQ %q not found", result.CatalogDLQName))
+		}
+	}
+
+	// Check queue consumer settings.
+	if result.CatalogQueueReady && catalogQ != nil {
+		consumers, consErr := client.ListQueueConsumers(ctx, catalogQ.QueueID)
+		if consErr == nil {
+			for _, c := range consumers {
+				if c.ScriptName == workerName && c.Type == "worker" {
+					result.ConsumerReady = true
+					result.ConsumerSettings = &consumerStatusSummary{
+						BatchSize:     c.Settings.BatchSize,
+						MaxRetries:    c.Settings.MaxRetries,
+						MaxWaitTimeMs: c.Settings.MaxWaitTimeMs,
+						DLQ:           c.DeadLetterQueue,
+					}
+					break
+				}
+			}
+			if !result.ConsumerReady {
+				result.Issues = append(result.Issues, fmt.Sprintf("no Worker consumer for %q found on catalog queue", workerName))
+			}
+		} else {
+			result.Issues = append(result.Issues, fmt.Sprintf("consumer check failed: %v", consErr))
+		}
+	}
+
+	// Check cron schedule.
+	schedules, schedErr := client.ListWorkerSchedules(ctx, workerName)
+	if schedErr == nil {
+		expectedCron := defaultCatalogCron
+		if meta != nil && meta.CatalogCron != "" {
+			expectedCron = meta.CatalogCron
+		}
+		for _, s := range schedules {
+			if s.Cron == expectedCron {
+				result.CronReady = true
+				result.CronSchedule = s.Cron
+				break
+			}
+		}
+		if !result.CronReady {
+			if len(schedules) > 0 {
+				result.CronSchedule = schedules[0].Cron
+				result.Issues = append(result.Issues, fmt.Sprintf("cron schedule %q not found (found: %s)", expectedCron, result.CronSchedule))
+			} else {
+				result.Issues = append(result.Issues, "no cron schedule configured")
+			}
+		}
+	} else {
+		result.Issues = append(result.Issues, fmt.Sprintf("cron check failed: %v", schedErr))
+	}
+
 	// Check secrets (names only, not values).
 	secretNames, err := client.ListWorkerSecretNames(ctx, workerName)
 	if err == nil {
@@ -545,14 +699,22 @@ func runBackendStatus(ctx context.Context) error {
 		return printJSON(result)
 	}
 
-	ok := result.WorkerReady && result.D1Ready && result.R2Ready && result.MigrationsReady
-	fmt.Fprintf(os.Stdout, "Worker (%s):   %s\n", result.WorkerName, readyStr(result.WorkerReady))
-	fmt.Fprintf(os.Stdout, "D1 database:       %s\n", readyStr(result.D1Ready))
-	fmt.Fprintf(os.Stdout, "R2 bucket:         %s\n", readyStr(result.R2Ready))
-	fmt.Fprintf(os.Stdout, "Migrations:        %s\n", readyStr(result.MigrationsReady))
-	fmt.Fprintf(os.Stdout, "Secrets set:       %s\n", strings.Join(result.SecretsConfigured, ", "))
+	ok := result.WorkerReady && result.D1Ready && result.R2Ready && result.MigrationsReady &&
+		result.CatalogQueueReady && result.CatalogDLQReady && result.ConsumerReady && result.CronReady
+	fmt.Fprintf(os.Stdout, "Worker (%s):       %s\n", result.WorkerName, readyStr(result.WorkerReady))
+	fmt.Fprintf(os.Stdout, "D1 database:           %s\n", readyStr(result.D1Ready))
+	fmt.Fprintf(os.Stdout, "R2 bucket:             %s\n", readyStr(result.R2Ready))
+	fmt.Fprintf(os.Stdout, "Migrations:            %s\n", readyStr(result.MigrationsReady))
+	fmt.Fprintf(os.Stdout, "Catalog queue (%s): %s\n", result.CatalogQueueName, readyStr(result.CatalogQueueReady))
+	fmt.Fprintf(os.Stdout, "Catalog DLQ (%s): %s\n", result.CatalogDLQName, readyStr(result.CatalogDLQReady))
+	fmt.Fprintf(os.Stdout, "Queue consumer:        %s\n", readyStr(result.ConsumerReady))
+	fmt.Fprintf(os.Stdout, "Cron schedule:         %s\n", readyStr(result.CronReady))
+	if result.CronSchedule != "" {
+		fmt.Fprintf(os.Stdout, "  Schedule: %s\n", result.CronSchedule)
+	}
+	fmt.Fprintf(os.Stdout, "Secrets set:           %s\n", strings.Join(result.SecretsConfigured, ", "))
 	if result.BackendURL != "" {
-		fmt.Fprintf(os.Stdout, "Backend URL:       %s\n", result.BackendURL)
+		fmt.Fprintf(os.Stdout, "Backend URL:           %s\n", result.BackendURL)
 	}
 	for _, issue := range result.Issues {
 		fmt.Fprintf(os.Stderr, "  issue: %s\n", issue)
@@ -589,45 +751,68 @@ func readyStr(ok bool) string {
 // ── backend destroy ───────────────────────────────────────────────────────────
 
 type destroyResult struct {
-	DryRun         bool   `json:"dryRun"`
-	WorkerDeleted  bool   `json:"workerDeleted"`
-	D1Deleted      bool   `json:"d1Deleted"`
-	R2Deleted      bool   `json:"r2Deleted"`
-	WorkerName     string `json:"workerName"`
-	D1DatabaseUUID string `json:"d1DatabaseUUID,omitempty"`
-	R2BucketName   string `json:"r2BucketName"`
+	DryRun              bool   `json:"dryRun"`
+	WorkerDeleted       bool   `json:"workerDeleted"`
+	D1Deleted           bool   `json:"d1Deleted"`
+	R2Deleted           bool   `json:"r2Deleted"`
+	ConsumerDeleted     bool   `json:"consumerDeleted"`
+	CatalogQueueDeleted bool   `json:"catalogQueueDeleted"`
+	CatalogDLQDeleted   bool   `json:"catalogDLQDeleted"`
+	CronCleared         bool   `json:"cronCleared"`
+	WorkerName          string `json:"workerName"`
+	D1DatabaseUUID      string `json:"d1DatabaseUUID,omitempty"`
+	R2BucketName        string `json:"r2BucketName"`
+	CatalogQueueName    string `json:"catalogQueueName,omitempty"`
+	CatalogDLQName      string `json:"catalogDLQName,omitempty"`
 }
 
 func runBackendDestroy(ctx context.Context) error {
-	// Dry-run is always safe, no --yes required.
 	if destroyDryRun {
 		meta, _ := cliauth.LoadBootstrapMetadata()
 		workerName := destroyName
 		d1UUID := ""
 		r2Name := "orun-storage"
+		catalogQueue := defaultCatalogQueue
+		catalogDLQ := defaultCatalogDLQ
+		catalogCron := defaultCatalogCron
 		if meta != nil {
 			if workerName == "" {
 				workerName = meta.WorkerName
 			}
 			d1UUID = meta.D1DatabaseUUID
 			r2Name = meta.R2BucketName
+			if meta.CatalogQueueName != "" {
+				catalogQueue = meta.CatalogQueueName
+			}
+			if meta.CatalogDLQName != "" {
+				catalogDLQ = meta.CatalogDLQName
+			}
+			if meta.CatalogCron != "" {
+				catalogCron = meta.CatalogCron
+			}
 		}
 		if workerName == "" {
 			workerName = "orun-api"
 		}
 		result := destroyResult{
-			DryRun:         true,
-			WorkerName:     workerName,
-			D1DatabaseUUID: d1UUID,
-			R2BucketName:   r2Name,
+			DryRun:           true,
+			WorkerName:       workerName,
+			D1DatabaseUUID:   d1UUID,
+			R2BucketName:     r2Name,
+			CatalogQueueName: catalogQueue,
+			CatalogDLQName:   catalogDLQ,
 		}
 		if !destroyJSON {
 			fmt.Fprintf(os.Stdout, "[dry-run] Would destroy:\n")
-			fmt.Fprintf(os.Stdout, "  Worker script: %s\n", workerName)
+			fmt.Fprintf(os.Stdout, "  Worker script:  %s\n", workerName)
+			fmt.Fprintf(os.Stdout, "  Cron schedule:  %s (cleared)\n", catalogCron)
+			fmt.Fprintf(os.Stdout, "  Queue consumer: %s on %s\n", workerName, catalogQueue)
+			fmt.Fprintf(os.Stdout, "  Catalog queue:  %s\n", catalogQueue)
+			fmt.Fprintf(os.Stdout, "  Catalog DLQ:    %s\n", catalogDLQ)
 			if meta != nil && d1UUID != "" {
-				fmt.Fprintf(os.Stdout, "  D1 database:   %s (%s)\n", meta.D1DatabaseName, d1UUID)
+				fmt.Fprintf(os.Stdout, "  D1 database:    %s (%s)\n", meta.D1DatabaseName, d1UUID)
 			}
-			fmt.Fprintf(os.Stdout, "  R2 bucket:     %s\n", r2Name)
+			fmt.Fprintf(os.Stdout, "  R2 bucket:      %s\n", r2Name)
 			fmt.Fprintln(os.Stdout, "  WARNING: D1 and R2 data deletion is irreversible.")
 		}
 		if destroyJSON {
@@ -636,7 +821,6 @@ func runBackendDestroy(ctx context.Context) error {
 		return nil
 	}
 
-	// Require --yes for actual destruction.
 	if !destroyYes {
 		return fmt.Errorf("destroy is destructive and irreversible; re-run with --yes to confirm, or use --dry-run to preview")
 	}
@@ -646,7 +830,6 @@ func runBackendDestroy(ctx context.Context) error {
 		return fmt.Errorf("load bootstrap metadata: %w", err)
 	}
 
-	// Guard: require managed metadata unless --adopted is set.
 	if !destroyAdopted && (meta == nil || meta.ManagedBy != managedByValue) {
 		return fmt.Errorf("no bootstrap metadata found; run `orun backend init` first, or pass --adopted to destroy resources by name without managed-resource safeguards")
 	}
@@ -654,12 +837,18 @@ func runBackendDestroy(ctx context.Context) error {
 	workerName := destroyName
 	d1UUID := ""
 	r2Name := ""
+	catalogQueue := ""
+	catalogQueueID := ""
+	catalogDLQ := ""
 	if meta != nil {
 		if workerName == "" {
 			workerName = meta.WorkerName
 		}
 		d1UUID = meta.D1DatabaseUUID
 		r2Name = meta.R2BucketName
+		catalogQueue = meta.CatalogQueueName
+		catalogQueueID = meta.CatalogQueueID
+		catalogDLQ = meta.CatalogDLQName
 	}
 	if workerName == "" {
 		workerName = "orun-api"
@@ -669,10 +858,12 @@ func runBackendDestroy(ctx context.Context) error {
 	}
 
 	result := destroyResult{
-		DryRun:         false,
-		WorkerName:     workerName,
-		D1DatabaseUUID: d1UUID,
-		R2BucketName:   r2Name,
+		DryRun:           false,
+		WorkerName:       workerName,
+		D1DatabaseUUID:   d1UUID,
+		R2BucketName:     r2Name,
+		CatalogQueueName: catalogQueue,
+		CatalogDLQName:   catalogDLQ,
 	}
 
 	ua := "orun-cli/" + version
@@ -683,7 +874,35 @@ func runBackendDestroy(ctx context.Context) error {
 
 	fmt.Fprintln(os.Stderr, "WARNING: Deleting Orun backend resources. D1 and R2 data cannot be recovered.")
 
-	// Delete Worker first (it references D1/R2 bindings).
+	// 1. Clear cron schedule first (Worker still exists, so this is safe).
+	fmt.Fprintf(os.Stdout, "Clearing cron schedule for %q...\n", workerName)
+	if err := client.DeleteWorkerSchedules(ctx, workerName); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: clear cron schedule: %v\n", err)
+	} else {
+		result.CronCleared = true
+	}
+
+	// 2. Delete queue consumer (before queue, to avoid dangling binding errors).
+	if catalogQueue != "" && catalogQueueID != "" {
+		fmt.Fprintf(os.Stdout, "Removing queue consumer from %q...\n", catalogQueue)
+		consumers, listErr := client.ListQueueConsumers(ctx, catalogQueueID)
+		if listErr == nil {
+			for _, c := range consumers {
+				if c.ScriptName == workerName && c.Type == "worker" {
+					if delErr := client.DeleteQueueConsumer(ctx, catalogQueueID, c.ConsumerID); delErr != nil {
+						fmt.Fprintf(os.Stderr, "warning: delete queue consumer: %v\n", delErr)
+					} else {
+						result.ConsumerDeleted = true
+					}
+					break
+				}
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: list consumers: %v\n", listErr)
+		}
+	}
+
+	// 3. Delete Worker (references D1/R2/queue bindings).
 	fmt.Fprintf(os.Stdout, "Deleting Worker %q...\n", workerName)
 	if err := client.DeleteWorkerScript(ctx, workerName); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: delete Worker: %v\n", err)
@@ -691,7 +910,27 @@ func runBackendDestroy(ctx context.Context) error {
 		result.WorkerDeleted = true
 	}
 
-	// Delete D1 database.
+	// 4. Delete catalog queue.
+	if catalogQueue != "" {
+		fmt.Fprintf(os.Stdout, "Deleting catalog queue %q...\n", catalogQueue)
+		if err := client.DeleteQueueByName(ctx, catalogQueue); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: delete catalog queue: %v\n", err)
+		} else {
+			result.CatalogQueueDeleted = true
+		}
+	}
+
+	// 5. Delete catalog DLQ.
+	if catalogDLQ != "" {
+		fmt.Fprintf(os.Stdout, "Deleting catalog DLQ %q...\n", catalogDLQ)
+		if err := client.DeleteQueueByName(ctx, catalogDLQ); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: delete catalog DLQ: %v\n", err)
+		} else {
+			result.CatalogDLQDeleted = true
+		}
+	}
+
+	// 6. Delete D1 database.
 	if d1UUID != "" {
 		fmt.Fprintf(os.Stdout, "Deleting D1 database %s...\n", d1UUID)
 		if err := client.DeleteD1Database(ctx, d1UUID); err != nil {
@@ -701,7 +940,7 @@ func runBackendDestroy(ctx context.Context) error {
 		}
 	}
 
-	// Delete R2 bucket.
+	// 7. Delete R2 bucket.
 	fmt.Fprintf(os.Stdout, "Deleting R2 bucket %q...\n", r2Name)
 	if err := client.DeleteR2Bucket(ctx, r2Name); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: delete R2: %v\n", err)
@@ -709,7 +948,6 @@ func runBackendDestroy(ctx context.Context) error {
 		result.R2Deleted = true
 	}
 
-	// Clear local bootstrap metadata.
 	_ = cliauth.ClearBootstrapMetadata()
 
 	if destroyJSON {

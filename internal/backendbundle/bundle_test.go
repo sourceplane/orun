@@ -27,6 +27,28 @@ func TestManifestLoads(t *testing.T) {
 	if len(m.DurableObjectClasses) == 0 {
 		t.Error("DurableObjectClasses is empty")
 	}
+	// Queue and cron metadata required for self-hosted bootstrap.
+	if m.CatalogQueueName == "" {
+		t.Error("CatalogQueueName is empty — manifest must declare the catalog queue name")
+	}
+	if m.CatalogDLQName == "" {
+		t.Error("CatalogDLQName is empty — manifest must declare the catalog DLQ name")
+	}
+	if m.CatalogCron == "" {
+		t.Error("CatalogCron is empty — manifest must declare the cron schedule")
+	}
+	if m.Bindings.Queue == "" {
+		t.Error("Bindings.Queue is empty — manifest must declare the CATALOG_INGEST_QUEUE binding name")
+	}
+	if m.CatalogConsumerSettings.BatchSize == 0 {
+		t.Error("CatalogConsumerSettings.BatchSize is 0 — must be declared in manifest")
+	}
+	if m.CatalogConsumerSettings.MaxRetries == 0 {
+		t.Error("CatalogConsumerSettings.MaxRetries is 0 — must be declared in manifest")
+	}
+	if m.CatalogConsumerSettings.MaxWaitTimeMs == 0 {
+		t.Error("CatalogConsumerSettings.MaxWaitTimeMs is 0 — must be declared in manifest")
+	}
 }
 
 func TestWorkerBundleNonEmpty(t *testing.T) {
@@ -56,6 +78,40 @@ func TestMigrationsSortedAndNonEmpty(t *testing.T) {
 	first := migrations[0].Name
 	if !strings.HasPrefix(first, "0001") {
 		t.Errorf("expected first migration to start with 0001, got %s", first)
+	}
+}
+
+// TestEmbeddedMigrationCount ensures the bundle keeps pace with the backend source of truth.
+// The minimum is 6 (through 0006_tenant_routes.sql from Task 0016).
+// This test fails intentionally when a new backend migration is added but not embedded.
+func TestEmbeddedMigrationCount(t *testing.T) {
+	migrations, err := backendbundle.Migrations()
+	if err != nil {
+		t.Fatalf("Migrations: %v", err)
+	}
+	const minMigrations = 6
+	if len(migrations) < minMigrations {
+		t.Errorf("embedded migration count = %d, want >= %d (through 0006_tenant_routes.sql); "+
+			"copy new backend migrations to internal/backendbundle/embed/migrations/ and update manifest.json",
+			len(migrations), minMigrations)
+	}
+}
+
+// TestEmbeddedMigrationLatest verifies the latest embedded migration is at least 0006_tenant_routes.sql.
+func TestEmbeddedMigrationLatest(t *testing.T) {
+	migrations, err := backendbundle.Migrations()
+	if err != nil {
+		t.Fatalf("Migrations: %v", err)
+	}
+	if len(migrations) == 0 {
+		t.Fatal("no migrations embedded")
+	}
+	latest := migrations[len(migrations)-1].Name
+	const requiredLatest = "0006_tenant_routes.sql"
+	if latest < requiredLatest {
+		t.Errorf("latest embedded migration = %q, want >= %q; "+
+			"copy 0006_tenant_routes.sql (and any newer migrations) to internal/backendbundle/embed/migrations/",
+			latest, requiredLatest)
 	}
 }
 

@@ -34,14 +34,19 @@ type RepoLink struct {
 // Secrets (API tokens, session secrets, GitHub client secrets) are never stored here.
 type BackendBootstrap struct {
 	// ManagedBy is always "orun-backend-init" to prevent accidental destroy of unrelated resources.
-	ManagedBy      string `yaml:"managedBy,omitempty"`
-	AccountID      string `yaml:"accountId,omitempty"`
-	WorkerName     string `yaml:"workerName,omitempty"`
-	D1DatabaseName string `yaml:"d1DatabaseName,omitempty"`
-	D1DatabaseUUID string `yaml:"d1DatabaseUUID,omitempty"`
-	R2BucketName   string `yaml:"r2BucketName,omitempty"`
-	BackendCommit  string `yaml:"backendCommit,omitempty"`
-	InitAt         string `yaml:"initAt,omitempty"`
+	ManagedBy        string `yaml:"managedBy,omitempty"`
+	AccountID        string `yaml:"accountId,omitempty"`
+	WorkerName       string `yaml:"workerName,omitempty"`
+	D1DatabaseName   string `yaml:"d1DatabaseName,omitempty"`
+	D1DatabaseUUID   string `yaml:"d1DatabaseUUID,omitempty"`
+	R2BucketName     string `yaml:"r2BucketName,omitempty"`
+	CatalogQueueName string `yaml:"catalogQueueName,omitempty"`
+	CatalogQueueID   string `yaml:"catalogQueueID,omitempty"`
+	CatalogDLQName   string `yaml:"catalogDLQName,omitempty"`
+	CatalogDLQID     string `yaml:"catalogDLQID,omitempty"`
+	CatalogCron      string `yaml:"catalogCron,omitempty"`
+	BackendCommit    string `yaml:"backendCommit,omitempty"`
+	InitAt           string `yaml:"initAt,omitempty"`
 }
 
 // Config is the non-secret CLI config stored in ~/.orun/config.yaml.
