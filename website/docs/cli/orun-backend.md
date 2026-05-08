@@ -8,12 +8,13 @@ This is an alternative to using Orun Cloud (`https://orun-api.sourceplane.ai`). 
 
 ## Prerequisites
 
-- A Cloudflare account with Workers, D1, R2, and Durable Objects enabled.
+- A Cloudflare account with Workers, D1, R2, Durable Objects, and Queues enabled.
 - A Cloudflare API token with the following permissions:
   - **Workers Scripts: Edit** (create/update/delete Worker scripts)
   - **Durable Objects: Edit**
   - **D1: Edit**
   - **R2: Edit**
+  - **Queues: Edit** (create/delete queues and manage consumers)
 - No GitHub PAT is required. GitHub OAuth is handled by the deployed Worker, not the CLI.
 
 ## Quick start
@@ -45,13 +46,23 @@ orun backend init [flags]
 **What it does:**
 
 1. Creates (or reuses) a D1 database.
-2. Creates (or reuses) an R2 bucket.
-3. Applies bundled D1 migrations that have not yet been applied.
-4. Uploads (or updates) the Cloudflare Worker script with all required bindings.
-5. Enables the workers.dev route and discovers the Worker URL.
-6. Sets required Worker vars (`GITHUB_JWKS_URL`, `GITHUB_OIDC_AUDIENCE`, and optionally `ORUN_PUBLIC_URL`, `ORUN_DASHBOARD_URL`).
-7. Sets Worker secrets (`ORUN_SESSION_SECRET` is generated if not provided).
-8. Stores non-secret bootstrap metadata in `~/.orun/config.yaml`.
+2. Applies bundled D1 migrations that have not yet been applied (currently 6, through `0006_tenant_routes.sql`).
+3. Creates (or reuses) an R2 bucket.
+4. Creates (or reuses) the catalog ingest queue (default `orun-catalog-ingest`).
+5. Creates (or reuses) the catalog dead-letter queue (default `orun-catalog-ingest-dlq`).
+6. Uploads (or updates) the Cloudflare Worker script with all required bindings in a single call:
+   - Durable Objects: `COORDINATOR` (RunCoordinator), `RATE_LIMITER` (RateLimitCounter)
+   - D1: `DB`
+   - R2: `STORAGE`
+   - Queue producer: `CATALOG_INGEST_QUEUE`
+   - Plain-text vars (included in upload metadata to avoid binding clobber)
+7. Enables the workers.dev route and discovers the Worker URL.
+8. Sets Worker secrets (`ORUN_SESSION_SECRET` is generated if not provided).
+9. Attaches a Worker queue consumer to the catalog queue with Task 0018 settings (`batch_size=10`, `max_retries=3`, `max_wait_time_ms=30000`, dead-letter queue = catalog DLQ).
+10. Sets the cron schedule (default `*/15 * * * *`) for scheduled Worker tasks.
+11. Stores non-secret bootstrap metadata in `~/.orun/config.yaml`.
+
+**Note on multi-shard D1:** `DB_CATALOG_0` and `DB_CATALOG_1` catalog shard bindings are intentionally not provisioned by bootstrap until the cross-shard JOIN proposal (`ai/proposals/task-0016-spec-update.md`) is resolved. The single-DB fallback handles all catalog storage for self-hosted deployments.
 
 **Flags:**
 
@@ -62,13 +73,16 @@ orun backend init [flags]
 | `--name` | `orun-api` | Worker script name |
 | `--d1-name` | `orun-db` | D1 database name |
 | `--r2-bucket` | `orun-storage` | R2 bucket name |
+| `--catalog-queue` | `orun-catalog-ingest` | Catalog ingest queue name |
+| `--catalog-dlq` | `orun-catalog-ingest-dlq` | Catalog dead-letter queue name |
+| `--catalog-cron` | `*/15 * * * *` | Worker cron schedule |
 | `--oidc-audience` | `orun` | GitHub OIDC audience for the `GITHUB_OIDC_AUDIENCE` var |
 | `--public-url` | (auto from workers.dev) | Public URL for `ORUN_PUBLIC_URL` |
 | `--dashboard-url` | `ORUN_DASHBOARD_URL` env | Dashboard URL for `ORUN_DASHBOARD_URL` |
 | `--github-client-id` | `GITHUB_CLIENT_ID` env | GitHub OAuth app client ID |
 | `--github-client-secret` | `GITHUB_CLIENT_SECRET` env | GitHub OAuth app client secret (not stored in config) |
 | `--session-secret` | `ORUN_SESSION_SECRET` env | Orun session HMAC secret (securely generated if absent) |
-| `--dry-run` | false | Print planned actions without touching Cloudflare |
+| `--dry-run` | false | Print planned actions without touching Cloudflare (no credentials required) |
 | `--json` | false | Output machine-readable JSON |
 
 **GitHub OAuth setup (required for auth and dashboard):**
@@ -99,6 +113,21 @@ Reports the readiness of all backend resources. Safe to run in CI — requires o
 orun backend status [flags]
 ```
 
+Checks:
+- Worker script exists
+- D1 database exists
+- All bundled migrations are applied
+- R2 bucket exists
+- Catalog queue exists
+- Catalog DLQ exists
+- Worker queue consumer is attached with the expected settings
+- Cron schedule is configured
+- Expected secret names are present
+
+Exits non-zero if any required resource is missing or misconfigured.
+
+Secret values are never revealed — `status` only reports whether secrets are configured by name.
+
 **Flags:**
 
 | Flag | Default | Description |
@@ -107,10 +136,6 @@ orun backend status [flags]
 | `--api-token` | `CLOUDFLARE_API_TOKEN` | Cloudflare API token |
 | `--name` | (stored or `orun-api`) | Worker script name |
 | `--json` | false | Output machine-readable JSON |
-
-Exits non-zero if any required resource is missing or migrations are not fully applied.
-
-Secret values are never revealed — `status` only reports whether secrets are configured by name.
 
 ### `orun backend destroy`
 
@@ -121,6 +146,18 @@ orun backend destroy [flags]
 ```
 
 Requires `--yes` to execute. Use `--dry-run` to preview what would be deleted.
+
+**Destroy order** (avoids Cloudflare API conflicts with dangling bindings):
+
+1. Clear cron schedule
+2. Delete queue consumer (before deleting the queue)
+3. Delete Worker script
+4. Delete catalog queue
+5. Delete catalog DLQ
+6. Delete D1 database
+7. Delete R2 bucket
+
+Missing resources at any step are treated as warnings, not fatal blockers.
 
 `destroy` only deletes resources that were recorded by `orun backend init`. Pass `--adopted` to destroy resources by name that were not created by this CLI.
 
@@ -151,12 +188,16 @@ Requires `--yes` to execute. Use `--dry-run` to preview what would be deleted.
 
 No GitHub PAT or GitHub access token is required.
 
+## GitHub Actions catalog sync and WAF
+
+`POST /v1/catalog/sync` via a custom domain may be blocked by Cloudflare WAF managed challenges for GitHub Actions runner IPs. If this occurs, use the `workers.dev` fallback URL (`https://<worker-name>.<subdomain>.workers.dev`) in CI workflows until the WAF policy is explicitly updated to allow GHA runner ranges.
+
 ## Updating the backend
 
 To update to a newer version of the Worker bundle:
 
 1. Pull the latest `orun` CLI release (the bundle is embedded at build time).
-2. Re-run `orun backend init` — it will update the Worker script and apply any new migrations without recreating resources.
+2. Re-run `orun backend init` — it will update the Worker script, apply any new migrations, and update queue consumer settings and the cron schedule without recreating existing resources.
 
 ## Config and security notes
 
@@ -170,6 +211,11 @@ backendBootstrap:
   d1DatabaseName: orun-db
   d1DatabaseUUID: "..."
   r2BucketName: orun-storage
+  catalogQueueName: orun-catalog-ingest
+  catalogQueueID: "..."
+  catalogDLQName: orun-catalog-ingest-dlq
+  catalogDLQID: "..."
+  catalogCron: "*/15 * * * *"
   backendCommit: "..."
   initAt: "..."
 backend:

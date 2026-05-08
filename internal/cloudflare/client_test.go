@@ -274,3 +274,323 @@ func TestMigrationsAppliedInOrder(t *testing.T) {
 		t.Errorf("SQL calls not in order: %v", sqlCalls)
 	}
 }
+
+// ── Queue tests ───────────────────────────────────────────────────────────────
+
+// TestListQueues verifies listing queues.
+func TestListQueues(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/accounts/test-account/queues", func(w http.ResponseWriter, r *http.Request) {
+		cfEnvelope(t, w, []cloudflare.Queue{
+			{QueueID: "q1", QueueName: "orun-catalog-ingest"},
+			{QueueID: "q2", QueueName: "orun-catalog-ingest-dlq"},
+		})
+	})
+	client := newTestClient(t, mux)
+	queues, err := client.ListQueues(context.Background())
+	if err != nil {
+		t.Fatalf("ListQueues: %v", err)
+	}
+	if len(queues) != 2 {
+		t.Fatalf("expected 2 queues, got %d", len(queues))
+	}
+}
+
+// TestCreateQueueIdempotent verifies that CreateQueue reuses an existing queue without creating a duplicate.
+func TestCreateQueueIdempotent(t *testing.T) {
+	createCalled := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/accounts/test-account/queues", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			cfEnvelope(t, w, []cloudflare.Queue{{QueueID: "existing-q", QueueName: "orun-catalog-ingest"}})
+			return
+		}
+		createCalled++
+		cfEnvelope(t, w, cloudflare.Queue{QueueID: "new-q", QueueName: "orun-catalog-ingest"})
+	})
+	client := newTestClient(t, mux)
+	q, err := client.CreateQueue(context.Background(), "orun-catalog-ingest")
+	if err != nil {
+		t.Fatalf("CreateQueue: %v", err)
+	}
+	if q.QueueID != "existing-q" {
+		t.Errorf("expected existing-q, got %s", q.QueueID)
+	}
+	if createCalled != 0 {
+		t.Errorf("POST called %d times, expected 0 (should reuse existing)", createCalled)
+	}
+}
+
+// TestCreateQueueNew verifies creating a new queue when none exists.
+func TestCreateQueueNew(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/accounts/test-account/queues", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			cfEnvelope(t, w, []cloudflare.Queue{})
+			return
+		}
+		cfEnvelope(t, w, cloudflare.Queue{QueueID: "new-q", QueueName: "orun-catalog-ingest"})
+	})
+	client := newTestClient(t, mux)
+	q, err := client.CreateQueue(context.Background(), "orun-catalog-ingest")
+	if err != nil {
+		t.Fatalf("CreateQueue: %v", err)
+	}
+	if q.QueueID != "new-q" {
+		t.Errorf("expected new-q, got %s", q.QueueID)
+	}
+}
+
+// TestDeleteQueueByNameMissing verifies that deleting a non-existent queue is not an error.
+func TestDeleteQueueByNameMissing(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/accounts/test-account/queues", func(w http.ResponseWriter, r *http.Request) {
+		cfEnvelope(t, w, []cloudflare.Queue{})
+	})
+	client := newTestClient(t, mux)
+	err := client.DeleteQueueByName(context.Background(), "nonexistent-queue")
+	if err != nil {
+		t.Fatalf("expected no error for missing queue, got: %v", err)
+	}
+}
+
+// TestDeleteQueueByIDMissing verifies that deleting a non-existent queue by ID is not an error.
+func TestDeleteQueueByIDMissing(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/accounts/test-account/queues/gone-q", func(w http.ResponseWriter, r *http.Request) {
+		cfError(t, w, 404, "not found")
+	})
+	client := newTestClient(t, mux)
+	err := client.DeleteQueueByID(context.Background(), "gone-q")
+	if err != nil {
+		t.Fatalf("expected no error for missing queue, got: %v", err)
+	}
+}
+
+// ── Queue consumer tests ──────────────────────────────────────────────────────
+
+// TestCreateQueueConsumerNew verifies creating a new consumer when none exists.
+func TestCreateQueueConsumerNew(t *testing.T) {
+	consumerCreated := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/accounts/test-account/queues/q1/consumers", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			cfEnvelope(t, w, []cloudflare.QueueConsumer{})
+			return
+		}
+		consumerCreated = true
+		cfEnvelope(t, w, cloudflare.QueueConsumer{ConsumerID: "c1", ScriptName: "orun-api", Type: "worker"})
+	})
+	client := newTestClient(t, mux)
+	err := client.CreateOrUpdateQueueConsumer(context.Background(), "q1", "orun-api", "orun-catalog-ingest-dlq",
+		cloudflare.QueueConsumerSettings{BatchSize: 10, MaxRetries: 3, MaxWaitTimeMs: 30000})
+	if err != nil {
+		t.Fatalf("CreateOrUpdateQueueConsumer: %v", err)
+	}
+	if !consumerCreated {
+		t.Error("expected consumer to be created, POST not called")
+	}
+}
+
+// TestCreateQueueConsumerIdempotent verifies no-op when consumer exists with matching settings.
+func TestCreateQueueConsumerIdempotent(t *testing.T) {
+	postCalled := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/accounts/test-account/queues/q1/consumers", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			cfEnvelope(t, w, []cloudflare.QueueConsumer{{
+				ConsumerID:      "c1",
+				ScriptName:      "orun-api",
+				Type:            "worker",
+				DeadLetterQueue: "orun-catalog-ingest-dlq",
+				Settings:        cloudflare.QueueConsumerSettings{BatchSize: 10, MaxRetries: 3, MaxWaitTimeMs: 30000},
+			}})
+			return
+		}
+		postCalled++
+		cfEnvelope(t, w, map[string]interface{}{})
+	})
+	client := newTestClient(t, mux)
+	err := client.CreateOrUpdateQueueConsumer(context.Background(), "q1", "orun-api", "orun-catalog-ingest-dlq",
+		cloudflare.QueueConsumerSettings{BatchSize: 10, MaxRetries: 3, MaxWaitTimeMs: 30000})
+	if err != nil {
+		t.Fatalf("CreateOrUpdateQueueConsumer: %v", err)
+	}
+	if postCalled != 0 {
+		t.Errorf("POST called %d times, expected 0 for idempotent no-op", postCalled)
+	}
+}
+
+// TestCreateQueueConsumerReplacesOnSettingsMismatch verifies delete+recreate when settings differ.
+func TestCreateQueueConsumerReplacesOnSettingsMismatch(t *testing.T) {
+	deleteCalled := false
+	postCalled := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/accounts/test-account/queues/q1/consumers", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			cfEnvelope(t, w, []cloudflare.QueueConsumer{{
+				ConsumerID:      "c1",
+				ScriptName:      "orun-api",
+				Type:            "worker",
+				DeadLetterQueue: "orun-catalog-ingest-dlq",
+				Settings:        cloudflare.QueueConsumerSettings{BatchSize: 5, MaxRetries: 1, MaxWaitTimeMs: 10000},
+			}})
+			return
+		}
+		postCalled = true
+		cfEnvelope(t, w, map[string]interface{}{})
+	})
+	mux.HandleFunc("/accounts/test-account/queues/q1/consumers/c1", func(w http.ResponseWriter, r *http.Request) {
+		deleteCalled = true
+		cfEnvelope(t, w, map[string]interface{}{})
+	})
+	client := newTestClient(t, mux)
+	err := client.CreateOrUpdateQueueConsumer(context.Background(), "q1", "orun-api", "orun-catalog-ingest-dlq",
+		cloudflare.QueueConsumerSettings{BatchSize: 10, MaxRetries: 3, MaxWaitTimeMs: 30000})
+	if err != nil {
+		t.Fatalf("CreateOrUpdateQueueConsumer: %v", err)
+	}
+	if !deleteCalled {
+		t.Error("expected old consumer to be deleted")
+	}
+	if !postCalled {
+		t.Error("expected new consumer to be created")
+	}
+}
+
+// TestDeleteQueueConsumerMissing verifies that deleting a non-existent consumer is not an error.
+func TestDeleteQueueConsumerMissing(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/accounts/test-account/queues/q1/consumers/gone", func(w http.ResponseWriter, r *http.Request) {
+		cfError(t, w, 404, "not found")
+	})
+	client := newTestClient(t, mux)
+	err := client.DeleteQueueConsumer(context.Background(), "q1", "gone")
+	if err != nil {
+		t.Fatalf("expected no error for missing consumer, got: %v", err)
+	}
+}
+
+// ── Worker schedule tests ─────────────────────────────────────────────────────
+
+// TestUpdateWorkerSchedules verifies that the PUT request body is a JSON array of cron objects.
+func TestUpdateWorkerSchedules(t *testing.T) {
+	var capturedCrons []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/accounts/test-account/workers/scripts/orun-api/schedules", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			type entry struct {
+				Cron string `json:"cron"`
+			}
+			var body []entry
+			json.NewDecoder(r.Body).Decode(&body)
+			for _, e := range body {
+				capturedCrons = append(capturedCrons, e.Cron)
+			}
+			type result struct {
+				Schedules []entry `json:"schedules"`
+			}
+			cfEnvelope(t, w, result{Schedules: body})
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	})
+	client := newTestClient(t, mux)
+	err := client.UpdateWorkerSchedules(context.Background(), "orun-api", []string{"*/15 * * * *"})
+	if err != nil {
+		t.Fatalf("UpdateWorkerSchedules: %v", err)
+	}
+	if len(capturedCrons) != 1 || capturedCrons[0] != "*/15 * * * *" {
+		t.Errorf("expected cron [*/15 * * * *], got %v", capturedCrons)
+	}
+}
+
+// TestDeleteWorkerSchedulesClearsAll verifies that DeleteWorkerSchedules sends an empty array.
+func TestDeleteWorkerSchedulesClearsAll(t *testing.T) {
+	var bodyWasEmpty bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/accounts/test-account/workers/scripts/orun-api/schedules", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			type entry struct {
+				Cron string `json:"cron"`
+			}
+			var body []entry
+			json.NewDecoder(r.Body).Decode(&body)
+			bodyWasEmpty = len(body) == 0
+			type result struct {
+				Schedules []entry `json:"schedules"`
+			}
+			cfEnvelope(t, w, result{Schedules: body})
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	})
+	client := newTestClient(t, mux)
+	err := client.DeleteWorkerSchedules(context.Background(), "orun-api")
+	if err != nil {
+		t.Fatalf("DeleteWorkerSchedules: %v", err)
+	}
+	if !bodyWasEmpty {
+		t.Error("expected empty array body to clear schedules")
+	}
+}
+
+// ── Worker upload binding tests ───────────────────────────────────────────────
+
+// TestUploadWorkerIncludesQueueBinding verifies that UploadWorkerScript sends a queue producer binding.
+func TestUploadWorkerIncludesQueueBinding(t *testing.T) {
+	var capturedBindingTypes []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/accounts/test-account/workers/scripts/orun-api", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			_ = r.ParseMultipartForm(10 << 20)
+			metaPart := r.FormValue("metadata")
+			type binding struct {
+				Type string `json:"type"`
+				Name string `json:"name"`
+			}
+			type meta struct {
+				Bindings []binding `json:"bindings"`
+			}
+			var m meta
+			json.Unmarshal([]byte(metaPart), &m)
+			for _, b := range m.Bindings {
+				capturedBindingTypes = append(capturedBindingTypes, b.Type)
+			}
+			cfEnvelope(t, w, cloudflare.WorkerScript{ID: "orun-api"})
+			return
+		}
+		cfEnvelope(t, w, cloudflare.WorkerScript{ID: "orun-api"})
+	})
+	client := newTestClient(t, mux)
+	bindings := []cloudflare.WorkerBinding{
+		{Type: "durable_object_namespace", Name: "COORDINATOR", ClassName: "RunCoordinator", ScriptName: "orun-api"},
+		{Type: "d1", Name: "DB", DatabaseID: "db-uuid"},
+		{Type: "r2_bucket", Name: "STORAGE", BucketName: "orun-storage"},
+		{Type: "queue", Name: "CATALOG_INGEST_QUEUE", QueueName: "orun-catalog-ingest"},
+		{Type: "plain_text", Name: "GITHUB_OIDC_AUDIENCE", Text: "orun"},
+	}
+	_, err := client.UploadWorkerScript(context.Background(), cloudflare.UploadWorkerParams{
+		ScriptName: "orun-api",
+		Bundle:     []byte("export default {};"),
+		Bindings:   bindings,
+	})
+	if err != nil {
+		t.Fatalf("UploadWorkerScript: %v", err)
+	}
+	wantTypes := map[string]bool{
+		"durable_object_namespace": false,
+		"d1":                       false,
+		"r2_bucket":                false,
+		"queue":                    false,
+		"plain_text":               false,
+	}
+	for _, bt := range capturedBindingTypes {
+		wantTypes[bt] = true
+	}
+	for bt, found := range wantTypes {
+		if !found {
+			t.Errorf("binding type %q not found in upload metadata — bindings present: %v", bt, capturedBindingTypes)
+		}
+	}
+}

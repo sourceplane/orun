@@ -35,18 +35,30 @@ type Migration struct {
 	SQL  string
 }
 
+// ManifestConsumerSettings holds the default queue consumer configuration for the embedded backend.
+type ManifestConsumerSettings struct {
+	BatchSize     int `json:"batchSize"`
+	MaxRetries    int `json:"maxRetries"`
+	MaxWaitTimeMs int `json:"maxWaitTimeMs"`
+}
+
 // Manifest describes the embedded backend artifact metadata.
 type Manifest struct {
-	BackendCommitSHA     string   `json:"backendCommitSHA"`
-	BundleDate           string   `json:"bundleDate"`
-	WorkerScriptName     string   `json:"workerScriptName"`
-	D1DatabaseName       string   `json:"d1DatabaseName"`
-	R2BucketName         string   `json:"r2BucketName"`
-	DurableObjectClasses []string `json:"durableObjectClasses"`
-	Bindings             struct {
+	BackendCommitSHA         string                   `json:"backendCommitSHA"`
+	BundleDate               string                   `json:"bundleDate"`
+	WorkerScriptName         string                   `json:"workerScriptName"`
+	D1DatabaseName           string                   `json:"d1DatabaseName"`
+	R2BucketName             string                   `json:"r2BucketName"`
+	CatalogQueueName         string                   `json:"catalogQueueName"`
+	CatalogDLQName           string                   `json:"catalogDLQName"`
+	CatalogCron              string                   `json:"catalogCron"`
+	CatalogConsumerSettings  ManifestConsumerSettings `json:"catalogConsumerSettings"`
+	DurableObjectClasses     []string                 `json:"durableObjectClasses"`
+	Bindings                 struct {
 		DurableObjects []string `json:"durableObjects"`
 		D1             string   `json:"d1"`
 		R2             string   `json:"r2"`
+		Queue          string   `json:"queue"`
 	} `json:"bindings"`
 	Vars    []string `json:"vars"`
 	Secrets []string `json:"secrets"`

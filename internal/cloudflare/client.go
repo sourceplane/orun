@@ -259,6 +259,8 @@ type WorkerBinding struct {
 	ClassName  string `json:"class_name,omitempty"`
 	DatabaseID string `json:"id,omitempty"`
 	BucketName string `json:"bucket_name,omitempty"`
+	QueueName  string `json:"queue_name,omitempty"`
+	Text       string `json:"text,omitempty"`
 }
 
 // DurableObjectMigration is a Durable Object class migration declaration.
@@ -488,6 +490,196 @@ func (c *Client) EnableWorkerSubdomainRoute(ctx context.Context, scriptName stri
 		return fmt.Errorf("enable subdomain route for %q: %w", scriptName, err)
 	}
 	return nil
+}
+
+// ── Queues ────────────────────────────────────────────────────────────────────
+
+// Queue represents a Cloudflare Queue.
+type Queue struct {
+	QueueID   string `json:"queue_id"`
+	QueueName string `json:"queue_name"`
+}
+
+// QueueConsumerSettings holds the configurable consumer behavior.
+type QueueConsumerSettings struct {
+	BatchSize     int `json:"batch_size,omitempty"`
+	MaxRetries    int `json:"max_retries,omitempty"`
+	MaxWaitTimeMs int `json:"max_wait_time_ms,omitempty"`
+}
+
+// QueueConsumer represents a consumer of a Cloudflare Queue.
+type QueueConsumer struct {
+	ConsumerID      string                `json:"consumer_id"`
+	ScriptName      string                `json:"script_name"`
+	DeadLetterQueue string                `json:"dead_letter_queue"`
+	Type            string                `json:"type"`
+	Settings        QueueConsumerSettings `json:"settings"`
+}
+
+// WorkerSchedule represents a single Worker cron trigger.
+type WorkerSchedule struct {
+	Cron string `json:"cron"`
+}
+
+// ListQueues returns all queues for the account.
+func (c *Client) ListQueues(ctx context.Context) ([]Queue, error) {
+	var queues []Queue
+	if err := c.doJSON(ctx, http.MethodGet, c.accountPath("/queues"), nil, &queues); err != nil {
+		return nil, fmt.Errorf("list queues: %w", err)
+	}
+	return queues, nil
+}
+
+// FindQueueByName returns the queue with the given name, or nil if not found.
+func (c *Client) FindQueueByName(ctx context.Context, name string) (*Queue, error) {
+	queues, err := c.ListQueues(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range queues {
+		if queues[i].QueueName == name {
+			return &queues[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// CreateQueue creates a new queue idempotently. If a queue with the given name already exists, it is returned.
+func (c *Client) CreateQueue(ctx context.Context, name string) (*Queue, error) {
+	existing, err := c.FindQueueByName(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return existing, nil
+	}
+	body := map[string]string{"queue_name": name}
+	var q Queue
+	if err := c.doJSON(ctx, http.MethodPost, c.accountPath("/queues"), body, &q); err != nil {
+		return nil, fmt.Errorf("create queue %q: %w", name, err)
+	}
+	return &q, nil
+}
+
+// DeleteQueueByID deletes a queue by its ID. Missing resources are not treated as an error.
+func (c *Client) DeleteQueueByID(ctx context.Context, queueID string) error {
+	err := c.doJSON(ctx, http.MethodDelete, c.accountPath("/queues/"+queueID), nil, nil)
+	if err == nil {
+		return nil
+	}
+	if cfErr := asCFError(err); cfErr != nil && (cfErr.Code == 404 || cfErr.Code == 10010 || cfErr.Code == 11001) {
+		return nil
+	}
+	return fmt.Errorf("delete queue %s: %w", queueID, err)
+}
+
+// DeleteQueueByName deletes a queue by name. Missing resources are not treated as an error.
+func (c *Client) DeleteQueueByName(ctx context.Context, name string) error {
+	q, err := c.FindQueueByName(ctx, name)
+	if err != nil {
+		return err
+	}
+	if q == nil {
+		return nil
+	}
+	return c.DeleteQueueByID(ctx, q.QueueID)
+}
+
+// ListQueueConsumers returns all consumers attached to a queue.
+func (c *Client) ListQueueConsumers(ctx context.Context, queueID string) ([]QueueConsumer, error) {
+	var consumers []QueueConsumer
+	path := c.accountPath("/queues/" + queueID + "/consumers")
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &consumers); err != nil {
+		return nil, fmt.Errorf("list queue consumers for %s: %w", queueID, err)
+	}
+	return consumers, nil
+}
+
+// CreateOrUpdateQueueConsumer idempotently attaches a Worker consumer to a queue.
+// If a consumer for the same script already exists with matching settings, this is a no-op.
+// If it exists with different settings, it is deleted and recreated.
+func (c *Client) CreateOrUpdateQueueConsumer(ctx context.Context, queueID, scriptName, dlqName string, settings QueueConsumerSettings) error {
+	consumers, err := c.ListQueueConsumers(ctx, queueID)
+	if err != nil {
+		return err
+	}
+	for _, cons := range consumers {
+		if cons.ScriptName == scriptName && cons.Type == "worker" {
+			if cons.Settings.BatchSize == settings.BatchSize &&
+				cons.Settings.MaxRetries == settings.MaxRetries &&
+				cons.Settings.MaxWaitTimeMs == settings.MaxWaitTimeMs &&
+				cons.DeadLetterQueue == dlqName {
+				return nil // already configured correctly
+			}
+			if delErr := c.DeleteQueueConsumer(ctx, queueID, cons.ConsumerID); delErr != nil {
+				return delErr
+			}
+			break
+		}
+	}
+	type consumerBody struct {
+		Type            string                `json:"type"`
+		ScriptName      string                `json:"script_name"`
+		DeadLetterQueue string                `json:"dead_letter_queue,omitempty"`
+		Settings        QueueConsumerSettings `json:"settings,omitempty"`
+	}
+	body := consumerBody{
+		Type:            "worker",
+		ScriptName:      scriptName,
+		DeadLetterQueue: dlqName,
+		Settings:        settings,
+	}
+	if err := c.doJSON(ctx, http.MethodPost, c.accountPath("/queues/"+queueID+"/consumers"), body, nil); err != nil {
+		return fmt.Errorf("create queue consumer for queue %s: %w", queueID, err)
+	}
+	return nil
+}
+
+// DeleteQueueConsumer removes a consumer from a queue. Missing resources are not treated as an error.
+func (c *Client) DeleteQueueConsumer(ctx context.Context, queueID, consumerID string) error {
+	path := c.accountPath("/queues/" + queueID + "/consumers/" + consumerID)
+	err := c.doJSON(ctx, http.MethodDelete, path, nil, nil)
+	if err == nil {
+		return nil
+	}
+	if cfErr := asCFError(err); cfErr != nil && cfErr.Code == 404 {
+		return nil
+	}
+	return fmt.Errorf("delete queue consumer %s: %w", consumerID, err)
+}
+
+// ListWorkerSchedules returns the cron schedules for a Worker script.
+func (c *Client) ListWorkerSchedules(ctx context.Context, scriptName string) ([]WorkerSchedule, error) {
+	type result struct {
+		Schedules []WorkerSchedule `json:"schedules"`
+	}
+	path := fmt.Sprintf("/accounts/%s/workers/scripts/%s/schedules", c.accountID, scriptName)
+	var r result
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &r); err != nil {
+		return nil, fmt.Errorf("list worker schedules for %q: %w", scriptName, err)
+	}
+	return r.Schedules, nil
+}
+
+// UpdateWorkerSchedules replaces all cron schedules for a Worker. Pass an empty slice to clear all schedules.
+func (c *Client) UpdateWorkerSchedules(ctx context.Context, scriptName string, crons []string) error {
+	type scheduleEntry struct {
+		Cron string `json:"cron"`
+	}
+	body := make([]scheduleEntry, 0, len(crons))
+	for _, cron := range crons {
+		body = append(body, scheduleEntry{Cron: cron})
+	}
+	path := fmt.Sprintf("/accounts/%s/workers/scripts/%s/schedules", c.accountID, scriptName)
+	if err := c.doJSON(ctx, http.MethodPut, path, body, nil); err != nil {
+		return fmt.Errorf("update worker schedules for %q: %w", scriptName, err)
+	}
+	return nil
+}
+
+// DeleteWorkerSchedules removes all cron schedules for a Worker.
+func (c *Client) DeleteWorkerSchedules(ctx context.Context, scriptName string) error {
+	return c.UpdateWorkerSchedules(ctx, scriptName, nil)
 }
 
 // ── internal helpers ──────────────────────────────────────────────────────────

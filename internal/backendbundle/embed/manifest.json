@@ -1,14 +1,23 @@
 {
-  "backendCommitSHA": "3429079e7c3848dfdd5548675a92e8a50a41e4cb",
+  "backendCommitSHA": "faf9e40e83210c66c9aa0934a5f51ffb7a746475",
   "bundleDate": "2026-05-08",
   "workerScriptName": "orun-api",
   "d1DatabaseName": "orun-db",
   "r2BucketName": "orun-storage",
+  "catalogQueueName": "orun-catalog-ingest",
+  "catalogDLQName": "orun-catalog-ingest-dlq",
+  "catalogCron": "*/15 * * * *",
+  "catalogConsumerSettings": {
+    "batchSize": 10,
+    "maxRetries": 3,
+    "maxWaitTimeMs": 30000
+  },
   "durableObjectClasses": ["RunCoordinator", "RateLimitCounter"],
   "bindings": {
     "durableObjects": ["COORDINATOR", "RATE_LIMITER"],
     "d1": "DB",
-    "r2": "STORAGE"
+    "r2": "STORAGE",
+    "queue": "CATALOG_INGEST_QUEUE"
   },
   "vars": ["GITHUB_JWKS_URL", "GITHUB_OIDC_AUDIENCE", "ORUN_PUBLIC_URL", "ORUN_DASHBOARD_URL"],
   "secrets": ["ORUN_SESSION_SECRET", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET"]
