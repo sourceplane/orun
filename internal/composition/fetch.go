@@ -3,11 +3,13 @@ package composition
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
-// FetchToDir downloads an OCI composition package and extracts it into destDir.
+// FetchToDir downloads an OCI composition package and extracts its compositions
+// into destDir. Each exported composition becomes a subdirectory inside destDir,
+// mirroring the compositions/ tree from the package (e.g. destDir/TerraformPlan/compositions.yaml).
 // destDir must not already exist; the caller is responsible for pre-flight checks.
-// Returns the resolved destination directory.
 func FetchToDir(ociRef, destDir string) (string, error) {
 	ref := normalizeOCIRef(ociRef)
 	if ref == "" {
@@ -24,7 +26,15 @@ func FetchToDir(ociRef, destDir string) (string, error) {
 		return "", fmt.Errorf("failed to fetch OCI package: %w", err)
 	}
 
-	if err := os.CopyFS(destDir, os.DirFS(cacheDir)); err != nil {
+	// Copy the compositions/ subtree so destDir contains only composition files,
+	// not the package metadata (stack.yaml / orun.yaml).
+	compositionsDir := filepath.Join(cacheDir, "compositions")
+	if _, statErr := os.Stat(compositionsDir); statErr != nil {
+		// Legacy flat packages have no compositions/ subdir; fall back to the full root.
+		compositionsDir = cacheDir
+	}
+
+	if err := os.CopyFS(destDir, os.DirFS(compositionsDir)); err != nil {
 		return "", fmt.Errorf("failed to write to %s: %w", destDir, err)
 	}
 
