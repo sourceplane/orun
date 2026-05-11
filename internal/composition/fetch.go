@@ -3,7 +3,6 @@ package composition
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 )
 
 // FetchToDir downloads an OCI composition package and extracts its compositions
@@ -26,15 +25,9 @@ func FetchToDir(ociRef, destDir string) (string, error) {
 		return "", fmt.Errorf("failed to fetch OCI package: %w", err)
 	}
 
-	// Copy the compositions/ subtree so destDir contains only composition files,
-	// not the package metadata (stack.yaml / orun.yaml).
-	compositionsDir := filepath.Join(cacheDir, "compositions")
-	if _, statErr := os.Stat(compositionsDir); statErr != nil {
-		// Legacy flat packages have no compositions/ subdir; fall back to the full root.
-		compositionsDir = cacheDir
-	}
-
-	if err := os.CopyFS(destDir, os.DirFS(compositionsDir)); err != nil {
+	// Copy the full cache root: stack.yaml (or orun.yaml) + compositions/ tree.
+	// The compositions layer already contains only these files.
+	if err := os.CopyFS(destDir, os.DirFS(cacheDir)); err != nil {
 		return "", fmt.Errorf("failed to write to %s: %w", destDir, err)
 	}
 
