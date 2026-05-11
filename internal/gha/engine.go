@@ -1487,7 +1487,7 @@ func actionBaseName(spec stepSpec, reference ActionReference) string {
 
 func inputEnvKey(name string) string {
 	upper := strings.ToUpper(name)
-	upper = strings.NewReplacer(" ", "_", "-", "_", ".", "_", "/", "_", "\\", "_").Replace(upper)
+	upper = strings.ReplaceAll(upper, " ", "_")
 	return "INPUT_" + upper
 }
 
