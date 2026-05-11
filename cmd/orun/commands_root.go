@@ -183,4 +183,5 @@ func init() {
 	registerDescribeCommand(rootCmd)
 	registerGCCommand(rootCmd)
 	registerPublishCommand(rootCmd)
+	registerFetchCommand(rootCmd)
 }
