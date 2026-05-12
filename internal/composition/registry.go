@@ -63,6 +63,10 @@ type Registry struct {
 	Jobs     *model.JobRegistry
 	Bindings map[string]*model.JobBinding
 	Sources  []model.ResolvedCompositionSource
+	// Stack-provided resources (merged from all stack sources)
+	Profiles       map[string]model.ExecutionProfile
+	Triggers       []model.AutomationTrigger
+	OverridePolicy *model.StackOverridePolicySpec
 }
 
 type sourcePackage struct {
@@ -125,6 +129,13 @@ func LoadRegistry(intent *model.Intent, intentPath, legacyConfigDir string) (*Re
 
 	if legacyRegistry != nil {
 		registry.Sources = append(registry.Sources, legacyRegistry.Sources...)
+	}
+
+	// Load stack-provided resources (profiles, triggers, override policy)
+	for _, pkg := range packages {
+		if err := loadStackResourcesIntoRegistry(registry, pkg.resolvedRoot, pkg.declared.Name); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := annotateIntentWithResolvedCompositions(intent, registry, packages, legacyRegistry); err != nil {
@@ -689,7 +700,7 @@ func resolveOCISource(source model.CompositionSource, index int) (*sourcePackage
 }
 
 func loadPackageSource(rootDir string, source model.CompositionSource, digest string, index int) (*sourcePackage, error) {
-	manifest, err := loadManifestFromRoot(rootDir, source.Name)
+	manifest, _, err := loadManifestFromRoot(rootDir, source.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -728,23 +739,27 @@ func loadPackageSource(rootDir string, source model.CompositionSource, digest st
 
 // loadManifestFromRoot reads stack.yaml (preferred) or orun.yaml from rootDir,
 // converting a Stack manifest to the internal CompositionPackage representation.
-func loadManifestFromRoot(rootDir, sourceName string) (*model.CompositionPackage, error) {
+func loadManifestFromRoot(rootDir, sourceName string) (*model.CompositionPackage, *model.Stack, error) {
 	if data, err := os.ReadFile(filepath.Join(rootDir, "stack.yaml")); err == nil {
+		var stack model.Stack
+		if err := yaml.Unmarshal(data, &stack); err != nil {
+			return nil, nil, fmt.Errorf("failed to parse stack.yaml for source %s: %w", sourceName, err)
+		}
 		pkg, convErr := stackYAMLToCompositionPackage(data, rootDir)
 		if convErr != nil {
-			return nil, fmt.Errorf("failed to parse stack.yaml for source %s: %w", sourceName, convErr)
+			return nil, nil, fmt.Errorf("failed to convert stack.yaml for source %s: %w", sourceName, convErr)
 		}
-		return pkg, nil
+		return pkg, &stack, nil
 	}
 	data, err := os.ReadFile(filepath.Join(rootDir, "orun.yaml"))
 	if err != nil {
-		return nil, fmt.Errorf("failed to read package manifest for source %s: %w", sourceName, err)
+		return nil, nil, fmt.Errorf("failed to read package manifest for source %s: %w", sourceName, err)
 	}
 	var manifest model.CompositionPackage
 	if err := yaml.Unmarshal(data, &manifest); err != nil {
-		return nil, fmt.Errorf("failed to parse package manifest for source %s: %w", sourceName, err)
+		return nil, nil, fmt.Errorf("failed to parse package manifest for source %s: %w", sourceName, err)
 	}
-	return &manifest, nil
+	return &manifest, nil, nil
 }
 
 func validatePackageManifest(sourceName string, manifest model.CompositionPackage) error {
@@ -946,6 +961,7 @@ func newRegistry() *Registry {
 		},
 		Bindings: make(map[string]*model.JobBinding),
 		Sources:  make([]model.ResolvedCompositionSource, 0),
+		Profiles: make(map[string]model.ExecutionProfile),
 	}
 }
 
