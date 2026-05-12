@@ -121,9 +121,6 @@ func generatePlan() error {
 				}
 			}
 		}
-		if len(filtered) == 0 {
-			return fmt.Errorf("no environments bound to profile %q", resolvedProfile)
-		}
 		instances = filtered
 	}
 
