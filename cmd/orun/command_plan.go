@@ -37,4 +37,8 @@ func registerPlanCommand(root *cobra.Command) {
 	planCmd.Flags().BoolVar(&uncommitted, "uncommitted", false, "Use only uncommitted changes")
 	planCmd.Flags().BoolVar(&untracked, "untracked", false, "Use only untracked files")
 	planCmd.Flags().BoolVar(&explainChanged, "explain", false, "Show how --changed refs were resolved")
+	planCmd.Flags().StringVar(&triggerName, "trigger", "", "Named trigger from intent automation section")
+	planCmd.Flags().StringVar(&profileName, "profile", "", "Select execution profile directly")
+	planCmd.Flags().StringVar(&fromCI, "from-ci", "", "Auto-detect CI event and match triggers (github/gitlab/buildkite)")
+	planCmd.Flags().StringVar(&eventFile, "event-file", "", "Path to JSON event context file for trigger matching")
 }

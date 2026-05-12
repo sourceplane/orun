@@ -33,6 +33,8 @@ type PlanMetadata struct {
 	// intent auto-discovery fails (e.g. in GHA where the intent lives in a
 	// subdirectory of GITHUB_WORKSPACE).
 	WorkDir string `json:"workDir,omitempty" yaml:"workDir,omitempty"`
+	Profile string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Trigger string `json:"trigger,omitempty" yaml:"trigger,omitempty"`
 }
 
 // PlanScope records the component scoping applied when the plan was generated.
