@@ -123,6 +123,12 @@ func (pv *PlanViewer) ViewDAG() string {
 
 				// Show job with composition and registry info
 				jobLine := fmt.Sprintf("%s%s", jobPrefix, job.Name)
+				if job.Skipped {
+					jobLine += " " + ui.Dim(pv.color, "[SKIP]")
+				}
+				if job.RequiresApproval {
+					jobLine += " " + ui.Cyan(pv.color, "[APPROVAL]")
+				}
 				if job.Timeout != "" {
 					jobLine += fmt.Sprintf(" [%s]", job.Timeout)
 				}

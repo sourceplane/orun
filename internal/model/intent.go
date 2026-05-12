@@ -15,7 +15,13 @@ type Intent struct {
 
 // IntentExecution holds optional execution-layer configuration in intent.yaml.
 type IntentExecution struct {
-	State IntentExecutionState `yaml:"state,omitempty" json:"state,omitempty"`
+	State    IntentExecutionState        `yaml:"state,omitempty" json:"state,omitempty"`
+	Profiles map[string]ExecutionProfile `yaml:"profiles,omitempty" json:"profiles,omitempty"`
+}
+
+// ExecutionProfile defines a named set of controls per composition type.
+type ExecutionProfile struct {
+	Controls map[string]map[string]interface{} `yaml:"controls,omitempty" json:"controls,omitempty"`
 }
 
 // IntentExecutionState configures where execution state is stored.
@@ -51,6 +57,13 @@ type Environment struct {
 	Selectors EnvironmentSelectors   `yaml:"selectors" json:"selectors"`
 	Defaults  map[string]interface{} `yaml:"defaults" json:"defaults"`
 	Policies  map[string]interface{} `yaml:"policies" json:"policies"`
+	Execution EnvironmentExecution   `yaml:"execution,omitempty" json:"execution,omitempty"`
+}
+
+// EnvironmentExecution selects an execution profile and optional control overrides.
+type EnvironmentExecution struct {
+	Profile          string                            `yaml:"profile,omitempty" json:"profile,omitempty"`
+	ControlOverrides map[string]map[string]interface{} `yaml:"controlOverrides,omitempty" json:"controlOverrides,omitempty"`
 }
 
 // EnvironmentSelectors specifies which components apply to an environment
@@ -72,6 +85,7 @@ type Component struct {
 	Overrides      ComponentOverrides       `yaml:"overrides" json:"overrides"`
 	Labels         map[string]string        `yaml:"labels" json:"labels"`
 	DependsOn      []Dependency             `yaml:"dependsOn" json:"dependsOn"`
+	ControlOverrides map[string]interface{} `yaml:"controlOverrides,omitempty" json:"controlOverrides,omitempty"`
 	ResolvedComposition       string        `yaml:"-" json:"-"`
 	ResolvedCompositionSource string        `yaml:"-" json:"-"`
 	SourcePath     string                   `yaml:"-" json:"-"`
@@ -98,6 +112,7 @@ type Dependency struct {
 // NormalizedIntent is the canonical internal representation
 type NormalizedIntent struct {
 	Metadata       Metadata
+	Execution      IntentExecution
 	Groups         map[string]Group
 	Environments   map[string]Environment
 	Components     map[string]Component
@@ -120,6 +135,7 @@ type ComponentInstance struct {
 	Policies      map[string]interface{}
 	DependsOn     []ResolvedDependency
 	Enabled       bool
+	Controls      map[string]interface{}
 }
 
 // ResolvedDependency is a dependency with resolved target component

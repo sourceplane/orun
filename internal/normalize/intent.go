@@ -17,6 +17,7 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 	// Initialize normalized intent
 	normalized := &model.NormalizedIntent{
 		Metadata:       intent.Metadata,
+		Execution:      intent.Execution,
 		Groups:         intent.Groups,
 		Environments:   intent.Environments,
 		Components:     make(map[string]model.Component),
