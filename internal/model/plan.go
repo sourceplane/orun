@@ -2,12 +2,22 @@ package model
 
 // Plan is the final execution-ready workflow DAG
 type Plan struct {
-	APIVersion string        `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string        `json:"kind" yaml:"kind"`
-	Metadata   PlanMetadata  `json:"metadata" yaml:"metadata"`
-	Execution  PlanExecution `json:"execution,omitempty" yaml:"execution,omitempty"`
-	Spec       PlanSpec      `json:"spec,omitempty" yaml:"spec,omitempty"`
-	Jobs       []PlanJob     `json:"jobs" yaml:"jobs"`
+	APIVersion  string        `json:"apiVersion" yaml:"apiVersion"`
+	Kind        string        `json:"kind" yaml:"kind"`
+	Metadata    PlanMetadata  `json:"metadata" yaml:"metadata"`
+	Execution   PlanExecution `json:"execution,omitempty" yaml:"execution,omitempty"`
+	Spec        PlanSpec      `json:"spec,omitempty" yaml:"spec,omitempty"`
+	Jobs        []PlanJob     `json:"jobs" yaml:"jobs"`
+	SkippedJobs []SkippedJob  `json:"skippedJobs,omitempty" yaml:"skippedJobs,omitempty"`
+}
+
+// SkippedJob records a job that was omitted from execution.
+type SkippedJob struct {
+	ID          string `json:"id" yaml:"id"`
+	Component   string `json:"component" yaml:"component"`
+	Environment string `json:"environment" yaml:"environment"`
+	Job         string `json:"job" yaml:"job"`
+	Reason      string `json:"reason" yaml:"reason"`
 }
 
 // PlanMetadata captures immutable plan generation details.
@@ -56,25 +66,29 @@ type ResolvedCompositionSource struct {
 
 // PlanJob is the execution unit in the final plan
 type PlanJob struct {
-	ID          string                 `json:"id" yaml:"id"`
-	UID         string                 `json:"uid,omitempty" yaml:"uid,omitempty"`
-	DisplayName string                 `json:"displayName,omitempty" yaml:"displayName,omitempty"`
-	CheckName   string                 `json:"checkName,omitempty" yaml:"checkName,omitempty"`
-	Name        string                 `json:"name" yaml:"name"`
-	Component   string                 `json:"component" yaml:"component"`
-	Environment string                 `json:"environment" yaml:"environment"`
-	Composition string                 `json:"composition,omitempty" yaml:"composition,omitempty"`
-	JobRegistry string                 `json:"jobRegistry,omitempty" yaml:"jobRegistry,omitempty"` // Name of the JobRegistry used
-	Job         string                 `json:"job,omitempty" yaml:"job,omitempty"`                 // Specific job from registry
-	RunsOn      string                 `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`
-	Path        string                 `json:"path,omitempty" yaml:"path,omitempty"` // Working directory for job execution
-	Steps       []PlanStep             `json:"steps" yaml:"steps"`
-	DependsOn   []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
-	Timeout     string                 `json:"timeout,omitempty" yaml:"timeout,omitempty"`
-	Retries     int                    `json:"retries,omitempty" yaml:"retries,omitempty"`
-	Env         map[string]interface{} `json:"env,omitempty" yaml:"env,omitempty"`
-	Labels      map[string]string      `json:"labels,omitempty" yaml:"labels,omitempty"`
-	Config      map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
+	ID               string                 `json:"id" yaml:"id"`
+	UID              string                 `json:"uid,omitempty" yaml:"uid,omitempty"`
+	DisplayName      string                 `json:"displayName,omitempty" yaml:"displayName,omitempty"`
+	CheckName        string                 `json:"checkName,omitempty" yaml:"checkName,omitempty"`
+	Name             string                 `json:"name" yaml:"name"`
+	Component        string                 `json:"component" yaml:"component"`
+	Environment      string                 `json:"environment" yaml:"environment"`
+	Composition      string                 `json:"composition,omitempty" yaml:"composition,omitempty"`
+	JobRegistry      string                 `json:"jobRegistry,omitempty" yaml:"jobRegistry,omitempty"` // Name of the JobRegistry used
+	Job              string                 `json:"job,omitempty" yaml:"job,omitempty"`                 // Specific job from registry
+	RunsOn           string                 `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`
+	Path             string                 `json:"path,omitempty" yaml:"path,omitempty"` // Working directory for job execution
+	Steps            []PlanStep             `json:"steps" yaml:"steps"`
+	DependsOn        []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
+	Timeout          string                 `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Retries          int                    `json:"retries,omitempty" yaml:"retries,omitempty"`
+	Env              map[string]interface{} `json:"env,omitempty" yaml:"env,omitempty"`
+	Labels           map[string]string      `json:"labels,omitempty" yaml:"labels,omitempty"`
+	Config           map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
+	Controls         map[string]interface{} `json:"controls,omitempty" yaml:"controls,omitempty"`
+	Skipped          bool                   `json:"skipped,omitempty" yaml:"skipped,omitempty"`
+	SkipReason       string                 `json:"skipReason,omitempty" yaml:"skipReason,omitempty"`
+	RequiresApproval bool                   `json:"requiresApproval,omitempty" yaml:"requiresApproval,omitempty"`
 }
 
 // PlanStep is a step in the final plan
@@ -92,4 +106,7 @@ type PlanStep struct {
 	Timeout          string                 `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	Retry            int                    `json:"retry,omitempty" yaml:"retry,omitempty"`
 	OnFailure        string                 `json:"onFailure,omitempty" yaml:"onFailure,omitempty"`
+	When             string                 `json:"when,omitempty" yaml:"when,omitempty"`
+	Skipped          bool                   `json:"skipped,omitempty" yaml:"skipped,omitempty"`
+	SkipReason       string                 `json:"skipReason,omitempty" yaml:"skipReason,omitempty"`
 }

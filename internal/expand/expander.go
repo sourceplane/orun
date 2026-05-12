@@ -10,15 +10,17 @@ import (
 
 // Expander handles environment × component expansion and merging
 type Expander struct {
-	normalized *model.NormalizedIntent
-	groups     map[string]model.Group
+	normalized      *model.NormalizedIntent
+	groups          map[string]model.Group
+	controlDefaults map[string]map[string]interface{}
 }
 
 // NewExpander creates a new expander
-func NewExpander(normalized *model.NormalizedIntent) *Expander {
+func NewExpander(normalized *model.NormalizedIntent, controlDefaults map[string]map[string]interface{}) *Expander {
 	return &Expander{
-		normalized: normalized,
-		groups:     normalized.Groups,
+		normalized:      normalized,
+		groups:          normalized.Groups,
+		controlDefaults: controlDefaults,
 	}
 }
 
@@ -74,6 +76,9 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 
 			// Extract and apply policies (cannot be overridden)
 			instance.Policies = e.resolvePolicies(comp, envName)
+
+			// Resolve execution controls
+			instance.Controls = e.resolveControls(comp, env, envName)
 
 			// Resolve dependencies
 			deps := e.resolveDependencies(comp, envName)
@@ -293,6 +298,51 @@ func (e *Expander) resolveDependencies(comp model.Component, envName string) []m
 	}
 
 	return resolved
+}
+
+// resolveControls builds the resolved controls for a component in an environment.
+// Precedence (lowest→highest): composition defaults → profile → env overrides → component overrides.
+func (e *Expander) resolveControls(comp model.Component, env model.Environment, envName string) map[string]interface{} {
+	controls := make(map[string]interface{})
+
+	if e.controlDefaults != nil {
+		if defaults, ok := e.controlDefaults[comp.Type]; ok {
+			deepMerge(controls, defaults)
+		}
+	}
+
+	profileName := env.Execution.Profile
+	if profileName != "" {
+		if profile, ok := e.normalized.Execution.Profiles[profileName]; ok {
+			if typeControls, ok := profile.Controls[comp.Type]; ok {
+				deepMerge(controls, typeControls)
+			}
+		}
+	}
+
+	if env.Execution.ControlOverrides != nil {
+		if typeOverrides, ok := env.Execution.ControlOverrides[comp.Type]; ok {
+			deepMerge(controls, typeOverrides)
+		}
+	}
+
+	if comp.ControlOverrides != nil {
+		deepMerge(controls, comp.ControlOverrides)
+	}
+
+	return controls
+}
+
+func deepMerge(dst, src map[string]interface{}) {
+	for k, srcVal := range src {
+		if srcMap, ok := srcVal.(map[string]interface{}); ok {
+			if dstMap, ok := dst[k].(map[string]interface{}); ok {
+				deepMerge(dstMap, srcMap)
+				continue
+			}
+		}
+		dst[k] = srcVal
+	}
 }
 
 // GetComponentInstance retrieves a specific component instance

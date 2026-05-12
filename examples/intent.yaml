@@ -21,38 +21,94 @@ discovery:
     - packages/
     - website/
 
+execution:
+  profiles:
+    dry-run:
+      controls:
+        terraform:
+          fmt:
+            enabled: true
+          init:
+            enabled: true
+            backend: false
+          validate:
+            enabled: true
+          plan:
+            enabled: false
+          apply:
+            enabled: false
+
+    verify:
+      controls:
+        terraform:
+          fmt:
+            enabled: true
+          init:
+            enabled: true
+            backend: true
+          validate:
+            enabled: true
+          plan:
+            enabled: true
+          apply:
+            enabled: false
+
+    release:
+      controls:
+        terraform:
+          fmt:
+            enabled: true
+          init:
+            enabled: true
+            backend: true
+          validate:
+            enabled: true
+          plan:
+            enabled: true
+          apply:
+            enabled: false
+
 environments:
   dev:
+    execution:
+      profile: dry-run
     defaults:
-      lane: dry-run
       namespacePrefix: dev-
     policies:
       requireApproval: "false"
 
   development:
+    execution:
+      profile: dry-run
     defaults:
-      lane: dry-run
       namespacePrefix: dev-
     policies:
       requireApproval: "false"
 
   preview:
+    execution:
+      profile: verify
     defaults:
-      lane: verify
       namespacePrefix: preview-
     policies:
       requireApproval: "false"
 
   staging:
+    execution:
+      profile: verify
     defaults:
-      lane: verify
       namespacePrefix: stg-
     policies:
       requireApproval: "true"
 
   production:
+    execution:
+      profile: release
     defaults:
-      lane: release
       namespacePrefix: prod-
     policies:
       requireApproval: "true"
+      requireSignedPlan: "true"
+      approvalRequiredCapabilities:
+        - terraform.apply
+        - mutation.infra

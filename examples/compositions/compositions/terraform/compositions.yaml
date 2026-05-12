@@ -46,12 +46,62 @@ spec:
             description: Optional backend key for future expansion
         additionalProperties: false
     additionalProperties: true
+  controlSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Terraform Execution Controls
+    type: object
+    properties:
+      fmt:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+      init:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+          backend:
+            type: boolean
+      validate:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+      plan:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+      apply:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+    additionalProperties: false
+  controlDefaults:
+    fmt:
+      enabled: true
+    init:
+      enabled: true
+      backend: true
+    validate:
+      enabled: true
+    plan:
+      enabled: true
+    apply:
+      enabled: false
   jobs:
     - name: validate-terraform
       description: Validate Terraform stacks with fmt, init, and validate
       runsOn: ubuntu-22.04
       timeout: 20m
       retries: 0
+      capabilities:
+        - terraform.fmt
+        - terraform.init
+        - terraform.validate
+        - terraform.plan
       labels:
         scope: infra
       steps:
@@ -68,11 +118,14 @@ spec:
             echo "Validating {{.stackName}} at {{.terraformDir}}"
           onFailure: stop
         - name: terraform-fmt-check
+          when: "{{(index .controls \"fmt\").enabled}}"
           run: terraform fmt -check {{.terraformDir}}
           onFailure: stop
         - name: terraform-init
+          when: "{{(index .controls \"init\").enabled}}"
           run: terraform -chdir={{.terraformDir}} init -backend=false -input=false
           onFailure: stop
         - name: terraform-validate
+          when: "{{(index .controls \"validate\").enabled}}"
           run: terraform -chdir={{.terraformDir}} validate -no-color
           onFailure: stop
