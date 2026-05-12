@@ -111,29 +111,62 @@ func loadStackTriggers(rootDir string, stack model.Stack) ([]model.AutomationTri
 	return triggers, nil
 }
 
-// loadStackOverridePolicy loads a stack override policy from an explicit path.
-// Returns nil if no policy is declared.
+// loadStackOverridePolicy loads a stack override policy.
+// If spec.overridePolicy is set, loads from the explicit path. Otherwise
+// auto-discovers by scanning policies/*.yaml for a StackOverridePolicy document.
+// Returns nil if no policy is declared or discovered.
 func loadStackOverridePolicy(rootDir string, stack model.Stack) (*model.StackOverridePolicySpec, error) {
-	if stack.Spec.OverridePolicy == nil {
-		return nil, nil
+	if stack.Spec.OverridePolicy != nil {
+		return loadOverridePolicyFromPath(rootDir, stack.Spec.OverridePolicy.Path)
 	}
 
-	path := filepath.Join(rootDir, filepath.FromSlash(stack.Spec.OverridePolicy.Path))
+	return discoverOverridePolicy(rootDir)
+}
+
+func loadOverridePolicyFromPath(rootDir, relPath string) (*model.StackOverridePolicySpec, error) {
+	path := filepath.Join(rootDir, filepath.FromSlash(relPath))
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read override policy %s: %w", stack.Spec.OverridePolicy.Path, err)
+		return nil, fmt.Errorf("failed to read override policy %s: %w", relPath, err)
 	}
 
 	var doc model.StackOverridePolicyDocument
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("failed to parse override policy %s: %w", stack.Spec.OverridePolicy.Path, err)
+		return nil, fmt.Errorf("failed to parse override policy %s: %w", relPath, err)
 	}
 
 	if doc.Kind != "" && doc.Kind != "StackOverridePolicy" {
-		return nil, fmt.Errorf("override policy %s has unexpected kind %q (expected StackOverridePolicy)", stack.Spec.OverridePolicy.Path, doc.Kind)
+		return nil, fmt.Errorf("override policy %s has unexpected kind %q (expected StackOverridePolicy)", relPath, doc.Kind)
 	}
 
 	return &doc.Spec, nil
+}
+
+// discoverOverridePolicy scans policies/*.yaml for the first StackOverridePolicy document.
+func discoverOverridePolicy(rootDir string) (*model.StackOverridePolicySpec, error) {
+	entries, err := discoverYAMLFiles(filepath.Join(rootDir, "policies"))
+	if err != nil {
+		return nil, nil
+	}
+
+	for _, entry := range entries {
+		path := filepath.Join(rootDir, filepath.FromSlash(entry.Path))
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		var doc model.StackOverridePolicyDocument
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			continue
+		}
+
+		if doc.Kind == "StackOverridePolicy" {
+			return &doc.Spec, nil
+		}
+	}
+
+	return nil, nil
 }
 
 // loadStackResourcesIntoRegistry loads profiles, triggers, and override policy from a stack
