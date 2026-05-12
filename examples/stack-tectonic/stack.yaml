@@ -9,23 +9,24 @@ metadata:
   tags:
     - terraform
     - platform
-spec:
-  compositions:
-    - path: compositions/terraform/compositions.yaml
-  profiles:
-    - name: pull-request
-      path: profiles/pull-request.yaml
-    - name: verify
-      path: profiles/verify.yaml
-    - name: release
-      path: profiles/release.yaml
-  triggers:
-    - name: github-pull-request
-      path: triggers/github-pull-request.yaml
-    - name: github-push-main
-      path: triggers/github-push-main.yaml
-    - name: github-tag-release
-      path: triggers/github-tag-release.yaml
-  overridePolicy:
-    name: default
-    path: override-policy.yaml
+
+# Convention-over-configuration: all resources auto-discovered from folder structure.
+#
+#   compositions/   → compositions.yaml files (recursive)
+#   profiles/       → ExecutionProfile documents (*.yaml)
+#   triggers/       → TriggerBinding documents (*.yaml)
+#   policies/       → StackOverridePolicy documents (*.yaml, first match wins)
+#
+# To override auto-discovery, declare explicit entries under spec:
+#   spec:
+#     compositions:
+#       - path: compositions/terraform/compositions.yaml
+#     profiles:
+#       - name: release
+#         path: profiles/release.yaml
+#     triggers:
+#       - name: push-main
+#         path: triggers/github-push-main.yaml
+#     overridePolicy:
+#       name: default
+#       path: policies/override-policy.yaml
