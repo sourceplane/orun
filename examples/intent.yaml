@@ -24,6 +24,9 @@ discovery:
 execution:
   profiles:
     dry-run:
+      description: Fast PR validation — non-mutating checks only
+      plan:
+        scope: changed
       controls:
         terraform:
           fmt:
@@ -39,6 +42,9 @@ execution:
             enabled: false
 
     verify:
+      description: Merge verification with plan generation
+      plan:
+        scope: changed
       controls:
         terraform:
           fmt:
@@ -54,6 +60,9 @@ execution:
             enabled: false
 
     release:
+      description: Release-grade execution
+      plan:
+        scope: full
       controls:
         terraform:
           fmt:
@@ -67,6 +76,38 @@ execution:
             enabled: true
           apply:
             enabled: false
+
+automation:
+  triggers:
+    - name: github-pull-request
+      on:
+        provider: github
+        event: pull_request
+        actions:
+          - opened
+          - synchronize
+          - reopened
+          - ready_for_review
+      plan:
+        profile: dry-run
+
+    - name: github-push-main
+      on:
+        provider: github
+        event: push
+        branches:
+          - main
+      plan:
+        profile: verify
+
+    - name: github-tag-release
+      on:
+        provider: github
+        event: push
+        tags:
+          - "v*"
+      plan:
+        profile: release
 
 environments:
   dev:
