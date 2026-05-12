@@ -1,0 +1,12 @@
+apiVersion: sourceplane.io/v1
+kind: TriggerBinding
+metadata:
+  name: github-tag-release
+spec:
+  on:
+    provider: github
+    event: push
+    tags:
+      - "v*"
+  plan:
+    profileRef: release

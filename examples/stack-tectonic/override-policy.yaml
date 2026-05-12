@@ -1,0 +1,29 @@
+apiVersion: sourceplane.io/v1
+kind: StackOverridePolicy
+metadata:
+  name: tectonic-default
+spec:
+  default: deny
+  allow:
+    intent:
+      environments:
+        defaults:
+          - namespacePrefix
+          - region
+          - cluster.*
+        policies:
+          - requireApproval
+          - requireSignedPlan
+      profiles:
+        pull-request:
+          controls:
+            terraform:
+              plan:
+                type: boolean
+        release:
+          controls:
+            terraform:
+              apply:
+                type: boolean
+  deny:
+    - "profiles.*.controls.terraform.init.backend"

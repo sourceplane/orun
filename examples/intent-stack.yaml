@@ -1,0 +1,67 @@
+apiVersion: sourceplane.io/v1
+kind: Intent
+
+metadata:
+  name: multi-tenant-saas
+  description: Lean intent that adopts the tectonic stack for profiles, triggers, and policy
+
+stacks:
+  - name: tectonic
+    source:
+      name: tectonic
+      kind: dir
+      path: ./stack-tectonic
+
+discovery:
+  roots:
+    - stack-tectonic/
+
+components:
+  - name: network
+    type: terraform
+    domain: foundation
+    path: infra/network
+    inputs:
+      stackName: network
+      terraformDir: infra/network
+  - name: compute
+    type: terraform
+    domain: foundation
+    path: infra/compute
+    inputs:
+      stackName: compute
+      terraformDir: infra/compute
+    dependsOn:
+      - component: network
+
+environments:
+  dev:
+    selectors:
+      components: ["*"]
+    execution:
+      profile: pull-request
+    defaults:
+      namespacePrefix: dev-
+    policies:
+      requireApproval: "false"
+
+  staging:
+    selectors:
+      components: ["*"]
+    execution:
+      profile: verify
+    defaults:
+      namespacePrefix: stg-
+    policies:
+      requireApproval: "true"
+
+  production:
+    selectors:
+      components: ["*"]
+    execution:
+      profile: release
+    defaults:
+      namespacePrefix: prod-
+    policies:
+      requireApproval: "true"
+      requireSignedPlan: "true"

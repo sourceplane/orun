@@ -64,6 +64,19 @@ func generatePlan() error {
 		return fmt.Errorf("failed to normalize intent: %w", err)
 	}
 
+	// Merge stack-provided resources (profiles, triggers, override policy)
+	stackResources := &normalize.StackResources{
+		Profiles:       compositionRegistry.Profiles,
+		Triggers:       compositionRegistry.Triggers,
+		OverridePolicy: compositionRegistry.OverridePolicy,
+	}
+	normalize.MergeStackResources(normalized, stackResources)
+
+	// Enforce override policy
+	if err := normalize.EnforceOverridePolicy(intent, normalized.OverridePolicy, compositionRegistry.Profiles); err != nil {
+		return err
+	}
+
 	if debugMode {
 		fmt.Println("□ Validating components against composition schemas...")
 	}

@@ -106,6 +106,44 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 	return normalized, nil
 }
 
+// StackResources holds resources loaded from stack packages.
+type StackResources struct {
+	Profiles       map[string]model.ExecutionProfile
+	Triggers       []model.AutomationTrigger
+	OverridePolicy *model.StackOverridePolicySpec
+}
+
+// MergeStackResources merges stack-provided profiles, triggers, and override policy
+// into the normalized intent. Stack profiles serve as defaults; intent profiles override.
+// Stack triggers are appended after intent triggers (intent triggers match first).
+func MergeStackResources(normalized *model.NormalizedIntent, resources *StackResources) {
+	if resources == nil {
+		return
+	}
+
+	// Merge profiles: stack profiles are base, intent profiles overlay
+	if len(resources.Profiles) > 0 {
+		if normalized.Execution.Profiles == nil {
+			normalized.Execution.Profiles = make(map[string]model.ExecutionProfile)
+		}
+		for name, stackProfile := range resources.Profiles {
+			if _, exists := normalized.Execution.Profiles[name]; !exists {
+				normalized.Execution.Profiles[name] = stackProfile
+			}
+		}
+	}
+
+	// Merge triggers: intent triggers come first (first-match-wins), stack triggers appended
+	if len(resources.Triggers) > 0 {
+		normalized.Automation.Triggers = append(normalized.Automation.Triggers, resources.Triggers...)
+	}
+
+	// Store override policy for later enforcement
+	if resources.OverridePolicy != nil {
+		normalized.OverridePolicy = resources.OverridePolicy
+	}
+}
+
 // contains checks if a slice contains a string
 func contains(slice []string, item string) bool {
 	for _, v := range slice {

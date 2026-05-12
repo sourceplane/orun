@@ -6,12 +6,19 @@ type Intent struct {
 	Kind         string                 `yaml:"kind" json:"kind"`
 	Metadata     Metadata               `yaml:"metadata" json:"metadata"`
 	Discovery    Discovery              `yaml:"discovery" json:"discovery"`
+	Stacks       []IntentStackRef       `yaml:"stacks,omitempty" json:"stacks,omitempty"`
 	Compositions CompositionConfig      `yaml:"compositions,omitempty" json:"compositions,omitempty"`
 	Groups       map[string]Group       `yaml:"groups" json:"groups"`
 	Environments map[string]Environment `yaml:"environments" json:"environments"`
 	Components   []Component            `yaml:"components" json:"components"`
 	Execution    IntentExecution        `yaml:"execution,omitempty" json:"execution,omitempty"`
 	Automation   IntentAutomation       `yaml:"automation,omitempty" json:"automation,omitempty"`
+}
+
+// IntentStackRef references a stack package by name and source.
+type IntentStackRef struct {
+	Name   string            `yaml:"name" json:"name"`
+	Source CompositionSource `yaml:"source" json:"source"`
 }
 
 // IntentExecution holds optional execution-layer configuration in intent.yaml.
@@ -151,7 +158,8 @@ type NormalizedIntent struct {
 	Groups         map[string]Group
 	Environments   map[string]Environment
 	Components     map[string]Component
-	ComponentIndex map[string]Component // for fast lookup
+	ComponentIndex map[string]Component
+	OverridePolicy *StackOverridePolicySpec
 }
 
 // ComponentInstance is the expanded form of Component for a specific environment

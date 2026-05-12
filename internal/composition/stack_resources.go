@@ -1,0 +1,213 @@
+package composition
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/sourceplane/orun/internal/model"
+	"gopkg.in/yaml.v3"
+)
+
+// loadStackProfiles loads execution profile documents from a stack directory.
+// If spec.Profiles is non-empty, loads from explicit paths. Otherwise auto-discovers profiles/*.yaml.
+func loadStackProfiles(rootDir string, stack model.Stack) (map[string]model.ExecutionProfile, error) {
+	profiles := make(map[string]model.ExecutionProfile)
+
+	var entries []model.StackExportEntry
+	if len(stack.Spec.Profiles) > 0 {
+		entries = stack.Spec.Profiles
+	} else {
+		discovered, err := discoverYAMLFiles(filepath.Join(rootDir, "profiles"))
+		if err != nil {
+			return profiles, nil
+		}
+		entries = discovered
+	}
+
+	for _, entry := range entries {
+		path := filepath.Join(rootDir, filepath.FromSlash(entry.Path))
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read profile %s: %w", entry.Path, err)
+		}
+
+		var doc model.ExecutionProfileDocument
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			return nil, fmt.Errorf("failed to parse profile %s: %w", entry.Path, err)
+		}
+
+		if doc.Kind != "" && doc.Kind != "ExecutionProfile" {
+			return nil, fmt.Errorf("profile %s has unexpected kind %q (expected ExecutionProfile)", entry.Path, doc.Kind)
+		}
+
+		name := doc.Metadata.Name
+		if name == "" {
+			name = entry.Name
+		}
+		if name == "" {
+			name = strings.TrimSuffix(filepath.Base(entry.Path), filepath.Ext(entry.Path))
+		}
+
+		profiles[name] = model.ExecutionProfile{
+			Description: doc.Spec.Description,
+			Plan:        doc.Spec.Plan,
+			Controls:    doc.Spec.Controls,
+		}
+	}
+
+	return profiles, nil
+}
+
+// loadStackTriggers loads trigger binding documents from a stack directory.
+// If spec.Triggers is non-empty, loads from explicit paths. Otherwise auto-discovers triggers/*.yaml.
+func loadStackTriggers(rootDir string, stack model.Stack) ([]model.AutomationTrigger, error) {
+	var triggers []model.AutomationTrigger
+
+	var entries []model.StackExportEntry
+	if len(stack.Spec.Triggers) > 0 {
+		entries = stack.Spec.Triggers
+	} else {
+		discovered, err := discoverYAMLFiles(filepath.Join(rootDir, "triggers"))
+		if err != nil {
+			return nil, nil
+		}
+		entries = discovered
+	}
+
+	for _, entry := range entries {
+		path := filepath.Join(rootDir, filepath.FromSlash(entry.Path))
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read trigger %s: %w", entry.Path, err)
+		}
+
+		var doc model.TriggerBindingDocument
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			return nil, fmt.Errorf("failed to parse trigger %s: %w", entry.Path, err)
+		}
+
+		if doc.Kind != "" && doc.Kind != "TriggerBinding" {
+			return nil, fmt.Errorf("trigger %s has unexpected kind %q (expected TriggerBinding)", entry.Path, doc.Kind)
+		}
+
+		name := doc.Metadata.Name
+		if name == "" {
+			name = entry.Name
+		}
+		if name == "" {
+			name = strings.TrimSuffix(filepath.Base(entry.Path), filepath.Ext(entry.Path))
+		}
+
+		triggers = append(triggers, model.AutomationTrigger{
+			Name: name,
+			On:   doc.Spec.On,
+			Plan: model.TriggerPlan{Profile: doc.Spec.Plan.ProfileRef},
+		})
+	}
+
+	return triggers, nil
+}
+
+// loadStackOverridePolicy loads a stack override policy from an explicit path.
+// Returns nil if no policy is declared.
+func loadStackOverridePolicy(rootDir string, stack model.Stack) (*model.StackOverridePolicySpec, error) {
+	if stack.Spec.OverridePolicy == nil {
+		return nil, nil
+	}
+
+	path := filepath.Join(rootDir, filepath.FromSlash(stack.Spec.OverridePolicy.Path))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read override policy %s: %w", stack.Spec.OverridePolicy.Path, err)
+	}
+
+	var doc model.StackOverridePolicyDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("failed to parse override policy %s: %w", stack.Spec.OverridePolicy.Path, err)
+	}
+
+	if doc.Kind != "" && doc.Kind != "StackOverridePolicy" {
+		return nil, fmt.Errorf("override policy %s has unexpected kind %q (expected StackOverridePolicy)", stack.Spec.OverridePolicy.Path, doc.Kind)
+	}
+
+	return &doc.Spec, nil
+}
+
+// loadStackResourcesIntoRegistry loads profiles, triggers, and override policy from a stack
+// source and merges them into the registry.
+func loadStackResourcesIntoRegistry(registry *Registry, rootDir, sourceName string) error {
+	data, err := os.ReadFile(filepath.Join(rootDir, "stack.yaml"))
+	if err != nil {
+		return nil
+	}
+
+	var stack model.Stack
+	if err := yaml.Unmarshal(data, &stack); err != nil {
+		return nil
+	}
+
+	profiles, err := loadStackProfiles(rootDir, stack)
+	if err != nil {
+		return fmt.Errorf("source %s: %w", sourceName, err)
+	}
+	for name, profile := range profiles {
+		if _, exists := registry.Profiles[name]; !exists {
+			registry.Profiles[name] = profile
+		}
+	}
+
+	triggers, err := loadStackTriggers(rootDir, stack)
+	if err != nil {
+		return fmt.Errorf("source %s: %w", sourceName, err)
+	}
+	registry.Triggers = append(registry.Triggers, triggers...)
+
+	policy, err := loadStackOverridePolicy(rootDir, stack)
+	if err != nil {
+		return fmt.Errorf("source %s: %w", sourceName, err)
+	}
+	if policy != nil && registry.OverridePolicy == nil {
+		registry.OverridePolicy = policy
+	}
+
+	return nil
+}
+
+// discoverYAMLFiles finds *.yaml files in a directory and returns them as export entries.
+func discoverYAMLFiles(dir string) ([]model.StackExportEntry, error) {
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("directory not found: %s", dir)
+	}
+
+	dirEntries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	var entries []model.StackExportEntry
+	for _, de := range dirEntries {
+		if de.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(de.Name()))
+		if ext != ".yaml" && ext != ".yml" {
+			continue
+		}
+		name := strings.TrimSuffix(de.Name(), ext)
+		relPath := filepath.ToSlash(filepath.Join(filepath.Base(dir), de.Name()))
+		entries = append(entries, model.StackExportEntry{
+			Name: name,
+			Path: relPath,
+		})
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name < entries[j].Name
+	})
+
+	return entries, nil
+}

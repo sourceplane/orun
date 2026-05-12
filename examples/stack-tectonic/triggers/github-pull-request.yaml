@@ -1,0 +1,15 @@
+apiVersion: sourceplane.io/v1
+kind: TriggerBinding
+metadata:
+  name: github-pull-request
+spec:
+  on:
+    provider: github
+    event: pull_request
+    actions:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  plan:
+    profileRef: pull-request
