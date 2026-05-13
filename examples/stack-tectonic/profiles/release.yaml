@@ -4,6 +4,7 @@ metadata:
   name: release
 spec:
   description: Release-grade execution with apply enabled
+  compositionRef: terraform
   plan:
     scope: full
   controls:

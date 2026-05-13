@@ -66,8 +66,10 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 				Retries:     jobDef.Retries,
 				Labels:      compInst.Labels,
 				Config:      compInst.Inputs,
-				DependsOn:   make([]string, 0),
-				Controls:    compInst.Controls,
+				DependsOn:              make([]string, 0),
+				Controls:               compInst.Controls,
+				ResolvedProfile:        compInst.ResolvedProfile,
+				ResolvedTriggerBinding: compInst.ResolvedTriggerBinding,
 			}
 
 			context := jp.buildTemplateContext(compInst)

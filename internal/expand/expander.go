@@ -10,17 +10,28 @@ import (
 
 // Expander handles environment × component expansion and merging
 type Expander struct {
-	normalized      *model.NormalizedIntent
-	groups          map[string]model.Group
-	controlDefaults map[string]map[string]interface{}
+	normalized             *model.NormalizedIntent
+	groups                 map[string]model.Group
+	controlDefaults        map[string]map[string]interface{}
+	allProfiles            map[string]model.ExecutionProfile
+	compositionDefProfiles map[string]string
 }
 
-// NewExpander creates a new expander
-func NewExpander(normalized *model.NormalizedIntent, controlDefaults map[string]map[string]interface{}) *Expander {
+// NewExpander creates a new expander.
+// allProfiles merges composition-scoped and intent-level profiles. When nil, falls back to normalized.Execution.Profiles.
+// compositionDefProfiles maps composition type to its default profile name. May be nil.
+func NewExpander(
+	normalized *model.NormalizedIntent,
+	controlDefaults map[string]map[string]interface{},
+	allProfiles map[string]model.ExecutionProfile,
+	compositionDefProfiles map[string]string,
+) *Expander {
 	return &Expander{
-		normalized:      normalized,
-		groups:          normalized.Groups,
-		controlDefaults: controlDefaults,
+		normalized:             normalized,
+		groups:                 normalized.Groups,
+		controlDefaults:        controlDefaults,
+		allProfiles:            allProfiles,
+		compositionDefProfiles: compositionDefProfiles,
 	}
 }
 
@@ -77,8 +88,10 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 			// Extract and apply policies (cannot be overridden)
 			instance.Policies = e.resolvePolicies(comp, envName)
 
-			// Resolve execution controls
-			instance.Controls = e.resolveControls(comp, env, envName)
+			// Resolve execution controls (with per-instance profile resolution)
+			profileName, controls := e.resolveControls(comp, env, envName)
+			instance.Controls = controls
+			instance.ResolvedProfile = profileName
 
 			// Resolve dependencies
 			deps := e.resolveDependencies(comp, envName)
@@ -300,9 +313,72 @@ func (e *Expander) resolveDependencies(comp model.Component, envName string) []m
 	return resolved
 }
 
+// resolveProfileForInstance determines the profile for a component×environment pair.
+// Precedence: subscription entry override → env per-type profile → env global profile → composition default.
+func (e *Expander) resolveProfileForInstance(comp model.Component, env model.Environment, envName string) (string, *model.ExecutionProfile) {
+	compType := comp.Type
+
+	for _, entry := range comp.Subscribe.Entries {
+		if entry.Profile != "" && sliceContains(entry.Environments, envName) {
+			if p := e.lookupProfile(entry.Profile, compType); p != nil {
+				return entry.Profile, p
+			}
+		}
+	}
+
+	if env.Execution.Profiles != nil {
+		if profileName, ok := env.Execution.Profiles[compType]; ok {
+			if p := e.lookupProfile(profileName, compType); p != nil {
+				return profileName, p
+			}
+		}
+	}
+
+	if env.Execution.Profile != "" {
+		if p := e.lookupProfile(env.Execution.Profile, compType); p != nil {
+			return env.Execution.Profile, p
+		}
+	}
+
+	if e.compositionDefProfiles != nil {
+		if defaultName, ok := e.compositionDefProfiles[compType]; ok {
+			if p := e.lookupProfile(defaultName, compType); p != nil {
+				return defaultName, p
+			}
+		}
+	}
+
+	return "", nil
+}
+
+func (e *Expander) lookupProfile(name, compType string) *model.ExecutionProfile {
+	if e.allProfiles != nil {
+		if p, ok := e.allProfiles[name]; ok {
+			return &p
+		}
+		fq := compType + "." + name
+		if p, ok := e.allProfiles[fq]; ok {
+			return &p
+		}
+	}
+	if p, ok := e.normalized.Execution.Profiles[name]; ok {
+		return &p
+	}
+	return nil
+}
+
+func sliceContains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveControls builds the resolved controls for a component in an environment.
 // Precedence (lowest→highest): composition defaults → profile → env overrides → component overrides.
-func (e *Expander) resolveControls(comp model.Component, env model.Environment, envName string) map[string]interface{} {
+func (e *Expander) resolveControls(comp model.Component, env model.Environment, envName string) (string, map[string]interface{}) {
 	controls := make(map[string]interface{})
 
 	if e.controlDefaults != nil {
@@ -311,12 +387,10 @@ func (e *Expander) resolveControls(comp model.Component, env model.Environment, 
 		}
 	}
 
-	profileName := env.Execution.Profile
-	if profileName != "" {
-		if profile, ok := e.normalized.Execution.Profiles[profileName]; ok {
-			if typeControls, ok := profile.Controls[comp.Type]; ok {
-				deepMerge(controls, typeControls)
-			}
+	profileName, profile := e.resolveProfileForInstance(comp, env, envName)
+	if profile != nil {
+		if typeControls, ok := profile.Controls[comp.Type]; ok {
+			deepMerge(controls, typeControls)
 		}
 	}
 
@@ -330,7 +404,7 @@ func (e *Expander) resolveControls(comp model.Component, env model.Environment, 
 		deepMerge(controls, comp.ControlOverrides)
 	}
 
-	return controls
+	return profileName, controls
 }
 
 func deepMerge(dst, src map[string]interface{}) {

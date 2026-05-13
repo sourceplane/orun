@@ -52,9 +52,10 @@ func loadStackProfiles(rootDir string, stack model.Stack) (map[string]model.Exec
 		}
 
 		profiles[name] = model.ExecutionProfile{
-			Description: doc.Spec.Description,
-			Plan:        doc.Spec.Plan,
-			Controls:    doc.Spec.Controls,
+			Description:    doc.Spec.Description,
+			CompositionRef: doc.Spec.CompositionRef,
+			Plan:           doc.Spec.Plan,
+			Controls:       doc.Spec.Controls,
 		}
 	}
 
@@ -192,11 +193,28 @@ func loadStackResourcesIntoRegistry(registry *Registry, rootDir, sourceName stri
 		}
 	}
 
+	// Load composition-scoped profiles (compositions/<type>/profiles/*.yaml)
+	compositionProfiles, err := loadCompositionScopedProfiles(rootDir)
+	if err != nil {
+		return fmt.Errorf("source %s: %w", sourceName, err)
+	}
+	for name, profile := range compositionProfiles {
+		if _, exists := registry.Profiles[name]; !exists {
+			registry.Profiles[name] = profile
+		}
+	}
+
 	triggers, err := loadStackTriggers(rootDir, stack)
 	if err != nil {
 		return fmt.Errorf("source %s: %w", sourceName, err)
 	}
-	registry.Triggers = append(registry.Triggers, triggers...)
+	for _, t := range triggers {
+		if t.Plan.Profile != "" {
+			registry.Triggers = append(registry.Triggers, t)
+		} else {
+			registry.TriggerBindings = append(registry.TriggerBindings, t)
+		}
+	}
 
 	policy, err := loadStackOverridePolicy(rootDir, stack)
 	if err != nil {
@@ -207,6 +225,76 @@ func loadStackResourcesIntoRegistry(registry *Registry, rootDir, sourceName stri
 	}
 
 	return nil
+}
+
+// loadCompositionScopedProfiles discovers profiles inside composition directories.
+// Profiles at compositions/<type>/profiles/*.yaml are stored with fully-qualified keys: <type>.<profileName>.
+func loadCompositionScopedProfiles(rootDir string) (map[string]model.ExecutionProfile, error) {
+	profiles := make(map[string]model.ExecutionProfile)
+
+	compositionsDir := filepath.Join(rootDir, "compositions")
+	info, err := os.Stat(compositionsDir)
+	if err != nil || !info.IsDir() {
+		return profiles, nil
+	}
+
+	topEntries, err := os.ReadDir(compositionsDir)
+	if err != nil {
+		return profiles, nil
+	}
+
+	for _, te := range topEntries {
+		if !te.IsDir() {
+			continue
+		}
+		compositionType := te.Name()
+		profilesDir := filepath.Join(compositionsDir, compositionType, "profiles")
+		entries, err := discoverYAMLFiles(profilesDir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			path := filepath.Join(rootDir, filepath.FromSlash(entry.Path))
+			// entry.Path is "profiles/<file>" relative to the profiles dir parent,
+			// but discoverYAMLFiles returns paths relative to rootDir via the dir basename.
+			// We need the actual full path.
+			path = filepath.Join(profilesDir, filepath.Base(entry.Path))
+			data, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+
+			var doc model.ExecutionProfileDocument
+			if err := yaml.Unmarshal(data, &doc); err != nil {
+				continue
+			}
+
+			if doc.Kind != "" && doc.Kind != "ExecutionProfile" {
+				continue
+			}
+
+			name := doc.Metadata.Name
+			if name == "" {
+				name = entry.Name
+			}
+
+			compositionRef := doc.Spec.CompositionRef
+			if compositionRef == "" {
+				compositionRef = compositionType
+			}
+
+			fqName := compositionRef + "." + name
+			profiles[fqName] = model.ExecutionProfile{
+				Description:    doc.Spec.Description,
+				CompositionRef: compositionRef,
+				Plan:           doc.Spec.Plan,
+				Controls:       doc.Spec.Controls,
+			}
+		}
+	}
+
+	return profiles, nil
 }
 
 // discoverYAMLFiles finds *.yaml files in a directory and returns them as export entries.

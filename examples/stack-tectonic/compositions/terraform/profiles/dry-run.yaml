@@ -1,10 +1,9 @@
 apiVersion: sourceplane.io/v1
 kind: ExecutionProfile
 metadata:
-  name: verify
+  name: dry-run
 spec:
-  description: Merge verification with full backend initialization
-  compositionRef: terraform
+  description: Plan-only dry run — no init backend, no apply
   plan:
     scope: changed
   controls:
@@ -13,7 +12,7 @@ spec:
         enabled: true
       init:
         enabled: true
-        backend: true
+        backend: false
       validate:
         enabled: true
       plan:

@@ -39,6 +39,7 @@ type Composition struct {
 	Name                  string
 	Description           string
 	DefaultJobName        string
+	DefaultProfile        string
 	InputSchema           map[string]interface{}
 	Jobs                  []model.JobSpec
 	JobMap                map[string]*model.JobSpec
@@ -64,9 +65,10 @@ type Registry struct {
 	Bindings map[string]*model.JobBinding
 	Sources  []model.ResolvedCompositionSource
 	// Stack-provided resources (merged from all stack sources)
-	Profiles       map[string]model.ExecutionProfile
-	Triggers       []model.AutomationTrigger
-	OverridePolicy *model.StackOverridePolicySpec
+	Profiles        map[string]model.ExecutionProfile
+	Triggers        []model.AutomationTrigger
+	TriggerBindings []model.AutomationTrigger
+	OverridePolicy  *model.StackOverridePolicySpec
 }
 
 type sourcePackage struct {
@@ -815,6 +817,7 @@ func loadExportedComposition(rootDir string, source model.CompositionSource, man
 		Name:            export.Composition,
 		Description:     document.Spec.Description,
 		DefaultJobName:  document.Spec.DefaultJob,
+		DefaultProfile:  document.Spec.DefaultProfile,
 		InputSchema:     document.Spec.InputSchema,
 		ControlDefaults: document.Spec.ControlDefaults,
 		Jobs:            document.Spec.Jobs,
