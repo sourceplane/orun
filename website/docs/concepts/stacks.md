@@ -6,29 +6,40 @@ A **Stack** is the standard packaging format for distributing composition types 
 
 ## What is a Stack?
 
-A Stack is a directory rooted at a `stack.yaml` manifest (apiVersion: `orun.io/v1`, kind: `Stack`). It bundles one or more `Composition` documents — one per composition type — together with metadata and an optional OCI registry target.
+A Stack is a directory rooted at a `stack.yaml` manifest (apiVersion: `orun.io/v1`, kind: `Stack`). It bundles one or more composition types — each using split-kind authoring — together with metadata and an optional OCI registry target.
 
 ```text
 my-platform/
 ├── stack.yaml                        ← Stack manifest
 └── compositions/
     ├── terraform/
-    │   └── compositions.yaml         ← Composition document
-    ├── helm-chart/
-    │   └── compositions.yaml
-    └── cloudflare-worker/
-        └── compositions.yaml
+    │   ├── composition.yaml          ← Composition facade
+    │   ├── schema.yaml               ← ComponentSchema
+    │   ├── jobs/
+    │   │   └── terraform-validate.yaml   ← JobTemplate
+    │   └── profiles/
+    │       ├── terraform-pull-request.yaml  ← ExecutionProfile
+    │       ├── terraform-verify.yaml
+    │       └── terraform-release.yaml
+    └── helm-chart/
+        ├── composition.yaml
+        ├── schema.yaml
+        ├── jobs/
+        │   └── helm-chart-render.yaml
+        └── profiles/
+            ├── helm-chart-lint-only.yaml
+            └── helm-chart-verify.yaml
 ```
 
-Each `compositions.yaml` defines a self-contained composition type: its input schema and its job definitions.
+Each composition type uses split-kind authoring: a `Composition` facade references a `ComponentSchema`, one or more `JobTemplate` documents, and `ExecutionProfile` documents by name.
 
 ## Auto-discovery
 
-When `spec.compositions` is omitted from `stack.yaml`, the packager walks the directory tree and automatically discovers every `compositions.yaml` file. The composition name is taken from the parent directory:
+When `spec.compositions` is omitted from `stack.yaml`, the packager walks the directory tree and automatically discovers composition documents (`composition.yaml`, `schema.yaml`, job templates, and profiles). The composition name is taken from the parent directory:
 
 ```text
-compositions/terraform/compositions.yaml  →  type "terraform"
-compositions/helm-chart/compositions.yaml →  type "helm-chart"
+compositions/terraform/composition.yaml  →  type "terraform"
+compositions/helm-chart/composition.yaml →  type "helm-chart"
 ```
 
 No path listing is required. Drop new composition subdirectories in and they are included automatically on the next pack or publish.
@@ -61,8 +72,8 @@ To pin specific files instead of relying on auto-discovery, add `spec.compositio
 ```yaml
 spec:
   compositions:
-    - path: compositions/terraform/compositions.yaml
-    - path: compositions/helm-chart/compositions.yaml
+    - path: compositions/terraform/composition.yaml
+    - path: compositions/helm-chart/composition.yaml
 ```
 
 ## Packaging a Stack
@@ -193,4 +204,4 @@ registry:
   visibility: public
 ```
 
-Running `orun pack --root examples/compositions` discovers and archives all eleven `compositions.yaml` files automatically.
+Running `orun pack --root examples/compositions` discovers and archives all eleven composition types automatically.

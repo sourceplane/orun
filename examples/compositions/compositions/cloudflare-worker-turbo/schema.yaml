@@ -1,0 +1,43 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ComponentSchema
+metadata:
+  name: cloudflare-worker-turbo-component
+spec:
+  type: cloudflare-worker-turbo
+  schema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Cloudflare Worker Turbo Component
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+      type:
+        type: string
+        const: cloudflare-worker-turbo
+      inputs:
+        type: object
+        required:
+          - nodeVersion
+          - pnpmVersion
+          - productionBranch
+        properties:
+          nodeVersion:
+            type: string
+          pnpmVersion:
+            type: string
+          productionBranch:
+            type: string
+          preBuildCommand:
+            type: string
+          buildCommand:
+            type: string
+          typecheckCommand:
+            type: string
+          deployCommand:
+            type: string
+        additionalProperties: false
+    additionalProperties: true

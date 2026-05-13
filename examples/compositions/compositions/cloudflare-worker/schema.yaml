@@ -1,0 +1,45 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ComponentSchema
+metadata:
+  name: cloudflare-worker-component
+spec:
+  type: cloudflare-worker
+  schema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Cloudflare Worker Component
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+      type:
+        type: string
+        const: cloudflare-worker
+      inputs:
+        type: object
+        required:
+          - installCommand
+          - buildCommand
+          - deployCommand
+          - nodeVersion
+          - productionBranch
+        properties:
+          installCommand:
+            type: string
+          buildCommand:
+            type: string
+          deployCommand:
+            type: string
+          nodeVersion:
+            type: string
+          productionBranch:
+            type: string
+          typecheckCommand:
+            type: string
+          pnpmVersion:
+            type: string
+        additionalProperties: false
+    additionalProperties: true

@@ -1,0 +1,66 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ComponentSchema
+metadata:
+  name: cloudflare-pages-turbo-terraform-component
+spec:
+  type: cloudflare-pages-turbo-terraform
+  schema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Cloudflare Pages Turbo Terraform Component
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+      type:
+        type: string
+        const: cloudflare-pages-turbo-terraform
+      inputs:
+        type: object
+        required:
+          - cloudflareBuildCommand
+          - outputDir
+          - destinationDir
+          - rootDir
+          - nodeVersion
+          - pnpmVersion
+          - terraformDir
+          - terraformVersion
+          - projectName
+          - productionBranch
+          - repoOwner
+          - repoName
+        properties:
+          cloudflareBuildCommand:
+            type: string
+          outputDir:
+            type: string
+          destinationDir:
+            type: string
+          rootDir:
+            type: string
+          nodeVersion:
+            type: string
+          pnpmVersion:
+            type: string
+          terraformDir:
+            type: string
+          terraformVersion:
+            type: string
+          projectName:
+            type: string
+          productionBranch:
+            type: string
+          repoOwner:
+            type: string
+          repoName:
+            type: string
+          preBuildCommand:
+            type: string
+          buildCommand:
+            type: string
+        additionalProperties: false
+    additionalProperties: true

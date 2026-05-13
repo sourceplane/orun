@@ -1,0 +1,19 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: cloudflare-pages-turbo-deploy
+spec:
+  description: Full pipeline including provisioning and deployment
+
+  jobs:
+    verify-deploy:
+      includeCapabilities:
+        - cloudflare-pages-turbo.setup-node
+        - cloudflare-pages-turbo.setup-pnpm
+        - cloudflare-pages-turbo.install
+        - cloudflare-pages-turbo.pre-build
+        - cloudflare-pages-turbo.verify-structure
+        - cloudflare-pages-turbo.build
+        - cloudflare-pages-turbo.verify-output
+        - cloudflare-pages-turbo.provision
+        - cloudflare-pages-turbo.deploy

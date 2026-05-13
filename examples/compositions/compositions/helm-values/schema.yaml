@@ -1,0 +1,37 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ComponentSchema
+metadata:
+  name: helm-values-component
+spec:
+  type: helm-values
+  schema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Helm Values Component
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+      type:
+        type: string
+        const: helm-values
+      inputs:
+        type: object
+        required:
+          - chartPath
+          - valuesFile
+          - releaseName
+        properties:
+          chartPath:
+            type: string
+          valuesFile:
+            type: string
+          releaseName:
+            type: string
+          helmVersion:
+            type: string
+        additionalProperties: false
+    additionalProperties: true

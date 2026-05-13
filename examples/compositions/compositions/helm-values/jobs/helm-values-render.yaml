@@ -1,0 +1,47 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: JobTemplate
+metadata:
+  name: helm-values-render
+spec:
+  description: Validate Helm values files against charts with lint and template
+  runsOn: ubuntu-22.04
+  timeout: 20m
+  retries: 0
+
+  labels:
+    scope: delivery
+
+  capabilities:
+    - helm-values.setup
+    - helm-values.context
+    - helm-values.lint
+    - helm-values.template
+
+  steps:
+    - id: setup-helm
+      name: setup-helm
+      capability: helm-values.setup
+      use: azure/setup-helm@v4.3.0
+      with:
+        version: "{{.helmVersion}}"
+
+    - id: helm-values-context
+      name: helm-values-context
+      capability: helm-values.context
+      shell: bash
+      run: |
+        helm version --short
+        echo "Validating {{.valuesFile}} against {{.chartPath}}"
+      onFailure: stop
+
+    - id: helm-values-lint
+      name: helm-values-lint
+      capability: helm-values.lint
+      run: helm lint {{.chartPath}} --values {{.valuesFile}}
+      onFailure: stop
+
+    - id: helm-values-template
+      name: helm-values-template
+      capability: helm-values.template
+      run: helm template {{.releaseName}} {{.chartPath}} --values {{.valuesFile}}
+      onFailure: stop

@@ -1,0 +1,13 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: helm-chart-lint-only
+spec:
+  description: Lint-only validation without template rendering
+
+  jobs:
+    render:
+      includeCapabilities:
+        - helm-chart.setup
+        - helm-chart.context
+        - helm-chart.lint

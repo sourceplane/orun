@@ -1,0 +1,13 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: workspace-quick-check
+spec:
+  description: Quick check with kubectl, helm, and terraform only
+
+  jobs:
+    verify:
+      includeCapabilities:
+        - workspace.kubectl
+        - workspace.helm
+        - workspace.terraform

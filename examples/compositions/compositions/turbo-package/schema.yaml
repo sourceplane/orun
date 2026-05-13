@@ -1,0 +1,38 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ComponentSchema
+metadata:
+  name: turbo-package-component
+spec:
+  type: turbo-package
+  schema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Turbo Package Component
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+      type:
+        type: string
+        const: turbo-package
+      inputs:
+        type: object
+        required:
+          - nodeVersion
+          - pnpmVersion
+        properties:
+          nodeVersion:
+            type: string
+          pnpmVersion:
+            type: string
+          preBuildCommand:
+            type: string
+          buildCommand:
+            type: string
+          typecheckCommand:
+            type: string
+        additionalProperties: false
+    additionalProperties: true

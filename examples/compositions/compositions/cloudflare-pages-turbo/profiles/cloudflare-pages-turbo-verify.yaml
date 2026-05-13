@@ -1,0 +1,17 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: cloudflare-pages-turbo-verify
+spec:
+  description: Full verification without provisioning or deployment
+
+  jobs:
+    verify-deploy:
+      includeCapabilities:
+        - cloudflare-pages-turbo.setup-node
+        - cloudflare-pages-turbo.setup-pnpm
+        - cloudflare-pages-turbo.install
+        - cloudflare-pages-turbo.pre-build
+        - cloudflare-pages-turbo.verify-structure
+        - cloudflare-pages-turbo.build
+        - cloudflare-pages-turbo.verify-output

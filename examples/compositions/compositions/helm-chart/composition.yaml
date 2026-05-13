@@ -1,0 +1,26 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: helm-chart
+spec:
+  type: helm-chart
+  description: Helm chart rendering and validation jobs
+
+  schemaRef:
+    name: helm-chart-component
+
+  defaultJob: render
+  defaultProfile: verify
+
+  jobs:
+    - name: render
+      templateRef:
+        name: helm-chart-render
+
+  profiles:
+    - name: lint-only
+      profileRef:
+        name: helm-chart-lint-only
+    - name: verify
+      profileRef:
+        name: helm-chart-verify

@@ -1,0 +1,20 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: cloudflare-pages-terraform-release
+spec:
+  description: Full pipeline including Terraform apply for production releases
+
+  jobs:
+    verify-reconcile:
+      includeCapabilities:
+        - cloudflare-pages-terraform.setup-node
+        - cloudflare-pages-terraform.install
+        - cloudflare-pages-terraform.build
+        - cloudflare-pages-terraform.verify
+        - cloudflare-pages-terraform.setup-terraform
+        - cloudflare-pages-terraform.terraform-context
+        - cloudflare-pages-terraform.terraform-fmt
+        - cloudflare-pages-terraform.terraform-init
+        - cloudflare-pages-terraform.terraform-validate
+        - cloudflare-pages-terraform.terraform-apply

@@ -1,0 +1,65 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ComponentSchema
+metadata:
+  name: cloudflare-pages-terraform-component
+spec:
+  type: cloudflare-pages-terraform
+  schema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Cloudflare Pages Terraform Component
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+      type:
+        type: string
+        const: cloudflare-pages-terraform
+      inputs:
+        type: object
+        required:
+          - siteDir
+          - installCommand
+          - buildCommand
+          - cloudflareBuildCommand
+          - outputDir
+          - rootDir
+          - nodeVersion
+          - terraformDir
+          - terraformVersion
+          - projectName
+          - productionBranch
+          - repoOwner
+          - repoName
+        properties:
+          siteDir:
+            type: string
+          installCommand:
+            type: string
+          buildCommand:
+            type: string
+          cloudflareBuildCommand:
+            type: string
+          outputDir:
+            type: string
+          rootDir:
+            type: string
+          nodeVersion:
+            type: string
+          terraformDir:
+            type: string
+          terraformVersion:
+            type: string
+          projectName:
+            type: string
+          productionBranch:
+            type: string
+          repoOwner:
+            type: string
+          repoName:
+            type: string
+        additionalProperties: false
+    additionalProperties: true

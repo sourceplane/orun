@@ -1,0 +1,19 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: cloudflare-pages-terraform-verify
+spec:
+  description: Full verification without Terraform apply
+
+  jobs:
+    verify-reconcile:
+      includeCapabilities:
+        - cloudflare-pages-terraform.setup-node
+        - cloudflare-pages-terraform.install
+        - cloudflare-pages-terraform.build
+        - cloudflare-pages-terraform.verify
+        - cloudflare-pages-terraform.setup-terraform
+        - cloudflare-pages-terraform.terraform-context
+        - cloudflare-pages-terraform.terraform-fmt
+        - cloudflare-pages-terraform.terraform-init
+        - cloudflare-pages-terraform.terraform-validate

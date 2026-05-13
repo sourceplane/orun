@@ -1,0 +1,14 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: turbo-package-quick-check
+spec:
+  description: Quick check with setup and structure verification only
+
+  jobs:
+    verify:
+      includeCapabilities:
+        - turbo-package.setup-node
+        - turbo-package.setup-pnpm
+        - turbo-package.install
+        - turbo-package.verify-structure

@@ -1,0 +1,17 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: cloudflare-worker-turbo-pull-request
+spec:
+  description: PR validation with Turborepo build and typecheck
+
+  jobs:
+    verify-deploy:
+      includeCapabilities:
+        - cloudflare-worker-turbo.setup-node
+        - cloudflare-worker-turbo.setup-pnpm
+        - cloudflare-worker-turbo.install
+        - cloudflare-worker-turbo.pre-build
+        - cloudflare-worker-turbo.verify-structure
+        - cloudflare-worker-turbo.build
+        - cloudflare-worker-turbo.typecheck

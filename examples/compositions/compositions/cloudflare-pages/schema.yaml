@@ -1,0 +1,47 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ComponentSchema
+metadata:
+  name: cloudflare-pages-component
+spec:
+  type: cloudflare-pages
+  schema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Cloudflare Pages Component
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+      type:
+        type: string
+        const: cloudflare-pages
+      inputs:
+        type: object
+        required:
+          - siteDir
+          - installCommand
+          - buildCommand
+          - outputDir
+          - projectName
+          - nodeVersion
+          - productionBranch
+        properties:
+          siteDir:
+            type: string
+          installCommand:
+            type: string
+          buildCommand:
+            type: string
+          outputDir:
+            type: string
+          projectName:
+            type: string
+          nodeVersion:
+            type: string
+          productionBranch:
+            type: string
+        additionalProperties: false
+    additionalProperties: true

@@ -1,0 +1,15 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: cloudflare-worker-verify
+spec:
+  description: Full non-mutating verification of Cloudflare Worker
+
+  jobs:
+    verify-deploy:
+      includeCapabilities:
+        - cloudflare-worker.setup
+        - cloudflare-worker.install
+        - cloudflare-worker.verify-structure
+        - cloudflare-worker.build
+        - cloudflare-worker.typecheck

@@ -1,0 +1,17 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: turbo-package-verify
+spec:
+  description: Full verification with build and typecheck
+
+  jobs:
+    verify:
+      includeCapabilities:
+        - turbo-package.setup-node
+        - turbo-package.setup-pnpm
+        - turbo-package.install
+        - turbo-package.pre-build
+        - turbo-package.verify-structure
+        - turbo-package.build
+        - turbo-package.typecheck

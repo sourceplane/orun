@@ -1,0 +1,43 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ComponentSchema
+metadata:
+  name: workspace-component
+spec:
+  type: workspace
+  schema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Workspace Component
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+      type:
+        type: string
+        const: workspace
+      inputs:
+        type: object
+        required:
+          - chartPath
+          - valuesFile
+          - kustomizeDir
+          - terraformDir
+          - workflowFile
+        properties:
+          chartPath:
+            type: string
+          valuesFile:
+            type: string
+          kustomizeDir:
+            type: string
+          terraformDir:
+            type: string
+          workflowFile:
+            type: string
+          AZURE_CLI_VERSION:
+            type: string
+        additionalProperties: false
+    additionalProperties: true

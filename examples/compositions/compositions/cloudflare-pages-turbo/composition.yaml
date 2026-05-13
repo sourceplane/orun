@@ -1,0 +1,29 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: cloudflare-pages-turbo
+spec:
+  type: cloudflare-pages-turbo
+  description: Cloudflare Pages deployment using Turbo monorepo builds
+
+  schemaRef:
+    name: cloudflare-pages-turbo-component
+
+  defaultJob: verify-deploy
+  defaultProfile: verify
+
+  jobs:
+    - name: verify-deploy
+      templateRef:
+        name: cloudflare-pages-turbo-verify-deploy
+
+  profiles:
+    - name: pull-request
+      profileRef:
+        name: cloudflare-pages-turbo-pull-request
+    - name: verify
+      profileRef:
+        name: cloudflare-pages-turbo-verify
+    - name: deploy
+      profileRef:
+        name: cloudflare-pages-turbo-deploy
