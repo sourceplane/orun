@@ -73,26 +73,10 @@ func generatePlan() error {
 	if debugMode {
 		fmt.Println("□ Expanding (env × component)...")
 	}
-	controlDefaults := make(map[string]map[string]interface{})
-	for _, composition := range compositionRegistry.Types {
-		if composition.ControlDefaults != nil {
-			controlDefaults[composition.Name] = composition.ControlDefaults
-		}
-	}
-	expander := expand.NewExpander(normalized, controlDefaults)
+	expander := expand.NewExpander(normalized)
 	instances, err := expander.Expand()
 	if err != nil {
 		return fmt.Errorf("failed to expand intent: %w", err)
-	}
-
-	// Validate controls against composition controlSchemas
-	for _, envInstances := range instances {
-		for _, inst := range envInstances {
-			comp := normalized.ComponentIndex[inst.ComponentName]
-			if err := compositionRegistry.ValidateControlsForComponent(&comp, inst.Controls); err != nil {
-				return fmt.Errorf("control validation failed: %w", err)
-			}
-		}
 	}
 
 	// Filter by --env flag
@@ -278,9 +262,6 @@ func generatePlan() error {
 			label += fmt.Sprintf(" (+%d more)", len(compNames)-maxShow)
 		}
 		fmt.Printf("  %s components: %s\n", ui.Dim(color, "│"), label)
-	}
-	if len(plan.SkippedJobs) > 0 {
-		fmt.Printf("  %s skipped: %s\n", ui.Dim(color, "│"), ui.Dim(color, fmt.Sprintf("%d jobs", len(plan.SkippedJobs))))
 	}
 	if changedOnly {
 		fmt.Printf("  %s mode: %s\n", ui.Dim(color, "│"), ui.Cyan(color, "changed-only"))

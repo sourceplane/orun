@@ -47,13 +47,11 @@ type CompositionDocument struct {
 
 // CompositionDocumentSpec is the portable contract for one composition type.
 type CompositionDocumentSpec struct {
-	Type            string                 `yaml:"type" json:"type"`
-	Description     string                 `yaml:"description,omitempty" json:"description,omitempty"`
-	DefaultJob      string                 `yaml:"defaultJob" json:"defaultJob"`
-	InputSchema     map[string]interface{} `yaml:"inputSchema,omitempty" json:"inputSchema,omitempty"`
-	ControlSchema   map[string]interface{} `yaml:"controlSchema,omitempty" json:"controlSchema,omitempty"`
-	ControlDefaults map[string]interface{} `yaml:"controlDefaults,omitempty" json:"controlDefaults,omitempty"`
-	Jobs            []JobSpec              `yaml:"jobs" json:"jobs"`
+	Type        string                 `yaml:"type" json:"type"`
+	Description string                 `yaml:"description,omitempty" json:"description,omitempty"`
+	DefaultJob  string                 `yaml:"defaultJob" json:"defaultJob"`
+	InputSchema map[string]interface{} `yaml:"inputSchema,omitempty" json:"inputSchema,omitempty"`
+	Jobs        []JobSpec              `yaml:"jobs" json:"jobs"`
 }
 
 // CompositionPackage is the package manifest at the root of a composition package.

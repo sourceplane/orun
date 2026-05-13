@@ -35,25 +35,22 @@ const (
 
 // Composition is the resolved internal representation used by planning and validation.
 type Composition struct {
-	Key                   string
-	Name                  string
-	Description           string
-	DefaultJobName        string
-	InputSchema           map[string]interface{}
-	Jobs                  []model.JobSpec
-	JobMap                map[string]*model.JobSpec
-	Schema                *jsonschema.Schema
-	ControlSchema         map[string]interface{}
-	ControlDefaults       map[string]interface{}
-	ControlSchemaCompiled *jsonschema.Schema
-	JobRegistryName       string
-	JobRegistryDesc       string
-	SourceName            string
-	SourceKind            string
-	SourceRef             string
-	SourcePath            string
-	ExportPath            string
-	ResolvedDigest        string
+	Key             string
+	Name            string
+	Description     string
+	DefaultJobName  string
+	InputSchema     map[string]interface{}
+	Jobs            []model.JobSpec
+	JobMap          map[string]*model.JobSpec
+	Schema          *jsonschema.Schema
+	JobRegistryName string
+	JobRegistryDesc string
+	SourceName      string
+	SourceKind      string
+	SourceRef       string
+	SourcePath      string
+	ExportPath      string
+	ResolvedDigest  string
 }
 
 // Registry holds resolved compositions and the sources they came from.
@@ -323,21 +320,6 @@ func (reg *Registry) ValidateAllComponents(normalized *model.NormalizedIntent) e
 		if err := reg.ValidateComponentAgainstComposition(&component); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-// ValidateControlsForComponent validates resolved controls against the composition's controlSchema.
-func (reg *Registry) ValidateControlsForComponent(component *model.Component, controls map[string]interface{}) error {
-	composition, err := reg.resolveForComponent(component)
-	if err != nil {
-		return err
-	}
-	if composition.ControlSchemaCompiled == nil {
-		return nil
-	}
-	if err := composition.ControlSchemaCompiled.Validate(controls); err != nil {
-		return fmt.Errorf("controls for component %s failed validation against %s controlSchema: %w", component.Name, component.Type, err)
 	}
 	return nil
 }
@@ -801,7 +783,6 @@ func loadExportedComposition(rootDir string, source model.CompositionSource, man
 		Description:     document.Spec.Description,
 		DefaultJobName:  document.Spec.DefaultJob,
 		InputSchema:     document.Spec.InputSchema,
-		ControlDefaults: document.Spec.ControlDefaults,
 		Jobs:            document.Spec.Jobs,
 		JobMap:          make(map[string]*model.JobSpec),
 		Schema:          schema,
@@ -813,15 +794,6 @@ func loadExportedComposition(rootDir string, source model.CompositionSource, man
 		SourcePath:      source.Path,
 		ExportPath:      export.Path,
 		ResolvedDigest:  digest,
-	}
-
-	if len(document.Spec.ControlSchema) > 0 {
-		controlSchemaCompiled, err := compileSchema(document.Spec.Type+"-controls", document.Spec.ControlSchema)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compile control schema for composition %s from source %s: %w", export.Composition, source.Name, err)
-		}
-		composition.ControlSchema = document.Spec.ControlSchema
-		composition.ControlSchemaCompiled = controlSchemaCompiled
 	}
 
 	for i := range composition.Jobs {
