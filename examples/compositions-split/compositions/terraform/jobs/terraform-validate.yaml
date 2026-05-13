@@ -1,0 +1,62 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: JobTemplate
+metadata:
+  name: terraform-validate
+spec:
+  description: Validate Terraform stacks with fmt, init, validate, and plan
+  runsOn: ubuntu-22.04
+  timeout: 20m
+  retries: 0
+
+  labels:
+    scope: infra
+
+  capabilities:
+    - terraform.setup
+    - terraform.context
+    - terraform.fmt
+    - terraform.init
+    - terraform.validate
+    - terraform.plan
+
+  steps:
+    - id: setup
+      name: setup
+      capability: terraform.setup
+      use: hashicorp/setup-terraform@v4
+      with:
+        terraform_version: "{{.terraformVersion}}"
+        terraform_wrapper: "false"
+
+    - id: context
+      name: context
+      capability: terraform.context
+      shell: bash
+      run: |
+        terraform version
+        echo "Validating {{.stackName}} at {{.terraformDir}}"
+      onFailure: stop
+
+    - id: fmt
+      name: fmt
+      capability: terraform.fmt
+      run: terraform fmt -check {{.terraformDir}}
+      onFailure: stop
+
+    - id: init
+      name: init
+      capability: terraform.init
+      run: terraform -chdir={{.terraformDir}} init -backend=false -input=false
+      onFailure: stop
+
+    - id: validate
+      name: validate
+      capability: terraform.validate
+      run: terraform -chdir={{.terraformDir}} validate -no-color
+      onFailure: stop
+
+    - id: plan
+      name: plan
+      capability: terraform.plan
+      run: terraform -chdir={{.terraformDir}} plan -no-color
+      onFailure: stop

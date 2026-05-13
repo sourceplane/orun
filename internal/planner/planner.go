@@ -131,7 +131,17 @@ func (jp *JobPlanner) resolveJobsForProfile(compInst *model.ComponentInstance, i
 			return nil, fmt.Errorf("profile references unknown job %q in composition %s", jobName, compInst.Type)
 		}
 
-		filteredSteps := filterStepsByProfile(baseJob.Steps, profileJob.StepsEnabled)
+		var filteredSteps []model.Step
+		if len(profileJob.IncludeCapabilities) > 0 {
+			filteredSteps = filterStepsByCapability(baseJob.Steps, profileJob.IncludeCapabilities)
+		} else {
+			filteredSteps = filterStepsByProfile(baseJob.Steps, profileJob.StepsEnabled)
+		}
+
+		if len(profileJob.StepOverrides) > 0 {
+			filteredSteps = applyProfileStepOverrides(filteredSteps, profileJob.StepOverrides)
+		}
+
 		entries = append(entries, jobRenderEntry{job: baseJob, steps: filteredSteps})
 	}
 
@@ -155,6 +165,51 @@ func filterStepsByProfile(baseSteps []model.Step, stepsEnabled []string) []model
 		}
 	}
 	return filtered
+}
+
+func filterStepsByCapability(baseSteps []model.Step, capabilities []string) []model.Step {
+	capSet := make(map[string]struct{}, len(capabilities))
+	for _, cap := range capabilities {
+		capSet[cap] = struct{}{}
+	}
+
+	filtered := make([]model.Step, 0, len(baseSteps))
+	for _, step := range baseSteps {
+		if step.Capability == "" {
+			filtered = append(filtered, step)
+			continue
+		}
+		if _, included := capSet[step.Capability]; included {
+			filtered = append(filtered, step)
+		}
+	}
+	return filtered
+}
+
+func applyProfileStepOverrides(steps []model.Step, overrides map[string]model.ProfileStepPatch) []model.Step {
+	result := make([]model.Step, 0, len(steps))
+	for _, step := range steps {
+		sid := step.ID
+		if sid == "" {
+			sid = step.Name
+		}
+		if patch, exists := overrides[sid]; exists {
+			patched := step
+			if patch.Run != "" {
+				patched.Run = patch.Run
+			}
+			if len(patch.With) > 0 {
+				patched.With = patch.With
+			}
+			if len(patch.Env) > 0 {
+				patched.Env = patch.Env
+			}
+			result = append(result, patched)
+		} else {
+			result = append(result, step)
+		}
+	}
+	return result
 }
 
 // Templates are cached to avoid re-parsing identical steps across multiple instances

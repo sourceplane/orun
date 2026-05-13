@@ -1,0 +1,16 @@
+apiVersion: orun.io/v1
+kind: Stack
+metadata:
+  name: split-format-platform-stack
+  title: Split Format Platform Stack
+  version: 0.1.0
+  description: Example stack demonstrating multi-kind composition authoring.
+  owner: sourceplane
+  tags:
+    - terraform
+    - split-format
+registry:
+  host: ghcr.io
+  namespace: sourceplane
+  repository: split-format-platform-stack
+  visibility: public

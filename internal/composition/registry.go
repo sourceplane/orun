@@ -23,14 +23,17 @@ import (
 )
 
 const (
-	compositionKind        = "Composition"
-	compositionPackageKind = "CompositionPackage"
-	stackKind              = "Stack"
-	lockAPIVersion         = "sourceplane.io/v1alpha1"
-	lockKind               = "CompositionLock"
-	legacySourceName       = "legacy-config-dir"
-	legacySourceKind       = "legacy-dir"
-	lockFilePath           = ".orun/compositions.lock.yaml"
+	compositionKind          = "Composition"
+	compositionPackageKind   = "CompositionPackage"
+	componentSchemaKind      = "ComponentSchema"
+	jobTemplateKind          = "JobTemplate"
+	executionProfileKind     = "ExecutionProfile"
+	stackKind                = "Stack"
+	lockAPIVersion           = "sourceplane.io/v1alpha1"
+	lockKind                 = "CompositionLock"
+	legacySourceName         = "legacy-config-dir"
+	legacySourceKind         = "legacy-dir"
+	lockFilePath             = ".orun/compositions.lock.yaml"
 )
 
 // Composition is the resolved internal representation used by planning and validation.
@@ -774,7 +777,31 @@ func loadExportedComposition(rootDir string, source model.CompositionSource, man
 		return nil, err
 	}
 
-	schema, err := compileSchema(document.Spec.Type, document.Spec.InputSchema)
+	compositionDir := filepath.Dir(compositionPath)
+
+	inputSchema := document.Spec.InputSchema
+	if inputSchema == nil && document.Spec.SchemaRef != nil {
+		loaded, err := loadComponentSchemaFromDir(compositionDir, document.Spec.SchemaRef.Name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve schemaRef %s for composition %s: %w", document.Spec.SchemaRef.Name, export.Composition, err)
+		}
+		inputSchema = loaded
+	}
+
+	jobs, err := resolveCompositionJobs(compositionDir, document.Spec.Jobs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve jobs for composition %s from source %s: %w", export.Composition, source.Name, err)
+	}
+
+	profiles := document.Spec.ExecutionProfiles
+	if profiles == nil && len(document.Spec.Profiles) > 0 {
+		profiles, err = resolveCompositionProfiles(compositionDir, document.Spec.Profiles)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve profiles for composition %s from source %s: %w", export.Composition, source.Name, err)
+		}
+	}
+
+	schema, err := compileSchema(document.Spec.Type, inputSchema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile input schema for composition %s from source %s: %w", export.Composition, source.Name, err)
 	}
@@ -785,9 +812,9 @@ func loadExportedComposition(rootDir string, source model.CompositionSource, man
 		Description:       document.Spec.Description,
 		DefaultJobName:    document.Spec.DefaultJob,
 		DefaultProfile:    document.Spec.DefaultProfile,
-		ExecutionProfiles: document.Spec.ExecutionProfiles,
-		InputSchema:       document.Spec.InputSchema,
-		Jobs:              document.Spec.Jobs,
+		ExecutionProfiles: profiles,
+		InputSchema:       inputSchema,
+		Jobs:              jobs,
 		JobMap:            make(map[string]*model.JobSpec),
 		Schema:            schema,
 		JobRegistryName:   manifest.Metadata.Name,
@@ -807,6 +834,113 @@ func loadExportedComposition(rootDir string, source model.CompositionSource, man
 	return composition, nil
 }
 
+func resolveCompositionJobs(compositionDir string, entries []model.CompositionJobEntry) ([]model.JobSpec, error) {
+	jobs := make([]model.JobSpec, 0, len(entries))
+	for _, entry := range entries {
+		if entry.TemplateRef != nil {
+			jobSpec, err := loadJobTemplateFromDir(compositionDir, entry.TemplateRef.Name, entry.Name)
+			if err != nil {
+				return nil, err
+			}
+			jobs = append(jobs, *jobSpec)
+		} else {
+			jobs = append(jobs, entry.ToJobSpec())
+		}
+	}
+	return jobs, nil
+}
+
+func resolveCompositionProfiles(compositionDir string, entries []model.CompositionProfileEntry) (map[string]model.ExecutionProfile, error) {
+	profiles := make(map[string]model.ExecutionProfile, len(entries))
+	for _, entry := range entries {
+		if entry.ProfileRef != nil {
+			profile, err := loadExecutionProfileFromDir(compositionDir, entry.ProfileRef.Name)
+			if err != nil {
+				return nil, err
+			}
+			profiles[entry.Name] = *profile
+		}
+	}
+	return profiles, nil
+}
+
+func loadComponentSchemaFromDir(compositionDir, name string) (map[string]interface{}, error) {
+	candidates := []string{
+		filepath.Join(compositionDir, "schema.yaml"),
+		filepath.Join(compositionDir, name+".yaml"),
+	}
+	for _, path := range candidates {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var doc model.ComponentSchemaDocument
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			continue
+		}
+		if doc.Kind == componentSchemaKind && (doc.Metadata.Name == name || name == "") {
+			return doc.Spec.Schema, nil
+		}
+	}
+	return nil, fmt.Errorf("ComponentSchema %q not found in %s", name, compositionDir)
+}
+
+func loadJobTemplateFromDir(compositionDir, name, jobName string) (*model.JobSpec, error) {
+	candidates := []string{
+		filepath.Join(compositionDir, "jobs", name+".yaml"),
+		filepath.Join(compositionDir, name+".yaml"),
+	}
+	for _, path := range candidates {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var doc model.JobTemplateDocument
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			continue
+		}
+		if doc.Kind == jobTemplateKind && doc.Metadata.Name == name {
+			return &model.JobSpec{
+				Name:         jobName,
+				Description:  doc.Spec.Description,
+				RunsOn:       doc.Spec.RunsOn,
+				Timeout:      doc.Spec.Timeout,
+				Retries:      doc.Spec.Retries,
+				Steps:        doc.Spec.Steps,
+				Inputs:       doc.Spec.Inputs,
+				Labels:       doc.Spec.Labels,
+				Capabilities: doc.Spec.Capabilities,
+			}, nil
+		}
+	}
+	return nil, fmt.Errorf("JobTemplate %q not found in %s", name, compositionDir)
+}
+
+func loadExecutionProfileFromDir(compositionDir, name string) (*model.ExecutionProfile, error) {
+	candidates := []string{
+		filepath.Join(compositionDir, "profiles", name+".yaml"),
+		filepath.Join(compositionDir, name+".yaml"),
+	}
+	for _, path := range candidates {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var doc model.ExecutionProfileDocument
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			continue
+		}
+		if doc.Kind == executionProfileKind && doc.Metadata.Name == name {
+			return &model.ExecutionProfile{
+				Description: doc.Spec.Description,
+				Policies:    doc.Spec.Policies,
+				Jobs:        doc.Spec.Jobs,
+			}, nil
+		}
+	}
+	return nil, fmt.Errorf("ExecutionProfile %q not found in %s", name, compositionDir)
+}
+
 func validateCompositionDocument(sourceName, exportName string, document model.CompositionDocument) error {
 	if document.Kind != compositionKind {
 		return fmt.Errorf("composition source %s export %s must have kind %s", sourceName, exportName, compositionKind)
@@ -823,8 +957,8 @@ func validateCompositionDocument(sourceName, exportName string, document model.C
 	if document.Spec.Type != document.Metadata.Name {
 		return fmt.Errorf("composition source %s export %s must keep spec.type equal to metadata.name", sourceName, exportName)
 	}
-	if len(document.Spec.InputSchema) == 0 {
-		return fmt.Errorf("composition source %s export %s must define spec.inputSchema", sourceName, exportName)
+	if len(document.Spec.InputSchema) == 0 && document.Spec.SchemaRef == nil {
+		return fmt.Errorf("composition source %s export %s must define spec.inputSchema or spec.schemaRef", sourceName, exportName)
 	}
 	if len(document.Spec.Jobs) == 0 {
 		return fmt.Errorf("composition source %s export %s must define at least one job", sourceName, exportName)
@@ -845,6 +979,10 @@ func validateCompositionDocument(sourceName, exportName string, document model.C
 		}
 		jobNameSeen[job.Name] = struct{}{}
 
+		if job.TemplateRef != nil {
+			continue
+		}
+
 		stepIDs := make(map[string]struct{}, len(job.Steps))
 		for _, step := range job.Steps {
 			sid := stepID(step)
@@ -859,8 +997,10 @@ func validateCompositionDocument(sourceName, exportName string, document model.C
 		return fmt.Errorf("composition source %s export %s defaultJob %s is not present in spec.jobs", sourceName, exportName, document.Spec.DefaultJob)
 	}
 
-	if err := validateExecutionProfiles(exportName, document.Spec, jobNameSeen, jobStepIDs); err != nil {
-		return err
+	if len(document.Spec.Profiles) == 0 {
+		if err := validateExecutionProfiles(exportName, document.Spec, jobNameSeen, jobStepIDs); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -893,19 +1033,23 @@ func validateExecutionProfiles(compositionName string, spec model.CompositionDoc
 			if _, exists := jobNames[jobName]; !exists {
 				return fmt.Errorf("composition %s profile %q references unknown job %q", compositionName, profileName, jobName)
 			}
-			if len(jobSpec.StepsEnabled) == 0 {
-				return fmt.Errorf("composition %s profile %q job %q stepsEnabled must not be empty", compositionName, profileName, jobName)
+			if len(jobSpec.StepsEnabled) == 0 && len(jobSpec.IncludeCapabilities) == 0 {
+				return fmt.Errorf("composition %s profile %q job %q must specify stepsEnabled or includeCapabilities", compositionName, profileName, jobName)
 			}
-			stepSeen := make(map[string]struct{}, len(jobSpec.StepsEnabled))
-			validSteps := jobStepIDs[jobName]
-			for _, sid := range jobSpec.StepsEnabled {
-				if _, exists := validSteps[sid]; !exists {
-					return fmt.Errorf("composition %s profile %q job %q enables unknown step %q", compositionName, profileName, jobName, sid)
+			if len(jobSpec.StepsEnabled) > 0 {
+				stepSeen := make(map[string]struct{}, len(jobSpec.StepsEnabled))
+				validSteps := jobStepIDs[jobName]
+				for _, sid := range jobSpec.StepsEnabled {
+					if validSteps != nil {
+						if _, exists := validSteps[sid]; !exists {
+							return fmt.Errorf("composition %s profile %q job %q enables unknown step %q", compositionName, profileName, jobName, sid)
+						}
+					}
+					if _, exists := stepSeen[sid]; exists {
+						return fmt.Errorf("composition %s profile %q job %q has duplicate stepsEnabled %q", compositionName, profileName, jobName, sid)
+					}
+					stepSeen[sid] = struct{}{}
 				}
-				if _, exists := stepSeen[sid]; exists {
-					return fmt.Errorf("composition %s profile %q job %q has duplicate stepsEnabled %q", compositionName, profileName, jobName, sid)
-				}
-				stepSeen[sid] = struct{}{}
 			}
 		}
 	}

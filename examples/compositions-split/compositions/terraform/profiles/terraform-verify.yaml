@@ -1,0 +1,16 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: terraform-verify
+spec:
+  description: Full non-mutating verification
+
+  jobs:
+    validate:
+      includeCapabilities:
+        - terraform.setup
+        - terraform.context
+        - terraform.fmt
+        - terraform.init
+        - terraform.validate
+        - terraform.plan

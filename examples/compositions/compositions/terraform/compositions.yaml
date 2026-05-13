@@ -84,17 +84,25 @@ spec:
       runsOn: ubuntu-22.04
       timeout: 20m
       retries: 0
+      capabilities:
+        - terraform.setup
+        - terraform.context
+        - terraform.fmt
+        - terraform.init
+        - terraform.validate
       labels:
         scope: infra
       steps:
         - id: setup-terraform
           name: setup-terraform
+          capability: terraform.setup
           use: hashicorp/setup-terraform@v4
           with:
             terraform_version: "{{.terraformVersion}}"
             terraform_wrapper: "false"
         - id: terraform-context
           name: terraform-context
+          capability: terraform.context
           shell: bash
           run: |
             terraform version
@@ -102,13 +110,16 @@ spec:
           onFailure: stop
         - id: terraform-fmt-check
           name: terraform-fmt-check
+          capability: terraform.fmt
           run: terraform fmt -check {{.terraformDir}}
           onFailure: stop
         - id: terraform-init
           name: terraform-init
+          capability: terraform.init
           run: terraform -chdir={{.terraformDir}} init -backend=false -input=false
           onFailure: stop
         - id: terraform-validate
           name: terraform-validate
+          capability: terraform.validate
           run: terraform -chdir={{.terraformDir}} validate -no-color
           onFailure: stop

@@ -1,0 +1,38 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ComponentSchema
+metadata:
+  name: terraform-component
+spec:
+  type: terraform
+  schema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Terraform Component
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+      type:
+        type: string
+        const: terraform
+      inputs:
+        type: object
+        required:
+          - stackName
+          - terraformDir
+        properties:
+          stackName:
+            type: string
+          terraformDir:
+            type: string
+          terraformVersion:
+            type: string
+          varFile:
+            type: string
+          backendKey:
+            type: string
+        additionalProperties: false
+    additionalProperties: true

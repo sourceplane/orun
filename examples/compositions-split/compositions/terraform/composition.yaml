@@ -1,0 +1,29 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: terraform
+spec:
+  type: terraform
+  description: Terraform validation jobs for infra components
+
+  schemaRef:
+    name: terraform-component
+
+  defaultJob: validate
+  defaultProfile: verify
+
+  jobs:
+    - name: validate
+      templateRef:
+        name: terraform-validate
+
+  profiles:
+    - name: pull-request
+      profileRef:
+        name: terraform-pull-request
+    - name: verify
+      profileRef:
+        name: terraform-verify
+    - name: release
+      profileRef:
+        name: terraform-release
