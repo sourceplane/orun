@@ -10,3 +10,4 @@ spec:
       - "v*"
   plan:
     profileRef: release
+    scope: full

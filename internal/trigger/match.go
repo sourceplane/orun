@@ -45,6 +45,44 @@ func MatchByName(triggers []model.AutomationTrigger, name string) *MatchResult {
 	return nil
 }
 
+// MatchAll searches both old-style triggers (with profile) and new-style bindings (without profile).
+// Old-style triggers are tried first. When a new-style binding matches, MatchResult.Profile is empty.
+func MatchAll(triggers, bindings []model.AutomationTrigger, event *model.EventContext) *MatchResult {
+	if event == nil {
+		return nil
+	}
+	if result := Match(triggers, event); result != nil {
+		return result
+	}
+	for i := range bindings {
+		b := &bindings[i]
+		if matchesTrigger(b, event) {
+			return &MatchResult{
+				Trigger: b,
+				Profile: b.Plan.Profile,
+			}
+		}
+	}
+	return nil
+}
+
+// MatchAllByName searches both old-style triggers and new-style bindings by name.
+func MatchAllByName(triggers, bindings []model.AutomationTrigger, name string) *MatchResult {
+	if result := MatchByName(triggers, name); result != nil {
+		return result
+	}
+	for i := range bindings {
+		b := &bindings[i]
+		if b.Name == name {
+			return &MatchResult{
+				Trigger: b,
+				Profile: b.Plan.Profile,
+			}
+		}
+	}
+	return nil
+}
+
 func matchesTrigger(t *model.AutomationTrigger, event *model.EventContext) bool {
 	if t.On.Provider != "" && !strings.EqualFold(t.On.Provider, event.Provider) {
 		return false

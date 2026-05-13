@@ -66,9 +66,10 @@ func generatePlan() error {
 
 	// Merge stack-provided resources (profiles, triggers, override policy)
 	stackResources := &normalize.StackResources{
-		Profiles:       compositionRegistry.Profiles,
-		Triggers:       compositionRegistry.Triggers,
-		OverridePolicy: compositionRegistry.OverridePolicy,
+		Profiles:        compositionRegistry.Profiles,
+		Triggers:        compositionRegistry.Triggers,
+		TriggerBindings: compositionRegistry.TriggerBindings,
+		OverridePolicy:  compositionRegistry.OverridePolicy,
 	}
 	normalize.MergeStackResources(normalized, stackResources)
 
@@ -103,12 +104,27 @@ func generatePlan() error {
 		fmt.Println("□ Expanding (env × component)...")
 	}
 	controlDefaults := make(map[string]map[string]interface{})
+	compositionDefProfiles := make(map[string]string)
 	for _, composition := range compositionRegistry.Types {
 		if composition.ControlDefaults != nil {
 			controlDefaults[composition.Name] = composition.ControlDefaults
 		}
+		if composition.DefaultProfile != "" {
+			compositionDefProfiles[composition.Name] = composition.DefaultProfile
+		}
 	}
-	expander := expand.NewExpander(normalized, controlDefaults)
+
+	allProfiles := make(map[string]model.ExecutionProfile)
+	for name, p := range normalized.Execution.Profiles {
+		allProfiles[name] = p
+	}
+	for name, p := range compositionRegistry.Profiles {
+		if _, exists := allProfiles[name]; !exists {
+			allProfiles[name] = p
+		}
+	}
+
+	expander := expand.NewExpander(normalized, controlDefaults, allProfiles, compositionDefProfiles)
 	instances, err := expander.Expand()
 	if err != nil {
 		return fmt.Errorf("failed to expand intent: %w", err)
@@ -1039,12 +1055,14 @@ func resolveTriggerAndProfile(normalized *model.NormalizedIntent) (string, strin
 	}
 
 	if triggerName != "" {
-		result := trigger.MatchByName(normalized.Automation.Triggers, triggerName)
+		result := trigger.MatchAllByName(normalized.Automation.Triggers, normalized.Automation.TriggerBindings, triggerName)
 		if result == nil {
 			return "", "", fmt.Errorf("trigger %q not found in intent automation section", triggerName)
 		}
-		if _, ok := normalized.Execution.Profiles[result.Profile]; !ok {
-			return "", "", fmt.Errorf("trigger %q references profile %q which is not defined", triggerName, result.Profile)
+		if result.Profile != "" {
+			if _, ok := normalized.Execution.Profiles[result.Profile]; !ok {
+				return "", "", fmt.Errorf("trigger %q references profile %q which is not defined", triggerName, result.Profile)
+			}
 		}
 		return result.Profile, triggerName, nil
 	}
@@ -1064,18 +1082,20 @@ func resolveTriggerAndProfile(normalized *model.NormalizedIntent) (string, strin
 			}
 		}
 
-		if len(normalized.Automation.Triggers) == 0 {
+		if len(normalized.Automation.Triggers) == 0 && len(normalized.Automation.TriggerBindings) == 0 {
 			return "", "", fmt.Errorf("no automation triggers defined in intent")
 		}
 
-		result := trigger.Match(normalized.Automation.Triggers, eventCtx)
+		result := trigger.MatchAll(normalized.Automation.Triggers, normalized.Automation.TriggerBindings, eventCtx)
 		if result == nil {
 			return "", "", fmt.Errorf("no trigger matched event %s/%s (branch=%s, ref=%s)",
 				eventCtx.Provider, eventCtx.Event, eventCtx.Branch, eventCtx.Ref)
 		}
-		if _, ok := normalized.Execution.Profiles[result.Profile]; !ok {
-			return "", "", fmt.Errorf("trigger %q references profile %q which is not defined",
-				result.Trigger.Name, result.Profile)
+		if result.Profile != "" {
+			if _, ok := normalized.Execution.Profiles[result.Profile]; !ok {
+				return "", "", fmt.Errorf("trigger %q references profile %q which is not defined",
+					result.Trigger.Name, result.Profile)
+			}
 		}
 		return result.Profile, result.Trigger.Name, nil
 	}
@@ -1084,12 +1104,13 @@ func resolveTriggerAndProfile(normalized *model.NormalizedIntent) (string, strin
 	// environment, build an EventContext and try to match a trigger. This lets
 	// `orun plan` work inside GitHub Actions / GitLab CI / Buildkite without
 	// requiring --from-ci, --trigger, or --profile.
-	if len(normalized.Automation.Triggers) > 0 {
+	if len(normalized.Automation.Triggers) > 0 || len(normalized.Automation.TriggerBindings) > 0 {
 		eventCtx := buildEventCtx(os.Getenv, os.ReadFile)
 		if eventCtx != nil {
-			result := trigger.Match(normalized.Automation.Triggers, eventCtx)
+			result := trigger.MatchAll(normalized.Automation.Triggers, normalized.Automation.TriggerBindings, eventCtx)
 			if result != nil {
-				if _, ok := normalized.Execution.Profiles[result.Profile]; ok {
+				_, profileDefined := normalized.Execution.Profiles[result.Profile]
+				if result.Profile == "" || profileDefined {
 					printAutoDetectBanner(eventCtx, result.Trigger.Name, result.Profile)
 					return result.Profile, result.Trigger.Name, nil
 				}
