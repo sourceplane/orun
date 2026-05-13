@@ -1,5 +1,12 @@
 package model
 
+import (
+	"encoding/json"
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
+
 // Intent is the top-level CRD for declarative deployment
 type Intent struct {
 	APIVersion   string                 `yaml:"apiVersion" json:"apiVersion"`
@@ -79,7 +86,73 @@ type Component struct {
 
 // ComponentSubscribe declares which environments a component participates in.
 type ComponentSubscribe struct {
-	Environments []string `yaml:"environments" json:"environments"`
+	Environments []EnvironmentSubscription `yaml:"environments" json:"environments"`
+}
+
+// EnvironmentSubscription specifies an environment binding with optional profile selection.
+type EnvironmentSubscription struct {
+	Name    string `yaml:"name" json:"name"`
+	Profile string `yaml:"profile,omitempty" json:"profile,omitempty"`
+}
+
+// UnmarshalYAML supports both string and object forms for environment subscriptions.
+func (s *EnvironmentSubscription) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		s.Name = value.Value
+		return nil
+	case yaml.MappingNode:
+		type raw EnvironmentSubscription
+		var r raw
+		if err := value.Decode(&r); err != nil {
+			return err
+		}
+		if r.Name == "" {
+			return fmt.Errorf("environment subscription object requires name")
+		}
+		*s = EnvironmentSubscription(r)
+		return nil
+	default:
+		return fmt.Errorf("environment subscription must be a string or object")
+	}
+}
+
+// EnvironmentNames returns the list of environment names from subscriptions.
+func (cs ComponentSubscribe) EnvironmentNames() []string {
+	names := make([]string, len(cs.Environments))
+	for i, env := range cs.Environments {
+		names[i] = env.Name
+	}
+	return names
+}
+
+// FindSubscription returns the subscription for a given environment name, or nil.
+func (cs ComponentSubscribe) FindSubscription(envName string) *EnvironmentSubscription {
+	for i := range cs.Environments {
+		if cs.Environments[i].Name == envName {
+			return &cs.Environments[i]
+		}
+	}
+	return nil
+}
+
+// UnmarshalJSON supports both string and object forms for environment subscriptions in JSON.
+func (s *EnvironmentSubscription) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		s.Name = str
+		return nil
+	}
+	type raw EnvironmentSubscription
+	var r raw
+	if err := json.Unmarshal(data, &r); err != nil {
+		return fmt.Errorf("environment subscription must be a string or object: %w", err)
+	}
+	if r.Name == "" {
+		return fmt.Errorf("environment subscription object requires name")
+	}
+	*s = EnvironmentSubscription(r)
+	return nil
 }
 
 // ComponentOverrides defines component-specific planner overrides.
@@ -120,6 +193,9 @@ type ComponentInstance struct {
 	Policies      map[string]interface{}
 	DependsOn     []ResolvedDependency
 	Enabled       bool
+	ProfileRef    string
+	ProfileName   string
+	ProfileSource string
 }
 
 // ResolvedDependency is a dependency with resolved target component

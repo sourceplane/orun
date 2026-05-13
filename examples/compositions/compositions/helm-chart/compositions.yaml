@@ -6,6 +6,7 @@ spec:
   type: helm-chart
   description: Helm chart validation jobs for chart components
   defaultJob: render-helm-chart
+  defaultProfile: verify
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Helm Chart Component
@@ -44,6 +45,24 @@ spec:
             description: Optional Helm version installed by the job registry
         additionalProperties: false
     additionalProperties: true
+  executionProfiles:
+    lint-only:
+      description: Quick lint check without template rendering
+      jobs:
+        render-helm-chart:
+          stepsEnabled:
+            - setup-helm
+            - helm-chart-context
+            - helm-chart-lint
+    verify:
+      description: Full lint and template rendering
+      jobs:
+        render-helm-chart:
+          stepsEnabled:
+            - setup-helm
+            - helm-chart-context
+            - helm-chart-lint
+            - helm-chart-template
   jobs:
     - name: render-helm-chart
       description: Lint and template Helm charts against their paired values files
@@ -58,15 +77,18 @@ spec:
           use: azure/setup-helm@v4.3.0
           with:
             version: "{{.helmVersion}}"
-        - name: helm-chart-context
+        - id: helm-chart-context
+          name: helm-chart-context
           shell: bash
           run: |
             helm version --short
             echo "Rendering {{.releaseName}} from {{.chartPath}} with {{.valuesFile}}"
           onFailure: stop
-        - name: helm-chart-lint
+        - id: helm-chart-lint
+          name: helm-chart-lint
           run: helm lint {{.chartPath}} --values {{.valuesFile}}
           onFailure: stop
-        - name: helm-chart-template
+        - id: helm-chart-template
+          name: helm-chart-template
           run: helm template {{.releaseName}} {{.chartPath}} --values {{.valuesFile}}
           onFailure: stop

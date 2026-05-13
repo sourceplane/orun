@@ -6,6 +6,7 @@ spec:
   type: workspace
   description: Workspace-backed provider smoke jobs
   defaultJob: verify-workspace
+  defaultProfile: full
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Workspace Provider Smoke Component
@@ -52,6 +53,25 @@ spec:
             description: Workflow file rendered by torkflow view
         additionalProperties: false
     additionalProperties: true
+  executionProfiles:
+    quick-check:
+      description: Core provider verification only
+      jobs:
+        verify-workspace:
+          stepsEnabled:
+            - kubectl-dry-run
+            - helm-template
+            - terraform-fmt-check
+    full:
+      description: All provider smoke tests
+      jobs:
+        verify-workspace:
+          stepsEnabled:
+            - kubectl-dry-run
+            - helm-template
+            - terraform-fmt-check
+            - kustomize-build
+            - torkflow-view
   jobs:
     - name: verify-workspace
       description: Verify workspace-installed provider tools with dry-run-safe commands
@@ -61,19 +81,24 @@ spec:
       labels:
         scope: smoke
       steps:
-        - name: kubectl-dry-run
+        - id: kubectl-dry-run
+          name: kubectl-dry-run
           run: kubectl version --client --output=yaml
           onFailure: stop
-        - name: helm-template
+        - id: helm-template
+          name: helm-template
           run: helm template {{.Component}} {{.chartPath}} --values {{.valuesFile}}
           onFailure: stop
-        - name: terraform-fmt-check
+        - id: terraform-fmt-check
+          name: terraform-fmt-check
           run: terraform fmt -check {{.terraformDir}}
           onFailure: stop
-        - name: kustomize-build
+        - id: kustomize-build
+          name: kustomize-build
           run: kustomize build {{.kustomizeDir}}
           onFailure: stop
-        - name: torkflow-view
+        - id: torkflow-view
+          name: torkflow-view
           run: torkflow view --workflow {{.workflowFile}}
           onFailure: stop
       inputs:

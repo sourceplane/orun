@@ -49,7 +49,7 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 			comp.Inputs = make(map[string]interface{})
 		}
 		if comp.Subscribe.Environments == nil {
-			comp.Subscribe.Environments = []string{}
+			comp.Subscribe.Environments = []model.EnvironmentSubscription{}
 		}
 		if comp.DependsOn == nil {
 			comp.DependsOn = []model.Dependency{}

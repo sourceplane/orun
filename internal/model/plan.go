@@ -56,25 +56,27 @@ type ResolvedCompositionSource struct {
 
 // PlanJob is the execution unit in the final plan
 type PlanJob struct {
-	ID          string                 `json:"id" yaml:"id"`
-	UID         string                 `json:"uid,omitempty" yaml:"uid,omitempty"`
-	DisplayName string                 `json:"displayName,omitempty" yaml:"displayName,omitempty"`
-	CheckName   string                 `json:"checkName,omitempty" yaml:"checkName,omitempty"`
-	Name        string                 `json:"name" yaml:"name"`
-	Component   string                 `json:"component" yaml:"component"`
-	Environment string                 `json:"environment" yaml:"environment"`
-	Composition string                 `json:"composition,omitempty" yaml:"composition,omitempty"`
-	JobRegistry string                 `json:"jobRegistry,omitempty" yaml:"jobRegistry,omitempty"` // Name of the JobRegistry used
-	Job         string                 `json:"job,omitempty" yaml:"job,omitempty"`                 // Specific job from registry
-	RunsOn      string                 `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`
-	Path        string                 `json:"path,omitempty" yaml:"path,omitempty"` // Working directory for job execution
-	Steps       []PlanStep             `json:"steps" yaml:"steps"`
-	DependsOn   []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
-	Timeout     string                 `json:"timeout,omitempty" yaml:"timeout,omitempty"`
-	Retries     int                    `json:"retries,omitempty" yaml:"retries,omitempty"`
-	Env         map[string]interface{} `json:"env,omitempty" yaml:"env,omitempty"`
-	Labels      map[string]string      `json:"labels,omitempty" yaml:"labels,omitempty"`
-	Config      map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
+	ID            string                 `json:"id" yaml:"id"`
+	UID           string                 `json:"uid,omitempty" yaml:"uid,omitempty"`
+	DisplayName   string                 `json:"displayName,omitempty" yaml:"displayName,omitempty"`
+	CheckName     string                 `json:"checkName,omitempty" yaml:"checkName,omitempty"`
+	Name          string                 `json:"name" yaml:"name"`
+	Component     string                 `json:"component" yaml:"component"`
+	Environment   string                 `json:"environment" yaml:"environment"`
+	Composition   string                 `json:"composition,omitempty" yaml:"composition,omitempty"`
+	Profile       string                 `json:"profile,omitempty" yaml:"profile,omitempty"`
+	ProfileSource string                 `json:"profileSource,omitempty" yaml:"profileSource,omitempty"`
+	JobRegistry   string                 `json:"jobRegistry,omitempty" yaml:"jobRegistry,omitempty"` // Name of the JobRegistry used
+	Job           string                 `json:"job,omitempty" yaml:"job,omitempty"`                 // Specific job from registry
+	RunsOn        string                 `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`
+	Path          string                 `json:"path,omitempty" yaml:"path,omitempty"` // Working directory for job execution
+	Steps         []PlanStep             `json:"steps" yaml:"steps"`
+	DependsOn     []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
+	Timeout       string                 `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Retries       int                    `json:"retries,omitempty" yaml:"retries,omitempty"`
+	Env           map[string]interface{} `json:"env,omitempty" yaml:"env,omitempty"`
+	Labels        map[string]string      `json:"labels,omitempty" yaml:"labels,omitempty"`
+	Config        map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
 // PlanStep is a step in the final plan

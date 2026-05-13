@@ -6,6 +6,7 @@ spec:
   type: cloudflare-pages-turbo
   description: Build a static app with Turbo and direct-upload it to Cloudflare Pages
   defaultJob: verify-deploy-cloudflare-pages-turbo
+  defaultProfile: verify
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Cloudflare Pages Turbo Component
@@ -55,6 +56,45 @@ spec:
             description: Override the default turbo build command
         additionalProperties: false
     additionalProperties: true
+  executionProfiles:
+    pull-request:
+      description: Build and verify output without deploying
+      jobs:
+        verify-deploy-cloudflare-pages-turbo:
+          stepsEnabled:
+            - setup-node
+            - setup-pnpm
+            - install-workspace-dependencies
+            - pre-build
+            - verify-pages-app-structure
+            - build-pages-app
+            - verify-build-output
+    verify:
+      description: Full build and output verification
+      jobs:
+        verify-deploy-cloudflare-pages-turbo:
+          stepsEnabled:
+            - setup-node
+            - setup-pnpm
+            - install-workspace-dependencies
+            - pre-build
+            - verify-pages-app-structure
+            - build-pages-app
+            - verify-build-output
+    deploy:
+      description: Build, verify, provision project, and deploy
+      jobs:
+        verify-deploy-cloudflare-pages-turbo:
+          stepsEnabled:
+            - setup-node
+            - setup-pnpm
+            - install-workspace-dependencies
+            - pre-build
+            - verify-pages-app-structure
+            - build-pages-app
+            - verify-build-output
+            - ensure-pages-project
+            - deploy-pages-artifact
   jobs:
     - name: verify-deploy-cloudflare-pages-turbo
       description: Build a Pages app and direct-upload it from the production branch
@@ -74,10 +114,12 @@ spec:
           use: pnpm/action-setup@v4
           with:
             version: "{{.pnpmVersion}}"
-        - name: install-workspace-dependencies
+        - id: install-workspace-dependencies
+          name: install-workspace-dependencies
           run: pnpm install --no-frozen-lockfile
           onFailure: stop
-        - name: pre-build
+        - id: pre-build
+          name: pre-build
           shell: bash
           run: |
             {{if .preBuildCommand}}
@@ -86,19 +128,23 @@ spec:
             echo "Skipping pre-build."
             {{end}}
           onFailure: stop
-        - name: verify-pages-app-structure
+        - id: verify-pages-app-structure
+          name: verify-pages-app-structure
           run: test -f package.json
           onFailure: stop
-        - name: build-pages-app
+        - id: build-pages-app
+          name: build-pages-app
           run: "{{if .buildCommand}}{{.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
           onFailure: stop
-        - name: verify-build-output
+        - id: verify-build-output
+          name: verify-build-output
           shell: bash
           run: |
             test -d "{{.outputDir}}"
             find "{{.outputDir}}" -maxdepth 2 -type f | head -n 20
           onFailure: stop
-        - name: ensure-pages-project
+        - id: ensure-pages-project
+          name: ensure-pages-project
           shell: bash
           run: |
             if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
@@ -136,7 +182,8 @@ spec:
               --data '{"production_branch":"{{.productionBranch}}"}' \
               "${api_root}/{{.projectName}}" >/dev/null
           onFailure: stop
-        - name: deploy-pages-artifact
+        - id: deploy-pages-artifact
+          name: deploy-pages-artifact
           shell: bash
           run: |
             if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then

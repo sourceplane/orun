@@ -9,8 +9,10 @@ spec:
   domain: customer-identity
   subscribe:
     environments:
-      - development
-      - staging
+      - name: development
+        profile: lint-only
+      - name: staging
+        profile: verify
   inputs:
     chartPath: .
     valuesFile: ../../../deploy/hello-deploy/values.yaml

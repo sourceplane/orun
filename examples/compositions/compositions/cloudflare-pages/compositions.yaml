@@ -6,6 +6,7 @@ spec:
   type: cloudflare-pages
   description: Build static site assets and direct-upload them to Cloudflare Pages with Wrangler
   defaultJob: verify-deploy-cloudflare-pages
+  defaultProfile: verify
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Cloudflare Pages Direct Upload Component
@@ -57,6 +58,36 @@ spec:
             description: Branch that is allowed to perform Cloudflare deployments
         additionalProperties: false
     additionalProperties: true
+  executionProfiles:
+    pull-request:
+      description: Build and verify output without deploying
+      jobs:
+        verify-deploy-cloudflare-pages:
+          stepsEnabled:
+            - setup-node
+            - install-site-dependencies
+            - build-site
+            - verify-build-output
+    verify:
+      description: Full build and output verification
+      jobs:
+        verify-deploy-cloudflare-pages:
+          stepsEnabled:
+            - setup-node
+            - install-site-dependencies
+            - build-site
+            - verify-build-output
+    deploy:
+      description: Build, verify, provision project, and deploy
+      jobs:
+        verify-deploy-cloudflare-pages:
+          stepsEnabled:
+            - setup-node
+            - install-site-dependencies
+            - build-site
+            - verify-build-output
+            - ensure-pages-project
+            - deploy-pages-artifact
   jobs:
     - name: verify-deploy-cloudflare-pages
       description: Build static assets everywhere and deploy them to Cloudflare Pages from the production branch
@@ -71,26 +102,30 @@ spec:
           use: actions/setup-node@v4
           with:
             node-version: "{{.nodeVersion}}"
-        - name: install-site-dependencies
+        - id: install-site-dependencies
+          name: install-site-dependencies
           shell: bash
           run: |
             cd "{{.siteDir}}"
             {{.installCommand}}
           onFailure: stop
-        - name: build-site
+        - id: build-site
+          name: build-site
           shell: bash
           run: |
             cd "{{.siteDir}}"
             {{.buildCommand}}
           onFailure: stop
-        - name: verify-build-output
+        - id: verify-build-output
+          name: verify-build-output
           shell: bash
           run: |
             cd "{{.siteDir}}"
             test -d "{{.outputDir}}"
             find "{{.outputDir}}" -maxdepth 2 -type f | head -n 20
           onFailure: stop
-        - name: ensure-pages-project
+        - id: ensure-pages-project
+          name: ensure-pages-project
           shell: bash
           run: |
             if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
@@ -128,7 +163,8 @@ spec:
               --data '{"production_branch":"{{.productionBranch}}"}' \
               "${api_root}/{{.projectName}}" >/dev/null
           onFailure: stop
-        - name: deploy-pages-artifact
+        - id: deploy-pages-artifact
+          name: deploy-pages-artifact
           shell: bash
           run: |
             if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then

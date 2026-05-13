@@ -38,7 +38,10 @@ func TestExpandSupportsSubscribedComponentsAlongsideSelectorFallback(t *testing.
 				Type:   "helm",
 				Domain: "platform",
 				Subscribe: model.ComponentSubscribe{
-					Environments: []string{"development", "production"},
+					Environments: []model.EnvironmentSubscription{
+						{Name: "development"},
+						{Name: "production"},
+					},
 				},
 				SourcePath: "services/api/component.yaml",
 			},
@@ -47,7 +50,9 @@ func TestExpandSupportsSubscribedComponentsAlongsideSelectorFallback(t *testing.
 				Type:   "helm",
 				Domain: "identity",
 				Subscribe: model.ComponentSubscribe{
-					Environments: []string{"production"},
+					Environments: []model.EnvironmentSubscription{
+						{Name: "production"},
+					},
 				},
 			},
 		},

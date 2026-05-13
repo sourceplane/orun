@@ -6,6 +6,7 @@ spec:
   type: cloudflare-worker-turbo
   description: Verify a Cloudflare Worker app and deploy it from the production branch
   defaultJob: verify-deploy-cloudflare-worker-turbo
+  defaultProfile: verify
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Cloudflare Worker Turbo Component
@@ -53,6 +54,44 @@ spec:
             description: Override the default deploy command
         additionalProperties: false
     additionalProperties: true
+  executionProfiles:
+    pull-request:
+      description: Build and typecheck without deploying
+      jobs:
+        verify-deploy-cloudflare-worker-turbo:
+          stepsEnabled:
+            - setup-node
+            - setup-pnpm
+            - install-workspace-dependencies
+            - pre-build
+            - verify-worker-structure
+            - build-worker
+            - typecheck-worker
+    verify:
+      description: Full verification without deploy
+      jobs:
+        verify-deploy-cloudflare-worker-turbo:
+          stepsEnabled:
+            - setup-node
+            - setup-pnpm
+            - install-workspace-dependencies
+            - pre-build
+            - verify-worker-structure
+            - build-worker
+            - typecheck-worker
+    deploy:
+      description: Full build, verify, and deploy
+      jobs:
+        verify-deploy-cloudflare-worker-turbo:
+          stepsEnabled:
+            - setup-node
+            - setup-pnpm
+            - install-workspace-dependencies
+            - pre-build
+            - verify-worker-structure
+            - build-worker
+            - typecheck-worker
+            - deploy-worker
   jobs:
     - name: verify-deploy-cloudflare-worker-turbo
       description: Verify a Worker app and deploy it from the production branch
@@ -72,10 +111,12 @@ spec:
           use: pnpm/action-setup@v4
           with:
             version: "{{.pnpmVersion}}"
-        - name: install-workspace-dependencies
+        - id: install-workspace-dependencies
+          name: install-workspace-dependencies
           run: pnpm install --no-frozen-lockfile
           onFailure: stop
-        - name: pre-build
+        - id: pre-build
+          name: pre-build
           shell: bash
           run: |
             {{if .preBuildCommand}}
@@ -84,19 +125,23 @@ spec:
             echo "Skipping pre-build."
             {{end}}
           onFailure: stop
-        - name: verify-worker-structure
+        - id: verify-worker-structure
+          name: verify-worker-structure
           shell: bash
           run: |
             test -f package.json
             test -f wrangler.jsonc
           onFailure: stop
-        - name: build-worker
+        - id: build-worker
+          name: build-worker
           run: "{{if .buildCommand}}{{.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
           onFailure: stop
-        - name: typecheck-worker
+        - id: typecheck-worker
+          name: typecheck-worker
           run: "{{if .typecheckCommand}}{{.typecheckCommand}}{{else}}pnpm exec turbo run typecheck --filter=./{{end}}"
           onFailure: stop
-        - name: deploy-worker
+        - id: deploy-worker
+          name: deploy-worker
           shell: bash
           run: |
             if [ "{{.Environment}}" = "dev" ]; then

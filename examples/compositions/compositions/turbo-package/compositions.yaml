@@ -6,6 +6,7 @@ spec:
   type: turbo-package
   description: Verify a shared package in a pnpm and Turbo monorepo
   defaultJob: verify-turbo-package
+  defaultProfile: verify
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Turbo Package Component
@@ -46,6 +47,28 @@ spec:
             description: Override the default turbo typecheck command
         additionalProperties: false
     additionalProperties: true
+  executionProfiles:
+    quick-check:
+      description: Verify package structure without build or typecheck
+      jobs:
+        verify-turbo-package:
+          stepsEnabled:
+            - setup-node
+            - setup-pnpm
+            - install-workspace-dependencies
+            - verify-package-structure
+    verify:
+      description: Full build and typecheck
+      jobs:
+        verify-turbo-package:
+          stepsEnabled:
+            - setup-node
+            - setup-pnpm
+            - install-workspace-dependencies
+            - pre-build
+            - verify-package-structure
+            - build-package
+            - typecheck-package
   jobs:
     - name: verify-turbo-package
       description: Install the workspace and validate a shared package
@@ -65,10 +88,12 @@ spec:
           use: pnpm/action-setup@v4
           with:
             version: "{{.pnpmVersion}}"
-        - name: install-workspace-dependencies
+        - id: install-workspace-dependencies
+          name: install-workspace-dependencies
           run: pnpm install --no-frozen-lockfile
           onFailure: stop
-        - name: pre-build
+        - id: pre-build
+          name: pre-build
           shell: bash
           run: |
             {{if .preBuildCommand}}
@@ -77,12 +102,15 @@ spec:
             echo "Skipping pre-build."
             {{end}}
           onFailure: stop
-        - name: verify-package-structure
+        - id: verify-package-structure
+          name: verify-package-structure
           run: test -f package.json
           onFailure: stop
-        - name: build-package
+        - id: build-package
+          name: build-package
           run: "{{if .buildCommand}}{{.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
           onFailure: stop
-        - name: typecheck-package
+        - id: typecheck-package
+          name: typecheck-package
           run: "{{if .typecheckCommand}}{{.typecheckCommand}}{{else}}pnpm exec turbo run typecheck --filter=./{{end}}"
           onFailure: stop

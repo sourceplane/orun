@@ -9,10 +9,14 @@ spec:
   domain: platform-packages
   subscribe:
     environments:
-      - dev
-      - development
-      - staging
-      - production
+      - name: dev
+        profile: quick-check
+      - name: development
+        profile: quick-check
+      - name: staging
+        profile: verify
+      - name: production
+        profile: verify
   inputs:
     nodeVersion: "20"
     pnpmVersion: "10.12.1"

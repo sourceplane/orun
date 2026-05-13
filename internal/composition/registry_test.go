@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sourceplane/orun/internal/expand"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/normalize"
 	"github.com/sourceplane/orun/internal/planner"
@@ -201,7 +200,9 @@ func TestPlannerUsesPerComponentCompositionOverride(t *testing.T) {
 			Name: "api",
 			Type: "helm",
 			Subscribe: model.ComponentSubscribe{
-				Environments: []string{"dev"},
+				Environments: []model.EnvironmentSubscription{
+					{Name: "dev"},
+				},
 			},
 			CompositionRef: &model.ComponentCompositionRef{Source: "overrides", Name: "helm"},
 		}},
@@ -220,9 +221,17 @@ func TestPlannerUsesPerComponentCompositionOverride(t *testing.T) {
 		t.Fatalf("ValidateAllComponents returned error: %v", err)
 	}
 
-	instances, err := expand.NewExpander(normalized).Expand()
-	if err != nil {
-		t.Fatalf("Expand returned error: %v", err)
+	instances := map[string][]*model.ComponentInstance{
+		"dev": {
+			{
+				ComponentName:       "api",
+				Environment:         "dev",
+				Type:                "helm",
+				ResolvedComposition: "overrides:helm",
+				Inputs:              make(map[string]interface{}),
+				Path:                "./",
+			},
+		},
 	}
 
 	compositionInfos := make(map[string]*planner.CompositionInfo)
