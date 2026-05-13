@@ -21,16 +21,14 @@ type JobRegistry struct {
 
 // JobSpec defines a complete job specification with multiple steps
 type JobSpec struct {
-	Name         string                 `yaml:"name" json:"name"`
-	Description  string                 `yaml:"description" json:"description"`
-	RunsOn       string                 `yaml:"runsOn,omitempty" json:"runsOn,omitempty"`
-	Timeout      string                 `yaml:"timeout" json:"timeout"`
-	Retries      int                    `yaml:"retries" json:"retries"`
-	Steps        []Step                 `yaml:"steps" json:"steps"`
-	Inputs       map[string]interface{} `yaml:"inputs" json:"inputs"`
-	Labels       map[string]string      `yaml:"labels" json:"labels"`
-	When         string                 `yaml:"when,omitempty" json:"when,omitempty"`
-	Capabilities []string               `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
+	Name        string                 `yaml:"name" json:"name"`
+	Description string                 `yaml:"description" json:"description"`
+	RunsOn      string                 `yaml:"runsOn,omitempty" json:"runsOn,omitempty"`
+	Timeout     string                 `yaml:"timeout" json:"timeout"`
+	Retries     int                    `yaml:"retries" json:"retries"`
+	Steps       []Step                 `yaml:"steps" json:"steps"`
+	Inputs      map[string]interface{} `yaml:"inputs" json:"inputs"`
+	Labels      map[string]string      `yaml:"labels" json:"labels"`
 }
 
 // Step is a single execution unit within a job
@@ -48,7 +46,6 @@ type Step struct {
 	Timeout          string                 `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	Retry            int                    `yaml:"retry,omitempty" json:"retry,omitempty"`
 	OnFailure        string                 `yaml:"onFailure,omitempty" json:"onFailure,omitempty"` // stop, continue
-	When             string                 `yaml:"when,omitempty" json:"when,omitempty"`
 }
 
 // NormalizePhase returns a normalized phase string and defaults empty values to "main".
@@ -100,25 +97,19 @@ type JobConstraints struct {
 
 // JobInstance is a materialized job for a component in an environment
 type JobInstance struct {
-	ID               string
-	Name             string
-	Component        string
-	Environment      string
-	Composition      string
-	RunsOn           string
-	Path             string
-	Steps            []RenderedStep
-	DependsOn        []string
-	Timeout          string
-	Retries          int
-	Config           map[string]interface{} // Single source of truth for env vars
-	Labels           map[string]string
-	Controls               map[string]interface{}
-	ResolvedProfile        string
-	ResolvedTriggerBinding string
-	Skipped                bool
-	SkipReason             string
-	RequiresApproval       bool
+	ID          string
+	Name        string
+	Component   string
+	Environment string
+	Composition string
+	RunsOn      string
+	Path        string
+	Steps       []RenderedStep
+	DependsOn   []string
+	Timeout     string
+	Retries     int
+	Config      map[string]interface{} // Single source of truth for env vars
+	Labels      map[string]string
 }
 
 // RenderedStep is a step with all templates resolved
@@ -136,9 +127,6 @@ type RenderedStep struct {
 	Timeout          string                 `json:"timeout"`
 	Retry            int                    `json:"retry"`
 	OnFailure        string                 `json:"onFailure"`
-	When             string                 `json:"when,omitempty"`
-	Skipped          bool                   `json:"skipped,omitempty"`
-	SkipReason       string                 `json:"skipReason,omitempty"`
 }
 
 // JobGraph represents the logical DAG of all job instances

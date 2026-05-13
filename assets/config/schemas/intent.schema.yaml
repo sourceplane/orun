@@ -115,22 +115,9 @@ properties:
         policies:
           type: object
           additionalProperties: true
-        execution:
-          type: object
-          description: Execution profile selection and control overrides for this environment.
-          properties:
-            profile:
-              type: string
-              description: Name of the execution profile to use.
-            controlOverrides:
-              type: object
-              description: Per-type control overrides applied on top of the selected profile.
-              additionalProperties:
-                type: object
-                additionalProperties: true
   execution:
     type: object
-    description: Optional execution-layer configuration (remote state, profiles, etc.)
+    description: Optional execution-layer configuration (remote state, etc.)
     properties:
       state:
         type: object
@@ -147,86 +134,6 @@ properties:
             description: URL of the orun-backend instance (required when mode is remote).
             format: uri
         additionalProperties: false
-      profiles:
-        type: object
-        description: Named execution profiles that define controls per composition type.
-        additionalProperties:
-          type: object
-          properties:
-            description:
-              type: string
-              description: Human-readable description of the profile.
-            plan:
-              type: object
-              description: Plan-generation settings for this profile.
-              properties:
-                scope:
-                  type: string
-                  description: Whether to plan all components or only changed ones.
-                  enum:
-                    - changed
-                    - full
-              additionalProperties: false
-            controls:
-              type: object
-              description: Controls keyed by composition type name.
-              additionalProperties:
-                type: object
-                additionalProperties: true
-    additionalProperties: false
-  automation:
-    type: object
-    description: Automation trigger bindings that map CI events to execution profiles.
-    properties:
-      triggers:
-        type: array
-        items:
-          type: object
-          required:
-            - name
-            - on
-            - plan
-          properties:
-            name:
-              type: string
-              minLength: 1
-              description: Unique name for this trigger.
-            on:
-              type: object
-              required:
-                - event
-              properties:
-                provider:
-                  type: string
-                  description: CI provider name (github, gitlab, buildkite).
-                event:
-                  type: string
-                  description: Event type (pull_request, push, etc.).
-                actions:
-                  type: array
-                  description: Event actions to match (e.g. opened, synchronize).
-                  items:
-                    type: string
-                branches:
-                  type: array
-                  description: Branch patterns to match (supports * suffix glob).
-                  items:
-                    type: string
-                tags:
-                  type: array
-                  description: Tag patterns to match (supports * suffix glob).
-                  items:
-                    type: string
-              additionalProperties: false
-            plan:
-              type: object
-              required:
-                - profile
-              properties:
-                profile:
-                  type: string
-                  description: Name of the execution profile to use when this trigger fires.
-              additionalProperties: false
     additionalProperties: false
   components:
     type: array

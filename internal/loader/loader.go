@@ -416,23 +416,7 @@ func LoadCompositionsFromDir(configDir string) (*CompositionRegistry, error) {
 // LoadCompositionsForIntent resolves declared composition sources from intent and
 // falls back to legacy --config-dir when needed.
 func LoadCompositionsForIntent(intent *model.Intent, intentPath, configDir string) (*CompositionRegistry, error) {
-	expandStacksToSources(intent)
 	return compositionpkg.LoadRegistry(intent, intentPath, configDir)
-}
-
-// expandStacksToSources converts intent.Stacks entries into composition sources.
-// This makes stacks[] syntactic sugar for compositions.sources[] with stack semantics.
-func expandStacksToSources(intent *model.Intent) {
-	if len(intent.Stacks) == 0 {
-		return
-	}
-	for _, stack := range intent.Stacks {
-		source := stack.Source
-		if source.Name == "" {
-			source.Name = stack.Name
-		}
-		intent.Compositions.Sources = append(intent.Compositions.Sources, source)
-	}
 }
 
 // WriteCompositionLockFile writes .orun/compositions.lock.yaml for the resolved sources.

@@ -220,7 +220,7 @@ func TestPlannerUsesPerComponentCompositionOverride(t *testing.T) {
 		t.Fatalf("ValidateAllComponents returned error: %v", err)
 	}
 
-	instances, err := expand.NewExpander(normalized, nil, nil, nil).Expand()
+	instances, err := expand.NewExpander(normalized).Expand()
 	if err != nil {
 		t.Fatalf("Expand returned error: %v", err)
 	}

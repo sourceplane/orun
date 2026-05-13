@@ -6,28 +6,6 @@ spec:
   type: helm-values
   description: Helm values validation jobs for deployment files
   defaultJob: render-helm-values
-  defaultProfile: validate
-  controlSchema:
-    $schema: http://json-schema.org/draft-07/schema#
-    title: Helm Values Execution Controls
-    type: object
-    properties:
-      lint:
-        type: object
-        properties:
-          enabled:
-            type: boolean
-      template:
-        type: object
-        properties:
-          enabled:
-            type: boolean
-    additionalProperties: false
-  controlDefaults:
-    lint:
-      enabled: true
-    template:
-      enabled: true
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Helm Values Component
@@ -87,10 +65,8 @@ spec:
             echo "Validating {{.valuesFile}} against {{.chartPath}}"
           onFailure: stop
         - name: helm-values-lint
-          when: "{{(index .controls \"lint\").enabled}}"
           run: helm lint {{.chartPath}} --values {{.valuesFile}}
           onFailure: stop
         - name: helm-values-template
-          when: "{{(index .controls \"template\").enabled}}"
           run: helm template {{.releaseName}} {{.chartPath}} --values {{.valuesFile}}
           onFailure: stop

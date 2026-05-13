@@ -1,6 +1,6 @@
 # Docs last updated for version
 
-v1.18.0
+v1.12.0
 
 ## How to use this file
 
@@ -8,24 +8,18 @@ When updating docs next time, run:
 
 ```bash
 # Get all changes since docs were last updated
-git log v1.18.0..HEAD --oneline
+git log v1.12.0..HEAD --oneline
 ```
 
 Then update this file to the new version after the docs PR is merged.
 
 ## What was covered in this update
 
-- Execution profiles: definition format, auto-discovery, per-instance resolution, control composition
-- Automation triggers and trigger bindings (TriggerBinding documents)
-- CI environment auto-detection (`--from-ci` for GitHub Actions, GitLab CI, Buildkite)
-- Stack override policies (StackOverridePolicy documents)
-- Convention-over-configuration auto-discovery for all stack resources (profiles/, triggers/, policies/)
-- Composition-scoped profiles (`compositions/<type>/profiles/*.yaml`)
-- `orun fetch` command for downloading OCI composition packages locally
-- Job identity fields: `uid`, `displayName`, `checkName`
-- New `orun plan` flags: `--profile`, `--trigger`, `--from-ci`, `--event-file`
-- Environment execution settings (`execution.profile`, `execution.profiles`, `execution.controlOverrides`)
-- Rich subscription format (per-environment profile overrides in component manifests)
-- New concept pages: profiles.md, automation.md
-- New CLI page: orun-fetch.md
-- Updated: intent-model, stacks, orun-plan, orun (command map), plan-schema, configuration, environment-variables, intro, sidebars, README
+- Remote state client for distributed GHA matrix execution (`--remote-state`, `--backend-url`)
+- `orun status` new flags: `--watch`, `--interval`, `--remote-state`, `--backend-url`
+- `orun logs` new flags: `--failed`, `--raw`, `--remote-state`, `--backend-url`
+- `intent.yaml` schema: `execution.state.{mode,backendUrl}`
+- New env vars: `ORUN_REMOTE_STATE`, `ORUN_BACKEND_URL`, `ORUN_TOKEN`
+- Step env vars: `ORUN_PLAN_ID`, `ORUN_JOB_ID`, `ORUN_JOB_RUN_ID`
+- New example: distributed execution with remote state (GHA matrix)
+- Fix: `--changed` exits 0 when no components are affected (v1.11.0)

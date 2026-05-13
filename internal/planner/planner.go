@@ -7,7 +7,6 @@ import (
 	"text/template"
 
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/policy"
 )
 
 // JobPlanner binds components to jobs and creates instances
@@ -66,43 +65,13 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 				Retries:     jobDef.Retries,
 				Labels:      compInst.Labels,
 				Config:      compInst.Inputs,
-				DependsOn:              make([]string, 0),
-				Controls:               compInst.Controls,
-				ResolvedProfile:        compInst.ResolvedProfile,
-				ResolvedTriggerBinding: compInst.ResolvedTriggerBinding,
-			}
-
-			context := jp.buildTemplateContext(compInst)
-
-			// Evaluate job-level when
-			if jobDef.When != "" {
-				renderedJobWhen, err := jp.renderTemplateString(compInst.Type, jobDef.Name, "job-when", jobDef.When, context)
-				if err != nil {
-					return nil, fmt.Errorf("failed to evaluate when for job %s: %w", jobID, err)
-				}
-				if !isTruthy(renderedJobWhen) {
-					jobInst.Skipped = true
-					jobInst.SkipReason = fmt.Sprintf("when condition evaluated to %q", renderedJobWhen)
-				}
-			}
-
-			// Enforce capability policies
-			if len(jobDef.Capabilities) > 0 && !jobInst.Skipped {
-				enforcer := policy.NewEnforcer()
-				result := enforcer.Enforce(jobDef.Capabilities, compInst.Policies)
-				if !result.Allowed {
-					jobInst.Skipped = true
-					jobInst.SkipReason = result.Reason
-				}
-				if result.RequiresApproval {
-					jobInst.RequiresApproval = true
-				}
+				DependsOn:   make([]string, 0),
 			}
 
 			resolvedSteps := applyStepOverrides(jobDef.Steps, compInst.StepOverrides)
 
 			// Render steps with template variables
-			renderedSteps, err := jp.renderSteps(resolvedSteps, compInst, context)
+			renderedSteps, err := jp.renderSteps(resolvedSteps, compInst)
 			if err != nil {
 				return nil, fmt.Errorf("failed to render steps for job %s: %w", jobID, err)
 			}
@@ -122,11 +91,23 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 }
 
 // Templates are cached to avoid re-parsing identical steps across multiple instances
-func (jp *JobPlanner) renderSteps(steps []model.Step, compInst *model.ComponentInstance, context map[string]interface{}) ([]model.RenderedStep, error) {
+func (jp *JobPlanner) renderSteps(steps []model.Step, compInst *model.ComponentInstance) ([]model.RenderedStep, error) {
 	rendered := make([]model.RenderedStep, 0, len(steps))
 	sortedSteps, err := sortStepsByPhaseAndOrder(steps)
 	if err != nil {
 		return nil, err
+	}
+
+	// Build template context once
+	context := map[string]interface{}{
+		"Component":   compInst.ComponentName,
+		"Environment": compInst.Environment,
+		"Type":        compInst.Type,
+	}
+
+	// Add all inputs to context
+	for k, v := range compInst.Inputs {
+		context[k] = v
 	}
 
 	for _, step := range sortedSteps {
@@ -155,19 +136,6 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, compInst *model.ComponentI
 			return nil, err
 		}
 
-		var skipped bool
-		var skipReason string
-		if step.When != "" {
-			renderedWhen, err := jp.renderTemplateString(compInst.Type, step.Name, "when", step.When, context)
-			if err != nil {
-				return nil, err
-			}
-			if !isTruthy(renderedWhen) {
-				skipped = true
-				skipReason = fmt.Sprintf("when condition evaluated to %q", renderedWhen)
-			}
-		}
-
 		rendered = append(rendered, model.RenderedStep{
 			ID:               step.ID,
 			Name:             step.Name,
@@ -182,9 +150,6 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, compInst *model.ComponentI
 			Timeout:          step.Timeout,
 			Retry:            step.Retry,
 			OnFailure:        step.OnFailure,
-			When:             step.When,
-			Skipped:          skipped,
-			SkipReason:       skipReason,
 		})
 	}
 
@@ -283,29 +248,6 @@ func phaseRank(phase string) int {
 		return 2
 	default:
 		return 99
-	}
-}
-
-func (jp *JobPlanner) buildTemplateContext(compInst *model.ComponentInstance) map[string]interface{} {
-	context := map[string]interface{}{
-		"Component":   compInst.ComponentName,
-		"Environment": compInst.Environment,
-		"Type":        compInst.Type,
-		"controls":    compInst.Controls,
-	}
-	for k, v := range compInst.Inputs {
-		context[k] = v
-	}
-	return context
-}
-
-func isTruthy(value string) bool {
-	v := strings.TrimSpace(strings.ToLower(value))
-	switch v {
-	case "true", "1", "yes":
-		return true
-	default:
-		return false
 	}
 }
 

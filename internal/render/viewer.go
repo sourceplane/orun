@@ -123,12 +123,6 @@ func (pv *PlanViewer) ViewDAG() string {
 
 				// Show job with composition and registry info
 				jobLine := fmt.Sprintf("%s%s", jobPrefix, job.Name)
-				if job.Skipped {
-					jobLine += " " + ui.Dim(pv.color, "[SKIP]")
-				}
-				if job.RequiresApproval {
-					jobLine += " " + ui.Cyan(pv.color, "[APPROVAL]")
-				}
 				if job.Timeout != "" {
 					jobLine += fmt.Sprintf(" [%s]", job.Timeout)
 				}
@@ -164,9 +158,8 @@ func (pv *PlanViewer) ViewDAG() string {
 						}
 
 						stepLine := fmt.Sprintf("%s%s", stepPrefix, step.Name)
-						if step.Skipped {
-							stepLine += " " + ui.Dim(pv.color, "[SKIP]")
-						} else if step.Run != "" {
+						if step.Run != "" {
+							// Truncate long run commands for readability
 							runCmd := step.Run
 							if len(runCmd) > 60 {
 								runCmd = runCmd[:57] + "..."
@@ -243,14 +236,7 @@ func (pv *PlanViewer) ViewByComponent(componentName string) string {
 				connector = "│   "
 			}
 
-			jobLine := fmt.Sprintf("%s%s", prefix, job.Name)
-			if job.Skipped {
-				jobLine += " " + ui.Dim(pv.color, "[SKIP]")
-			}
-			if job.RequiresApproval {
-				jobLine += " " + ui.Cyan(pv.color, "[APPROVAL]")
-			}
-			sb.WriteString(jobLine + "\n")
+			sb.WriteString(fmt.Sprintf("%s%s\n", prefix, job.Name))
 			if job.JobRegistry != "" {
 				sb.WriteString(fmt.Sprintf("%s  registry: %s\n", connector, job.JobRegistry))
 			}
@@ -278,26 +264,19 @@ func (pv *PlanViewer) ViewByComponent(componentName string) string {
 					if j == len(job.Steps)-1 {
 						stepPrefix = "└─ "
 					}
-					sb.WriteString(fmt.Sprintf("%s    %s%s", connector, stepPrefix, step.Name))
-					if step.Skipped {
-						sb.WriteString(" " + ui.Dim(pv.color, "[SKIP]"))
-						sb.WriteString("\n")
-					} else if step.Run != "" {
+					sb.WriteString(fmt.Sprintf("%s    %s%s\n", connector, stepPrefix, step.Name))
+					if step.Run != "" {
 						runCmd := step.Run
 						if len(runCmd) > 70 {
 							runCmd = runCmd[:67] + "..."
 						}
-						sb.WriteString("\n")
 						sb.WriteString(fmt.Sprintf("%s    %s   run: %s\n", connector, "   ", runCmd))
 					} else if step.Use != "" {
 						useRef := step.Use
 						if len(useRef) > 70 {
 							useRef = useRef[:67] + "..."
 						}
-						sb.WriteString("\n")
 						sb.WriteString(fmt.Sprintf("%s    %s   use: %s\n", connector, "   ", useRef))
-					} else {
-						sb.WriteString("\n")
 					}
 				}
 			}

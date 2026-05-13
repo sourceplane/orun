@@ -13,7 +13,6 @@ The root `orun` command is the entry point for planning, inspection, and executi
 | `orun auth` | Manage the local Orun CLI session for remote state |
 | `orun cloud` | Link the current GitHub repo for local remote-state runs |
 | `orun backend` | Provision, inspect, and remove a self-hosted Orun backend on Cloudflare |
-| `orun fetch` | Download a composition package from an OCI registry to a local directory |
 | `orun status` | Show execution status for the latest or a specific execution |
 | `orun logs` | Stream or filter per-step logs from an execution |
 | `orun get` | List resources: `plans`, `runs`, `jobs`, `components`, `environments` |

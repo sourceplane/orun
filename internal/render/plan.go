@@ -72,41 +72,25 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 		}
 
 		planJob := model.PlanJob{
-			ID:               job.ID,
-			Name:             job.Name,
-			Component:        job.Component,
-			Environment:      job.Environment,
-			Composition:      job.Composition,
-			JobRegistry:      registryName,
-			Job:              job.Name, // The specific job name from the registry
-			RunsOn:           job.RunsOn,
-			Path:             job.Path,
-			Steps:            r.convertSteps(job.Steps),
-			DependsOn:        job.DependsOn,
-			Timeout:          job.Timeout,
-			Retries:          job.Retries,
-			Env:              job.Config, // Single source: Config
-			Labels:           job.Labels,
-			Config:           job.Config,
-			Controls:         job.Controls,
-			ResolvedProfile:  job.ResolvedProfile,
-			TriggerBinding:   job.ResolvedTriggerBinding,
-			Skipped:          job.Skipped,
-			SkipReason:       job.SkipReason,
-			RequiresApproval: job.RequiresApproval,
+			ID:          job.ID,
+			Name:        job.Name,
+			Component:   job.Component,
+			Environment: job.Environment,
+			Composition: job.Composition,
+			JobRegistry: registryName,
+			Job:         job.Name, // The specific job name from the registry
+			RunsOn:      job.RunsOn,
+			Path:        job.Path,
+			Steps:       r.convertSteps(job.Steps),
+			DependsOn:   job.DependsOn,
+			Timeout:     job.Timeout,
+			Retries:     job.Retries,
+			Env:         job.Config, // Single source: Config
+			Labels:      job.Labels,
+			Config:      job.Config,
 		}
 
 		plan.Jobs = append(plan.Jobs, planJob)
-
-		if job.Skipped {
-			plan.SkippedJobs = append(plan.SkippedJobs, model.SkippedJob{
-				ID:          job.ID,
-				Component:   job.Component,
-				Environment: job.Environment,
-				Job:         job.Name,
-				Reason:      job.SkipReason,
-			})
-		}
 	}
 
 	r.attachChecksum(plan)
@@ -137,9 +121,6 @@ func (r *Renderer) convertSteps(steps []model.RenderedStep) []model.PlanStep {
 			Timeout:          step.Timeout,
 			Retry:            step.Retry,
 			OnFailure:        step.OnFailure,
-			When:             step.When,
-			Skipped:          step.Skipped,
-			SkipReason:       step.SkipReason,
 		}
 	}
 	return planSteps

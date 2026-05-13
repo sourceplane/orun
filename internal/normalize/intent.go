@@ -17,8 +17,6 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 	// Initialize normalized intent
 	normalized := &model.NormalizedIntent{
 		Metadata:       intent.Metadata,
-		Execution:      intent.Execution,
-		Automation:     intent.Automation,
 		Groups:         intent.Groups,
 		Environments:   intent.Environments,
 		Components:     make(map[string]model.Component),
@@ -52,11 +50,6 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 		}
 		if comp.Subscribe.Environments == nil {
 			comp.Subscribe.Environments = []string{}
-		}
-		if len(comp.Subscribe.Entries) == 0 && len(comp.Subscribe.Environments) > 0 {
-			comp.Subscribe.Entries = []model.SubscriptionEntry{
-				{Environments: comp.Subscribe.Environments},
-			}
 		}
 		if comp.DependsOn == nil {
 			comp.DependsOn = []model.Dependency{}
@@ -109,50 +102,6 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 	}
 
 	return normalized, nil
-}
-
-// StackResources holds resources loaded from stack packages.
-type StackResources struct {
-	Profiles        map[string]model.ExecutionProfile
-	Triggers        []model.AutomationTrigger
-	TriggerBindings []model.AutomationTrigger
-	OverridePolicy  *model.StackOverridePolicySpec
-}
-
-// MergeStackResources merges stack-provided profiles, triggers, and override policy
-// into the normalized intent. Stack profiles serve as defaults; intent profiles override.
-// Stack triggers are appended after intent triggers (intent triggers match first).
-func MergeStackResources(normalized *model.NormalizedIntent, resources *StackResources) {
-	if resources == nil {
-		return
-	}
-
-	// Merge profiles: stack profiles are base, intent profiles overlay
-	if len(resources.Profiles) > 0 {
-		if normalized.Execution.Profiles == nil {
-			normalized.Execution.Profiles = make(map[string]model.ExecutionProfile)
-		}
-		for name, stackProfile := range resources.Profiles {
-			if _, exists := normalized.Execution.Profiles[name]; !exists {
-				normalized.Execution.Profiles[name] = stackProfile
-			}
-		}
-	}
-
-	// Merge triggers: intent triggers come first (first-match-wins), stack triggers appended
-	if len(resources.Triggers) > 0 {
-		normalized.Automation.Triggers = append(normalized.Automation.Triggers, resources.Triggers...)
-	}
-
-	// Merge new-style trigger bindings (no profile ref)
-	if len(resources.TriggerBindings) > 0 {
-		normalized.Automation.TriggerBindings = append(normalized.Automation.TriggerBindings, resources.TriggerBindings...)
-	}
-
-	// Store override policy for later enforcement
-	if resources.OverridePolicy != nil {
-		normalized.OverridePolicy = resources.OverridePolicy
-	}
 }
 
 // contains checks if a slice contains a string

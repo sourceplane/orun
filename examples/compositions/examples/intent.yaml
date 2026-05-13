@@ -2,33 +2,16 @@ apiVersion: sourceplane.io/v1
 kind: Intent
 metadata:
   name: example-platform
-  description: Example intent showing how to consume the example-platform-compositions stack from OCI.
-
+  description: Example intent showing how to consume the example-platform-compositions stack.
 compositions:
   sources:
     - name: example-platform
       kind: oci
       ref: ghcr.io/sourceplane/example-platform-compositions:latest
-
 discovery:
   roots:
     - apps/
-
 environments:
   development:
-    execution:
-      profile: verify
-      profiles:
-        cloudflare-worker: verify
-        cloudflare-pages: verify
     defaults:
-      lane: dev
-
-  production:
-    execution:
-      profile: deploy
-      profiles:
-        cloudflare-worker: deploy
-        cloudflare-pages: deploy
-    defaults:
-      lane: prod
+      lane: dry-run

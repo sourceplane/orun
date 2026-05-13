@@ -47,14 +47,11 @@ type CompositionDocument struct {
 
 // CompositionDocumentSpec is the portable contract for one composition type.
 type CompositionDocumentSpec struct {
-	Type            string                 `yaml:"type" json:"type"`
-	Description     string                 `yaml:"description,omitempty" json:"description,omitempty"`
-	DefaultJob      string                 `yaml:"defaultJob" json:"defaultJob"`
-	DefaultProfile  string                 `yaml:"defaultProfile,omitempty" json:"defaultProfile,omitempty"`
-	InputSchema     map[string]interface{} `yaml:"inputSchema,omitempty" json:"inputSchema,omitempty"`
-	ControlSchema   map[string]interface{} `yaml:"controlSchema,omitempty" json:"controlSchema,omitempty"`
-	ControlDefaults map[string]interface{} `yaml:"controlDefaults,omitempty" json:"controlDefaults,omitempty"`
-	Jobs            []JobSpec              `yaml:"jobs" json:"jobs"`
+	Type        string                 `yaml:"type" json:"type"`
+	Description string                 `yaml:"description,omitempty" json:"description,omitempty"`
+	DefaultJob  string                 `yaml:"defaultJob" json:"defaultJob"`
+	InputSchema map[string]interface{} `yaml:"inputSchema,omitempty" json:"inputSchema,omitempty"`
+	Jobs        []JobSpec              `yaml:"jobs" json:"jobs"`
 }
 
 // CompositionPackage is the package manifest at the root of a composition package.
@@ -123,16 +120,7 @@ type StackRegistry struct {
 // When Compositions is empty the packager auto-discovers every compositions.yaml
 // found by walking the directory that contains stack.yaml.
 type StackSpec struct {
-	Compositions   []StackCompositionEntry `yaml:"compositions,omitempty" json:"compositions,omitempty"`
-	Profiles       []StackExportEntry      `yaml:"profiles,omitempty" json:"profiles,omitempty"`
-	Triggers       []StackExportEntry      `yaml:"triggers,omitempty" json:"triggers,omitempty"`
-	OverridePolicy *StackExportEntry       `yaml:"overridePolicy,omitempty" json:"overridePolicy,omitempty"`
-}
-
-// StackExportEntry is a named path reference to a resource file within the stack.
-type StackExportEntry struct {
-	Name string `yaml:"name" json:"name"`
-	Path string `yaml:"path" json:"path"`
+	Compositions []StackCompositionEntry `yaml:"compositions,omitempty" json:"compositions,omitempty"`
 }
 
 // StackCompositionEntry is a path reference to a compositions.yaml within the stack.

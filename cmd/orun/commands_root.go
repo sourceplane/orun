@@ -6,9 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sourceplane/orun/internal/ci"
 	"github.com/sourceplane/orun/internal/discovery"
-	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/spf13/cobra"
@@ -52,14 +50,6 @@ var (
 	compositionPackageRoot   string
 	compositionPackageOutput string
 	explainChanged           bool
-	triggerName              string
-	profileName              string
-	fromCI                   string
-	eventFile                string
-
-	// buildEventCtx builds a CI event context. Defaults to ci.BuildEventContext
-	// with os.Getenv/os.ReadFile. Tests override this to inject fake CI environments.
-	buildEventCtx func(getenv func(string) string, readFile func(string) ([]byte, error)) *model.EventContext
 )
 
 var rootCmd = &cobra.Command{
@@ -173,8 +163,6 @@ func commandUsesIntent(cmd *cobra.Command) bool {
 }
 
 func init() {
-	buildEventCtx = ci.BuildEventContext
-
 	rootCmd.SetVersionTemplate(cliName + " version {{.Version}}\n")
 	rootCmd.PersistentFlags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path (auto-discovered if not set)")
 	rootCmd.PersistentFlags().StringVarP(&configDir, "config-dir", "c", "", fmt.Sprintf("Config directory for JobRegistry definitions (or set %s; use * or ** for recursive scanning)", configDirEnvVar))

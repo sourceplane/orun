@@ -96,11 +96,6 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().BoolVar(&runRemoteState, "remote-state", false, "Use orun-backend for distributed run coordination (sets ORUN_REMOTE_STATE=true)")
 	runCmd.Flags().StringVar(&runBackendURL, "backend-url", "", "orun-backend URL for remote state (or set ORUN_BACKEND_URL)")
 
-	runCmd.Flags().StringVar(&triggerName, "trigger", "", "Named trigger from intent automation section")
-	runCmd.Flags().StringVar(&profileName, "profile", "", "Select execution profile directly")
-	runCmd.Flags().StringVar(&fromCI, "from-ci", "", "Auto-detect CI event and match triggers")
-	runCmd.Flags().StringVar(&eventFile, "event-file", "", "Path to JSON event context file")
-
 	_ = runCmd.Flags().MarkDeprecated("job-id", "use --job instead")
 }
 

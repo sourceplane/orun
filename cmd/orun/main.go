@@ -16,7 +16,6 @@ import (
 	"github.com/sourceplane/orun/internal/planner"
 	"github.com/sourceplane/orun/internal/render"
 	"github.com/sourceplane/orun/internal/state"
-	"github.com/sourceplane/orun/internal/trigger"
 	"github.com/sourceplane/orun/internal/ui"
 )
 
@@ -64,20 +63,6 @@ func generatePlan() error {
 		return fmt.Errorf("failed to normalize intent: %w", err)
 	}
 
-	// Merge stack-provided resources (profiles, triggers, override policy)
-	stackResources := &normalize.StackResources{
-		Profiles:        compositionRegistry.Profiles,
-		Triggers:        compositionRegistry.Triggers,
-		TriggerBindings: compositionRegistry.TriggerBindings,
-		OverridePolicy:  compositionRegistry.OverridePolicy,
-	}
-	normalize.MergeStackResources(normalized, stackResources)
-
-	// Enforce override policy
-	if err := normalize.EnforceOverridePolicy(intent, normalized.OverridePolicy, compositionRegistry.Profiles); err != nil {
-		return err
-	}
-
 	if debugMode {
 		fmt.Println("□ Validating components against composition schemas...")
 	}
@@ -85,72 +70,13 @@ func generatePlan() error {
 		return fmt.Errorf("component validation failed: %w", err)
 	}
 
-	// Resolve trigger / profile
-	resolvedProfile, resolvedTrigger, err := resolveTriggerAndProfile(normalized)
-	if err != nil {
-		return err
-	}
-
-	// If profile defines scope: changed, imply --changed
-	if resolvedProfile != "" {
-		if profile, ok := normalized.Execution.Profiles[resolvedProfile]; ok {
-			if strings.EqualFold(profile.Plan.Scope, "changed") && !changedOnly {
-				changedOnly = true
-			}
-		}
-	}
-
 	if debugMode {
 		fmt.Println("□ Expanding (env × component)...")
 	}
-	controlDefaults := make(map[string]map[string]interface{})
-	compositionDefProfiles := make(map[string]string)
-	for _, composition := range compositionRegistry.Types {
-		if composition.ControlDefaults != nil {
-			controlDefaults[composition.Name] = composition.ControlDefaults
-		}
-		if composition.DefaultProfile != "" {
-			compositionDefProfiles[composition.Name] = composition.DefaultProfile
-		}
-	}
-
-	allProfiles := make(map[string]model.ExecutionProfile)
-	for name, p := range normalized.Execution.Profiles {
-		allProfiles[name] = p
-	}
-	for name, p := range compositionRegistry.Profiles {
-		if _, exists := allProfiles[name]; !exists {
-			allProfiles[name] = p
-		}
-	}
-
-	expander := expand.NewExpander(normalized, controlDefaults, allProfiles, compositionDefProfiles)
+	expander := expand.NewExpander(normalized)
 	instances, err := expander.Expand()
 	if err != nil {
 		return fmt.Errorf("failed to expand intent: %w", err)
-	}
-
-	// Validate controls against composition controlSchemas
-	for _, envInstances := range instances {
-		for _, inst := range envInstances {
-			comp := normalized.ComponentIndex[inst.ComponentName]
-			if err := compositionRegistry.ValidateControlsForComponent(&comp, inst.Controls); err != nil {
-				return fmt.Errorf("control validation failed: %w", err)
-			}
-		}
-	}
-
-	// Filter environments by resolved profile
-	if resolvedProfile != "" {
-		filtered := make(map[string][]*model.ComponentInstance)
-		for envName, envInsts := range instances {
-			if env, ok := normalized.Environments[envName]; ok {
-				if env.Execution.Profile == resolvedProfile {
-					filtered[envName] = envInsts
-				}
-			}
-		}
-		instances = filtered
 	}
 
 	// Filter by --env flag
@@ -269,14 +195,6 @@ func generatePlan() error {
 	plan := renderer.RenderPlanWithOrder(intent.Metadata, jobInstances, jobBindings, sorted)
 	plan.Spec.CompositionSources = compositionRegistry.Sources
 
-	// Annotate plan metadata with trigger/profile
-	if resolvedProfile != "" {
-		plan.Metadata.Profile = resolvedProfile
-	}
-	if resolvedTrigger != "" {
-		plan.Metadata.Trigger = resolvedTrigger
-	}
-
 	// Embed the intent directory as a workspace-relative path so that
 	// orun run can resolve component paths correctly when auto-discovery
 	// cannot walk up to find the intent (e.g. intent in a repo subdirectory).
@@ -344,16 +262,6 @@ func generatePlan() error {
 			label += fmt.Sprintf(" (+%d more)", len(compNames)-maxShow)
 		}
 		fmt.Printf("  %s components: %s\n", ui.Dim(color, "│"), label)
-	}
-	if len(plan.SkippedJobs) > 0 {
-		fmt.Printf("  %s skipped: %s\n", ui.Dim(color, "│"), ui.Dim(color, fmt.Sprintf("%d jobs", len(plan.SkippedJobs))))
-	}
-	if resolvedProfile != "" {
-		profileLabel := resolvedProfile
-		if resolvedTrigger != "" {
-			profileLabel += fmt.Sprintf(" (trigger: %s)", resolvedTrigger)
-		}
-		fmt.Printf("  %s profile: %s\n", ui.Dim(color, "│"), ui.Cyan(color, profileLabel))
 	}
 	if changedOnly {
 		fmt.Printf("  %s mode: %s\n", ui.Dim(color, "│"), ui.Cyan(color, "changed-only"))
@@ -822,17 +730,6 @@ func printCIDetectionBanner(detected ci.DetectedRefs) {
 	)
 }
 
-func printAutoDetectBanner(event *model.EventContext, triggerName, profile string) {
-	color := ui.ColorEnabledForWriter(os.Stderr)
-	fmt.Fprintf(os.Stderr, "%s %s/%s (action=%s) %s trigger=%s, profile=%s\n",
-		ui.Cyan(color, "auto:"),
-		event.Provider, event.Event, event.Action,
-		ui.Dim(color, "→"),
-		ui.Bold(color, triggerName),
-		ui.Bold(color, profile),
-	)
-}
-
 func printExplainInfo(detected ci.DetectedRefs, explicitBase, explicitHead string) {
 	color := ui.ColorEnabledForWriter(os.Stderr)
 	fmt.Fprintf(os.Stderr, "\n%s --changed ref resolution\n", ui.Bold(color, "explain:"))
@@ -1027,96 +924,4 @@ func matchesAnyFilter(value string, filters []string) bool {
 		}
 	}
 	return false
-}
-
-// resolveTriggerAndProfile resolves the execution profile from CLI flags.
-// Returns (profileName, triggerName, error). Both may be empty when no
-// trigger/profile flags are set (backward-compat: process all environments).
-func resolveTriggerAndProfile(normalized *model.NormalizedIntent) (string, string, error) {
-	sources := 0
-	if profileName != "" {
-		sources++
-	}
-	if triggerName != "" {
-		sources++
-	}
-	if fromCI != "" || eventFile != "" {
-		sources++
-	}
-	if sources > 1 {
-		return "", "", fmt.Errorf("--profile, --trigger, and --from-ci/--event-file are mutually exclusive")
-	}
-
-	if profileName != "" {
-		if _, ok := normalized.Execution.Profiles[profileName]; !ok {
-			return "", "", fmt.Errorf("execution profile %q not found in intent", profileName)
-		}
-		return profileName, "", nil
-	}
-
-	if triggerName != "" {
-		result := trigger.MatchAllByName(normalized.Automation.Triggers, normalized.Automation.TriggerBindings, triggerName)
-		if result == nil {
-			return "", "", fmt.Errorf("trigger %q not found in intent automation section", triggerName)
-		}
-		if result.Profile != "" {
-			if _, ok := normalized.Execution.Profiles[result.Profile]; !ok {
-				return "", "", fmt.Errorf("trigger %q references profile %q which is not defined", triggerName, result.Profile)
-			}
-		}
-		return result.Profile, triggerName, nil
-	}
-
-	if fromCI != "" || eventFile != "" {
-		var eventCtx *model.EventContext
-		if eventFile != "" {
-			var err error
-			eventCtx, err = ci.LoadEventContextFromFile(eventFile)
-			if err != nil {
-				return "", "", fmt.Errorf("failed to load event file %s: %w", eventFile, err)
-			}
-		} else {
-			eventCtx = buildEventCtx(os.Getenv, os.ReadFile)
-			if eventCtx == nil {
-				return "", "", fmt.Errorf("--from-ci: no CI environment detected")
-			}
-		}
-
-		if len(normalized.Automation.Triggers) == 0 && len(normalized.Automation.TriggerBindings) == 0 {
-			return "", "", fmt.Errorf("no automation triggers defined in intent")
-		}
-
-		result := trigger.MatchAll(normalized.Automation.Triggers, normalized.Automation.TriggerBindings, eventCtx)
-		if result == nil {
-			return "", "", fmt.Errorf("no trigger matched event %s/%s (branch=%s, ref=%s)",
-				eventCtx.Provider, eventCtx.Event, eventCtx.Branch, eventCtx.Ref)
-		}
-		if result.Profile != "" {
-			if _, ok := normalized.Execution.Profiles[result.Profile]; !ok {
-				return "", "", fmt.Errorf("trigger %q references profile %q which is not defined",
-					result.Trigger.Name, result.Profile)
-			}
-		}
-		return result.Profile, result.Trigger.Name, nil
-	}
-
-	// Auto-detect: when automation triggers are defined and we're inside a CI
-	// environment, build an EventContext and try to match a trigger. This lets
-	// `orun plan` work inside GitHub Actions / GitLab CI / Buildkite without
-	// requiring --from-ci, --trigger, or --profile.
-	if len(normalized.Automation.Triggers) > 0 || len(normalized.Automation.TriggerBindings) > 0 {
-		eventCtx := buildEventCtx(os.Getenv, os.ReadFile)
-		if eventCtx != nil {
-			result := trigger.MatchAll(normalized.Automation.Triggers, normalized.Automation.TriggerBindings, eventCtx)
-			if result != nil {
-				_, profileDefined := normalized.Execution.Profiles[result.Profile]
-				if result.Profile == "" || profileDefined {
-					printAutoDetectBanner(eventCtx, result.Trigger.Name, result.Profile)
-					return result.Profile, result.Trigger.Name, nil
-				}
-			}
-		}
-	}
-
-	return "", "", nil
 }

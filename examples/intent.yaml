@@ -21,162 +21,38 @@ discovery:
     - packages/
     - website/
 
-execution:
-  profiles:
-    dry-run:
-      description: Fast PR validation — non-mutating checks only
-      compositionRef: terraform
-      plan:
-        scope: changed
-      controls:
-        terraform:
-          fmt:
-            enabled: true
-          init:
-            enabled: true
-            backend: false
-          validate:
-            enabled: true
-          plan:
-            enabled: false
-          apply:
-            enabled: false
-
-    verify:
-      description: Merge verification with plan generation
-      compositionRef: terraform
-      plan:
-        scope: changed
-      controls:
-        terraform:
-          fmt:
-            enabled: true
-          init:
-            enabled: true
-            backend: true
-          validate:
-            enabled: true
-          plan:
-            enabled: true
-          apply:
-            enabled: false
-
-    release:
-      description: Release-grade execution
-      compositionRef: terraform
-      plan:
-        scope: full
-      controls:
-        terraform:
-          fmt:
-            enabled: true
-          init:
-            enabled: true
-            backend: true
-          validate:
-            enabled: true
-          plan:
-            enabled: true
-          apply:
-            enabled: false
-
-automation:
-  triggers:
-    - name: github-push-main
-      on:
-        provider: github
-        event: push
-        branches:
-          - main
-      plan:
-        profile: verify
-
-    - name: github-tag-release
-      on:
-        provider: github
-        event: push
-        tags:
-          - "v*"
-      plan:
-        profile: release
-        scope: full
-
-  triggerBindings:
-    - name: github-pull-request
-      on:
-        provider: github
-        event: pull_request
-        actions:
-          - opened
-          - synchronize
-          - reopened
-          - ready_for_review
-      plan:
-        scope: changed
-        base: main
-
 environments:
   dev:
-    execution:
-      profile: dry-run
-      profiles:
-        cloudflare-worker: verify
-        cloudflare-pages: verify
-        turbo-package: verify
     defaults:
+      lane: dry-run
       namespacePrefix: dev-
     policies:
       requireApproval: "false"
 
   development:
-    execution:
-      profile: dry-run
-      profiles:
-        cloudflare-worker: verify
-        cloudflare-pages: verify
-        turbo-package: verify
     defaults:
+      lane: dry-run
       namespacePrefix: dev-
     policies:
       requireApproval: "false"
 
   preview:
-    execution:
-      profile: verify
-      profiles:
-        cloudflare-worker: verify
-        cloudflare-pages: verify
     defaults:
+      lane: verify
       namespacePrefix: preview-
     policies:
       requireApproval: "false"
 
   staging:
-    execution:
-      profile: verify
-      profiles:
-        cloudflare-worker: verify
-        cloudflare-pages: verify
     defaults:
+      lane: verify
       namespacePrefix: stg-
     policies:
       requireApproval: "true"
 
   production:
-    execution:
-      profile: release
-      profiles:
-        cloudflare-worker: deploy
-        cloudflare-worker-turbo: deploy
-        cloudflare-pages: deploy
-        cloudflare-pages-turbo: deploy
-        cloudflare-pages-terraform: deploy
-        cloudflare-pages-turbo-terraform: deploy
     defaults:
+      lane: release
       namespacePrefix: prod-
     policies:
       requireApproval: "true"
-      requireSignedPlan: "true"
-      approvalRequiredCapabilities:
-        - terraform.apply
-        - mutation.infra

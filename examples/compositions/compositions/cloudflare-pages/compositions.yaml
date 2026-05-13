@@ -6,28 +6,6 @@ spec:
   type: cloudflare-pages
   description: Build static site assets and direct-upload them to Cloudflare Pages with Wrangler
   defaultJob: verify-deploy-cloudflare-pages
-  defaultProfile: verify
-  controlSchema:
-    $schema: http://json-schema.org/draft-07/schema#
-    title: Cloudflare Pages Execution Controls
-    type: object
-    properties:
-      build:
-        type: object
-        properties:
-          enabled:
-            type: boolean
-      deploy:
-        type: object
-        properties:
-          enabled:
-            type: boolean
-    additionalProperties: false
-  controlDefaults:
-    build:
-      enabled: true
-    deploy:
-      enabled: false
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Cloudflare Pages Direct Upload Component
@@ -100,7 +78,6 @@ spec:
             {{.installCommand}}
           onFailure: stop
         - name: build-site
-          when: "{{(index .controls \"build\").enabled}}"
           shell: bash
           run: |
             cd "{{.siteDir}}"
@@ -114,7 +91,6 @@ spec:
             find "{{.outputDir}}" -maxdepth 2 -type f | head -n 20
           onFailure: stop
         - name: ensure-pages-project
-          when: "{{(index .controls \"deploy\").enabled}}"
           shell: bash
           run: |
             if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
@@ -153,7 +129,6 @@ spec:
               "${api_root}/{{.projectName}}" >/dev/null
           onFailure: stop
         - name: deploy-pages-artifact
-          when: "{{(index .controls \"deploy\").enabled}}"
           shell: bash
           run: |
             if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
