@@ -24,6 +24,9 @@ components:
     inputs:
       stackName: network
       terraformDir: infra/network
+    subscribe:
+      - environments: [dev, staging, production]
+
   - name: compute
     type: terraform
     domain: foundation
@@ -33,6 +36,10 @@ components:
       terraformDir: infra/compute
     dependsOn:
       - component: network
+    subscribe:
+      - environments: [dev, staging]
+      - environments: [production]
+        profile: release
 
 environments:
   dev:

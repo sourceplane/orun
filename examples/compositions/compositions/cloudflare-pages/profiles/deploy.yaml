@@ -1,0 +1,14 @@
+apiVersion: sourceplane.io/v1
+kind: ExecutionProfile
+metadata:
+  name: deploy
+spec:
+  description: Build and deploy to Cloudflare Pages
+  plan:
+    scope: full
+  controls:
+    cloudflare-pages:
+      build:
+        enabled: true
+      deploy:
+        enabled: true

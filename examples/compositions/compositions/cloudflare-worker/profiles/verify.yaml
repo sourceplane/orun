@@ -1,0 +1,16 @@
+apiVersion: sourceplane.io/v1
+kind: ExecutionProfile
+metadata:
+  name: verify
+spec:
+  description: Build and typecheck only — no deployment
+  plan:
+    scope: changed
+  controls:
+    cloudflare-worker:
+      build:
+        enabled: true
+      typecheck:
+        enabled: true
+      deploy:
+        enabled: false

@@ -6,6 +6,7 @@ spec:
   type: terraform
   description: Terraform validation jobs for infra components
   defaultJob: validate-terraform
+  defaultProfile: validate
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Terraform Stack Component

@@ -1,0 +1,14 @@
+apiVersion: sourceplane.io/v1
+kind: ExecutionProfile
+metadata:
+  name: verify
+spec:
+  description: Build and verify output only — no Cloudflare deployment
+  plan:
+    scope: changed
+  controls:
+    cloudflare-pages:
+      build:
+        enabled: true
+      deploy:
+        enabled: false

@@ -1,0 +1,8 @@
+apiVersion: sourceplane.io/v1
+kind: ExecutionProfile
+metadata:
+  name: smoke
+spec:
+  description: Workspace provider smoke verification
+  plan:
+    scope: full

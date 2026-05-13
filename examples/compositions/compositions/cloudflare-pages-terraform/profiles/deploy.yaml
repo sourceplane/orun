@@ -1,0 +1,15 @@
+apiVersion: sourceplane.io/v1
+kind: ExecutionProfile
+metadata:
+  name: deploy
+spec:
+  description: Build site and apply Terraform to reconcile Cloudflare Pages project
+  plan:
+    scope: full
+  controls:
+    cloudflare-pages-terraform:
+      build:
+        enabled: true
+      terraform:
+        plan: true
+        apply: true

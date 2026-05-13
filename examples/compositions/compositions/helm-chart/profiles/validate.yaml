@@ -1,0 +1,14 @@
+apiVersion: sourceplane.io/v1
+kind: ExecutionProfile
+metadata:
+  name: validate
+spec:
+  description: Lint and template Helm charts
+  plan:
+    scope: changed
+  controls:
+    helm-chart:
+      lint:
+        enabled: true
+      template:
+        enabled: true

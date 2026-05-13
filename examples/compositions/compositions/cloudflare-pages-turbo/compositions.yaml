@@ -6,6 +6,28 @@ spec:
   type: cloudflare-pages-turbo
   description: Build a static app with Turbo and direct-upload it to Cloudflare Pages
   defaultJob: verify-deploy-cloudflare-pages-turbo
+  defaultProfile: verify
+  controlSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Cloudflare Pages Turbo Execution Controls
+    type: object
+    properties:
+      build:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+      deploy:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+    additionalProperties: false
+  controlDefaults:
+    build:
+      enabled: true
+    deploy:
+      enabled: false
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Cloudflare Pages Turbo Component
@@ -90,6 +112,7 @@ spec:
           run: test -f package.json
           onFailure: stop
         - name: build-pages-app
+          when: "{{(index .controls \"build\").enabled}}"
           run: "{{if .buildCommand}}{{.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
           onFailure: stop
         - name: verify-build-output
@@ -99,6 +122,7 @@ spec:
             find "{{.outputDir}}" -maxdepth 2 -type f | head -n 20
           onFailure: stop
         - name: ensure-pages-project
+          when: "{{(index .controls \"deploy\").enabled}}"
           shell: bash
           run: |
             if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
@@ -137,6 +161,7 @@ spec:
               "${api_root}/{{.projectName}}" >/dev/null
           onFailure: stop
         - name: deploy-pages-artifact
+          when: "{{(index .controls \"deploy\").enabled}}"
           shell: bash
           run: |
             if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
