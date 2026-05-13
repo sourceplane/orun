@@ -1,0 +1,29 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: cloudflare-pages-terraform
+spec:
+  type: cloudflare-pages-terraform
+  description: Cloudflare Pages deployment managed with Terraform
+
+  schemaRef:
+    name: cloudflare-pages-terraform-component
+
+  defaultJob: verify-reconcile
+  defaultProfile: verify
+
+  jobs:
+    - name: verify-reconcile
+      templateRef:
+        name: cloudflare-pages-terraform-verify-reconcile
+
+  profiles:
+    - name: pull-request
+      profileRef:
+        name: cloudflare-pages-terraform-pull-request
+    - name: verify
+      profileRef:
+        name: cloudflare-pages-terraform-verify
+    - name: release
+      profileRef:
+        name: cloudflare-pages-terraform-release

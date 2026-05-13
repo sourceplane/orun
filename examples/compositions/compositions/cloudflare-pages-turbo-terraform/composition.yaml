@@ -1,0 +1,29 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: cloudflare-pages-turbo-terraform
+spec:
+  type: cloudflare-pages-turbo-terraform
+  description: Cloudflare Pages deployment using Turbo monorepo builds managed with Terraform
+
+  schemaRef:
+    name: cloudflare-pages-turbo-terraform-component
+
+  defaultJob: verify-reconcile
+  defaultProfile: verify
+
+  jobs:
+    - name: verify-reconcile
+      templateRef:
+        name: cloudflare-pages-turbo-terraform-verify-reconcile
+
+  profiles:
+    - name: pull-request
+      profileRef:
+        name: cloudflare-pages-turbo-terraform-pull-request
+    - name: verify
+      profileRef:
+        name: cloudflare-pages-turbo-terraform-verify
+    - name: release
+      profileRef:
+        name: cloudflare-pages-turbo-terraform-release

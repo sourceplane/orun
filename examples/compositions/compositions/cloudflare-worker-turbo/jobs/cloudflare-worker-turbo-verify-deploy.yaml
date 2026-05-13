@@ -1,0 +1,98 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: JobTemplate
+metadata:
+  name: cloudflare-worker-turbo-verify-deploy
+spec:
+  description: Build, verify, and deploy a Cloudflare Worker in a Turborepo workspace
+  runsOn: ubuntu-22.04
+  timeout: 30m
+  retries: 0
+
+  labels:
+    scope: delivery
+
+  capabilities:
+    - cloudflare-worker-turbo.setup-node
+    - cloudflare-worker-turbo.setup-pnpm
+    - cloudflare-worker-turbo.install
+    - cloudflare-worker-turbo.pre-build
+    - cloudflare-worker-turbo.verify-structure
+    - cloudflare-worker-turbo.build
+    - cloudflare-worker-turbo.typecheck
+    - cloudflare-worker-turbo.deploy
+
+  steps:
+    - id: setup-node
+      name: setup-node
+      capability: cloudflare-worker-turbo.setup-node
+      use: actions/setup-node@v4
+      with:
+        node-version: "{{.nodeVersion}}"
+
+    - id: setup-pnpm
+      name: setup-pnpm
+      capability: cloudflare-worker-turbo.setup-pnpm
+      use: pnpm/action-setup@v4
+      with:
+        version: "{{.pnpmVersion}}"
+
+    - id: install-workspace-dependencies
+      name: install-workspace-dependencies
+      capability: cloudflare-worker-turbo.install
+      run: pnpm install --no-frozen-lockfile
+      onFailure: stop
+
+    - id: pre-build
+      name: pre-build
+      capability: cloudflare-worker-turbo.pre-build
+      shell: bash
+      run: |
+        {{if .preBuildCommand}}
+        {{.preBuildCommand}}
+        {{else}}
+        echo "Skipping pre-build."
+        {{end}}
+      onFailure: stop
+
+    - id: verify-worker-structure
+      name: verify-worker-structure
+      capability: cloudflare-worker-turbo.verify-structure
+      shell: bash
+      run: |
+        test -f package.json
+        test -f wrangler.jsonc
+      onFailure: stop
+
+    - id: build-worker
+      name: build-worker
+      capability: cloudflare-worker-turbo.build
+      run: "{{if .buildCommand}}{{.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
+      onFailure: stop
+
+    - id: typecheck-worker
+      name: typecheck-worker
+      capability: cloudflare-worker-turbo.typecheck
+      run: "{{if .typecheckCommand}}{{.typecheckCommand}}{{else}}pnpm exec turbo run typecheck --filter=./{{end}}"
+      onFailure: stop
+
+    - id: deploy-worker
+      name: deploy-worker
+      capability: cloudflare-worker-turbo.deploy
+      shell: bash
+      run: |
+        if [ "{{.Environment}}" = "dev" ]; then
+          echo "Running wrangler deploy dry-run for {{.Component}} in dev environment."
+          pnpm exec wrangler deploy --dry-run
+          exit 0
+        fi
+
+        if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
+          echo "Skipping Cloudflare Worker deploy for {{.Component}} in {{.Environment}} on ${GITHUB_REF:-local}."
+          exit 0
+        fi
+
+        : "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required for deploy}"
+        : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required for deploy}"
+
+        {{if .deployCommand}}{{.deployCommand}}{{else}}pnpm run deploy{{end}}
+      onFailure: stop

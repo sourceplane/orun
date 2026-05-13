@@ -1,0 +1,88 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: JobTemplate
+metadata:
+  name: cloudflare-worker-verify-deploy
+spec:
+  description: Build, verify, and deploy a Cloudflare Worker
+  runsOn: ubuntu-22.04
+  timeout: 30m
+  retries: 0
+
+  labels:
+    scope: delivery
+
+  capabilities:
+    - cloudflare-worker.setup
+    - cloudflare-worker.install
+    - cloudflare-worker.verify-structure
+    - cloudflare-worker.build
+    - cloudflare-worker.typecheck
+    - cloudflare-worker.deploy
+
+  steps:
+    - id: setup-node
+      name: setup-node
+      capability: cloudflare-worker.setup
+      use: actions/setup-node@v4
+      with:
+        node-version: "{{.nodeVersion}}"
+
+    - id: install-dependencies
+      name: install-dependencies
+      capability: cloudflare-worker.install
+      shell: bash
+      run: |
+        {{if .pnpmVersion}}
+        npm install -g pnpm@{{.pnpmVersion}}
+        {{end}}
+        {{.installCommand}}
+      onFailure: stop
+
+    - id: verify-worker-structure
+      name: verify-worker-structure
+      capability: cloudflare-worker.verify-structure
+      shell: bash
+      run: |
+        test -f package.json
+        test -f wrangler.jsonc
+      onFailure: stop
+
+    - id: build-worker
+      name: build-worker
+      capability: cloudflare-worker.build
+      run: "{{.buildCommand}}"
+      onFailure: stop
+
+    - id: typecheck-worker
+      name: typecheck-worker
+      capability: cloudflare-worker.typecheck
+      shell: bash
+      run: |
+        {{if .typecheckCommand}}
+        {{.typecheckCommand}}
+        {{else}}
+        echo "Skipping typecheck (not configured)."
+        {{end}}
+      onFailure: stop
+
+    - id: deploy-worker
+      name: deploy-worker
+      capability: cloudflare-worker.deploy
+      shell: bash
+      run: |
+        if [ "{{.Environment}}" = "dev" ]; then
+          echo "Running wrangler deploy dry-run for {{.Component}} in dev environment."
+          pnpm exec wrangler deploy --dry-run
+          exit 0
+        fi
+
+        if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
+          echo "Skipping Cloudflare Worker deploy for {{.Component}} in {{.Environment}} on ${GITHUB_REF:-local}."
+          exit 0
+        fi
+
+        : "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required for deploy}"
+        : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required for deploy}"
+
+        {{.deployCommand}}
+      onFailure: stop

@@ -1,0 +1,14 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: helm-values-verify
+spec:
+  description: Full verification with lint and template rendering
+
+  jobs:
+    render:
+      includeCapabilities:
+        - helm-values.setup
+        - helm-values.context
+        - helm-values.lint
+        - helm-values.template

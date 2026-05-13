@@ -25,7 +25,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: sourceplane/orun-action@v1.1.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build orun from source
+        run: go build -o /usr/local/bin/orun ./cmd/orun
       - name: Plan with Orun
         id: plan
         run: |
@@ -65,7 +69,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: orun-plan
-      - uses: sourceplane/orun-action@v1.1.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build orun from source
+        run: go build -o /usr/local/bin/orun ./cmd/orun
       - name: run job steps
         run: |
           orun run \

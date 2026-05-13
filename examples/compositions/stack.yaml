@@ -3,13 +3,14 @@ kind: Stack
 metadata:
   name: sumo-ops-orun-platform-stack
   title: Sumo Ops Platform Orun Stack
-  version: 0.9.2
+  version: 0.10.0
   description: Packaged compositions for the Sumo Ops Platform Orun repository.
   owner: sourceplane
   tags:
     - terraform
     - helm
     - cloudflare
+    - turbo
     - platform
 registry:
   host: ghcr.io

@@ -1,0 +1,16 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: cloudflare-pages-deploy
+spec:
+  description: Full build, provision, and deploy pipeline for Cloudflare Pages
+
+  jobs:
+    verify-deploy:
+      includeCapabilities:
+        - cloudflare-pages.setup
+        - cloudflare-pages.install
+        - cloudflare-pages.build
+        - cloudflare-pages.verify
+        - cloudflare-pages.provision
+        - cloudflare-pages.deploy

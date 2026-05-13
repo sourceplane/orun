@@ -1,0 +1,72 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: JobTemplate
+metadata:
+  name: turbo-package-verify
+spec:
+  description: Verify Turborepo package with install, build, and typecheck
+  runsOn: ubuntu-22.04
+  timeout: 25m
+  retries: 0
+
+  labels:
+    scope: verify
+
+  capabilities:
+    - turbo-package.setup-node
+    - turbo-package.setup-pnpm
+    - turbo-package.install
+    - turbo-package.pre-build
+    - turbo-package.verify-structure
+    - turbo-package.build
+    - turbo-package.typecheck
+
+  steps:
+    - id: setup-node
+      name: setup-node
+      capability: turbo-package.setup-node
+      use: actions/setup-node@v4
+      with:
+        node-version: "{{.nodeVersion}}"
+
+    - id: setup-pnpm
+      name: setup-pnpm
+      capability: turbo-package.setup-pnpm
+      use: pnpm/action-setup@v4
+      with:
+        version: "{{.pnpmVersion}}"
+
+    - id: install-workspace-dependencies
+      name: install-workspace-dependencies
+      capability: turbo-package.install
+      run: pnpm install --no-frozen-lockfile
+      onFailure: stop
+
+    - id: pre-build
+      name: pre-build
+      capability: turbo-package.pre-build
+      shell: bash
+      run: |
+        {{if .preBuildCommand}}
+        {{.preBuildCommand}}
+        {{else}}
+        echo "Skipping pre-build."
+        {{end}}
+      onFailure: stop
+
+    - id: verify-package-structure
+      name: verify-package-structure
+      capability: turbo-package.verify-structure
+      run: test -f package.json
+      onFailure: stop
+
+    - id: build-package
+      name: build-package
+      capability: turbo-package.build
+      run: "{{if .buildCommand}}{{.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
+      onFailure: stop
+
+    - id: typecheck-package
+      name: typecheck-package
+      capability: turbo-package.typecheck
+      run: "{{if .typecheckCommand}}{{.typecheckCommand}}{{else}}pnpm exec turbo run typecheck --filter=./{{end}}"
+      onFailure: stop

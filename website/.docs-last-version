@@ -1,6 +1,6 @@
 # Docs last updated for version
 
-v1.12.0
+v1.25.0
 
 ## How to use this file
 
@@ -8,18 +8,18 @@ When updating docs next time, run:
 
 ```bash
 # Get all changes since docs were last updated
-git log v1.12.0..HEAD --oneline
+git log v1.25.0..HEAD --oneline
 ```
 
 Then update this file to the new version after the docs PR is merged.
 
 ## What was covered in this update
 
-- Remote state client for distributed GHA matrix execution (`--remote-state`, `--backend-url`)
-- `orun status` new flags: `--watch`, `--interval`, `--remote-state`, `--backend-url`
-- `orun logs` new flags: `--failed`, `--raw`, `--remote-state`, `--backend-url`
-- `intent.yaml` schema: `execution.state.{mode,backendUrl}`
-- New env vars: `ORUN_REMOTE_STATE`, `ORUN_BACKEND_URL`, `ORUN_TOKEN`
-- Step env vars: `ORUN_PLAN_ID`, `ORUN_JOB_ID`, `ORUN_JOB_RUN_ID`
-- New example: distributed execution with remote state (GHA matrix)
-- Fix: `--changed` exits 0 when no components are affected (v1.11.0)
+- Multi-kind composition authoring (ComponentSchema, JobTemplate, ExecutionProfile)
+- Split-kind directory structure with `composition.yaml`, `schema.yaml`, `jobs/`, `profiles/`
+- Capability-based step selection via `includeCapabilities`
+- Profile step overrides via `stepOverrides`
+- Profile policies (requireCleanGitTree, requireApproval, etc.)
+- All 11 example compositions converted to split-kind format
+- Updated: composition-contract.md, composition-examples.md, writing-compositions.md
+- Updated: concepts/compositions.md, concepts/stacks.md

@@ -1,0 +1,129 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: JobTemplate
+metadata:
+  name: cloudflare-pages-terraform-verify-reconcile
+spec:
+  description: Build and verify a Cloudflare Pages site then reconcile infrastructure with Terraform
+  runsOn: ubuntu-22.04
+  timeout: 30m
+  retries: 0
+
+  labels:
+    scope: infra
+
+  capabilities:
+    - cloudflare-pages-terraform.setup-node
+    - cloudflare-pages-terraform.install
+    - cloudflare-pages-terraform.build
+    - cloudflare-pages-terraform.verify
+    - cloudflare-pages-terraform.setup-terraform
+    - cloudflare-pages-terraform.terraform-context
+    - cloudflare-pages-terraform.terraform-fmt
+    - cloudflare-pages-terraform.terraform-init
+    - cloudflare-pages-terraform.terraform-validate
+    - cloudflare-pages-terraform.terraform-apply
+
+  steps:
+    - id: setup-node
+      name: setup-node
+      capability: cloudflare-pages-terraform.setup-node
+      use: actions/setup-node@v4
+      with:
+        node-version: "{{.nodeVersion}}"
+
+    - id: install-site-dependencies
+      name: install-site-dependencies
+      capability: cloudflare-pages-terraform.install
+      shell: bash
+      run: |
+        cd "{{.siteDir}}"
+        {{.installCommand}}
+      onFailure: stop
+
+    - id: build-site
+      name: build-site
+      capability: cloudflare-pages-terraform.build
+      shell: bash
+      run: |
+        cd "{{.siteDir}}"
+        {{.buildCommand}}
+      onFailure: stop
+
+    - id: verify-build-output
+      name: verify-build-output
+      capability: cloudflare-pages-terraform.verify
+      shell: bash
+      run: |
+        cd "{{.siteDir}}"
+        test -d "{{.outputDir}}"
+        find "{{.outputDir}}" -maxdepth 2 -type f | head -n 20
+      onFailure: stop
+
+    - id: setup-terraform
+      name: setup-terraform
+      capability: cloudflare-pages-terraform.setup-terraform
+      use: hashicorp/setup-terraform@v4
+      with:
+        terraform_version: "{{.terraformVersion}}"
+        terraform_wrapper: "false"
+
+    - id: terraform-context
+      name: terraform-context
+      capability: cloudflare-pages-terraform.terraform-context
+      shell: bash
+      run: |
+        terraform version
+        echo "Reconciling Cloudflare Pages project {{.projectName}} from {{.terraformDir}}"
+      onFailure: stop
+
+    - id: terraform-fmt-check
+      name: terraform-fmt-check
+      capability: cloudflare-pages-terraform.terraform-fmt
+      run: terraform -chdir={{.terraformDir}} fmt -check
+      onFailure: stop
+
+    - id: terraform-init
+      name: terraform-init
+      capability: cloudflare-pages-terraform.terraform-init
+      run: terraform -chdir={{.terraformDir}} init -input=false
+      onFailure: stop
+
+    - id: terraform-validate
+      name: terraform-validate
+      capability: cloudflare-pages-terraform.terraform-validate
+      run: terraform -chdir={{.terraformDir}} validate -no-color
+      onFailure: stop
+
+    - id: terraform-plan-or-apply
+      name: terraform-plan-or-apply
+      capability: cloudflare-pages-terraform.terraform-apply
+      shell: bash
+      run: |
+        cloudflare_account_id="${CLOUDFLARE_ACCOUNT_ID:-00000000000000000000000000000000}"
+
+        terraform_args=(
+          "-input=false"
+          "-var=account_id=${cloudflare_account_id}"
+          "-var=project_name={{.projectName}}"
+          "-var=production_branch={{.productionBranch}}"
+          "-var=repo_owner={{.repoOwner}}"
+          "-var=repo_name={{.repoName}}"
+          "-var=build_command={{.cloudflareBuildCommand}}"
+          "-var=destination_dir={{.outputDir}}"
+          "-var=root_dir={{.rootDir}}"
+        )
+
+        if [ "{{.Environment}}" = "production" ] && [ "${GITHUB_REF:-}" = "refs/heads/{{.productionBranch}}" ]; then
+          : "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required for apply}"
+          : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required for apply}"
+          terraform -chdir={{.terraformDir}} apply -auto-approve "${terraform_args[@]}"
+          exit 0
+        fi
+
+        if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+          echo "Skipping terraform plan because Cloudflare credentials are not available outside deployment contexts."
+          exit 0
+        fi
+
+        terraform -chdir={{.terraformDir}} plan -lock=false -no-color "${terraform_args[@]}"
+      onFailure: stop

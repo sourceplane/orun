@@ -1,0 +1,50 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: JobTemplate
+metadata:
+  name: workspace-verify
+spec:
+  description: Verify workspace with kubectl, helm, terraform, kustomize, and torkflow
+  runsOn: ubuntu-22.04
+  timeout: 15m
+  retries: 0
+
+  labels:
+    scope: smoke
+
+  capabilities:
+    - workspace.kubectl
+    - workspace.helm
+    - workspace.terraform
+    - workspace.kustomize
+    - workspace.torkflow
+
+  steps:
+    - id: kubectl-dry-run
+      name: kubectl-dry-run
+      capability: workspace.kubectl
+      run: kubectl version --client --output=yaml
+      onFailure: stop
+
+    - id: helm-template
+      name: helm-template
+      capability: workspace.helm
+      run: helm template {{.Component}} {{.chartPath}} --values {{.valuesFile}}
+      onFailure: stop
+
+    - id: terraform-fmt-check
+      name: terraform-fmt-check
+      capability: workspace.terraform
+      run: terraform fmt -check {{.terraformDir}}
+      onFailure: stop
+
+    - id: kustomize-build
+      name: kustomize-build
+      capability: workspace.kustomize
+      run: kustomize build {{.kustomizeDir}}
+      onFailure: stop
+
+    - id: torkflow-view
+      name: torkflow-view
+      capability: workspace.torkflow
+      run: torkflow view --workflow {{.workflowFile}}
+      onFailure: stop

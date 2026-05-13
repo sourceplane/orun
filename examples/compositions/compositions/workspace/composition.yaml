@@ -1,0 +1,26 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: workspace
+spec:
+  type: workspace
+  description: Workspace verification jobs for multi-tool environments
+
+  schemaRef:
+    name: workspace-component
+
+  defaultJob: verify
+  defaultProfile: full
+
+  jobs:
+    - name: verify
+      templateRef:
+        name: workspace-verify
+
+  profiles:
+    - name: quick-check
+      profileRef:
+        name: workspace-quick-check
+    - name: full
+      profileRef:
+        name: workspace-full

@@ -1,0 +1,15 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: workspace-full
+spec:
+  description: Full workspace verification with all tools
+
+  jobs:
+    verify:
+      includeCapabilities:
+        - workspace.kubectl
+        - workspace.helm
+        - workspace.terraform
+        - workspace.kustomize
+        - workspace.torkflow

@@ -1,0 +1,14 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: cloudflare-pages-pull-request
+spec:
+  description: PR validation with build and output verification
+
+  jobs:
+    verify-deploy:
+      includeCapabilities:
+        - cloudflare-pages.setup
+        - cloudflare-pages.install
+        - cloudflare-pages.build
+        - cloudflare-pages.verify

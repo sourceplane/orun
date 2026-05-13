@@ -1,0 +1,26 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: helm-values
+spec:
+  type: helm-values
+  description: Helm values validation jobs
+
+  schemaRef:
+    name: helm-values-component
+
+  defaultJob: render
+  defaultProfile: verify
+
+  jobs:
+    - name: render
+      templateRef:
+        name: helm-values-render
+
+  profiles:
+    - name: lint-only
+      profileRef:
+        name: helm-values-lint-only
+    - name: verify
+      profileRef:
+        name: helm-values-verify

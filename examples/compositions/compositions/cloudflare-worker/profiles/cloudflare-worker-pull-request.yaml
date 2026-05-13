@@ -1,0 +1,15 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: cloudflare-worker-pull-request
+spec:
+  description: PR validation with build and typecheck verification
+
+  jobs:
+    verify-deploy:
+      includeCapabilities:
+        - cloudflare-worker.setup
+        - cloudflare-worker.install
+        - cloudflare-worker.verify-structure
+        - cloudflare-worker.build
+        - cloudflare-worker.typecheck

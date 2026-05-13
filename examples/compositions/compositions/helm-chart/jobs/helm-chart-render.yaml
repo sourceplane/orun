@@ -1,0 +1,47 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: JobTemplate
+metadata:
+  name: helm-chart-render
+spec:
+  description: Render and validate Helm charts with lint and template
+  runsOn: ubuntu-22.04
+  timeout: 20m
+  retries: 0
+
+  labels:
+    scope: delivery
+
+  capabilities:
+    - helm-chart.setup
+    - helm-chart.context
+    - helm-chart.lint
+    - helm-chart.template
+
+  steps:
+    - id: setup-helm
+      name: setup-helm
+      capability: helm-chart.setup
+      use: azure/setup-helm@v4.3.0
+      with:
+        version: "{{.helmVersion}}"
+
+    - id: helm-chart-context
+      name: helm-chart-context
+      capability: helm-chart.context
+      shell: bash
+      run: |
+        helm version --short
+        echo "Rendering {{.releaseName}} from {{.chartPath}} with {{.valuesFile}}"
+      onFailure: stop
+
+    - id: helm-chart-lint
+      name: helm-chart-lint
+      capability: helm-chart.lint
+      run: helm lint {{.chartPath}} --values {{.valuesFile}}
+      onFailure: stop
+
+    - id: helm-chart-template
+      name: helm-chart-template
+      capability: helm-chart.template
+      run: helm template {{.releaseName}} {{.chartPath}} --values {{.valuesFile}}
+      onFailure: stop

@@ -1,0 +1,29 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: cloudflare-worker
+spec:
+  type: cloudflare-worker
+  description: Cloudflare Worker build, verify, and deploy pipeline
+
+  schemaRef:
+    name: cloudflare-worker-component
+
+  defaultJob: verify-deploy
+  defaultProfile: verify
+
+  jobs:
+    - name: verify-deploy
+      templateRef:
+        name: cloudflare-worker-verify-deploy
+
+  profiles:
+    - name: pull-request
+      profileRef:
+        name: cloudflare-worker-pull-request
+    - name: verify
+      profileRef:
+        name: cloudflare-worker-verify
+    - name: deploy
+      profileRef:
+        name: cloudflare-worker-deploy

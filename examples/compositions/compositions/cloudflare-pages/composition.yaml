@@ -1,0 +1,29 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: cloudflare-pages
+spec:
+  type: cloudflare-pages
+  description: Cloudflare Pages build, verify, and deploy pipeline
+
+  schemaRef:
+    name: cloudflare-pages-component
+
+  defaultJob: verify-deploy
+  defaultProfile: verify
+
+  jobs:
+    - name: verify-deploy
+      templateRef:
+        name: cloudflare-pages-verify-deploy
+
+  profiles:
+    - name: pull-request
+      profileRef:
+        name: cloudflare-pages-pull-request
+    - name: verify
+      profileRef:
+        name: cloudflare-pages-verify
+    - name: deploy
+      profileRef:
+        name: cloudflare-pages-deploy

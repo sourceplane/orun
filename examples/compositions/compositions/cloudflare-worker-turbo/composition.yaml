@@ -1,0 +1,29 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: cloudflare-worker-turbo
+spec:
+  type: cloudflare-worker-turbo
+  description: Cloudflare Worker with Turborepo build, verify, and deploy pipeline
+
+  schemaRef:
+    name: cloudflare-worker-turbo-component
+
+  defaultJob: verify-deploy
+  defaultProfile: verify
+
+  jobs:
+    - name: verify-deploy
+      templateRef:
+        name: cloudflare-worker-turbo-verify-deploy
+
+  profiles:
+    - name: pull-request
+      profileRef:
+        name: cloudflare-worker-turbo-pull-request
+    - name: verify
+      profileRef:
+        name: cloudflare-worker-turbo-verify
+    - name: deploy
+      profileRef:
+        name: cloudflare-worker-turbo-deploy

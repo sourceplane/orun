@@ -1,0 +1,26 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: turbo-package
+spec:
+  type: turbo-package
+  description: Turborepo package verification jobs
+
+  schemaRef:
+    name: turbo-package-component
+
+  defaultJob: verify
+  defaultProfile: verify
+
+  jobs:
+    - name: verify
+      templateRef:
+        name: turbo-package-verify
+
+  profiles:
+    - name: quick-check
+      profileRef:
+        name: turbo-package-quick-check
+    - name: verify
+      profileRef:
+        name: turbo-package-verify

@@ -1,0 +1,14 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: helm-chart-verify
+spec:
+  description: Full verification with lint and template rendering
+
+  jobs:
+    render:
+      includeCapabilities:
+        - helm-chart.setup
+        - helm-chart.context
+        - helm-chart.lint
+        - helm-chart.template

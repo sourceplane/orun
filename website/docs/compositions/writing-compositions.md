@@ -6,19 +6,25 @@ Author a new composition package when you want to introduce a new component type
 
 ## 1. Create a Stack package root
 
-The recommended format is a `stack.yaml` manifest with a `compositions/` subdirectory. Each composition type lives in its own subdirectory containing a single `compositions.yaml` file.
+The recommended format is a `stack.yaml` manifest with a `compositions/` subdirectory. Each composition type lives in its own subdirectory using either inline or split-kind authoring.
 
 ```text
 my-platform/
 ├── stack.yaml
 └── compositions/
     └── mytype/
-        └── compositions.yaml
+        ├── composition.yaml
+        ├── schema.yaml
+        ├── jobs/
+        │   └── mytype-apply.yaml
+        └── profiles/
+            ├── mytype-verify.yaml
+            └── mytype-deploy.yaml
 ```
 
 ## 2. Define the Stack manifest
 
-`stack.yaml` describes the package and an optional OCI registry target. When `spec.compositions` is omitted, the packager auto-discovers every `compositions.yaml` file by walking the directory tree — no explicit path listing is needed.
+`stack.yaml` describes the package and an optional OCI registry target. When `spec.compositions` is omitted, the packager auto-discovers composition files by walking the directory tree.
 
 ```yaml
 apiVersion: orun.io/v1
@@ -35,18 +41,121 @@ registry:
   visibility: public
 ```
 
-To pin specific files instead of using auto-discovery, add a `spec.compositions` block:
+## 3. Choose an authoring style
+
+### Split-kind authoring (recommended)
+
+Split each concern into its own file and kind. This makes each piece independently versionable, reusable, and easier to review.
+
+| Kind | Owns | Changes when |
+|------|------|-------------|
+| `Composition` | Type binding and defaults | You introduce/rename a component type |
+| `ComponentSchema` | Input validation | Component contract changes |
+| `JobTemplate` | Steps, capabilities, runner defaults | Runtime implementation changes |
+| `ExecutionProfile` | Which behavior to use per trigger/env | PR/release/env behavior changes |
+
+**composition.yaml** — The public facade:
 
 ```yaml
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: mytype
 spec:
-  compositions:
-    - path: compositions/mytype/compositions.yaml
-    - path: compositions/othertype/compositions.yaml
+  type: mytype
+  description: My component type
+  schemaRef:
+    name: mytype-component
+  defaultJob: apply
+  defaultProfile: verify
+  jobs:
+    - name: apply
+      templateRef:
+        name: mytype-apply
+  profiles:
+    - name: verify
+      profileRef:
+        name: mytype-verify
+    - name: deploy
+      profileRef:
+        name: mytype-deploy
 ```
 
-## 3. Define the composition document
+**schema.yaml** — Input validation contract (`kind: ComponentSchema`):
 
-Start by expressing the type contract and jobs in a single `Composition` document at `compositions/mytype/compositions.yaml`.
+```yaml
+apiVersion: sourceplane.io/v1alpha1
+kind: ComponentSchema
+metadata:
+  name: mytype-component
+spec:
+  type: mytype
+  schema:
+    $schema: http://json-schema.org/draft-07/schema#
+    type: object
+    required: [name, type, inputs]
+    properties:
+      name:
+        type: string
+      type:
+        const: mytype
+      inputs:
+        type: object
+        required: [target]
+        properties:
+          target:
+            type: string
+```
+
+**jobs/mytype-apply.yaml** — Reusable execution template (`kind: JobTemplate`):
+
+```yaml
+apiVersion: sourceplane.io/v1alpha1
+kind: JobTemplate
+metadata:
+  name: mytype-apply
+spec:
+  description: Apply mytype changes
+  runsOn: ubuntu-22.04
+  timeout: 15m
+  capabilities:
+    - mytype.setup
+    - mytype.apply
+  steps:
+    - id: setup
+      name: setup
+      capability: mytype.setup
+      run: mytool version
+      onFailure: stop
+    - id: apply
+      name: apply
+      capability: mytype.apply
+      run: mytool apply {{.target}}
+      onFailure: stop
+```
+
+**profiles/mytype-verify.yaml** — Behavior overlay (`kind: ExecutionProfile`):
+
+```yaml
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: mytype-verify
+spec:
+  description: Verify without applying
+  jobs:
+    apply:
+      includeCapabilities:
+        - mytype.setup
+        - mytype.apply
+      stepOverrides:
+        apply:
+          run: mytool apply --dry-run {{.target}}
+```
+
+### Inline authoring
+
+For simpler compositions, define everything in a single `compositions.yaml`:
 
 ```yaml
 apiVersion: sourceplane.io/v1alpha1
@@ -64,38 +173,42 @@ spec:
         const: mytype
       inputs:
         type: object
+        required: [target]
         properties:
           target:
             type: string
-          timeout:
-            type: string
-        required:
-          - target
+  executionProfiles:
+    verify:
+      jobs:
+        apply:
+          stepsEnabled:
+            - setup
+            - apply
   jobs:
     - name: apply
       runsOn: ubuntu-22.04
       steps:
-        - name: apply
+        - id: setup
+          name: setup
+          run: mytool version
+        - id: apply
+          name: apply
           run: mytool apply {{.target}}
 ```
 
-That makes validation fail early before you have to debug runtime behavior.
-
 ## 4. Test with an example component
-
-Create a sample component manifest and point it at the new type.
 
 ```yaml
 apiVersion: sourceplane.io/v1
 kind: Component
-
 metadata:
   name: demo
-
 spec:
   type: mytype
   subscribe:
-    environments: [development]
+    environments:
+      - name: development
+        profile: verify
   inputs:
     target: demo-service
 ```
@@ -109,18 +222,14 @@ orun compositions mytype --intent examples/intent.yaml
 orun plan --intent examples/intent.yaml --output /tmp/mytype-plan.json
 ```
 
-In the consuming intent, declare the package under `compositions.sources` using `kind: dir`, `kind: archive`, or `kind: oci`.
-
 ## 6. Publish to a registry
-
-After validating locally, publish the Stack to an OCI registry so others can reference it remotely:
 
 ```bash
 orun login ghcr.io
 orun publish --root ./my-platform
 ```
 
-Teams consuming the stack reference it by OCI ref in their `intent.yaml`:
+Teams consuming the stack reference it by OCI ref:
 
 ```yaml
 compositions:
@@ -134,10 +243,11 @@ See [Stacks](../concepts/stacks.md) for the full packaging and distribution guid
 
 ## Authoring guidelines
 
+- Use split-kind authoring when your composition has multiple profiles or jobs that might be reused across types.
+- Use inline authoring for simple compositions with 1-2 profiles and a single job.
+- Tag steps with `capability` fields so profiles can select behavior semantically.
+- Prefer `includeCapabilities` over `stepsEnabled` — step IDs are implementation details.
+- Use `stepOverrides` in profiles to alter behavior (e.g., `--dry-run`) without duplicating steps.
+- Add `policies` to release profiles for enforcement rules like `requireApproval`.
 - Keep schemas strict enough to reject invalid inputs early.
-- Put reusable defaults in schemas or jobs, not in every component.
-- Prefer explicit step phases and timeouts when ordering matters.
-- Set `defaultJob` intentionally instead of depending on job order.
-- Test the composition with dry-run first, then execute through the runtime you expect to use in CI.
-
-The legacy `--config-dir` flow still works for folder-shaped compositions, but new authoring should target Stack packages with `compositions.yaml` documents.
+- Set `defaultJob` and `defaultProfile` explicitly.
