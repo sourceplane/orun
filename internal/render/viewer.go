@@ -13,6 +13,7 @@ import (
 type PlanViewer struct {
 	plan  *model.Plan
 	color bool
+	long  bool
 }
 
 // NewPlanViewer creates a new plan viewer
@@ -23,6 +24,27 @@ func NewPlanViewer(plan *model.Plan) *PlanViewer {
 func (pv *PlanViewer) SetColor(enabled bool) *PlanViewer {
 	pv.color = enabled
 	return pv
+}
+
+func (pv *PlanViewer) SetLong(enabled bool) *PlanViewer {
+	pv.long = enabled
+	return pv
+}
+
+// profileDisplayName returns the display name for a job based on profile.
+// For "validate-terraform" with profile "terraform.validate", returns "validate".
+func profileDisplayName(job *model.PlanJob) string {
+	if job.Profile != "" {
+		parts := strings.SplitN(job.Profile, ".", 2)
+		if len(parts) == 2 {
+			return parts[1]
+		}
+	}
+	name := job.Name
+	if job.Composition != "" {
+		name = strings.TrimSuffix(name, "-"+job.Composition)
+	}
+	return name
 }
 
 // ViewDAG returns a human-readable tree view of the DAG
@@ -41,7 +63,7 @@ func (pv *PlanViewer) ViewDAG() string {
 		componentMap[job.Component][job.Environment] = append(componentMap[job.Component][job.Environment], job)
 	}
 
-	// Sort components and environments for consistent output
+	// Sort components for consistent output
 	components := make([]string, 0, len(componentMap))
 	for comp := range componentMap {
 		components = append(components, comp)
@@ -49,34 +71,16 @@ func (pv *PlanViewer) ViewDAG() string {
 	sort.Strings(components)
 
 	var sb strings.Builder
-	sb.WriteString(panelHeader("plan view: dag", pv.plan.Metadata.Name, len(pv.plan.Jobs), pv.color))
 	sb.WriteString("\n" + ui.BoldCyan(pv.color, "Component graph") + "\n")
 
-	// Iterate through components
 	for i, component := range components {
 		isLastComponent := i == len(components)-1
 
-		// Get composition type from first job of this component
-		var compositionType string
-		if len(componentMap[component]) > 0 {
-			for _, jobs := range componentMap[component] {
-				if len(jobs) > 0 {
-					compositionType = jobs[0].Composition
-					break
-				}
-			}
-		}
-
-		// Component header with composition type in brackets
 		componentPrefix := "├─ "
 		if isLastComponent {
 			componentPrefix = "└─ "
 		}
-		if compositionType != "" {
-			sb.WriteString(fmt.Sprintf("%s%s [%s]\n", componentPrefix, component, compositionType))
-		} else {
-			sb.WriteString(fmt.Sprintf("%s%s\n", componentPrefix, component))
-		}
+		sb.WriteString(fmt.Sprintf("%s%s\n", componentPrefix, component))
 
 		// Get sorted environments for this component
 		envMap := componentMap[component]
@@ -86,45 +90,46 @@ func (pv *PlanViewer) ViewDAG() string {
 		}
 		sort.Strings(environments)
 
-		// Iterate through environments
 		for j, env := range environments {
 			isLastEnv := j == len(environments)-1
 			jobs := envMap[env]
 
-			// Sort jobs for consistent output
 			sort.Slice(jobs, func(a, b int) bool {
 				return jobs[a].Name < jobs[b].Name
 			})
 
-			// Environment line
-			envPrefix := "│  ├─ "
-			envConnector := "│  │"
-			if isLastEnv {
-				envPrefix = "│  └─ "
-				envConnector = "│     "
+			// Environment line with profile: staging [terraform.validate]
+			envPrefix := "│  └─ "
+			envConnector := "│     "
+			if !isLastEnv {
+				envPrefix = "│  ├─ "
+				envConnector = "│  │  "
 			}
 			if isLastComponent {
 				envPrefix = strings.Replace(envPrefix, "│", " ", 1)
 				envConnector = strings.Replace(envConnector, "│", " ", 1)
 			}
 
-			sb.WriteString(fmt.Sprintf("%s%s\n", envPrefix, env))
+			profileTag := ""
+			if len(jobs) > 0 && jobs[0].Profile != "" {
+				profileTag = fmt.Sprintf(" [%s]", jobs[0].Profile)
+			}
+			sb.WriteString(fmt.Sprintf("%s%s%s\n", envPrefix, env, profileTag))
 
-			// Iterate through jobs in this environment
 			for k, job := range jobs {
 				isLastJob := k == len(jobs)-1
 
-				jobPrefix := envConnector + "  ├─ "
-				jobConnector := envConnector + "  │"
-				if isLastJob {
-					jobPrefix = envConnector + "  └─ "
-					jobConnector = envConnector + "     "
+				jobPrefix := envConnector + "└─ "
+				jobConnector := envConnector + "   "
+				if !isLastJob {
+					jobPrefix = envConnector + "├─ "
+					jobConnector = envConnector + "│  "
 				}
 
-				// Show job with composition and registry info
-				jobLine := fmt.Sprintf("%s%s", jobPrefix, job.Name)
+				displayName := profileDisplayName(job)
+				jobLine := fmt.Sprintf("%s%s", jobPrefix, displayName)
 				if job.Timeout != "" {
-					jobLine += fmt.Sprintf(" [%s]", job.Timeout)
+					jobLine += fmt.Sprintf(" · %s", job.Timeout)
 				}
 				if job.Retries > 0 {
 					jobLine += fmt.Sprintf(" (retry:%dx)", job.Retries)
@@ -135,10 +140,10 @@ func (pv *PlanViewer) ViewDAG() string {
 				if len(job.DependsOn) > 0 {
 					sort.Strings(job.DependsOn)
 					for l, dep := range job.DependsOn {
-						isLastDep := l == len(job.DependsOn)-1
-						depPrefix := jobConnector + "  ├─ "
+						isLastDep := l == len(job.DependsOn)-1 && len(job.Steps) == 0
+						depPrefix := jobConnector + "├─ "
 						if isLastDep {
-							depPrefix = jobConnector + "  └─ "
+							depPrefix = jobConnector + "└─ "
 						}
 						sb.WriteString(fmt.Sprintf("%s(depends on) %s\n", depPrefix, dep))
 					}
@@ -148,25 +153,20 @@ func (pv *PlanViewer) ViewDAG() string {
 				if len(job.Steps) > 0 {
 					for l, step := range job.Steps {
 						isLastStep := l == len(job.Steps)-1
-						stepPrefix := jobConnector + "  ├─ "
-						if isLastStep && len(job.DependsOn) == 0 {
-							stepPrefix = jobConnector + "  └─ "
-						}
-						if len(job.DependsOn) > 0 && isLastStep {
-							// After showing deps, use different connector
-							stepPrefix = jobConnector + "  ├─ "
+						stepPrefix := jobConnector + "├─ "
+						if isLastStep {
+							stepPrefix = jobConnector + "└─ "
 						}
 
-						stepLine := fmt.Sprintf("%s%s", stepPrefix, step.Name)
-						if step.Run != "" {
-							// Truncate long run commands for readability
-							runCmd := step.Run
-							if len(runCmd) > 60 {
-								runCmd = runCmd[:57] + "..."
+						sb.WriteString(fmt.Sprintf("%s%s\n", stepPrefix, step.Name))
+
+						if pv.long && step.Run != "" {
+							stepConnector := jobConnector + "│  "
+							if isLastStep {
+								stepConnector = jobConnector + "   "
 							}
-							stepLine += fmt.Sprintf(" | %s", runCmd)
+							sb.WriteString(fmt.Sprintf("%srun: %s\n", stepConnector, step.Run))
 						}
-						sb.WriteString(stepLine + "\n")
 					}
 				}
 			}
@@ -174,7 +174,7 @@ func (pv *PlanViewer) ViewDAG() string {
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString(summaryPanel("dag summary", map[string]int{
+	sb.WriteString(summaryPanel("", map[string]int{
 		"components": len(components),
 		"jobs":       len(pv.plan.Jobs),
 	}, pv.color))
@@ -358,13 +358,10 @@ func summaryPanel(title string, values map[string]int, color bool) string {
 	sort.Strings(keys)
 
 	var sb strings.Builder
-	sb.WriteString("\n" + ui.Cyan(color, "┌──────────────────────────────────────────────────────────┐") + "\n")
-	sb.WriteString(ui.BoldCyan(color, fmt.Sprintf("│ %-56s │", title)) + "\n")
-	sb.WriteString(ui.Cyan(color, "├──────────────────────────────────────────────────────────┤") + "\n")
+	sb.WriteString("\n")
 	for _, key := range keys {
-		sb.WriteString(fmt.Sprintf("│ %-10s %d\n", key+":", values[key]))
+		sb.WriteString(fmt.Sprintf("  %-12s %d\n", key, values[key]))
 	}
-	sb.WriteString(ui.Cyan(color, "└──────────────────────────────────────────────────────────┘") + "\n")
 	return sb.String()
 }
 

@@ -91,7 +91,12 @@ func generatePlan() error {
 			}
 		}
 		if len(filtered) == 0 {
-			return fmt.Errorf("no matching environments for filter: %s", environment)
+			available := make([]string, 0, len(instances))
+			for envName := range instances {
+				available = append(available, envName)
+			}
+			sort.Strings(available)
+			return formatEnvNotFoundError(environment, available)
 		}
 		instances = filtered
 	}
@@ -114,7 +119,22 @@ func generatePlan() error {
 			}
 		}
 		if len(instances) == 0 {
-			return fmt.Errorf("no matching components for filter: %s", strings.Join(planComponents, ", "))
+			available := make([]string, 0)
+			// Re-expand to get all component names for suggestion
+			allInstances, _ := expander.Expand()
+			if allInstances != nil {
+				compSet := make(map[string]struct{})
+				for _, envInsts := range allInstances {
+					for _, inst := range envInsts {
+						compSet[inst.ComponentName] = struct{}{}
+					}
+				}
+				for name := range compSet {
+					available = append(available, name)
+				}
+				sort.Strings(available)
+			}
+			return formatComponentNotFoundError(strings.Join(planComponents, ", "), available)
 		}
 	}
 
@@ -294,6 +314,10 @@ func generatePlan() error {
 
 		switch {
 		case viewPlan == "dag":
+			viewer.SetLong(planLong)
+			output = viewer.ViewDAG()
+		case viewPlan == "dag:long":
+			viewer.SetLong(true)
 			output = viewer.ViewDAG()
 		case viewPlan == "dependencies":
 			output = viewer.ViewDependencies()
@@ -301,7 +325,7 @@ func generatePlan() error {
 			componentName := strings.TrimPrefix(viewPlan, "component=")
 			output = viewer.ViewByComponent(componentName)
 		default:
-			// Default to DAG view
+			viewer.SetLong(planLong)
 			output = viewer.ViewDAG()
 		}
 
@@ -653,7 +677,7 @@ func printComponentCompact(comp *expand.ComponentMerged, color bool) {
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "✕ %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -926,4 +950,40 @@ func matchesAnyFilter(value string, filters []string) bool {
 		}
 	}
 	return false
+}
+
+func formatEnvNotFoundError(filter string, available []string) error {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("no environment matched %q", filter))
+
+	if suggestion := ui.SuggestMatch(filter, available); suggestion != "" {
+		sb.WriteString(fmt.Sprintf("\n\ndid you mean:\n  %s", suggestion))
+	}
+
+	if len(available) > 0 {
+		sb.WriteString("\n\navailable environments:\n")
+		for _, env := range available {
+			sb.WriteString(fmt.Sprintf("  %s\n", env))
+		}
+	}
+
+	return fmt.Errorf("%s", sb.String())
+}
+
+func formatComponentNotFoundError(filter string, available []string) error {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("no component matched %q", filter))
+
+	if suggestion := ui.SuggestMatch(filter, available); suggestion != "" {
+		sb.WriteString(fmt.Sprintf("\n\ndid you mean:\n  %s", suggestion))
+	}
+
+	if len(available) > 0 {
+		sb.WriteString("\n\navailable components:\n")
+		for _, comp := range available {
+			sb.WriteString(fmt.Sprintf("  %s\n", comp))
+		}
+	}
+
+	return fmt.Errorf("%s", sb.String())
 }

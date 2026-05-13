@@ -53,10 +53,12 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:     cliName,
-	Short:   "Plan and run changes from intent",
-	Long:    "orun turns intent into deterministic plans and runs them with clear, resumable execution feedback",
-	Version: version,
+	Use:           cliName,
+	Short:         "Plan and run changes from intent",
+	Long:          "orun turns intent into deterministic plans and runs them with clear, resumable execution feedback",
+	Version:       version,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if commandNeedsConfig(cmd) && configDir == "" {
 			if envConfigDir := configDirEnvValue(); envConfigDir != "" {
