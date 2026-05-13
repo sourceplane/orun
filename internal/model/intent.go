@@ -1,7 +1,5 @@
 package model
 
-import "gopkg.in/yaml.v3"
-
 // Intent is the top-level CRD for declarative deployment
 type Intent struct {
 	APIVersion   string                 `yaml:"apiVersion" json:"apiVersion"`
@@ -31,10 +29,9 @@ type IntentExecution struct {
 
 // ExecutionProfile defines a named set of controls per composition type.
 type ExecutionProfile struct {
-	Description    string                            `yaml:"description,omitempty" json:"description,omitempty"`
-	CompositionRef string                            `yaml:"compositionRef,omitempty" json:"compositionRef,omitempty"`
-	Plan           ProfilePlan                       `yaml:"plan,omitempty" json:"plan,omitempty"`
-	Controls       map[string]map[string]interface{} `yaml:"controls,omitempty" json:"controls,omitempty"`
+	Description string                            `yaml:"description,omitempty" json:"description,omitempty"`
+	Plan        ProfilePlan                       `yaml:"plan,omitempty" json:"plan,omitempty"`
+	Controls    map[string]map[string]interface{} `yaml:"controls,omitempty" json:"controls,omitempty"`
 }
 
 // ProfilePlan holds plan-generation settings for an execution profile.
@@ -44,8 +41,7 @@ type ProfilePlan struct {
 
 // IntentAutomation holds the automation section of an intent.
 type IntentAutomation struct {
-	Triggers        []AutomationTrigger `yaml:"triggers,omitempty" json:"triggers,omitempty"`
-	TriggerBindings []AutomationTrigger `yaml:"triggerBindings,omitempty" json:"triggerBindings,omitempty"`
+	Triggers []AutomationTrigger `yaml:"triggers,omitempty" json:"triggers,omitempty"`
 }
 
 // AutomationTrigger maps a CI event to an execution profile.
@@ -66,10 +62,7 @@ type TriggerOn struct {
 
 // TriggerPlan specifies which execution profile a trigger selects.
 type TriggerPlan struct {
-	Profile string `yaml:"profile,omitempty" json:"profile,omitempty"`
-	Scope   string `yaml:"scope,omitempty" json:"scope,omitempty"`
-	Base    string `yaml:"base,omitempty" json:"base,omitempty"`
-	Head    string `yaml:"head,omitempty" json:"head,omitempty"`
+	Profile string `yaml:"profile" json:"profile"`
 }
 
 // IntentExecutionState configures where execution state is stored.
@@ -111,8 +104,6 @@ type Environment struct {
 // EnvironmentExecution selects an execution profile and optional control overrides.
 type EnvironmentExecution struct {
 	Profile          string                            `yaml:"profile,omitempty" json:"profile,omitempty"`
-	TriggerBindings  []string                          `yaml:"triggerBindings,omitempty" json:"triggerBindings,omitempty"`
-	Profiles         map[string]string                 `yaml:"profiles,omitempty" json:"profiles,omitempty"`
 	ControlOverrides map[string]map[string]interface{} `yaml:"controlOverrides,omitempty" json:"controlOverrides,omitempty"`
 }
 
@@ -141,69 +132,9 @@ type Component struct {
 	SourcePath     string                   `yaml:"-" json:"-"`
 }
 
-// SubscriptionEntry is a rich subscription binding environments to optional profile/triggerBinding overrides.
-type SubscriptionEntry struct {
-	Environments    []string `yaml:"environments" json:"environments"`
-	Profile         string   `yaml:"profile,omitempty" json:"profile,omitempty"`
-	TriggerBindings []string `yaml:"triggerBindings,omitempty" json:"triggerBindings,omitempty"`
-}
-
 // ComponentSubscribe declares which environments a component participates in.
-// Supports two YAML formats:
-//   - Old: {environments: [dev, staging]}
-//   - New: [{environments: [dev], profile: dry-run}, {environments: [staging]}]
 type ComponentSubscribe struct {
-	Environments []string            `yaml:"-" json:"environments,omitempty"`
-	Entries      []SubscriptionEntry `yaml:"-" json:"entries,omitempty"`
-}
-
-func (cs *ComponentSubscribe) UnmarshalYAML(value *yaml.Node) error {
-	if value.Kind == yaml.SequenceNode {
-		var entries []SubscriptionEntry
-		if err := value.Decode(&entries); err != nil {
-			return err
-		}
-		cs.Entries = entries
-		envSet := make(map[string]struct{})
-		for _, e := range entries {
-			for _, env := range e.Environments {
-				envSet[env] = struct{}{}
-			}
-		}
-		cs.Environments = make([]string, 0, len(envSet))
-		for env := range envSet {
-			cs.Environments = append(cs.Environments, env)
-		}
-		return nil
-	}
-
-	var old struct {
-		Environments []string `yaml:"environments"`
-	}
-	if err := value.Decode(&old); err != nil {
-		return err
-	}
-	cs.Environments = old.Environments
-	if len(old.Environments) > 0 {
-		cs.Entries = []SubscriptionEntry{{Environments: old.Environments}}
-	}
-	return nil
-}
-
-func (cs ComponentSubscribe) MarshalYAML() (interface{}, error) {
-	hasOverrides := false
-	for _, e := range cs.Entries {
-		if e.Profile != "" || len(e.TriggerBindings) > 0 {
-			hasOverrides = true
-			break
-		}
-	}
-	if hasOverrides {
-		return cs.Entries, nil
-	}
-	return struct {
-		Environments []string `yaml:"environments"`
-	}{Environments: cs.Environments}, nil
+	Environments []string `yaml:"environments" json:"environments"`
 }
 
 // ComponentOverrides defines component-specific planner overrides.
@@ -248,8 +179,6 @@ type ComponentInstance struct {
 	DependsOn     []ResolvedDependency
 	Enabled       bool
 	Controls      map[string]interface{}
-	ResolvedProfile        string
-	ResolvedTriggerBinding string
 }
 
 // ResolvedDependency is a dependency with resolved target component

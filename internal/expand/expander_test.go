@@ -58,7 +58,7 @@ func TestExpandSupportsSubscribedComponentsAlongsideSelectorFallback(t *testing.
 		t.Fatalf("NormalizeIntent returned error: %v", err)
 	}
 
-	instances, err := NewExpander(normalized, nil, nil, nil).Expand()
+	instances, err := NewExpander(normalized, nil).Expand()
 	if err != nil {
 		t.Fatalf("Expand returned error: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestResolveControlsFromProfile(t *testing.T) {
 		t.Fatalf("NormalizeIntent error: %v", err)
 	}
 
-	instances, err := NewExpander(normalized, nil, nil, nil).Expand()
+	instances, err := NewExpander(normalized, nil).Expand()
 	if err != nil {
 		t.Fatalf("Expand error: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestResolveControlsPrecedenceOrder(t *testing.T) {
 		t.Fatalf("NormalizeIntent error: %v", err)
 	}
 
-	instances, err := NewExpander(normalized, nil, nil, nil).Expand()
+	instances, err := NewExpander(normalized, nil).Expand()
 	if err != nil {
 		t.Fatalf("Expand error: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestResolveControlsNoProfile(t *testing.T) {
 		},
 	}
 
-	instances, err := NewExpander(normalized, controlDefaults, nil, nil).Expand()
+	instances, err := NewExpander(normalized, controlDefaults).Expand()
 	if err != nil {
 		t.Fatalf("Expand error: %v", err)
 	}

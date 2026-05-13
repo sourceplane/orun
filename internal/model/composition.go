@@ -50,7 +50,6 @@ type CompositionDocumentSpec struct {
 	Type            string                 `yaml:"type" json:"type"`
 	Description     string                 `yaml:"description,omitempty" json:"description,omitempty"`
 	DefaultJob      string                 `yaml:"defaultJob" json:"defaultJob"`
-	DefaultProfile  string                 `yaml:"defaultProfile,omitempty" json:"defaultProfile,omitempty"`
 	InputSchema     map[string]interface{} `yaml:"inputSchema,omitempty" json:"inputSchema,omitempty"`
 	ControlSchema   map[string]interface{} `yaml:"controlSchema,omitempty" json:"controlSchema,omitempty"`
 	ControlDefaults map[string]interface{} `yaml:"controlDefaults,omitempty" json:"controlDefaults,omitempty"`

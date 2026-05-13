@@ -88,8 +88,6 @@ type PlanJob struct {
 	Labels           map[string]string      `json:"labels,omitempty" yaml:"labels,omitempty"`
 	Config           map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
 	Controls         map[string]interface{} `json:"controls,omitempty" yaml:"controls,omitempty"`
-	ResolvedProfile  string                 `json:"resolvedProfile,omitempty" yaml:"resolvedProfile,omitempty"`
-	TriggerBinding   string                 `json:"triggerBinding,omitempty" yaml:"triggerBinding,omitempty"`
 	Skipped          bool                   `json:"skipped,omitempty" yaml:"skipped,omitempty"`
 	SkipReason       string                 `json:"skipReason,omitempty" yaml:"skipReason,omitempty"`
 	RequiresApproval bool                   `json:"requiresApproval,omitempty" yaml:"requiresApproval,omitempty"`

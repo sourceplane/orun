@@ -14,7 +14,7 @@ type ComponentAnalyzer struct {
 
 // NewComponentAnalyzer creates a new component analyzer
 func NewComponentAnalyzer(normalized *model.NormalizedIntent) *ComponentAnalyzer {
-	expander := NewExpander(normalized, nil, nil, nil)
+	expander := NewExpander(normalized, nil)
 	return &ComponentAnalyzer{
 		expander: expander,
 	}

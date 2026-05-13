@@ -89,8 +89,6 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 			Labels:           job.Labels,
 			Config:           job.Config,
 			Controls:         job.Controls,
-			ResolvedProfile:  job.ResolvedProfile,
-			TriggerBinding:   job.ResolvedTriggerBinding,
 			Skipped:          job.Skipped,
 			SkipReason:       job.SkipReason,
 			RequiresApproval: job.RequiresApproval,

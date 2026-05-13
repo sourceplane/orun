@@ -12,5 +12,4 @@ spec:
       - reopened
       - ready_for_review
   plan:
-    scope: changed
-    base: main
+    profileRef: pull-request

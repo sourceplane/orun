@@ -113,12 +113,10 @@ type JobInstance struct {
 	Retries          int
 	Config           map[string]interface{} // Single source of truth for env vars
 	Labels           map[string]string
-	Controls               map[string]interface{}
-	ResolvedProfile        string
-	ResolvedTriggerBinding string
-	Skipped                bool
-	SkipReason             string
-	RequiresApproval       bool
+	Controls         map[string]interface{}
+	Skipped          bool
+	SkipReason       string
+	RequiresApproval bool
 }
 
 // RenderedStep is a step with all templates resolved

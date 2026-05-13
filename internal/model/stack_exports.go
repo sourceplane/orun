@@ -10,10 +10,9 @@ type ExecutionProfileDocument struct {
 
 // ExecutionProfileSpec is the spec section of a standalone profile document.
 type ExecutionProfileSpec struct {
-	Description    string                            `yaml:"description,omitempty" json:"description,omitempty"`
-	CompositionRef string                            `yaml:"compositionRef,omitempty" json:"compositionRef,omitempty"`
-	Plan           ProfilePlan                       `yaml:"plan,omitempty" json:"plan,omitempty"`
-	Controls       map[string]map[string]interface{} `yaml:"controls,omitempty" json:"controls,omitempty"`
+	Description string                            `yaml:"description,omitempty" json:"description,omitempty"`
+	Plan        ProfilePlan                       `yaml:"plan,omitempty" json:"plan,omitempty"`
+	Controls    map[string]map[string]interface{} `yaml:"controls,omitempty" json:"controls,omitempty"`
 }
 
 // TriggerBindingDocument is the standalone file format for a trigger in a stack.
@@ -32,10 +31,7 @@ type TriggerBindingSpec struct {
 
 // TriggerPlanRef references a profile by name.
 type TriggerPlanRef struct {
-	ProfileRef string `yaml:"profileRef,omitempty" json:"profileRef,omitempty"`
-	Scope      string `yaml:"scope,omitempty" json:"scope,omitempty"`
-	Base       string `yaml:"base,omitempty" json:"base,omitempty"`
-	Head       string `yaml:"head,omitempty" json:"head,omitempty"`
+	ProfileRef string `yaml:"profileRef" json:"profileRef"`
 }
 
 // StackOverridePolicyDocument is the standalone file format for an override policy.

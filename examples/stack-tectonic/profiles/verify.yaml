@@ -4,7 +4,6 @@ metadata:
   name: verify
 spec:
   description: Merge verification with full backend initialization
-  compositionRef: terraform
   plan:
     scope: changed
   controls:

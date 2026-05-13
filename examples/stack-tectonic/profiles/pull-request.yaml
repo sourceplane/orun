@@ -4,7 +4,6 @@ metadata:
   name: pull-request
 spec:
   description: Fast PR validation — non-mutating checks only
-  compositionRef: terraform
   plan:
     scope: changed
   controls:
