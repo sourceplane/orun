@@ -1,0 +1,15 @@
+apiVersion: sourceplane.io/v1
+kind: ExecutionProfile
+metadata:
+  name: verify
+spec:
+  description: Build app and validate Terraform — no plan or apply
+  plan:
+    scope: changed
+  controls:
+    cloudflare-pages-turbo-terraform:
+      build:
+        enabled: true
+      terraform:
+        plan: false
+        apply: false

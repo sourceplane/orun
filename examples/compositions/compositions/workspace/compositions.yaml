@@ -6,6 +6,7 @@ spec:
   type: workspace
   description: Workspace-backed provider smoke jobs
   defaultJob: verify-workspace
+  defaultProfile: smoke
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Workspace Provider Smoke Component

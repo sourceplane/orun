@@ -1,0 +1,21 @@
+apiVersion: sourceplane.io/v1
+kind: ExecutionProfile
+metadata:
+  name: validate
+spec:
+  description: Validation only — fmt, init (local), and validate without plan or apply
+  plan:
+    scope: changed
+  controls:
+    terraform:
+      fmt:
+        enabled: true
+      init:
+        enabled: true
+        backend: false
+      validate:
+        enabled: true
+      plan:
+        enabled: false
+      apply:
+        enabled: false

@@ -1,0 +1,14 @@
+apiVersion: sourceplane.io/v1
+kind: ExecutionProfile
+metadata:
+  name: verify
+spec:
+  description: Build and typecheck shared package
+  plan:
+    scope: changed
+  controls:
+    turbo-package:
+      build:
+        enabled: true
+      typecheck:
+        enabled: true

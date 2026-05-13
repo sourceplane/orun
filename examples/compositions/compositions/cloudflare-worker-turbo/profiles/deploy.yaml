@@ -1,0 +1,16 @@
+apiVersion: sourceplane.io/v1
+kind: ExecutionProfile
+metadata:
+  name: deploy
+spec:
+  description: Full build, typecheck, and deploy to Cloudflare
+  plan:
+    scope: full
+  controls:
+    cloudflare-worker-turbo:
+      build:
+        enabled: true
+      typecheck:
+        enabled: true
+      deploy:
+        enabled: true
