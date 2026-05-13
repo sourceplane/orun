@@ -51,20 +51,84 @@ type CompositionDocumentSpec struct {
 	Description       string                       `yaml:"description,omitempty" json:"description,omitempty"`
 	DefaultJob        string                       `yaml:"defaultJob" json:"defaultJob"`
 	DefaultProfile    string                       `yaml:"defaultProfile,omitempty" json:"defaultProfile,omitempty"`
+	SchemaRef         *ResourceRef                 `yaml:"schemaRef,omitempty" json:"schemaRef,omitempty"`
 	InputSchema       map[string]interface{}       `yaml:"inputSchema,omitempty" json:"inputSchema,omitempty"`
 	ExecutionProfiles map[string]ExecutionProfile  `yaml:"executionProfiles,omitempty" json:"executionProfiles,omitempty"`
-	Jobs              []JobSpec                    `yaml:"jobs" json:"jobs"`
+	Jobs              []CompositionJobEntry        `yaml:"jobs" json:"jobs"`
+	Profiles          []CompositionProfileEntry    `yaml:"profiles,omitempty" json:"profiles,omitempty"`
+}
+
+// ResourceRef is a named reference to another resource in the same package.
+type ResourceRef struct {
+	Name string `yaml:"name" json:"name"`
+}
+
+// CompositionJobEntry represents a job in the composition — either inline or via templateRef.
+type CompositionJobEntry struct {
+	Name        string       `yaml:"name" json:"name"`
+	TemplateRef *ResourceRef `yaml:"templateRef,omitempty" json:"templateRef,omitempty"`
+
+	// Inline job fields (used when templateRef is nil)
+	Description string                 `yaml:"description,omitempty" json:"description,omitempty"`
+	RunsOn      string                 `yaml:"runsOn,omitempty" json:"runsOn,omitempty"`
+	Timeout     string                 `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	Retries     int                    `yaml:"retries,omitempty" json:"retries,omitempty"`
+	Steps       []Step                 `yaml:"steps,omitempty" json:"steps,omitempty"`
+	Inputs      map[string]interface{} `yaml:"inputs,omitempty" json:"inputs,omitempty"`
+	Labels      map[string]string      `yaml:"labels,omitempty" json:"labels,omitempty"`
+	Capabilities []string              `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
+}
+
+// CompositionProfileEntry represents a profile in the composition — either inline or via profileRef.
+type CompositionProfileEntry struct {
+	Name       string       `yaml:"name" json:"name"`
+	ProfileRef *ResourceRef `yaml:"profileRef,omitempty" json:"profileRef,omitempty"`
+}
+
+// Step is a single execution unit within a job (imported from job.go for composition inline use).
+// See job.go for the canonical Step type.
+
+// ToJobSpec converts a CompositionJobEntry to a JobSpec for internal use.
+func (e CompositionJobEntry) ToJobSpec() JobSpec {
+	return JobSpec{
+		Name:         e.Name,
+		Description:  e.Description,
+		RunsOn:       e.RunsOn,
+		Timeout:      e.Timeout,
+		Retries:      e.Retries,
+		Steps:        e.Steps,
+		Inputs:       e.Inputs,
+		Labels:       e.Labels,
+		Capabilities: e.Capabilities,
+	}
 }
 
 // ExecutionProfile is a named selection of jobs and steps from the composition.
 type ExecutionProfile struct {
 	Description string                    `yaml:"description,omitempty" json:"description,omitempty"`
+	Policies    *ProfilePolicies          `yaml:"policies,omitempty" json:"policies,omitempty"`
 	Jobs        map[string]ProfileJobSpec `yaml:"jobs" json:"jobs"`
+}
+
+// ProfilePolicies defines enforcement rules for a profile.
+type ProfilePolicies struct {
+	RequireCleanGitTree          bool `yaml:"requireCleanGitTree,omitempty" json:"requireCleanGitTree,omitempty"`
+	RequirePinnedTerraformVersion bool `yaml:"requirePinnedTerraformVersion,omitempty" json:"requirePinnedTerraformVersion,omitempty"`
+	RequireApproval              bool `yaml:"requireApproval,omitempty" json:"requireApproval,omitempty"`
 }
 
 // ProfileJobSpec selects which steps from a base job are included in a profile.
 type ProfileJobSpec struct {
-	StepsEnabled []string `yaml:"stepsEnabled" json:"stepsEnabled"`
+	StepsEnabled        []string                    `yaml:"stepsEnabled,omitempty" json:"stepsEnabled,omitempty"`
+	IncludeCapabilities []string                    `yaml:"includeCapabilities,omitempty" json:"includeCapabilities,omitempty"`
+	StepOverrides       map[string]ProfileStepPatch `yaml:"stepOverrides,omitempty" json:"stepOverrides,omitempty"`
+}
+
+// ProfileStepPatch allows overriding specific fields of a step within a profile.
+type ProfileStepPatch struct {
+	Run  string                 `yaml:"run,omitempty" json:"run,omitempty"`
+	With map[string]interface{} `yaml:"with,omitempty" json:"with,omitempty"`
+	Env  map[string]interface{} `yaml:"env,omitempty" json:"env,omitempty"`
 }
 
 // CompositionPackage is the package manifest at the root of a composition package.
@@ -156,4 +220,53 @@ type CompositionLockSource struct {
 	Path           string   `yaml:"path,omitempty" json:"path,omitempty"`
 	ResolvedDigest string   `yaml:"resolvedDigest" json:"resolvedDigest"`
 	Exports        []string `yaml:"exports,omitempty" json:"exports,omitempty"`
+}
+
+// ComponentSchemaDocument is the self-describing schema definition (kind: ComponentSchema).
+type ComponentSchemaDocument struct {
+	APIVersion string               `yaml:"apiVersion" json:"apiVersion"`
+	Kind       string               `yaml:"kind" json:"kind"`
+	Metadata   Metadata             `yaml:"metadata" json:"metadata"`
+	Spec       ComponentSchemaSpec  `yaml:"spec" json:"spec"`
+}
+
+// ComponentSchemaSpec defines the JSON schema for a component type.
+type ComponentSchemaSpec struct {
+	Type   string                 `yaml:"type" json:"type"`
+	Schema map[string]interface{} `yaml:"schema" json:"schema"`
+}
+
+// JobTemplateDocument is the self-describing job template definition (kind: JobTemplate).
+type JobTemplateDocument struct {
+	APIVersion string          `yaml:"apiVersion" json:"apiVersion"`
+	Kind       string          `yaml:"kind" json:"kind"`
+	Metadata   Metadata        `yaml:"metadata" json:"metadata"`
+	Spec       JobTemplateSpec `yaml:"spec" json:"spec"`
+}
+
+// JobTemplateSpec defines a reusable job template.
+type JobTemplateSpec struct {
+	Description  string                 `yaml:"description,omitempty" json:"description,omitempty"`
+	RunsOn       string                 `yaml:"runsOn,omitempty" json:"runsOn,omitempty"`
+	Timeout      string                 `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	Retries      int                    `yaml:"retries,omitempty" json:"retries,omitempty"`
+	Labels       map[string]string      `yaml:"labels,omitempty" json:"labels,omitempty"`
+	Capabilities []string               `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
+	Steps        []Step                 `yaml:"steps" json:"steps"`
+	Inputs       map[string]interface{} `yaml:"inputs,omitempty" json:"inputs,omitempty"`
+}
+
+// ExecutionProfileDocument is the self-describing execution profile definition (kind: ExecutionProfile).
+type ExecutionProfileDocument struct {
+	APIVersion string               `yaml:"apiVersion" json:"apiVersion"`
+	Kind       string               `yaml:"kind" json:"kind"`
+	Metadata   Metadata             `yaml:"metadata" json:"metadata"`
+	Spec       ExecutionProfileSpec `yaml:"spec" json:"spec"`
+}
+
+// ExecutionProfileSpec defines the behavior overlay for one execution context.
+type ExecutionProfileSpec struct {
+	Description string                    `yaml:"description,omitempty" json:"description,omitempty"`
+	Policies    *ProfilePolicies          `yaml:"policies,omitempty" json:"policies,omitempty"`
+	Jobs        map[string]ProfileJobSpec `yaml:"jobs" json:"jobs"`
 }

@@ -1,0 +1,21 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: terraform-release
+spec:
+  description: Release-grade validation before apply-capable workflows
+
+  policies:
+    requireCleanGitTree: true
+    requirePinnedTerraformVersion: true
+    requireApproval: true
+
+  jobs:
+    validate:
+      includeCapabilities:
+        - terraform.setup
+        - terraform.context
+        - terraform.fmt
+        - terraform.init
+        - terraform.validate
+        - terraform.plan

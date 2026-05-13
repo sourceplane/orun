@@ -1,0 +1,22 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: terraform-pull-request
+spec:
+  description: Fast PR validation with speculative planning
+
+  jobs:
+    validate:
+      includeCapabilities:
+        - terraform.setup
+        - terraform.context
+        - terraform.fmt
+        - terraform.init
+        - terraform.validate
+        - terraform.plan
+
+      stepOverrides:
+        init:
+          run: terraform -chdir={{.terraformDir}} init -backend=false -input=false
+        plan:
+          run: terraform -chdir={{.terraformDir}} plan -no-color -lock=false

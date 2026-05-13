@@ -21,20 +21,22 @@ type JobRegistry struct {
 
 // JobSpec defines a complete job specification with multiple steps
 type JobSpec struct {
-	Name        string                 `yaml:"name" json:"name"`
-	Description string                 `yaml:"description" json:"description"`
-	RunsOn      string                 `yaml:"runsOn,omitempty" json:"runsOn,omitempty"`
-	Timeout     string                 `yaml:"timeout" json:"timeout"`
-	Retries     int                    `yaml:"retries" json:"retries"`
-	Steps       []Step                 `yaml:"steps" json:"steps"`
-	Inputs      map[string]interface{} `yaml:"inputs" json:"inputs"`
-	Labels      map[string]string      `yaml:"labels" json:"labels"`
+	Name         string                 `yaml:"name" json:"name"`
+	Description  string                 `yaml:"description" json:"description"`
+	RunsOn       string                 `yaml:"runsOn,omitempty" json:"runsOn,omitempty"`
+	Timeout      string                 `yaml:"timeout" json:"timeout"`
+	Retries      int                    `yaml:"retries" json:"retries"`
+	Steps        []Step                 `yaml:"steps" json:"steps"`
+	Inputs       map[string]interface{} `yaml:"inputs" json:"inputs"`
+	Labels       map[string]string      `yaml:"labels" json:"labels"`
+	Capabilities []string               `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
 }
 
 // Step is a single execution unit within a job
 type Step struct {
 	ID               string                 `yaml:"id,omitempty" json:"id,omitempty"`
 	Name             string                 `yaml:"name" json:"name"`
+	Capability       string                 `yaml:"capability,omitempty" json:"capability,omitempty"`
 	Phase            string                 `yaml:"phase,omitempty" json:"phase,omitempty"`
 	Order            int                    `yaml:"order,omitempty" json:"order,omitempty"`
 	Run              string                 `yaml:"run,omitempty" json:"run,omitempty"`
