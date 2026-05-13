@@ -33,6 +33,66 @@ compositions/helm-chart/compositions.yaml →  type "helm-chart"
 
 No path listing is required. Drop new composition subdirectories in and they are included automatically on the next pack or publish.
 
+## Stack resources
+
+Beyond compositions, a Stack can export profiles, triggers, and override policies as first-class resources. These follow the same convention-over-configuration pattern: when spec fields are empty, orun auto-discovers resources from well-known directories.
+
+### Full stack layout
+
+```text
+my-stack/
+├── stack.yaml
+├── profiles/                        ← Stack-level execution profiles
+│   ├── pull-request.yaml
+│   ├── verify.yaml
+│   └── release.yaml
+├── triggers/                        ← Trigger bindings
+│   ├── github-push-main.yaml
+│   ├── github-tag-release.yaml
+│   └── github-pull-request.yaml
+├── policies/                        ← Override policies
+│   └── override-policy.yaml
+└── compositions/
+    ├── terraform/
+    │   ├── compositions.yaml
+    │   └── profiles/                ← Composition-scoped profiles
+    │       └── dry-run.yaml
+    ├── helm-chart/
+    │   └── compositions.yaml
+    └── cloudflare-worker/
+        └── compositions.yaml
+```
+
+### Auto-discovery rules
+
+| Directory | Document kind | Scoping |
+| --- | --- | --- |
+| `profiles/*.yaml` | `ExecutionProfile` | Stack-wide |
+| `compositions/<type>/profiles/*.yaml` | `ExecutionProfile` | Composition-scoped (keyed as `<type>.<name>`) |
+| `triggers/*.yaml` | `TriggerBinding` | Stack-wide |
+| `policies/*.yaml` | `StackOverridePolicy` | First document wins |
+
+### Explicit declaration
+
+To override auto-discovery, declare entries under `spec`:
+
+```yaml
+spec:
+  compositions:
+    - path: compositions/terraform/compositions.yaml
+  profiles:
+    - name: release
+      path: profiles/release.yaml
+  triggers:
+    - name: push-main
+      path: triggers/github-push-main.yaml
+  overridePolicy:
+    name: default
+    path: policies/override-policy.yaml
+```
+
+Read [execution profiles](./profiles.md) and [automation](./automation.md) for the resource document formats and resolution semantics.
+
 ## Stack manifest
 
 ```yaml
