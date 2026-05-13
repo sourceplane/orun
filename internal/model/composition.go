@@ -122,16 +122,7 @@ type StackRegistry struct {
 // When Compositions is empty the packager auto-discovers every compositions.yaml
 // found by walking the directory that contains stack.yaml.
 type StackSpec struct {
-	Compositions   []StackCompositionEntry `yaml:"compositions,omitempty" json:"compositions,omitempty"`
-	Profiles       []StackExportEntry      `yaml:"profiles,omitempty" json:"profiles,omitempty"`
-	Triggers       []StackExportEntry      `yaml:"triggers,omitempty" json:"triggers,omitempty"`
-	OverridePolicy *StackExportEntry       `yaml:"overridePolicy,omitempty" json:"overridePolicy,omitempty"`
-}
-
-// StackExportEntry is a named path reference to a resource file within the stack.
-type StackExportEntry struct {
-	Name string `yaml:"name" json:"name"`
-	Path string `yaml:"path" json:"path"`
+	Compositions []StackCompositionEntry `yaml:"compositions,omitempty" json:"compositions,omitempty"`
 }
 
 // StackCompositionEntry is a path reference to a compositions.yaml within the stack.
