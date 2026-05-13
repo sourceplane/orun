@@ -9,9 +9,12 @@ spec:
   domain: platform-identity
   subscribe:
     environments:
-      - dev
-      - staging
-      - production
+      - name: dev
+        profile: pull-request
+      - name: staging
+        profile: verify
+      - name: production
+        profile: deploy
   inputs:
     installCommand: pnpm install --no-frozen-lockfile
     buildCommand: pnpm exec turbo run build --filter=./

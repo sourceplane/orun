@@ -9,9 +9,12 @@ spec:
   domain: platform-ui
   subscribe:
     environments:
-      - preview
-      - staging
-      - production
+      - name: preview
+        profile: pull-request
+      - name: staging
+        profile: verify
+      - name: production
+        profile: deploy
   inputs:
     outputDir: dist
     projectName: example-platform-web-console

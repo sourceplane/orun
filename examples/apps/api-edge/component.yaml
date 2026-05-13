@@ -9,9 +9,12 @@ spec:
   domain: platform-runtime
   subscribe:
     environments:
-      - dev
-      - staging
-      - production
+      - name: dev
+        profile: pull-request
+      - name: staging
+        profile: verify
+      - name: production
+        profile: deploy
   inputs:
     nodeVersion: "20"
     pnpmVersion: "10.12.1"
