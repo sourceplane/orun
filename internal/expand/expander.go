@@ -1,10 +1,12 @@
 package expand
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 
+	compositionpkg "github.com/sourceplane/orun/internal/composition"
 	"github.com/sourceplane/orun/internal/model"
 )
 
@@ -12,6 +14,7 @@ import (
 type Expander struct {
 	normalized *model.NormalizedIntent
 	groups     map[string]model.Group
+	registry   *compositionpkg.Registry
 }
 
 // NewExpander creates a new expander
@@ -20,6 +23,12 @@ func NewExpander(normalized *model.NormalizedIntent) *Expander {
 		normalized: normalized,
 		groups:     normalized.Groups,
 	}
+}
+
+// WithRegistry sets the composition registry for profile resolution.
+func (e *Expander) WithRegistry(registry *compositionpkg.Registry) *Expander {
+	e.registry = registry
+	return e
 }
 
 // Expand produces ComponentInstances for each environment × component pair
@@ -55,6 +64,13 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 				StepOverrides: comp.Overrides.Steps,
 				SourcePath:    comp.SourcePath,
 				Enabled:       comp.Enabled,
+			}
+
+			// Resolve execution profile if registry is available
+			if e.registry != nil {
+				if err := e.resolveProfile(instance, comp, envName); err != nil {
+					return nil, err
+				}
 			}
 
 			// Merge all properties (including path) with template interpolation
@@ -109,8 +125,9 @@ func (e *Expander) getApplicableComponents(envName string, env model.Environment
 }
 
 func componentMatchesEnvironment(component model.Component, envName string, env model.Environment) bool {
-	if len(component.Subscribe.Environments) > 0 {
-		if !matchesAny(component.Subscribe.Environments, envName) {
+	envNames := component.Subscribe.EnvironmentNames()
+	if len(envNames) > 0 {
+		if !matchesAny(envNames, envName) {
 			return false
 		}
 	} else if !matchesAny(env.Selectors.Components, component.Name) {
@@ -304,5 +321,36 @@ func (e *Expander) GetComponentInstance(envName, compName string, instances map[
 			}
 		}
 	}
+	return nil
+}
+
+// resolveProfile resolves the execution profile for a component/environment instance.
+func (e *Expander) resolveProfile(instance *model.ComponentInstance, comp model.Component, envName string) error {
+	if e.registry == nil {
+		return nil
+	}
+
+	compositionKey := comp.ResolvedComposition
+	if compositionKey == "" {
+		compositionKey = comp.Type
+	}
+
+	composition, exists := e.registry.ByKey[compositionKey]
+	if !exists {
+		if composition, exists = e.registry.Types[comp.Type]; !exists {
+			return nil
+		}
+	}
+
+	subscription := comp.Subscribe.FindSubscription(envName)
+
+	resolved, err := compositionpkg.ResolveProfileRef(comp.Type, composition, subscription)
+	if err != nil {
+		return fmt.Errorf("component %s environment %s: %w", comp.Name, envName, err)
+	}
+
+	instance.ProfileRef = resolved.Ref
+	instance.ProfileName = resolved.Name
+	instance.ProfileSource = resolved.Source
 	return nil
 }

@@ -6,6 +6,7 @@ spec:
   type: cloudflare-worker
   description: Verify a Cloudflare Worker app and deploy it from the production branch
   defaultJob: verify-deploy-cloudflare-worker
+  defaultProfile: verify
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Cloudflare Worker Component
@@ -55,6 +56,38 @@ spec:
             description: Branch that is allowed to deploy the Worker app
         additionalProperties: false
     additionalProperties: true
+  executionProfiles:
+    pull-request:
+      description: Build and typecheck without deploying
+      jobs:
+        verify-deploy-cloudflare-worker:
+          stepsEnabled:
+            - setup-node
+            - install-dependencies
+            - verify-worker-structure
+            - build-worker
+            - typecheck-worker
+    verify:
+      description: Full verification without deploy
+      jobs:
+        verify-deploy-cloudflare-worker:
+          stepsEnabled:
+            - setup-node
+            - install-dependencies
+            - verify-worker-structure
+            - build-worker
+            - typecheck-worker
+    deploy:
+      description: Full build, verify, and deploy
+      jobs:
+        verify-deploy-cloudflare-worker:
+          stepsEnabled:
+            - setup-node
+            - install-dependencies
+            - verify-worker-structure
+            - build-worker
+            - typecheck-worker
+            - deploy-worker
   jobs:
     - name: verify-deploy-cloudflare-worker
       description: Verify a Worker app and deploy it from the production branch
@@ -69,7 +102,8 @@ spec:
           use: actions/setup-node@v4
           with:
             node-version: "{{.nodeVersion}}"
-        - name: install-dependencies
+        - id: install-dependencies
+          name: install-dependencies
           shell: bash
           run: |
             {{if .pnpmVersion}}
@@ -77,16 +111,19 @@ spec:
             {{end}}
             {{.installCommand}}
           onFailure: stop
-        - name: verify-worker-structure
+        - id: verify-worker-structure
+          name: verify-worker-structure
           shell: bash
           run: |
             test -f package.json
             test -f wrangler.jsonc
           onFailure: stop
-        - name: build-worker
+        - id: build-worker
+          name: build-worker
           run: "{{.buildCommand}}"
           onFailure: stop
-        - name: typecheck-worker
+        - id: typecheck-worker
+          name: typecheck-worker
           shell: bash
           run: |
             {{if .typecheckCommand}}
@@ -95,7 +132,8 @@ spec:
             echo "Skipping typecheck (not configured)."
             {{end}}
           onFailure: stop
-        - name: deploy-worker
+        - id: deploy-worker
+          name: deploy-worker
           shell: bash
           run: |
             if [ "{{.Environment}}" = "dev" ]; then

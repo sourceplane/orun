@@ -6,6 +6,7 @@ spec:
   type: cloudflare-pages-terraform
   description: Verify static site builds locally and reconcile a Git-backed Cloudflare Pages project with Terraform
   defaultJob: verify-reconcile-cloudflare-pages-terraform
+  defaultProfile: verify
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Cloudflare Pages Terraform Component
@@ -81,6 +82,48 @@ spec:
             description: GitHub repository name connected to the Cloudflare Pages project
         additionalProperties: false
     additionalProperties: true
+  executionProfiles:
+    pull-request:
+      description: Build site and check Terraform formatting only
+      jobs:
+        verify-reconcile-cloudflare-pages-terraform:
+          stepsEnabled:
+            - setup-node
+            - install-site-dependencies
+            - build-site
+            - verify-build-output
+            - setup-terraform
+            - terraform-context
+            - terraform-fmt-check
+    verify:
+      description: Full site build and Terraform validation
+      jobs:
+        verify-reconcile-cloudflare-pages-terraform:
+          stepsEnabled:
+            - setup-node
+            - install-site-dependencies
+            - build-site
+            - verify-build-output
+            - setup-terraform
+            - terraform-context
+            - terraform-fmt-check
+            - terraform-init
+            - terraform-validate
+    release:
+      description: Full site build, Terraform validate, and plan-or-apply
+      jobs:
+        verify-reconcile-cloudflare-pages-terraform:
+          stepsEnabled:
+            - setup-node
+            - install-site-dependencies
+            - build-site
+            - verify-build-output
+            - setup-terraform
+            - terraform-context
+            - terraform-fmt-check
+            - terraform-init
+            - terraform-validate
+            - terraform-plan-or-apply
   jobs:
     - name: verify-reconcile-cloudflare-pages-terraform
       description: Build static assets locally, validate Terraform, plan on branches, and apply on the production branch
@@ -95,19 +138,22 @@ spec:
           use: actions/setup-node@v4
           with:
             node-version: "{{.nodeVersion}}"
-        - name: install-site-dependencies
+        - id: install-site-dependencies
+          name: install-site-dependencies
           shell: bash
           run: |
             cd "{{.siteDir}}"
             {{.installCommand}}
           onFailure: stop
-        - name: build-site
+        - id: build-site
+          name: build-site
           shell: bash
           run: |
             cd "{{.siteDir}}"
             {{.buildCommand}}
           onFailure: stop
-        - name: verify-build-output
+        - id: verify-build-output
+          name: verify-build-output
           shell: bash
           run: |
             cd "{{.siteDir}}"
@@ -120,22 +166,27 @@ spec:
           with:
             terraform_version: "{{.terraformVersion}}"
             terraform_wrapper: "false"
-        - name: terraform-context
+        - id: terraform-context
+          name: terraform-context
           shell: bash
           run: |
             terraform version
             echo "Reconciling Cloudflare Pages project {{.projectName}} from {{.terraformDir}}"
           onFailure: stop
-        - name: terraform-fmt-check
+        - id: terraform-fmt-check
+          name: terraform-fmt-check
           run: terraform -chdir={{.terraformDir}} fmt -check
           onFailure: stop
-        - name: terraform-init
+        - id: terraform-init
+          name: terraform-init
           run: terraform -chdir={{.terraformDir}} init -input=false
           onFailure: stop
-        - name: terraform-validate
+        - id: terraform-validate
+          name: terraform-validate
           run: terraform -chdir={{.terraformDir}} validate -no-color
           onFailure: stop
-        - name: terraform-plan-or-apply
+        - id: terraform-plan-or-apply
+          name: terraform-plan-or-apply
           shell: bash
           run: |
             cloudflare_account_id="${CLOUDFLARE_ACCOUNT_ID:-00000000000000000000000000000000}"

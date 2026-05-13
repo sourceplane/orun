@@ -17,8 +17,10 @@ type JobPlanner struct {
 
 // CompositionInfo holds the default job for a composition
 type CompositionInfo struct {
-	Type       string
-	DefaultJob *model.JobSpec
+	Type              string
+	DefaultJob        *model.JobSpec
+	ExecutionProfiles map[string]model.ExecutionProfile
+	JobMap            map[string]*model.JobSpec
 }
 
 // NewJobPlanner creates a new job planner from a composition registry
@@ -46,38 +48,41 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 				return nil, fmt.Errorf("no job definition for composition: %s", compositionKey)
 			}
 
-			jobDef := compositionInfo.DefaultJob
-			if jobDef == nil {
-				return nil, fmt.Errorf("no default job defined for composition: %s", compositionKey)
-			}
-
-			// Create job instance
-			jobID := fmt.Sprintf("%s.%s.%s", compInst.ComponentName, envName, jobDef.Name)
-			jobInst := &model.JobInstance{
-				ID:          jobID,
-				Name:        jobDef.Name,
-				Component:   compInst.ComponentName,
-				Environment: envName,
-				Composition: compInst.Type,
-				RunsOn:      jobDef.RunsOn,
-				Path:        compInst.Path,
-				Timeout:     jobDef.Timeout,
-				Retries:     jobDef.Retries,
-				Labels:      compInst.Labels,
-				Config:      compInst.Inputs,
-				DependsOn:   make([]string, 0),
-			}
-
-			resolvedSteps := applyStepOverrides(jobDef.Steps, compInst.StepOverrides)
-
-			// Render steps with template variables
-			renderedSteps, err := jp.renderSteps(resolvedSteps, compInst)
+			// Determine which jobs to plan based on profile
+			jobsToRender, err := jp.resolveJobsForProfile(compInst, compositionInfo)
 			if err != nil {
-				return nil, fmt.Errorf("failed to render steps for job %s: %w", jobID, err)
+				return nil, err
 			}
-			jobInst.Steps = renderedSteps
 
-			jobInstances[jobID] = jobInst
+			for _, jobEntry := range jobsToRender {
+				jobID := fmt.Sprintf("%s.%s.%s", compInst.ComponentName, envName, jobEntry.job.Name)
+				jobInst := &model.JobInstance{
+					ID:            jobID,
+					Name:          jobEntry.job.Name,
+					Component:     compInst.ComponentName,
+					Environment:   envName,
+					Composition:   compInst.Type,
+					Profile:       compInst.ProfileRef,
+					ProfileSource: compInst.ProfileSource,
+					RunsOn:        jobEntry.job.RunsOn,
+					Path:          compInst.Path,
+					Timeout:       jobEntry.job.Timeout,
+					Retries:       jobEntry.job.Retries,
+					Labels:        compInst.Labels,
+					Config:        compInst.Inputs,
+					DependsOn:     make([]string, 0),
+				}
+
+				resolvedSteps := applyStepOverrides(jobEntry.steps, compInst.StepOverrides)
+
+				renderedSteps, err := jp.renderSteps(resolvedSteps, compInst)
+				if err != nil {
+					return nil, fmt.Errorf("failed to render steps for job %s: %w", jobID, err)
+				}
+				jobInst.Steps = renderedSteps
+
+				jobInstances[jobID] = jobInst
+			}
 		}
 	}
 
@@ -88,6 +93,68 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 	}
 
 	return jobInstances, nil
+}
+
+type jobRenderEntry struct {
+	job   *model.JobSpec
+	steps []model.Step
+}
+
+func (jp *JobPlanner) resolveJobsForProfile(compInst *model.ComponentInstance, info *CompositionInfo) ([]jobRenderEntry, error) {
+	// Legacy: no profile means use default job with all steps
+	if compInst.ProfileSource == "" || compInst.ProfileSource == "legacy-none" {
+		jobDef := info.DefaultJob
+		if jobDef == nil {
+			return nil, fmt.Errorf("no default job defined for composition: %s", compInst.Type)
+		}
+		return []jobRenderEntry{{job: jobDef, steps: jobDef.Steps}}, nil
+	}
+
+	// Profile-based: filter jobs and steps
+	if len(info.ExecutionProfiles) == 0 {
+		jobDef := info.DefaultJob
+		if jobDef == nil {
+			return nil, fmt.Errorf("no default job defined for composition: %s", compInst.Type)
+		}
+		return []jobRenderEntry{{job: jobDef, steps: jobDef.Steps}}, nil
+	}
+
+	profile, exists := info.ExecutionProfiles[compInst.ProfileName]
+	if !exists {
+		return nil, fmt.Errorf("profile %q not found in composition %s", compInst.ProfileName, compInst.Type)
+	}
+
+	entries := make([]jobRenderEntry, 0, len(profile.Jobs))
+	for jobName, profileJob := range profile.Jobs {
+		baseJob, exists := info.JobMap[jobName]
+		if !exists {
+			return nil, fmt.Errorf("profile references unknown job %q in composition %s", jobName, compInst.Type)
+		}
+
+		filteredSteps := filterStepsByProfile(baseJob.Steps, profileJob.StepsEnabled)
+		entries = append(entries, jobRenderEntry{job: baseJob, steps: filteredSteps})
+	}
+
+	return entries, nil
+}
+
+func filterStepsByProfile(baseSteps []model.Step, stepsEnabled []string) []model.Step {
+	enabledSet := make(map[string]struct{}, len(stepsEnabled))
+	for _, sid := range stepsEnabled {
+		enabledSet[sid] = struct{}{}
+	}
+
+	filtered := make([]model.Step, 0, len(stepsEnabled))
+	for _, step := range baseSteps {
+		sid := step.ID
+		if sid == "" {
+			sid = step.Name
+		}
+		if _, enabled := enabledSet[sid]; enabled {
+			filtered = append(filtered, step)
+		}
+	}
+	return filtered
 }
 
 // Templates are cached to avoid re-parsing identical steps across multiple instances

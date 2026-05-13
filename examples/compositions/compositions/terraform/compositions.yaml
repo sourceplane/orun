@@ -6,6 +6,7 @@ spec:
   type: terraform
   description: Terraform validation jobs for infra components
   defaultJob: validate-terraform
+  defaultProfile: verify
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Terraform Stack Component
@@ -46,6 +47,37 @@ spec:
             description: Optional backend key for future expansion
         additionalProperties: false
     additionalProperties: true
+  executionProfiles:
+    pull-request:
+      description: Fast PR validation without backend init
+      jobs:
+        validate-terraform:
+          stepsEnabled:
+            - setup-terraform
+            - terraform-context
+            - terraform-fmt-check
+            - terraform-init
+            - terraform-validate
+    verify:
+      description: Full non-mutating verification
+      jobs:
+        validate-terraform:
+          stepsEnabled:
+            - setup-terraform
+            - terraform-context
+            - terraform-fmt-check
+            - terraform-init
+            - terraform-validate
+    release:
+      description: Release-grade validation
+      jobs:
+        validate-terraform:
+          stepsEnabled:
+            - setup-terraform
+            - terraform-context
+            - terraform-fmt-check
+            - terraform-init
+            - terraform-validate
   jobs:
     - name: validate-terraform
       description: Validate Terraform stacks with fmt, init, and validate
@@ -61,18 +93,22 @@ spec:
           with:
             terraform_version: "{{.terraformVersion}}"
             terraform_wrapper: "false"
-        - name: terraform-context
+        - id: terraform-context
+          name: terraform-context
           shell: bash
           run: |
             terraform version
             echo "Validating {{.stackName}} at {{.terraformDir}}"
           onFailure: stop
-        - name: terraform-fmt-check
+        - id: terraform-fmt-check
+          name: terraform-fmt-check
           run: terraform fmt -check {{.terraformDir}}
           onFailure: stop
-        - name: terraform-init
+        - id: terraform-init
+          name: terraform-init
           run: terraform -chdir={{.terraformDir}} init -backend=false -input=false
           onFailure: stop
-        - name: terraform-validate
+        - id: terraform-validate
+          name: terraform-validate
           run: terraform -chdir={{.terraformDir}} validate -no-color
           onFailure: stop

@@ -50,8 +50,10 @@ func generatePlan() error {
 			defaultJob = &composition.Jobs[0]
 		}
 		compositionInfos[compositionKey] = &planner.CompositionInfo{
-			Type:       composition.Name,
-			DefaultJob: defaultJob,
+			Type:              composition.Name,
+			DefaultJob:        defaultJob,
+			ExecutionProfiles: composition.ExecutionProfiles,
+			JobMap:            composition.JobMap,
 		}
 	}
 
@@ -73,7 +75,7 @@ func generatePlan() error {
 	if debugMode {
 		fmt.Println("□ Expanding (env × component)...")
 	}
-	expander := expand.NewExpander(normalized)
+	expander := expand.NewExpander(normalized).WithRegistry(compositionRegistry)
 	instances, err := expander.Expand()
 	if err != nil {
 		return fmt.Errorf("failed to expand intent: %w", err)

@@ -97,19 +97,21 @@ type JobConstraints struct {
 
 // JobInstance is a materialized job for a component in an environment
 type JobInstance struct {
-	ID          string
-	Name        string
-	Component   string
-	Environment string
-	Composition string
-	RunsOn      string
-	Path        string
-	Steps       []RenderedStep
-	DependsOn   []string
-	Timeout     string
-	Retries     int
-	Config      map[string]interface{} // Single source of truth for env vars
-	Labels      map[string]string
+	ID            string
+	Name          string
+	Component     string
+	Environment   string
+	Composition   string
+	Profile       string
+	ProfileSource string
+	RunsOn        string
+	Path          string
+	Steps         []RenderedStep
+	DependsOn     []string
+	Timeout       string
+	Retries       int
+	Config        map[string]interface{} // Single source of truth for env vars
+	Labels        map[string]string
 }
 
 // RenderedStep is a step with all templates resolved

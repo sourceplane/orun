@@ -35,22 +35,24 @@ const (
 
 // Composition is the resolved internal representation used by planning and validation.
 type Composition struct {
-	Key             string
-	Name            string
-	Description     string
-	DefaultJobName  string
-	InputSchema     map[string]interface{}
-	Jobs            []model.JobSpec
-	JobMap          map[string]*model.JobSpec
-	Schema          *jsonschema.Schema
-	JobRegistryName string
-	JobRegistryDesc string
-	SourceName      string
-	SourceKind      string
-	SourceRef       string
-	SourcePath      string
-	ExportPath      string
-	ResolvedDigest  string
+	Key               string
+	Name              string
+	Description       string
+	DefaultJobName    string
+	DefaultProfile    string
+	ExecutionProfiles map[string]model.ExecutionProfile
+	InputSchema       map[string]interface{}
+	Jobs              []model.JobSpec
+	JobMap            map[string]*model.JobSpec
+	Schema            *jsonschema.Schema
+	JobRegistryName   string
+	JobRegistryDesc   string
+	SourceName        string
+	SourceKind        string
+	SourceRef         string
+	SourcePath        string
+	ExportPath        string
+	ResolvedDigest    string
 }
 
 // Registry holds resolved compositions and the sources they came from.
@@ -778,22 +780,24 @@ func loadExportedComposition(rootDir string, source model.CompositionSource, man
 	}
 
 	composition := &Composition{
-		Key:             compositionKey(source.Name, export.Composition),
-		Name:            export.Composition,
-		Description:     document.Spec.Description,
-		DefaultJobName:  document.Spec.DefaultJob,
-		InputSchema:     document.Spec.InputSchema,
-		Jobs:            document.Spec.Jobs,
-		JobMap:          make(map[string]*model.JobSpec),
-		Schema:          schema,
-		JobRegistryName: manifest.Metadata.Name,
-		JobRegistryDesc: manifest.Metadata.Description,
-		SourceName:      source.Name,
-		SourceKind:      source.Kind,
-		SourceRef:       source.Ref,
-		SourcePath:      source.Path,
-		ExportPath:      export.Path,
-		ResolvedDigest:  digest,
+		Key:               compositionKey(source.Name, export.Composition),
+		Name:              export.Composition,
+		Description:       document.Spec.Description,
+		DefaultJobName:    document.Spec.DefaultJob,
+		DefaultProfile:    document.Spec.DefaultProfile,
+		ExecutionProfiles: document.Spec.ExecutionProfiles,
+		InputSchema:       document.Spec.InputSchema,
+		Jobs:              document.Spec.Jobs,
+		JobMap:            make(map[string]*model.JobSpec),
+		Schema:            schema,
+		JobRegistryName:   manifest.Metadata.Name,
+		JobRegistryDesc:   manifest.Metadata.Description,
+		SourceName:        source.Name,
+		SourceKind:        source.Kind,
+		SourceRef:         source.Ref,
+		SourcePath:        source.Path,
+		ExportPath:        export.Path,
+		ResolvedDigest:    digest,
 	}
 
 	for i := range composition.Jobs {
@@ -829,15 +833,81 @@ func validateCompositionDocument(sourceName, exportName string, document model.C
 		return fmt.Errorf("composition source %s export %s must define spec.defaultJob", sourceName, exportName)
 	}
 
+	jobNameSeen := make(map[string]struct{}, len(document.Spec.Jobs))
+	jobStepIDs := make(map[string]map[string]struct{}, len(document.Spec.Jobs))
 	defaultJobExists := false
 	for _, job := range document.Spec.Jobs {
 		if job.Name == document.Spec.DefaultJob {
 			defaultJobExists = true
-			break
 		}
+		if _, exists := jobNameSeen[job.Name]; exists {
+			return fmt.Errorf("composition %s has duplicate job name %q", exportName, job.Name)
+		}
+		jobNameSeen[job.Name] = struct{}{}
+
+		stepIDs := make(map[string]struct{}, len(job.Steps))
+		for _, step := range job.Steps {
+			sid := stepID(step)
+			if _, exists := stepIDs[sid]; exists {
+				return fmt.Errorf("composition %s job %q has duplicate step id %q", exportName, job.Name, sid)
+			}
+			stepIDs[sid] = struct{}{}
+		}
+		jobStepIDs[job.Name] = stepIDs
 	}
 	if !defaultJobExists {
 		return fmt.Errorf("composition source %s export %s defaultJob %s is not present in spec.jobs", sourceName, exportName, document.Spec.DefaultJob)
+	}
+
+	if err := validateExecutionProfiles(exportName, document.Spec, jobNameSeen, jobStepIDs); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func stepID(step model.Step) string {
+	if step.ID != "" {
+		return step.ID
+	}
+	return step.Name
+}
+
+func validateExecutionProfiles(compositionName string, spec model.CompositionDocumentSpec, jobNames map[string]struct{}, jobStepIDs map[string]map[string]struct{}) error {
+	if len(spec.ExecutionProfiles) == 0 {
+		return nil
+	}
+
+	if strings.TrimSpace(spec.DefaultProfile) == "" {
+		return fmt.Errorf("composition %s defines executionProfiles but spec.defaultProfile is empty", compositionName)
+	}
+	if _, exists := spec.ExecutionProfiles[spec.DefaultProfile]; !exists {
+		return fmt.Errorf("composition %s defaultProfile %q does not exist in spec.executionProfiles", compositionName, spec.DefaultProfile)
+	}
+
+	for profileName, profile := range spec.ExecutionProfiles {
+		if len(profile.Jobs) == 0 {
+			return fmt.Errorf("composition %s profile %q must select at least one job", compositionName, profileName)
+		}
+		for jobName, jobSpec := range profile.Jobs {
+			if _, exists := jobNames[jobName]; !exists {
+				return fmt.Errorf("composition %s profile %q references unknown job %q", compositionName, profileName, jobName)
+			}
+			if len(jobSpec.StepsEnabled) == 0 {
+				return fmt.Errorf("composition %s profile %q job %q stepsEnabled must not be empty", compositionName, profileName, jobName)
+			}
+			stepSeen := make(map[string]struct{}, len(jobSpec.StepsEnabled))
+			validSteps := jobStepIDs[jobName]
+			for _, sid := range jobSpec.StepsEnabled {
+				if _, exists := validSteps[sid]; !exists {
+					return fmt.Errorf("composition %s profile %q job %q enables unknown step %q", compositionName, profileName, jobName, sid)
+				}
+				if _, exists := stepSeen[sid]; exists {
+					return fmt.Errorf("composition %s profile %q job %q has duplicate stepsEnabled %q", compositionName, profileName, jobName, sid)
+				}
+				stepSeen[sid] = struct{}{}
+			}
+		}
 	}
 
 	return nil

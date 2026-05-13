@@ -47,11 +47,24 @@ type CompositionDocument struct {
 
 // CompositionDocumentSpec is the portable contract for one composition type.
 type CompositionDocumentSpec struct {
-	Type        string                 `yaml:"type" json:"type"`
-	Description string                 `yaml:"description,omitempty" json:"description,omitempty"`
-	DefaultJob  string                 `yaml:"defaultJob" json:"defaultJob"`
-	InputSchema map[string]interface{} `yaml:"inputSchema,omitempty" json:"inputSchema,omitempty"`
-	Jobs        []JobSpec              `yaml:"jobs" json:"jobs"`
+	Type              string                       `yaml:"type" json:"type"`
+	Description       string                       `yaml:"description,omitempty" json:"description,omitempty"`
+	DefaultJob        string                       `yaml:"defaultJob" json:"defaultJob"`
+	DefaultProfile    string                       `yaml:"defaultProfile,omitempty" json:"defaultProfile,omitempty"`
+	InputSchema       map[string]interface{}       `yaml:"inputSchema,omitempty" json:"inputSchema,omitempty"`
+	ExecutionProfiles map[string]ExecutionProfile  `yaml:"executionProfiles,omitempty" json:"executionProfiles,omitempty"`
+	Jobs              []JobSpec                    `yaml:"jobs" json:"jobs"`
+}
+
+// ExecutionProfile is a named selection of jobs and steps from the composition.
+type ExecutionProfile struct {
+	Description string                    `yaml:"description,omitempty" json:"description,omitempty"`
+	Jobs        map[string]ProfileJobSpec `yaml:"jobs" json:"jobs"`
+}
+
+// ProfileJobSpec selects which steps from a base job are included in a profile.
+type ProfileJobSpec struct {
+	StepsEnabled []string `yaml:"stepsEnabled" json:"stepsEnabled"`
 }
 
 // CompositionPackage is the package manifest at the root of a composition package.
