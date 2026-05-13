@@ -9,9 +9,12 @@ spec:
   domain: platform-foundation
   subscribe:
     environments:
-      - development
-      - staging
-      - production
+      - name: development
+        profile: pull-request
+      - name: staging
+        profile: verify
+      - name: production
+        profile: release
   inputs:
     stackName: cluster-addons
     terraformDir: .
