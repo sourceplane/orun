@@ -224,7 +224,7 @@ func stackYAMLToCompositionPackage(data []byte, rootDir string) (*model.Composit
 			return nil, fmt.Errorf("stack.yaml at %s has no spec.compositions and auto-discovery failed: %w", rootDir, err)
 		}
 		if len(discovered) == 0 {
-			return nil, fmt.Errorf("stack.yaml at %s has no spec.compositions and no compositions.yaml files were found under %s", rootDir, rootDir)
+			return nil, fmt.Errorf("stack.yaml at %s has no spec.compositions and no composition files were found under %s", rootDir, rootDir)
 		}
 		exports = discovered
 	}
@@ -244,7 +244,8 @@ func stackYAMLToCompositionPackage(data []byte, rootDir string) (*model.Composit
 }
 
 // discoverCompositionFiles walks rootDir and returns a CompositionExport for every
-// compositions.yaml file found, with the composition name taken from the parent directory.
+// composition file found, with the composition name taken from the parent directory.
+// Supports both split-kind (composition.yaml) and inline (compositions.yaml) formats.
 func discoverCompositionFiles(rootDir string) ([]model.CompositionExport, error) {
 	var exports []model.CompositionExport
 	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, walkErr error) error {
@@ -254,7 +255,7 @@ func discoverCompositionFiles(rootDir string) ([]model.CompositionExport, error)
 		if info.IsDir() {
 			return nil
 		}
-		if info.Name() != "compositions.yaml" {
+		if info.Name() != "compositions.yaml" && info.Name() != "composition.yaml" {
 			return nil
 		}
 		relPath, err := filepath.Rel(rootDir, path)
@@ -264,7 +265,7 @@ func discoverCompositionFiles(rootDir string) ([]model.CompositionExport, error)
 		relPath = filepath.ToSlash(relPath)
 		name := filepath.Base(filepath.Dir(relPath))
 		if name == "" || name == "." {
-			return nil // skip compositions.yaml at root level
+			return nil // skip at root level
 		}
 		exports = append(exports, model.CompositionExport{
 			Composition: name,
