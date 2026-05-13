@@ -9,12 +9,9 @@ spec:
   domain: platform-foundation
   subscribe:
     environments:
-      - name: development
-        profile: pull-request
-      - name: staging
-        profile: verify
-      - name: production
-        profile: release
+      - development
+      - staging
+      - production
   inputs:
     stackName: network-foundation
     terraformDir: .

@@ -9,10 +9,8 @@ spec:
   domain: commerce-checkout
   subscribe:
     environments:
-      - name: development
-        profile: lint-only
-      - name: production
-        profile: verify
+      - development
+      - production
   inputs:
     chartPath: ../../charts/chart-2/chart
     valuesFile: values.yaml

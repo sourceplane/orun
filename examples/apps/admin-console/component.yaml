@@ -9,10 +9,8 @@ spec:
   domain: platform-ui
   subscribe:
     environments:
-      - name: staging
-        profile: verify
-      - name: production
-        profile: release
+      - staging
+      - production
   inputs:
     cloudflareBuildCommand: corepack enable && pnpm turbo run build --filter=@example/admin-console
     outputDir: dist
