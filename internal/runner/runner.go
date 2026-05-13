@@ -502,19 +502,6 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 			continue
 		}
 
-		if step.Skipped {
-			r.updateState(persistState, execState, func() {
-				jobState.Steps[stepID] = "completed"
-			})
-			if r.inGHA() {
-				r.ghaPrintStepSkipped(job, stepID, idx+1, len(job.Steps))
-			} else {
-				r.printStepSkipped(stepID, idx+1, len(job.Steps))
-			}
-			jobReport.observeStepDone(stepID, true, true, 0)
-			continue
-		}
-
 		r.updateState(persistState, execState, func() {
 			jobState.Steps[stepID] = "running"
 		})
