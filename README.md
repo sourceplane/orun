@@ -37,14 +37,14 @@ The script auto-detects your OS and architecture, downloads the latest release f
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ORUN_VERSION` | `latest` | Specific version to install (e.g. `v1.12.3`) |
+| `ORUN_VERSION` | `latest` | Specific version to install (e.g. `v1.18.0`) |
 | `ORUN_INSTALL_DIR` | `~/.local/bin` | Installation directory |
 
 Example — install a specific version to `/usr/local/bin`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/sourceplane/orun/main/install.sh \
-  | ORUN_VERSION=v1.12.3 ORUN_INSTALL_DIR=/usr/local/bin sh
+  | ORUN_VERSION=v1.18.0 ORUN_INSTALL_DIR=/usr/local/bin sh
 ```
 
 ### Manual download
@@ -53,7 +53,7 @@ Download the archive for your platform from the [releases page](https://github.c
 
 ```sh
 # Example: Linux amd64
-curl -fsSL https://github.com/sourceplane/orun/releases/download/v1.12.3/orun_1.12.3_linux_amd64.tar.gz \
+curl -fsSL https://github.com/sourceplane/orun/releases/download/v1.18.0/orun_1.12.3_linux_amd64.tar.gz \
   | tar xz -C /usr/local/bin
 ```
 
@@ -73,17 +73,17 @@ Requires Go 1.25 or later.
 
 ```sh
 kiox init demo
-kiox --workspace demo add ghcr.io/sourceplane/orun:v1.12.3 as orun
+kiox --workspace demo add ghcr.io/sourceplane/orun:v1.18.0 as orun
 kiox --workspace demo exec -- orun plan --intent intent.yaml
 ```
 
 ### OCI image
 
 ```sh
-docker run ghcr.io/sourceplane/orun:v1.12.3 plan --intent intent.yaml
+docker run ghcr.io/sourceplane/orun:v1.18.0 plan --intent intent.yaml
 ```
 
-The OCI image is a kiox provider artifact. Use `oras pull ghcr.io/sourceplane/orun:v1.12.3` to pull the raw provider package.
+The OCI image is a kiox provider artifact. Use `oras pull ghcr.io/sourceplane/orun:v1.18.0` to pull the raw provider package.
 
 ## Quick start
 
@@ -171,6 +171,18 @@ orun compositions package build \
 orun compositions package push dist/example-platform-compositions-0.9.2.tgz oci://ghcr.io/org/compositions:v0.9.2
 ```
 
+### `orun fetch`
+
+Download a composition package from an OCI registry to a local directory.
+
+```sh
+# Fetch to a directory named after the repository
+orun fetch ghcr.io/sourceplane/stack-tectonic:1.0.0
+
+# Fetch to a custom directory
+orun fetch ghcr.io/sourceplane/stack-tectonic:1.0.0 --output ./my-compositions
+```
+
 ### `orun status` / `orun logs`
 
 ```sh
@@ -194,6 +206,46 @@ orun logs --failed
 | `--runner` | | Execution backend: `local`, `github-actions`, `docker` |
 
 ## Architecture
+
+### Execution profiles and automation
+
+Profiles define named execution modes that control which steps run:
+
+```yaml
+execution:
+  profiles:
+    verify:
+      compositionRef: terraform
+      plan:
+        scope: changed
+      controls:
+        terraform:
+          plan:
+            enabled: true
+          apply:
+            enabled: false
+```
+
+Trigger bindings connect CI events to profiles:
+
+```yaml
+automation:
+  triggers:
+    - name: github-push-main
+      on:
+        provider: github
+        event: push
+        branches: [main]
+      plan:
+        profile: verify
+```
+
+Use `--profile` or `--from-ci` at plan time:
+
+```sh
+orun plan --profile verify
+orun plan --from-ci github
+```
 
 ### Six-stage compiler pipeline
 
@@ -227,6 +279,26 @@ discovery:
     - services/
     - infra/
 
+execution:
+  profiles:
+    verify:
+      plan:
+        scope: changed
+      controls:
+        terraform:
+          apply:
+            enabled: false
+
+automation:
+  triggers:
+    - name: push-main
+      on:
+        provider: github
+        event: push
+        branches: [main]
+      plan:
+        profile: verify
+
 groups:
   platform:
     policies:
@@ -236,6 +308,8 @@ groups:
 
 environments:
   production:
+    execution:
+      profile: release
     selectors:
       domains: ["platform"]
   staging:

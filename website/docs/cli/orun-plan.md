@@ -88,6 +88,30 @@ Debug how `--changed` resolved its git refs:
 orun plan -i examples/intent.yaml --changed --explain
 ```
 
+Select an execution profile:
+
+```bash
+orun plan --profile verify
+```
+
+Auto-detect CI environment and match triggers:
+
+```bash
+orun plan --from-ci github
+```
+
+Use a named trigger directly:
+
+```bash
+orun plan --trigger github-push-main
+```
+
+Load a custom event context for trigger matching:
+
+```bash
+orun plan --event-file ci-event.json
+```
+
 ## Flags
 
 | Flag | Meaning |
@@ -107,6 +131,10 @@ orun plan -i examples/intent.yaml --changed --explain
 | `--uncommitted` | Scope to uncommitted changes |
 | `--untracked` | Scope to untracked files |
 | `--explain` | Print how `--changed` resolved its base and head refs |
+| `--profile` | Select an execution profile by name |
+| `--trigger` | Use a named trigger from intent or stack automation |
+| `--from-ci` | Auto-detect CI platform (`github`, `gitlab`, `buildkite`) and match triggers |
+| `--event-file` | Load an EventContext from a JSON file for trigger matching |
 
 ## Output contract
 
@@ -114,6 +142,10 @@ The generated plan contains explicit jobs, dependency edges, step phases, labels
 
 Plans stored in `.orun/plans/` can be inspected with `orun get plans` and `orun describe plan <id>`.
 
+When a profile is active, the plan's `metadata.profile` records which profile was used. When a trigger matched, `metadata.trigger` records its name.
+
 Use `--config-dir` only when you need to load legacy folder-shaped compositions instead of intent-declared packages.
 
 See [context-aware discovery](../concepts/context-discovery.md) for how `orun run` and `orun get jobs` auto-filter by component when run from inside a component directory.
+
+See [execution profiles](../concepts/profiles.md) and [automation](../concepts/automation.md) for the profile and trigger models.
