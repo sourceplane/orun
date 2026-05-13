@@ -5,6 +5,7 @@ import "github.com/spf13/cobra"
 var (
 	planName       string
 	planComponents []string
+	planLong       bool
 )
 
 var planCmd = &cobra.Command{
@@ -29,7 +30,8 @@ func registerPlanCommand(root *cobra.Command) {
 	planCmd.Flags().StringVarP(&environment, "env", "e", "", "Filter by environment")
 	planCmd.Flags().StringArrayVar(&planComponents, "component", nil, "Filter by component (repeatable)")
 	planCmd.Flags().StringVar(&planName, "name", "", "Named plan stored in .orun/plans/<name>.json")
-	planCmd.Flags().StringVarP(&viewPlan, "view", "v", "", "View plan (dag/dependencies/component=NAME)")
+	planCmd.Flags().StringVarP(&viewPlan, "view", "v", "", "View plan (dag/dag:long/dependencies/component=NAME)")
+	planCmd.Flags().BoolVar(&planLong, "long", false, "Show detailed output (step commands, IDs)")
 	planCmd.Flags().BoolVar(&changedOnly, "changed", false, "Show only changed components (requires git)")
 	planCmd.Flags().StringVar(&baseBranch, "base", "", "Base ref for changed detection (default: main)")
 	planCmd.Flags().StringVar(&headRef, "head", "", "Head ref for changed detection (usually HEAD)")
