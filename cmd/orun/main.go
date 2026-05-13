@@ -793,17 +793,6 @@ func printCIDetectionBanner(detected ci.DetectedRefs) {
 	)
 }
 
-func printAutoDetectBanner(event *model.EventContext, triggerName, profile string) {
-	color := ui.ColorEnabledForWriter(os.Stderr)
-	fmt.Fprintf(os.Stderr, "%s %s/%s (action=%s) %s trigger=%s, profile=%s\n",
-		ui.Cyan(color, "auto:"),
-		event.Provider, event.Event, event.Action,
-		ui.Dim(color, "→"),
-		ui.Bold(color, triggerName),
-		ui.Bold(color, profile),
-	)
-}
-
 func printExplainInfo(detected ci.DetectedRefs, explicitBase, explicitHead string) {
 	color := ui.ColorEnabledForWriter(os.Stderr)
 	fmt.Fprintf(os.Stderr, "\n%s --changed ref resolution\n", ui.Bold(color, "explain:"))
@@ -1045,7 +1034,7 @@ func resolveTriggerAndProfile(normalized *model.NormalizedIntent) (string, strin
 				return "", "", fmt.Errorf("failed to load event file %s: %w", eventFile, err)
 			}
 		} else {
-			eventCtx = buildEventCtx(os.Getenv, os.ReadFile)
+			eventCtx = ci.BuildEventContext(os.Getenv, os.ReadFile)
 			if eventCtx == nil {
 				return "", "", fmt.Errorf("--from-ci: no CI environment detected")
 			}
@@ -1065,23 +1054,6 @@ func resolveTriggerAndProfile(normalized *model.NormalizedIntent) (string, strin
 				result.Trigger.Name, result.Profile)
 		}
 		return result.Profile, result.Trigger.Name, nil
-	}
-
-	// Auto-detect: when automation triggers are defined and we're inside a CI
-	// environment, build an EventContext and try to match a trigger. This lets
-	// `orun plan` work inside GitHub Actions / GitLab CI / Buildkite without
-	// requiring --from-ci, --trigger, or --profile.
-	if len(normalized.Automation.Triggers) > 0 {
-		eventCtx := buildEventCtx(os.Getenv, os.ReadFile)
-		if eventCtx != nil {
-			result := trigger.Match(normalized.Automation.Triggers, eventCtx)
-			if result != nil {
-				if _, ok := normalized.Execution.Profiles[result.Profile]; ok {
-					printAutoDetectBanner(eventCtx, result.Trigger.Name, result.Profile)
-					return result.Profile, result.Trigger.Name, nil
-				}
-			}
-		}
 	}
 
 	return "", "", nil
