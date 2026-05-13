@@ -11,7 +11,6 @@ type Intent struct {
 	Environments map[string]Environment `yaml:"environments" json:"environments"`
 	Components   []Component            `yaml:"components" json:"components"`
 	Execution    IntentExecution        `yaml:"execution,omitempty" json:"execution,omitempty"`
-	Automation   IntentAutomation       `yaml:"automation,omitempty" json:"automation,omitempty"`
 }
 
 // IntentExecution holds optional execution-layer configuration in intent.yaml.
@@ -22,40 +21,7 @@ type IntentExecution struct {
 
 // ExecutionProfile defines a named set of controls per composition type.
 type ExecutionProfile struct {
-	Description string                            `yaml:"description,omitempty" json:"description,omitempty"`
-	Plan        ProfilePlan                       `yaml:"plan,omitempty" json:"plan,omitempty"`
-	Controls    map[string]map[string]interface{} `yaml:"controls,omitempty" json:"controls,omitempty"`
-}
-
-// ProfilePlan holds plan-generation settings for an execution profile.
-type ProfilePlan struct {
-	Scope string `yaml:"scope,omitempty" json:"scope,omitempty"`
-}
-
-// IntentAutomation holds the automation section of an intent.
-type IntentAutomation struct {
-	Triggers []AutomationTrigger `yaml:"triggers,omitempty" json:"triggers,omitempty"`
-}
-
-// AutomationTrigger maps a CI event to an execution profile.
-type AutomationTrigger struct {
-	Name string      `yaml:"name" json:"name"`
-	On   TriggerOn   `yaml:"on" json:"on"`
-	Plan TriggerPlan `yaml:"plan" json:"plan"`
-}
-
-// TriggerOn defines the event conditions that activate a trigger.
-type TriggerOn struct {
-	Provider string   `yaml:"provider,omitempty" json:"provider,omitempty"`
-	Event    string   `yaml:"event" json:"event"`
-	Actions  []string `yaml:"actions,omitempty" json:"actions,omitempty"`
-	Branches []string `yaml:"branches,omitempty" json:"branches,omitempty"`
-	Tags     []string `yaml:"tags,omitempty" json:"tags,omitempty"`
-}
-
-// TriggerPlan specifies which execution profile a trigger selects.
-type TriggerPlan struct {
-	Profile string `yaml:"profile" json:"profile"`
+	Controls map[string]map[string]interface{} `yaml:"controls,omitempty" json:"controls,omitempty"`
 }
 
 // IntentExecutionState configures where execution state is stored.
@@ -147,7 +113,6 @@ type Dependency struct {
 type NormalizedIntent struct {
 	Metadata       Metadata
 	Execution      IntentExecution
-	Automation     IntentAutomation
 	Groups         map[string]Group
 	Environments   map[string]Environment
 	Components     map[string]Component

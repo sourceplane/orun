@@ -50,10 +50,6 @@ var (
 	compositionPackageRoot   string
 	compositionPackageOutput string
 	explainChanged           bool
-	triggerName              string
-	profileName              string
-	fromCI                   string
-	eventFile                string
 )
 
 var rootCmd = &cobra.Command{
