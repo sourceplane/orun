@@ -19,44 +19,6 @@ title: Environment variables
 | `GITHUB_ACTIONS` | Causes `run` to auto-select the GitHub Actions backend when set to `true` |
 | `GITHUB_WORKSPACE` | Used as the default workdir for the GitHub Actions backend when `--workdir` is not set |
 
-## Variables for CI auto-detection
-
-These variables are read by `orun plan --from-ci` to build an event context and match triggers.
-
-### GitHub Actions
-
-| Variable | Purpose |
-| --- | --- |
-| `GITHUB_ACTIONS` | Set to `true` — signals GitHub Actions environment |
-| `GITHUB_EVENT_NAME` | Event type (e.g., `push`, `pull_request`) |
-| `GITHUB_REF` | Full git ref (e.g., `refs/heads/main`, `refs/tags/v1.0.0`) |
-| `GITHUB_BASE_REF` | Base branch for pull requests |
-| `GITHUB_HEAD_REF` | Head branch for pull requests |
-| `GITHUB_SHA` | Head commit SHA |
-| `GITHUB_ACTOR` | User or app that triggered the workflow |
-| `GITHUB_REPOSITORY` | Full repository path (`owner/repo`) |
-
-### GitLab CI
-
-| Variable | Purpose |
-| --- | --- |
-| `GITLAB_CI` | Present when running in GitLab CI |
-| `CI_PIPELINE_SOURCE` | Pipeline trigger source (`push`, `merge_request_event`, etc.) |
-| `CI_MERGE_REQUEST_TARGET_BRANCH_NAME` | Target branch for merge requests |
-| `CI_COMMIT_SHA` | Current commit SHA |
-| `CI_COMMIT_BRANCH` | Branch name |
-| `CI_COMMIT_TAG` | Tag name (when triggered by tag) |
-
-### Buildkite
-
-| Variable | Purpose |
-| --- | --- |
-| `BUILDKITE` | Present when running in Buildkite |
-| `BUILDKITE_PIPELINE_DEFAULT_BRANCH` | Default branch for the pipeline |
-| `BUILDKITE_BRANCH` | Current branch |
-| `BUILDKITE_COMMIT` | Current commit SHA |
-| `BUILDKITE_TAG` | Tag name (when triggered by tag) |
-
 ## Variables for self-hosted backend provisioning
 
 These variables are used by `orun backend init`, `orun backend status`, and `orun backend destroy`.

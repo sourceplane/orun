@@ -39,28 +39,6 @@ discovery:
     - packages/
     - website/
 
-execution:
-  profiles:
-    dry-run:
-      description: Non-mutating checks only
-      compositionRef: terraform
-      plan:
-        scope: changed
-      controls:
-        terraform:
-          apply:
-            enabled: false
-
-automation:
-  triggers:
-    - name: github-push-main
-      on:
-        provider: github
-        event: push
-        branches: [main]
-      plan:
-        profile: verify
-
 groups:
   platform:
     policies:
@@ -70,10 +48,6 @@ groups:
 
 environments:
   production:
-    execution:
-      profile: release
-      profiles:
-        cloudflare-worker: deploy
     selectors:
       domains: [platform]
     defaults:
@@ -88,53 +62,6 @@ Discovery roots are scanned recursively for `component.yaml` files relative to t
 
 `intent.yaml` also serves as the workspace root marker for [context-aware discovery](./context-discovery.md). When you run `orun` from any subdirectory in your repo, it walks up the directory tree to find `intent.yaml` and uses its location to resolve all relative paths.
 
-### `execution`
-
-The `execution` block defines [profiles](./profiles.md) — named configurations that control which steps run:
-
-```yaml
-execution:
-  profiles:
-    dry-run:
-      compositionRef: terraform
-      plan:
-        scope: changed
-      controls:
-        terraform:
-          apply:
-            enabled: false
-```
-
-Profiles can also be loaded from stack-level files via convention-over-configuration. See [profiles](./profiles.md) for the full model.
-
-### `automation`
-
-The `automation` block defines [triggers](./automation.md) that connect CI events to profile selection:
-
-```yaml
-automation:
-  triggers:
-    - name: github-push-main
-      on:
-        provider: github
-        event: push
-        branches: [main]
-      plan:
-        profile: verify
-
-  triggerBindings:
-    - name: github-pull-request
-      on:
-        provider: github
-        event: pull_request
-        actions: [opened, synchronize, reopened, ready_for_review]
-      plan:
-        scope: changed
-        base: main
-```
-
-See [automation](./automation.md) for trigger matching, CI auto-detection, and override policies.
-
 ### `groups`
 
 Groups define platform-owned defaults and policy domains. They are the right place for non-negotiable constraints and common defaults that should apply across many components.
@@ -142,22 +69,6 @@ Groups define platform-owned defaults and policy domains. They are the right pla
 ### `environments`
 
 Environments define selectors, defaults, and policies for a target environment such as `development`, `staging`, or `production`.
-
-Environments can also declare execution settings that select profiles per-type:
-
-```yaml
-environments:
-  production:
-    execution:
-      profile: release
-      profiles:
-        cloudflare-worker: deploy
-        cloudflare-pages: deploy
-    defaults:
-      namespacePrefix: prod-
-```
-
-The `execution.profile` sets the default profile for all composition types in that environment. The `execution.profiles` map overrides specific composition types.
 
 ### `components`
 
@@ -184,23 +95,6 @@ spec:
     terraformDir: .
     terraformVersion: 1.9.8
 ```
-
-### Rich subscription format
-
-Components can specify per-environment profile and trigger binding overrides using the array subscription format:
-
-```yaml
-spec:
-  type: terraform
-  subscribe:
-    - environments: [dev]
-      profile: dry-run
-    - environments: [staging, production]
-      profile: release
-      triggerBindings: [github-push-main]
-```
-
-Each entry can override the profile and trigger bindings for the listed environments, giving fine-grained control over how each component×environment pair executes.
 
 ## Merge model
 

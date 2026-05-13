@@ -10,30 +10,17 @@ The plan schema defines the artifact produced by `orun plan` and consumed by `or
 | --- | --- |
 | `apiVersion` | `orun.io/v1` |
 | `kind` | Always `Plan` |
-| `metadata` | Name, description, namespace, generation timestamp, checksum, profile, trigger |
+| `metadata` | Name, description, namespace, generation timestamp, checksum |
 | `execution` | Concurrency, fail-fast behavior, and state-file name |
 | `spec.jobBindings` | Optional metadata about bound jobs |
 | `jobs` | The concrete execution DAG |
-
-## Metadata fields
-
-| Field | Meaning |
-| --- | --- |
-| `metadata.name` | Plan name |
-| `metadata.generatedAt` | ISO 8601 generation timestamp |
-| `metadata.checksum` | SHA-256 digest of the plan content |
-| `metadata.profile` | Name of the execution profile used to generate this plan (empty if none) |
-| `metadata.trigger` | Name of the automation trigger that initiated plan generation (empty if manual) |
 
 ## Job fields
 
 Each job can include:
 
 - `id`
-- `uid` — deterministic unique identifier derived from plan digest + job key
 - `name`
-- `displayName` — human-readable name (e.g., "Terraform fmt")
-- `checkName` — CI check name format: "component · environment · DisplayName"
 - `component`
 - `environment`
 - `composition`
@@ -47,16 +34,6 @@ Each job can include:
 - `env`
 - `labels`
 - `config`
-
-### Job identity fields
-
-Three fields added for CI/CD integration:
-
-| Field | Format | Purpose |
-| --- | --- | --- |
-| `uid` | `job_<plan-short>_<job-hash>` | Stable cross-plan identifier for deduplication |
-| `displayName` | Title case from job name | Human-readable label (hyphens → spaces, capitalized) |
-| `checkName` | `component · environment · DisplayName` | Formatted for GitHub Checks and similar APIs |
 
 ## Step fields
 
