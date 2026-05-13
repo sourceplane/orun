@@ -6,28 +6,6 @@ spec:
   type: helm-chart
   description: Helm chart validation jobs for chart components
   defaultJob: render-helm-chart
-  defaultProfile: validate
-  controlSchema:
-    $schema: http://json-schema.org/draft-07/schema#
-    title: Helm Chart Execution Controls
-    type: object
-    properties:
-      lint:
-        type: object
-        properties:
-          enabled:
-            type: boolean
-      template:
-        type: object
-        properties:
-          enabled:
-            type: boolean
-    additionalProperties: false
-  controlDefaults:
-    lint:
-      enabled: true
-    template:
-      enabled: true
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Helm Chart Component
@@ -87,10 +65,8 @@ spec:
             echo "Rendering {{.releaseName}} from {{.chartPath}} with {{.valuesFile}}"
           onFailure: stop
         - name: helm-chart-lint
-          when: "{{(index .controls \"lint\").enabled}}"
           run: helm lint {{.chartPath}} --values {{.valuesFile}}
           onFailure: stop
         - name: helm-chart-template
-          when: "{{(index .controls \"template\").enabled}}"
           run: helm template {{.releaseName}} {{.chartPath}} --values {{.valuesFile}}
           onFailure: stop

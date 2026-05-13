@@ -6,35 +6,6 @@ spec:
   type: cloudflare-worker-turbo
   description: Verify a Cloudflare Worker app and deploy it from the production branch
   defaultJob: verify-deploy-cloudflare-worker-turbo
-  defaultProfile: verify
-  controlSchema:
-    $schema: http://json-schema.org/draft-07/schema#
-    title: Cloudflare Worker Turbo Execution Controls
-    type: object
-    properties:
-      build:
-        type: object
-        properties:
-          enabled:
-            type: boolean
-      typecheck:
-        type: object
-        properties:
-          enabled:
-            type: boolean
-      deploy:
-        type: object
-        properties:
-          enabled:
-            type: boolean
-    additionalProperties: false
-  controlDefaults:
-    build:
-      enabled: true
-    typecheck:
-      enabled: true
-    deploy:
-      enabled: false
   inputSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Cloudflare Worker Turbo Component
@@ -120,15 +91,12 @@ spec:
             test -f wrangler.jsonc
           onFailure: stop
         - name: build-worker
-          when: "{{(index .controls \"build\").enabled}}"
           run: "{{if .buildCommand}}{{.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
           onFailure: stop
         - name: typecheck-worker
-          when: "{{(index .controls \"typecheck\").enabled}}"
           run: "{{if .typecheckCommand}}{{.typecheckCommand}}{{else}}pnpm exec turbo run typecheck --filter=./{{end}}"
           onFailure: stop
         - name: deploy-worker
-          when: "{{(index .controls \"deploy\").enabled}}"
           shell: bash
           run: |
             if [ "{{.Environment}}" = "dev" ]; then

@@ -25,7 +25,6 @@ execution:
   profiles:
     dry-run:
       description: Fast PR validation — non-mutating checks only
-      compositionRef: terraform
       plan:
         scope: changed
       controls:
@@ -44,7 +43,6 @@ execution:
 
     verify:
       description: Merge verification with plan generation
-      compositionRef: terraform
       plan:
         scope: changed
       controls:
@@ -63,7 +61,6 @@ execution:
 
     release:
       description: Release-grade execution
-      compositionRef: terraform
       plan:
         scope: full
       controls:
@@ -82,6 +79,18 @@ execution:
 
 automation:
   triggers:
+    - name: github-pull-request
+      on:
+        provider: github
+        event: pull_request
+        actions:
+          - opened
+          - synchronize
+          - reopened
+          - ready_for_review
+      plan:
+        profile: dry-run
+
     - name: github-push-main
       on:
         provider: github
@@ -99,30 +108,11 @@ automation:
           - "v*"
       plan:
         profile: release
-        scope: full
-
-  triggerBindings:
-    - name: github-pull-request
-      on:
-        provider: github
-        event: pull_request
-        actions:
-          - opened
-          - synchronize
-          - reopened
-          - ready_for_review
-      plan:
-        scope: changed
-        base: main
 
 environments:
   dev:
     execution:
       profile: dry-run
-      profiles:
-        cloudflare-worker: verify
-        cloudflare-pages: verify
-        turbo-package: verify
     defaults:
       namespacePrefix: dev-
     policies:
@@ -131,10 +121,6 @@ environments:
   development:
     execution:
       profile: dry-run
-      profiles:
-        cloudflare-worker: verify
-        cloudflare-pages: verify
-        turbo-package: verify
     defaults:
       namespacePrefix: dev-
     policies:
@@ -143,9 +129,6 @@ environments:
   preview:
     execution:
       profile: verify
-      profiles:
-        cloudflare-worker: verify
-        cloudflare-pages: verify
     defaults:
       namespacePrefix: preview-
     policies:
@@ -154,9 +137,6 @@ environments:
   staging:
     execution:
       profile: verify
-      profiles:
-        cloudflare-worker: verify
-        cloudflare-pages: verify
     defaults:
       namespacePrefix: stg-
     policies:
@@ -165,13 +145,6 @@ environments:
   production:
     execution:
       profile: release
-      profiles:
-        cloudflare-worker: deploy
-        cloudflare-worker-turbo: deploy
-        cloudflare-pages: deploy
-        cloudflare-pages-turbo: deploy
-        cloudflare-pages-terraform: deploy
-        cloudflare-pages-turbo-terraform: deploy
     defaults:
       namespacePrefix: prod-
     policies:
