@@ -97,6 +97,16 @@ properties:
     additionalProperties:
       type: object
       properties:
+        activation:
+          type: object
+          properties:
+            triggerRefs:
+              type: array
+              description: Names of trigger bindings that activate this environment.
+              items:
+                type: string
+                minLength: 1
+          additionalProperties: false
         selectors:
           type: object
           properties:
@@ -115,6 +125,72 @@ properties:
         policies:
           type: object
           additionalProperties: true
+  automation:
+    type: object
+    description: Trigger binding declarations for CI/event-driven planning.
+    properties:
+      triggerBindings:
+        type: object
+        description: Named trigger bindings that map provider events to environment activation.
+        additionalProperties:
+          type: object
+          required:
+            - on
+          properties:
+            description:
+              type: string
+            on:
+              type: object
+              required:
+                - provider
+                - event
+              properties:
+                provider:
+                  type: string
+                  description: Event provider (e.g. github).
+                  minLength: 1
+                event:
+                  type: string
+                  description: Normalized event name (e.g. push, pull_request).
+                  minLength: 1
+                actions:
+                  type: array
+                  description: Optional event action filter.
+                  items:
+                    type: string
+                branches:
+                  type: array
+                  description: Optional source/ref branch filter (supports globs).
+                  items:
+                    type: string
+                baseBranches:
+                  type: array
+                  description: Optional PR base branch filter (supports globs).
+                  items:
+                    type: string
+                tags:
+                  type: array
+                  description: Optional tag filter (supports globs).
+                  items:
+                    type: string
+              additionalProperties: false
+            plan:
+              type: object
+              properties:
+                scope:
+                  type: string
+                  description: Plan scope when this trigger fires.
+                  enum:
+                    - full
+                    - changed
+                base:
+                  type: string
+                  description: Dot-path into the raw event payload for the base revision.
+                head:
+                  type: string
+                  description: Dot-path into the raw event payload for the head revision.
+              additionalProperties: false
+    additionalProperties: false
   execution:
     type: object
     description: Optional execution-layer configuration (remote state, etc.)

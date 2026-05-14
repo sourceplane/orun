@@ -88,6 +88,18 @@ Debug how `--changed` resolved its git refs:
 orun plan -i examples/intent.yaml --changed --explain
 ```
 
+Use trigger bindings for CI-driven environment activation:
+
+```bash
+orun plan --from-ci github --event-file "$GITHUB_EVENT_PATH"
+```
+
+Simulate a named trigger locally:
+
+```bash
+orun plan --trigger github-pull-request --base main --head HEAD
+```
+
 ## Flags
 
 | Flag | Meaning |
@@ -107,6 +119,9 @@ orun plan -i examples/intent.yaml --changed --explain
 | `--uncommitted` | Scope to uncommitted changes |
 | `--untracked` | Scope to untracked files |
 | `--explain` | Print how `--changed` resolved its base and head refs |
+| `--trigger` | Named trigger binding for environment activation |
+| `--from-ci` | CI provider for event normalization (e.g. `github`) |
+| `--event-file` | Path to provider event JSON file |
 
 ## Output contract
 

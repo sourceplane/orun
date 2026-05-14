@@ -34,7 +34,8 @@ jobs:
         id: plan
         run: |
           orun plan \
-            --changed \
+            --from-ci github \
+            --event-file "$GITHUB_EVENT_PATH" \
             --intent examples/intent.yaml \
             --output plan.json
           echo "plan-checksum=$(jq -r '.metadata.checksum | ltrimstr("sha256-") | .[0:12]' plan.json)" >> $GITHUB_OUTPUT

@@ -16,6 +16,7 @@ import (
 	"github.com/sourceplane/orun/internal/planner"
 	"github.com/sourceplane/orun/internal/render"
 	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/trigger"
 	"github.com/sourceplane/orun/internal/ui"
 )
 
@@ -72,6 +73,47 @@ func generatePlan() error {
 		return fmt.Errorf("component validation failed: %w", err)
 	}
 
+	// Resolve trigger context and determine active environments
+	triggerCtx, err := buildTriggerContext()
+	if err != nil {
+		return fmt.Errorf("trigger resolution failed: %w", err)
+	}
+
+	var triggerResolution *model.TriggerResolution
+	var triggerActiveEnvs []string
+
+	if triggerCtx.Mode != "none" && triggerCtx.Mode != "" {
+		if debugMode {
+			fmt.Printf("□ Resolving trigger (%s)...\n", triggerCtx.Mode)
+		}
+
+		if err := trigger.ValidateTriggerContext(intent, triggerCtx); err != nil {
+			return err
+		}
+
+		triggerActiveEnvs, triggerResolution, err = trigger.ResolveActiveEnvironments(intent, triggerCtx, environment)
+		if err != nil {
+			return err
+		}
+
+		if debugMode {
+			fmt.Printf("  Matched triggers: %s\n", strings.Join(triggerResolution.MatchedTriggerNames, ", "))
+			fmt.Printf("  Active environments: %s\n", strings.Join(triggerResolution.ActiveEnvironments, ", "))
+			fmt.Printf("  Plan scope: %s\n", triggerResolution.PlanScope)
+		}
+
+		// Apply trigger-resolved scope: if scope=changed, enable changed mode with resolved base/head
+		if triggerResolution.PlanScope == "changed" && !changedOnly {
+			changedOnly = true
+			if baseBranch == "" && triggerResolution.Base != "" {
+				baseBranch = triggerResolution.Base
+			}
+			if headRef == "" && triggerResolution.Head != "" {
+				headRef = triggerResolution.Head
+			}
+		}
+	}
+
 	if debugMode {
 		fmt.Println("□ Expanding (env × component)...")
 	}
@@ -81,8 +123,23 @@ func generatePlan() error {
 		return fmt.Errorf("failed to expand intent: %w", err)
 	}
 
-	// Filter by --env flag
-	if environment != "" {
+	// Filter by trigger-resolved environments or --env flag
+	if len(triggerActiveEnvs) > 0 {
+		envSet := make(map[string]struct{}, len(triggerActiveEnvs))
+		for _, env := range triggerActiveEnvs {
+			envSet[env] = struct{}{}
+		}
+		filtered := make(map[string][]*model.ComponentInstance)
+		for envName, envInsts := range instances {
+			if _, ok := envSet[envName]; ok {
+				filtered[envName] = envInsts
+			}
+		}
+		if len(filtered) == 0 {
+			return fmt.Errorf("trigger-activated environments %v produced no component instances", triggerActiveEnvs)
+		}
+		instances = filtered
+	} else if environment != "" {
 		envFilters := parseCommaSeparated(environment)
 		filtered := make(map[string][]*model.ComponentInstance)
 		for envName, envInsts := range instances {
@@ -216,6 +273,24 @@ func generatePlan() error {
 	renderer := render.NewRenderer()
 	plan := renderer.RenderPlanWithOrder(intent.Metadata, jobInstances, jobBindings, sorted)
 	plan.Spec.CompositionSources = compositionRegistry.Sources
+
+	// Attach trigger metadata to plan
+	if triggerResolution != nil {
+		planTrigger := &model.PlanTrigger{
+			Mode:               triggerCtx.Mode,
+			MatchedBindings:    triggerResolution.MatchedTriggerNames,
+			ActiveEnvironments: triggerResolution.ActiveEnvironments,
+			Scope:              triggerResolution.PlanScope,
+			Base:               triggerResolution.Base,
+			Head:               triggerResolution.Head,
+		}
+		if triggerCtx.Event != nil {
+			planTrigger.Provider = triggerCtx.Event.Provider
+			planTrigger.Event = triggerCtx.Event.Event
+			planTrigger.Action = triggerCtx.Event.Action
+		}
+		plan.Metadata.Trigger = planTrigger
+	}
 
 	// Embed the intent directory as a workspace-relative path so that
 	// orun run can resolve component paths correctly when auto-discovery
@@ -986,4 +1061,46 @@ func formatComponentNotFoundError(filter string, available []string) error {
 	}
 
 	return fmt.Errorf("%s", sb.String())
+}
+
+func buildTriggerContext() (model.TriggerContext, error) {
+	if triggerName != "" && eventFile != "" {
+		return model.TriggerContext{}, fmt.Errorf("--trigger and --event-file are mutually exclusive")
+	}
+
+	if triggerName != "" {
+		return model.TriggerContext{
+			Mode:        "named-trigger",
+			TriggerName: triggerName,
+		}, nil
+	}
+
+	if eventFile != "" {
+		if fromCI == "" {
+			return model.TriggerContext{}, fmt.Errorf("--from-ci is required when using --event-file")
+		}
+
+		data, err := os.ReadFile(eventFile)
+		if err != nil {
+			return model.TriggerContext{}, fmt.Errorf("failed to read event file %s: %w", eventFile, err)
+		}
+
+		eventName := os.Getenv("GITHUB_EVENT_NAME")
+		var event *model.NormalizedEvent
+		if eventName != "" {
+			event, err = trigger.ParseEventFileWithName(fromCI, eventName, data)
+		} else {
+			event, err = trigger.ParseEventFile(fromCI, data)
+		}
+		if err != nil {
+			return model.TriggerContext{}, err
+		}
+
+		return model.TriggerContext{
+			Mode:  "event-file",
+			Event: event,
+		}, nil
+	}
+
+	return model.TriggerContext{Mode: "none"}, nil
 }

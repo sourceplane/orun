@@ -36,3 +36,20 @@ orun run \
 ```
 
 Use the explicit flag when you want the command line itself to document that the plan requires GitHub Actions semantics.
+
+## Trigger-aware CI planning
+
+When your intent file declares trigger bindings, use `--from-ci` to let orun automatically scope the plan based on the GitHub event:
+
+```bash
+orun plan \
+  --from-ci github \
+  --event-file "$GITHUB_EVENT_PATH" \
+  --output plan.json
+
+orun run \
+  --plan plan.json \
+  --runner github-actions
+```
+
+This replaces manual `--changed --base --head` flags — the trigger binding's `plan.scope` and event paths handle everything. See [trigger-aware CI](./trigger-bindings-ci.md) for a complete workflow example.

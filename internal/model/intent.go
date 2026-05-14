@@ -14,6 +14,7 @@ type Intent struct {
 	Metadata     Metadata               `yaml:"metadata" json:"metadata"`
 	Discovery    Discovery              `yaml:"discovery" json:"discovery"`
 	Compositions CompositionConfig      `yaml:"compositions,omitempty" json:"compositions,omitempty"`
+	Automation   AutomationConfig       `yaml:"automation,omitempty" json:"automation,omitempty"`
 	Groups       map[string]Group       `yaml:"groups" json:"groups"`
 	Environments map[string]Environment `yaml:"environments" json:"environments"`
 	Components   []Component            `yaml:"components" json:"components"`
@@ -54,10 +55,11 @@ type Group struct {
 
 // Environment defines environment runtime contexts
 type Environment struct {
-	Path      string                 `yaml:"path" json:"path"`
-	Selectors EnvironmentSelectors   `yaml:"selectors" json:"selectors"`
-	Defaults  map[string]interface{} `yaml:"defaults" json:"defaults"`
-	Policies  map[string]interface{} `yaml:"policies" json:"policies"`
+	Path       string                 `yaml:"path" json:"path"`
+	Activation EnvironmentActivation  `yaml:"activation,omitempty" json:"activation,omitempty"`
+	Selectors  EnvironmentSelectors   `yaml:"selectors" json:"selectors"`
+	Defaults   map[string]interface{} `yaml:"defaults" json:"defaults"`
+	Policies   map[string]interface{} `yaml:"policies" json:"policies"`
 }
 
 // EnvironmentSelectors specifies which components apply to an environment

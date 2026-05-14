@@ -1,6 +1,6 @@
 # Docs last updated for version
 
-v1.25.0
+v1.26.0
 
 ## How to use this file
 
@@ -8,18 +8,21 @@ When updating docs next time, run:
 
 ```bash
 # Get all changes since docs were last updated
-git log v1.25.0..HEAD --oneline
+git log v1.26.0..HEAD --oneline
 ```
 
 Then update this file to the new version after the docs PR is merged.
 
 ## What was covered in this update
 
-- Multi-kind composition authoring (ComponentSchema, JobTemplate, ExecutionProfile)
-- Split-kind directory structure with `composition.yaml`, `schema.yaml`, `jobs/`, `profiles/`
-- Capability-based step selection via `includeCapabilities`
-- Profile step overrides via `stepOverrides`
-- Profile policies (requireCleanGitTree, requireApproval, etc.)
-- All 11 example compositions converted to split-kind format
-- Updated: composition-contract.md, composition-examples.md, writing-compositions.md
-- Updated: concepts/compositions.md, concepts/stacks.md
+- Trigger bindings: declarative CI event → environment activation
+- CLI flags: --trigger, --from-ci, --event-file for trigger-aware planning
+- Trigger-resolved plan scope (changed/full) with base/head from event paths
+- Plan metadata includes trigger resolution details
+- Updated: concepts/intent-model.md, concepts/change-detection.md
+- Updated: cli/orun-plan.md, examples/run-github-actions.md
+- New: concepts/trigger-bindings.md, examples/trigger-bindings-ci.md
+- Updated: sidebars.js with new pages
+- Updated: intent.schema.yaml with automation schema
+- Updated: examples/intent.yaml with trigger bindings and environment activation
+- Updated: CI workflow to use --from-ci github --event-file
