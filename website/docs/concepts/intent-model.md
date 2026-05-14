@@ -70,6 +70,41 @@ Groups define platform-owned defaults and policy domains. They are the right pla
 
 Environments define selectors, defaults, and policies for a target environment such as `development`, `staging`, or `production`.
 
+Environments can optionally declare `activation.triggerRefs` to specify which trigger bindings activate them for CI-driven planning:
+
+```yaml
+environments:
+  development:
+    activation:
+      triggerRefs:
+        - github-pull-request
+    defaults:
+      namespacePrefix: dev-
+```
+
+See [trigger bindings](./trigger-bindings.md) for full details.
+
+### `automation`
+
+The `automation` section declares trigger bindings that map CI provider events to environment activation:
+
+```yaml
+automation:
+  triggerBindings:
+    github-pull-request:
+      on:
+        provider: github
+        event: pull_request
+        actions: [opened, synchronize]
+        baseBranches: [main]
+      plan:
+        scope: changed
+        base: pull_request.base.sha
+        head: pull_request.head.sha
+```
+
+Trigger bindings are opt-in. Existing intent files without `automation` continue to work unchanged.
+
 ### `components`
 
 Intent can also declare inline components. In practice, many teams combine inline components with discovered component manifests when they want both central declarations and repo-local ownership.

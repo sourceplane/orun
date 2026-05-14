@@ -8,6 +8,7 @@ const sidebars = {
         'concepts/intent-model',
         'concepts/compositions',
         'concepts/stacks',
+        'concepts/trigger-bindings',
         'concepts/plan-dag',
         'concepts/execution-model',
         'concepts/change-detection',
@@ -53,6 +54,7 @@ const sidebars = {
       items: [
         'examples/review-pull-request',
         'examples/run-github-actions',
+        'examples/trigger-bindings-ci',
         'examples/remote-state-matrix',
         'examples/run-with-docker',
         'examples/use-with-kiox',

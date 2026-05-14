@@ -12,17 +12,31 @@ type Plan struct {
 
 // PlanMetadata captures immutable plan generation details.
 type PlanMetadata struct {
-	Name        string     `json:"name" yaml:"name"`
-	Description string     `json:"description,omitempty" yaml:"description,omitempty"`
-	Namespace   string     `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	GeneratedAt string     `json:"generatedAt,omitempty" yaml:"generatedAt,omitempty"`
-	Checksum    string     `json:"checksum,omitempty" yaml:"checksum,omitempty"`
-	Scope       *PlanScope `json:"scope,omitempty" yaml:"scope,omitempty"`
+	Name        string       `json:"name" yaml:"name"`
+	Description string       `json:"description,omitempty" yaml:"description,omitempty"`
+	Namespace   string       `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	GeneratedAt string       `json:"generatedAt,omitempty" yaml:"generatedAt,omitempty"`
+	Checksum    string       `json:"checksum,omitempty" yaml:"checksum,omitempty"`
+	Scope       *PlanScope   `json:"scope,omitempty" yaml:"scope,omitempty"`
+	Trigger     *PlanTrigger `json:"trigger,omitempty" yaml:"trigger,omitempty"`
 	// WorkDir is the intent directory path relative to the workspace root
 	// (the directory where orun plan was invoked). orun run uses this when
 	// intent auto-discovery fails (e.g. in GHA where the intent lives in a
 	// subdirectory of GITHUB_WORKSPACE).
 	WorkDir string `json:"workDir,omitempty" yaml:"workDir,omitempty"`
+}
+
+// PlanTrigger records which trigger bindings activated the plan.
+type PlanTrigger struct {
+	Mode               string   `json:"mode" yaml:"mode"`
+	Provider           string   `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Event              string   `json:"event,omitempty" yaml:"event,omitempty"`
+	Action             string   `json:"action,omitempty" yaml:"action,omitempty"`
+	MatchedBindings    []string `json:"matchedBindings" yaml:"matchedBindings"`
+	ActiveEnvironments []string `json:"activeEnvironments" yaml:"activeEnvironments"`
+	Scope              string   `json:"scope" yaml:"scope"`
+	Base               string   `json:"base,omitempty" yaml:"base,omitempty"`
+	Head               string   `json:"head,omitempty" yaml:"head,omitempty"`
 }
 
 // PlanScope records the component scoping applied when the plan was generated.

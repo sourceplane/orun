@@ -101,3 +101,29 @@ orun run --changed --explain
 ```
 
 Use change detection to reduce noise during review, not to hide full-environment validation when you need a canonical plan for release.
+
+## Trigger-driven change detection
+
+When using [trigger bindings](./trigger-bindings.md) with `plan.scope: changed`, the trigger system automatically enables change detection with the base/head refs resolved from the event payload:
+
+```yaml
+automation:
+  triggerBindings:
+    github-pull-request:
+      on:
+        provider: github
+        event: pull_request
+        baseBranches: [main]
+      plan:
+        scope: changed
+        base: pull_request.base.sha
+        head: pull_request.head.sha
+```
+
+When this trigger fires via `--from-ci github --event-file "$GITHUB_EVENT_PATH"`, orun resolves `base` and `head` from the event JSON and enables `--changed` mode automatically. No explicit `--changed` flag is needed:
+
+```bash
+orun plan --from-ci github --event-file "$GITHUB_EVENT_PATH"
+```
+
+CLI `--base` and `--head` flags override trigger-derived values when you need manual control.

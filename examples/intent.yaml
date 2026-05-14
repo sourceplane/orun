@@ -21,8 +21,52 @@ discovery:
     - packages/
     - website/
 
+automation:
+  triggerBindings:
+    github-pull-request:
+      description: Pull request validation
+      on:
+        provider: github
+        event: pull_request
+        actions:
+          - opened
+          - synchronize
+          - reopened
+          - ready_for_review
+        baseBranches:
+          - main
+      plan:
+        scope: changed
+        base: pull_request.base.sha
+        head: pull_request.head.sha
+
+    github-push-main:
+      description: Main branch verification after merge
+      on:
+        provider: github
+        event: push
+        branches:
+          - main
+      plan:
+        scope: changed
+        base: before
+        head: after
+
+    github-tag-release:
+      description: Release tag planning
+      on:
+        provider: github
+        event: push
+        tags:
+          - "v*"
+      plan:
+        scope: full
+
 environments:
   dev:
+    activation:
+      triggerRefs:
+        - github-pull-request
     defaults:
       lane: dry-run
       namespacePrefix: dev-
@@ -30,6 +74,9 @@ environments:
       requireApproval: "false"
 
   development:
+    activation:
+      triggerRefs:
+        - github-pull-request
     defaults:
       lane: dry-run
       namespacePrefix: dev-
@@ -37,6 +84,9 @@ environments:
       requireApproval: "false"
 
   preview:
+    activation:
+      triggerRefs:
+        - github-pull-request
     defaults:
       lane: verify
       namespacePrefix: preview-
@@ -44,6 +94,9 @@ environments:
       requireApproval: "false"
 
   staging:
+    activation:
+      triggerRefs:
+        - github-push-main
     defaults:
       lane: verify
       namespacePrefix: stg-
@@ -51,6 +104,9 @@ environments:
       requireApproval: "true"
 
   production:
+    activation:
+      triggerRefs:
+        - github-tag-release
     defaults:
       lane: release
       namespacePrefix: prod-
