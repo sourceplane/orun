@@ -20,6 +20,9 @@ kind: Intent
 metadata:
   name: demo
 
+env:
+  OWNER: sourceplane
+
 discovery:
   roots:
     - services/
@@ -28,9 +31,11 @@ environments:
   development:
     defaults:
       region: us-east-1
+    env:
+      AWS_REGION: us-east-1
 ```
 
-The intent file is where you define environments, discovery roots, groups, selectors, defaults, and optional inline components.
+The intent file is where you define environments, discovery roots, groups, selectors, defaults, and optional inline components. Root-level `env` provides global environment variables shared across all environments.
 
 It also declares where compositions come from:
 
@@ -56,6 +61,8 @@ metadata:
 spec:
   type: terraform
   domain: platform-foundation
+  env:
+    REPO: network-foundation
   subscribe:
     environments: [development, staging, production]
   inputs:
@@ -63,7 +70,7 @@ spec:
     terraformDir: .
 ```
 
-Components carry type-specific inputs, labels, overrides, and dependency declarations.
+Components carry type-specific inputs, root-level environment variables, labels, overrides, and dependency declarations. Root-level `env` applies across all subscribed environments and can be overridden per subscription.
 
 ## Composition sources
 

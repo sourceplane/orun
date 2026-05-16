@@ -50,9 +50,20 @@ No GitHub PAT is required for `orun backend` commands.
 
 ## User-declared environment variables
 
-You can declare environment variables at two levels in your configuration. These are resolved at plan time and injected into jobs at runtime.
+You can declare environment variables at four levels in your configuration. These are resolved at plan time and injected into jobs at runtime. User-declared env keys must not use the reserved `ORUN_` prefix.
 
-### Intent-level env
+### Intent root-level env
+
+```yaml
+# intent.yaml
+env:
+  OWNER: sourceplane
+  ORGANIZATION: sourceplane
+```
+
+Global env vars shared across all environments and components (lowest precedence).
+
+### Intent environment-level env
 
 ```yaml
 environments:
@@ -61,6 +72,18 @@ environments:
       AWS_REGION: us-east-1
       TF_LOG: WARN
 ```
+
+### Component root-level env
+
+```yaml
+# component.yaml
+spec:
+  env:
+    REPO: aws-admin
+    SERVICE: github-iam
+```
+
+Component-wide env vars applied across all subscribed environments.
 
 ### Component subscription-level env
 
@@ -73,7 +96,7 @@ subscribe:
         TF_VAR_replicas: "1"
 ```
 
-Component subscription env values override intent-level env values when the same key exists. See [Runtime environment](/docs/concepts/runtime-environment) for full merge semantics.
+Subscription env values override all lower-precedence levels. The full merge order from lowest to highest is: intent root → environment → component root → subscription. See [Runtime environment](/concepts/runtime-environment) for full merge semantics.
 
 ## GitHub Actions compatibility mode
 

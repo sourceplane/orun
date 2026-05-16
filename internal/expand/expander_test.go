@@ -274,3 +274,184 @@ func TestExpandNoEnvFieldProducesEmptyMap(t *testing.T) {
 		t.Errorf("expected empty env map when no env declared, got %v", env)
 	}
 }
+
+func TestExpandIntentRootEnvMergesIntoAll(t *testing.T) {
+	intent := &model.Intent{
+		Metadata: model.Metadata{Name: "root-env-test"},
+		Env: map[string]string{
+			"OWNER":        "sourceplane",
+			"ORGANIZATION": "sourceplane",
+		},
+		Environments: map[string]model.Environment{
+			"dev": {
+				Env: map[string]string{
+					"AWS_REGION": "us-east-1",
+				},
+				Selectors: model.EnvironmentSelectors{
+					Components: []string{"*"},
+				},
+			},
+		},
+		Components: []model.Component{
+			{
+				Name: "api",
+				Type: "terraform",
+			},
+		},
+	}
+
+	normalized, err := normalize.NormalizeIntent(intent)
+	if err != nil {
+		t.Fatalf("NormalizeIntent returned error: %v", err)
+	}
+
+	instances, err := NewExpander(normalized).Expand()
+	if err != nil {
+		t.Fatalf("Expand returned error: %v", err)
+	}
+
+	env := instances["dev"][0].Env
+	expectations := map[string]string{
+		"OWNER":        "sourceplane",
+		"ORGANIZATION": "sourceplane",
+		"AWS_REGION":   "us-east-1",
+	}
+	for k, want := range expectations {
+		if got := env[k]; got != want {
+			t.Errorf("env[%q] = %q, want %q", k, got, want)
+		}
+	}
+}
+
+func TestExpandComponentRootEnvMerges(t *testing.T) {
+	intent := &model.Intent{
+		Metadata: model.Metadata{Name: "comp-root-env-test"},
+		Env: map[string]string{
+			"OWNER": "sourceplane",
+		},
+		Environments: map[string]model.Environment{
+			"dev": {
+				Env: map[string]string{
+					"AWS_REGION": "us-east-1",
+				},
+				Selectors: model.EnvironmentSelectors{
+					Components: []string{"*"},
+				},
+			},
+		},
+		Components: []model.Component{
+			{
+				Name: "api",
+				Type: "terraform",
+				Env: map[string]string{
+					"REPO":    "aws-admin",
+					"SERVICE": "github-iam",
+				},
+			},
+		},
+	}
+
+	normalized, err := normalize.NormalizeIntent(intent)
+	if err != nil {
+		t.Fatalf("NormalizeIntent returned error: %v", err)
+	}
+
+	instances, err := NewExpander(normalized).Expand()
+	if err != nil {
+		t.Fatalf("Expand returned error: %v", err)
+	}
+
+	env := instances["dev"][0].Env
+	expectations := map[string]string{
+		"OWNER":      "sourceplane",
+		"AWS_REGION": "us-east-1",
+		"REPO":       "aws-admin",
+		"SERVICE":    "github-iam",
+	}
+	for k, want := range expectations {
+		if got := env[k]; got != want {
+			t.Errorf("env[%q] = %q, want %q", k, got, want)
+		}
+	}
+}
+
+func TestExpandFourLayerPrecedence(t *testing.T) {
+	intent := &model.Intent{
+		Metadata: model.Metadata{Name: "precedence-test"},
+		Env: map[string]string{
+			"VAR": "intent-root",
+		},
+		Environments: map[string]model.Environment{
+			"dev": {
+				Env: map[string]string{
+					"VAR": "environment",
+				},
+				Selectors: model.EnvironmentSelectors{
+					Components: []string{"*"},
+				},
+			},
+		},
+		Components: []model.Component{
+			{
+				Name: "comp-no-override",
+				Type: "terraform",
+			},
+			{
+				Name: "comp-root-override",
+				Type: "terraform",
+				Env: map[string]string{
+					"VAR": "component-root",
+				},
+			},
+			{
+				Name: "comp-sub-override",
+				Type: "terraform",
+				Env: map[string]string{
+					"VAR": "component-root",
+				},
+				Subscribe: model.ComponentSubscribe{
+					Environments: []model.EnvironmentSubscription{
+						{
+							Name: "dev",
+							Env: map[string]string{
+								"VAR": "subscription",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	normalized, err := normalize.NormalizeIntent(intent)
+	if err != nil {
+		t.Fatalf("NormalizeIntent returned error: %v", err)
+	}
+
+	instances, err := NewExpander(normalized).Expand()
+	if err != nil {
+		t.Fatalf("Expand returned error: %v", err)
+	}
+
+	devInstances := instances["dev"]
+
+	tests := []struct {
+		comp string
+		want string
+	}{
+		{"comp-no-override", "environment"},
+		{"comp-root-override", "component-root"},
+		{"comp-sub-override", "subscription"},
+	}
+
+	for _, tt := range tests {
+		for _, inst := range devInstances {
+			if inst.ComponentName == tt.comp {
+				if got := inst.Env["VAR"]; got != tt.want {
+					t.Errorf("component %s: env[VAR] = %q, want %q", tt.comp, got, tt.want)
+				}
+				break
+			}
+		}
+	}
+}
