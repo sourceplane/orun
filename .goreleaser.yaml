@@ -16,6 +16,10 @@ builds:
     goarch:
       - amd64
       - arm64
+    hooks:
+      post:
+        - mkdir -p dist/bin/{{ .Os }}/{{ .Arch }}
+        - cp {{ .Path }} dist/bin/{{ .Os }}/{{ .Arch }}/orun
 
 archives:
   - id: orun-archive
