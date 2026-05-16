@@ -37,14 +37,14 @@ The script auto-detects your OS and architecture, downloads the latest release f
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ORUN_VERSION` | `latest` | Specific version to install (e.g. `v1.12.3`) |
+| `ORUN_VERSION` | `latest` | Specific version to install (e.g. `v1.29.0`) |
 | `ORUN_INSTALL_DIR` | `~/.local/bin` | Installation directory |
 
 Example — install a specific version to `/usr/local/bin`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/sourceplane/orun/main/install.sh \
-  | ORUN_VERSION=v1.12.3 ORUN_INSTALL_DIR=/usr/local/bin sh
+  | ORUN_VERSION=v1.29.0 ORUN_INSTALL_DIR=/usr/local/bin sh
 ```
 
 ### Manual download
@@ -53,7 +53,7 @@ Download the archive for your platform from the [releases page](https://github.c
 
 ```sh
 # Example: Linux amd64
-curl -fsSL https://github.com/sourceplane/orun/releases/download/v1.12.3/orun_1.12.3_linux_amd64.tar.gz \
+curl -fsSL https://github.com/sourceplane/orun/releases/download/v1.29.0/orun_1.29.0_linux_amd64.tar.gz \
   | tar xz -C /usr/local/bin
 ```
 
@@ -73,17 +73,17 @@ Requires Go 1.25 or later.
 
 ```sh
 kiox init demo
-kiox --workspace demo add ghcr.io/sourceplane/orun:v1.12.3 as orun
+kiox --workspace demo add ghcr.io/sourceplane/orun:v1.29.0 as orun
 kiox --workspace demo exec -- orun plan --intent intent.yaml
 ```
 
 ### OCI image
 
 ```sh
-docker run ghcr.io/sourceplane/orun:v1.12.3 plan --intent intent.yaml
+docker run ghcr.io/sourceplane/orun:v1.29.0 plan --intent intent.yaml
 ```
 
-The OCI image is a kiox provider artifact. Use `oras pull ghcr.io/sourceplane/orun:v1.12.3` to pull the raw provider package.
+The OCI image is a kiox provider artifact. Use `oras pull ghcr.io/sourceplane/orun:v1.29.0` to pull the raw provider package.
 
 ## Quick start
 
