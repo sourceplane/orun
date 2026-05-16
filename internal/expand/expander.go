@@ -77,6 +77,9 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 			merged := e.mergeProperties(comp, env, envName, compName)
 			instance.Inputs = merged
 
+			// Merge explicit environment variables
+			instance.Env = e.mergeEnv(comp, env, envName)
+
 			// Extract path from merged properties if it exists
 			if pathVal, exists := merged["path"]; exists {
 				if pathStr, ok := pathVal.(string); ok {
@@ -261,6 +264,28 @@ func (e *Expander) interpolateString(s, envName, groupName, compName string) str
 
 	result = strings.TrimSpace(result)
 	return result
+}
+
+// mergeEnv merges environment variables with precedence: intent env < subscription env.
+func (e *Expander) mergeEnv(comp model.Component, env model.Environment, envName string) map[string]string {
+	merged := make(map[string]string)
+
+	for k, v := range env.Env {
+		merged[k] = v
+	}
+
+	sub := comp.Subscribe.FindSubscription(envName)
+	if sub != nil {
+		for k, v := range sub.Env {
+			merged[k] = v
+		}
+	}
+
+	for k, v := range merged {
+		merged[k] = e.interpolateString(v, envName, comp.Domain, comp.Name)
+	}
+
+	return merged
 }
 
 // resolvePolicies extracts policies that apply to this component in this environment

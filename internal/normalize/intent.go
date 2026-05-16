@@ -87,6 +87,9 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 		if env.Selectors.Domains == nil {
 			env.Selectors.Domains = []string{}
 		}
+		if env.Env == nil {
+			env.Env = make(map[string]string)
+		}
 
 		// Expand wildcards
 		if contains(env.Selectors.Components, "*") {
