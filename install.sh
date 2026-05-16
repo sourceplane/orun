@@ -46,11 +46,11 @@ resolve_version() {
     return
   fi
 
-  api="https://api.github.com/repos/${REPO}/releases/latest"
-  tag="$(curl -fsSL "$api" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+  url="https://github.com/${REPO}/releases/latest"
+  tag="$(curl -fsSI "$url" | grep -i "^location:" | sed 's|.*/tag/||' | tr -d '\r\n')"
 
   if [ -z "$tag" ]; then
-    echo "error: could not resolve latest release tag from ${api}" >&2
+    echo "error: could not resolve latest release tag from ${url}" >&2
     exit 1
   fi
 
