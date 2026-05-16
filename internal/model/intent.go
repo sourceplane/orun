@@ -60,6 +60,7 @@ type Environment struct {
 	Selectors  EnvironmentSelectors   `yaml:"selectors" json:"selectors"`
 	Defaults   map[string]interface{} `yaml:"defaults" json:"defaults"`
 	Policies   map[string]interface{} `yaml:"policies" json:"policies"`
+	Env        map[string]string      `yaml:"env,omitempty" json:"env,omitempty"`
 }
 
 // EnvironmentSelectors specifies which components apply to an environment
@@ -93,8 +94,9 @@ type ComponentSubscribe struct {
 
 // EnvironmentSubscription specifies an environment binding with optional profile selection.
 type EnvironmentSubscription struct {
-	Name    string `yaml:"name" json:"name"`
-	Profile string `yaml:"profile,omitempty" json:"profile,omitempty"`
+	Name    string            `yaml:"name" json:"name"`
+	Profile string            `yaml:"profile,omitempty" json:"profile,omitempty"`
+	Env     map[string]string `yaml:"env,omitempty" json:"env,omitempty"`
 }
 
 // UnmarshalYAML supports both string and object forms for environment subscriptions.
@@ -191,6 +193,7 @@ type ComponentInstance struct {
 	SourcePath    string
 	Labels        map[string]string
 	Inputs        map[string]interface{}
+	Env           map[string]string
 	StepOverrides []Step
 	Policies      map[string]interface{}
 	DependsOn     []ResolvedDependency

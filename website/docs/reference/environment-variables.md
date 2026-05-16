@@ -45,6 +45,35 @@ No GitHub PAT is required for `orun backend` commands.
 | `ORUN_PLAN_ID` | Plan checksum short-hash (injected into every step environment) |
 | `ORUN_JOB_ID` | Job ID of the currently running job (e.g. `api@dev.deploy`) |
 | `ORUN_JOB_RUN_ID` | Stable cross-job identifier: `{planID}:{execID}:{jobID}` |
+| `ORUN_ENVIRONMENT` | Environment name for the current job (e.g. `dev`, `production`) |
+| `ORUN_COMPONENT` | Component name for the current job (e.g. `api-platform`) |
+
+## User-declared environment variables
+
+You can declare environment variables at two levels in your configuration. These are resolved at plan time and injected into jobs at runtime.
+
+### Intent-level env
+
+```yaml
+environments:
+  dev:
+    env:
+      AWS_REGION: us-east-1
+      TF_LOG: WARN
+```
+
+### Component subscription-level env
+
+```yaml
+subscribe:
+  environments:
+    - name: dev
+      env:
+        STACK_NAME: api-platform
+        TF_VAR_replicas: "1"
+```
+
+Component subscription env values override intent-level env values when the same key exists. See [Runtime environment](/docs/concepts/runtime-environment) for full merge semantics.
 
 ## GitHub Actions compatibility mode
 

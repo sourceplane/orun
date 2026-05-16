@@ -112,7 +112,8 @@ type JobInstance struct {
 	DependsOn     []string
 	Timeout       string
 	Retries       int
-	Config        map[string]interface{} // Single source of truth for env vars
+	Config        map[string]interface{}
+	Env           map[string]string
 	Labels        map[string]string
 }
 

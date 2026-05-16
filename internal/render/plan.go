@@ -87,7 +87,7 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 			DependsOn:     job.DependsOn,
 			Timeout:       job.Timeout,
 			Retries:       job.Retries,
-			Env:           job.Config, // Single source: Config
+			Env:           buildPlanJobEnv(job),
 			Labels:        job.Labels,
 			Config:        job.Config,
 		}
@@ -99,6 +99,17 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 	r.fillJobIdentity(plan)
 
 	return plan
+}
+
+func buildPlanJobEnv(job *model.JobInstance) map[string]interface{} {
+	if len(job.Env) == 0 {
+		return job.Config
+	}
+	result := make(map[string]interface{}, len(job.Env))
+	for k, v := range job.Env {
+		result[k] = v
+	}
+	return result
 }
 
 // convertSteps converts rendered steps to plan steps

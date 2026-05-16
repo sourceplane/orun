@@ -90,3 +90,187 @@ func assertInstanceNames(t *testing.T, instances []*model.ComponentInstance, exp
 		}
 	}
 }
+
+func TestExpandMergesEnvironmentEnvVars(t *testing.T) {
+	intent := &model.Intent{
+		Metadata: model.Metadata{Name: "env-merge-test"},
+		Environments: map[string]model.Environment{
+			"dev": {
+				Env: map[string]string{
+					"AWS_REGION":       "us-east-1",
+					"TF_LOG":           "WARN",
+					"NAMESPACE_PREFIX": "dev-",
+				},
+				Selectors: model.EnvironmentSelectors{
+					Components: []string{"*"},
+				},
+			},
+		},
+		Components: []model.Component{
+			{
+				Name: "api-platform",
+				Type: "terraform",
+				Subscribe: model.ComponentSubscribe{
+					Environments: []model.EnvironmentSubscription{
+						{
+							Name: "dev",
+							Env: map[string]string{
+								"STACK_NAME":      "api-platform",
+								"TF_VAR_replicas": "1",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	normalized, err := normalize.NormalizeIntent(intent)
+	if err != nil {
+		t.Fatalf("NormalizeIntent returned error: %v", err)
+	}
+
+	instances, err := NewExpander(normalized).Expand()
+	if err != nil {
+		t.Fatalf("Expand returned error: %v", err)
+	}
+
+	devInstances := instances["dev"]
+	if len(devInstances) != 1 {
+		t.Fatalf("expected 1 dev instance, got %d", len(devInstances))
+	}
+
+	env := devInstances[0].Env
+	expectations := map[string]string{
+		"AWS_REGION":       "us-east-1",
+		"TF_LOG":           "WARN",
+		"NAMESPACE_PREFIX": "dev-",
+		"STACK_NAME":       "api-platform",
+		"TF_VAR_replicas":  "1",
+	}
+
+	for k, want := range expectations {
+		if got := env[k]; got != want {
+			t.Errorf("env[%q] = %q, want %q", k, got, want)
+		}
+	}
+}
+
+func TestExpandSubscriptionEnvOverridesIntentEnv(t *testing.T) {
+	intent := &model.Intent{
+		Metadata: model.Metadata{Name: "env-override-test"},
+		Environments: map[string]model.Environment{
+			"dev": {
+				Env: map[string]string{
+					"AWS_REGION": "us-east-1",
+				},
+				Selectors: model.EnvironmentSelectors{
+					Components: []string{"*"},
+				},
+			},
+		},
+		Components: []model.Component{
+			{
+				Name: "api",
+				Type: "terraform",
+				Subscribe: model.ComponentSubscribe{
+					Environments: []model.EnvironmentSubscription{
+						{
+							Name: "dev",
+							Env: map[string]string{
+								"AWS_REGION": "eu-west-1",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	normalized, err := normalize.NormalizeIntent(intent)
+	if err != nil {
+		t.Fatalf("NormalizeIntent returned error: %v", err)
+	}
+
+	instances, err := NewExpander(normalized).Expand()
+	if err != nil {
+		t.Fatalf("Expand returned error: %v", err)
+	}
+
+	env := instances["dev"][0].Env
+	if env["AWS_REGION"] != "eu-west-1" {
+		t.Errorf("expected subscription env to override intent env, got %q", env["AWS_REGION"])
+	}
+}
+
+func TestExpandEnvTemplateInterpolation(t *testing.T) {
+	intent := &model.Intent{
+		Metadata: model.Metadata{Name: "env-template-test"},
+		Environments: map[string]model.Environment{
+			"staging": {
+				Env: map[string]string{
+					"NAMESPACE": "{{ .environment }}-{{ .component }}",
+				},
+				Selectors: model.EnvironmentSelectors{
+					Components: []string{"*"},
+				},
+			},
+		},
+		Components: []model.Component{
+			{
+				Name:   "web",
+				Type:   "helm",
+				Domain: "apps",
+			},
+		},
+	}
+
+	normalized, err := normalize.NormalizeIntent(intent)
+	if err != nil {
+		t.Fatalf("NormalizeIntent returned error: %v", err)
+	}
+
+	instances, err := NewExpander(normalized).Expand()
+	if err != nil {
+		t.Fatalf("Expand returned error: %v", err)
+	}
+
+	env := instances["staging"][0].Env
+	if env["NAMESPACE"] != "staging-web" {
+		t.Errorf("expected interpolated env value, got %q", env["NAMESPACE"])
+	}
+}
+
+func TestExpandNoEnvFieldProducesEmptyMap(t *testing.T) {
+	intent := &model.Intent{
+		Metadata: model.Metadata{Name: "no-env-test"},
+		Environments: map[string]model.Environment{
+			"dev": {
+				Selectors: model.EnvironmentSelectors{
+					Components: []string{"*"},
+				},
+			},
+		},
+		Components: []model.Component{
+			{
+				Name: "svc",
+				Type: "terraform",
+			},
+		},
+	}
+
+	normalized, err := normalize.NormalizeIntent(intent)
+	if err != nil {
+		t.Fatalf("NormalizeIntent returned error: %v", err)
+	}
+
+	instances, err := NewExpander(normalized).Expand()
+	if err != nil {
+		t.Fatalf("Expand returned error: %v", err)
+	}
+
+	env := instances["dev"][0].Env
+	if len(env) != 0 {
+		t.Errorf("expected empty env map when no env declared, got %v", env)
+	}
+}

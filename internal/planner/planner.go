@@ -70,6 +70,7 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 					Retries:       jobEntry.job.Retries,
 					Labels:        compInst.Labels,
 					Config:        compInst.Inputs,
+					Env:           compInst.Env,
 					DependsOn:     make([]string, 0),
 				}
 

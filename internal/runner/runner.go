@@ -1399,9 +1399,11 @@ func (r *Runner) stepExecContext(base executor.ExecContext, job model.PlanJob, s
 	execContext.JobEnv = executor.JobEnvironment(job.Env)
 	// Inject job-level runtime IDs so steps can reference the current job.
 	jobRuntimeEnv := map[string]string{
-		"ORUN_JOB_ID":     job.ID,
-		"ORUN_JOB_UID":    job.UID,
-		"ORUN_JOB_RUN_ID": r.ExecID + "/" + job.UID,
+		"ORUN_JOB_ID":      job.ID,
+		"ORUN_JOB_UID":     job.UID,
+		"ORUN_JOB_RUN_ID":  r.ExecID + "/" + job.UID,
+		"ORUN_ENVIRONMENT": job.Environment,
+		"ORUN_COMPONENT":   job.Component,
 	}
 	execContext.JobEnv = executor.MergeEnvironment(execContext.JobEnv, jobRuntimeEnv)
 	execContext.StepEnv = executor.JobEnvironment(step.Env)
