@@ -21,6 +21,16 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 		Environments:   intent.Environments,
 		Components:     make(map[string]model.Component),
 		ComponentIndex: make(map[string]model.Component),
+		Env:            intent.Env,
+	}
+
+	if normalized.Env == nil {
+		normalized.Env = make(map[string]string)
+	}
+
+	// Validate intent root env: ORUN_* prefix is reserved
+	if err := validateEnvKeys(normalized.Env, "intent root env"); err != nil {
+		return nil, err
 	}
 
 	// Normalize components
@@ -57,6 +67,21 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 		if comp.Overrides.Steps == nil {
 			comp.Overrides.Steps = []model.Step{}
 		}
+		if comp.Env == nil {
+			comp.Env = make(map[string]string)
+		}
+
+		// Validate component root env: ORUN_* prefix is reserved
+		if err := validateEnvKeys(comp.Env, fmt.Sprintf("component %s root env", comp.Name)); err != nil {
+			return nil, err
+		}
+
+		// Validate subscription env
+		for _, sub := range comp.Subscribe.Environments {
+			if err := validateEnvKeys(sub.Env, fmt.Sprintf("component %s subscription %s env", comp.Name, sub.Name)); err != nil {
+				return nil, err
+			}
+		}
 
 		// Normalize dependencies
 		for i := range comp.DependsOn {
@@ -79,7 +104,7 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 		normalized.ComponentIndex[comp.Name] = comp
 	}
 
-	// Validate environment selectors
+	// Validate environment selectors and env
 	for envName, env := range normalized.Environments {
 		if env.Selectors.Components == nil {
 			env.Selectors.Components = []string{}
@@ -89,6 +114,11 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 		}
 		if env.Env == nil {
 			env.Env = make(map[string]string)
+		}
+
+		// Validate environment env: ORUN_* prefix is reserved
+		if err := validateEnvKeys(env.Env, fmt.Sprintf("environment %s env", envName)); err != nil {
+			return nil, err
 		}
 
 		// Expand wildcards
@@ -115,6 +145,16 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+// validateEnvKeys rejects user-defined env vars that use the reserved ORUN_ prefix.
+func validateEnvKeys(env map[string]string, context string) error {
+	for k := range env {
+		if strings.HasPrefix(strings.ToUpper(k), "ORUN_") {
+			return fmt.Errorf("%s: env key %q uses reserved ORUN_ prefix", context, k)
+		}
+	}
+	return nil
 }
 
 // matchesWildcard checks if a component name matches a wildcard pattern

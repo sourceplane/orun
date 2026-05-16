@@ -266,11 +266,23 @@ func (e *Expander) interpolateString(s, envName, groupName, compName string) str
 	return result
 }
 
-// mergeEnv merges environment variables with precedence: intent env < subscription env.
+// mergeEnv merges environment variables with 4-layer precedence (lowest to highest):
+// 1. intent root env
+// 2. intent environment env
+// 3. component root env
+// 4. component subscription env
 func (e *Expander) mergeEnv(comp model.Component, env model.Environment, envName string) map[string]string {
 	merged := make(map[string]string)
 
+	for k, v := range e.normalized.Env {
+		merged[k] = v
+	}
+
 	for k, v := range env.Env {
+		merged[k] = v
+	}
+
+	for k, v := range comp.Env {
 		merged[k] = v
 	}
 

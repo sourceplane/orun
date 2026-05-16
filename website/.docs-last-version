@@ -1,6 +1,6 @@
 # Docs last updated for version
 
-v1.26.0
+v1.31.0
 
 ## How to use this file
 
@@ -8,21 +8,19 @@ When updating docs next time, run:
 
 ```bash
 # Get all changes since docs were last updated
-git log v1.26.0..HEAD --oneline
+git log v1.31.0..HEAD --oneline
 ```
 
 Then update this file to the new version after the docs PR is merged.
 
 ## What was covered in this update
 
-- Trigger bindings: declarative CI event → environment activation
-- CLI flags: --trigger, --from-ci, --event-file for trigger-aware planning
-- Trigger-resolved plan scope (changed/full) with base/head from event paths
-- Plan metadata includes trigger resolution details
-- Updated: concepts/intent-model.md, concepts/change-detection.md
-- Updated: cli/orun-plan.md, examples/run-github-actions.md
-- New: concepts/trigger-bindings.md, examples/trigger-bindings-ci.md
-- Updated: sidebars.js with new pages
-- Updated: intent.schema.yaml with automation schema
-- Updated: examples/intent.yaml with trigger bindings and environment activation
-- Updated: CI workflow to use --from-ci github --event-file
+- Root-level `env:` on intent.yaml for global platform env vars
+- Root-level `env:` on component.yaml for component-wide env vars
+- 4-layer env merge precedence: intent root → environment → component root → subscription
+- ORUN_* prefix validation: user-defined env keys cannot use reserved prefix
+- Deterministic alphabetical ordering of env vars in plan output
+- Updated: concepts/runtime-environment.md (full rewrite for 4-layer model)
+- Updated: concepts/intent-model.md (root env + component env examples)
+- Updated: reference/environment-variables.md (4 declaration levels)
+- Updated: reference/configuration.md (root env examples)

@@ -24,6 +24,10 @@ kind: Intent
 metadata:
   name: microservices-deployment
 
+env:
+  OWNER: sourceplane
+  ORGANIZATION: sourceplane
+
 compositions:
   sources:
     - name: example-platform
@@ -52,9 +56,17 @@ environments:
       domains: [platform]
     defaults:
       replicas: 3
+    env:
+      AWS_REGION: us-west-2
     policies:
       requireApproval: "true"
 ```
+
+### `env`
+
+Root-level `env` declares global environment variables shared across all environments and all components. These are the lowest-precedence user-declared env vars and are useful for platform-wide identity such as organization name, repository owner, or shared runtime settings.
+
+Environment-level `env` (under `environments.<name>.env`) provides per-environment overrides. See [runtime environment](./runtime-environment.md) for the full merge model.
 
 ### `discovery`
 
@@ -111,7 +123,7 @@ Intent can also declare inline components. In practice, many teams combine inlin
 
 ## Discovered component manifests
 
-Component manifests carry type-specific inputs and dependency edges:
+Component manifests carry type-specific inputs, environment variable declarations, and dependency edges:
 
 ```yaml
 apiVersion: sourceplane.io/v1
@@ -123,13 +135,23 @@ metadata:
 spec:
   type: terraform
   domain: platform-foundation
+  env:
+    REPO: network-foundation
+    SERVICE: platform-infra
   subscribe:
-    environments: [development, staging, production]
+    environments:
+      - name: development
+      - name: staging
+      - name: production
+        env:
+          TF_VAR_replicas: "3"
   inputs:
     stackName: network-foundation
     terraformDir: .
     terraformVersion: 1.9.8
 ```
+
+Root-level `env` on a component applies to all subscribed environments. Subscription-level `env` overrides component root env for that specific environment. See [runtime environment](./runtime-environment.md) for the full merge model.
 
 ## Merge model
 

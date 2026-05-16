@@ -6,7 +6,26 @@ orun resolves environment variables at plan time and injects them into every job
 
 ## Declaring environment variables
 
-### Intent-level env
+Environment variables can be declared at four levels, giving platform teams and component authors fine-grained control over runtime context.
+
+### Intent root-level env
+
+Define global environment variables shared across all environments and components:
+
+```yaml
+# intent.yaml
+apiVersion: sourceplane.io/v1
+kind: Intent
+
+metadata:
+  name: aws-admin
+
+env:
+  OWNER: sourceplane
+  ORGANIZATION: sourceplane
+```
+
+### Intent environment-level env
 
 Define environment variables that apply to all components running in a given environment:
 
@@ -22,6 +41,19 @@ environments:
     env:
       AWS_REGION: us-west-2
       TF_LOG: ERROR
+```
+
+### Component root-level env
+
+Define environment variables that apply to a component across all its subscribed environments:
+
+```yaml
+# component.yaml
+spec:
+  type: terraform
+  env:
+    REPO: aws-admin
+    SERVICE: github-iam
 ```
 
 ### Component subscription-level env
@@ -50,11 +82,13 @@ Environment variables are merged once during plan compilation. When the same key
 
 | Priority | Source | Example |
 | --- | --- | --- |
-| 1 (lowest) | Intent environment `env` | `environments.dev.env.AWS_REGION` |
-| 2 | Component subscription `env` | `subscribe.environments[name=dev].env.AWS_REGION` |
-| 3 | ORUN runtime variables | `ORUN_ENVIRONMENT`, `ORUN_COMPONENT` |
-| 4 | Step-level `env` | Step definition in composition |
-| 5 (highest) | OS environment | Inherited from parent process |
+| 1 (lowest) | Intent root `env` | `env.OWNER` |
+| 2 | Intent environment `env` | `environments.dev.env.AWS_REGION` |
+| 3 | Component root `env` | `spec.env.REPO` |
+| 4 | Component subscription `env` | `subscribe.environments[name=dev].env.STACK_NAME` |
+| 5 | ORUN runtime variables | `ORUN_ENVIRONMENT`, `ORUN_COMPONENT` |
+| 6 | Step-level `env` | Step definition in composition |
+| 7 (highest) | OS environment | Inherited from parent process |
 
 ### Example resolution
 
@@ -62,34 +96,49 @@ Given:
 
 ```yaml
 # intent.yaml
+env:
+  OWNER: sourceplane
+  ORGANIZATION: sourceplane
+
 environments:
   dev:
     env:
       AWS_REGION: us-east-1
-      TF_LOG: WARN
+      NAMESPACE_PREFIX: dev-
 ```
 
 ```yaml
 # component.yaml (api-platform)
+env:
+  REPO: aws-admin
+
 subscribe:
   environments:
     - name: dev
       env:
-        AWS_REGION: eu-west-1
         STACK_NAME: api-platform
 ```
 
 The resolved runtime environment for the `api-platform` component in `dev` is:
 
 ```
-AWS_REGION=eu-west-1          # subscription overrides intent
-TF_LOG=WARN                   # from intent (no override)
-STACK_NAME=api-platform       # from subscription
-ORUN_ENVIRONMENT=dev          # injected by runtime
-ORUN_COMPONENT=api-platform   # injected by runtime
-ORUN_PLAN_ID=abc1234          # injected by runtime
+OWNER=sourceplane              # from intent root
+ORGANIZATION=sourceplane       # from intent root
+AWS_REGION=us-east-1           # from intent environment
+NAMESPACE_PREFIX=dev-          # from intent environment
+REPO=aws-admin                 # from component root
+STACK_NAME=api-platform        # from component subscription
+ORUN_ENVIRONMENT=dev           # injected by runtime
+ORUN_COMPONENT=api-platform    # injected by runtime
+ORUN_PLAN_ID=abc1234           # injected by runtime
 ORUN_JOB_ID=api-platform.dev.deploy
 ```
+
+## Reserved ORUN_ prefix
+
+User-defined environment variables must not start with `ORUN_`. This prefix is reserved for runtime-injected system variables. If a user-declared env key uses the `ORUN_` prefix, plan generation will fail with a validation error.
+
+This applies to all four declaration levels (intent root, environment, component root, and subscription).
 
 ## ORUN-prefixed runtime variables
 
@@ -132,7 +181,7 @@ When no `env` is declared, `PlanJob.env` falls back to the component inputs for 
 
 ## Plan output
 
-The resolved environment variables appear in the plan under each job's `env` field:
+The resolved environment variables appear in the plan under each job's `env` field. Keys are sorted alphabetically for deterministic output:
 
 ```json
 {
@@ -142,8 +191,11 @@ The resolved environment variables appear in the plan under each job's `env` fie
       "component": "api-platform",
       "environment": "dev",
       "env": {
-        "AWS_REGION": "eu-west-1",
-        "TF_LOG": "WARN",
+        "AWS_REGION": "us-east-1",
+        "NAMESPACE_PREFIX": "dev-",
+        "ORGANIZATION": "sourceplane",
+        "OWNER": "sourceplane",
+        "REPO": "aws-admin",
         "STACK_NAME": "api-platform"
       },
       "config": {

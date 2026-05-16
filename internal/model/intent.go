@@ -19,6 +19,7 @@ type Intent struct {
 	Environments map[string]Environment `yaml:"environments" json:"environments"`
 	Components   []Component            `yaml:"components" json:"components"`
 	Execution    IntentExecution        `yaml:"execution,omitempty" json:"execution,omitempty"`
+	Env          map[string]string      `yaml:"env,omitempty" json:"env,omitempty"`
 }
 
 // IntentExecution holds optional execution-layer configuration in intent.yaml.
@@ -82,6 +83,7 @@ type Component struct {
 	Overrides      ComponentOverrides       `yaml:"overrides" json:"overrides"`
 	Labels         map[string]string        `yaml:"labels" json:"labels"`
 	DependsOn      []Dependency             `yaml:"dependsOn" json:"dependsOn"`
+	Env            map[string]string        `yaml:"env,omitempty" json:"env,omitempty"`
 	ResolvedComposition       string        `yaml:"-" json:"-"`
 	ResolvedCompositionSource string        `yaml:"-" json:"-"`
 	SourcePath     string                   `yaml:"-" json:"-"`
@@ -179,6 +181,7 @@ type NormalizedIntent struct {
 	Environments   map[string]Environment
 	Components     map[string]Component
 	ComponentIndex map[string]Component // for fast lookup
+	Env            map[string]string    // root-level env from intent
 }
 
 // ComponentInstance is the expanded form of Component for a specific environment

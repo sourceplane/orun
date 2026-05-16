@@ -105,9 +105,15 @@ func buildPlanJobEnv(job *model.JobInstance) map[string]interface{} {
 	if len(job.Env) == 0 {
 		return job.Config
 	}
-	result := make(map[string]interface{}, len(job.Env))
-	for k, v := range job.Env {
-		result[k] = v
+	keys := make([]string, 0, len(job.Env))
+	for k := range job.Env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	result := make(map[string]interface{}, len(keys))
+	for _, k := range keys {
+		result[k] = job.Env[k]
 	}
 	return result
 }
