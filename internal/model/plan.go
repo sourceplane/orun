@@ -92,6 +92,7 @@ type PlanJob struct {
 	Env           map[string]interface{} `json:"env,omitempty" yaml:"env,omitempty"`
 	Labels        map[string]string      `json:"labels,omitempty" yaml:"labels,omitempty"`
 	Config        map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
+	Parameters    map[string]interface{} `json:"parameters,omitempty" yaml:"parameters,omitempty"`
 }
 
 // PlanPromotionGate is a cross-plan evidence gate in the plan output.

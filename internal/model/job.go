@@ -114,6 +114,7 @@ type JobInstance struct {
 	Timeout       string
 	Retries       int
 	Config        map[string]interface{}
+	Parameters    map[string]interface{}
 	Env           map[string]string
 	Labels        map[string]string
 }

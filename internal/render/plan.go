@@ -90,6 +90,7 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 			Env:           buildPlanJobEnv(job),
 			Labels:        job.Labels,
 			Config:        job.Config,
+			Parameters:    job.Parameters,
 		}
 
 		if len(job.Gates) > 0 {
