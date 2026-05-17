@@ -70,13 +70,19 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 					Retries:       jobEntry.job.Retries,
 					Labels:        compInst.Labels,
 					Config:        compInst.Parameters,
+					Parameters:    compInst.Parameters,
 					Env:           compInst.Env,
 					DependsOn:     make([]string, 0),
 				}
 
 				resolvedSteps := applyStepOverrides(jobEntry.steps, compInst.StepOverrides)
 
-				renderedSteps, err := jp.renderSteps(resolvedSteps, compInst)
+				tctx := &TemplateContext{
+					CompInst: compInst,
+					JobID:    jobID,
+					JobName:  jobEntry.job.Name,
+				}
+				renderedSteps, err := jp.renderSteps(resolvedSteps, tctx)
 				if err != nil {
 					return nil, fmt.Errorf("failed to render steps for job %s: %w", jobID, err)
 				}
@@ -214,47 +220,38 @@ func applyProfileStepOverrides(steps []model.Step, overrides map[string]model.Pr
 }
 
 // Templates are cached to avoid re-parsing identical steps across multiple instances
-func (jp *JobPlanner) renderSteps(steps []model.Step, compInst *model.ComponentInstance) ([]model.RenderedStep, error) {
+func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext) ([]model.RenderedStep, error) {
 	rendered := make([]model.RenderedStep, 0, len(steps))
 	sortedSteps, err := sortStepsByPhaseAndOrder(steps)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build template context once
-	context := map[string]interface{}{
-		"Component":   compInst.ComponentName,
-		"Environment": compInst.Environment,
-		"Type":        compInst.Type,
-	}
+	context := tctx.Build()
 
-	// Add all inputs to context
-	for k, v := range compInst.Parameters {
-		context[k] = v
-	}
-
+	compType := tctx.CompInst.Type
 	for _, step := range sortedSteps {
-		renderedRun, err := jp.renderTemplateString(compInst.Type, step.Name, "run", step.Run, context)
+		renderedRun, err := jp.renderTemplateString(compType, step.Name, "run", step.Run, context)
 		if err != nil {
 			return nil, err
 		}
-		renderedUse, err := jp.renderTemplateString(compInst.Type, step.Name, "use", step.Use, context)
+		renderedUse, err := jp.renderTemplateString(compType, step.Name, "use", step.Use, context)
 		if err != nil {
 			return nil, err
 		}
-		renderedShell, err := jp.renderTemplateString(compInst.Type, step.Name, "shell", step.Shell, context)
+		renderedShell, err := jp.renderTemplateString(compType, step.Name, "shell", step.Shell, context)
 		if err != nil {
 			return nil, err
 		}
-		renderedWorkingDirectory, err := jp.renderTemplateString(compInst.Type, step.Name, "working-directory", step.WorkingDirectory, context)
+		renderedWorkingDirectory, err := jp.renderTemplateString(compType, step.Name, "working-directory", step.WorkingDirectory, context)
 		if err != nil {
 			return nil, err
 		}
-		renderedWith, err := jp.renderTemplateMap(compInst.Type, step.Name, "with", step.With, context)
+		renderedWith, err := jp.renderTemplateMap(compType, step.Name, "with", step.With, context)
 		if err != nil {
 			return nil, err
 		}
-		renderedEnv, err := jp.renderTemplateMap(compInst.Type, step.Name, "env", step.Env, context)
+		renderedEnv, err := jp.renderTemplateMap(compType, step.Name, "env", step.Env, context)
 		if err != nil {
 			return nil, err
 		}
