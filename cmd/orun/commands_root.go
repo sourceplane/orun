@@ -158,7 +158,7 @@ func commandUsesIntent(cmd *cobra.Command) bool {
 		return false
 	}
 	switch cmd.Name() {
-	case "plan", "run", "validate", "debug", "component", "compositions", "get", "describe", "status", "logs":
+	case "plan", "run", "validate", "debug", "component", "compositions", "get", "describe", "status", "logs", "intent":
 		return true
 	}
 	if parent := cmd.Parent(); parent != nil {
@@ -189,4 +189,5 @@ func init() {
 	registerGCCommand(rootCmd)
 	registerPublishCommand(rootCmd)
 	registerFetchCommand(rootCmd)
+	registerIntentCommand(rootCmd)
 }

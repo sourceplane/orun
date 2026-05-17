@@ -12,6 +12,7 @@ type Intent struct {
 	APIVersion   string                 `yaml:"apiVersion" json:"apiVersion"`
 	Kind         string                 `yaml:"kind" json:"kind"`
 	Metadata     Metadata               `yaml:"metadata" json:"metadata"`
+	Extends      []ExtendsRef           `yaml:"extends,omitempty" json:"extends,omitempty"`
 	Discovery    Discovery              `yaml:"discovery" json:"discovery"`
 	Compositions CompositionConfig      `yaml:"compositions,omitempty" json:"compositions,omitempty"`
 	Automation   AutomationConfig       `yaml:"automation,omitempty" json:"automation,omitempty"`

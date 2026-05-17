@@ -60,11 +60,12 @@ type Composition struct {
 
 // Registry holds resolved compositions and the sources they came from.
 type Registry struct {
-	Types    map[string]*Composition
-	ByKey    map[string]*Composition
-	Jobs     *model.JobRegistry
-	Bindings map[string]*model.JobBinding
-	Sources  []model.ResolvedCompositionSource
+	Types       map[string]*Composition
+	ByKey       map[string]*Composition
+	Jobs        *model.JobRegistry
+	Bindings    map[string]*model.JobBinding
+	Sources     []model.ResolvedCompositionSource
+	SourceRoots map[string]string
 }
 
 type sourcePackage struct {
@@ -117,6 +118,7 @@ func LoadRegistry(intent *model.Intent, intentPath, legacyConfigDir string) (*Re
 	registry := newRegistry()
 	for _, sourcePackage := range packages {
 		registry.Sources = append(registry.Sources, sourcePackage.resolvedMetadata)
+		registry.SourceRoots[sourcePackage.declared.Name] = sourcePackage.resolvedRoot
 	}
 
 	for typeName, composition := range selectedTypes {
@@ -1130,8 +1132,9 @@ func newRegistry() *Registry {
 			Kind:       "JobRegistry",
 			Jobs:       []model.JobSpec{},
 		},
-		Bindings: make(map[string]*model.JobBinding),
-		Sources:  make([]model.ResolvedCompositionSource, 0),
+		Bindings:    make(map[string]*model.JobBinding),
+		Sources:     make([]model.ResolvedCompositionSource, 0),
+		SourceRoots: make(map[string]string),
 	}
 }
 

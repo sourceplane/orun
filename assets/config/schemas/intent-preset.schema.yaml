@@ -1,0 +1,139 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: orun IntentPreset
+description: Reusable intent scaffolding published by Stacks.
+type: object
+required:
+  - apiVersion
+  - kind
+  - metadata
+  - spec
+properties:
+  apiVersion:
+    type: string
+    pattern: ^sourceplane\.io/v[0-9]+(alpha[0-9]+)?$
+  kind:
+    type: string
+    enum:
+      - IntentPreset
+  metadata:
+    type: object
+    required:
+      - name
+    properties:
+      name:
+        type: string
+        minLength: 1
+      description:
+        type: string
+  spec:
+    type: object
+    properties:
+      env:
+        type: object
+        additionalProperties:
+          type: string
+      discovery:
+        type: object
+        properties:
+          roots:
+            type: array
+            items:
+              type: string
+      automation:
+        type: object
+        properties:
+          triggerBindings:
+            type: object
+            additionalProperties:
+              type: object
+              required:
+                - on
+              properties:
+                description:
+                  type: string
+                on:
+                  type: object
+                  required:
+                    - provider
+                    - event
+                  properties:
+                    provider:
+                      type: string
+                      minLength: 1
+                    event:
+                      type: string
+                      minLength: 1
+                    actions:
+                      type: array
+                      items:
+                        type: string
+                    branches:
+                      type: array
+                      items:
+                        type: string
+                    baseBranches:
+                      type: array
+                      items:
+                        type: string
+                    tags:
+                      type: array
+                      items:
+                        type: string
+                  additionalProperties: false
+                plan:
+                  type: object
+                  properties:
+                    scope:
+                      type: string
+                      enum:
+                        - full
+                        - changed
+                    base:
+                      type: string
+                    head:
+                      type: string
+                  additionalProperties: false
+        additionalProperties: false
+      environments:
+        type: object
+        additionalProperties:
+          type: object
+          properties:
+            activation:
+              type: object
+              properties:
+                triggerRefs:
+                  type: array
+                  items:
+                    type: string
+                    minLength: 1
+              additionalProperties: false
+            selectors:
+              type: object
+              properties:
+                components:
+                  type: array
+                  items:
+                    type: string
+                domains:
+                  type: array
+                  items:
+                    type: string
+            defaults:
+              type: object
+              additionalProperties: true
+            policies:
+              type: object
+              additionalProperties: true
+      groups:
+        type: object
+        additionalProperties:
+          type: object
+          properties:
+            policies:
+              type: object
+              additionalProperties: true
+            defaults:
+              type: object
+              additionalProperties: true
+    additionalProperties: false
