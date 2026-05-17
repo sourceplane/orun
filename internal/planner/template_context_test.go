@@ -25,20 +25,18 @@ func TestTemplateContextBuildLegacyFlatKeys(t *testing.T) {
 
 	ctx := tctx.Build()
 
-	if ctx["Component"] != "api" {
-		t.Errorf("Component = %v, want api", ctx["Component"])
+	// Legacy flat keys are removed; verify namespaced access works
+	params := ctx["parameters"].(map[string]interface{})
+	if params["namespace"] != "default" {
+		t.Errorf("parameters.namespace = %v, want default", params["namespace"])
 	}
-	if ctx["Environment"] != "dev" {
-		t.Errorf("Environment = %v, want dev", ctx["Environment"])
+	if params["replicaCount"] != 3 {
+		t.Errorf("parameters.replicaCount = %v, want 3", params["replicaCount"])
 	}
-	if ctx["Type"] != "helm" {
-		t.Errorf("Type = %v, want helm", ctx["Type"])
-	}
-	if ctx["namespace"] != "default" {
-		t.Errorf("namespace = %v, want default", ctx["namespace"])
-	}
-	if ctx["replicaCount"] != 3 {
-		t.Errorf("replicaCount = %v, want 3", ctx["replicaCount"])
+	orun := ctx["orun"].(map[string]interface{})
+	comp := orun["component"].(map[string]interface{})
+	if comp["name"] != "api" {
+		t.Errorf("orun.component.name = %v, want api", comp["name"])
 	}
 }
 
@@ -221,11 +219,8 @@ func TestTemplateContextEndToEndRendering(t *testing.T) {
 		tmplStr  string
 		expected string
 	}{
-		{"legacy flat parameter", "terraform -chdir={{.terraformDir}} validate", "terraform -chdir=infra/network validate"},
-		{"legacy Component", "{{.Component}}", "network-foundation"},
-		{"legacy Environment", "{{.Environment}}", "dev"},
-		{"legacy Type", "{{.Type}}", "terraform"},
 		{"namespaced parameter", "{{.parameters.terraformDir}}", "infra/network"},
+		{"namespaced parameter version", "{{.parameters.terraformVersion}}", "1.9.8"},
 		{"namespaced orun component name", "{{.orun.component.name}}", "network-foundation"},
 		{"namespaced orun environment name", "{{.orun.environment.name}}", "dev"},
 		{"namespaced orun composition type", "{{.orun.composition.type}}", "terraform"},

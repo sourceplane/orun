@@ -37,13 +37,13 @@ spec:
         - name: validate
           shell: bash
           run: |
-            echo "=== SMOKE: {{.Component}}@{{.Environment}}.smoke validate ==="
-            echo "module={{.module}}"
+            echo "=== SMOKE: {{.orun.component.name}}@{{.orun.environment.name}}.smoke validate ==="
+            echo "module={{.parameters.module}}"
             sleep 2
             echo "=== DONE ==="
         - name: apply
           shell: bash
           run: |
-            echo "=== SMOKE: {{.Component}}@{{.Environment}}.smoke apply ==="
+            echo "=== SMOKE: {{.orun.component.name}}@{{.orun.environment.name}}.smoke apply ==="
             sleep 1
             echo "=== DONE ==="

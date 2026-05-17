@@ -23,7 +23,7 @@ jobs:
         timeout: 5m
         onFailure: stop
       - name: plan
-        run: terraform plan -workspace={{.workspace}} -out=tfplan
+        run: terraform plan -workspace={{.parameters.workspace}} -out=tfplan
         timeout: 15m
         onFailure: stop
     inputs:
@@ -46,7 +46,7 @@ jobs:
         timeout: 5m
         onFailure: stop
       - name: plan
-        run: terraform plan -workspace={{.workspace}} -out=tfplan
+        run: terraform plan -workspace={{.parameters.workspace}} -out=tfplan
         timeout: 15m
         onFailure: stop
       - name: apply
@@ -72,11 +72,11 @@ jobs:
         run: terraform init -backend=true
         onFailure: stop
       - name: destroy
-        run: terraform destroy -workspace={{.workspace}} -auto-approve
+        run: terraform destroy -workspace={{.parameters.workspace}} -auto-approve
         timeout: 20m
         onFailure: stop
       - name: workspace-delete
-        run: terraform workspace delete {{.workspace}}
+        run: terraform workspace delete {{.parameters.workspace}}
         onFailure: continue
     inputs:
       autoApprove: "false"

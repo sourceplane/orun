@@ -28,23 +28,23 @@ spec:
     - id: helm-template
       name: helm-template
       capability: workspace.helm
-      run: helm template {{.Component}} {{.chartPath}} --values {{.valuesFile}}
+      run: helm template {{.orun.component.name}} {{.parameters.chartPath}} --values {{.parameters.valuesFile}}
       onFailure: stop
 
     - id: terraform-fmt-check
       name: terraform-fmt-check
       capability: workspace.terraform
-      run: terraform fmt -check {{.terraformDir}}
+      run: terraform fmt -check {{.parameters.terraformDir}}
       onFailure: stop
 
     - id: kustomize-build
       name: kustomize-build
       capability: workspace.kustomize
-      run: kustomize build {{.kustomizeDir}}
+      run: kustomize build {{.parameters.kustomizeDir}}
       onFailure: stop
 
     - id: torkflow-view
       name: torkflow-view
       capability: workspace.torkflow
-      run: torkflow view --workflow {{.workflowFile}}
+      run: torkflow view --workflow {{.parameters.workflowFile}}
       onFailure: stop

@@ -25,15 +25,15 @@ spec:
       capability: cloudflare-pages.setup
       use: actions/setup-node@v4
       with:
-        node-version: "{{.nodeVersion}}"
+        node-version: "{{.parameters.nodeVersion}}"
 
     - id: install-site-dependencies
       name: install-site-dependencies
       capability: cloudflare-pages.install
       shell: bash
       run: |
-        cd "{{.siteDir}}"
-        {{.installCommand}}
+        cd "{{.parameters.siteDir}}"
+        {{.parameters.installCommand}}
       onFailure: stop
 
     - id: build-site
@@ -41,8 +41,8 @@ spec:
       capability: cloudflare-pages.build
       shell: bash
       run: |
-        cd "{{.siteDir}}"
-        {{.buildCommand}}
+        cd "{{.parameters.siteDir}}"
+        {{.parameters.buildCommand}}
       onFailure: stop
 
     - id: verify-build-output
@@ -50,9 +50,9 @@ spec:
       capability: cloudflare-pages.verify
       shell: bash
       run: |
-        cd "{{.siteDir}}"
-        test -d "{{.outputDir}}"
-        find "{{.outputDir}}" -maxdepth 2 -type f | head -n 20
+        cd "{{.parameters.siteDir}}"
+        test -d "{{.parameters.outputDir}}"
+        find "{{.parameters.outputDir}}" -maxdepth 2 -type f | head -n 20
       onFailure: stop
 
     - id: ensure-pages-project
@@ -60,8 +60,8 @@ spec:
       capability: cloudflare-pages.provision
       shell: bash
       run: |
-        if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
-          echo "Skipping Cloudflare Pages project reconciliation for {{.Environment}} on ${GITHUB_REF:-local}."
+        if [ "{{.orun.environment.name}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.parameters.productionBranch}}" ]; then
+          echo "Skipping Cloudflare Pages project reconciliation for {{.orun.environment.name}} on ${GITHUB_REF:-local}."
           exit 0
         fi
 
@@ -73,17 +73,17 @@ spec:
         status="$(curl -sS -o "${response_file}" -w "%{http_code}" \
           -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
           -H "Content-Type: application/json" \
-          "${api_root}/{{.projectName}}")"
+          "${api_root}/{{.parameters.projectName}}")"
 
         if [ "${status}" = "200" ]; then
-          echo "Pages project {{.projectName}} already exists."
+          echo "Pages project {{.parameters.projectName}} already exists."
         elif [ "${status}" = "404" ]; then
           curl -sS --fail -X POST \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             -H "Content-Type: application/json" \
-            --data '{"name":"{{.projectName}}","production_branch":"{{.productionBranch}}"}' \
+            --data '{"name":"{{.parameters.projectName}}","production_branch":"{{.parameters.productionBranch}}"}' \
             "${api_root}" >/dev/null
-          echo "Created Pages project {{.projectName}}."
+          echo "Created Pages project {{.parameters.projectName}}."
         else
           cat "${response_file}"
           exit 1
@@ -92,8 +92,8 @@ spec:
         curl -sS --fail -X PATCH \
           -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
           -H "Content-Type: application/json" \
-          --data '{"production_branch":"{{.productionBranch}}"}' \
-          "${api_root}/{{.projectName}}" >/dev/null
+          --data '{"production_branch":"{{.parameters.productionBranch}}"}' \
+          "${api_root}/{{.parameters.projectName}}" >/dev/null
       onFailure: stop
 
     - id: deploy-pages-artifact
@@ -101,16 +101,16 @@ spec:
       capability: cloudflare-pages.deploy
       shell: bash
       run: |
-        if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
-          echo "Skipping Cloudflare Pages deploy for {{.Environment}} on ${GITHUB_REF:-local}."
+        if [ "{{.orun.environment.name}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.parameters.productionBranch}}" ]; then
+          echo "Skipping Cloudflare Pages deploy for {{.orun.environment.name}} on ${GITHUB_REF:-local}."
           exit 0
         fi
 
         : "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required for deployment}"
         : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required for deployment}"
 
-        cd "{{.siteDir}}"
-        npx wrangler pages deploy "{{.outputDir}}" \
-          --project-name "{{.projectName}}" \
-          --branch "{{.productionBranch}}"
+        cd "{{.parameters.siteDir}}"
+        npx wrangler pages deploy "{{.parameters.outputDir}}" \
+          --project-name "{{.parameters.projectName}}" \
+          --branch "{{.parameters.productionBranch}}"
       onFailure: stop

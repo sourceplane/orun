@@ -20,11 +20,11 @@ jobs:
         run: helm repo update
         retry: 2
       - name: deploy
-        run: helm upgrade --install {{.Component}} {{.chart}} --namespace platform-common --create-namespace --wait=true --timeout={{.timeout}}
+        run: helm upgrade --install {{.orun.component.name}} {{.parameters.chart}} --namespace platform-common --create-namespace --wait=true --timeout={{.parameters.timeout}}
         timeout: 15m
         onFailure: stop
       - name: verify
-        run: kubectl get deployment -n platform-common {{.Component}}
+        run: kubectl get deployment -n platform-common {{.orun.component.name}}
         onFailure: continue
     inputs:
       pullPolicy: IfNotPresent
@@ -39,13 +39,13 @@ jobs:
       type: common-services
     steps:
       - name: pod-status
-        run: kubectl get pods -n platform-common -l app={{.Component}} -o wide
+        run: kubectl get pods -n platform-common -l app={{.orun.component.name}} -o wide
         onFailure: continue
       - name: service-check
-        run: kubectl get svc -n platform-common {{.Component}}
+        run: kubectl get svc -n platform-common {{.orun.component.name}}
         onFailure: continue
       - name: logs
-        run: kubectl logs -n platform-common -l app={{.Component}} --tail=20 || true
+        run: kubectl logs -n platform-common -l app={{.orun.component.name}} --tail=20 || true
         onFailure: continue
     inputs:
       pullPolicy: IfNotPresent
@@ -60,14 +60,14 @@ jobs:
       type: common-services
     steps:
       - name: get-revision
-        run: helm history {{.Component}} -n platform-common | head -2
+        run: helm history {{.orun.component.name}} -n platform-common | head -2
         onFailure: stop
       - name: rollback
-        run: helm rollback {{.Component}} -n platform-common
+        run: helm rollback {{.orun.component.name}} -n platform-common
         timeout: 10m
         onFailure: stop
       - name: verify-rollback
-        run: kubectl rollout status deployment/{{.Component}} -n platform-common
+        run: kubectl rollout status deployment/{{.orun.component.name}} -n platform-common
         onFailure: continue
     inputs:
       pullPolicy: IfNotPresent

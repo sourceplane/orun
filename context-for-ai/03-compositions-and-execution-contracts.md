@@ -98,21 +98,30 @@ spec:
         - terraform.plan
       stepOverrides:
         init:
-          run: terraform -chdir={{.terraformDir}} init -backend=false -input=false
+          run: terraform -chdir={{.parameters.terraformDir}} init -backend=false -input=false
 ```
 
 Prefer `includeCapabilities` over brittle step lists when the composition uses capability tags. Capabilities describe intent at the step level and survive step ID refactors better.
 
 ## Template context
 
-Composition steps render with values from the component instance:
+Composition steps render with a namespaced template context:
 
-- `.Component`
-- `.Environment`
-- `.Type`
-- merged component input fields, such as `.terraformDir`, `.chartPath`, `.nodeVersion`
+| Namespace | Purpose | Example |
+| --- | --- | --- |
+| `.orun` | System/compiler-provided context | `{{ .orun.component.name }}` |
+| `.parameters` | Resolved component parameters | `{{ .parameters.terraformDir }}` |
+| `.env` | Resolved runtime env map | `{{ .env.AWS_REGION }}` |
 
-Do not rely on undeclared values. If a template needs a new value, add it to the component schema and supply it through component inputs or defaults.
+Available `.orun` fields:
+
+- `.orun.component.name`, `.orun.component.type`, `.orun.component.domain`
+- `.orun.environment.name`
+- `.orun.composition.type`
+- `.orun.profile.name`
+- `.orun.job.id`, `.orun.job.name`
+
+Do not rely on undeclared values. If a template needs a new value, add it to the component schema and supply it through component parameters or parameterDefaults.
 
 ## When to change a composition
 

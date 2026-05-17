@@ -17,6 +17,6 @@ spec:
 
       stepOverrides:
         init:
-          run: terraform -chdir={{.terraformDir}} init -backend=false -input=false
+          run: terraform -chdir={{.parameters.terraformDir}} init -backend=false -input=false
         plan:
-          run: terraform -chdir={{.terraformDir}} plan -no-color -lock=false
+          run: terraform -chdir={{.parameters.terraformDir}} plan -no-color -lock=false

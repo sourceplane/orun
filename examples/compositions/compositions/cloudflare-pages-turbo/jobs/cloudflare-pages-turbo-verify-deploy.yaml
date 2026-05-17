@@ -28,14 +28,14 @@ spec:
       capability: cloudflare-pages-turbo.setup-node
       use: actions/setup-node@v4
       with:
-        node-version: "{{.nodeVersion}}"
+        node-version: "{{.parameters.nodeVersion}}"
 
     - id: setup-pnpm
       name: setup-pnpm
       capability: cloudflare-pages-turbo.setup-pnpm
       use: pnpm/action-setup@v4
       with:
-        version: "{{.pnpmVersion}}"
+        version: "{{.parameters.pnpmVersion}}"
 
     - id: install-workspace-dependencies
       name: install-workspace-dependencies
@@ -49,7 +49,7 @@ spec:
       shell: bash
       run: |
         {{if .preBuildCommand}}
-        {{.preBuildCommand}}
+        {{.parameters.preBuildCommand}}
         {{else}}
         echo "Skipping pre-build."
         {{end}}
@@ -64,7 +64,7 @@ spec:
     - id: build-pages-app
       name: build-pages-app
       capability: cloudflare-pages-turbo.build
-      run: "{{if .buildCommand}}{{.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
+      run: "{{if .buildCommand}}{{.parameters.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
       onFailure: stop
 
     - id: verify-build-output
@@ -72,8 +72,8 @@ spec:
       capability: cloudflare-pages-turbo.verify-output
       shell: bash
       run: |
-        test -d "{{.outputDir}}"
-        find "{{.outputDir}}" -maxdepth 2 -type f | head -n 20
+        test -d "{{.parameters.outputDir}}"
+        find "{{.parameters.outputDir}}" -maxdepth 2 -type f | head -n 20
       onFailure: stop
 
     - id: ensure-pages-project
@@ -81,8 +81,8 @@ spec:
       capability: cloudflare-pages-turbo.provision
       shell: bash
       run: |
-        if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
-          echo "Skipping Cloudflare Pages project reconciliation for {{.Component}} in {{.Environment}} on ${GITHUB_REF:-local}."
+        if [ "{{.orun.environment.name}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.parameters.productionBranch}}" ]; then
+          echo "Skipping Cloudflare Pages project reconciliation for {{.orun.component.name}} in {{.orun.environment.name}} on ${GITHUB_REF:-local}."
           exit 0
         fi
 
@@ -94,17 +94,17 @@ spec:
         status="$(curl -sS -o "${response_file}" -w "%{http_code}" \
           -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
           -H "Content-Type: application/json" \
-          "${api_root}/{{.projectName}}")"
+          "${api_root}/{{.parameters.projectName}}")"
 
         if [ "${status}" = "200" ]; then
-          echo "Pages project {{.projectName}} already exists."
+          echo "Pages project {{.parameters.projectName}} already exists."
         elif [ "${status}" = "404" ]; then
           curl -sS --fail -X POST \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             -H "Content-Type: application/json" \
-            --data '{"name":"{{.projectName}}","production_branch":"{{.productionBranch}}"}' \
+            --data '{"name":"{{.parameters.projectName}}","production_branch":"{{.parameters.productionBranch}}"}' \
             "${api_root}" >/dev/null
-          echo "Created Pages project {{.projectName}}."
+          echo "Created Pages project {{.parameters.projectName}}."
         else
           cat "${response_file}"
           exit 1
@@ -113,8 +113,8 @@ spec:
         curl -sS --fail -X PATCH \
           -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
           -H "Content-Type: application/json" \
-          --data '{"production_branch":"{{.productionBranch}}"}' \
-          "${api_root}/{{.projectName}}" >/dev/null
+          --data '{"production_branch":"{{.parameters.productionBranch}}"}' \
+          "${api_root}/{{.parameters.projectName}}" >/dev/null
       onFailure: stop
 
     - id: deploy-pages-artifact
@@ -122,15 +122,15 @@ spec:
       capability: cloudflare-pages-turbo.deploy
       shell: bash
       run: |
-        if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
-          echo "Skipping Cloudflare Pages deploy for {{.Component}} in {{.Environment}} on ${GITHUB_REF:-local}."
+        if [ "{{.orun.environment.name}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.parameters.productionBranch}}" ]; then
+          echo "Skipping Cloudflare Pages deploy for {{.orun.component.name}} in {{.orun.environment.name}} on ${GITHUB_REF:-local}."
           exit 0
         fi
 
         : "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required for deployment}"
         : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required for deployment}"
 
-        pnpm exec wrangler pages deploy "{{.outputDir}}" \
-          --project-name "{{.projectName}}" \
-          --branch "{{.productionBranch}}"
+        pnpm exec wrangler pages deploy "{{.parameters.outputDir}}" \
+          --project-name "{{.parameters.projectName}}" \
+          --branch "{{.parameters.productionBranch}}"
       onFailure: stop

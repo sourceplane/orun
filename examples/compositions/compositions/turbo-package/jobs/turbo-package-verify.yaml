@@ -26,14 +26,14 @@ spec:
       capability: turbo-package.setup-node
       use: actions/setup-node@v4
       with:
-        node-version: "{{.nodeVersion}}"
+        node-version: "{{.parameters.nodeVersion}}"
 
     - id: setup-pnpm
       name: setup-pnpm
       capability: turbo-package.setup-pnpm
       use: pnpm/action-setup@v4
       with:
-        version: "{{.pnpmVersion}}"
+        version: "{{.parameters.pnpmVersion}}"
 
     - id: install-workspace-dependencies
       name: install-workspace-dependencies
@@ -47,7 +47,7 @@ spec:
       shell: bash
       run: |
         {{if .preBuildCommand}}
-        {{.preBuildCommand}}
+        {{.parameters.preBuildCommand}}
         {{else}}
         echo "Skipping pre-build."
         {{end}}
@@ -62,11 +62,11 @@ spec:
     - id: build-package
       name: build-package
       capability: turbo-package.build
-      run: "{{if .buildCommand}}{{.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
+      run: "{{if .buildCommand}}{{.parameters.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
       onFailure: stop
 
     - id: typecheck-package
       name: typecheck-package
       capability: turbo-package.typecheck
-      run: "{{if .typecheckCommand}}{{.typecheckCommand}}{{else}}pnpm exec turbo run typecheck --filter=./{{end}}"
+      run: "{{if .typecheckCommand}}{{.parameters.typecheckCommand}}{{else}}pnpm exec turbo run typecheck --filter=./{{end}}"
       onFailure: stop

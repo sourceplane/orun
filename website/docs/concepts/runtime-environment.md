@@ -175,10 +175,8 @@ Available variables: `{{ .environment }}`, `{{ .component }}`, `{{ .group }}`.
 
 `env` and `parameters` serve different purposes:
 
-- **parameters** (`spec.parameters` in component.yaml) are configuration values used for template rendering in composition steps. They appear in `PlanJob.config`.
-- **env** is a flat `map[string]string` of shell environment variables injected at runtime. They appear in `PlanJob.env`.
-
-When no `env` is declared, `PlanJob.env` falls back to the component parameters for backwards compatibility with existing compositions that reference parameters as environment variables.
+- **parameters** (`spec.parameters` in component.yaml) are configuration values used for template rendering in composition steps. They appear in `PlanJob.parameters` and are accessed via `{{ .parameters.fieldName }}` in templates.
+- **env** is a flat `map[string]string` of shell environment variables injected at runtime. They appear in `PlanJob.env` and are accessible via `{{ .env.VAR_NAME }}` in templates.
 
 ## Plan output
 
@@ -199,7 +197,7 @@ The resolved environment variables appear in the plan under each job's `env` fie
         "REPO": "aws-admin",
         "STACK_NAME": "api-platform"
       },
-      "config": {
+      "parameters": {
         "stackName": "api-platform",
         "terraformDir": ".",
         "terraformVersion": "1.9.8"

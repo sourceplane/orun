@@ -29,15 +29,15 @@ spec:
       capability: cloudflare-pages-terraform.setup-node
       use: actions/setup-node@v4
       with:
-        node-version: "{{.nodeVersion}}"
+        node-version: "{{.parameters.nodeVersion}}"
 
     - id: install-site-dependencies
       name: install-site-dependencies
       capability: cloudflare-pages-terraform.install
       shell: bash
       run: |
-        cd "{{.siteDir}}"
-        {{.installCommand}}
+        cd "{{.parameters.siteDir}}"
+        {{.parameters.installCommand}}
       onFailure: stop
 
     - id: build-site
@@ -45,8 +45,8 @@ spec:
       capability: cloudflare-pages-terraform.build
       shell: bash
       run: |
-        cd "{{.siteDir}}"
-        {{.buildCommand}}
+        cd "{{.parameters.siteDir}}"
+        {{.parameters.buildCommand}}
       onFailure: stop
 
     - id: verify-build-output
@@ -54,9 +54,9 @@ spec:
       capability: cloudflare-pages-terraform.verify
       shell: bash
       run: |
-        cd "{{.siteDir}}"
-        test -d "{{.outputDir}}"
-        find "{{.outputDir}}" -maxdepth 2 -type f | head -n 20
+        cd "{{.parameters.siteDir}}"
+        test -d "{{.parameters.outputDir}}"
+        find "{{.parameters.outputDir}}" -maxdepth 2 -type f | head -n 20
       onFailure: stop
 
     - id: setup-terraform
@@ -64,7 +64,7 @@ spec:
       capability: cloudflare-pages-terraform.setup-terraform
       use: hashicorp/setup-terraform@v4
       with:
-        terraform_version: "{{.terraformVersion}}"
+        terraform_version: "{{.parameters.terraformVersion}}"
         terraform_wrapper: "false"
 
     - id: terraform-context
@@ -73,25 +73,25 @@ spec:
       shell: bash
       run: |
         terraform version
-        echo "Reconciling Cloudflare Pages project {{.projectName}} from {{.terraformDir}}"
+        echo "Reconciling Cloudflare Pages project {{.parameters.projectName}} from {{.parameters.terraformDir}}"
       onFailure: stop
 
     - id: terraform-fmt-check
       name: terraform-fmt-check
       capability: cloudflare-pages-terraform.terraform-fmt
-      run: terraform -chdir={{.terraformDir}} fmt -check
+      run: terraform -chdir={{.parameters.terraformDir}} fmt -check
       onFailure: stop
 
     - id: terraform-init
       name: terraform-init
       capability: cloudflare-pages-terraform.terraform-init
-      run: terraform -chdir={{.terraformDir}} init -input=false
+      run: terraform -chdir={{.parameters.terraformDir}} init -input=false
       onFailure: stop
 
     - id: terraform-validate
       name: terraform-validate
       capability: cloudflare-pages-terraform.terraform-validate
-      run: terraform -chdir={{.terraformDir}} validate -no-color
+      run: terraform -chdir={{.parameters.terraformDir}} validate -no-color
       onFailure: stop
 
     - id: terraform-plan-or-apply
@@ -104,19 +104,19 @@ spec:
         terraform_args=(
           "-input=false"
           "-var=account_id=${cloudflare_account_id}"
-          "-var=project_name={{.projectName}}"
-          "-var=production_branch={{.productionBranch}}"
-          "-var=repo_owner={{.repoOwner}}"
-          "-var=repo_name={{.repoName}}"
-          "-var=build_command={{.cloudflareBuildCommand}}"
-          "-var=destination_dir={{.outputDir}}"
-          "-var=root_dir={{.rootDir}}"
+          "-var=project_name={{.parameters.projectName}}"
+          "-var=production_branch={{.parameters.productionBranch}}"
+          "-var=repo_owner={{.parameters.repoOwner}}"
+          "-var=repo_name={{.parameters.repoName}}"
+          "-var=build_command={{.parameters.cloudflareBuildCommand}}"
+          "-var=destination_dir={{.parameters.outputDir}}"
+          "-var=root_dir={{.parameters.rootDir}}"
         )
 
-        if [ "{{.Environment}}" = "production" ] && [ "${GITHUB_REF:-}" = "refs/heads/{{.productionBranch}}" ]; then
+        if [ "{{.orun.environment.name}}" = "production" ] && [ "${GITHUB_REF:-}" = "refs/heads/{{.parameters.productionBranch}}" ]; then
           : "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required for apply}"
           : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required for apply}"
-          terraform -chdir={{.terraformDir}} apply -auto-approve "${terraform_args[@]}"
+          terraform -chdir={{.parameters.terraformDir}} apply -auto-approve "${terraform_args[@]}"
           exit 0
         fi
 
@@ -125,5 +125,5 @@ spec:
           exit 0
         fi
 
-        terraform -chdir={{.terraformDir}} plan -lock=false -no-color "${terraform_args[@]}"
+        terraform -chdir={{.parameters.terraformDir}} plan -lock=false -no-color "${terraform_args[@]}"
       onFailure: stop
