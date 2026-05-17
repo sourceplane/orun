@@ -110,11 +110,21 @@ type JobInstance struct {
 	Path          string
 	Steps         []RenderedStep
 	DependsOn     []string
+	Gates         []PromotionGate
 	Timeout       string
 	Retries       int
 	Config        map[string]interface{}
 	Env           map[string]string
 	Labels        map[string]string
+}
+
+// PromotionGate is an evidence check for cross-plan environment promotion.
+type PromotionGate struct {
+	Type        string
+	Environment string
+	Component   string
+	Condition   string
+	Match       map[string]string
 }
 
 // RenderedStep is a step with all templates resolved

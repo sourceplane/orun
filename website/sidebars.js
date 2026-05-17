@@ -9,6 +9,7 @@ const sidebars = {
         'concepts/compositions',
         'concepts/stacks',
         'concepts/trigger-bindings',
+        'concepts/environment-promotion',
         'concepts/runtime-environment',
         'concepts/plan-dag',
         'concepts/execution-model',

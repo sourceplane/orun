@@ -96,6 +96,33 @@ environments:
 
 See [trigger bindings](./trigger-bindings.md) for full details.
 
+Environments can also declare `promotion.dependsOn` to express deployment pipeline ordering:
+
+```yaml
+environments:
+  staging:
+    activation:
+      triggerRefs:
+        - github-push-main
+    promotion:
+      dependsOn:
+        - environment: preview
+    defaults:
+      lane: verify
+
+  production:
+    activation:
+      triggerRefs:
+        - github-tag-release
+    promotion:
+      dependsOn:
+        - environment: staging
+    defaults:
+      lane: release
+```
+
+This compiles into DAG edges when both environments are active, or gates when they are in separate plans. See [environment promotion](./environment-promotion.md) for full details.
+
 ### `automation`
 
 The `automation` section declares trigger bindings that map CI provider events to environment activation:

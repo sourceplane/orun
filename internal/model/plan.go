@@ -86,11 +86,21 @@ type PlanJob struct {
 	Path          string                 `json:"path,omitempty" yaml:"path,omitempty"` // Working directory for job execution
 	Steps         []PlanStep             `json:"steps" yaml:"steps"`
 	DependsOn     []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
+	Gates         []PlanPromotionGate    `json:"gates,omitempty" yaml:"gates,omitempty"`
 	Timeout       string                 `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	Retries       int                    `json:"retries,omitempty" yaml:"retries,omitempty"`
 	Env           map[string]interface{} `json:"env,omitempty" yaml:"env,omitempty"`
 	Labels        map[string]string      `json:"labels,omitempty" yaml:"labels,omitempty"`
 	Config        map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
+}
+
+// PlanPromotionGate is a cross-plan evidence gate in the plan output.
+type PlanPromotionGate struct {
+	Type        string            `json:"type" yaml:"type"`
+	Environment string            `json:"environment" yaml:"environment"`
+	Component   string            `json:"component" yaml:"component"`
+	Condition   string            `json:"condition" yaml:"condition"`
+	Match       map[string]string `json:"match" yaml:"match"`
 }
 
 // PlanStep is a step in the final plan

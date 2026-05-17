@@ -94,6 +94,37 @@ Use CLI flags when you want to scope the effective configuration at compile time
 
 Read [environment variables](./environment-variables.md) if you want to control configuration through the shell.
 
+## Environment promotion
+
+Declare promotion dependencies between environments to establish deployment ordering:
+
+```yaml
+environments:
+  staging:
+    activation:
+      triggerRefs: [github-push-main]
+    promotion:
+      dependsOn:
+        - environment: preview
+          strategy: same-component      # default
+          condition: success            # default
+          satisfy: same-plan-or-previous-success  # default
+          match:
+            revision: source            # default
+    defaults:
+      lane: verify
+```
+
+| Field | Values | Default | Meaning |
+| --- | --- | --- | --- |
+| `environment` | string (required) | — | Environment that must succeed first |
+| `strategy` | `same-component`, `environment-barrier` | `same-component` | How to link jobs across environments |
+| `condition` | `success` | `success` | Required outcome in the dependency environment |
+| `satisfy` | `same-plan`, `previous-success`, `same-plan-or-previous-success` | `same-plan-or-previous-success` | Whether to use DAG edges, gates, or both |
+| `match.revision` | `source` | `source` | How to match prior success evidence |
+
+See [environment promotion](../concepts/environment-promotion.md) for detailed behavior.
+
 ## Remote state configuration
 
 Add an `execution.state` block to `intent.yaml` to enable remote state coordination via orun-backend:

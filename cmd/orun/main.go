@@ -241,6 +241,11 @@ func generatePlan() error {
 		return fmt.Errorf("failed to plan jobs: %w", err)
 	}
 
+	// Resolve environment promotion dependencies into DAG edges or gates
+	if err := planner.ResolvePromotionDependencies(jobInstances, instances, normalized.Environments); err != nil {
+		return fmt.Errorf("failed to resolve promotion dependencies: %w", err)
+	}
+
 	if debugMode {
 		fmt.Println("□ Detecting cycles...")
 	}

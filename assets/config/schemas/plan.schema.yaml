@@ -139,6 +139,31 @@ properties:
           type: array
           items:
             type: string
+        gates:
+          type: array
+          description: Cross-plan promotion gates that require prior environment success evidence.
+          items:
+            type: object
+            required:
+              - type
+              - environment
+              - component
+              - condition
+            properties:
+              type:
+                type: string
+                enum:
+                  - environment-promotion
+              environment:
+                type: string
+              component:
+                type: string
+              condition:
+                type: string
+              match:
+                type: object
+                additionalProperties:
+                  type: string
         timeout:
           type: string
         retries:

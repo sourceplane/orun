@@ -198,3 +198,126 @@ func TestNormalizeCarriesIntentRootEnv(t *testing.T) {
 		t.Fatalf("expected intent root env to be carried, got %v", normalized.Env)
 	}
 }
+
+func TestPromotionDefaultsApplied(t *testing.T) {
+	intent := &model.Intent{
+		Metadata: model.Metadata{Name: "test"},
+		Environments: map[string]model.Environment{
+			"dev": {},
+			"staging": {
+				Promotion: model.EnvironmentPromotion{
+					DependsOn: []model.PromotionDependency{{
+						Environment: "dev",
+					}},
+				},
+			},
+		},
+		Components: []model.Component{
+			{Name: "api", Type: "terraform"},
+		},
+	}
+
+	normalized, err := NormalizeIntent(intent)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	dep := normalized.Environments["staging"].Promotion.DependsOn[0]
+	if dep.Strategy != "same-component" {
+		t.Errorf("expected default strategy same-component, got %s", dep.Strategy)
+	}
+	if dep.Condition != "success" {
+		t.Errorf("expected default condition success, got %s", dep.Condition)
+	}
+	if dep.Satisfy != "same-plan-or-previous-success" {
+		t.Errorf("expected default satisfy same-plan-or-previous-success, got %s", dep.Satisfy)
+	}
+	if dep.Match.Revision != "source" {
+		t.Errorf("expected default match.revision source, got %s", dep.Match.Revision)
+	}
+}
+
+func TestPromotionRejectsSelfReference(t *testing.T) {
+	intent := &model.Intent{
+		Metadata: model.Metadata{Name: "test"},
+		Environments: map[string]model.Environment{
+			"dev": {
+				Promotion: model.EnvironmentPromotion{
+					DependsOn: []model.PromotionDependency{{
+						Environment: "dev",
+					}},
+				},
+			},
+		},
+		Components: []model.Component{
+			{Name: "api", Type: "terraform"},
+		},
+	}
+
+	_, err := NormalizeIntent(intent)
+	if err == nil {
+		t.Fatal("expected error for self-referencing promotion")
+	}
+	if !strings.Contains(err.Error(), "cannot reference itself") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPromotionRejectsNonExistentEnvironment(t *testing.T) {
+	intent := &model.Intent{
+		Metadata: model.Metadata{Name: "test"},
+		Environments: map[string]model.Environment{
+			"dev": {
+				Promotion: model.EnvironmentPromotion{
+					DependsOn: []model.PromotionDependency{{
+						Environment: "unknown",
+					}},
+				},
+			},
+		},
+		Components: []model.Component{
+			{Name: "api", Type: "terraform"},
+		},
+	}
+
+	_, err := NormalizeIntent(intent)
+	if err == nil {
+		t.Fatal("expected error for non-existent environment reference")
+	}
+	if !strings.Contains(err.Error(), "non-existent environment") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPromotionDetectsCycle(t *testing.T) {
+	intent := &model.Intent{
+		Metadata: model.Metadata{Name: "test"},
+		Environments: map[string]model.Environment{
+			"dev": {
+				Promotion: model.EnvironmentPromotion{
+					DependsOn: []model.PromotionDependency{{
+						Environment: "staging",
+					}},
+				},
+			},
+			"staging": {
+				Promotion: model.EnvironmentPromotion{
+					DependsOn: []model.PromotionDependency{{
+						Environment: "dev",
+					}},
+				},
+			},
+		},
+		Components: []model.Component{
+			{Name: "api", Type: "terraform"},
+		},
+	}
+
+	_, err := NormalizeIntent(intent)
+	if err == nil {
+		t.Fatal("expected error for promotion cycle")
+	}
+	if !strings.Contains(err.Error(), "cycle detected") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

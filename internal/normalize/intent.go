@@ -121,6 +121,32 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 			return nil, err
 		}
 
+		// Normalize promotion dependencies
+		for i := range env.Promotion.DependsOn {
+			dep := &env.Promotion.DependsOn[i]
+			if dep.Environment == "" {
+				return nil, fmt.Errorf("environment %s: promotion dependency requires environment field", envName)
+			}
+			if dep.Environment == envName {
+				return nil, fmt.Errorf("environment %s: promotion dependency cannot reference itself", envName)
+			}
+			if _, exists := normalized.Environments[dep.Environment]; !exists {
+				return nil, fmt.Errorf("environment %s: promotion dependency references non-existent environment %q", envName, dep.Environment)
+			}
+			if dep.Strategy == "" {
+				dep.Strategy = "same-component"
+			}
+			if dep.Condition == "" {
+				dep.Condition = "success"
+			}
+			if dep.Satisfy == "" {
+				dep.Satisfy = "same-plan-or-previous-success"
+			}
+			if dep.Match.Revision == "" {
+				dep.Match.Revision = "source"
+			}
+		}
+
 		// Expand wildcards
 		if contains(env.Selectors.Components, "*") {
 			expandedComps := make([]string, 0)
@@ -132,6 +158,11 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 		}
 
 		normalized.Environments[envName] = env
+	}
+
+	// Detect promotion dependency cycles
+	if err := detectPromotionCycles(normalized.Environments); err != nil {
+		return nil, err
 	}
 
 	return normalized, nil
@@ -167,4 +198,51 @@ func matchesWildcard(pattern, name string) bool {
 		return strings.HasPrefix(name, prefix)
 	}
 	return pattern == name
+}
+
+// detectPromotionCycles checks for cycles in environment promotion dependencies using DFS.
+func detectPromotionCycles(environments map[string]model.Environment) error {
+	const (
+		white = 0 // unvisited
+		gray  = 1 // in current path
+		black = 2 // fully processed
+	)
+
+	color := make(map[string]int)
+	for envName := range environments {
+		color[envName] = white
+	}
+
+	var visit func(envName string, path []string) error
+	visit = func(envName string, path []string) error {
+		color[envName] = gray
+		path = append(path, envName)
+
+		env := environments[envName]
+		for _, dep := range env.Promotion.DependsOn {
+			target := dep.Environment
+			switch color[target] {
+			case gray:
+				cycle := append(path, target)
+				return fmt.Errorf("promotion dependency cycle detected: %s", strings.Join(cycle, " → "))
+			case white:
+				if err := visit(target, path); err != nil {
+					return err
+				}
+			}
+		}
+
+		color[envName] = black
+		return nil
+	}
+
+	for envName := range environments {
+		if color[envName] == white {
+			if err := visit(envName, nil); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }

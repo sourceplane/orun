@@ -107,6 +107,51 @@ properties:
                 type: string
                 minLength: 1
           additionalProperties: false
+        promotion:
+          type: object
+          description: Environment promotion dependencies for ordering/gating between environments.
+          properties:
+            dependsOn:
+              type: array
+              items:
+                type: object
+                required:
+                  - environment
+                properties:
+                  environment:
+                    type: string
+                    minLength: 1
+                    description: Name of the environment that must succeed before this one.
+                  strategy:
+                    type: string
+                    enum:
+                      - same-component
+                      - environment-barrier
+                    default: same-component
+                    description: How to map dependencies. same-component links matching components; environment-barrier waits for all jobs.
+                  condition:
+                    type: string
+                    enum:
+                      - success
+                    default: success
+                  satisfy:
+                    type: string
+                    enum:
+                      - same-plan
+                      - previous-success
+                      - same-plan-or-previous-success
+                    default: same-plan-or-previous-success
+                    description: Whether to use in-plan DAG edges, prior evidence, or both.
+                  match:
+                    type: object
+                    properties:
+                      revision:
+                        type: string
+                        enum:
+                          - source
+                        description: How to match prior success evidence (source = same commit).
+                    additionalProperties: false
+          additionalProperties: false
         selectors:
           type: object
           properties:

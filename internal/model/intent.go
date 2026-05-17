@@ -58,10 +58,30 @@ type Group struct {
 type Environment struct {
 	Path       string                 `yaml:"path" json:"path"`
 	Activation EnvironmentActivation  `yaml:"activation,omitempty" json:"activation,omitempty"`
+	Promotion  EnvironmentPromotion   `yaml:"promotion,omitempty" json:"promotion,omitempty"`
 	Selectors  EnvironmentSelectors   `yaml:"selectors" json:"selectors"`
 	Defaults   map[string]interface{} `yaml:"defaults" json:"defaults"`
 	Policies   map[string]interface{} `yaml:"policies" json:"policies"`
 	Env        map[string]string      `yaml:"env,omitempty" json:"env,omitempty"`
+}
+
+// EnvironmentPromotion declares ordering/gating relationships between environments.
+type EnvironmentPromotion struct {
+	DependsOn []PromotionDependency `yaml:"dependsOn,omitempty" json:"dependsOn,omitempty"`
+}
+
+// PromotionDependency specifies a dependency on another environment for promotion.
+type PromotionDependency struct {
+	Environment string         `yaml:"environment" json:"environment"`
+	Strategy    string         `yaml:"strategy,omitempty" json:"strategy,omitempty"`
+	Condition   string         `yaml:"condition,omitempty" json:"condition,omitempty"`
+	Satisfy     string         `yaml:"satisfy,omitempty" json:"satisfy,omitempty"`
+	Match       PromotionMatch `yaml:"match,omitempty" json:"match,omitempty"`
+}
+
+// PromotionMatch specifies how to match evidence for cross-plan promotion gates.
+type PromotionMatch struct {
+	Revision string `yaml:"revision,omitempty" json:"revision,omitempty"`
 }
 
 // EnvironmentSelectors specifies which components apply to an environment
