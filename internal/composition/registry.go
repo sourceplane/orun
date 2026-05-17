@@ -307,11 +307,12 @@ func (reg *Registry) ValidateComponentAgainstComposition(component *model.Compon
 	}
 
 	validationObj := map[string]interface{}{
-		"name":   component.Name,
-		"type":   component.Type,
+		"name":       component.Name,
+		"type":       component.Type,
 		"parameters": component.Parameters,
-		"domain": component.Domain,
-		"labels": component.Labels,
+		"inputs":     component.Parameters,
+		"domain":     component.Domain,
+		"labels":     component.Labels,
 	}
 
 	if err := composition.Schema.Validate(validationObj); err != nil {
