@@ -92,6 +92,19 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 			Config:        job.Config,
 		}
 
+		if len(job.Gates) > 0 {
+			planJob.Gates = make([]model.PlanPromotionGate, len(job.Gates))
+			for i, g := range job.Gates {
+				planJob.Gates[i] = model.PlanPromotionGate{
+					Type:        g.Type,
+					Environment: g.Environment,
+					Component:   g.Component,
+					Condition:   g.Condition,
+					Match:       g.Match,
+				}
+			}
+		}
+
 		plan.Jobs = append(plan.Jobs, planJob)
 	}
 
@@ -253,6 +266,12 @@ func (r *Renderer) DebugDump(plan *model.Plan) string {
 		output += fmt.Sprintf("  Composition: %s\n", job.Composition)
 		output += fmt.Sprintf("  Steps: %d\n", len(job.Steps))
 		output += fmt.Sprintf("  DependsOn: %v\n", job.DependsOn)
+		if len(job.Gates) > 0 {
+			output += fmt.Sprintf("  Gates: %d\n", len(job.Gates))
+			for _, g := range job.Gates {
+				output += fmt.Sprintf("    - %s: %s@%s (%s)\n", g.Type, g.Component, g.Environment, g.Condition)
+			}
+		}
 		output += "\n"
 	}
 
