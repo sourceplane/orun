@@ -205,3 +205,42 @@ registry:
 ```
 
 Running `orun pack --root examples/compositions` discovers and archives all eleven composition types automatically.
+
+## Intent Presets
+
+Stacks can publish reusable intent scaffolding alongside compositions. This lets platform teams ship "golden repo baselines" — standard environments, triggers, defaults, and policies — that consuming repos opt into via `extends:`.
+
+### Declaring Presets in stack.yaml
+
+```yaml
+apiVersion: orun.io/v1
+kind: Stack
+metadata:
+  name: aws-platform-stack
+  version: 1.0.0
+spec:
+  compositions:
+    - path: compositions/terraform/compositions.yaml
+  intentPresets:
+    - name: standard
+      path: presets/standard.yaml
+    - name: github-actions
+      path: presets/github-actions.yaml
+```
+
+Preset files use `kind: IntentPreset` and live anywhere within the Stack directory. They are included in the OCI artifact when the Stack is published.
+
+### Directory Structure
+
+```text
+my-platform/
+├── stack.yaml
+├── compositions/
+│   └── ...
+└── presets/
+    ├── standard.yaml       ← IntentPreset
+    └── github-actions.yaml ← IntentPreset
+```
+
+See [Intent Presets](./intent-presets.md) for the full preset specification and merge rules.
+

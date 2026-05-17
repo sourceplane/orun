@@ -14,6 +14,7 @@ import (
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/normalize"
 	"github.com/sourceplane/orun/internal/planner"
+	"github.com/sourceplane/orun/internal/preset"
 	"github.com/sourceplane/orun/internal/render"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/trigger"
@@ -38,6 +39,25 @@ func generatePlan() error {
 	}
 	if err := loader.WriteCompositionLockFile(intentFile, compositionRegistry.Sources); err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ warning: failed to write composition lock file: %v\n", err)
+	}
+
+	// Resolve and merge intent presets from composition sources
+	if len(intent.Extends) > 0 {
+		if debugMode {
+			fmt.Printf("□ Resolving %d intent presets...\n", len(intent.Extends))
+		}
+		if err := preset.ValidateExtendsRefs(intent); err != nil {
+			return err
+		}
+		resolvedPresets, err := preset.LoadPresetsForIntent(intent, compositionRegistry.SourceRoots)
+		if err != nil {
+			return fmt.Errorf("failed to load intent presets: %w", err)
+		}
+		mergeResult, err := preset.MergePresets(intent, resolvedPresets)
+		if err != nil {
+			return fmt.Errorf("failed to merge intent presets: %w", err)
+		}
+		intent = mergeResult.Intent
 	}
 
 	// Build CompositionInfo map for the planner with default jobs

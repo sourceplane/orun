@@ -6,12 +6,13 @@ title: Intent model
 
 ## Inputs that make up intent
 
-The planning boundary is built from four inputs:
+The planning boundary is built from five inputs:
 
 1. `intent.yaml`
 2. Discovered `component.yaml` manifests
 3. Composition sources declared under `intent.compositions`
-4. Optional CLI scoping such as `--env` or change-detection flags
+4. Intent presets inherited via `extends:`
+5. Optional CLI scoping such as `--env` or change-detection flags
 
 The output of those inputs is a compiled `plan.json`.
 
@@ -67,6 +68,20 @@ environments:
 Root-level `env` declares global environment variables shared across all environments and all components. These are the lowest-precedence user-declared env vars and are useful for platform-wide identity such as organization name, repository owner, or shared runtime settings.
 
 Environment-level `env` (under `environments.<name>.env`) provides per-environment overrides. See [runtime environment](./runtime-environment.md) for the full merge model.
+
+### `extends`
+
+The `extends` field lets a repo inherit reusable intent scaffolding (environments, triggers, defaults, policies) from Stack-provided presets:
+
+```yaml
+extends:
+  - source: aws-platform
+    preset: github-actions
+```
+
+Each entry references a composition source by name and a preset published by that source's Stack. The repo must declare the composition source under `compositions.sources` first.
+
+Presets are merged into the intent before planning — the repo's own values always take precedence. See [Intent Presets](./intent-presets.md) for details on merge rules and authoring.
 
 ### `discovery`
 

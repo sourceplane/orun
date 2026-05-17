@@ -197,7 +197,8 @@ type StackRegistry struct {
 // When Compositions is empty the packager auto-discovers every compositions.yaml
 // found by walking the directory that contains stack.yaml.
 type StackSpec struct {
-	Compositions []StackCompositionEntry `yaml:"compositions,omitempty" json:"compositions,omitempty"`
+	Compositions  []StackCompositionEntry `yaml:"compositions,omitempty" json:"compositions,omitempty"`
+	IntentPresets []StackIntentPreset     `yaml:"intentPresets,omitempty" json:"intentPresets,omitempty"`
 }
 
 // StackCompositionEntry is a path reference to a compositions.yaml within the stack.

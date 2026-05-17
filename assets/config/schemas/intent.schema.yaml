@@ -29,6 +29,24 @@ properties:
       namespace:
         type: string
         default: default
+  extends:
+    type: array
+    description: List of intent presets to inherit from composition sources.
+    items:
+      type: object
+      required:
+        - source
+        - preset
+      properties:
+        source:
+          type: string
+          description: Name of a declared composition source.
+          minLength: 1
+        preset:
+          type: string
+          description: Name of the preset within that source's stack.
+          minLength: 1
+      additionalProperties: false
   discovery:
     type: object
     properties:
