@@ -86,7 +86,7 @@ func TestMergePresetsEnvironmentsDeepMerge(t *testing.T) {
 		Metadata: model.Metadata{Name: "test"},
 		Environments: map[string]model.Environment{
 			"production": {
-				Defaults: map[string]interface{}{"region": "us-east-1", "replicas": 3},
+				ParameterDefaults: map[string]map[string]interface{}{"*": {"region": "us-east-1", "replicas": 3}},
 			},
 		},
 	}
@@ -95,7 +95,7 @@ func TestMergePresetsEnvironmentsDeepMerge(t *testing.T) {
 			Spec: model.IntentPresetSpec{
 				Environments: map[string]model.Environment{
 					"production": {
-						Defaults: map[string]interface{}{"region": "eu-west-1", "lane": "release"},
+						ParameterDefaults: map[string]map[string]interface{}{"*": {"region": "eu-west-1", "lane": "release"}},
 					},
 				},
 			},
@@ -109,14 +109,14 @@ func TestMergePresetsEnvironmentsDeepMerge(t *testing.T) {
 	}
 
 	prod := result.Intent.Environments["production"]
-	if prod.Defaults["region"] != "us-east-1" {
-		t.Errorf("expected repo to win for region, got %v", prod.Defaults["region"])
+	if prod.ParameterDefaults["*"]["region"] != "us-east-1" {
+		t.Errorf("expected repo to win for region, got %v", prod.ParameterDefaults["*"]["region"])
 	}
-	if prod.Defaults["lane"] != "release" {
-		t.Errorf("expected preset lane default to be added, got %v", prod.Defaults["lane"])
+	if prod.ParameterDefaults["*"]["lane"] != "release" {
+		t.Errorf("expected preset lane default to be added, got %v", prod.ParameterDefaults["*"]["lane"])
 	}
-	if prod.Defaults["replicas"] != 3 {
-		t.Errorf("expected repo replicas preserved, got %v", prod.Defaults["replicas"])
+	if prod.ParameterDefaults["*"]["replicas"] != 3 {
+		t.Errorf("expected repo replicas preserved, got %v", prod.ParameterDefaults["*"]["replicas"])
 	}
 }
 
@@ -130,7 +130,7 @@ func TestMergePresetsNewEnvironmentFromPreset(t *testing.T) {
 			Spec: model.IntentPresetSpec{
 				Environments: map[string]model.Environment{
 					"staging": {
-						Defaults: map[string]interface{}{"lane": "verify"},
+						ParameterDefaults: map[string]map[string]interface{}{"*": {"lane": "verify"}},
 						Activation: model.EnvironmentActivation{
 							TriggerRefs: []string{"push-main"},
 						},
@@ -150,8 +150,8 @@ func TestMergePresetsNewEnvironmentFromPreset(t *testing.T) {
 	if !exists {
 		t.Fatal("expected staging environment from preset to be added")
 	}
-	if staging.Defaults["lane"] != "verify" {
-		t.Errorf("expected lane default, got %v", staging.Defaults["lane"])
+	if staging.ParameterDefaults["*"]["lane"] != "verify" {
+		t.Errorf("expected lane default, got %v", staging.ParameterDefaults["*"]["lane"])
 	}
 	if len(staging.Activation.TriggerRefs) != 1 || staging.Activation.TriggerRefs[0] != "push-main" {
 		t.Error("expected trigger ref from preset")
@@ -200,7 +200,7 @@ func TestMergePresetsGroupDefaultsDeepMerge(t *testing.T) {
 		Metadata: model.Metadata{Name: "test"},
 		Groups: map[string]model.Group{
 			"platform": {
-				Defaults: map[string]interface{}{"version": "1.0"},
+				ParameterDefaults: map[string]map[string]interface{}{"*": {"version": "1.0"}},
 			},
 		},
 	}
@@ -209,7 +209,7 @@ func TestMergePresetsGroupDefaultsDeepMerge(t *testing.T) {
 			Spec: model.IntentPresetSpec{
 				Groups: map[string]model.Group{
 					"platform": {
-						Defaults: map[string]interface{}{"version": "2.0", "backend": "s3"},
+						ParameterDefaults: map[string]map[string]interface{}{"*": {"version": "2.0", "backend": "s3"}},
 					},
 				},
 			},
@@ -223,10 +223,10 @@ func TestMergePresetsGroupDefaultsDeepMerge(t *testing.T) {
 	}
 
 	group := result.Intent.Groups["platform"]
-	if group.Defaults["version"] != "1.0" {
-		t.Errorf("expected repo to win for version, got %v", group.Defaults["version"])
+	if group.ParameterDefaults["*"]["version"] != "1.0" {
+		t.Errorf("expected repo to win for version, got %v", group.ParameterDefaults["*"]["version"])
 	}
-	if group.Defaults["backend"] != "s3" {
+	if group.ParameterDefaults["*"]["backend"] != "s3" {
 		t.Error("expected preset backend default to be added")
 	}
 }
@@ -315,16 +315,16 @@ func TestMergePresetsDeterminism(t *testing.T) {
 	intent := &model.Intent{
 		Metadata:     model.Metadata{Name: "test"},
 		Env:          map[string]string{"A": "1"},
-		Environments: map[string]model.Environment{"prod": {Defaults: map[string]interface{}{"x": "y"}}},
-		Groups:       map[string]model.Group{"g1": {Defaults: map[string]interface{}{"d": "v"}}},
+		Environments: map[string]model.Environment{"prod": {ParameterDefaults: map[string]map[string]interface{}{"*": {"x": "y"}}}},
+		Groups:       map[string]model.Group{"g1": {ParameterDefaults: map[string]map[string]interface{}{"*": {"d": "v"}}}},
 	}
 	presets := []*ResolvedPreset{{
 		Preset: model.IntentPreset{
 			Spec: model.IntentPresetSpec{
 				Env:          map[string]string{"B": "2", "C": "3"},
 				Discovery:    model.Discovery{Roots: []string{"a/", "b/"}},
-				Environments: map[string]model.Environment{"staging": {Defaults: map[string]interface{}{"lane": "verify"}}},
-				Groups:       map[string]model.Group{"g2": {Defaults: map[string]interface{}{"e": "f"}}},
+				Environments: map[string]model.Environment{"staging": {ParameterDefaults: map[string]map[string]interface{}{"*": {"lane": "verify"}}}},
+				Groups:       map[string]model.Group{"g2": {ParameterDefaults: map[string]map[string]interface{}{"*": {"e": "f"}}}},
 			},
 		},
 		Provenance: model.PresetProvenance{Source: "src", Preset: "p1"},
@@ -357,7 +357,7 @@ func TestMergePresetsProvenance(t *testing.T) {
 		Preset: model.IntentPreset{
 			Spec: model.IntentPresetSpec{
 				Env:          map[string]string{"KEY": "val"},
-				Environments: map[string]model.Environment{"dev": {Defaults: map[string]interface{}{"lane": "pr"}}},
+				Environments: map[string]model.Environment{"dev": {ParameterDefaults: map[string]map[string]interface{}{"*": {"lane": "pr"}}}},
 			},
 		},
 		Provenance: model.PresetProvenance{Source: "aws-platform", Preset: "github-actions"},

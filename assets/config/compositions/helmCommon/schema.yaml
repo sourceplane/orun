@@ -10,7 +10,7 @@ properties:
     type: string
     const: helmCommon
     description: Component type identifier
-  inputs:
+  parameters:
     type: object
     description: Helm-specific input values for common services
     properties:

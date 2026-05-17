@@ -22,7 +22,7 @@ Required fields (inline):
 - `metadata.name`
 - `spec.type`
 - `spec.defaultJob`
-- `spec.inputSchema` or `spec.schemaRef`
+- `spec.parameterSchema` or `spec.schemaRef`
 - `spec.jobs`
 
 Example (split-kind):
@@ -65,13 +65,13 @@ metadata:
 spec:
   type: helm
   defaultJob: deploy
-  inputSchema:
+  parameterSchema:
     $schema: http://json-schema.org/draft-07/schema#
     type: object
     properties:
       type:
         const: helm
-      inputs:
+      parameters:
         type: object
         properties:
           chart:
@@ -90,7 +90,7 @@ spec:
 
 ## ComponentSchema document
 
-Defines the JSON Schema validation contract for component inputs. Referenced by `schemaRef.name` in the Composition.
+Defines the JSON Schema validation contract for component parameters. Referenced by `schemaRef.name` in the Composition.
 
 ```yaml
 apiVersion: sourceplane.io/v1alpha1
@@ -102,13 +102,13 @@ spec:
   schema:
     $schema: http://json-schema.org/draft-07/schema#
     type: object
-    required: [name, type, inputs]
+    required: [name, type, parameters]
     properties:
       name:
         type: string
       type:
         const: terraform
-      inputs:
+      parameters:
         type: object
         required: [stackName, terraformDir]
         properties:

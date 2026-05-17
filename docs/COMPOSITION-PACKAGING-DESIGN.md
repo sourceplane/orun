@@ -195,13 +195,13 @@ spec:
   type: helm
   description: Deploy Helm-managed services
   defaultJob: deploy
-  inputSchema:
+  parameterSchema:
     $schema: http://json-schema.org/draft-07/schema#
     type: object
     properties:
       type:
         const: helm
-      inputs:
+      parameters:
         type: object
         properties:
           chart:
@@ -227,7 +227,7 @@ Notes:
 
 - `metadata.name` and `spec.type` should initially be required to match.
 - `defaultJob` must be explicit. Do not keep "first job wins" semantics.
-- `inputSchema` replaces the separate `schema.yaml`.
+- `parameterSchema` replaces the separate `schema.yaml`.
 - `jobs` replaces the separate `job.yaml`.
 
 ### Composition package document
@@ -419,7 +419,7 @@ Backward compatibility is critical. The transition should not break current user
 - `--config-dir` remains supported
 - existing folder-based compositions keep working
 - loader should be able to synthesize a `Composition` object from a legacy folder:
-  - `schema.yaml` -> `spec.inputSchema`
+  - `schema.yaml` -> `spec.parameterSchema`
   - `job.yaml` -> `spec.jobs`
   - folder name -> `metadata.name` and `spec.type`
   - first job -> temporary `defaultJob` only if the legacy format did not define one

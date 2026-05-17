@@ -10,7 +10,7 @@ spec:
   subscribe:
     environments:
       - production
-  inputs:
+  parameters:
     siteDir: .
     installCommand: npm ci
     buildCommand: npm run docs:build

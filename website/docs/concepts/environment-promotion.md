@@ -18,8 +18,9 @@ environments:
     activation:
       triggerRefs:
         - github-pull-request
-    defaults:
-      lane: verify
+    parameterDefaults:
+      "*":
+        lane: verify
 
   staging:
     activation:
@@ -28,8 +29,9 @@ environments:
     promotion:
       dependsOn:
         - environment: preview
-    defaults:
-      lane: verify
+    parameterDefaults:
+      "*":
+        lane: verify
 
   production:
     activation:
@@ -38,8 +40,9 @@ environments:
     promotion:
       dependsOn:
         - environment: staging
-    defaults:
-      lane: release
+    parameterDefaults:
+      "*":
+        lane: release
 ```
 
 With defaults applied, each entry is equivalent to:
@@ -186,8 +189,9 @@ environments:
   preview:
     activation:
       triggerRefs: [github-pull-request]
-    defaults:
-      lane: verify
+    parameterDefaults:
+      "*":
+        lane: verify
 
   staging:
     activation:
@@ -195,8 +199,9 @@ environments:
     promotion:
       dependsOn:
         - environment: preview
-    defaults:
-      lane: verify
+    parameterDefaults:
+      "*":
+        lane: verify
 
   production:
     activation:
@@ -204,8 +209,9 @@ environments:
     promotion:
       dependsOn:
         - environment: staging
-    defaults:
-      lane: release
+    parameterDefaults:
+      "*":
+        lane: release
 ```
 
 This gives you:

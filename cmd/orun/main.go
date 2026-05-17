@@ -469,7 +469,7 @@ func debugIntent() error {
 	fmt.Printf("\nMetadata: %+v\n", normalized.Metadata)
 	fmt.Printf("Groups: %d\n", len(normalized.Groups))
 	for name, group := range normalized.Groups {
-		fmt.Printf("  - %s: policies=%v, defaults=%v\n", name, group.Policies, group.Defaults)
+		fmt.Printf("  - %s: policies=%v, parameterDefaults=%v\n", name, group.Policies, group.ParameterDefaults)
 	}
 
 	fmt.Printf("Environments: %d\n", len(normalized.Environments))
@@ -748,9 +748,9 @@ func printComponentDetails(comp *expand.ComponentMerged) {
 	fmt.Printf("│  instances (%d):\n", len(comp.Instances))
 	for _, inst := range comp.Instances {
 		fmt.Printf("│  ├─ [%s] path=%s\n", inst.Environment, inst.Path)
-		if len(inst.Inputs) > 0 {
-			fmt.Printf("│  │  inputs:\n")
-			for k, v := range inst.Inputs {
+		if len(inst.Parameters) > 0 {
+			fmt.Printf("│  │  parameters:\n")
+			for k, v := range inst.Parameters {
 				fmt.Printf("│  │    %s: %v\n", k, v)
 			}
 		}

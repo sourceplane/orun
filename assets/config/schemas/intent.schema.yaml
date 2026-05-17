@@ -106,10 +106,12 @@ properties:
         policies:
           type: object
           additionalProperties: true
-        defaults:
+        parameterDefaults:
           type: object
-          description: Default properties for components in this group (supports template variables)
-          additionalProperties: true
+          description: Default parameters for components in this group, keyed by composition type or "*" for all types
+          additionalProperties:
+            type: object
+            additionalProperties: true
   environments:
     type: object
     additionalProperties:
@@ -181,10 +183,12 @@ properties:
               type: array
               items:
                 type: string
-        defaults:
+        parameterDefaults:
           type: object
-          description: Default properties for components in this environment (supports template variables)
-          additionalProperties: true
+          description: Default parameters for components in this environment, keyed by composition type or "*" for all types
+          additionalProperties:
+            type: object
+            additionalProperties: true
         policies:
           type: object
           additionalProperties: true
@@ -311,7 +315,7 @@ properties:
               type: string
             name:
               type: string
-        inputs:
+        parameters:
           type: object
           additionalProperties: true
         overrides:

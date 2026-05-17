@@ -137,13 +137,18 @@ func mergeGroups(intent *model.Intent, presetGroups map[string]model.Group, prov
 			continue
 		}
 
-		if existing.Defaults == nil {
-			existing.Defaults = make(map[string]interface{})
+		if existing.ParameterDefaults == nil {
+			existing.ParameterDefaults = make(map[string]map[string]interface{})
 		}
-		for k, v := range presetGroup.Defaults {
-			if _, has := existing.Defaults[k]; !has {
-				existing.Defaults[k] = v
-				provMap[fmt.Sprintf("groups.%s.defaults.%s", name, k)] = append(provMap[fmt.Sprintf("groups.%s.defaults.%s", name, k)], prov)
+		for typeName, params := range presetGroup.ParameterDefaults {
+			if _, has := existing.ParameterDefaults[typeName]; !has {
+				existing.ParameterDefaults[typeName] = make(map[string]interface{}, len(params))
+			}
+			for k, v := range params {
+				if _, has := existing.ParameterDefaults[typeName][k]; !has {
+					existing.ParameterDefaults[typeName][k] = v
+					provMap[fmt.Sprintf("groups.%s.parameterDefaults.%s.%s", name, typeName, k)] = append(provMap[fmt.Sprintf("groups.%s.parameterDefaults.%s.%s", name, typeName, k)], prov)
+				}
 			}
 		}
 
@@ -181,13 +186,18 @@ func mergeEnvironments(intent *model.Intent, presetEnvs map[string]model.Environ
 			continue
 		}
 
-		if existing.Defaults == nil {
-			existing.Defaults = make(map[string]interface{})
+		if existing.ParameterDefaults == nil {
+			existing.ParameterDefaults = make(map[string]map[string]interface{})
 		}
-		for k, v := range presetEnv.Defaults {
-			if _, has := existing.Defaults[k]; !has {
-				existing.Defaults[k] = v
-				provMap[fmt.Sprintf("environments.%s.defaults.%s", name, k)] = append(provMap[fmt.Sprintf("environments.%s.defaults.%s", name, k)], prov)
+		for typeName, params := range presetEnv.ParameterDefaults {
+			if _, has := existing.ParameterDefaults[typeName]; !has {
+				existing.ParameterDefaults[typeName] = make(map[string]interface{}, len(params))
+			}
+			for k, v := range params {
+				if _, has := existing.ParameterDefaults[typeName][k]; !has {
+					existing.ParameterDefaults[typeName][k] = v
+					provMap[fmt.Sprintf("environments.%s.parameterDefaults.%s.%s", name, typeName, k)] = append(provMap[fmt.Sprintf("environments.%s.parameterDefaults.%s.%s", name, typeName, k)], prov)
+				}
 			}
 		}
 
@@ -259,10 +269,13 @@ func mergeTriggerBindings(intent *model.Intent, presetBindings map[string]model.
 
 func copyGroup(g model.Group) model.Group {
 	cp := model.Group{Path: g.Path}
-	if g.Defaults != nil {
-		cp.Defaults = make(map[string]interface{}, len(g.Defaults))
-		for k, v := range g.Defaults {
-			cp.Defaults[k] = v
+	if g.ParameterDefaults != nil {
+		cp.ParameterDefaults = make(map[string]map[string]interface{}, len(g.ParameterDefaults))
+		for typeName, params := range g.ParameterDefaults {
+			cp.ParameterDefaults[typeName] = make(map[string]interface{}, len(params))
+			for k, v := range params {
+				cp.ParameterDefaults[typeName][k] = v
+			}
 		}
 	}
 	if g.Policies != nil {
@@ -281,10 +294,13 @@ func copyEnvironment(e model.Environment) model.Environment {
 		Promotion:  e.Promotion,
 		Selectors:  e.Selectors,
 	}
-	if e.Defaults != nil {
-		cp.Defaults = make(map[string]interface{}, len(e.Defaults))
-		for k, v := range e.Defaults {
-			cp.Defaults[k] = v
+	if e.ParameterDefaults != nil {
+		cp.ParameterDefaults = make(map[string]map[string]interface{}, len(e.ParameterDefaults))
+		for typeName, params := range e.ParameterDefaults {
+			cp.ParameterDefaults[typeName] = make(map[string]interface{}, len(params))
+			for k, v := range params {
+				cp.ParameterDefaults[typeName][k] = v
+			}
 		}
 	}
 	if e.Policies != nil {

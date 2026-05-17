@@ -69,7 +69,7 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 					Timeout:       jobEntry.job.Timeout,
 					Retries:       jobEntry.job.Retries,
 					Labels:        compInst.Labels,
-					Config:        compInst.Inputs,
+					Config:        compInst.Parameters,
 					Env:           compInst.Env,
 					DependsOn:     make([]string, 0),
 				}
@@ -229,7 +229,7 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, compInst *model.ComponentI
 	}
 
 	// Add all inputs to context
-	for k, v := range compInst.Inputs {
+	for k, v := range compInst.Parameters {
 		context[k] = v
 	}
 

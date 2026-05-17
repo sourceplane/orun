@@ -89,14 +89,16 @@ spec:
     dev:
       activation:
         triggerRefs: [github-pull-request]
-      defaults:
-        lane: pull-request
+      parameterDefaults:
+        "*":
+          lane: pull-request
 
     staging:
       activation:
         triggerRefs: [github-push-main]
-      defaults:
-        lane: verify
+      parameterDefaults:
+        "*":
+          lane: verify
 ```
 
 ### 3. Repo Opts In
@@ -128,8 +130,9 @@ env:
 
 environments:
   production:
-    defaults:
-      awsAccountId: "123456789012"
+    parameterDefaults:
+      "*":
+        awsAccountId: "123456789012"
 ```
 
 ## Merge Rules

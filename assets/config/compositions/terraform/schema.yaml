@@ -10,7 +10,7 @@ properties:
     type: string
     const: terraform
     description: Component type identifier
-  inputs:
+  parameters:
     type: object
     description: Terraform-specific input values
     properties:

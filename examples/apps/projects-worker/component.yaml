@@ -15,7 +15,7 @@ spec:
         profile: verify
       - name: production
         profile: deploy
-  inputs:
+  parameters:
     installCommand: pnpm install --no-frozen-lockfile
     buildCommand: pnpm exec turbo run build --filter=./
     typecheckCommand: pnpm exec turbo run typecheck --filter=./

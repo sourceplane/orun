@@ -75,22 +75,25 @@ environments:
     activation:
       triggerRefs:
         - github-pull-request
-    defaults:
-      namespacePrefix: dev-
+    parameterDefaults:
+      "*":
+        namespacePrefix: dev-
 
   staging:
     activation:
       triggerRefs:
         - github-push-main
-    defaults:
-      namespacePrefix: stg-
+    parameterDefaults:
+      "*":
+        namespacePrefix: stg-
 
   production:
     activation:
       triggerRefs:
         - github-tag-release
-    defaults:
-      namespacePrefix: prod-
+    parameterDefaults:
+      "*":
+        namespacePrefix: prod-
 ```
 
 When `github-pull-request` fires, only `development` is activated. Components subscribed to `development` are planned; components only subscribed to `staging` or `production` are skipped.

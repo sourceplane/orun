@@ -62,20 +62,23 @@ environments:
   development:
     activation:
       triggerRefs: [github-pull-request]
-    defaults:
-      namespacePrefix: dev-
+    parameterDefaults:
+      "*":
+        namespacePrefix: dev-
 
   staging:
     activation:
       triggerRefs: [github-push-main]
-    defaults:
-      namespacePrefix: stg-
+    parameterDefaults:
+      "*":
+        namespacePrefix: stg-
 
   production:
     activation:
       triggerRefs: [github-tag-release]
-    defaults:
-      namespacePrefix: prod-
+    parameterDefaults:
+      "*":
+        namespacePrefix: prod-
 ```
 
 ## GitHub Actions workflow

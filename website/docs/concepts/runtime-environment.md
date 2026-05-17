@@ -159,7 +159,7 @@ These are injected automatically by the runner and cannot be overridden by user-
 
 ## Template interpolation
 
-Env values support the same template variables as component inputs:
+Env values support the same template variables as component parameters:
 
 ```yaml
 environments:
@@ -171,14 +171,14 @@ environments:
 
 Available variables: `{{ .environment }}`, `{{ .component }}`, `{{ .group }}`.
 
-## Relationship to inputs
+## Relationship to parameters
 
-`env` and `inputs` serve different purposes:
+`env` and `parameters` serve different purposes:
 
-- **inputs** (`spec.inputs` in component.yaml) are configuration values used for template rendering in composition steps. They appear in `PlanJob.config`.
+- **parameters** (`spec.parameters` in component.yaml) are configuration values used for template rendering in composition steps. They appear in `PlanJob.config`.
 - **env** is a flat `map[string]string` of shell environment variables injected at runtime. They appear in `PlanJob.env`.
 
-When no `env` is declared, `PlanJob.env` falls back to the component inputs for backwards compatibility with existing compositions that reference inputs as environment variables.
+When no `env` is declared, `PlanJob.env` falls back to the component parameters for backwards compatibility with existing compositions that reference parameters as environment variables.
 
 ## Plan output
 

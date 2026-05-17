@@ -97,7 +97,7 @@ func ExtractModelInfo(modelName string, composition *loader.Composition, configD
 	info.Title = fmt.Sprintf("%s Model", strings.ToTitle(strings.ToLower(modelName)))
 	info.Description = fmt.Sprintf("Model: %s", modelName)
 
-	schemaObj := composition.InputSchema
+	schemaObj := composition.ParameterSchema
 	if len(schemaObj) == 0 {
 		schemaPath := filepath.Join(configDir, modelName, "schema.yaml")
 		schemaData, err := os.ReadFile(schemaPath)

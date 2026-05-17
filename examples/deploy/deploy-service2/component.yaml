@@ -13,7 +13,7 @@ spec:
         profile: lint-only
       - name: production
         profile: verify
-  inputs:
+  parameters:
     chartPath: ../../charts/chart-2/chart
     valuesFile: values.yaml
     releaseName: commerce-checkout

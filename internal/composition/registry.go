@@ -44,7 +44,7 @@ type Composition struct {
 	DefaultJobName    string
 	DefaultProfile    string
 	ExecutionProfiles map[string]model.ExecutionProfile
-	InputSchema       map[string]interface{}
+	ParameterSchema   map[string]interface{}
 	Jobs              []model.JobSpec
 	JobMap            map[string]*model.JobSpec
 	Schema            *jsonschema.Schema
@@ -262,7 +262,7 @@ func LoadFromDir(configDir string) (*Registry, error) {
 			Key:             legacyCompositionKey(typeName),
 			Name:            typeName,
 			DefaultJobName:  jobRegistry.Jobs[0].Name,
-			InputSchema:     schemaObj,
+			ParameterSchema: schemaObj,
 			Jobs:            jobRegistry.Jobs,
 			JobMap:          make(map[string]*model.JobSpec),
 			Schema:          schema,
@@ -307,11 +307,12 @@ func (reg *Registry) ValidateComponentAgainstComposition(component *model.Compon
 	}
 
 	validationObj := map[string]interface{}{
-		"name":   component.Name,
-		"type":   component.Type,
-		"inputs": component.Inputs,
-		"domain": component.Domain,
-		"labels": component.Labels,
+		"name":       component.Name,
+		"type":       component.Type,
+		"parameters": component.Parameters,
+		"inputs":     component.Parameters,
+		"domain":     component.Domain,
+		"labels":     component.Labels,
 	}
 
 	if err := composition.Schema.Validate(validationObj); err != nil {
@@ -781,13 +782,13 @@ func loadExportedComposition(rootDir string, source model.CompositionSource, man
 
 	compositionDir := filepath.Dir(compositionPath)
 
-	inputSchema := document.Spec.InputSchema
-	if inputSchema == nil && document.Spec.SchemaRef != nil {
+	parameterSchema := document.Spec.ParameterSchema
+	if parameterSchema == nil && document.Spec.SchemaRef != nil {
 		loaded, err := loadComponentSchemaFromDir(compositionDir, document.Spec.SchemaRef.Name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve schemaRef %s for composition %s: %w", document.Spec.SchemaRef.Name, export.Composition, err)
 		}
-		inputSchema = loaded
+		parameterSchema = loaded
 	}
 
 	jobs, err := resolveCompositionJobs(compositionDir, document.Spec.Jobs)
@@ -803,7 +804,7 @@ func loadExportedComposition(rootDir string, source model.CompositionSource, man
 		}
 	}
 
-	schema, err := compileSchema(document.Spec.Type, inputSchema)
+	schema, err := compileSchema(document.Spec.Type, parameterSchema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile input schema for composition %s from source %s: %w", export.Composition, source.Name, err)
 	}
@@ -815,7 +816,7 @@ func loadExportedComposition(rootDir string, source model.CompositionSource, man
 		DefaultJobName:    document.Spec.DefaultJob,
 		DefaultProfile:    document.Spec.DefaultProfile,
 		ExecutionProfiles: profiles,
-		InputSchema:       inputSchema,
+		ParameterSchema:   parameterSchema,
 		Jobs:              jobs,
 		JobMap:            make(map[string]*model.JobSpec),
 		Schema:            schema,
@@ -959,8 +960,8 @@ func validateCompositionDocument(sourceName, exportName string, document model.C
 	if document.Spec.Type != document.Metadata.Name {
 		return fmt.Errorf("composition source %s export %s must keep spec.type equal to metadata.name", sourceName, exportName)
 	}
-	if len(document.Spec.InputSchema) == 0 && document.Spec.SchemaRef == nil {
-		return fmt.Errorf("composition source %s export %s must define spec.inputSchema or spec.schemaRef", sourceName, exportName)
+	if len(document.Spec.ParameterSchema) == 0 && document.Spec.SchemaRef == nil {
+		return fmt.Errorf("composition source %s export %s must define spec.parameterSchema or spec.schemaRef", sourceName, exportName)
 	}
 	if len(document.Spec.Jobs) == 0 {
 		return fmt.Errorf("composition source %s export %s must define at least one job", sourceName, exportName)
