@@ -47,6 +47,7 @@ No GitHub PAT is required for `orun backend` commands.
 | `ORUN_JOB_RUN_ID` | Stable cross-job identifier: `{planID}:{execID}:{jobID}` |
 | `ORUN_ENVIRONMENT` | Environment name for the current job (e.g. `dev`, `production`) |
 | `ORUN_COMPONENT` | Component name for the current job (e.g. `api-platform`) |
+| `ORUN_ENV` | Path to the env file for persisting environment variables across steps (alias for `GITHUB_ENV`) |
 
 ## User-declared environment variables
 
@@ -101,6 +102,16 @@ Subscription env values override all lower-precedence levels. The full merge ord
 ## GitHub Actions compatibility mode
 
 When the GitHub Actions backend is active, `orun` also supports standard GitHub Actions workflow command behavior such as `GITHUB_ENV`, `GITHUB_OUTPUT`, and `GITHUB_PATH` handling inside the compatibility engine.
+
+`ORUN_ENV` is always set as an alias for `GITHUB_ENV`, pointing to the same file. Writing `KEY=VALUE` pairs to either `$ORUN_ENV` or `$GITHUB_ENV` has the same effect — the variables become available to all subsequent steps in the job. This allows compositions to use the portable `ORUN_ENV` name without depending on GitHub-specific variable names.
+
+```bash
+# Both of these are equivalent:
+echo "MY_VAR=hello" >> "$ORUN_ENV"
+echo "MY_VAR=hello" >> "$GITHUB_ENV"
+```
+
+When running inside actual GitHub Actions (detected via `GITHUB_ENV` in the host environment), the runner automatically sets `ORUN_ENV` to the same path, so compositions work identically whether executed by the orun GHA compatibility engine or directly on a GitHub-hosted runner.
 
 Prefer CLI flags when you need per-command overrides, and reserve environment variables for CI defaults or workspace-wide configuration.
 

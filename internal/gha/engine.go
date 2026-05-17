@@ -576,6 +576,7 @@ func (e *Engine) executeRunStep(ctx ExecContext, state *jobState, scope *scope, 
 		return stepExecutionResult{}, err
 	}
 	commandEnv["GITHUB_ENV"] = files.HostEnv
+	commandEnv["ORUN_ENV"] = files.HostEnv
 	commandEnv["GITHUB_OUTPUT"] = files.HostOutput
 	commandEnv["GITHUB_PATH"] = files.HostPath
 	commandEnv["GITHUB_STATE"] = files.HostState
@@ -699,6 +700,7 @@ func (e *Engine) runNodeStage(ctx ExecContext, state *jobState, scope *scope, in
 		return "", nil, nil, err
 	}
 	env["GITHUB_ENV"] = files.HostEnv
+	env["ORUN_ENV"] = files.HostEnv
 	env["GITHUB_OUTPUT"] = files.HostOutput
 	env["GITHUB_PATH"] = files.HostPath
 	env["GITHUB_STATE"] = files.HostState
@@ -812,6 +814,7 @@ func (e *Engine) runDockerContainer(ctx ExecContext, state *jobState, githubCont
 
 	env := mergeStringMaps(copyStringMap(state.globalEnv), additionalEnv, githubEnv(githubContext))
 	env["GITHUB_ENV"] = files.ContainerEnv
+	env["ORUN_ENV"] = files.ContainerEnv
 	env["GITHUB_OUTPUT"] = files.ContainerOutput
 	env["GITHUB_PATH"] = files.ContainerPath
 	env["GITHUB_STATE"] = files.ContainerState
@@ -987,6 +990,9 @@ func (state *jobState) applyCommandEnv(values map[string]string) {
 			if upper != "CI" {
 				continue
 			}
+		}
+		if strings.HasPrefix(upper, "ORUN_") {
+			continue
 		}
 		state.globalEnv[key] = value
 		if key == "PATH" {
