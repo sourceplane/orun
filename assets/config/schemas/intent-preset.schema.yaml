@@ -119,9 +119,11 @@ properties:
                   type: array
                   items:
                     type: string
-            defaults:
+            parameterDefaults:
               type: object
-              additionalProperties: true
+              additionalProperties:
+                type: object
+                additionalProperties: true
             policies:
               type: object
               additionalProperties: true
@@ -133,7 +135,9 @@ properties:
             policies:
               type: object
               additionalProperties: true
-            defaults:
+            parameterDefaults:
               type: object
-              additionalProperties: true
+              additionalProperties:
+                type: object
+                additionalProperties: true
     additionalProperties: false

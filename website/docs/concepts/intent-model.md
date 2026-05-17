@@ -48,15 +48,17 @@ groups:
   platform:
     policies:
       isolation: strict
-    defaults:
-      namespacePrefix: platform-
+    parameterDefaults:
+      "*":
+        namespacePrefix: platform-
 
 environments:
   production:
     selectors:
       domains: [platform]
-    defaults:
-      replicas: 3
+    parameterDefaults:
+      "*":
+        replicas: 3
     env:
       AWS_REGION: us-west-2
     policies:
@@ -105,8 +107,9 @@ environments:
     activation:
       triggerRefs:
         - github-pull-request
-    defaults:
-      namespacePrefix: dev-
+    parameterDefaults:
+      "*":
+        namespacePrefix: dev-
 ```
 
 See [trigger bindings](./trigger-bindings.md) for full details.
@@ -122,8 +125,9 @@ environments:
     promotion:
       dependsOn:
         - environment: preview
-    defaults:
-      lane: verify
+    parameterDefaults:
+      "*":
+        lane: verify
 
   production:
     activation:
@@ -132,8 +136,9 @@ environments:
     promotion:
       dependsOn:
         - environment: staging
-    defaults:
-      lane: release
+    parameterDefaults:
+      "*":
+        lane: release
 ```
 
 This compiles into DAG edges when both environments are active, or gates when they are in separate plans. See [environment promotion](./environment-promotion.md) for full details.
@@ -187,7 +192,7 @@ spec:
       - name: production
         env:
           TF_VAR_replicas: "3"
-  inputs:
+  parameters:
     stackName: network-foundation
     terraformDir: .
     terraformVersion: 1.9.8

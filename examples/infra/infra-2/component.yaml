@@ -15,7 +15,7 @@ spec:
         profile: verify
       - name: production
         profile: release
-  inputs:
+  parameters:
     stackName: cluster-addons
     terraformDir: .
     terraformVersion: 1.9.8

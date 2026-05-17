@@ -50,20 +50,20 @@ type Metadata struct {
 
 // Group defines ownership and policy constraints
 type Group struct {
-	Path     string                 `yaml:"path" json:"path"`
-	Policies map[string]interface{} `yaml:"policies" json:"policies"`
-	Defaults map[string]interface{} `yaml:"defaults" json:"defaults"`
+	Path              string                            `yaml:"path" json:"path"`
+	Policies          map[string]interface{}            `yaml:"policies" json:"policies"`
+	ParameterDefaults map[string]map[string]interface{} `yaml:"parameterDefaults" json:"parameterDefaults"`
 }
 
 // Environment defines environment runtime contexts
 type Environment struct {
-	Path       string                 `yaml:"path" json:"path"`
-	Activation EnvironmentActivation  `yaml:"activation,omitempty" json:"activation,omitempty"`
-	Promotion  EnvironmentPromotion   `yaml:"promotion,omitempty" json:"promotion,omitempty"`
-	Selectors  EnvironmentSelectors   `yaml:"selectors" json:"selectors"`
-	Defaults   map[string]interface{} `yaml:"defaults" json:"defaults"`
-	Policies   map[string]interface{} `yaml:"policies" json:"policies"`
-	Env        map[string]string      `yaml:"env,omitempty" json:"env,omitempty"`
+	Path              string                            `yaml:"path" json:"path"`
+	Activation        EnvironmentActivation             `yaml:"activation,omitempty" json:"activation,omitempty"`
+	Promotion         EnvironmentPromotion              `yaml:"promotion,omitempty" json:"promotion,omitempty"`
+	Selectors         EnvironmentSelectors              `yaml:"selectors" json:"selectors"`
+	ParameterDefaults map[string]map[string]interface{} `yaml:"parameterDefaults" json:"parameterDefaults"`
+	Policies          map[string]interface{}            `yaml:"policies" json:"policies"`
+	Env               map[string]string                 `yaml:"env,omitempty" json:"env,omitempty"`
 }
 
 // EnvironmentPromotion declares ordering/gating relationships between environments.
@@ -100,7 +100,7 @@ type Component struct {
 	Path           string                   `yaml:"path" json:"path"`
 	Subscribe      ComponentSubscribe       `yaml:"subscribe" json:"subscribe"`
 	CompositionRef *ComponentCompositionRef `yaml:"compositionRef,omitempty" json:"compositionRef,omitempty"`
-	Inputs         map[string]interface{}   `yaml:"inputs" json:"inputs"`
+	Parameters     map[string]interface{}   `yaml:"parameters" json:"parameters"`
 	Overrides      ComponentOverrides       `yaml:"overrides" json:"overrides"`
 	Labels         map[string]string        `yaml:"labels" json:"labels"`
 	DependsOn      []Dependency             `yaml:"dependsOn" json:"dependsOn"`
@@ -117,9 +117,10 @@ type ComponentSubscribe struct {
 
 // EnvironmentSubscription specifies an environment binding with optional profile selection.
 type EnvironmentSubscription struct {
-	Name    string            `yaml:"name" json:"name"`
-	Profile string            `yaml:"profile,omitempty" json:"profile,omitempty"`
-	Env     map[string]string `yaml:"env,omitempty" json:"env,omitempty"`
+	Name       string                 `yaml:"name" json:"name"`
+	Profile    string                 `yaml:"profile,omitempty" json:"profile,omitempty"`
+	Env        map[string]string      `yaml:"env,omitempty" json:"env,omitempty"`
+	Parameters map[string]interface{} `yaml:"parameters,omitempty" json:"parameters,omitempty"`
 }
 
 // UnmarshalYAML supports both string and object forms for environment subscriptions.
@@ -216,7 +217,7 @@ type ComponentInstance struct {
 	Path          string
 	SourcePath    string
 	Labels        map[string]string
-	Inputs        map[string]interface{}
+	Parameters    map[string]interface{}
 	Env           map[string]string
 	StepOverrides []Step
 	Policies      map[string]interface{}

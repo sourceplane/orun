@@ -353,8 +353,10 @@ func getEnvironments() error {
 		}
 
 		defaults := []string{}
-		for k, v := range env.Defaults {
-			defaults = append(defaults, fmt.Sprintf("%s=%v", k, v))
+		for typeName, params := range env.ParameterDefaults {
+			for k, v := range params {
+				defaults = append(defaults, fmt.Sprintf("%s.%s=%v", typeName, k, v))
+			}
 		}
 
 		meta := []string{}

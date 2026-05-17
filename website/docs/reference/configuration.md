@@ -29,8 +29,9 @@ discovery:
 
 environments:
   development:
-    defaults:
-      region: us-east-1
+    parameterDefaults:
+      "*":
+        region: us-east-1
     env:
       AWS_REGION: us-east-1
 ```
@@ -65,7 +66,7 @@ spec:
     REPO: network-foundation
   subscribe:
     environments: [development, staging, production]
-  inputs:
+  parameters:
     stackName: network-foundation
     terraformDir: .
 ```
@@ -111,8 +112,9 @@ environments:
           satisfy: same-plan-or-previous-success  # default
           match:
             revision: source            # default
-    defaults:
-      lane: verify
+    parameterDefaults:
+      "*":
+        lane: verify
 ```
 
 | Field | Values | Default | Meaning |

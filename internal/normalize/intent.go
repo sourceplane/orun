@@ -55,8 +55,8 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 		if comp.Labels == nil {
 			comp.Labels = make(map[string]string)
 		}
-		if comp.Inputs == nil {
-			comp.Inputs = make(map[string]interface{})
+		if comp.Parameters == nil {
+			comp.Parameters = make(map[string]interface{})
 		}
 		if comp.Subscribe.Environments == nil {
 			comp.Subscribe.Environments = []model.EnvironmentSubscription{}

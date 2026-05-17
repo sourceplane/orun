@@ -13,7 +13,7 @@ spec:
         profile: lint-only
       - name: production
         profile: verify
-  inputs:
+  parameters:
     chartPath: .
     valuesFile: ../../../deploy/deploy-service2/values.yaml
     releaseName: commerce-checkout

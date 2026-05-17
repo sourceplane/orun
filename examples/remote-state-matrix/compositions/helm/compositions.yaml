@@ -6,20 +6,20 @@ spec:
   type: helm
   description: Smoke-test composition for remote-state conformance (no cloud credentials)
   defaultJob: smoke
-  inputSchema:
+  parameterSchema:
     $schema: http://json-schema.org/draft-07/schema#
     title: Helm Smoke Component
     type: object
     required:
       - name
       - type
-      - inputs
+      - parameters
     properties:
       name:
         type: string
       type:
         const: helm
-      inputs:
+      parameters:
         type: object
         required:
           - chart

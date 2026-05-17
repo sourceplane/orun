@@ -15,7 +15,7 @@ spec:
         profile: verify
       - name: production
         profile: deploy
-  inputs:
+  parameters:
     outputDir: dist
     projectName: example-platform-web-console
     nodeVersion: "20"

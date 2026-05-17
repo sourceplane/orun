@@ -67,9 +67,10 @@ environments:
     activation:
       triggerRefs:
         - github-pull-request
-    defaults:
-      lane: dry-run
-      namespacePrefix: dev-
+    parameterDefaults:
+      "*":
+        lane: dry-run
+        namespacePrefix: dev-
     policies:
       requireApproval: "false"
 
@@ -77,9 +78,10 @@ environments:
     activation:
       triggerRefs:
         - github-pull-request
-    defaults:
-      lane: dry-run
-      namespacePrefix: dev-
+    parameterDefaults:
+      "*":
+        lane: dry-run
+        namespacePrefix: dev-
     policies:
       requireApproval: "false"
 
@@ -87,9 +89,10 @@ environments:
     activation:
       triggerRefs:
         - github-pull-request
-    defaults:
-      lane: verify
-      namespacePrefix: preview-
+    parameterDefaults:
+      "*":
+        lane: verify
+        namespacePrefix: preview-
     policies:
       requireApproval: "false"
 
@@ -97,9 +100,10 @@ environments:
     activation:
       triggerRefs:
         - github-push-main
-    defaults:
-      lane: verify
-      namespacePrefix: stg-
+    parameterDefaults:
+      "*":
+        lane: verify
+        namespacePrefix: stg-
     policies:
       requireApproval: "true"
 
@@ -107,8 +111,9 @@ environments:
     activation:
       triggerRefs:
         - github-tag-release
-    defaults:
-      lane: release
-      namespacePrefix: prod-
+    parameterDefaults:
+      "*":
+        lane: release
+        namespacePrefix: prod-
     policies:
       requireApproval: "true"

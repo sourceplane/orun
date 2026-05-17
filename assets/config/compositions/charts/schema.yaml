@@ -14,7 +14,7 @@ properties:
     type: string
     const: charts
     description: Component type identifier
-  inputs:
+  parameters:
     type: object
     description: Chart packaging input values
     properties:

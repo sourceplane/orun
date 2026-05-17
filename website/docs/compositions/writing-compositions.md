@@ -93,13 +93,13 @@ spec:
   schema:
     $schema: http://json-schema.org/draft-07/schema#
     type: object
-    required: [name, type, inputs]
+    required: [name, type, parameters]
     properties:
       name:
         type: string
       type:
         const: mytype
-      inputs:
+      parameters:
         type: object
         required: [target]
         properties:
@@ -165,13 +165,13 @@ metadata:
 spec:
   type: mytype
   defaultJob: apply
-  inputSchema:
+  parameterSchema:
     $schema: http://json-schema.org/draft-07/schema#
     type: object
     properties:
       type:
         const: mytype
-      inputs:
+      parameters:
         type: object
         required: [target]
         properties:
@@ -209,7 +209,7 @@ spec:
     environments:
       - name: development
         profile: verify
-  inputs:
+  parameters:
     target: demo-service
 ```
 

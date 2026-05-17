@@ -46,7 +46,7 @@ properties:
             type: array
             items:
               type: string
-      inputs:
+      parameters:
         type: object
         additionalProperties: true
       overrides:

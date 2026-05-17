@@ -113,15 +113,17 @@ groups:              # Ownership/policy domains
   platform:
     policies:        # Non-overridable constraints
       isolation: strict
-    defaults:        # Can be overridden
-      region: us-west-2
+    parameterDefaults:  # Can be overridden
+      "*":
+        region: us-west-2
 
 environments:        # Environment definitions
   production:
     selectors:       # Optional domain filters / legacy selectors
       domains: [platform]
-    defaults:        # Env-specific config
-      replicas: 3
+    parameterDefaults:  # Env-specific config
+      "*":
+        replicas: 3
     policies:        # Env constraints
       requireApproval: true
 
@@ -396,19 +398,21 @@ components:
   - name: web-app
     type: helm
     domain: platform
-    inputs:
+    parameters:
       replicas: 5
 
 groups:
   platform:
-    defaults:
-      region: us-west-2
-      replicas: 3
+    parameterDefaults:
+      "*":
+        region: us-west-2
+        replicas: 3
 
 environments:
   production:
-    defaults:
-      replicas: 10
+    parameterDefaults:
+      "*":
+        replicas: 10
 ```
 
 Merge order for production:

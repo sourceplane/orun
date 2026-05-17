@@ -13,7 +13,7 @@ spec:
         profile: lint-only
       - name: staging
         profile: verify
-  inputs:
+  parameters:
     chartPath: ../../charts/hello-chart/chart
     valuesFile: values.yaml
     releaseName: identity-portal

@@ -36,7 +36,7 @@ type ComponentTreeComponent struct {
 	Enabled      bool                   `yaml:"enabled" json:"enabled"`
 	Path         string                 `yaml:"path,omitempty" json:"path,omitempty"`
 	Subscribe    ComponentSubscribe     `yaml:"subscribe,omitempty" json:"subscribe,omitempty"`
-	Inputs       map[string]interface{} `yaml:"inputs,omitempty" json:"inputs,omitempty"`
+	Parameters   map[string]interface{} `yaml:"parameters,omitempty" json:"parameters,omitempty"`
 	Overrides    ComponentOverrides     `yaml:"overrides,omitempty" json:"overrides,omitempty"`
 	Labels       map[string]string      `yaml:"labels,omitempty" json:"labels,omitempty"`
 	DependsOn    []Dependency           `yaml:"dependsOn,omitempty" json:"dependsOn,omitempty"`
@@ -55,7 +55,7 @@ func (entry ComponentTreeComponent) ToComponent() Component {
 		Enabled:    entry.Enabled,
 		Path:       entry.Path,
 		Subscribe:  entry.Subscribe,
-		Inputs:     entry.Inputs,
+		Parameters: entry.Parameters,
 		Overrides:  entry.Overrides,
 		Labels:     entry.Labels,
 		DependsOn:  entry.DependsOn,
@@ -72,7 +72,7 @@ func FromComponent(component Component, source string) ComponentTreeComponent {
 		Enabled:    component.Enabled,
 		Path:       component.Path,
 		Subscribe:  component.Subscribe,
-		Inputs:     component.Inputs,
+		Parameters: component.Parameters,
 		Overrides:  component.Overrides,
 		Labels:     component.Labels,
 		DependsOn:  component.DependsOn,

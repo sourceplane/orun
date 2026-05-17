@@ -52,7 +52,7 @@ type CompositionDocumentSpec struct {
 	DefaultJob        string                       `yaml:"defaultJob" json:"defaultJob"`
 	DefaultProfile    string                       `yaml:"defaultProfile,omitempty" json:"defaultProfile,omitempty"`
 	SchemaRef         *ResourceRef                 `yaml:"schemaRef,omitempty" json:"schemaRef,omitempty"`
-	InputSchema       map[string]interface{}       `yaml:"inputSchema,omitempty" json:"inputSchema,omitempty"`
+	ParameterSchema   map[string]interface{}       `yaml:"parameterSchema,omitempty" json:"parameterSchema,omitempty"`
 	ExecutionProfiles map[string]ExecutionProfile  `yaml:"executionProfiles,omitempty" json:"executionProfiles,omitempty"`
 	Jobs              []CompositionJobEntry        `yaml:"jobs" json:"jobs"`
 	Profiles          []CompositionProfileEntry    `yaml:"profiles,omitempty" json:"profiles,omitempty"`

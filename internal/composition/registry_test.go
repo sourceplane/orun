@@ -228,7 +228,7 @@ func TestPlannerUsesPerComponentCompositionOverride(t *testing.T) {
 				Environment:         "dev",
 				Type:                "helm",
 				ResolvedComposition: "overrides:helm",
-				Inputs:              make(map[string]interface{}),
+				Parameters:          make(map[string]interface{}),
 				Path:                "./",
 			},
 		},
@@ -304,13 +304,13 @@ spec:
   type: %s
   description: %s composition
   defaultJob: %s
-  inputSchema:
+  parameterSchema:
     $schema: http://json-schema.org/draft-07/schema#
     type: object
     properties:
       type:
         const: %s
-      inputs:
+      parameters:
         type: object
         properties:
           chart:

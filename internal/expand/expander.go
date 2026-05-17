@@ -75,7 +75,7 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 
 			// Merge all properties (including path) with template interpolation
 			merged := e.mergeProperties(comp, env, envName, compName)
-			instance.Inputs = merged
+			instance.Parameters = merged
 
 			// Merge explicit environment variables
 			instance.Env = e.mergeEnv(comp, env, envName)
@@ -166,67 +166,101 @@ func matchesPattern(pattern, value string) bool {
 	return pattern == value
 }
 
-// mergeProperties applies the merge precedence order with proper override hierarchy
-// Override hierarchy: component > group > environment > default
-// Path is handled separately: component path > group path (from defaults) > environment path (from defaults) > default "./"
+// mergeProperties applies the merge precedence order with proper override hierarchy.
+// Precedence (lowest to highest):
+//   env parameterDefaults["*"] → env parameterDefaults[type] →
+//   group parameterDefaults["*"] → group parameterDefaults[type] →
+//   component parameters → subscription parameters
 func (e *Expander) mergeProperties(comp model.Component, env model.Environment, envName, compName string) map[string]interface{} {
 	merged := make(map[string]interface{})
 
-	// Collect paths from each level for later use
 	var groupPath, envPath string
 
-	// 1. Environment defaults - lowest priority
-	if env.Defaults != nil {
-		for k, v := range env.Defaults {
-			// Extract path from defaults but don't add to merged yet
-			if k == "path" {
-				if pathStr, ok := v.(string); ok {
-					envPath = pathStr
+	// 1. Environment parameterDefaults["*"] - lowest priority
+	if env.ParameterDefaults != nil {
+		if wildcardDefaults, ok := env.ParameterDefaults["*"]; ok {
+			for k, v := range wildcardDefaults {
+				if k == "path" {
+					if pathStr, ok := v.(string); ok {
+						envPath = pathStr
+					}
+				} else {
+					merged[k] = v
 				}
-			} else {
-				merged[k] = v
+			}
+		}
+
+		// 2. Environment parameterDefaults[type]
+		if typeDefaults, ok := env.ParameterDefaults[comp.Type]; ok {
+			for k, v := range typeDefaults {
+				if k == "path" {
+					if pathStr, ok := v.(string); ok {
+						envPath = pathStr
+					}
+				} else {
+					merged[k] = v
+				}
 			}
 		}
 	}
 
-	// 2. Group defaults - middle priority (overwrites environment defaults)
+	// 3. Group parameterDefaults["*"]
 	if comp.Domain != "" {
 		if group, exists := e.groups[comp.Domain]; exists {
-			if group.Defaults != nil {
-				for k, v := range group.Defaults {
-					// Extract path from defaults but don't add to merged yet
-					if k == "path" {
-						if pathStr, ok := v.(string); ok {
-							groupPath = pathStr
+			if group.ParameterDefaults != nil {
+				if wildcardDefaults, ok := group.ParameterDefaults["*"]; ok {
+					for k, v := range wildcardDefaults {
+						if k == "path" {
+							if pathStr, ok := v.(string); ok {
+								groupPath = pathStr
+							}
+						} else {
+							merged[k] = v
 						}
-					} else {
-						merged[k] = v
+					}
+				}
+
+				// 4. Group parameterDefaults[type]
+				if typeDefaults, ok := group.ParameterDefaults[comp.Type]; ok {
+					for k, v := range typeDefaults {
+						if k == "path" {
+							if pathStr, ok := v.(string); ok {
+								groupPath = pathStr
+							}
+						} else {
+							merged[k] = v
+						}
 					}
 				}
 			}
 		}
 	}
 
-	// 3. Component properties - highest priority (overwrites group and environment defaults)
-	if comp.Inputs != nil {
-		for k, v := range comp.Inputs {
+	// 5. Component parameters
+	if comp.Parameters != nil {
+		for k, v := range comp.Parameters {
 			merged[k] = v
 		}
 	}
 
-	// 4. Handle path with explicit override hierarchy: component > group > environment > default
+	// 6. Subscription parameters - highest priority
+	sub := comp.Subscribe.FindSubscription(envName)
+	if sub != nil && sub.Parameters != nil {
+		for k, v := range sub.Parameters {
+			merged[k] = v
+		}
+	}
+
+	// 7. Handle path with explicit override hierarchy: component > group > environment > default
 	if comp.Path != "" {
-		// Component level (highest priority)
 		merged["path"] = comp.Path
 	} else if groupPath != "" {
-		// Group level (from group defaults)
 		merged["path"] = groupPath
 	} else if envPath != "" {
-		// Environment level (from environment defaults)
 		merged["path"] = envPath
 	}
 
-	// 5. Interpolate template variables in all string values
+	// 8. Interpolate template variables in all string values
 	return e.interpolateProperties(merged, envName, comp.Domain, compName)
 }
 

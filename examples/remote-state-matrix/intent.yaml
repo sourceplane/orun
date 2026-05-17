@@ -19,11 +19,13 @@ execution:
 
 environments:
   dev:
-    defaults:
-      cluster: dev-smoke
+    parameterDefaults:
+      "*":
+        cluster: dev-smoke
   stage:
-    defaults:
-      cluster: stage-smoke
+    parameterDefaults:
+      "*":
+        cluster: stage-smoke
 
 components:
   - name: foundation
@@ -32,7 +34,7 @@ components:
       environments:
         - dev
         - stage
-    inputs:
+    parameters:
       module: infra/foundation
 
   - name: api
@@ -41,7 +43,7 @@ components:
       environments:
         - dev
         - stage
-    inputs:
+    parameters:
       chart: charts/api
     dependsOn:
       - component: foundation
@@ -53,7 +55,7 @@ components:
       environments:
         - dev
         - stage
-    inputs:
+    parameters:
       chart: charts/web
     dependsOn:
       - component: api
