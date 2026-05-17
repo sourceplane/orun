@@ -155,6 +155,7 @@ These are injected automatically by the runner and cannot be overridden by user-
 | `ORUN_JOB_RUN_ID` | Cross-job traceability identifier |
 | `ORUN_ENVIRONMENT` | Environment name for the current job |
 | `ORUN_COMPONENT` | Component name for the current job |
+| `ORUN_ENV` | Path to env file for persisting variables across steps (alias for `GITHUB_ENV`) |
 
 ## Template interpolation
 
@@ -207,3 +208,26 @@ The resolved environment variables appear in the plan under each job's `env` fie
   ]
 }
 ```
+
+## Dynamic environment propagation with ORUN_ENV
+
+Steps can persist environment variables for subsequent steps by appending `KEY=VALUE` pairs to the file at `$ORUN_ENV`:
+
+```bash
+echo "DEPLOY_SHA=$(git rev-parse HEAD)" >> "$ORUN_ENV"
+```
+
+This uses the same file-based mechanism as GitHub Actions' `$GITHUB_ENV`. Both variables point to the same file — writing to either one has the same effect. Using `ORUN_ENV` is preferred in compositions because it is portable and does not depend on GitHub-specific naming.
+
+Multi-line values use heredoc syntax:
+
+```bash
+cat >> "$ORUN_ENV" <<'HEREDOC'
+MULTI_LINE_VAR<<EOF
+line one
+line two
+EOF
+HEREDOC
+```
+
+Variables written to `$ORUN_ENV` are available to all subsequent steps in the same job but not to other jobs.

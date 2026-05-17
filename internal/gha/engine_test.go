@@ -112,6 +112,70 @@ func TestEngineJobsGetIsolatedHomeDirectories(t *testing.T) {
 	}
 }
 
+func TestEngineRunStepOrunEnvAliasesGithubEnv(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	engine := NewEngine(Options{
+		CacheDir:     filepath.Join(workspaceDir, ".cache", "actions"),
+		ToolCacheDir: filepath.Join(workspaceDir, ".cache", "tools"),
+	})
+	execCtx := ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: workspaceDir,
+		WorkDir:      workspaceDir,
+		BaseEnv: map[string]string{
+			"PATH": os.Getenv("PATH"),
+			"HOME": os.Getenv("HOME"),
+		},
+	}
+	if err := engine.Prepare(execCtx); err != nil {
+		t.Fatalf("engine.Prepare() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := engine.Cleanup(execCtx); err != nil {
+			t.Fatalf("engine.Cleanup() error = %v", err)
+		}
+	})
+
+	job := model.PlanJob{ID: "orun-env-job"}
+
+	// Step 1: write env var using ORUN_ENV (the alias)
+	if _, err := engine.RunStep(execCtx, job, model.PlanStep{
+		ID:    "set-via-orun-env",
+		Run:   `echo "MY_VAR=from_orun_env" >> "$ORUN_ENV"`,
+		Shell: "bash",
+	}); err != nil {
+		t.Fatalf("engine.RunStep() set-via-orun-env error = %v", err)
+	}
+
+	// Step 2: verify the env var is available in a subsequent step
+	output, err := engine.RunStep(execCtx, job, model.PlanStep{
+		ID:    "read-var",
+		Run:   `printf '%s' "$MY_VAR"`,
+		Shell: "bash",
+	})
+	if err != nil {
+		t.Fatalf("engine.RunStep() read-var error = %v", err)
+	}
+	if output != "from_orun_env" {
+		t.Fatalf("read-var output = %q, want %q", output, "from_orun_env")
+	}
+
+	// Step 3: verify ORUN_ENV and GITHUB_ENV point to the same file
+	pathOutput, err := engine.RunStep(execCtx, job, model.PlanStep{
+		ID:    "compare-paths",
+		Run:   `test "$ORUN_ENV" = "$GITHUB_ENV" && printf 'same'`,
+		Shell: "bash",
+	})
+	if err != nil {
+		t.Fatalf("engine.RunStep() compare-paths error = %v", err)
+	}
+	if pathOutput != "same" {
+		t.Fatalf("compare-paths output = %q, want %q", pathOutput, "same")
+	}
+}
+
 func TestEngineRunStepLocalCompositeActionPropagatesOutputsAndEnv(t *testing.T) {
 	t.Parallel()
 

@@ -277,6 +277,9 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		Stderr:  r.Stderr,
 		DryRun:  r.DryRun,
 	}
+	if githubEnv := baseExecContext.BaseEnv["GITHUB_ENV"]; githubEnv != "" {
+		baseExecContext.BaseEnv["ORUN_ENV"] = githubEnv
+	}
 	baseExecContext.Env = executor.MergeEnvironment(baseExecContext.BaseEnv)
 
 	// Create execution and load/create state

@@ -113,3 +113,14 @@ Potentially destructive:
 
 Ask for explicit user intent before destructive operations.
 
+## Runtime environment variables
+
+Steps running under Orun have access to `ORUN_ENV`, a file path for persisting environment variables across steps within a job. This is an alias for `GITHUB_ENV` — both point to the same file. Compositions should prefer `ORUN_ENV` for portability.
+
+```bash
+# Persist a variable for subsequent steps
+echo "DEPLOY_SHA=$(git rev-parse HEAD)" >> "$ORUN_ENV"
+```
+
+The `ORUN_` prefix is reserved for runtime-injected variables and cannot be used in user-declared `env` at any level (intent root, environment, component root, subscription). Key runtime variables: `ORUN_CONTEXT`, `ORUN_RUNNER`, `ORUN_EXEC_ID`, `ORUN_PLAN_ID`, `ORUN_JOB_ID`, `ORUN_JOB_UID`, `ORUN_JOB_RUN_ID`, `ORUN_ENVIRONMENT`, `ORUN_COMPONENT`, `ORUN_ENV`.
+
