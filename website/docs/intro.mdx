@@ -95,10 +95,10 @@ intent.yaml + component.yaml + composition packages
   --intent examples/intent.yaml \
   --output /tmp/orun-plan.json
 
-./orun run --plan /tmp/orun-plan.json
+./orun run --plan /tmp/orun-plan.json --dry-run
 ```
 
-The default `run` mode is a dry-run, so teams can inspect the resolved jobs and steps before enabling `--execute`.
+`orun run` executes by default. Add `--dry-run` when teams need to inspect the resolved jobs and steps without running them.
 
 The lock command and planning flow write `examples/.orun/compositions.lock.yaml`, which records the resolved composition digests used for the compiled plan.
 
@@ -127,3 +127,4 @@ The lock command and planning flow write `examples/.orun/compositions.lock.yaml`
 1. Follow the [installation](./getting-started/installation.md) guide.
 2. Run the repository-backed [quick start](./getting-started/quick-start.md).
 3. Read [intent model](./concepts/intent-model.md) and [plan DAG](./concepts/plan-dag.md) before writing new compositions.
+4. Share [AI context for Orun repositories](./ai-context/orun-repositories.md) with coding agents that need to work in component-modeled repos.
