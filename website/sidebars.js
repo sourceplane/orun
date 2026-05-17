@@ -23,6 +23,11 @@ const sidebars = {
     },
     {
       type: 'category',
+      label: 'AI Context',
+      items: ['ai-context/orun-repositories'],
+    },
+    {
+      type: 'category',
       label: 'CLI',
       items: [
         'cli/orun',

@@ -157,11 +157,11 @@ Root-level `env` on a component applies to all subscribed environments. Subscrip
 
 At compile time, `orun` merges configuration in a stable order from lowest to highest precedence:
 
-1. Type defaults from the composition input schema
-2. Job defaults from the resolved composition job definition
-3. Group defaults
-4. Environment defaults
-5. Component inputs and overrides
+1. Environment defaults
+2. Group defaults for the component domain
+3. Component inputs
+
+`path` has its own override order: component `path`, group default `path`, environment default `path`, then `./`.
 
 Policies are not treated as ordinary defaults. They are enforced as platform constraints.
 
