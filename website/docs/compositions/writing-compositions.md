@@ -130,7 +130,7 @@ spec:
     - id: apply
       name: apply
       capability: mytype.apply
-      run: mytool apply {{.target}}
+      run: mytool apply {{.parameters.target}}
       onFailure: stop
 ```
 
@@ -150,7 +150,7 @@ spec:
         - mytype.apply
       stepOverrides:
         apply:
-          run: mytool apply --dry-run {{.target}}
+          run: mytool apply --dry-run {{.parameters.target}}
 ```
 
 ### Inline authoring
@@ -193,7 +193,7 @@ spec:
           run: mytool version
         - id: apply
           name: apply
-          run: mytool apply {{.target}}
+          run: mytool apply {{.parameters.target}}
 ```
 
 ## 4. Test with an example component

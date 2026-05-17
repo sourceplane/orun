@@ -213,14 +213,14 @@ spec:
       retries: 2
       steps:
         - name: deploy
-          run: helm upgrade --install {{.Component}} {{.chart}}
+          run: helm upgrade --install {{.orun.component.name}} {{.parameters.chart}}
     - name: rollback
       runsOn: ubuntu-22.04
       timeout: 10m
       retries: 1
       steps:
         - name: rollback
-          run: helm rollback {{.Component}}
+          run: helm rollback {{.orun.component.name}}
 ```
 
 Notes:

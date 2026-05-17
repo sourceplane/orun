@@ -55,12 +55,12 @@ spec:
       capability: terraform.setup
       use: hashicorp/setup-terraform@v4
       with:
-        terraform_version: "{{.terraformVersion}}"
+        terraform_version: "{{.parameters.terraformVersion}}"
         terraform_wrapper: "false"
     - id: validate
       name: validate
       capability: terraform.validate
-      run: terraform -chdir={{.terraformDir}} validate -no-color
+      run: terraform -chdir={{.parameters.terraformDir}} validate -no-color
       onFailure: stop
 ```
 
@@ -84,9 +84,9 @@ spec:
         - terraform.plan
       stepOverrides:
         init:
-          run: terraform -chdir={{.terraformDir}} init -backend=false -input=false
+          run: terraform -chdir={{.parameters.terraformDir}} init -backend=false -input=false
         plan:
-          run: terraform -chdir={{.terraformDir}} plan -no-color -lock=false
+          run: terraform -chdir={{.parameters.terraformDir}} plan -no-color -lock=false
 ```
 
 ## Profile policies

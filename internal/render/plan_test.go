@@ -8,7 +8,7 @@ import (
 
 func TestBuildPlanJobEnvWithExplicitEnv(t *testing.T) {
 	job := &model.JobInstance{
-		Config: map[string]interface{}{
+		Parameters: map[string]interface{}{
 			"stackName": "my-stack",
 			"region":    "us-east-1",
 		},
@@ -31,9 +31,9 @@ func TestBuildPlanJobEnvWithExplicitEnv(t *testing.T) {
 	}
 }
 
-func TestBuildPlanJobEnvFallsBackToConfig(t *testing.T) {
+func TestBuildPlanJobEnvReturnsNilWhenNoEnv(t *testing.T) {
 	job := &model.JobInstance{
-		Config: map[string]interface{}{
+		Parameters: map[string]interface{}{
 			"stackName": "my-stack",
 			"region":    "us-east-1",
 		},
@@ -42,17 +42,14 @@ func TestBuildPlanJobEnvFallsBackToConfig(t *testing.T) {
 
 	result := buildPlanJobEnv(job)
 
-	if len(result) != 2 {
-		t.Fatalf("expected 2 config entries (fallback), got %d", len(result))
-	}
-	if result["stackName"] != "my-stack" {
-		t.Errorf("stackName = %v, want my-stack", result["stackName"])
+	if result != nil {
+		t.Fatalf("expected nil when no env, got %v", result)
 	}
 }
 
-func TestBuildPlanJobEnvEmptyEnvFallsBack(t *testing.T) {
+func TestBuildPlanJobEnvReturnsNilWhenEmptyEnv(t *testing.T) {
 	job := &model.JobInstance{
-		Config: map[string]interface{}{
+		Parameters: map[string]interface{}{
 			"key": "value",
 		},
 		Env: map[string]string{},
@@ -60,7 +57,7 @@ func TestBuildPlanJobEnvEmptyEnvFallsBack(t *testing.T) {
 
 	result := buildPlanJobEnv(job)
 
-	if result["key"] != "value" {
-		t.Errorf("expected fallback to Config when Env is empty, got %v", result)
+	if result != nil {
+		t.Fatalf("expected nil when env is empty, got %v", result)
 	}
 }

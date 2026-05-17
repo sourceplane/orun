@@ -32,14 +32,14 @@ spec:
       capability: cloudflare-pages-turbo-terraform.setup-node
       use: actions/setup-node@v4
       with:
-        node-version: "{{.nodeVersion}}"
+        node-version: "{{.parameters.nodeVersion}}"
 
     - id: setup-pnpm
       name: setup-pnpm
       capability: cloudflare-pages-turbo-terraform.setup-pnpm
       use: pnpm/action-setup@v4
       with:
-        version: "{{.pnpmVersion}}"
+        version: "{{.parameters.pnpmVersion}}"
 
     - id: install-workspace-dependencies
       name: install-workspace-dependencies
@@ -53,7 +53,7 @@ spec:
       shell: bash
       run: |
         {{if .preBuildCommand}}
-        {{.preBuildCommand}}
+        {{.parameters.preBuildCommand}}
         {{else}}
         echo "Skipping pre-build."
         {{end}}
@@ -68,7 +68,7 @@ spec:
     - id: build-pages-app
       name: build-pages-app
       capability: cloudflare-pages-turbo-terraform.build
-      run: "{{if .buildCommand}}{{.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
+      run: "{{if .buildCommand}}{{.parameters.buildCommand}}{{else}}pnpm exec turbo run build --filter=./{{end}}"
       onFailure: stop
 
     - id: verify-build-output
@@ -76,8 +76,8 @@ spec:
       capability: cloudflare-pages-turbo-terraform.verify-output
       shell: bash
       run: |
-        test -d "{{.outputDir}}"
-        find "{{.outputDir}}" -maxdepth 2 -type f | head -n 20
+        test -d "{{.parameters.outputDir}}"
+        find "{{.parameters.outputDir}}" -maxdepth 2 -type f | head -n 20
       onFailure: stop
 
     - id: setup-terraform
@@ -85,7 +85,7 @@ spec:
       capability: cloudflare-pages-turbo-terraform.setup-terraform
       use: hashicorp/setup-terraform@v4
       with:
-        terraform_version: "{{.terraformVersion}}"
+        terraform_version: "{{.parameters.terraformVersion}}"
         terraform_wrapper: "false"
 
     - id: terraform-context
@@ -94,25 +94,25 @@ spec:
       shell: bash
       run: |
         terraform version
-        echo "Reconciling Cloudflare Pages project {{.projectName}} from {{.terraformDir}}"
+        echo "Reconciling Cloudflare Pages project {{.parameters.projectName}} from {{.parameters.terraformDir}}"
       onFailure: stop
 
     - id: terraform-fmt-check
       name: terraform-fmt-check
       capability: cloudflare-pages-turbo-terraform.terraform-fmt
-      run: terraform -chdir={{.terraformDir}} fmt -check
+      run: terraform -chdir={{.parameters.terraformDir}} fmt -check
       onFailure: stop
 
     - id: terraform-init
       name: terraform-init
       capability: cloudflare-pages-turbo-terraform.terraform-init
-      run: terraform -chdir={{.terraformDir}} init -input=false
+      run: terraform -chdir={{.parameters.terraformDir}} init -input=false
       onFailure: stop
 
     - id: terraform-validate
       name: terraform-validate
       capability: cloudflare-pages-turbo-terraform.terraform-validate
-      run: terraform -chdir={{.terraformDir}} validate -no-color
+      run: terraform -chdir={{.parameters.terraformDir}} validate -no-color
       onFailure: stop
 
     - id: terraform-plan-or-apply
@@ -125,19 +125,19 @@ spec:
         terraform_args=(
           "-input=false"
           "-var=account_id=${cloudflare_account_id}"
-          "-var=project_name={{.projectName}}"
-          "-var=production_branch={{.productionBranch}}"
-          "-var=repo_owner={{.repoOwner}}"
-          "-var=repo_name={{.repoName}}"
-          "-var=build_command={{.cloudflareBuildCommand}}"
-          "-var=destination_dir={{.destinationDir}}"
-          "-var=root_dir={{.rootDir}}"
+          "-var=project_name={{.parameters.projectName}}"
+          "-var=production_branch={{.parameters.productionBranch}}"
+          "-var=repo_owner={{.parameters.repoOwner}}"
+          "-var=repo_name={{.parameters.repoName}}"
+          "-var=build_command={{.parameters.cloudflareBuildCommand}}"
+          "-var=destination_dir={{.parameters.destinationDir}}"
+          "-var=root_dir={{.parameters.rootDir}}"
         )
 
-        if [ "{{.Environment}}" = "production" ] && [ "${GITHUB_REF:-}" = "refs/heads/{{.productionBranch}}" ]; then
+        if [ "{{.orun.environment.name}}" = "production" ] && [ "${GITHUB_REF:-}" = "refs/heads/{{.parameters.productionBranch}}" ]; then
           : "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required for apply}"
           : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required for apply}"
-          terraform -chdir={{.terraformDir}} apply -auto-approve "${terraform_args[@]}"
+          terraform -chdir={{.parameters.terraformDir}} apply -auto-approve "${terraform_args[@]}"
           exit 0
         fi
 
@@ -146,5 +146,5 @@ spec:
           exit 0
         fi
 
-        terraform -chdir={{.terraformDir}} plan -lock=false -no-color "${terraform_args[@]}"
+        terraform -chdir={{.parameters.terraformDir}} plan -lock=false -no-color "${terraform_args[@]}"
       onFailure: stop

@@ -83,7 +83,7 @@ spec:
       retries: 2
       steps:
         - name: deploy
-          run: helm upgrade --install {{.Component}} {{.chart}}
+          run: helm upgrade --install {{.orun.component.name}} {{.parameters.chart}}
 ```
 
 `defaultJob` must be explicit. Orun no longer relies on implicit "first job wins" behavior.
@@ -150,7 +150,7 @@ spec:
       capability: terraform.setup
       use: hashicorp/setup-terraform@v4
       with:
-        terraform_version: "{{.terraformVersion}}"
+        terraform_version: "{{.parameters.terraformVersion}}"
     - id: fmt
       name: fmt
       capability: terraform.fmt
@@ -267,13 +267,41 @@ my-platform/
             └── terraform-release.yaml
 ```
 
-## Template inputs
+## Template namespaces
 
-Job steps resolve against merged component data. Common template values:
+Job steps resolve against a namespaced template context:
 
-- `.Component` — component name
-- `.Environment` — current environment name
-- merged input fields such as `.terraformDir`, `.chart`, `.nodeVersion`
+| Namespace | Purpose | Example |
+| --- | --- | --- |
+| `.orun` | System/compiler-provided context | `{{ .orun.component.name }}` |
+| `.parameters` | Resolved component parameters | `{{ .parameters.terraformDir }}` |
+| `.env` | Resolved runtime env map | `{{ .env.AWS_REGION }}` |
+
+### `.orun` fields
+
+- `.orun.component.name` — component name
+- `.orun.component.type` — composition type
+- `.orun.component.domain` — group/domain name
+- `.orun.environment.name` — environment name
+- `.orun.composition.type` — composition type
+- `.orun.profile.name` — execution profile name
+- `.orun.job.id` — job ID (e.g. `api.dev.deploy`)
+- `.orun.job.name` — job name (e.g. `deploy`)
+
+### `.parameters` fields
+
+All resolved component parameters after merge (parameterDefaults + component parameters + subscription parameters):
+
+- `.parameters.terraformDir`
+- `.parameters.chartPath`
+- `.parameters.nodeVersion`
+
+### `.env` fields
+
+Runtime environment variables declared in intent or component env blocks:
+
+- `.env.AWS_REGION`
+- `.env.TF_LOG`
 
 ## Execution semantics
 

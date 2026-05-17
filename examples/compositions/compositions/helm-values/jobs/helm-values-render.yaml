@@ -23,7 +23,7 @@ spec:
       capability: helm-values.setup
       use: azure/setup-helm@v4.3.0
       with:
-        version: "{{.helmVersion}}"
+        version: "{{.parameters.helmVersion}}"
 
     - id: helm-values-context
       name: helm-values-context
@@ -31,17 +31,17 @@ spec:
       shell: bash
       run: |
         helm version --short
-        echo "Validating {{.valuesFile}} against {{.chartPath}}"
+        echo "Validating {{.parameters.valuesFile}} against {{.parameters.chartPath}}"
       onFailure: stop
 
     - id: helm-values-lint
       name: helm-values-lint
       capability: helm-values.lint
-      run: helm lint {{.chartPath}} --values {{.valuesFile}}
+      run: helm lint {{.parameters.chartPath}} --values {{.parameters.valuesFile}}
       onFailure: stop
 
     - id: helm-values-template
       name: helm-values-template
       capability: helm-values.template
-      run: helm template {{.releaseName}} {{.chartPath}} --values {{.valuesFile}}
+      run: helm template {{.parameters.releaseName}} {{.parameters.chartPath}} --values {{.parameters.valuesFile}}
       onFailure: stop

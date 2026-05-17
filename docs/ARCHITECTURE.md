@@ -152,7 +152,7 @@ jobs:
     retries: 2
     steps:           # Shell commands
       - name: deploy
-        run: helm upgrade --install {{.Component}} ...
+        run: helm upgrade --install {{.orun.component.name}} ...
     inputs:          # Job defaults
       pullPolicy: IfNotPresent
 ```
@@ -240,8 +240,8 @@ type JobInstance struct {
         }
       ],
       "dependsOn": ["common-services@production.deploy"],
-      "env": { "fully merged config" },
-      "config": { "same as env" }
+      "env": { "runtime environment variables" },
+      "parameters": { "resolved component parameters" }
     }
   ]
 }
@@ -346,8 +346,8 @@ context := {
 
 for step in jobDef.steps:
     rendered := render(step.run, context)
-    // {{.Component}} → "web-app"
-    // {{.replicas}} → "3"
+    // {{.orun.component.name}} → "web-app"
+    // {{.parameters.replicas}} → "3"
 ```
 
 ### Phase 3.4: Dependency Resolution
@@ -449,17 +449,25 @@ Note: Cannot be overridden by component.inputs
 
 ## Templating System
 
-Steps use Go `text/template` syntax. Template context includes:
+Steps use Go `text/template` syntax. Template context uses explicit namespaces:
 
-- **Standard fields**:
-  - `{{.Component}}` - Component name
-  - `{{.Environment}}` - Environment name
-  - `{{.Type}}` - Component type
+- **`.orun`** — System/compiler-provided context:
+  - `{{.orun.component.name}}` - Component name
+  - `{{.orun.component.type}}` - Composition type
+  - `{{.orun.component.domain}}` - Group/domain name
+  - `{{.orun.environment.name}}` - Environment name
+  - `{{.orun.composition.type}}` - Composition type
+  - `{{.orun.profile.name}}` - Execution profile name
+  - `{{.orun.job.id}}` - Job ID
+  - `{{.orun.job.name}}` - Job name
 
-- **Merged inputs** (any config key):
-  - `{{.chart}}` - From component inputs
-  - `{{.replicas}}` - From merged config
-  - `{{.region}}` - From env defaults
+- **`.parameters`** — Resolved component parameters:
+  - `{{.parameters.chart}}` - From component parameters
+  - `{{.parameters.replicas}}` - From merged parameters
+  - `{{.parameters.region}}` - From parameterDefaults
+
+- **`.env`** — Runtime environment variables:
+  - `{{.env.AWS_REGION}}` - From env declarations
 
 Example:
 
@@ -467,9 +475,9 @@ Example:
 steps:
   - name: deploy
     run: |
-      helm upgrade --install {{.Component}} {{.chart}} \
-        --replicas {{.replicas}} \
-        --region {{.region}}
+      helm upgrade --install {{.orun.component.name}} {{.parameters.chart}} \
+        --replicas {{.parameters.replicas}} \
+        --region {{.parameters.region}}
 ```
 
 With context: `{ Component: web-app, chart: "...", replicas: 3, region: "us-west-2" }`
@@ -586,7 +594,7 @@ Failed: dependency resolution
 
 ```
 Failed: template rendering in job "web-app@prod.deploy"
-- Unresolved variable: {{.unknownField}}
+- Unresolved variable: {{.parameters.unknownField}}
 - Template parse error: {{.invalid syntax
 ```
 

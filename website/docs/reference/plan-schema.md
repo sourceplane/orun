@@ -33,7 +33,7 @@ Each job can include:
 - `retries`
 - `env`
 - `labels`
-- `config`
+- `parameters`
 
 ## Step fields
 

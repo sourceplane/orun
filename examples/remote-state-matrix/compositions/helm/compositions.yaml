@@ -37,13 +37,13 @@ spec:
         - name: lint
           shell: bash
           run: |
-            echo "=== SMOKE: {{.Component}}@{{.Environment}}.smoke lint ==="
-            echo "chart={{.chart}}"
+            echo "=== SMOKE: {{.orun.component.name}}@{{.orun.environment.name}}.smoke lint ==="
+            echo "chart={{.parameters.chart}}"
             sleep 2
             echo "=== DONE ==="
         - name: deploy
           shell: bash
           run: |
-            echo "=== SMOKE: {{.Component}}@{{.Environment}}.smoke deploy ==="
+            echo "=== SMOKE: {{.orun.component.name}}@{{.orun.environment.name}}.smoke deploy ==="
             sleep 1
             echo "=== DONE ==="

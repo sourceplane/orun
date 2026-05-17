@@ -25,7 +25,7 @@ spec:
       capability: cloudflare-worker.setup
       use: actions/setup-node@v4
       with:
-        node-version: "{{.nodeVersion}}"
+        node-version: "{{.parameters.nodeVersion}}"
 
     - id: install-dependencies
       name: install-dependencies
@@ -33,9 +33,9 @@ spec:
       shell: bash
       run: |
         {{if .pnpmVersion}}
-        npm install -g pnpm@{{.pnpmVersion}}
+        npm install -g pnpm@{{.parameters.pnpmVersion}}
         {{end}}
-        {{.installCommand}}
+        {{.parameters.installCommand}}
       onFailure: stop
 
     - id: verify-worker-structure
@@ -50,7 +50,7 @@ spec:
     - id: build-worker
       name: build-worker
       capability: cloudflare-worker.build
-      run: "{{.buildCommand}}"
+      run: "{{.parameters.buildCommand}}"
       onFailure: stop
 
     - id: typecheck-worker
@@ -59,7 +59,7 @@ spec:
       shell: bash
       run: |
         {{if .typecheckCommand}}
-        {{.typecheckCommand}}
+        {{.parameters.typecheckCommand}}
         {{else}}
         echo "Skipping typecheck (not configured)."
         {{end}}
@@ -70,19 +70,19 @@ spec:
       capability: cloudflare-worker.deploy
       shell: bash
       run: |
-        if [ "{{.Environment}}" = "dev" ]; then
-          echo "Running wrangler deploy dry-run for {{.Component}} in dev environment."
+        if [ "{{.orun.environment.name}}" = "dev" ]; then
+          echo "Running wrangler deploy dry-run for {{.orun.component.name}} in dev environment."
           pnpm exec wrangler deploy --dry-run
           exit 0
         fi
 
-        if [ "{{.Environment}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.productionBranch}}" ]; then
-          echo "Skipping Cloudflare Worker deploy for {{.Component}} in {{.Environment}} on ${GITHUB_REF:-local}."
+        if [ "{{.orun.environment.name}}" != "production" ] || [ "${GITHUB_REF:-}" != "refs/heads/{{.parameters.productionBranch}}" ]; then
+          echo "Skipping Cloudflare Worker deploy for {{.orun.component.name}} in {{.orun.environment.name}} on ${GITHUB_REF:-local}."
           exit 0
         fi
 
         : "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required for deploy}"
         : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required for deploy}"
 
-        {{.deployCommand}}
+        {{.parameters.deployCommand}}
       onFailure: stop

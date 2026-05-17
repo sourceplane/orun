@@ -19,11 +19,11 @@ jobs:
         run: helm repo update
         retry: 2
       - name: deploy
-        run: helm upgrade --install {{.Component}} {{.chart}} --namespace {{.namespacePrefix}}{{.Component}} --create-namespace --wait=true --timeout={{.timeout}}
+        run: helm upgrade --install {{.orun.component.name}} {{.parameters.chart}} --namespace {{.parameters.namespacePrefix}}{{.orun.component.name}} --create-namespace --wait=true --timeout={{.parameters.timeout}}
         timeout: 15m
         onFailure: stop
       - name: verify
-        run: kubectl get deployment -n {{.namespacePrefix}}{{.Component}} {{.Component}}
+        run: kubectl get deployment -n {{.parameters.namespacePrefix}}{{.orun.component.name}} {{.orun.component.name}}
         onFailure: continue
     inputs:
       pullPolicy: IfNotPresent
@@ -38,14 +38,14 @@ jobs:
       scope: recovery
     steps:
       - name: get-revision
-        run: helm history {{.Component}} -n {{.namespacePrefix}}{{.Component}} | head -2
+        run: helm history {{.orun.component.name}} -n {{.parameters.namespacePrefix}}{{.orun.component.name}} | head -2
         onFailure: stop
       - name: rollback
-        run: helm rollback {{.Component}} -n {{.namespacePrefix}}{{.Component}}
+        run: helm rollback {{.orun.component.name}} -n {{.parameters.namespacePrefix}}{{.orun.component.name}}
         timeout: 10m
         onFailure: stop
       - name: verify-rollback
-        run: kubectl rollout status deployment/{{.Component}} -n {{.namespacePrefix}}{{.Component}}
+        run: kubectl rollout status deployment/{{.orun.component.name}} -n {{.parameters.namespacePrefix}}{{.orun.component.name}}
         onFailure: continue
     inputs:
       pullPolicy: IfNotPresent
@@ -62,7 +62,7 @@ jobs:
         run: helm repo add mycompany oci://mycompany.azurecr.io/helm/charts
         retry: 3
       - name: diff
-        run: helm diff release {{.Component}} {{.chart}} --namespace {{.namespacePrefix}}{{.Component}} || true
+        run: helm diff release {{.orun.component.name}} {{.parameters.chart}} --namespace {{.parameters.namespacePrefix}}{{.orun.component.name}} || true
         onFailure: continue
     inputs:
       pullPolicy: IfNotPresent

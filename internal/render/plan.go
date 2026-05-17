@@ -89,7 +89,6 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 			Retries:       job.Retries,
 			Env:           buildPlanJobEnv(job),
 			Labels:        job.Labels,
-			Config:        job.Config,
 			Parameters:    job.Parameters,
 		}
 
@@ -117,7 +116,7 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 
 func buildPlanJobEnv(job *model.JobInstance) map[string]interface{} {
 	if len(job.Env) == 0 {
-		return job.Config
+		return nil
 	}
 	keys := make([]string, 0, len(job.Env))
 	for k := range job.Env {

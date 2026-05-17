@@ -15,13 +15,13 @@ jobs:
       - name: lint
         phase: main
         order: 10
-        run: helm lint {{.registry}}/charts
+        run: helm lint {{.parameters.registry}}/charts
         timeout: 5m
         onFailure: stop
       - name: package
         phase: main
         order: 20
-        run: helm package {{.registry}}/charts -d dist/
+        run: helm package {{.parameters.registry}}/charts -d dist/
         timeout: 5m
         onFailure: stop
     inputs:
@@ -38,26 +38,26 @@ jobs:
       - name: lint
         phase: main
         order: 10
-        run: helm lint {{.registry}}/charts
+        run: helm lint {{.parameters.registry}}/charts
         timeout: 5m
         onFailure: stop
       - name: package
         phase: main
         order: 20
-        run: helm package {{.registry}}/charts -d dist/
+        run: helm package {{.parameters.registry}}/charts -d dist/
         timeout: 5m
         onFailure: stop
       - name: push
         phase: main
         order: 30
-        run: helm push dist/*.tgz oci://{{.registry}}/helm/charts
+        run: helm push dist/*.tgz oci://{{.parameters.registry}}/helm/charts
         timeout: 5m
         retry: 2
         onFailure: stop
       - name: verify
         phase: post
         order: 10
-        run: helm search repo oci://{{.registry}}/helm/charts
+        run: helm search repo oci://{{.parameters.registry}}/helm/charts
         onFailure: continue
     inputs:
       pullPolicy: Always
@@ -74,13 +74,13 @@ jobs:
       - name: lint
         phase: main
         order: 10
-        run: helm lint {{.registry}}/charts --strict
+        run: helm lint {{.parameters.registry}}/charts --strict
         timeout: 5m
         onFailure: stop
       - name: template-dry-run
         phase: main
         order: 20
-        run: helm template test {{.registry}}/charts --validate
+        run: helm template test {{.parameters.registry}}/charts --validate
         timeout: 5m
         onFailure: stop
     inputs:

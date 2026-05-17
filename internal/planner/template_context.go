@@ -13,15 +13,6 @@ type TemplateContext struct {
 func (tc *TemplateContext) Build() map[string]interface{} {
 	ctx := make(map[string]interface{})
 
-	// Legacy flat keys (backward compat)
-	ctx["Component"] = tc.CompInst.ComponentName
-	ctx["Environment"] = tc.CompInst.Environment
-	ctx["Type"] = tc.CompInst.Type
-
-	for k, v := range tc.CompInst.Parameters {
-		ctx[k] = v
-	}
-
 	// .orun namespace
 	ctx["orun"] = map[string]interface{}{
 		"component": map[string]interface{}{
