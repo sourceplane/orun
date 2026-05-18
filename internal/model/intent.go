@@ -117,10 +117,23 @@ type ComponentSubscribe struct {
 
 // EnvironmentSubscription specifies an environment binding with optional profile selection.
 type EnvironmentSubscription struct {
-	Name       string                 `yaml:"name" json:"name"`
-	Profile    string                 `yaml:"profile,omitempty" json:"profile,omitempty"`
-	Env        map[string]string      `yaml:"env,omitempty" json:"env,omitempty"`
-	Parameters map[string]interface{} `yaml:"parameters,omitempty" json:"parameters,omitempty"`
+	Name         string                 `yaml:"name" json:"name"`
+	Profile      string                 `yaml:"profile,omitempty" json:"profile,omitempty"`
+	ProfileRules []ProfileRule          `yaml:"profileRules,omitempty" json:"profileRules,omitempty"`
+	Env          map[string]string      `yaml:"env,omitempty" json:"env,omitempty"`
+	Parameters   map[string]interface{} `yaml:"parameters,omitempty" json:"parameters,omitempty"`
+}
+
+// ProfileRule is a conditional override that selects a different execution profile
+// when the specified condition matches. Rules are evaluated in order (first-match-wins).
+type ProfileRule struct {
+	Profile string          `yaml:"profile" json:"profile"`
+	When    ProfileRuleWhen `yaml:"when" json:"when"`
+}
+
+// ProfileRuleWhen defines the condition for a profile rule.
+type ProfileRuleWhen struct {
+	TriggerRef string `yaml:"triggerRef" json:"triggerRef"`
 }
 
 // UnmarshalYAML supports both string and object forms for environment subscriptions.
@@ -226,6 +239,7 @@ type ComponentInstance struct {
 	ProfileRef    string
 	ProfileName   string
 	ProfileSource string
+	ProfileRuleTriggerRef string
 }
 
 // ResolvedDependency is a dependency with resolved target component

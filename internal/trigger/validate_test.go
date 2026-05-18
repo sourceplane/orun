@@ -219,3 +219,183 @@ func TestFormatErrors(t *testing.T) {
 		t.Fatal("expected nil for empty errors")
 	}
 }
+
+func TestValidateProfileRules_Valid(t *testing.T) {
+	intent := &model.Intent{
+		Automation: model.AutomationConfig{
+			TriggerBindings: map[string]model.TriggerBinding{
+				"github-push-main": {On: model.TriggerMatch{Provider: "github", Event: "push"}},
+			},
+		},
+		Components: []model.Component{
+			{
+				Name: "infra",
+				Type: "terraform",
+				Subscribe: model.ComponentSubscribe{
+					Environments: []model.EnvironmentSubscription{
+						{
+							Name:    "dev",
+							Profile: "plan-only",
+							ProfileRules: []model.ProfileRule{
+								{Profile: "apply", When: model.ProfileRuleWhen{TriggerRef: "github-push-main"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	errs := ValidateProfileRules(intent)
+	if len(errs) > 0 {
+		t.Errorf("expected no errors, got %v", errs)
+	}
+}
+
+func TestValidateProfileRules_MissingFallbackProfile(t *testing.T) {
+	intent := &model.Intent{
+		Automation: model.AutomationConfig{
+			TriggerBindings: map[string]model.TriggerBinding{
+				"github-push-main": {On: model.TriggerMatch{Provider: "github", Event: "push"}},
+			},
+		},
+		Components: []model.Component{
+			{
+				Name: "infra",
+				Type: "terraform",
+				Subscribe: model.ComponentSubscribe{
+					Environments: []model.EnvironmentSubscription{
+						{
+							Name: "dev",
+							ProfileRules: []model.ProfileRule{
+								{Profile: "apply", When: model.ProfileRuleWhen{TriggerRef: "github-push-main"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	errs := ValidateProfileRules(intent)
+	if len(errs) == 0 {
+		t.Fatal("expected error for missing fallback profile")
+	}
+}
+
+func TestValidateProfileRules_UnknownTriggerRef(t *testing.T) {
+	intent := &model.Intent{
+		Automation: model.AutomationConfig{
+			TriggerBindings: map[string]model.TriggerBinding{
+				"github-push-main": {On: model.TriggerMatch{Provider: "github", Event: "push"}},
+			},
+		},
+		Components: []model.Component{
+			{
+				Name: "infra",
+				Type: "terraform",
+				Subscribe: model.ComponentSubscribe{
+					Environments: []model.EnvironmentSubscription{
+						{
+							Name:    "dev",
+							Profile: "plan-only",
+							ProfileRules: []model.ProfileRule{
+								{Profile: "apply", When: model.ProfileRuleWhen{TriggerRef: "nonexistent"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	errs := ValidateProfileRules(intent)
+	if len(errs) == 0 {
+		t.Fatal("expected error for unknown triggerRef")
+	}
+}
+
+func TestValidateProfileRules_EmptyRuleProfile(t *testing.T) {
+	intent := &model.Intent{
+		Automation: model.AutomationConfig{
+			TriggerBindings: map[string]model.TriggerBinding{
+				"github-push-main": {On: model.TriggerMatch{Provider: "github", Event: "push"}},
+			},
+		},
+		Components: []model.Component{
+			{
+				Name: "infra",
+				Type: "terraform",
+				Subscribe: model.ComponentSubscribe{
+					Environments: []model.EnvironmentSubscription{
+						{
+							Name:    "dev",
+							Profile: "plan-only",
+							ProfileRules: []model.ProfileRule{
+								{Profile: "", When: model.ProfileRuleWhen{TriggerRef: "github-push-main"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	errs := ValidateProfileRules(intent)
+	if len(errs) == 0 {
+		t.Fatal("expected error for empty rule profile")
+	}
+}
+
+func TestValidateProfileRules_EmptyTriggerRef(t *testing.T) {
+	intent := &model.Intent{
+		Automation: model.AutomationConfig{
+			TriggerBindings: map[string]model.TriggerBinding{
+				"github-push-main": {On: model.TriggerMatch{Provider: "github", Event: "push"}},
+			},
+		},
+		Components: []model.Component{
+			{
+				Name: "infra",
+				Type: "terraform",
+				Subscribe: model.ComponentSubscribe{
+					Environments: []model.EnvironmentSubscription{
+						{
+							Name:    "dev",
+							Profile: "plan-only",
+							ProfileRules: []model.ProfileRule{
+								{Profile: "apply", When: model.ProfileRuleWhen{TriggerRef: ""}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	errs := ValidateProfileRules(intent)
+	if len(errs) == 0 {
+		t.Fatal("expected error for empty triggerRef")
+	}
+}
+
+func TestValidateProfileRules_NoRulesNoError(t *testing.T) {
+	intent := &model.Intent{
+		Components: []model.Component{
+			{
+				Name: "infra",
+				Type: "terraform",
+				Subscribe: model.ComponentSubscribe{
+					Environments: []model.EnvironmentSubscription{
+						{Name: "dev", Profile: "plan-only"},
+					},
+				},
+			},
+		},
+	}
+
+	errs := ValidateProfileRules(intent)
+	if len(errs) > 0 {
+		t.Errorf("expected no errors for subscription without profileRules, got %v", errs)
+	}
+}

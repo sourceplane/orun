@@ -112,7 +112,11 @@ func (pv *PlanViewer) ViewDAG() string {
 
 			profileTag := ""
 			if len(jobs) > 0 && jobs[0].Profile != "" {
-				profileTag = fmt.Sprintf(" [%s]", jobs[0].Profile)
+				tag := jobs[0].Profile
+				if jobs[0].ProfileRuleTriggerRef != "" {
+					tag += " via " + jobs[0].ProfileRuleTriggerRef
+				}
+				profileTag = fmt.Sprintf(" [%s]", tag)
 			}
 			sb.WriteString(fmt.Sprintf("%s%s%s\n", envPrefix, env, profileTag))
 

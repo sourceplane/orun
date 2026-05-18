@@ -106,6 +106,7 @@ type JobInstance struct {
 	Composition   string
 	Profile       string
 	ProfileSource string
+	ProfileRuleTriggerRef string
 	RunsOn        string
 	Path          string
 	Steps         []RenderedStep

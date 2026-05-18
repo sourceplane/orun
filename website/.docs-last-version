@@ -1,6 +1,6 @@
 # Docs last updated for version
 
-v1.31.0
+v2.1.0
 
 ## How to use this file
 
@@ -8,19 +8,22 @@ When updating docs next time, run:
 
 ```bash
 # Get all changes since docs were last updated
-git log v1.31.0..HEAD --oneline
+git log v2.1.0..HEAD --oneline
 ```
 
 Then update this file to the new version after the docs PR is merged.
 
 ## What was covered in this update
 
-- Root-level `env:` on intent.yaml for global platform env vars
-- Root-level `env:` on component.yaml for component-wide env vars
-- 4-layer env merge precedence: intent root → environment → component root → subscription
-- ORUN_* prefix validation: user-defined env keys cannot use reserved prefix
-- Deterministic alphabetical ordering of env vars in plan output
-- Updated: concepts/runtime-environment.md (full rewrite for 4-layer model)
-- Updated: concepts/intent-model.md (root env + component env examples)
-- Updated: reference/environment-variables.md (4 declaration levels)
-- Updated: reference/configuration.md (root env examples)
+- Profile rules: conditional profile selection via `profileRules` on subscriptions
+- Template context: namespaced `.orun`, `.parameters`, `.env` (breaking: flat context removed)
+- Parameters model: `inputs`→`parameters`, `defaults`→`parameterDefaults` (breaking)
+- `PlanJob.config` removed (breaking)
+- ORUN_ENV as portable alias for GITHUB_ENV
+- Intent presets: stack-published reusable intent scaffolding
+- Environment promotion dependencies
+- Updated: concepts/profile-rules.md (new)
+- Updated: concepts/intent-model.md (profileRules reference)
+- Updated: reference/configuration.md (profileRules syntax)
+- Updated: compositions/composition-contract.md (v2.0.0 breaking changes)
+- Updated: sidebars.js (added profile-rules, intent-presets)

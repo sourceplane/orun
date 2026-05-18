@@ -93,6 +93,10 @@ func generatePlan() error {
 		return fmt.Errorf("component validation failed: %w", err)
 	}
 
+	if errs := trigger.ValidateProfileRules(intent); len(errs) > 0 {
+		return trigger.FormatErrors(errs)
+	}
+
 	// Resolve trigger context and determine active environments
 	triggerCtx, err := buildTriggerContext()
 	if err != nil {
@@ -138,6 +142,9 @@ func generatePlan() error {
 		fmt.Println("□ Expanding (env × component)...")
 	}
 	expander := expand.NewExpander(normalized).WithRegistry(compositionRegistry)
+	if triggerResolution != nil {
+		expander = expander.WithMatchedTriggers(triggerResolution.MatchedTriggerNames)
+	}
 	instances, err := expander.Expand()
 	if err != nil {
 		return fmt.Errorf("failed to expand intent: %w", err)
@@ -448,6 +455,10 @@ func validateFiles() error {
 	_, err = normalize.NormalizeIntent(intent)
 	if err != nil {
 		return fmt.Errorf("normalization failed: %w", err)
+	}
+
+	if errs := trigger.ValidateProfileRules(intent); len(errs) > 0 {
+		return trigger.FormatErrors(errs)
 	}
 
 	fmt.Println("✓ All validation passed")

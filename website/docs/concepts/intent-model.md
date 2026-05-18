@@ -200,6 +200,8 @@ spec:
 
 Root-level `env` on a component applies to all subscribed environments. Subscription-level `env` overrides component root env for that specific environment. See [runtime environment](./runtime-environment.md) for the full merge model.
 
+Subscriptions can also declare `profileRules` for conditional profile selection based on triggers. See [profile rules](./profile-rules.md) for details.
+
 ## Merge model
 
 At compile time, `orun` merges configuration in a stable order from lowest to highest precedence:

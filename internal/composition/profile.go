@@ -11,7 +11,66 @@ import (
 type ResolvedProfile struct {
 	Ref    string // e.g. "terraform.verify"
 	Name   string // e.g. "verify"
-	Source string // "subscription", "composition-default", or "legacy-none"
+	Source string // "subscription", "subscription-rule", "composition-default", or "legacy-none"
+}
+
+// MatchedProfileRule captures which rule was selected for plan traceability.
+type MatchedProfileRule struct {
+	RuleIndex  int
+	Profile    string
+	TriggerRef string
+}
+
+// ResolveProfileWithRules evaluates profileRules against matched triggers,
+// then delegates to ResolveProfileRef with the effective profile.
+func ResolveProfileWithRules(
+	componentType string,
+	composition *Composition,
+	subscription *model.EnvironmentSubscription,
+	matchedTriggers []string,
+) (ResolvedProfile, *MatchedProfileRule, error) {
+	if subscription == nil {
+		resolved, err := ResolveProfileRef(componentType, composition, subscription)
+		return resolved, nil, err
+	}
+
+	effectiveProfile, matchedRule := evaluateProfileRules(subscription, matchedTriggers)
+
+	if effectiveProfile != "" {
+		overridden := *subscription
+		overridden.Profile = effectiveProfile
+		resolved, err := ResolveProfileRef(componentType, composition, &overridden)
+		if err != nil {
+			return ResolvedProfile{}, nil, err
+		}
+		resolved.Source = "subscription-rule"
+		return resolved, matchedRule, nil
+	}
+
+	resolved, err := ResolveProfileRef(componentType, composition, subscription)
+	return resolved, nil, err
+}
+
+func evaluateProfileRules(sub *model.EnvironmentSubscription, matchedTriggers []string) (string, *MatchedProfileRule) {
+	if len(sub.ProfileRules) == 0 || len(matchedTriggers) == 0 {
+		return "", nil
+	}
+
+	triggerSet := make(map[string]struct{}, len(matchedTriggers))
+	for _, t := range matchedTriggers {
+		triggerSet[t] = struct{}{}
+	}
+
+	for i, rule := range sub.ProfileRules {
+		if _, ok := triggerSet[rule.When.TriggerRef]; ok {
+			return rule.Profile, &MatchedProfileRule{
+				RuleIndex:  i,
+				Profile:    rule.Profile,
+				TriggerRef: rule.When.TriggerRef,
+			}
+		}
+	}
+	return "", nil
 }
 
 // ResolveProfileRef resolves a profile reference for a component/environment subscription

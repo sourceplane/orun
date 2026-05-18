@@ -64,6 +64,7 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 					Composition:   compInst.Type,
 					Profile:       compInst.ProfileRef,
 					ProfileSource: compInst.ProfileSource,
+					ProfileRuleTriggerRef: compInst.ProfileRuleTriggerRef,
 					RunsOn:        jobEntry.job.RunsOn,
 					Path:          compInst.Path,
 					Timeout:       jobEntry.job.Timeout,

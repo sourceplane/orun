@@ -79,6 +79,7 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 			Composition:   job.Composition,
 			Profile:       job.Profile,
 			ProfileSource: job.ProfileSource,
+			ProfileRuleTriggerRef: job.ProfileRuleTriggerRef,
 			JobRegistry:   registryName,
 			Job:           job.Name, // The specific job name from the registry
 			RunsOn:        job.RunsOn,

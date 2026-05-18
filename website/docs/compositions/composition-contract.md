@@ -308,3 +308,17 @@ Runtime environment variables declared in intent or component env blocks:
 Jobs can declare: `runsOn`, `timeout`, `retries`, `labels`, `capabilities`, `steps`.
 
 Steps can declare: `run` or `use`, `capability`, `phase`, `order`, `with`, `env`, `shell`, `working-directory`, `timeout`, `retry`, `onFailure`.
+
+## Breaking changes (v2.0.0)
+
+**Flat template context removed.** Prior to v2.0.0, step templates could use flat context variables like `{{ .component }}`, `{{ .environment }}`, `{{ .type }}`. These have been removed. All templates must use the namespaced form:
+
+| Old (removed) | New (required) |
+|------|------|
+| `{{ .component }}` | `{{ .orun.component.name }}` |
+| `{{ .environment }}` | `{{ .orun.environment.name }}` |
+| `{{ .type }}` | `{{ .orun.component.type }}` |
+
+**`PlanJob.config` removed.** The `config` field on plan job output has been removed. Use `parameters` instead.
+
+**`inputs`/`defaults` renamed.** Component `inputs` is now `parameters`. Intent `defaults` is now `parameterDefaults`. The old names are no longer accepted.

@@ -73,6 +73,24 @@ spec:
 
 Components carry type-specific inputs, root-level environment variables, labels, overrides, and dependency declarations. Root-level `env` applies across all subscribed environments and can be overridden per subscription.
 
+### Conditional profile selection
+
+Use `profileRules` to select different execution profiles depending on which trigger fires:
+
+```yaml
+spec:
+  subscribe:
+    environments:
+      - name: dev-preview
+        profile: plan-only
+        profileRules:
+          - profile: apply
+            when:
+              triggerRef: github-push-main
+```
+
+The `profile` field is the default fallback. Rules are evaluated in order (first-match-wins). See [profile rules](../concepts/profile-rules.md) for full details.
+
 ## Composition sources
 
 Declare composition sources in the intent and plan directly against that intent:

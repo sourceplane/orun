@@ -80,6 +80,7 @@ type PlanJob struct {
 	Composition   string                 `json:"composition,omitempty" yaml:"composition,omitempty"`
 	Profile       string                 `json:"profile,omitempty" yaml:"profile,omitempty"`
 	ProfileSource string                 `json:"profileSource,omitempty" yaml:"profileSource,omitempty"`
+	ProfileRuleTriggerRef string         `json:"profileRuleTriggerRef,omitempty" yaml:"profileRuleTriggerRef,omitempty"`
 	JobRegistry   string                 `json:"jobRegistry,omitempty" yaml:"jobRegistry,omitempty"` // Name of the JobRegistry used
 	Job           string                 `json:"job,omitempty" yaml:"job,omitempty"`                 // Specific job from registry
 	RunsOn        string                 `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`

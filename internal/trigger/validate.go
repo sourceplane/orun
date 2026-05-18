@@ -101,6 +101,55 @@ func ValidateTriggerContext(intent *model.Intent, ctx model.TriggerContext) erro
 	return nil
 }
 
+// ValidateProfileRules checks that profileRules in subscriptions reference
+// existing trigger bindings and have required fields.
+func ValidateProfileRules(intent *model.Intent) []error {
+	var errs []error
+
+	bindingNames := make(map[string]struct{})
+	for name := range intent.Automation.TriggerBindings {
+		bindingNames[name] = struct{}{}
+	}
+
+	for _, comp := range intent.Components {
+		for _, sub := range comp.Subscribe.Environments {
+			if len(sub.ProfileRules) == 0 {
+				continue
+			}
+
+			if sub.Profile == "" {
+				errs = append(errs, fmt.Errorf(
+					"component %q subscription %q: profile is required when profileRules is defined",
+					comp.Name, sub.Name,
+				))
+			}
+
+			for i, rule := range sub.ProfileRules {
+				if rule.Profile == "" {
+					errs = append(errs, fmt.Errorf(
+						"component %q subscription %q: profileRules[%d].profile is required",
+						comp.Name, sub.Name, i,
+					))
+				}
+
+				if rule.When.TriggerRef == "" {
+					errs = append(errs, fmt.Errorf(
+						"component %q subscription %q: profileRules[%d].when.triggerRef is required",
+						comp.Name, sub.Name, i,
+					))
+				} else if _, exists := bindingNames[rule.When.TriggerRef]; !exists {
+					errs = append(errs, fmt.Errorf(
+						"component %q subscription %q: profileRules[%d].when.triggerRef %q does not exist in automation.triggerBindings",
+						comp.Name, sub.Name, i, rule.When.TriggerRef,
+					))
+				}
+			}
+		}
+	}
+
+	return errs
+}
+
 // FormatErrors joins multiple validation errors into a single message.
 func FormatErrors(errs []error) error {
 	if len(errs) == 0 {

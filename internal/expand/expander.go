@@ -12,9 +12,10 @@ import (
 
 // Expander handles environment × component expansion and merging
 type Expander struct {
-	normalized *model.NormalizedIntent
-	groups     map[string]model.Group
-	registry   *compositionpkg.Registry
+	normalized      *model.NormalizedIntent
+	groups          map[string]model.Group
+	registry        *compositionpkg.Registry
+	matchedTriggers []string
 }
 
 // NewExpander creates a new expander
@@ -28,6 +29,12 @@ func NewExpander(normalized *model.NormalizedIntent) *Expander {
 // WithRegistry sets the composition registry for profile resolution.
 func (e *Expander) WithRegistry(registry *compositionpkg.Registry) *Expander {
 	e.registry = registry
+	return e
+}
+
+// WithMatchedTriggers sets the trigger binding names that fired, enabling profileRules evaluation.
+func (e *Expander) WithMatchedTriggers(triggers []string) *Expander {
+	e.matchedTriggers = triggers
 	return e
 }
 
@@ -415,7 +422,7 @@ func (e *Expander) resolveProfile(instance *model.ComponentInstance, comp model.
 
 	subscription := comp.Subscribe.FindSubscription(envName)
 
-	resolved, err := compositionpkg.ResolveProfileRef(comp.Type, composition, subscription)
+	resolved, matchedRule, err := compositionpkg.ResolveProfileWithRules(comp.Type, composition, subscription, e.matchedTriggers)
 	if err != nil {
 		return fmt.Errorf("component %s environment %s: %w", comp.Name, envName, err)
 	}
@@ -423,5 +430,9 @@ func (e *Expander) resolveProfile(instance *model.ComponentInstance, comp model.
 	instance.ProfileRef = resolved.Ref
 	instance.ProfileName = resolved.Name
 	instance.ProfileSource = resolved.Source
+
+	if matchedRule != nil {
+		instance.ProfileRuleTriggerRef = matchedRule.TriggerRef
+	}
 	return nil
 }
