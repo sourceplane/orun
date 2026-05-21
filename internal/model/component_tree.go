@@ -40,6 +40,7 @@ type ComponentTreeComponent struct {
 	Overrides    ComponentOverrides     `yaml:"overrides,omitempty" json:"overrides,omitempty"`
 	Labels       map[string]string      `yaml:"labels,omitempty" json:"labels,omitempty"`
 	DependsOn    []Dependency           `yaml:"dependsOn,omitempty" json:"dependsOn,omitempty"`
+	Change       ComponentChange        `yaml:"change,omitempty" json:"change,omitempty"`
 	Source       string                 `yaml:"source" json:"source"`
 	SourcePath   string                 `yaml:"sourcePath,omitempty" json:"sourcePath,omitempty"`
 	FileSize     int64                  `yaml:"fileSize,omitempty" json:"fileSize,omitempty"`
@@ -59,6 +60,7 @@ func (entry ComponentTreeComponent) ToComponent() Component {
 		Overrides:  entry.Overrides,
 		Labels:     entry.Labels,
 		DependsOn:  entry.DependsOn,
+		Change:     entry.Change,
 		SourcePath: entry.SourcePath,
 	}
 }
@@ -76,6 +78,7 @@ func FromComponent(component Component, source string) ComponentTreeComponent {
 		Overrides:  component.Overrides,
 		Labels:     component.Labels,
 		DependsOn:  component.DependsOn,
+		Change:     component.Change,
 		Source:     source,
 		SourcePath: component.SourcePath,
 	}

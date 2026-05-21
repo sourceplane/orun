@@ -76,6 +76,13 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 			return nil, err
 		}
 
+		// Validate change watches
+		for _, w := range comp.Change.Watches {
+			if !isValidWatchSection(w) {
+				return nil, fmt.Errorf("component %s: invalid change.watches value %q (valid: %s)", comp.Name, w, strings.Join(model.ValidWatchSections, ", "))
+			}
+		}
+
 		// Validate subscription env
 		for _, sub := range comp.Subscribe.Environments {
 			if err := validateEnvKeys(sub.Env, fmt.Sprintf("component %s subscription %s env", comp.Name, sub.Name)); err != nil {
@@ -198,6 +205,15 @@ func matchesWildcard(pattern, name string) bool {
 		return strings.HasPrefix(name, prefix)
 	}
 	return pattern == name
+}
+
+func isValidWatchSection(s string) bool {
+	for _, v := range model.ValidWatchSections {
+		if s == v {
+			return true
+		}
+	}
+	return false
 }
 
 // detectPromotionCycles checks for cycles in environment promotion dependencies using DFS.

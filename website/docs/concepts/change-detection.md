@@ -22,6 +22,7 @@ Use those commands when you want to focus on the parts of the platform graph tha
 | `--files <path,...>` | Override git diff resolution with an explicit file list |
 | `--uncommitted` | Scope detection to uncommitted changes |
 | `--untracked` | Scope detection to untracked files |
+| `--intent-impact <mode>` | How global intent changes affect components (`watch`/`all`/`none`, default: `watch`) |
 | `--explain` | Print how `--changed` resolved its base and head refs (useful for debugging) |
 
 ## CI auto-detection
@@ -108,12 +109,12 @@ When `intent.yaml` itself is in the changed file set, `orun` performs a **semant
 
 | What changed in intent.yaml | Effect |
 | --- | --- |
-| Top-level `env`, `environments`, `groups`, `discovery`, `compositions`, `automation`, or `execution` | All components marked changed (safe fallback) |
+| Top-level `env`, `environments`, `groups`, `discovery`, `compositions`, `automation`, or `execution` | Only components with matching `change.watches` are marked changed |
 | Only entries under top-level `components: []` | Only the added/modified/removed inline component names are marked changed |
 | Formatting, comments, or component reordering without content change | No components marked changed from intent |
-| Both `components` and another section | All components marked changed |
+| Both `components` and another section | Global sections use watch matching; inline component changes are always direct |
 
-This means a pull request that only adds or modifies a single inline component definition in `intent.yaml` will produce a scoped plan containing just that component — instead of rebuilding the entire platform graph.
+By default, a global intent section change does **not** mark any component as changed unless that component explicitly opts in with [`spec.change.watches`](./change-watches.md). Use `--intent-impact=all` for pre-v2.3 behavior where all components are marked.
 
 The `--explain` flag shows the intent semantic diff reasoning:
 
@@ -121,9 +122,11 @@ The `--explain` flag shows the intent semantic diff reasoning:
 orun plan --changed --explain
 # explain: intent.yaml semantic diff
 #   intent changed: yes
-#   diff mode: components
-#   reason: only inline components changed
-#   added: bootstrap
+#   diff mode: global
+#   changed sections: environments
+#   intent-impact: watch
+#   matched watches:
+#     - api-platform (watches: environments, groups)
 ```
 
 If the base or head intent cannot be parsed (e.g. the file is new), `orun` falls back to marking all components changed and surfaces a warning in `--explain` output.

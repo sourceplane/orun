@@ -934,12 +934,41 @@ func semanticIntentDiff(options git.ChangeOptions, intentPath string) git.Intent
 	return git.DiffIntent(baseYAML, headYAML)
 }
 
-func printIntentDiffExplanation(result git.IntentDiffResult) {
+func printIntentDiffExplanation(result git.IntentDiffResult, normalized *model.NormalizedIntent) {
 	color := ui.ColorEnabledForWriter(os.Stderr)
 	fmt.Fprintf(os.Stderr, "\n%s intent.yaml semantic diff\n", ui.Bold(color, "explain:"))
 	fmt.Fprintf(os.Stderr, "  intent changed: yes\n")
 	fmt.Fprintf(os.Stderr, "  diff mode: %s\n", result.Mode)
 	fmt.Fprintf(os.Stderr, "  reason: %s\n", result.Reason)
+	if len(result.ChangedSections) > 0 {
+		fmt.Fprintf(os.Stderr, "  changed sections: %s\n", strings.Join(result.ChangedSections, ", "))
+	}
+	if result.Mode == git.IntentDiffGlobal {
+		fmt.Fprintf(os.Stderr, "  intent-impact: %s\n", intentImpact)
+		if intentImpact == "watch" && normalized != nil {
+			var matched, unmatched []string
+			for _, comp := range normalized.Components {
+				if watchesIntersect(comp.Change.Watches, result.ChangedSections) {
+					matched = append(matched, comp.Name)
+				} else {
+					unmatched = append(unmatched, comp.Name)
+				}
+			}
+			if len(matched) > 0 {
+				fmt.Fprintf(os.Stderr, "  matched watches:\n")
+				for _, name := range matched {
+					comp := normalized.Components[name]
+					fmt.Fprintf(os.Stderr, "    - %s (watches: %s)\n", name, strings.Join(comp.Change.Watches, ", "))
+				}
+			}
+			if len(unmatched) > 0 {
+				fmt.Fprintf(os.Stderr, "  unmatched:\n")
+				for _, name := range unmatched {
+					fmt.Fprintf(os.Stderr, "    - %s (no matching watches)\n", name)
+				}
+			}
+		}
+	}
 	if len(result.Added) > 0 {
 		fmt.Fprintf(os.Stderr, "  added: %s\n", strings.Join(result.Added, ", "))
 	}
@@ -950,6 +979,17 @@ func printIntentDiffExplanation(result git.IntentDiffResult) {
 		fmt.Fprintf(os.Stderr, "  removed: %s\n", strings.Join(result.Removed, ", "))
 	}
 	fmt.Fprintln(os.Stderr)
+}
+
+func watchesIntersect(watches, sections []string) bool {
+	for _, w := range watches {
+		for _, s := range sections {
+			if w == s {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isPathChanged(changedFiles map[string]struct{}, path string) bool {
@@ -985,14 +1025,23 @@ func collectChangedComponents(
 	if isIntentPathChanged(changedFiles, intentPath) {
 		diffResult := semanticIntentDiff(changeOptions, intentPath)
 		if explainChanged {
-			printIntentDiffExplanation(diffResult)
+			printIntentDiffExplanation(diffResult, normalized)
 		}
 		switch diffResult.Mode {
 		case git.IntentDiffGlobal:
-			for _, comp := range normalized.Components {
-				changedComponents[comp.Name] = true
+			if intentImpact == "all" {
+				for _, comp := range normalized.Components {
+					changedComponents[comp.Name] = true
+				}
+				return changedComponents
 			}
-			return changedComponents
+			if intentImpact != "none" {
+				for _, comp := range normalized.Components {
+					if watchesIntersect(comp.Change.Watches, diffResult.ChangedSections) {
+						changedComponents[comp.Name] = true
+					}
+				}
+			}
 		case git.IntentDiffComponents:
 			for _, name := range diffResult.Added {
 				changedComponents[name] = true

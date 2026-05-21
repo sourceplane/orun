@@ -39,6 +39,7 @@ func registerPlanCommand(root *cobra.Command) {
 	planCmd.Flags().BoolVar(&uncommitted, "uncommitted", false, "Use only uncommitted changes")
 	planCmd.Flags().BoolVar(&untracked, "untracked", false, "Use only untracked files")
 	planCmd.Flags().BoolVar(&explainChanged, "explain", false, "Show how --changed refs were resolved")
+	planCmd.Flags().StringVar(&intentImpact, "intent-impact", "watch", "How global intent changes affect components (all/watch/none)")
 	planCmd.Flags().StringVar(&triggerName, "trigger", "", "Named trigger binding for environment activation")
 	planCmd.Flags().StringVar(&fromCI, "from-ci", "", "CI provider for event normalization (e.g. github)")
 	planCmd.Flags().StringVar(&eventFile, "event-file", "", "Path to provider event JSON file")

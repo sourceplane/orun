@@ -44,7 +44,11 @@ func TestCollectChangedComponents_ComponentManifestChangeOnlyMatchesOwningCompon
 	}
 }
 
-func TestCollectChangedComponents_IntentChangeMarksAllComponents(t *testing.T) {
+func TestCollectChangedComponents_IntentChangeMarksAllComponents_IntentImpactAll(t *testing.T) {
+	oldImpact := intentImpact
+	intentImpact = "all"
+	defer func() { intentImpact = oldImpact }()
+
 	normalized := &model.NormalizedIntent{
 		Components: map[string]model.Component{
 			"docs-site-direct-upload": {
@@ -65,7 +69,95 @@ func TestCollectChangedComponents_IntentChangeMarksAllComponents(t *testing.T) {
 	}, "intent.yaml", git.ChangeOptions{})
 
 	if !changed["docs-site-direct-upload"] || !changed["api-edge-worker"] {
-		t.Fatal("expected intent.yaml change to mark all components changed")
+		t.Fatal("expected intent.yaml change to mark all components changed with intent-impact=all")
+	}
+}
+
+func TestCollectChangedComponents_WatchMode_NoWatchesNotChanged(t *testing.T) {
+	oldImpact := intentImpact
+	intentImpact = "watch"
+	defer func() { intentImpact = oldImpact }()
+
+	normalized := &model.NormalizedIntent{
+		Components: map[string]model.Component{
+			"web": {Name: "web", Path: "apps/web", SourcePath: "apps/web/component.yaml"},
+			"api": {Name: "api", Path: "apps/api", SourcePath: "apps/api/component.yaml"},
+		},
+	}
+
+	changed := collectChangedComponents(normalized, nil, map[string]struct{}{
+		"nested/intent.yaml": {},
+	}, "intent.yaml", git.ChangeOptions{})
+
+	if changed["web"] || changed["api"] {
+		t.Fatal("expected no components marked changed when they have no watches (watch mode)")
+	}
+}
+
+func TestCollectChangedComponents_WatchMode_MatchesIntentSections(t *testing.T) {
+	oldImpact := intentImpact
+	intentImpact = "watch"
+	defer func() { intentImpact = oldImpact }()
+
+	normalized := &model.NormalizedIntent{
+		Components: map[string]model.Component{
+			"web": {
+				Name:       "web",
+				Path:       "apps/web",
+				SourcePath: "apps/web/component.yaml",
+				Change:     model.ComponentChange{Watches: []string{"environments", "groups"}},
+			},
+			"api": {
+				Name:       "api",
+				Path:       "apps/api",
+				SourcePath: "apps/api/component.yaml",
+			},
+			"worker": {
+				Name:       "worker",
+				Path:       "apps/worker",
+				SourcePath: "apps/worker/component.yaml",
+				Change:     model.ComponentChange{Watches: []string{"env"}},
+			},
+		},
+	}
+
+	// Simulate --files fallback (ChangedSections can't be determined, global fallback)
+	changed := collectChangedComponents(normalized, nil, map[string]struct{}{
+		"intent.yaml": {},
+	}, "intent.yaml", git.ChangeOptions{Files: []string{"intent.yaml"}})
+
+	// With --files, semantic diff falls back to global with empty ChangedSections.
+	// watchesIntersect with empty sections returns false, so no watch matches.
+	// But intentImpact="watch" with --files fallback: ChangedSections is empty
+	// so no components should match.
+	if changed["api"] {
+		t.Fatal("api has no watches and should not be changed")
+	}
+}
+
+func TestCollectChangedComponents_IntentImpactNone(t *testing.T) {
+	oldImpact := intentImpact
+	intentImpact = "none"
+	defer func() { intentImpact = oldImpact }()
+
+	normalized := &model.NormalizedIntent{
+		Components: map[string]model.Component{
+			"web": {
+				Name:       "web",
+				Path:       "apps/web",
+				SourcePath: "apps/web/component.yaml",
+				Change:     model.ComponentChange{Watches: []string{"environments"}},
+			},
+			"api": {Name: "api", Path: "apps/api", SourcePath: "apps/api/component.yaml"},
+		},
+	}
+
+	changed := collectChangedComponents(normalized, nil, map[string]struct{}{
+		"nested/intent.yaml": {},
+	}, "intent.yaml", git.ChangeOptions{})
+
+	if changed["web"] || changed["api"] {
+		t.Fatal("expected no components marked changed with intent-impact=none")
 	}
 }
 
@@ -104,27 +196,6 @@ func TestCollectChangedComponents_AbsoluteIntentPathMatchesRelativeChangedFiles(
 	}
 }
 
-func TestCollectChangedComponents_IntentSemanticDiff_InlineComponentOnly(t *testing.T) {
-	// When intent.yaml change is detected but semantic diff says only components changed,
-	// only the named components should be marked. We test this by passing Files option
-	// which forces fallback to Global (safe behavior test).
-	normalized := &model.NormalizedIntent{
-		Components: map[string]model.Component{
-			"web": {Name: "web", Path: "apps/web", SourcePath: "apps/web/component.yaml"},
-			"api": {Name: "api", Path: "apps/api", SourcePath: "apps/api/component.yaml"},
-		},
-	}
-
-	// With --files, semantic diff falls back to global (cannot access git refs)
-	changed := collectChangedComponents(normalized, nil, map[string]struct{}{
-		"intent.yaml": {},
-	}, "intent.yaml", git.ChangeOptions{Files: []string{"intent.yaml"}})
-
-	if !changed["web"] || !changed["api"] {
-		t.Fatal("expected all components marked when using --files (global fallback)")
-	}
-}
-
 func TestCollectChangedComponents_DiscoveredAndInlineUnion(t *testing.T) {
 	// Even when intent marks some components, discovered component path changes
 	// should still be detected via the normal path-based logic.
@@ -158,5 +229,30 @@ func TestCollectChangedComponents_DiscoveredAndInlineUnion(t *testing.T) {
 	}
 	if changed["worker"] {
 		t.Fatal("worker should not be changed")
+	}
+}
+
+func TestWatchesIntersect(t *testing.T) {
+	tests := []struct {
+		name     string
+		watches  []string
+		sections []string
+		want     bool
+	}{
+		{"nil watches", nil, []string{"environments"}, false},
+		{"empty watches", []string{}, []string{"environments"}, false},
+		{"nil sections", []string{"environments"}, nil, false},
+		{"match single", []string{"environments"}, []string{"environments", "groups"}, true},
+		{"no match", []string{"env"}, []string{"environments", "groups"}, false},
+		{"match multiple", []string{"environments", "groups"}, []string{"groups"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := watchesIntersect(tt.watches, tt.sections)
+			if got != tt.want {
+				t.Fatalf("watchesIntersect(%v, %v) = %v, want %v", tt.watches, tt.sections, got, tt.want)
+			}
+		})
 	}
 }

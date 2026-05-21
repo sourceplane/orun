@@ -321,3 +321,52 @@ func TestPromotionDetectsCycle(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestValidateRejectsInvalidWatchSection(t *testing.T) {
+	intent := &model.Intent{
+		Metadata: model.Metadata{Name: "test"},
+		Environments: map[string]model.Environment{
+			"dev": {},
+		},
+		Components: []model.Component{
+			{
+				Name: "api",
+				Type: "terraform",
+				Change: model.ComponentChange{
+					Watches: []string{"environments", "invalid-section"},
+				},
+			},
+		},
+	}
+
+	_, err := NormalizeIntent(intent)
+	if err == nil {
+		t.Fatal("expected error for invalid watch section")
+	}
+	if !strings.Contains(err.Error(), "invalid change.watches value") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateAcceptsValidWatchSections(t *testing.T) {
+	intent := &model.Intent{
+		Metadata: model.Metadata{Name: "test"},
+		Environments: map[string]model.Environment{
+			"dev": {},
+		},
+		Components: []model.Component{
+			{
+				Name: "api",
+				Type: "terraform",
+				Change: model.ComponentChange{
+					Watches: []string{"environments", "groups", "env"},
+				},
+			},
+		},
+	}
+
+	_, err := NormalizeIntent(intent)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

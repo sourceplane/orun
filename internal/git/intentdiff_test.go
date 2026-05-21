@@ -68,6 +68,9 @@ env:
 	if result.Mode != IntentDiffGlobal {
 		t.Fatalf("expected Global for env change, got %s: %s", result.Mode, result.Reason)
 	}
+	if len(result.ChangedSections) != 1 || result.ChangedSections[0] != "env" {
+		t.Fatalf("expected ChangedSections=[env], got %v", result.ChangedSections)
+	}
 }
 
 func TestDiffIntent_EnvironmentsChanged(t *testing.T) {
@@ -93,6 +96,9 @@ components:
 	if result.Mode != IntentDiffGlobal {
 		t.Fatalf("expected Global for environments change, got %s: %s", result.Mode, result.Reason)
 	}
+	if len(result.ChangedSections) != 1 || result.ChangedSections[0] != "environments" {
+		t.Fatalf("expected ChangedSections=[environments], got %v", result.ChangedSections)
+	}
 }
 
 func TestDiffIntent_GroupsChanged(t *testing.T) {
@@ -115,6 +121,53 @@ components:
 	result := DiffIntent(base, head)
 	if result.Mode != IntentDiffGlobal {
 		t.Fatalf("expected Global for groups change, got %s: %s", result.Mode, result.Reason)
+	}
+	if len(result.ChangedSections) != 1 || result.ChangedSections[0] != "groups" {
+		t.Fatalf("expected ChangedSections=[groups], got %v", result.ChangedSections)
+	}
+}
+
+func TestDiffIntent_MultipleSectionsChanged(t *testing.T) {
+	base := []byte(`apiVersion: orun/v1
+environments:
+  dev:
+    path: dev
+groups:
+  infra:
+    path: infra
+env:
+  FOO: bar
+components:
+  - name: web
+    type: app
+`)
+	head := []byte(`apiVersion: orun/v1
+environments:
+  dev:
+    path: dev
+  staging:
+    path: staging
+groups:
+  infra:
+    path: infra2
+env:
+  FOO: baz
+components:
+  - name: web
+    type: app
+`)
+	result := DiffIntent(base, head)
+	if result.Mode != IntentDiffGlobal {
+		t.Fatalf("expected Global, got %s: %s", result.Mode, result.Reason)
+	}
+	if len(result.ChangedSections) != 3 {
+		t.Fatalf("expected 3 changed sections, got %v", result.ChangedSections)
+	}
+	expected := []string{"env", "environments", "groups"}
+	for i, s := range expected {
+		if result.ChangedSections[i] != s {
+			t.Fatalf("expected ChangedSections[%d]=%s, got %s", i, s, result.ChangedSections[i])
+		}
 	}
 }
 

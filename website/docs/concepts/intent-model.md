@@ -202,6 +202,8 @@ Root-level `env` on a component applies to all subscribed environments. Subscrip
 
 Subscriptions can also declare `profileRules` for conditional profile selection based on triggers. See [profile rules](./profile-rules.md) for details.
 
+Components can declare `change.watches` to opt into global intent change signals. Without watches, changing `environments` or `groups` in intent.yaml does not mark the component as changed during `--changed` planning. See [change watches](./change-watches.md) for details.
+
 ## Merge model
 
 At compile time, `orun` merges configuration in a stable order from lowest to highest precedence:

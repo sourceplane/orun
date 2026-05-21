@@ -15,6 +15,7 @@ const sidebars = {
         'concepts/plan-dag',
         'concepts/execution-model',
         'concepts/change-detection',
+        'concepts/change-watches',
         'concepts/context-discovery',
         'concepts/intent-presets',
       ],

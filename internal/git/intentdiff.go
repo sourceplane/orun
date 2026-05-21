@@ -21,11 +21,12 @@ const (
 
 // IntentDiffResult holds the outcome of a semantic intent comparison.
 type IntentDiffResult struct {
-	Mode     IntentDiffMode
-	Added    []string
-	Modified []string
-	Removed  []string
-	Reason   string
+	Mode            IntentDiffMode
+	ChangedSections []string
+	Added           []string
+	Modified        []string
+	Removed         []string
+	Reason          string
 }
 
 // DiffIntent compares two YAML-encoded intent documents and determines whether
@@ -45,13 +46,13 @@ func DiffIntent(baseYAML, headYAML []byte) IntentDiffResult {
 		}
 	}
 
-	baseNoComp := withoutKey(baseDoc, "components")
-	headNoComp := withoutKey(headDoc, "components")
+	changedSections := findChangedSections(baseDoc, headDoc)
 
-	if !reflect.DeepEqual(baseNoComp, headNoComp) {
+	if len(changedSections) > 0 {
 		return IntentDiffResult{
-			Mode:   IntentDiffGlobal,
-			Reason: "intent changed outside top-level components",
+			Mode:            IntentDiffGlobal,
+			ChangedSections: changedSections,
+			Reason:          "intent changed outside top-level components",
 		}
 	}
 
@@ -165,4 +166,35 @@ func componentName(comp map[string]interface{}) string {
 		}
 	}
 	return ""
+}
+
+var ignoredIntentKeys = map[string]bool{
+	"apiVersion": true,
+	"kind":       true,
+	"metadata":   true,
+	"components": true,
+}
+
+func findChangedSections(baseDoc, headDoc map[string]interface{}) []string {
+	allKeys := make(map[string]bool)
+	for k := range baseDoc {
+		allKeys[k] = true
+	}
+	for k := range headDoc {
+		allKeys[k] = true
+	}
+
+	var changed []string
+	for k := range allKeys {
+		if ignoredIntentKeys[k] {
+			continue
+		}
+		baseVal, baseHas := baseDoc[k]
+		headVal, headHas := headDoc[k]
+		if baseHas != headHas || !reflect.DeepEqual(baseVal, headVal) {
+			changed = append(changed, k)
+		}
+	}
+	sort.Strings(changed)
+	return changed
 }

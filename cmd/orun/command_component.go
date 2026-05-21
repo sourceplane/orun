@@ -22,5 +22,6 @@ func registerComponentCommand(root *cobra.Command) {
 	componentCmd.Flags().BoolVar(&uncommitted, "uncommitted", false, "Use only uncommitted changes")
 	componentCmd.Flags().BoolVar(&untracked, "untracked", false, "Use only untracked files")
 	componentCmd.Flags().BoolVar(&explainChanged, "explain", false, "Show how --changed refs were resolved")
+	componentCmd.Flags().StringVar(&intentImpact, "intent-impact", "watch", "How global intent changes affect components (all/watch/none)")
 	componentCmd.Flags().BoolVarP(&longFormat, "long", "l", false, "Show detailed information")
 }

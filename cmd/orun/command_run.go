@@ -75,6 +75,7 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().BoolVar(&uncommitted, "uncommitted", false, "Use only uncommitted changes")
 	runCmd.Flags().BoolVar(&untracked, "untracked", false, "Use only untracked files")
 	runCmd.Flags().BoolVar(&explainChanged, "explain", false, "Show how --changed refs were resolved")
+	runCmd.Flags().StringVar(&intentImpact, "intent-impact", "watch", "How global intent changes affect components (all/watch/none)")
 	runCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Preview the run without executing jobs")
 	runCmd.Flags().BoolVar(&runVerbose, "verbose", false, "Expand step commands and raw logs inline")
 	runCmd.Flags().StringVar(&runWorkDir, "workdir", ".", "Override working directory for all jobs")

@@ -50,6 +50,7 @@ var (
 	compositionPackageRoot   string
 	compositionPackageOutput string
 	explainChanged           bool
+	intentImpact             string
 	triggerName              string
 	fromCI                   string
 	eventFile                string

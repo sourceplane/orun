@@ -91,6 +91,14 @@ type EnvironmentSelectors struct {
 	Domains    []string `yaml:"domains" json:"domains"`
 }
 
+// ValidWatchSections lists valid values for ComponentChange.Watches.
+var ValidWatchSections = []string{"automation", "compositions", "discovery", "env", "environments", "execution", "groups"}
+
+// ComponentChange declares which intent change signals affect a component.
+type ComponentChange struct {
+	Watches []string `yaml:"watches,omitempty" json:"watches,omitempty"`
+}
+
 // Component is execution-agnostic declaration
 type Component struct {
 	Name           string                   `yaml:"name" json:"name"`
@@ -105,6 +113,7 @@ type Component struct {
 	Labels         map[string]string        `yaml:"labels" json:"labels"`
 	DependsOn      []Dependency             `yaml:"dependsOn" json:"dependsOn"`
 	Env            map[string]string        `yaml:"env,omitempty" json:"env,omitempty"`
+	Change         ComponentChange          `yaml:"change,omitempty" json:"change,omitempty"`
 	ResolvedComposition       string        `yaml:"-" json:"-"`
 	ResolvedCompositionSource string        `yaml:"-" json:"-"`
 	SourcePath     string                   `yaml:"-" json:"-"`

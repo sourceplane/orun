@@ -91,6 +91,23 @@ spec:
 
 The `profile` field is the default fallback. Rules are evaluated in order (first-match-wins). See [profile rules](../concepts/profile-rules.md) for full details.
 
+### Change watches
+
+Declare which global intent sections should mark this component as changed during `--changed` planning:
+
+```yaml
+spec:
+  change:
+    watches:
+      - environments
+      - groups
+      - env
+```
+
+Valid values: `environments`, `groups`, `env`, `automation`, `compositions`, `discovery`, `execution`.
+
+Without `change.watches`, global intent changes do not affect the component. See [change watches](../concepts/change-watches.md) for full details.
+
 ## Composition sources
 
 Declare composition sources in the intent and plan directly against that intent:
