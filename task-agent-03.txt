@@ -1,0 +1,586 @@
+Best model: treat `intent.yaml` changes as **change signals**, not automatic component changes.
+
+`intent.yaml` is still the repo-level desired-state boundary, but a global intent change should not automatically mean every component is changed. Orun already separates intent, component, and composition layers; intent owns environments, discovery, groups, triggers, composition sources, and repo-wide defaults, while components own type, path, subscriptions, inputs, labels, and dependencies.  So the clean model is: **global intent changes are only consumed by components that explicitly opt in.**
+
+## Recommended rule
+
+```text
+Normal component file changed
+  → component is changed
+
+Inline component under intent.components changed
+  → that inline component is changed
+
+Global intent section changed
+  → no component is changed by default
+  → only components that opt into that intent-change signal are changed
+```
+
+This gives you a much better default for large repos. A small environment/default/trigger edit should not explode the changed plan unless a component says: “this global intent section affects me.”
+
+## Proposed YAML model
+
+Add a component-level field:
+
+```yaml
+apiVersion: sourceplane.io/v1
+kind: Component
+
+metadata:
+  name: api-platform
+
+spec:
+  type: terraform
+  domain: platform
+
+  subscribe:
+    environments:
+      - name: dev
+        profile: plan-only
+      - name: stage
+        profile: verify
+
+  change:
+    onIntent:
+      - scope: environment
+        names:
+          - dev
+          - stage
+        fields:
+          - defaults
+          - env
+          - policies
+
+      - scope: group
+        names:
+          - platform
+        fields:
+          - defaults
+          - policies
+
+      - scope: root
+        fields:
+          - env
+```
+
+Meaning:
+
+```text
+This component becomes changed when selected intent sections change.
+```
+
+Default:
+
+```yaml
+change:
+  onIntent: []
+```
+
+So if `intent.yaml` changes but the component has no `change.onIntent`, the component is not marked changed.
+
+## Simpler first version
+
+For the first implementation, keep it smaller:
+
+```yaml
+spec:
+  change:
+    onIntent:
+      - environments
+      - groups
+      - env
+      - automation
+      - compositions
+      - discovery
+```
+
+Example:
+
+```yaml
+spec:
+  change:
+    onIntent:
+      - environments
+      - groups
+```
+
+This means:
+
+```text
+If intent.environments or intent.groups changes, mark this component changed.
+```
+
+Then later you can support more granular matching like:
+
+```yaml
+spec:
+  change:
+    onIntent:
+      - path: environments.dev.defaults
+      - path: groups.platform.defaults
+      - path: env
+```
+
+## Best long-term model
+
+Use a **watch-based model**, because it feels natural and scalable:
+
+```yaml
+spec:
+  change:
+    watches:
+      - intent:
+          path: environments.dev.defaults
+      - intent:
+          path: environments.stage.env
+      - intent:
+          path: groups.platform.defaults
+      - intent:
+          path: env
+```
+
+This reads clearly:
+
+```text
+This component watches these intent paths for changed planning.
+```
+
+For convenience, support wildcards:
+
+```yaml
+spec:
+  change:
+    watches:
+      - intent:
+          path: environments.*.defaults
+      - intent:
+          path: groups.platform.*
+```
+
+And support semantic shortcuts:
+
+```yaml
+spec:
+  change:
+    watches:
+      - intent:
+          scope: subscribed-environments
+          fields:
+            - defaults
+            - env
+            - policies
+
+      - intent:
+          scope: own-domain
+          fields:
+            - defaults
+            - policies
+```
+
+This is the most CNCF-style model: explicit, declarative, reviewable, and component-owned.
+
+## My recommended final schema
+
+Use this:
+
+```yaml
+spec:
+  change:
+    watches:
+      - intent:
+          scope: subscribed-environments
+          fields:
+            - defaults
+            - env
+            - policies
+
+      - intent:
+          scope: own-domain
+          fields:
+            - defaults
+            - policies
+
+      - intent:
+          path: env
+```
+
+Supported watch forms:
+
+### 1. Exact path watch
+
+```yaml
+spec:
+  change:
+    watches:
+      - intent:
+          path: environments.dev.defaults
+```
+
+### 2. Wildcard path watch
+
+```yaml
+spec:
+  change:
+    watches:
+      - intent:
+          path: environments.*.defaults
+```
+
+### 3. Subscribed environment watch
+
+```yaml
+spec:
+  change:
+    watches:
+      - intent:
+          scope: subscribed-environments
+          fields:
+            - defaults
+            - env
+            - policies
+```
+
+This only reacts to environments the component is subscribed to.
+
+### 4. Own domain/group watch
+
+```yaml
+spec:
+  change:
+    watches:
+      - intent:
+          scope: own-domain
+          fields:
+            - defaults
+            - policies
+```
+
+If the component has:
+
+```yaml
+spec:
+  domain: platform
+```
+
+Then this watches:
+
+```text
+groups.platform.defaults
+groups.platform.policies
+```
+
+### 5. All intent watch, explicit opt-in
+
+```yaml
+spec:
+  change:
+    watches:
+      - intent:
+          path: "*"
+```
+
+This gives old behavior, but only for components that explicitly want it.
+
+## Changed detection behavior
+
+### Case 1: app code changed
+
+```text
+apps/api/**
+```
+
+Result:
+
+```text
+changed:
+  - api
+```
+
+No intent watch needed.
+
+### Case 2: component.yaml changed
+
+```text
+apps/api/component.yaml
+```
+
+Result:
+
+```text
+changed:
+  - api
+```
+
+No intent watch needed.
+
+### Case 3: inline component changed in intent
+
+```yaml
+components:
+  - name: api
+    type: terraform
+    parameters:
+      terraformVersion: 1.10.0
+```
+
+Result:
+
+```text
+changed:
+  - api
+```
+
+No intent watch needed because this is a direct component change.
+
+### Case 4: intent environment default changed
+
+```diff
+environments:
+  dev:
+    defaults:
+-      awsRegion: us-east-1
++      awsRegion: us-west-2
+```
+
+Only this component reacts:
+
+```yaml
+spec:
+  change:
+    watches:
+      - intent:
+          scope: subscribed-environments
+          fields: [defaults]
+```
+
+Result:
+
+```text
+changed:
+  - components subscribed to dev and opted into environment defaults
+```
+
+Components without that watch are not changed.
+
+### Case 5: composition source changed
+
+```diff
+compositions:
+  sources:
+    - name: platform
+-     ref: v1.0.0
++     ref: v1.1.0
+```
+
+Default:
+
+```text
+changed:
+  - none
+```
+
+Only components with this become changed:
+
+```yaml
+spec:
+  change:
+    watches:
+      - intent:
+          path: compositions
+```
+
+or:
+
+```yaml
+spec:
+  change:
+    watches:
+      - composition:
+          type: terraform
+```
+
+I would eventually add `composition` watches separately, because a composition package change is not the same as an environment default change.
+
+## Important distinction
+
+Do not call every `intent.yaml` edit a component change.
+
+Instead classify intent changes as:
+
+```text
+direct inline component change
+global intent change
+no semantic change
+```
+
+Then resolve:
+
+```text
+direct inline component change
+  → mark that component changed
+
+global intent change
+  → find components whose change.watches match the changed intent paths
+
+no semantic change
+  → no component changed
+```
+
+## Suggested internal model
+
+```go
+type ChangeSignal struct {
+    Source string // file, intent, composition
+    Path   string // environments.dev.defaults, groups.platform.policies
+    Kind   string // added, modified, removed
+}
+
+type ComponentChangeWatch struct {
+    Source string
+    Path   string
+    Scope  string
+    Fields []string
+}
+
+type ChangedComponentReason struct {
+    Component string
+    Signal    ChangeSignal
+    Watch     ComponentChangeWatch
+    Reason    string
+}
+```
+
+Pipeline:
+
+```text
+changed files
+  → normal file-to-component detection
+  → intent semantic diff produces intent change signals
+  → component watches match signals
+  → final changed component set
+  → dependency closure / plan filtering
+```
+
+## CLI explain output
+
+`orun plan --changed --explain` should make this obvious:
+
+```text
+Changed files:
+  - intent.yaml
+
+Intent semantic changes:
+  - environments.dev.defaults.awsRegion modified
+
+Intent change default:
+  - no components are changed by default
+
+Matched component watches:
+  - api-platform watches subscribed-environments.defaults
+  - network-foundation watches own-domain.defaults
+
+Final changed components:
+  - api-platform
+  - network-foundation
+```
+
+If nothing opts in:
+
+```text
+Changed files:
+  - intent.yaml
+
+Intent semantic changes:
+  - environments.dev.defaults.awsRegion modified
+
+Matched component watches:
+  - none
+
+Final changed components:
+  - none
+
+Note:
+  intent.yaml changes do not mark components changed unless components opt in with spec.change.watches.
+```
+
+## Backward compatibility option
+
+Because this changes behavior significantly, add a temporary compatibility flag:
+
+```bash
+orun plan --changed --intent-impact=all
+orun plan --changed --intent-impact=watch
+orun plan --changed --intent-impact=none
+```
+
+Recommended defaults:
+
+```text
+v1 transition:
+  default = all or warn
+
+v2:
+  default = watch
+
+your desired default:
+  default = watch
+  with no watches = no components
+```
+
+Since you want the new default now:
+
+```text
+Default: watch
+No watch match: no component changed
+Explicit old behavior: --intent-impact=all
+```
+
+## Best naming
+
+Use:
+
+```yaml
+spec:
+  change:
+    watches:
+```
+
+Not:
+
+```yaml
+affectedBy:
+reactsTo:
+intentTriggers:
+```
+
+`watches` is clearer because this is not execution activation. It is changed-planning impact.
+
+## Final recommendation
+
+Implement the model as:
+
+```yaml
+spec:
+  change:
+    watches:
+      - intent:
+          scope: subscribed-environments
+          fields: [defaults, env, policies]
+
+      - intent:
+          scope: own-domain
+          fields: [defaults, policies]
+
+      - intent:
+          path: compositions
+```
+
+And make the default:
+
+```text
+intent.yaml global changes do not mark any component changed.
+Only direct inline component edits under intent.components mark that component changed automatically.
+All other intent changes require explicit component opt-in through spec.change.watches.
+```
+
+This keeps Orun component-native, avoids accidental full-repo plans, and makes global intent impact visible in `component.yaml` where ownership lives.
