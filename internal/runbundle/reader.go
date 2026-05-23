@@ -36,6 +36,7 @@ func ReadShardManifest(dir string) (*RunBundleShardManifest, error) {
 
 // PlanShard holds the contents of a parsed plan shard.
 type PlanShard struct {
+	Dir      string
 	Manifest *RunBundleShardManifest
 	Plan     *model.Plan
 }
@@ -58,6 +59,7 @@ func ReadPlanShard(dir string) (*PlanShard, error) {
 	}
 
 	return &PlanShard{
+		Dir:      dir,
 		Manifest: manifest,
 		Plan:     plan,
 	}, nil
@@ -65,6 +67,7 @@ func ReadPlanShard(dir string) (*PlanShard, error) {
 
 // JobShard holds the contents of a parsed job shard.
 type JobShard struct {
+	Dir      string
 	Manifest *RunBundleShardManifest
 	JobState *state.JobState
 }
@@ -87,6 +90,7 @@ func ReadJobShard(dir string) (*JobShard, error) {
 	}
 
 	return &JobShard{
+		Dir:      dir,
 		Manifest: manifest,
 		JobState: js,
 	}, nil
