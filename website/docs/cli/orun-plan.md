@@ -122,6 +122,28 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | `--trigger` | Named trigger binding for environment activation |
 | `--from-ci` | CI provider for event normalization (e.g. `github`) |
 | `--event-file` | Path to provider event JSON file |
+| `--artifact` | Artifact backend for uploading plan shard from CI (`github`) |
+| `--github-output` | Write `matrix`, `plan_id`, `exec_id` to `$GITHUB_OUTPUT` (for GitHub Actions matrix) |
+
+### GitHub Actions usage
+
+When run inside GitHub Actions with `--artifact github`, `orun plan`:
+
+1. Derives an execution ID from `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, and the plan checksum
+2. Writes a plan shard (manifest.json + plan.json + metadata) to a temp directory
+3. Uploads the shard as a GitHub Actions artifact using the embedded `@actions/artifact` helper
+4. With `--github-output`, writes `matrix`, `plan_id`, and `exec_id` to `$GITHUB_OUTPUT` for downstream matrix jobs
+
+Example:
+```bash
+orun plan \
+  --from-ci github \
+  --event-file "$GITHUB_EVENT_PATH" \
+  --artifact github \
+  --github-output
+```
+
+This replaces the need for `actions/upload-artifact@v4` and manual `jq` piping in CI workflows.
 
 ## Output contract
 

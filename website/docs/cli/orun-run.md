@@ -167,6 +167,7 @@ orun run --changed --explain
 | `--isolation` | Per-job workspace isolation: `auto` (on when concurrency > 1), `workspace` (always on), or `none` (legacy shared tree). Default: `auto` |
 | `--keep-workspaces` | Preserve per-job staged workspaces after the run for debugging |
 | `--background` | Run the plan detached and return immediately. Track progress with `orun status --watch` |
+| `--artifact` | Artifact backend for uploading job shard from CI (`github`) |
 | `--remote-state` | Use orun-backend for distributed run coordination (enables remote state) |
 | `--backend-url` | orun-backend URL for remote state (or set `ORUN_BACKEND_URL`) |
 

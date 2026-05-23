@@ -9,10 +9,13 @@ permissions:
   contents: read
   packages: read
   id-token: write   # orun remote-state OIDC authentication
+  actions: write    # required for artifact upload
 
 env:
   GITHUB_TOKEN: ${{ github.token }}
   ORUN_BACKEND_URL: https://orun-api.sourceplane.ai
+  ORUN_ARTIFACT_BACKEND: github
+  ORUN_ARTIFACT_UPLOAD: "true"
 
 jobs:
   plan:
@@ -37,14 +40,10 @@ jobs:
             --from-ci github \
             --event-file "$GITHUB_EVENT_PATH" \
             --intent examples/intent.yaml \
-            --output plan.json
-          echo "plan-checksum=$(jq -r '.metadata.checksum | ltrimstr("sha256-") | .[0:12]' plan.json)" >> $GITHUB_OUTPUT
-          echo "job-matrix=$(jq -c '[.jobs[] | {"job-id": .id, "job-name": .checkName}]' plan.json)" >> $GITHUB_OUTPUT
-      - name: Upload plan artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: orun-plan
-          path: plan.json
+            --artifact github \
+            --github-output
+          echo "plan-checksum=$(cat $GITHUB_OUTPUT | grep 'plan_id=' | cut -d= -f2)" >> $GITHUB_OUTPUT
+          echo "job-matrix=$(cat $GITHUB_OUTPUT | grep 'matrix=' | cut -d= -f2-)" >> $GITHUB_OUTPUT
 
   execute:
     name: ${{ matrix.job-name }}
@@ -62,14 +61,11 @@ jobs:
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ORUN_EXEC_ID: ${{ needs.plan.outputs.plan-checksum }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Download plan artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: orun-plan
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -82,4 +78,5 @@ jobs:
             --runner github-actions \
             --remote-state \
             --job "${{ matrix.job-id }}" \
-            --exec-id "${{ github.run_id }}-${{ github.run_attempt }}"
+            --exec-id "${{ github.run_id }}-${{ github.run_attempt }}" \
+            --artifact github
