@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/sourceplane/orun/internal/artifactstore"
 	"github.com/sourceplane/orun/internal/artifactstore/github"
 	"github.com/sourceplane/orun/internal/runbundle"
+	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -290,7 +292,7 @@ func runGithubPull() error {
 
 	orunDir := githubPullOrunDir
 	if orunDir == "." {
-		orunDir = storeDir()
+		orunDir = filepath.Join(storeDir(), state.OrunDir)
 	}
 
 	// Download all shards

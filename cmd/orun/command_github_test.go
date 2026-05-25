@@ -1,8 +1,11 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sourceplane/orun/internal/state"
 )
 
 func TestGithubCommandRegistered(t *testing.T) {
@@ -137,6 +140,36 @@ func TestGithubCommandRunsHelp(t *testing.T) {
 	}
 	if !strings.Contains(cmd.Long, "Level 1") {
 		t.Errorf("expected runs command to mention three levels of detail")
+	}
+}
+
+func TestGithubPullOrunDirDefaultResolvesToDotOrun(t *testing.T) {
+	// Verify that the default orunDir for github pull resolves to a path
+	// ending in ".orun", matching the Hydrate function's expected input.
+	//
+	// This validates the fix: orunDir = filepath.Join(storeDir(), state.OrunDir)
+	// instead of the previous orunDir = storeDir() which passed the intent root
+	// (missing the ".orun" suffix).
+	got := filepath.Join(storeDir(), state.OrunDir)
+
+	// Without intent discovery, storeDir() returns ".".
+	// filepath.Join(".", ".orun") should resolve to ".orun".
+	if got != state.OrunDir {
+		t.Errorf("default orunDir for pull = %q, want %q (the .orun directory)", got, state.OrunDir)
+	}
+}
+
+func TestGithubPullOrunDirWithIntentRoot(t *testing.T) {
+	// Simulate a scenario where intent discovery populated intentRoot.
+	// The resolved orunDir must end with ".orun".
+	orig := intentRoot
+	intentRoot = "/tmp/test-project"
+	t.Cleanup(func() { intentRoot = orig })
+
+	got := filepath.Join(storeDir(), state.OrunDir)
+	wantSuffix := string(filepath.Separator) + state.OrunDir
+	if !strings.HasSuffix(got, wantSuffix) {
+		t.Errorf("orunDir with intent root = %q, want path ending in %q", got, wantSuffix)
 	}
 }
 

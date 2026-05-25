@@ -42,6 +42,7 @@ const sidebars = {
         'cli/orun-get',
         'cli/orun-describe',
         'cli/orun-gc',
+        'cli/orun-github',
         'cli/orun-validate',
         'cli/orun-debug',
         'cli/orun-compositions',
