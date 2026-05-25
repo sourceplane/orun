@@ -29,6 +29,50 @@ func TestIsGitHubActions(t *testing.T) {
 	}
 }
 
+// TestUploadShard_FallbackWhenRuntimeTokenMissing verifies UploadShard falls back
+// to REST API when GITHUB_ACTIONS=true but ACTIONS_RUNTIME_TOKEN is not set
+// (the case when running `orun plan` as a shell command in a plan job).
+func TestUploadShard_FallbackWhenRuntimeTokenMissing(t *testing.T) {
+	// Set GITHUB_ACTIONS but NOT ACTIONS_RUNTIME_TOKEN
+	os.Setenv("GITHUB_ACTIONS", "true")
+	os.Unsetenv("ACTIONS_RUNTIME_TOKEN")
+	defer os.Unsetenv("GITHUB_ACTIONS")
+
+	client, err := NewClient(context.Background(), "owner/repo", WithToken("test"))
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+
+	// Create a temp shard dir with a manifest
+	shardDir := t.TempDir()
+	manifestFile := filepath.Join(shardDir, "manifest.json")
+	if err := os.WriteFile(manifestFile, []byte(`{"apiVersion":"orun.io/v1alpha1","kind":"RunBundleShard"}`), 0644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	// UploadShard should fall back to REST API since ACTIONS_RUNTIME_TOKEN is missing.
+	// This will fail because there's no real API endpoint, but it shouldn't fail
+	// with "gha upload" or "runtime token" errors.
+	_, err = client.UploadShard(context.Background(), &runbundle.Shard{
+		Dir:    shardDir,
+		ExecID: "gh-123-1-abc",
+		Role:   runbundle.ShardRolePlan,
+		Suffix: "abc123",
+		Status: "created",
+	})
+	if err == nil {
+		t.Fatal("expected error from fallback REST API call")
+	}
+	// Should NOT contain "gha upload" (which would indicate we tried GHA helper)
+	if strings.Contains(err.Error(), "gha upload") {
+		t.Errorf("unexpectedly tried GHA helper: %v", err)
+	}
+	// Should NOT contain "runtime token" (which would indicate wrong path)
+	if strings.Contains(err.Error(), "ACTIONS_RUNTIME_TOKEN") {
+		t.Errorf("unexpectedly failed on runtime token: %v", err)
+	}
+}
+
 // TestUpload_NotInGitHubActions verifies Upload returns error outside GHA.
 func TestUpload_NotInGitHubActions(t *testing.T) {
 	os.Unsetenv("GITHUB_ACTIONS")

@@ -1,0 +1,14 @@
+# Helm compositions for api component
+# These steps run in a GitHub Actions matrix after foundation completes
+
+steps:
+  - id: deploy
+    run: |
+      echo "Deploying api..."
+      echo "Simulated api deployment" > /tmp/api-deploy.txt
+      echo "Job completed with status: completed"
+
+  - id: verify-artifact
+    run: |
+      echo "Verifying artifact for api component..."
+      echo "API artifact verification complete"

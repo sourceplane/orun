@@ -1,6 +1,8 @@
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const { UploadArtifactClient } = require('@actions/artifact');
+const { DefaultArtifactClient } = require('@actions/artifact');
+import { readdirSync } from 'fs';
+import { join } from 'path';
 
 async function main() {
   const [shardDir, artifactName, retentionDays] = process.argv.slice(2);
@@ -10,13 +12,15 @@ async function main() {
     process.exit(1);
   }
 
-  const client = new UploadArtifactClient();
+  const client = new DefaultArtifactClient();
   const options = {};
   if (retentionDays) {
     options.retentionDays = parseInt(retentionDays, 10);
   }
 
-  const result = await client.uploadArtifact(artifactName, shardDir, options);
+  // v2 @actions/artifact API: uploadArtifact(name, files[], rootDirectory, options)
+  const files = readdirSync(shardDir).map(f => join(shardDir, f));
+  const result = await client.uploadArtifact(artifactName, files, shardDir, options);
 
   console.log(JSON.stringify({
     id: result.id,
