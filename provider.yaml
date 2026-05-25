@@ -3,7 +3,7 @@ kind: Provider
 metadata:
   namespace: sourceplane
   name: orun
-  version: v0.0.0
+  version: v2.4.1
   description: Provider-native CI planning engine that compiles intent into deterministic execution plans
   homepage: https://github.com/sourceplane/orun
   license: MIT

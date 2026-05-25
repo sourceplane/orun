@@ -48,7 +48,7 @@ jobs:
           dist: dist
           tag: ${{ github.ref_name }}
           push: ${{ env.IMAGE_REF }}
-          kiox-version: v0.4.3
+          kiox-version: v2.4.1
           delegate-goreleaser: true
           goreleaser-config: .goreleaser.yaml
 

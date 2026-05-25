@@ -1,3 +1,4 @@
+// v2.4.1 update
 const panel = document.querySelector(".panel");
 
 if (panel) {
