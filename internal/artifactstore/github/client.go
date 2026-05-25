@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,10 +17,11 @@ const (
 
 // Client is a GitHub API client for artifact operations.
 type Client struct {
-	repo    string // "owner/repo"
-	token   string
-	baseURL string
-	http    *http.Client
+	repo        string // "owner/repo"
+	token       string
+	baseURL     string
+	http        *http.Client
+	retryConfig RetryConfig
 }
 
 // NewClient creates a new GitHub API client for the given repository.
@@ -83,6 +85,13 @@ func WithHTTPClient(httpClient *http.Client) ClientOption {
 	}
 }
 
+// WithRetryConfig sets a custom retry configuration for API calls.
+func WithRetryConfig(cfg RetryConfig) ClientOption {
+	return func(c *Client) {
+		c.retryConfig = cfg
+	}
+}
+
 // resolveToken resolves a GitHub token from environment or gh CLI.
 func resolveToken(ctx context.Context) (string, error) {
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
@@ -124,13 +133,45 @@ func (c *Client) newRequest(ctx context.Context, url string) (*http.Request, err
 
 // doRequest performs an HTTP request and returns the response (body already checked).
 func (c *Client) doRequest(req *http.Request) (*http.Response, error) {
-	resp, err := c.http.Do(req)
+	resp, err := c.retryDo(req.Context(), req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		resp.Body.Close()
 		return nil, fmt.Errorf("unexpected status %d for %s", resp.StatusCode, req.URL)
 	}
 	return resp, nil
+}
+
+// newPostRequest creates an authenticated POST request with a JSON body.
+func (c *Client) newPostRequest(ctx context.Context, url string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", userAgent)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	return req, nil
+}
+
+// newPutRequest creates an authenticated PUT request with a byte body.
+func (c *Client) newPutRequest(ctx context.Context, url, contentType string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("User-Agent", userAgent)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	return req, nil
 }

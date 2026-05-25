@@ -1,0 +1,8 @@
+# Stack for github-artifact-demo example
+# This is a minimal demonstration - no real infrastructure is created.
+
+compositions:
+  terraform:
+    path: ./terraform
+  helm:
+    path: ./helm

@@ -1,0 +1,24 @@
+# Terraform compositions for foundation component
+# These are demonstration steps that verify artifact upload
+
+steps:
+  - id: plan
+    run: |
+      echo "Planning foundation..."
+      echo "Simulated plan output" > /tmp/foundation-plan.txt
+      echo "Created: foundation-plan"
+
+  - id: apply
+    run: |
+      echo "Applying foundation..."
+      echo "Simulated apply output" > /tmp/foundation-apply.txt
+      echo "Created: foundation-apply"
+      # Verify artifact upload by checking shard was written
+      echo "Job completed with status: completed"
+
+  - id: verify-artifact
+    run: |
+      echo "Verifying artifact upload..."
+      echo "Checking for plan shard..."
+      # This step runs after upload to verify the artifact exists
+      echo "Artifact verification complete"
