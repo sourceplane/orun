@@ -52,6 +52,10 @@ func (c *Client) Upload(ctx context.Context, shard *runbundle.Shard) (*artifacts
 		return nil, fmt.Errorf("github upload only supported inside GitHub Actions")
 	}
 
+	if os.Getenv("ACTIONS_RUNTIME_TOKEN") == "" {
+		return nil, fmt.Errorf("ACTIONS_RUNTIME_TOKEN not available; @actions/artifact requires it")
+	}
+
 	if shard == nil {
 		return nil, fmt.Errorf("shard is required")
 	}
@@ -72,11 +76,9 @@ func (c *Client) Upload(ctx context.Context, shard *runbundle.Shard) (*artifacts
 	cmd := exec.CommandContext(ctx, "node", "upload.mjs", shard.Dir, name, strconv.Itoa(retentionDays))
 	cmd.Dir = hd
 
-	// Pass only the runtime token and results URL — not the full env
-	cmd.Env = []string{
-		"ACTIONS_RUNTIME_TOKEN=" + os.Getenv("ACTIONS_RUNTIME_TOKEN"),
-		"ACTIONS_RESULTS_URL=" + os.Getenv("ACTIONS_RESULTS_URL"),
-	}
+	// Inherit full environment — @actions/artifact needs ACTIONS_RUNTIME_TOKEN,
+	// ACTIONS_RESULTS_URL, GITHUB_RUN_ID, GITHUB_WORKSPACE, and other runner vars.
+	cmd.Env = os.Environ()
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

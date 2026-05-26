@@ -492,7 +492,7 @@ func generatePlan() error {
 					if err != nil {
 						fmt.Fprintf(os.Stderr, "⚠ warning: failed to create GitHub client: %v\n", err)
 					} else {
-						result, err := ghClient.Upload(context.Background(), shard)
+						result, err := ghClient.UploadShard(context.Background(), shard)
 						if err != nil {
 							fmt.Fprintf(os.Stderr, "⚠ warning: failed to upload plan artifact: %v\n", err)
 						} else if result != nil {
@@ -520,8 +520,15 @@ func generatePlan() error {
 			outputLines = append(outputLines, fmt.Sprintf("plan_id=%s", planID))
 			outputLines = append(outputLines, fmt.Sprintf("exec_id=%s", execID))
 
-			if err := os.WriteFile(outputPath, []byte(strings.Join(outputLines, "\n")+"\n"), 0644); err != nil {
-				fmt.Fprintf(os.Stderr, "⚠ warning: failed to write %s: %v\n", outputPath, err)
+			f, err := os.OpenFile(outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "⚠ warning: failed to open %s: %v\n", outputPath, err)
+			} else {
+				_, err = f.WriteString(strings.Join(outputLines, "\n") + "\n")
+				f.Close()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "⚠ warning: failed to write %s: %v\n", outputPath, err)
+				}
 			}
 		}
 	}

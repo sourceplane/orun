@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -161,7 +162,8 @@ func parseGitHubRepo(url string) string {
 
 // execCommand runs a command and returns stdout.
 var execCommand = func(name string, args ...string) ([]byte, error) {
-	return nil, fmt.Errorf("not implemented")
+	cmd := exec.Command(name, args...)
+	return cmd.Output()
 }
 
 func runGithubRuns() error {

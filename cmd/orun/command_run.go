@@ -386,7 +386,7 @@ func uploadJobShardsAfterRun(store *state.Store, execID, planID string, plan *mo
 			continue
 		}
 
-		result, err := ghClient.Upload(context.Background(), shard)
+		result, err := ghClient.UploadShard(context.Background(), shard)
 		os.RemoveAll(shardDir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  ⚠ warning: failed to upload job artifact for %s: %v\n", jobID, err)

@@ -22,8 +22,9 @@ jobs:
     name: Orun Plan
     runs-on: ubuntu-latest
     outputs:
-      job-matrix: ${{ steps.plan.outputs.job-matrix }}
-      plan-checksum: ${{ steps.plan.outputs.plan-checksum }}
+      job-matrix: ${{ steps.plan.outputs.matrix }}
+      plan-checksum: ${{ steps.plan.outputs.plan_id }}
+      exec-id: ${{ steps.plan.outputs.exec_id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,6 +32,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       - name: Build orun from source
         run: go build -o /usr/local/bin/orun ./cmd/orun
       - name: Plan with Orun
@@ -42,26 +46,23 @@ jobs:
             --intent examples/intent.yaml \
             --artifact github \
             --github-output
-          echo "plan-checksum=$(cat $GITHUB_OUTPUT | grep 'plan_id=' | cut -d= -f2)" >> $GITHUB_OUTPUT
-          echo "job-matrix=$(cat $GITHUB_OUTPUT | grep 'matrix=' | cut -d= -f2-)" >> $GITHUB_OUTPUT
 
   execute:
-    name: ${{ matrix.job-name }}
+    name: "${{ matrix.component }}/${{ matrix.env }}"
     needs: plan
-    if: needs.plan.outputs.job-matrix != '[]'
+    if: needs.plan.outputs.job-matrix != '' && needs.plan.outputs.job-matrix != '{"include":[]}'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       max-parallel: 10
-      matrix:
-        include: ${{ fromJson(needs.plan.outputs.job-matrix) }}
+      matrix: ${{ fromJson(needs.plan.outputs.job-matrix) }}
     concurrency:
-      group: orun-${{ github.ref }}-${{ matrix.job-id }}
+      group: orun-${{ github.ref }}-${{ matrix.id }}
       cancel-in-progress: false
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      ORUN_EXEC_ID: ${{ needs.plan.outputs.plan-checksum }}
+      ORUN_EXEC_ID: ${{ needs.plan.outputs.exec-id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,6 +70,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       - name: Build orun from source
         run: go build -o /usr/local/bin/orun ./cmd/orun
       - name: run job steps
@@ -77,6 +81,6 @@ jobs:
             --plan plan.json \
             --runner github-actions \
             --remote-state \
-            --job "${{ matrix.job-id }}" \
-            --exec-id "${{ github.run_id }}-${{ github.run_attempt }}" \
+            --job "${{ matrix.id }}" \
+            --exec-id "${{ needs.plan.outputs.exec-id }}" \
             --artifact github

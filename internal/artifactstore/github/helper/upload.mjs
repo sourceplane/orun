@@ -1,8 +1,21 @@
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { DefaultArtifactClient } = require('@actions/artifact');
-import { readdirSync } from 'fs';
+import { readdirSync, statSync } from 'fs';
 import { join } from 'path';
+
+function getAllFiles(dir) {
+  const results = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      results.push(...getAllFiles(full));
+    } else {
+      results.push(full);
+    }
+  }
+  return results;
+}
 
 async function main() {
   const [shardDir, artifactName, retentionDays] = process.argv.slice(2);
@@ -18,12 +31,11 @@ async function main() {
     options.retentionDays = parseInt(retentionDays, 10);
   }
 
-  // v2 @actions/artifact API: uploadArtifact(name, files[], rootDirectory, options)
-  const files = readdirSync(shardDir).map(f => join(shardDir, f));
+  const files = getAllFiles(shardDir);
   const result = await client.uploadArtifact(artifactName, files, shardDir, options);
 
   console.log(JSON.stringify({
-    id: result.id,
+    id: String(result.id),
     name: artifactName,
     size: result.size,
   }));
