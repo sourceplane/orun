@@ -79,6 +79,7 @@ jobs:
         run: |
           orun run \
             --plan plan.json \
+            --intent examples/intent.yaml \
             --runner github-actions \
             --remote-state \
             --job "${{ matrix.id }}" \
