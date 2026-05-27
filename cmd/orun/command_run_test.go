@@ -169,3 +169,22 @@ func TestPlanWorkDirRecoveredWhenIntentRootEmpty(t *testing.T) {
 		t.Fatalf("resolveEffectiveWorkDir() = %q, want %q", final, want)
 	}
 }
+
+func TestRunCommandRegistersArtifactFlag(t *testing.T) {
+	f := runCmd.Flags().Lookup("artifact")
+	if f == nil {
+		t.Fatal("expected run command to register --artifact flag")
+	}
+	if f.DefValue != "" {
+		t.Errorf("default --artifact = %q, want empty", f.DefValue)
+	}
+}
+
+func TestRunArtifactFlagAcceptsGithub(t *testing.T) {
+	if err := runCmd.Flags().Set("artifact", "github"); err != nil {
+		t.Fatalf("failed to set --artifact=github: %v", err)
+	}
+	if artifactBackend != "github" {
+		t.Errorf("artifactBackend = %q, want %q", artifactBackend, "github")
+	}
+}

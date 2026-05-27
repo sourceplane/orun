@@ -1,0 +1,26 @@
+apiVersion: sourceplane.io/v1
+kind: Intent
+metadata:
+  name: github-artifact-demo
+  description: |
+    Demonstrates CI plan generation, artifact upload, and verification.
+    Shows how orun plan generates jobs, metrics work, and jobs push artifacts.
+
+compositions:
+  sources:
+    - name: demo
+      kind: dir
+      path: ./compositions
+
+components:
+  - name: foundation
+    type: terraform
+    parameters:
+      module: infra/foundation
+
+  - name: api
+    type: helm
+    parameters:
+      chart: charts/api
+    dependsOn:
+      - component: foundation

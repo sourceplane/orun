@@ -11,10 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sourceplane/orun/internal/artifactstore/github"
 	"github.com/sourceplane/orun/internal/executor"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/runner"
+	"github.com/sourceplane/orun/internal/runbundle"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/ui"
@@ -96,6 +98,8 @@ func registerRunCommand(root *cobra.Command) {
 
 	runCmd.Flags().BoolVar(&runRemoteState, "remote-state", false, "Use orun-backend for distributed run coordination (sets ORUN_REMOTE_STATE=true)")
 	runCmd.Flags().StringVar(&runBackendURL, "backend-url", "", "orun-backend URL for remote state (or set ORUN_BACKEND_URL)")
+
+	runCmd.Flags().StringVar(&artifactBackend, "artifact", "", "Artifact backend for upload (e.g. github)")
 
 	_ = runCmd.Flags().MarkDeprecated("job-id", "use --job instead")
 }
@@ -300,8 +304,96 @@ func runPlan() error {
 		setupLocalStateHooks(r, plan, execID)
 	}
 
-	if err := r.Run(plan); err != nil {
-		return err
+	runErr := r.Run(plan)
+
+	// Job shard upload: runs after the runner completes, even on failure.
+	// The original exit code is preserved — a failed upload only warns.
+	if artifactBackend == "github" && os.Getenv("GITHUB_ACTIONS") == "true" && !runDryRun {
+		if err := uploadJobShardsAfterRun(store, execID, planID, plan); err != nil {
+			color := ui.ColorEnabledForWriter(os.Stderr)
+			fmt.Fprintf(os.Stderr, "%s failed to upload job artifact: %v\n", ui.Yellow(color, "⚠"), err)
+		}
+	}
+
+	return runErr
+}
+
+// uploadJobShardsAfterRun loads the execution state and uploads job shards
+// for all terminal jobs. The upload is best-effort — errors warn but do not
+// change the job conclusion.
+func uploadJobShardsAfterRun(store *state.Store, execID, planID string, plan *model.Plan) error {
+	execState, err := store.LoadState(execID)
+	if err != nil {
+		return fmt.Errorf("load execution state: %w", err)
+	}
+	if execState == nil || len(execState.Jobs) == 0 {
+		return nil
+	}
+
+	repo := os.Getenv("GITHUB_REPOSITORY")
+	if repo == "" {
+		return fmt.Errorf("GITHUB_REPOSITORY not set")
+	}
+
+	ghClient, err := github.NewClient(context.Background(), repo)
+	if err != nil {
+		return fmt.Errorf("create GitHub client: %w", err)
+	}
+
+	source := runbundle.ShardSource{
+		Type:       "github-actions",
+		Repository: repo,
+		RunID:      os.Getenv("GITHUB_RUN_ID"),
+		RunAttempt: os.Getenv("GITHUB_RUN_ATTEMPT"),
+		Workflow:   os.Getenv("GITHUB_WORKFLOW"),
+		SHA:        os.Getenv("GITHUB_SHA"),
+		Ref:        os.Getenv("GITHUB_REF"),
+		EventName:  os.Getenv("GITHUB_EVENT_NAME"),
+	}
+
+	for jobID, jobState := range execState.Jobs {
+		if jobState.Status == "" || jobState.Status == "running" || jobState.Status == "pending" {
+			continue
+		}
+
+		// Build job shard in a temp directory
+		shardDir, err := os.MkdirTemp("", "orun-job-shard-*")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  ⚠ warning: failed to create temp dir for job %s: %v\n", jobID, err)
+			continue
+		}
+
+		// Look up the plan job for metadata
+		planJob := findJobByIDInPlan(plan, jobID)
+
+		shard, err := runbundle.WriteJobShard(context.Background(), runbundle.WriteJobShardOptions{
+			ExecID:    execID,
+			PlanID:    planID,
+			JobUID:    planJob.UID,
+			JobID:     jobID,
+			Component: planJob.Component,
+			Env:       planJob.Environment,
+			Profile:   planJob.Profile,
+			Status:    jobState.Status,
+			Source:    source,
+			State:     jobState,
+			LogsDir:   store.LogDir(execID, jobID),
+			OutputDir: shardDir,
+		})
+		if err != nil {
+			os.RemoveAll(shardDir)
+			fmt.Fprintf(os.Stderr, "  ⚠ warning: failed to write job shard for %s: %v\n", jobID, err)
+			continue
+		}
+
+		result, err := ghClient.UploadShard(context.Background(), shard)
+		os.RemoveAll(shardDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  ⚠ warning: failed to upload job artifact for %s: %v\n", jobID, err)
+			continue
+		}
+
+		fmt.Fprintf(os.Stderr, "  ✓ uploaded job artifact for %s: %s (%d bytes)\n", jobID, result.Name, result.Size)
 	}
 
 	return nil

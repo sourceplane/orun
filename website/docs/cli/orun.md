@@ -22,6 +22,7 @@ The root `orun` command is the entry point for planning, inspection, and executi
 | `orun debug` | Inspect intent processing and planning internals |
 | `orun compositions` | List or inspect available compositions |
 | `orun component` | List components or inspect a merged component view |
+| `orun github` | Inspect GitHub Actions artifact shards and workflow runs |
 | `orun completion` | Generate shell completion scripts |
 
 ## Global flags

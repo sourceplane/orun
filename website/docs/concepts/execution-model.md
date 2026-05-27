@@ -140,3 +140,41 @@ During execution, `orun` injects runner context into the step environment:
 - `ORUN_RUNNER`
 
 That gives steps a consistent way to understand whether they are running locally, in a container, or through the GitHub Actions-compatible backend.
+
+## CI artifacts
+
+When running in GitHub Actions, `orun` can produce immutable shard artifacts that capture execution evidence (plan, job results, logs) without requiring `actions/upload-artifact` steps in workflow YAML.
+
+### How it works
+
+Each `orun` invocation produces one shard:
+
+- **Plan shard** — `orun plan --artifact github` writes a plan shard (manifest, plan.json, checksums) and uploads it as a GitHub Actions artifact.
+- **Job shard** — `orun run --artifact github` uploads a job shard after the runner completes, even on failure. The original exit code is preserved.
+
+Shards use the naming convention `orun.v1.<exec-id>.<role>.<suffix>.<status>` and are uploaded via an embedded `@actions/artifact` Node.js helper.
+
+### CLI inspection
+
+The `orun github` command tree provides remote inspection without downloading full artifacts:
+
+- `orun github runs` — list workflow runs with artifact shard counts
+- `orun github status` — lightweight remote status via artifact name parsing
+- `orun github pull` — full download, synthesize, and hydrate into local `.orun/executions/`
+- `orun github logs` — download specific job shard logs
+
+### Partial hydration
+
+When some job shards are missing (e.g., cancelled run), hydration produces `status: "partial"` rather than failing. Missing shards are recorded as "pending" in the synthesized state:
+
+```
+EXECUTION gh-26185145757-1-a1b2c3d4  ◐ partial  13/18 shards
+```
+
+### Env-based activation
+
+Set the following environment variables in your GitHub Actions workflow to enable artifact upload without CLI flags:
+
+- `ORUN_ARTIFACT_BACKEND=github` — select the GitHub store
+- `ORUN_ARTIFACT_UPLOAD=true` — enable upload
+- `ORUN_ARTIFACT_RETENTION_DAYS=14` — override artifact retention
