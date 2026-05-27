@@ -47,11 +47,12 @@ jobs:
             --artifact github \
             --github-output
       - name: Upload plan artifact
+        if: steps.plan.outputs.matrix != '' && steps.plan.outputs.matrix != '{"include":[]}'
         uses: actions/upload-artifact@v4
         with:
           name: orun-plan
-          path: .orun/plans/
-          if-no-files-found: error
+          path: examples/.orun/plans/
+          if-no-files-found: warn
           retention-days: 14
 
   execute:
@@ -86,7 +87,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: orun-plan
-          path: .orun/plans/
+          path: examples/.orun/plans/
       - name: run job steps
         run: |
           orun run '${{ needs.plan.outputs.plan-checksum }}' \
