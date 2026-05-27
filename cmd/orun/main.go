@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/artifactstore/github"
 	"github.com/sourceplane/orun/internal/ci"
 	"github.com/sourceplane/orun/internal/expand"
 	"github.com/sourceplane/orun/internal/git"
@@ -16,6 +18,7 @@ import (
 	"github.com/sourceplane/orun/internal/planner"
 	"github.com/sourceplane/orun/internal/preset"
 	"github.com/sourceplane/orun/internal/render"
+	"github.com/sourceplane/orun/internal/runbundle"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/trigger"
 	"github.com/sourceplane/orun/internal/ui"
@@ -437,6 +440,97 @@ func generatePlan() error {
 		}
 
 		fmt.Println("\n" + output)
+	}
+
+	// Artifact upload for CI: write plan shard and upload via --artifact flag
+	if artifactBackend == "github" && os.Getenv("GITHUB_ACTIONS") == "true" && plan != nil {
+		runID := os.Getenv("GITHUB_RUN_ID")
+		runAttempt := os.Getenv("GITHUB_RUN_ATTEMPT")
+		if runAttempt == "" {
+			runAttempt = "1"
+		}
+		shortSHA := planID
+		if len(shortSHA) > 12 {
+			shortSHA = shortSHA[:12]
+		}
+		execID := runbundle.ExecID(runID, runAttempt, shortSHA)
+
+		// Create shard source metadata
+		source := runbundle.ShardSource{
+			Type:       "github-actions",
+			Repository: os.Getenv("GITHUB_REPOSITORY"),
+			RunID:      runID,
+			RunAttempt: runAttempt,
+			Workflow:   os.Getenv("GITHUB_WORKFLOW"),
+			SHA:        os.Getenv("GITHUB_SHA"),
+			Ref:        os.Getenv("GITHUB_REF"),
+			EventName:  os.Getenv("GITHUB_EVENT_NAME"),
+		}
+
+		// Write plan shard to temp directory
+		shardDir, err := os.MkdirTemp("", "orun-plan-shard-*")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠ warning: failed to create plan shard temp dir: %v\n", err)
+		} else {
+			defer os.RemoveAll(shardDir)
+
+			shard, err := runbundle.WritePlanShard(context.Background(), runbundle.WritePlanShardOptions{
+				ExecID:    execID,
+				Plan:      plan,
+				Source:    source,
+				OutputDir: shardDir,
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "⚠ warning: failed to write plan shard: %v\n", err)
+			} else if shard != nil {
+				// Upload plan shard via GitHub store
+				repo := os.Getenv("GITHUB_REPOSITORY")
+				if repo == "" {
+					fmt.Fprintf(os.Stderr, "⚠ warning: GITHUB_REPOSITORY not set, cannot upload artifact\n")
+				} else {
+					ghClient, err := github.NewClient(context.Background(), repo)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "⚠ warning: failed to create GitHub client: %v\n", err)
+					} else {
+						result, err := ghClient.UploadShard(context.Background(), shard)
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "⚠ warning: failed to upload plan artifact: %v\n", err)
+						} else if result != nil {
+							fmt.Fprintf(os.Stderr, "✓ uploaded plan artifact: %s (%d bytes)\n", result.Name, result.Size)
+						}
+					}
+				}
+			}
+		}
+
+		// --github-output: write matrix, plan_id, exec_id to $GITHUB_OUTPUT
+		if githubOutput && os.Getenv("GITHUB_OUTPUT") != "" {
+			outputPath := os.Getenv("GITHUB_OUTPUT")
+			var outputLines []string
+
+			// Build matrix JSON from plan jobs
+			var matrixEntries []string
+			for _, job := range plan.Jobs {
+				entry := fmt.Sprintf(`{"id":%q,"uid":%q,"component":%q,"env":%q,"composition":%q,"profile":%q}`,
+					job.ID, job.UID, job.Component, job.Environment, job.Composition, job.Profile)
+				matrixEntries = append(matrixEntries, entry)
+			}
+			matrixJSON := fmt.Sprintf("{\"include\":[%s]}", strings.Join(matrixEntries, ","))
+			outputLines = append(outputLines, fmt.Sprintf("matrix<<EOF\n%s\nEOF", matrixJSON))
+			outputLines = append(outputLines, fmt.Sprintf("plan_id=%s", planID))
+			outputLines = append(outputLines, fmt.Sprintf("exec_id=%s", execID))
+
+			f, err := os.OpenFile(outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "⚠ warning: failed to open %s: %v\n", outputPath, err)
+			} else {
+				_, err = f.WriteString(strings.Join(outputLines, "\n") + "\n")
+				f.Close()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "⚠ warning: failed to write %s: %v\n", outputPath, err)
+				}
+			}
+		}
 	}
 
 	return nil

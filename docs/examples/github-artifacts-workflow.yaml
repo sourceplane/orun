@@ -1,0 +1,71 @@
+name: orun
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: write    # required for artifact upload
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      exec_id: ${{ steps.plan.outputs.exec_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build orun
+        run: go build -o /usr/local/bin/orun ./cmd/orun
+
+      - name: Plan
+        id: plan
+        env:
+          ORUN_ARTIFACT_BACKEND: github
+          ORUN_ARTIFACT_UPLOAD: "true"
+        run: |
+          orun plan \
+            --from-ci github \
+            --event-file "$GITHUB_EVENT_PATH" \
+            --artifact github \
+            --github-output
+
+  run:
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        job: ${{ fromJson(needs.plan.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build orun
+        run: go build -o /usr/local/bin/orun ./cmd/orun
+
+      - name: Run
+        env:
+          ORUN_EXEC_ID: ${{ needs.plan.outputs.exec_id }}
+          ORUN_JOB_ID: ${{ matrix.job.id }}
+          ORUN_ARTIFACT_BACKEND: github
+          ORUN_ARTIFACT_UPLOAD: "true"
+        run: |
+          orun run \
+            --from-ci github \
+            --event-file "$GITHUB_EVENT_PATH" \
+            --exec-id "$ORUN_EXEC_ID" \
+            --job "$ORUN_JOB_ID" \
+            --artifact github \
+            --gha

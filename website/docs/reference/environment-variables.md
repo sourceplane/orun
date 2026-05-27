@@ -19,6 +19,21 @@ title: Environment variables
 | `GITHUB_ACTIONS` | Causes `run` to auto-select the GitHub Actions backend when set to `true` |
 | `GITHUB_WORKSPACE` | Used as the default workdir for the GitHub Actions backend when `--workdir` is not set |
 
+## GitHub artifact variables
+
+These variables configure artifact upload and inspection when using `--artifact github` or the `orun github` command tree.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ORUN_ARTIFACT_BACKEND` | | Artifact backend selector (`github`). Equivalent to `--artifact github` |
+| `ORUN_ARTIFACT_UPLOAD` | `true` inside GHA | Enable artifact upload from CI |
+| `ORUN_ARTIFACT_RETENTION_DAYS` | `14` | Override artifact retention in days |
+| `ORUN_SKIP_ARTIFACT_UPLOAD` | | Set to `true` to disable artifact upload for debugging |
+| `GITHUB_TOKEN` | | GitHub token for artifact API access (auto-set in GHA runners) |
+| `GH_TOKEN` | | Alternative GitHub token env var (fallback after `GITHUB_TOKEN`) |
+| `ACTIONS_RUNTIME_TOKEN` | | Runtime token for `@actions/artifact` upload (auto-set in GHA runners) |
+| `ACTIONS_RESULTS_URL` | | Results URL for `@actions/artifact` upload (auto-set in GHA runners) |
+
 ## Variables for self-hosted backend provisioning
 
 These variables are used by `orun backend init`, `orun backend status`, and `orun backend destroy`.

@@ -9,18 +9,22 @@ permissions:
   contents: read
   packages: read
   id-token: write   # orun remote-state OIDC authentication
+  actions: write    # required for artifact upload
 
 env:
   GITHUB_TOKEN: ${{ github.token }}
   ORUN_BACKEND_URL: https://orun-api.sourceplane.ai
+  ORUN_ARTIFACT_BACKEND: github
+  ORUN_ARTIFACT_UPLOAD: "true"
 
 jobs:
   plan:
     name: Orun Plan
     runs-on: ubuntu-latest
     outputs:
-      job-matrix: ${{ steps.plan.outputs.job-matrix }}
-      plan-checksum: ${{ steps.plan.outputs.plan-checksum }}
+      job-matrix: ${{ steps.plan.outputs.matrix }}
+      plan-checksum: ${{ steps.plan.outputs.plan_id }}
+      exec-id: ${{ steps.plan.outputs.exec_id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,6 +32,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       - name: Build orun from source
         run: go build -o /usr/local/bin/orun ./cmd/orun
       - name: Plan with Orun
@@ -37,49 +44,54 @@ jobs:
             --from-ci github \
             --event-file "$GITHUB_EVENT_PATH" \
             --intent examples/intent.yaml \
-            --output plan.json
-          echo "plan-checksum=$(jq -r '.metadata.checksum | ltrimstr("sha256-") | .[0:12]' plan.json)" >> $GITHUB_OUTPUT
-          echo "job-matrix=$(jq -c '[.jobs[] | {"job-id": .id, "job-name": .checkName}]' plan.json)" >> $GITHUB_OUTPUT
+            --artifact github \
+            --github-output
       - name: Upload plan artifact
         uses: actions/upload-artifact@v4
         with:
           name: orun-plan
-          path: plan.json
+          path: .orun/plans/
+          if-no-files-found: error
+          retention-days: 14
 
   execute:
-    name: ${{ matrix.job-name }}
+    name: "${{ matrix.component }}/${{ matrix.env }}"
     needs: plan
-    if: needs.plan.outputs.job-matrix != '[]'
+    if: needs.plan.outputs.job-matrix != '' && needs.plan.outputs.job-matrix != '{"include":[]}'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       max-parallel: 10
-      matrix:
-        include: ${{ fromJson(needs.plan.outputs.job-matrix) }}
+      matrix: ${{ fromJson(needs.plan.outputs.job-matrix) }}
     concurrency:
-      group: orun-${{ github.ref }}-${{ matrix.job-id }}
+      group: orun-${{ github.ref }}-${{ matrix.id }}
       cancel-in-progress: false
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ORUN_EXEC_ID: ${{ needs.plan.outputs.exec-id }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build orun from source
+        run: go build -o /usr/local/bin/orun ./cmd/orun
       - name: Download plan artifact
         uses: actions/download-artifact@v4
         with:
           name: orun-plan
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Build orun from source
-        run: go build -o /usr/local/bin/orun ./cmd/orun
+          path: .orun/plans/
       - name: run job steps
         run: |
-          orun run \
-            --plan plan.json \
+          orun run '${{ needs.plan.outputs.plan-checksum }}' \
             --runner github-actions \
             --remote-state \
-            --job "${{ matrix.job-id }}" \
-            --exec-id "${{ github.run_id }}-${{ github.run_attempt }}"
+            --job "${{ matrix.id }}" \
+            --exec-id "${{ needs.plan.outputs.exec-id }}" \
+            --artifact github

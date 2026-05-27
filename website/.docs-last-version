@@ -1,6 +1,6 @@
 # Docs last updated for version
 
-v2.1.0
+v2.3.0
 
 ## How to use this file
 
@@ -8,22 +8,19 @@ When updating docs next time, run:
 
 ```bash
 # Get all changes since docs were last updated
-git log v2.1.0..HEAD --oneline
+git log v2.3.0..HEAD --oneline
 ```
 
 Then update this file to the new version after the docs PR is merged.
 
 ## What was covered in this update
 
-- Profile rules: conditional profile selection via `profileRules` on subscriptions
-- Template context: namespaced `.orun`, `.parameters`, `.env` (breaking: flat context removed)
-- Parameters model: `inputs`→`parameters`, `defaults`→`parameterDefaults` (breaking)
-- `PlanJob.config` removed (breaking)
-- ORUN_ENV as portable alias for GITHUB_ENV
-- Intent presets: stack-published reusable intent scaffolding
-- Environment promotion dependencies
-- Updated: concepts/profile-rules.md (new)
-- Updated: concepts/intent-model.md (profileRules reference)
-- Updated: reference/configuration.md (profileRules syntax)
-- Updated: compositions/composition-contract.md (v2.0.0 breaking changes)
-- Updated: sidebars.js (added profile-rules, intent-presets)
+- Change watches: spec.change.watches for component opt-in to intent change signals
+- --intent-impact flag (all/watch/none) for controlling global intent impact behavior
+- Enhanced --explain output showing matched/unmatched watches
+- Breaking: default intent-impact is now "watch" (was implicitly "all")
+- New: concepts/change-watches.md
+- Updated: concepts/change-detection.md (intent-aware scoping table, --intent-impact flag)
+- Updated: reference/configuration.md (change.watches section)
+- Updated: concepts/intent-model.md (change.watches reference)
+- Updated: sidebars.js (added change-watches entry)
