@@ -473,15 +473,55 @@ func runGithubLogs() error {
 			fmt.Fprintf(os.Stderr, "⚠ warning: failed to download %s: %v\n", s.Name, err)
 			continue
 		}
-		fmt.Printf("=== %s ===\n", s.Name)
-		if ds.Shard != nil {
-			for logicalName := range ds.Shard.Files {
-				fmt.Printf("  %s\n", logicalName)
-			}
+		if ds.Shard == nil {
+			continue
 		}
+		printShardLogs(ds, s.Name)
 	}
 
 	return nil
+}
+
+// printShardLogs prints log file contents from a downloaded shard.
+// Only manifest entries whose logical name starts with "log:" are printed.
+// Each log section gets a header: === {shard-name} / {step-id} ===
+// Unreadable log files produce a stderr warning and do not abort.
+func printShardLogs(ds *artifactstore.DownloadedShard, shardName string) {
+	for logicalName, relPath := range ds.Shard.Files {
+		if !strings.HasPrefix(logicalName, "log:") {
+			continue
+		}
+		stepID := strings.TrimPrefix(logicalName, "log:")
+
+		// Resolve and constrain path under ds.Dir
+		fullPath := filepath.Join(ds.Dir, relPath)
+		absDir, err := filepath.Abs(ds.Dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠ warning: cannot resolve shard dir for %s: %v\n", logicalName, err)
+			continue
+		}
+		absPath, err := filepath.Abs(fullPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠ warning: cannot resolve log path for %s: %v\n", logicalName, err)
+			continue
+		}
+		if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) && absPath != absDir {
+			fmt.Fprintf(os.Stderr, "⚠ warning: log path %q escapes shard directory, skipping\n", relPath)
+			continue
+		}
+
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠ warning: cannot read log %s: %v\n", logicalName, err)
+			continue
+		}
+		fmt.Printf("=== %s / %s ===\n", shardName, stepID)
+		fmt.Print(string(content))
+		// Ensure a trailing newline separates sections
+		if len(content) > 0 && content[len(content)-1] != '\n' {
+			fmt.Println()
+		}
+	}
 }
 
 // filterOrunShards returns only artifacts matching the Orun naming scheme.

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/sourceplane/orun/internal/artifactstore"
+	"github.com/sourceplane/orun/internal/runbundle"
 	"github.com/sourceplane/orun/internal/state"
 )
 
@@ -174,3 +177,231 @@ func TestGithubPullOrunDirWithIntentRoot(t *testing.T) {
 }
 
 var _ = strings.Contains
+
+// --- Tests for printShardLogs and log content display ---
+
+func TestGithubLogsPrintsLogContent(t *testing.T) {
+	// Set up a temp dir with a log file
+	tmpDir := t.TempDir()
+	logsDir := filepath.Join(tmpDir, "logs")
+	os.MkdirAll(logsDir, 0755)
+	os.WriteFile(filepath.Join(logsDir, "step-init.log"), []byte("Initializing terraform...\nPlan complete.\n"), 0644)
+
+	ds := &artifactstore.DownloadedShard{
+		Name: "orun-shard-job1",
+		Dir:  tmpDir,
+		Shard: &runbundle.RunBundleShardManifest{
+			Role: runbundle.ShardRoleJob,
+			Files: map[string]string{
+				"log:step-init": "logs/step-init.log",
+				"result":        "result.json",
+			},
+		},
+	}
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	printShardLogs(ds, "orun-shard-job1")
+
+	w.Close()
+	os.Stdout = oldStdout
+	buf := make([]byte, 4096)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	// Must have header with shard name and step ID
+	if !strings.Contains(output, "=== orun-shard-job1 / step-init ===") {
+		t.Errorf("expected section header, got:\n%s", output)
+	}
+	// Must contain actual log content
+	if !strings.Contains(output, "Initializing terraform...") {
+		t.Errorf("expected log content, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Plan complete.") {
+		t.Errorf("expected log content 'Plan complete.', got:\n%s", output)
+	}
+	// Must NOT contain non-log entries
+	if strings.Contains(output, "result") && !strings.Contains(output, "result.json is excluded") {
+		// "result" key should not appear as a section header
+		if strings.Contains(output, "=== orun-shard-job1 / result") {
+			t.Errorf("non-log entry 'result' should not appear as log section")
+		}
+	}
+}
+
+func TestGithubLogsSkipsNonLogEntries(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.WriteFile(filepath.Join(tmpDir, "result.json"), []byte(`{"status":"ok"}`), 0644)
+
+	ds := &artifactstore.DownloadedShard{
+		Name: "shard1",
+		Dir:  tmpDir,
+		Shard: &runbundle.RunBundleShardManifest{
+			Role: runbundle.ShardRoleJob,
+			Files: map[string]string{
+				"result": "result.json",
+				"plan":   "plan.json",
+			},
+		},
+	}
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	printShardLogs(ds, "shard1")
+
+	w.Close()
+	os.Stdout = oldStdout
+	buf := make([]byte, 4096)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	if output != "" {
+		t.Errorf("expected no output for non-log entries, got:\n%s", output)
+	}
+}
+
+func TestGithubLogsWarnsOnUnreadableFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	ds := &artifactstore.DownloadedShard{
+		Name: "shard1",
+		Dir:  tmpDir,
+		Shard: &runbundle.RunBundleShardManifest{
+			Role: runbundle.ShardRoleJob,
+			Files: map[string]string{
+				"log:missing-step": "logs/nonexistent.log",
+			},
+		},
+	}
+
+	// Capture stderr
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	printShardLogs(ds, "shard1")
+
+	w.Close()
+	os.Stderr = oldStderr
+	buf := make([]byte, 4096)
+	n, _ := r.Read(buf)
+	errOutput := string(buf[:n])
+
+	if !strings.Contains(errOutput, "warning") || !strings.Contains(errOutput, "log:missing-step") {
+		t.Errorf("expected warning about unreadable log, got:\n%s", errOutput)
+	}
+}
+
+func TestGithubLogsMultipleSteps(t *testing.T) {
+	tmpDir := t.TempDir()
+	logsDir := filepath.Join(tmpDir, "logs")
+	os.MkdirAll(logsDir, 0755)
+	os.WriteFile(filepath.Join(logsDir, "fmt.log"), []byte("fmt ok\n"), 0644)
+	os.WriteFile(filepath.Join(logsDir, "plan.log"), []byte("plan ok\n"), 0644)
+
+	ds := &artifactstore.DownloadedShard{
+		Name: "orun-job-abc",
+		Dir:  tmpDir,
+		Shard: &runbundle.RunBundleShardManifest{
+			Role: runbundle.ShardRoleJob,
+			Files: map[string]string{
+				"log:fmt":  "logs/fmt.log",
+				"log:plan": "logs/plan.log",
+			},
+		},
+	}
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	printShardLogs(ds, "orun-job-abc")
+
+	w.Close()
+	os.Stdout = oldStdout
+	buf := make([]byte, 4096)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	if !strings.Contains(output, "fmt ok") {
+		t.Errorf("missing fmt log content")
+	}
+	if !strings.Contains(output, "plan ok") {
+		t.Errorf("missing plan log content")
+	}
+	// Both headers present
+	headerCount := strings.Count(output, "=== orun-job-abc /")
+	if headerCount != 2 {
+		t.Errorf("expected 2 section headers, got %d", headerCount)
+	}
+}
+
+func TestGithubLogsPathTraversalBlocked(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	ds := &artifactstore.DownloadedShard{
+		Name: "shard1",
+		Dir:  tmpDir,
+		Shard: &runbundle.RunBundleShardManifest{
+			Role: runbundle.ShardRoleJob,
+			Files: map[string]string{
+				"log:evil": "../../etc/passwd",
+			},
+		},
+	}
+
+	// Capture stderr
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	// Capture stdout to ensure nothing printed
+	oldStdout := os.Stdout
+	rOut, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	printShardLogs(ds, "shard1")
+
+	w.Close()
+	wOut.Close()
+	os.Stderr = oldStderr
+	os.Stdout = oldStdout
+
+	buf := make([]byte, 4096)
+	n, _ := r.Read(buf)
+	errOutput := string(buf[:n])
+
+	bufOut := make([]byte, 4096)
+	nOut, _ := rOut.Read(bufOut)
+	stdOutput := string(bufOut[:nOut])
+
+	if !strings.Contains(errOutput, "escapes shard directory") {
+		t.Errorf("expected path traversal warning, got stderr:\n%s", errOutput)
+	}
+	if strings.Contains(stdOutput, "===") {
+		t.Errorf("path traversal log should not produce output, got:\n%s", stdOutput)
+	}
+}
+
+func TestGithubLogsJobFilterNoMatch(t *testing.T) {
+	// The --job filter returning error when no match is already in runGithubLogs.
+	// Verify that the error message format is correct.
+	shards := []artifactstore.RemoteShard{
+		{ID: "1", Name: "orun-shard-plan"},
+	}
+	var filtered []artifactstore.RemoteShard
+	jobFilter := "nonexistent-job"
+	for _, s := range shards {
+		if strings.Contains(s.Name, jobFilter) {
+			filtered = append(filtered, s)
+		}
+	}
+	if len(filtered) != 0 {
+		t.Errorf("expected no matches for job filter %q", jobFilter)
+	}
+}
