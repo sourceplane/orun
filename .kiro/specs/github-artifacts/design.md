@@ -118,7 +118,7 @@ Remote inspection operates at three levels of cost and fidelity:
 
 Level 1 is always fast. Level 2 requires downloading one small JSON per shard. Level 3 is the full fan-in path.
 
-**Level 2 is not yet implemented.** The `--details` flag is registered but `runGithubRuns()` does not download manifests. See Phase 9 gap below.
+**Level 2 is implemented (Task 0141).** The `--details` flag triggers `DownloadManifestOnly()` for each Orun shard, printing manifest-derived role/status/exec-id/component/environment data.
 
 ### Artifact Naming Convention
 
@@ -633,7 +633,7 @@ All four subcommands are registered under `orun github` in `cmd/orun/command_git
 
 Lists workflow runs. For each run, calls `ListArtifacts` and filters to Orun shards. Displays run ID, short SHA, branch, status, age, and shard count.
 
-**Gap — `--details` (Level 2) not implemented:**
+**Gap — `--details` (Level 2) implemented (Task 0141):**
 
 The `--details` flag is registered but `runGithubRuns()` does not download manifests. The intended behavior:
 
@@ -696,7 +696,7 @@ for logical, relPath := range ds.Shard.Files {
 | Item | Status |
 |------|--------|
 | `orun github runs` — Level 1 listing | ✅ DONE |
-| `orun github runs --details` — Level 2 manifest download | ⚠️ NEEDS WORK — flag registered, not implemented |
+| `orun github runs --details` — Level 2 manifest download | ✅ DONE — implemented in Task 0141 |
 | `orun github pull` — full fan-in + hydration | ✅ DONE |
 | `orun github status` — lightweight shard count | ✅ DONE |
 | `orun github logs` — download + print log content | ⚠️ NEEDS WORK — prints file names only, not content |
@@ -886,7 +886,7 @@ go test ./internal/artifactstore/github/... -cover
 
 | Gap | Phase | Effort | Priority |
 |-----|-------|--------|----------|
-| `orun github runs --details` (Level 2 manifest download) | 9 | Small — add `DownloadManifest()` helper + wire into `runGithubRuns()` | High |
+| `orun github runs --details` (Level 2 manifest download) | 9 | ✅ Done (Task 0141) | — |
 | `orun github logs` prints file names, not content | 9 | Small — read log files from extracted shard dir and print to stdout | High |
 | Partial hydration display in `orun status` | 8 | Verify — check `command_status.go` handles `status="partial"` | Medium |
 | `.github/workflows/orun.yaml` template | 10 | Small — copy from `docs/examples/` or add `orun init --workflow` | Medium |
