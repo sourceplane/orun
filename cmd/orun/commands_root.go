@@ -192,4 +192,5 @@ func init() {
 	registerFetchCommand(rootCmd)
 	registerIntentCommand(rootCmd)
 	registerGithubCommand(rootCmd)
+	registerTuiCommand(rootCmd)
 }
