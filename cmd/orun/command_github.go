@@ -231,9 +231,67 @@ func runGithubRuns() error {
 		} else {
 			fmt.Println(summary)
 		}
+
+		// Level 2: download manifests for accurate status when --details is set
+		if githubRunsDetails && len(orunArtifacts) > 0 {
+			printManifestDetails(ctx, client, orunArtifacts)
+		}
 	}
 
 	return nil
+}
+
+// printManifestDetails downloads manifests for Orun shards and prints
+// detailed status from each manifest. This is the Level 2 detail path.
+// Individual manifest failures produce warnings; they do not abort
+// printing for other shards.
+func printManifestDetails(ctx context.Context, client *github.Client, shards []artifactstore.RemoteShard) {
+	// Sort by name for deterministic output
+	sorted := make([]artifactstore.RemoteShard, len(shards))
+	copy(sorted, shards)
+	sortShardsByName(sorted)
+
+	for _, s := range sorted {
+		detail, err := client.DownloadManifestOnly(ctx, s)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "    ⚠ %s: manifest download failed: %v\n", s.Name, err)
+			continue
+		}
+		m := detail.Manifest
+		line := fmt.Sprintf("    %s  role=%s  exec=%s  status=%s",
+			s.Name, m.Role, m.ExecID, manifestStatus(m))
+		if m.JobID != "" {
+			line += fmt.Sprintf("  job=%s", m.JobID)
+		}
+		if m.Component != "" {
+			line += fmt.Sprintf("  component=%s", m.Component)
+		}
+		if m.Environment != "" {
+			line += fmt.Sprintf("  env=%s", m.Environment)
+		}
+		fmt.Println(line)
+	}
+}
+
+// manifestStatus returns the effective status string from a manifest.
+func manifestStatus(m *runbundle.RunBundleShardManifest) string {
+	if m.Status != "" {
+		return m.Status
+	}
+	// Plan shards may not have an explicit status field
+	if m.Role == runbundle.ShardRolePlan {
+		return "plan"
+	}
+	return "unknown"
+}
+
+// sortShardsByName sorts shards by name for deterministic output.
+func sortShardsByName(shards []artifactstore.RemoteShard) {
+	for i := 1; i < len(shards); i++ {
+		for j := i; j > 0 && shards[j].Name < shards[j-1].Name; j-- {
+			shards[j], shards[j-1] = shards[j-1], shards[j]
+		}
+	}
 }
 
 func runGithubPull() error {
