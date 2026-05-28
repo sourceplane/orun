@@ -60,3 +60,16 @@
 |- Scope boundary: Verification of PR #141 only. Confirm Level 2 manifest detail, Level 1 no-download guard, graceful degradation, secret/path-traversal safety, and bounded spec updates.
 |- Acceptance: All local tests pass; CI logs inspected and green; code path review confirms Level 1/2 separation, temp cleanup, and path traversal inheritance; PASS report filed and PR #141 merged.
 |- Expected outcome: Task 0141 verified+merged, making Requirement 11 durable on main.
+
+## Task 0142
+
+||- Agent: Verifier
+||- Prompt: `ai/tasks/task-0142-verifier.md`
+||- Status: verified FAIL (2026-05-29) — PR #142 left OPEN, not merged
+||- Implementation under review: PR #142, branch `happy-patch-113`, head `ddbec4c`
+||- PR CI: run 26606559596 (Orun Plan QUEUED >24h), run 26606559621 (Harness dry-run guard SUCCESS; downstream remote-state conformance jobs SKIPPED); mergeStateStatus UNSTABLE
+||- Reports: `ai/reports/task-0142-verifier.md` (no implementer report exists)
+||- Objective: Verify PR #142 against the Verifier Standard and decide PASS/FAIL — protect `main` from queued CI, unrelated scope, and a dummy CI trigger that snuck in alongside a legitimate GitHub CLI UX fix.
+||- Scope boundary: PR #142 only. Code under review: `cmd/orun/command_github.go` (`--orun-dir` normalization, `github status` flag registration) and `website/docs/cli/orun-github.md`. Scope-risk files: `.kiro/specs/orun-tui-cockpit/**`, `orun-tui-cockpit.md`, `agents/orchestrator.md`, historical `ai/tasks/task-013x/014x` prompts, `ai/waiting_for_input.md`, `examples/apps/api-edge/component.yaml`.
+||- Acceptance verdict: CLI code change is correct and locally tested (all 17 TestGithub* + full ./cmd/orun/..., ./internal/artifactstore/github/..., ./internal/runbundle/... pass; build clean). FAIL is driven by (1) Orun Plan CI queued, (2) `trigger: pr-142-dummy-change` dummy label in component.yaml, (3) 3,760-line unrelated scope (TUI cockpit spec pack, orchestrator doc, historical prompts, stale waiting_for_input), (4) meaningless PR title with no implementer report.
+||- Durable outcome: Verification report recorded on `main`; PR #142 stays OPEN; orchestrator must scope a narrowed CLI-only follow-up plus separate spec/docs/history PRs before any new implementation task starts.

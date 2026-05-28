@@ -1,6 +1,6 @@
 {
   "goal": "Orun GitHub Artifacts stabilization and upcoming orun-tui-cockpit roadmap",
-  "current_task": null,
+  "current_task": "0142",
   "completed": [
     "0139.1",
     "0140",
@@ -8,14 +8,16 @@
     "0141",
     "0141.1"
   ],
-  "repo_health": "green",
-  "next_focus": "partial-hydration-or-workflow-template-or-tui-cockpit",
+  "repo_health": "yellow",
+  "next_focus": "narrow-pr-142-to-cli-fix-and-resubmit",
   "last_verified": "2026-05-29",
   "waiting_for_input": "false",
-  "task_agent": null,
+  "task_agent": "verifier",
   "notes": [
     "Task 0141 verified PASS and merged via PR #141 at merge commit 1ebcb46.",
     "orun github runs --details now downloads manifest-only data for Level 2 detail: role, exec-id, status, job, component, environment per shard.",
-    "GitHub Artifacts Requirement 11 satisfied. Level 2 manifest download is DONE."
+    "GitHub Artifacts Requirement 11 satisfied. Level 2 manifest download is DONE.",
+    "Task 0142 verifier ran 2026-05-29: PR #142 FAILED verification. Blockers: (1) Orun Plan CI queued ~24h, mergeStateStatus UNSTABLE; (2) dummy CI trigger label trigger: pr-142-dummy-change in examples/apps/api-edge/component.yaml; (3) massive unrelated scope (3,760 additions: TUI cockpit spec pack 1,971 lines, agents/orchestrator.md 475 lines, historical task prompts, stale ai/waiting_for_input.md); (4) meaningless PR title 'chore: update happy-patch-113' with no implementer report.",
+    "PR #142 remains OPEN. Code change itself (--orun-dir normalization + github status flag registration) is correct and tested locally. Recommend narrowing PR to commit ddbec4c only (minus dummy trigger), retitling, and re-running CI. Spec pack, orchestrator doc, and historical files should ship as separate PRs."
   ]
 }
