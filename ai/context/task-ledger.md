@@ -97,3 +97,13 @@
 |- Scope boundary: verification of PR #143 only. Confirmed TUI command registration, remote-state fail-closed behavior, service boundary/no shell-out, focused tests/build, Orun validation, secret safety, spec drift handling, and separation from PR #142. PR #142 untouched.
 |- Durable outcome: `orun tui` cobra command registered; `internal/tui` Phase 1 foundation lives on `main` with three-panel Bubble Tea shell, async workspace load, loading/error states, and an `internal/tui/services` boundary that calls Orun internals directly (no `exec.Command`, no `"orun"` literal). Phase 2/3 surfaces (GeneratePlan, RunPlan, Describe, follow-mode TailLogs, remote ListRuns) are explicit `errNotImplemented` stubs. Charm deps pinned (`bubbletea v1.3.5`, `bubbles v0.21.0`, `lipgloss v1.1.0`); `pgregory.net/rapid v1.1.0` substituted for the spec's stale `github.com/flyingmutant/rapid` mirror path (one-line spec edit recommended for next housekeeping pass).
 |- Open risks: PR #142 still open/dirty, out of scope here; next orchestrator cycle must decide its disposition before Phase 2.
+
+## Task 0145
+
+|- Agent: Implementer
+|- Prompt: `ai/tasks/task-0145.md`
+|- Status: scoped and ready to begin (2026-05-29)
+|- Objective: resolve dirty PR #142 before new TUI Phase 2 feature work by preserving the valid GitHub CLI UX change (`--orun-dir` normalization and `github status` selector flags) in a clean successor PR and closing or explicitly dispositioning PR #142.
+|- Scope boundary: GitHub CLI UX fix plus matching docs/tests/report only; no TUI Phase 2, no TUI spec/process/history files from PR #142, no dummy component trigger, no artifact schema/workflow changes.
+|- Acceptance: final PR diff is narrow; blocker files and `pr-142-dummy-change` are absent; focused Go tests/build pass; implementer report names a real PR number; PR #142 is closed as superseded or a closure blocker is documented.
+|- Expected outcome: a verifier-ready successor PR that returns repo health toward green and unblocks TUI Cockpit Phase 2 after verification/merge.

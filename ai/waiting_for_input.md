@@ -6,8 +6,8 @@ No human input is currently requested.
 
 ## Last Decision
 
-The Orchestrator scoped Task 0144.1: verify PR #143 for the Orun Cockpit TUI Phase 1 foundation. This follows the Task 0144 implementer report and open PR #143 with green check rollup.
+The Orchestrator scoped Task 0145: supersede/close dirty PR #142 with a clean GitHub CLI UX fix PR from current `main`. This must happen before TUI Phase 2 work resumes.
 
 ## Ready To Proceed
 
-Task 0144.1 verifier prompt is ready in `/ai/tasks/task-0144-verifier.md`. The Verifier may begin immediately. PR #142 remains a separate open-risk item and is out of scope for this verifier task.
+Task 0145 prompt is ready in `/ai/tasks/task-0145.md`. The Implementer may begin immediately.

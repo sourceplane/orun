@@ -1,6 +1,6 @@
 {
   "goal": "Orun TUI cockpit roadmap and open PR verification",
-  "current_task": null,
+  "current_task": "0145",
   "completed": [
     "0139.1",
     "0140",
@@ -11,16 +11,17 @@
     "0144.1"
   ],
   "repo_health": "yellow",
-  "next_focus": "decide-pr-142-disposition-and-scope-task-0145-tui-phase-2",
+  "next_focus": "supersede-pr-142-github-cli-ux-fix",
   "last_verified": "2026-05-29",
   "waiting_for_input": "false",
-  "task_agent": null,
+  "task_agent": "/ai/tasks/task-0145.md",
   "notes": [
-    "Task 0144 implementer opened PR #143 from impl/task-0144-tui-foundation for Orun Cockpit TUI Phase 1 foundation.",
-    "Task 0144.1 verifier PASS: PR #143 merged via gh pr merge (merge commit 17d3b58) on 2026-05-29 05:13:38 +0530. Local main fast-forwarded; branch deleted; report committed pre-merge.",
-    "Verified: tui command registered, --remote-state fails closed pre-Bubble-Tea, internal/tui service boundary uses Orun internals directly (no exec.Command, no 'orun' literal under internal/tui/services), focused tests + full go test ./... pass, orun validate/plan/dry-run clean, no committed secrets.",
-    "Spec drift accepted: pgregory.net/rapid used in place of design.md's stale github.com/flyingmutant/rapid mirror path; recommend one-line spec edit in next housekeeping pass.",
-    "PR #142 still open/dirty and out of scope; next orchestrator cycle must decide close vs. narrow vs. supersede.",
-    "Repo health remains yellow until PR #142 is resolved; PR #143 is no longer an open-risk item."
+    "Task 0145 scoped: supersede/close dirty PR #142 with a clean GitHub CLI UX fix PR from current main.",
+    "Task 0144.1 completed and PR #143 merged; Orun Cockpit TUI Phase 1 foundation is durable on main.",
+    "PR #142 remains open and DIRTY with unrelated/stale scope despite Task 0142 FAIL and Task 0143 repair prompt; no Task 0143 implementer report exists.",
+    "Task 0145 preserves only the useful PR #142 ddbec4c behavior: --orun-dir normalization and github status selector flags plus matching docs/tests.",
+    "Final PR must exclude TUI specs/process docs/historical prompts/stale waiting_for_input and the pr-142-dummy-change trigger.",
+    "Implementer must open a real successor PR, update ai/reports/task-0145-implementer.md with the real PR number, and close or explicitly document inability to close PR #142.",
+    "Verifier will inspect successor PR diff, tests, CI logs, PR #142 disposition, and merge only on PASS."
   ]
 }
