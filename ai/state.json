@@ -4,16 +4,18 @@
   "completed": [
     "0139.1",
     "0140",
-    "0140.1"
+    "0140.1",
+    "0141",
+    "0141.1"
   ],
   "repo_health": "green",
-  "next_focus": "next-github-artifacts-gap-or-tui-cockpit-readiness",
+  "next_focus": "partial-hydration-or-workflow-template-or-tui-cockpit",
   "last_verified": "2026-05-29",
   "waiting_for_input": "false",
   "task_agent": null,
   "notes": [
-    "Task 0140 verified PASS and merged via PR #140 at merge commit 612e378.",
-    "orun github logs now prints actual log file contents with === shard / step === headers, log: prefix filtering, path traversal defense, and warn-and-continue on unreadable files.",
-    "GitHub Artifacts Requirement 14 satisfied. Requirement 20 test coverage added for log-content path."
+    "Task 0141 verified PASS and merged via PR #141 at merge commit 1ebcb46.",
+    "orun github runs --details now downloads manifest-only data for Level 2 detail: role, exec-id, status, job, component, environment per shard.",
+    "GitHub Artifacts Requirement 11 satisfied. Level 2 manifest download is DONE."
   ]
 }
