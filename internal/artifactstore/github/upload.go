@@ -76,6 +76,13 @@ func (c *Client) Upload(ctx context.Context, shard *runbundle.Shard) (*artifacts
 	// ACTIONS_RESULTS_URL, GITHUB_RUN_ID, GITHUB_WORKSPACE, and other runner vars.
 	cmd.Env = os.Environ()
 
+	// Debug: log ACTIONS_ env vars to help diagnose missing token issues
+	for _, env := range os.Environ() {
+		if strings.HasPrefix(env, "ACTIONS_") {
+			fmt.Fprintf(os.Stderr, "  [artifact-debug] %s\n", strings.SplitN(env, "=", 2)[0])
+		}
+	}
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("upload helper failed: %w\noutput: %s", err, strings.TrimSpace(string(output)))
