@@ -105,10 +105,16 @@ func registerGithubCommand(root *cobra.Command) {
 	githubPullCmd.Flags().BoolVar(&githubPullLatest, "latest", false, "Pull latest run")
 	githubPullCmd.Flags().BoolVar(&githubPullFailed, "failed", false, "Pull latest failed run")
 	githubPullCmd.Flags().BoolVar(&githubPullIncludeRaw, "include-raw", false, "Include unredacted logs")
-	githubPullCmd.Flags().StringVar(&githubPullOrunDir, "orun-dir", ".", "Target .orun directory")
+	githubPullCmd.Flags().StringVar(&githubPullOrunDir, "orun-dir", ".", "Target working directory (a .orun/ subdirectory is created/used inside it)")
 
 	// Status subcommand
 	githubCmd.AddCommand(githubStatusCmd)
+	githubStatusCmd.Flags().Int64Var(&githubLogsRunID, "run-id", 0, "Explicit GitHub run ID")
+	githubStatusCmd.Flags().StringVar(&githubLogsExecID, "exec-id", "", "Execution ID (gh-<run>-<attempt>-<sha>)")
+	githubStatusCmd.Flags().StringVar(&githubLogsSHA, "sha", "", "Latest run for this SHA")
+	githubStatusCmd.Flags().StringVar(&githubLogsBranch, "branch", "", "Latest run for this branch")
+	githubStatusCmd.Flags().BoolVar(&githubLogsFailed, "failed", false, "Latest failed run")
+	githubStatusCmd.Flags().BoolVar(&githubLogsLatest, "latest", false, "Latest run")
 
 	// Logs subcommand
 	githubCmd.AddCommand(githubLogsCmd)
@@ -351,8 +357,13 @@ func runGithubPull() error {
 	}
 
 	orunDir := githubPullOrunDir
-	if orunDir == "." {
-		orunDir = filepath.Join(storeDir(), state.OrunDir)
+	if orunDir == "" {
+		orunDir = "."
+	}
+	// Normalize: --orun-dir is a working directory; .orun/ lives inside it.
+	// Accept either the working dir or a path that already ends in .orun for back-compat.
+	if filepath.Base(orunDir) != state.OrunDir {
+		orunDir = filepath.Join(orunDir, state.OrunDir)
 	}
 
 	// Download all shards
