@@ -84,3 +84,13 @@
 |- Acceptance: PR diff is narrow; `trigger: pr-142-dummy-change` and unrelated files are absent; focused Go tests/build pass; PR title/body are meaningful; implementer report names the real PR; required CI is re-run and not queued/unknown before reporting complete.
 |- Expected outcome: PR #142 is repaired and ready for a Task 0143 verifier pass, or a successor PR is opened if PR #142 cannot be safely repaired; no new feature work starts until this open PR is resolved.
 
+
+## Task 0144.1
+
+|- Agent: Verifier
+|- Prompt: `ai/tasks/task-0144-verifier.md`
+|- Status: scoped and ready to begin (2026-05-29)
+|- Objective: verify PR #143 (`Task 0144: Orun Cockpit TUI Phase 1 foundation`) against Task 0144, the TUI cockpit spec pack, local/CI validation, and the Verifier Merge Protocol; merge only on PASS plus acceptable CI/log evidence.
+|- Scope boundary: verification of PR #143 only. Confirm TUI command registration, remote-state fail-closed behavior, service boundary/no shell-out, focused tests/build, Orun validation, secret safety, spec drift handling, and separation from PR #142. Do not repair or merge PR #142 and do not require later TUI phases.
+|- Acceptance: verifier report `ai/reports/task-0144-verifier.md` records PASS/FAIL; local checks and CI logs inspected; PR #143 either merged with local `main` synced and clean, or left open with clear blockers.
+|- Expected outcome: Task 0144 is either verified+merged, making the TUI Phase 1 foundation durable on `main`, or returned to implementer with precise blockers.

@@ -1,89 +1,87 @@
 # Current Orchestration Context
 
-Last updated: 2026-05-29 (Task 0143 scoped — repair/narrow PR #142)
+Last updated: 2026-05-29 (Task 0144.1 scoped — verify PR #143 TUI foundation)
 
 ## Repo Reality
 
-- Local branch: `main` at `813e682` (`docs: Task 0142 verifier report — PR #142 FAIL, left OPEN`), synced with `origin/main`.
-- One PR open: **#142** (`happy-patch-113`, title `chore: update happy-patch-113`) — verified FAIL, not merged.
-- PR #142 CI remains unhealthy: `Orun Plan` is QUEUED/unknown and `mergeStateStatus = UNSTABLE`; `Harness dry-run guard` succeeded, downstream remote-state conformance jobs are skipped.
-- Repo health: **yellow** because PR #142 contains valid CLI work but is blocked by CI and unrelated scope.
+- Local branch observed during orchestration: `impl/task-0144-tui-foundation` at `19627c2` (`docs: add task-0144 implementer report (PR #143)`), tracking `origin/impl/task-0144-tui-foundation`.
+- Open PRs:
+  - **#143** (`impl/task-0144-tui-foundation` → `main`, title `Task 0144: Orun Cockpit TUI Phase 1 foundation`) — ready for verifier. `mergeStateStatus = CLEAN`; CI rollup shows `Orun Plan` SUCCESS and `Harness dry-run guard` SUCCESS, with downstream matrix jobs skipped as expected for the plan shape.
+  - **#142** (`happy-patch-113`, title `chore: update happy-patch-113`) — previously verified FAIL and remains open/dirty. It is out of scope for Task 0144.1.
+- Repo health: **yellow** until PR #143 is verified/merged or failed with blockers documented. PR #142 remains a separate unresolved open-risk item.
 
 ## Last Completed Task (0141.1)
 
 Task 0141 verified PASS and merged via PR #141 at `1ebcb46`. `orun github runs --details` now downloads manifest-only data for each Orun shard and prints Level 2 detail: role, exec-id, status, job, component, environment. Default `orun github runs` remains Level 1 (no downloads). GitHub Artifacts Requirement 11 satisfied.
 
-## Last Verification (0142 — FAIL)
+## User-Directed Roadmap Pivot
 
-Task 0142 verifier inspected PR #142 and wrote `ai/reports/task-0142-verifier.md`.
+The user explicitly instructed the orchestrator to act from `agents/orchestrator.md` and to produce new tasks or verifiers as suited. The current repo state shows the implementer already followed a pivot from the earlier PR #142 cleanup path into Orun TUI cockpit work:
 
-**Result: FAIL.** The CLI code change is correct and locally tested, but the PR must not merge because:
+- Task 0144 prompt exists at `ai/tasks/task-0144.md`.
+- Implementer report exists at `ai/reports/task-0144-implementer.md`.
+- PR #143 is open and claims Task 0144 complete.
 
-1. `Orun Plan` CI is queued/unknown and `mergeStateStatus = UNSTABLE`.
-2. `examples/apps/api-edge/component.yaml` contains dummy CI trigger label `trigger: pr-142-dummy-change`.
-3. PR scope is massively unrelated: TUI cockpit spec pack, root `orun-tui-cockpit.md`, `agents/orchestrator.md`, historical task prompts, and stale `ai/waiting_for_input.md` are bundled with a small GitHub CLI UX fix.
-4. PR title/body are placeholder (`chore: update happy-patch-113`, `Created by rh-ghflow`) and no implementer report exists.
+Given the implementer report and green check rollup, the correct next orchestration action is a **Verifier** task for PR #143, not a new implementation task.
 
-PR #142 remains OPEN. Do not treat Task 0142 as completed/merged.
+## Current Task (0144.1 — Verifier)
 
-## Current Task (0143 — Implementer)
+Prompt: `ai/tasks/task-0144-verifier.md`
 
-Prompt: `ai/tasks/task-0143.md`
+Objective: verify PR #143 against Task 0144, the TUI cockpit spec pack, and `agents/orchestrator.md` Verifier Standard. Merge only on PASS plus acceptable local validation and CI log inspection; otherwise leave PR #143 open with precise blockers.
 
-Objective: repair PR #142 into a coherent GitHub CLI UX fix PR by preserving only the valid `--orun-dir` normalization, `orun github status` resolver flags, matching CLI docs, and direct UX-review context; remove dummy/unrelated files; retitle/rewrite the PR; commit an implementer report; and re-trigger CI.
-
-### PR Boundary
+### PR Boundary To Verify
 
 In scope:
 
-- `cmd/orun/command_github.go` changes for `--orun-dir` normalization and `github status` flags.
-- `cmd/orun/command_github_test.go` only if focused tests are added or adjusted.
-- `website/docs/cli/orun-github.md` docs matching the code behavior.
-- `docs/github-log-pull-ux-review.md` only if retained as direct context for the UX fix.
-- `ai/reports/task-0143-implementer.md` with real PR number and test/CI evidence.
-- PR metadata cleanup for PR #142, or successor PR if #142 cannot be safely repaired.
+- `cmd/orun/command_tui.go` and `cmd/orun/commands_root.go` for `orun tui` registration.
+- Charm stack dependencies in `go.mod` / `go.sum`.
+- `internal/tui/**` Phase 1 foundation: app/model/keymap/theme, service boundary, mock/live service, read-only LoadWorkspace/ListRuns/TailLogs slice, minimal views/events, tests.
+- `.kiro/specs/orun-tui-cockpit/**`, `agents/orchestrator.md`, `orun-tui-cockpit.md`, and `ai/tasks/task-0144.md` included by the pivot branch; verifier must decide whether bundling these with implementation is acceptable under the user-directed pivot or should be recorded as a scope concern.
+- `ai/reports/task-0144-implementer.md`.
 
-Out of scope / must be removed from this PR:
+Out of scope:
 
-- `.kiro/specs/orun-tui-cockpit/**`
-- `orun-tui-cockpit.md`
-- `agents/orchestrator.md`
-- historical `ai/tasks/task-0139-verifier.md`, `task-0140.md`, `task-0140-verifier.md`, `task-0141-verifier.md`
-- stale `ai/waiting_for_input.md`
-- dummy `trigger: pr-142-dummy-change` in `examples/apps/api-edge/component.yaml`
+- No PR #142 repair, closure, or merge.
+- No full Browse filters, dependency tree, Plan Studio, Run Dashboard, follow-mode Log Explorer, History replay, command palette execution, remote cockpit polling, plan diff, failure workbench, or explain mode.
+- No feature implementation by verifier beyond small verifier-only report/metadata fixes if needed.
 
 ### Acceptance Summary
 
-- PR #142 diff is narrow and no longer includes dummy/unrelated files.
-- Local Go tests/build pass:
-  - `go test ./cmd/orun/ -run 'TestGithub(Status|Pull|Logs|Runs)|TestGithubCommand' -v`
-  - `go test ./internal/artifactstore/github/... -v`
-  - `go test ./internal/runbundle/... -v`
-  - `go test ./cmd/orun/... -v`
-  - `go build ./cmd/orun/`
-- PR title/body tell the actual story.
-- `ai/reports/task-0143-implementer.md` is committed with real PR number.
-- Required GitHub checks are re-run and no required check is queued, failing, cancelled, or unknown when implementer reports complete.
+- PR #143 maps exactly to Task 0144 and does not include PR #142 CLI repair files.
+- `orun tui --help` is registered and visible.
+- `orun tui --remote-state` fails before Bubble Tea launch if no backend URL is configured.
+- TUI code compiles and focused tests pass.
+- `internal/tui/services` uses Orun internals directly and does not shell out to the `orun` binary.
+- Orun validation/plan/dry-run remains healthy for `intent.yaml`.
+- CI logs for PR #143 are inspected and support the check rollup.
+- Secret safety is verified.
+- Spec drift around `github.com/flyingmutant/rapid` vs `pgregory.net/rapid` is documented and either accepted, proposed, or blocked.
+- If PASS: PR #143 is merged, local `main` is synced, and repo is clean.
 
 ## Current Roadmap Position
 
-GitHub Artifacts stabilization remains active. Immediate priority is repairing the failed open PR before generating fresh feature work.
+Orun TUI cockpit roadmap is active for PR #143 verification. The TUI cockpit spec pack defines four MVP phases:
 
-After Task 0143 and its verifier complete, remaining GitHub Artifacts gaps are:
+1. Phase 1 — read-only browse / foundation.
+2. Phase 2 — Plan Studio.
+3. Phase 3 — Execution Dashboard, Log Explorer, History/Replay.
+4. Phase 4 — advanced features: plan diff, failure workbench, explain mode, remote cockpit.
 
-1. Partial hydration display verification and CLI integration tests (Requirements 10 and 20).
-2. Workflow template/root workflow decision and E2E workflow coverage (Requirements 17 and 21).
-3. ArtifactStore memory/local test implementation gap (Requirement 5, low priority).
-4. TUI cockpit Phase 1 from `.kiro/specs/orun-tui-cockpit/tasks.md`, only after the spec pack lands in a dedicated PR or the user approves using it as-is.
+Task 0144 covers a large but coherent Phase 1 foundation slice: command entry point, service seam, read-only workspace/run/log access, minimal Bubble Tea shell, and tests. This is appropriately PR-sized because the service boundary, command registration, dependencies, and root model must land together for later TUI phases to build on a stable seam.
 
-## Next Task After 0143
+## Next Task After 0144.1
 
-Generate a **Verifier** task for Task 0143 / PR #142 (or the successor PR) once the implementer reports that the branch has been narrowed, PR metadata fixed, report committed, and CI re-run. The verifier must inspect diff scope, code behavior, tests, PR CI logs, secret safety, and then merge only on PASS plus green CI.
+If Task 0144.1 PASSes and PR #143 merges, the next orchestrator cycle should scope one of these, in priority order:
 
-If Task 0143 cannot repair PR #142 because CI remains stuck after re-run or branch ownership prevents rewriting, the implementer should report the blocker and the orchestrator should decide whether to close/supersede PR #142 with a clean successor PR.
+1. **Task 0145 Implementer — TUI Phase 1 read-only Browse completion**: implement full Navigator/Browse/Inspector interactions from `.kiro/specs/orun-tui-cockpit/tasks.md` tasks 7-9, including component table, filters/search, dependency tree, and resource descriptions.
+2. **Task 0145 Implementer — Spec cleanup for rapid module path** if the verifier decides the `pgregory.net/rapid` mismatch should be corrected separately before more TUI implementation.
+3. Revisit **PR #142 cleanup/closure** only if the user wants the old GitHub CLI UX PR resolved before continuing TUI cockpit work.
 
-## Deferred Dedicated PRs
+If Task 0144.1 FAILs, the next task should be a targeted implementer fix for PR #143 blockers, not new feature work.
 
-- `chore(spec): add orun TUI cockpit spec pack` for `.kiro/specs/orun-tui-cockpit/**` and `orun-tui-cockpit.md`.
-- `docs(agents): add orchestrator operating protocol` for `agents/orchestrator.md`.
-- `chore(ai): archive historical task prompts and refresh waiting input state` for old `ai/tasks/*` prompts and `ai/waiting_for_input.md`.
+## Deferred / Open Risks
+
+- PR #142 remains open, dirty, and previously failed verification. It includes unrelated TUI/spec/process/history files plus a GitHub CLI UX fix. Keep it out of PR #143 verification.
+- The implementer report notes a spec/module mismatch: `.kiro/specs/orun-tui-cockpit/tasks.md` names `github.com/flyingmutant/rapid`, but the Go module path used is `pgregory.net/rapid`. Verifier must decide whether this needs a formal proposal/spec edit.
+- PR #143 is large because it includes the spec pack, orchestrator doc, architecture brief, and implementation. Verifier should judge whether this is acceptable under the explicit pivot and report rationale.

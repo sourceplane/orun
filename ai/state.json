@@ -1,6 +1,6 @@
 {
-  "goal": "Orun GitHub Artifacts stabilization and upcoming orun-tui-cockpit roadmap",
-  "current_task": "0143",
+  "goal": "Orun TUI cockpit roadmap and open PR verification",
+  "current_task": "0144.1",
   "completed": [
     "0139.1",
     "0140",
@@ -9,16 +9,16 @@
     "0141.1"
   ],
   "repo_health": "yellow",
-  "next_focus": "narrow-pr-142-to-cli-fix-and-resubmit",
+  "next_focus": "verify-pr-143-tui-foundation",
   "last_verified": "2026-05-29",
   "waiting_for_input": "false",
-  "task_agent": "ai/tasks/task-0143.md",
+  "task_agent": "ai/tasks/task-0144-verifier.md",
   "notes": [
-    "Task 0142 verifier ran 2026-05-29 and FAILED PR #142; PR #142 remains OPEN and must not merge as-is.",
-    "The useful PR #142 code change is narrow: --orun-dir normalization for github pull plus resolver flag registration for github status, with matching docs.",
-    "Task 0143 is scoped for an Implementer to repair PR #142: remove the dummy trigger, split out unrelated TUI cockpit/process/history files, retitle/rewrite the PR, add an implementer report, and re-run CI.",
-    "The dummy label trigger: pr-142-dummy-change in examples/apps/api-edge/component.yaml must not land on main.",
-    "TUI cockpit spec pack, agents/orchestrator.md, historical task prompts, and stale ai/waiting_for_input.md are deferred to dedicated later PRs.",
-    "Repo health remains yellow until PR #142 is narrowed and required checks, especially Orun Plan, are no longer queued/unknown."
+    "Task 0144 implementer opened PR #143 from impl/task-0144-tui-foundation for Orun Cockpit TUI Phase 1 foundation.",
+    "PR #143 CI currently reports Orun Plan SUCCESS and Harness dry-run guard SUCCESS; verifier must inspect logs, not only status summaries.",
+    "Task 0144.1 is scoped as the verifier for PR #143 and must merge only on PASS plus green/acceptable CI.",
+    "Verifier must inspect command registration, remote-state fail-closed behavior, TUI service boundary, no subprocess shell-out, tests, and secret safety.",
+    "PR #142 remains open/dirty and is out of scope for Task 0144.1; do not merge or repair PR #142 in this verifier task.",
+    "Repo health remains yellow until PR #143 is verified/merged or failed with blockers documented; PR #142 is a separate unresolved open-risk item."
   ]
 }
