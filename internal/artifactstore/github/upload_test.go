@@ -29,10 +29,10 @@ func TestIsGitHubActions(t *testing.T) {
 	}
 }
 
-// TestUploadShard_FallbackWhenRuntimeTokenMissing verifies UploadShard returns
-// a descriptive error when GITHUB_ACTIONS=true but ACTIONS_RUNTIME_TOKEN is
-// not set, guiding users to add actions/upload-artifact@v4 to their workflow.
-func TestUploadShard_FallbackWhenRuntimeTokenMissing(t *testing.T) {
+// TestUploadShard_TriesHelperWithoutRuntimeToken verifies UploadShard
+// attempts the Node.js helper even when ACTIONS_RUNTIME_TOKEN is not set,
+// since @actions/artifact v2 can discover auth via other mechanisms.
+func TestUploadShard_TriesHelperWithoutRuntimeToken(t *testing.T) {
 	// Set GITHUB_ACTIONS but NOT ACTIONS_RUNTIME_TOKEN
 	os.Setenv("GITHUB_ACTIONS", "true")
 	os.Unsetenv("ACTIONS_RUNTIME_TOKEN")
@@ -57,12 +57,13 @@ func TestUploadShard_FallbackWhenRuntimeTokenMissing(t *testing.T) {
 		Suffix: "abc123",
 		Status: "created",
 	})
+	// Should fail (Node helper won't work outside real GHA) but should NOT
+	// mention "ACTIONS_RUNTIME_TOKEN not set" — the token gate was removed.
 	if err == nil {
-		t.Fatal("expected error when ACTIONS_RUNTIME_TOKEN is missing")
+		t.Fatal("expected error (helper can't run outside real GHA)")
 	}
-	// Should contain guidance about using actions/upload-artifact
-	if !strings.Contains(err.Error(), "actions/upload-artifact@v4") {
-		t.Errorf("error should mention actions/upload-artifact@v4, got: %v", err)
+	if strings.Contains(err.Error(), "ACTIONS_RUNTIME_TOKEN not set") {
+		t.Errorf("should not gate on ACTIONS_RUNTIME_TOKEN, got: %v", err)
 	}
 }
 
