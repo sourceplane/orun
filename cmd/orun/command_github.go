@@ -319,11 +319,13 @@ func runGithubPull() error {
 		if ds.Shard != nil && ds.Shard.Role == runbundle.ShardRolePlan {
 			planShard = ds
 		} else if ds.Shard != nil && ds.Shard.Role == runbundle.ShardRoleJob {
-			// Convert DownloadedShard to JobShard
-			jobShards = append(jobShards, &runbundle.JobShard{
-				Manifest: ds.Shard,
-				Dir:      ds.Dir,
-			})
+			// Read full job shard from downloaded directory
+			js, readErr := runbundle.ReadJobShard(ds.Dir)
+			if readErr != nil {
+				fmt.Fprintf(os.Stderr, "⚠ warning: failed to read job shard %s: %v\n", s.Name, readErr)
+				continue
+			}
+			jobShards = append(jobShards, js)
 		}
 	}
 
@@ -332,9 +334,9 @@ func runGithubPull() error {
 	}
 
 	// Synthesize execution
-	planShardData := &runbundle.PlanShard{
-		Manifest: planShard.Shard,
-		Dir:      planShard.Dir,
+	planShardData, err := runbundle.ReadPlanShard(planShard.Dir)
+	if err != nil {
+		return fmt.Errorf("read plan shard: %w", err)
 	}
 
 	synthesized, err := runbundle.Synthesize(planShardData, jobShards)
