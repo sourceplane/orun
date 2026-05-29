@@ -92,15 +92,76 @@ func (dr *DependencyResolver) GetTransitiveDependents(componentName string) map[
 	return result
 }
 
-// ResolveComponentSet takes a set of changed components and returns:
-// - All changed components
-// - All their dependencies (so planner can resolve)
-// Useful for plan --changed scenarios
-func (dr *DependencyResolver) ResolveComponentSet(changedComponents map[string]bool) map[string]bool {
+// dependencyForEdge looks up the Dependency declaration on a component
+// for a specific target component name. Returns nil if not found.
+func (dr *DependencyResolver) dependencyForEdge(componentName, depName string) *model.Dependency {
+	comp, exists := dr.components[componentName]
+	if !exists {
+		return nil
+	}
+	for i := range comp.DependsOn {
+		if comp.DependsOn[i].Component == depName {
+			return &comp.DependsOn[i]
+		}
+	}
+	return nil
+}
+
+// ResolveComponentSet takes a set of seed components and grows it
+// according to each dependency edge's include policy:
+//
+//   - include: if-selected — do NOT pull the dependency in (order-only).
+//   - include: always      — pull the dependency in and recurse.
+//
+// This is the include-aware replacement for the legacy "pull every
+// transitive dependency" behavior. The default include policy is
+// "if-selected" (set during normalization), so by default the seed
+// set is returned unchanged — change-detection no longer silently
+// includes unchanged components.
+//
+// Backwards-compatible callers that want the old "include everything
+// transitively reachable" behavior should call ResolveComponentSetAll
+// instead.
+func (dr *DependencyResolver) ResolveComponentSet(seedComponents map[string]bool) map[string]bool {
+	included := make(map[string]bool, len(seedComponents))
+	for comp := range seedComponents {
+		included[comp] = true
+	}
+
+	// Iterate until the set stops growing. Only "include: always" edges
+	// add new members.
+	changed := true
+	for changed {
+		changed = false
+		for comp := range included {
+			c, exists := dr.components[comp]
+			if !exists {
+				continue
+			}
+			for _, dep := range c.DependsOn {
+				if dep.Include != model.IncludeAlways {
+					continue
+				}
+				if !included[dep.Component] {
+					included[dep.Component] = true
+					changed = true
+				}
+			}
+		}
+	}
+
+	return included
+}
+
+// ResolveComponentSetAll is the legacy "pull every transitive
+// dependency" behavior, retained for callers that need it (e.g. the
+// context-aware CWD scope banner, which lists what a fresh full plan
+// would touch).
+func (dr *DependencyResolver) ResolveComponentSetAll(seedComponents map[string]bool) map[string]bool {
 	included := make(map[string]bool)
 
-	// Add all changed components
-	for comp := range changedComponents {
+	// Add all seed components
+	for comp := range seedComponents {
 		included[comp] = true
 	}
 
