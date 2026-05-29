@@ -121,3 +121,27 @@
 |- Objective: verify PR #144 against Task 0145, the implementer report, Task 0142 failure findings, and the Verifier Standard; merge only on PASS.
 |- Scope boundary: verification of PR #144 only. Confirmed diff narrowness (5 task-scoped files), absence of TUI specs/process/history blockers, absence of `pr-142-dummy-change` in product/config, code behavior of `normalizeOrunDir()` and `github status` selector flags, doc alignment, focused tests/build, PR CI green signal, PR #142 closed disposition, and absence of secrets/signed URLs/dummy triggers. Reviewed the default-resolution semantic change (`--orun-dir .` now resolves to `./.orun` instead of `filepath.Join(storeDir(), state.OrunDir)`) and accepted it as the intended unification documented in the updated public docs.
 |- Durable outcome: PR #144 merged to main at 300a436; repo health returns from yellow to green; TUI Cockpit Phase 2 is now unblocked.
+
+## Task 0146
+
+|- Agent: Implementer
+|- Prompt: `ai/tasks/task-0146.md`
+|- Status: verified PASS, PR #145 merged as 5beb334 (2026-05-29)
+|- Implementation: PR #145, branch impl/task-0146-plan-studio, merge commit 5beb334
+|- PR CI: CI/Orun Plan SUCCESS (run 26610789285), orun remote-state conformance/Harness dry-run guard SUCCESS (run 26610789289); matrix jobs SKIPPED as expected (no orun-component changes)
+|- Reports: ai/reports/task-0146-implementer.md, ai/reports/task-0146-verifier.md
+|- Objective: ship the first coherent TUI Cockpit Phase 2 Plan Studio slice — wire `LiveOrunService.GeneratePlan` to Orun internals (no shell-out), implement Plan Studio state machine (generate/review/error/save), route via root model, and add focused service/view tests including `pgregory.net/rapid` property tests.
+|- Scope boundary: only `GeneratePlan` service, Plan Studio view rewrite, root model routing, and tests. No `RunPlan`, no `Describe`, no follow-mode `TailLogs`, no remote-state execution, no command-palette completion, no full graphical DAG, no GitHub CLI UX follow-ups.
+|- Durable outcome: `LiveOrunService.GeneratePlan` mirrors `cmd/orun/main.go:generatePlan` via internal packages with ctx-cancellation at every stage; returns `*PlanResult` with plan/checksum/JobCount/Components/Warnings/GeneratedAt. PlanStudioModel state machine (Idle/Configuring/Generating/Review/Saved/Error) with cursor nav and `g`/`s`/`c` bindings; deterministic `View()`. Root model routes `PlanGeneratedMsg` and `PlanStudioSaveRequestedMsg`, mode-switches `p`/`b`/`h`, seeds request from workspace snapshot. Save reuses `GeneratePlan` with `NamedPlan` for byte-identical persisted plan; nil-store emits warning. `bubbletea`/`bubbles`/`lipgloss`/`pgregory.net/rapid` promoted to direct deps; stale `flyingmutant/rapid` NOT reintroduced. 4 service tests + 10 view tests + 2 rapid property tests pass. No `exec.Command`/`os/exec`/`"orun"` literal under `internal/tui/`.
+
+## Task 0146.1
+
+|- Agent: Verifier
+|- Prompt: `ai/tasks/task-0146-verifier.md`
+|- Status: verified PASS, PR #145 merged as 5beb334 (2026-05-29)
+|- Implementation: verifier task only; verified and merged PR #145
+|- PR CI: CI/Orun Plan SUCCESS, orun remote-state conformance/Harness dry-run guard SUCCESS (post verifier-report push: same checks re-ran green)
+|- Reports: ai/reports/task-0146-verifier.md
+|- Objective: verify PR #145 against Task 0146, the implementer report, `.kiro/specs/orun-tui-cockpit` Requirements 4/13/14, and the Verifier Standard; merge only on PASS.
+|- Scope boundary: verification of PR #145 only. Confirmed diff narrowness (Plan Studio service+view+model+tests only), absence of `exec.Command`/`os/exec`/`"orun"` literals in `internal/tui/`, code parity vs `cmd/orun/main.go:generatePlan`, ctx-cancellation at stage boundaries, nil-store warning path, no `RunPlan` execution path leaked, deterministic view rendering, property-test convergence, local `go test`/`go build` green, PR CI green, `mergeStateStatus=CLEAN`, no secret/token leakage in reports/logs.
+|- Durable outcome: PR #145 merged to main at 5beb334; repo health stays green; TUI Cockpit Phase 3 (`RunPlan`/`Describe`/`TailLogs(Follow=true)`) is now unblocked.

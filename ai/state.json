@@ -1,6 +1,6 @@
 {
   "goal": "Orun TUI cockpit roadmap and open PR verification",
-  "current_task": "0146",
+  "current_task": "0146.1",
   "completed": [
     "0139.1",
     "0140",
@@ -10,14 +10,18 @@
     "0144",
     "0144.1",
     "0145",
-    "0145.1"
+    "0145.1",
+    "0146",
+    "0146.1"
   ],
   "repo_health": "green",
-  "next_focus": "tui-cockpit-phase-2-plan-studio",
+  "next_focus": "tui-cockpit-phase-3-runplan-describe-taillogs",
   "last_verified": "2026-05-29",
   "waiting_for_input": "false",
   "task_agent": "",
   "notes": [
+    "Task 0146.1 verified PASS and merged PR #145 at 5beb334 (2026-05-29). Plan Studio Phase 2 slice landed on main. Repo health stays green.",
+    "Durable outcome on main: LiveOrunService.GeneratePlan calls Orun internals directly (loader/composition/trigger/expand/planner/render) — no shell-out from internal/tui. PlanStudioModel has Idle/Configuring/Generating/Review/Saved/Error state machine with cursor nav, generate (g) / save (s) / clear (c) bindings. Root model routes services.PlanGeneratedMsg and PlanStudioSaveRequestedMsg, mode-switches p/b/h. Save reuses GeneratePlan with NamedPlan for byte-identical persisted plan. NamedPlan nil-store path emits a clear warning. Property tests (pgregory.net/rapid) cover state-set invariants and deterministic rendering.",
     "Task 0145.1 verified PASS and merged PR #144 at 300a436 (2026-05-29T00:14:11Z). Repo health returns to green.",
     "PR #142 is CLOSED as superseded (closedAt 2026-05-29T00:01:57Z); no remaining open-dirty PRs.",
     "Durable outcome on main: normalizeOrunDir() helper centralizes --orun-dir resolution; orun github status registers the same six selector flags as pull/logs (--run-id, --exec-id, --sha, --branch, --latest, --failed); website/docs/cli/orun-github.md matches; focused tests cover parent-input, already-.orun-input, empty-input, status flag registration, and status selector parse-time acceptance.",
