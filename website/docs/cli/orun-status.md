@@ -39,7 +39,7 @@ orun status --exec-id my-plan-20240601-a1b2c3
 ## Output
 
 `orun status` renders through the shared **cockpit** layer (see
-[TUI cockpit architecture](../architecture/tui-cockpit.md) and
+[TUI cockpit architecture](../cockpit/architecture.md) and
 the [Cockpit UX](#cockpit-ux) section below). The output is the TUI's
 run pane compressed into a single frame — same palette, same glyphs,
 same view-model, no drift.
@@ -138,5 +138,5 @@ Use `orun describe run <id>` for a fuller breakdown including metadata, timing, 
   Shared by `--watch` and the TUI.
 
 One place to reskin Orun. See
-[TUI cockpit architecture](../architecture/tui-cockpit.md) for the
+[TUI cockpit architecture](../cockpit/architecture.md) for the
 TUI-side wiring.

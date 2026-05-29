@@ -4,7 +4,7 @@ const require = createRequire(import.meta.url);
 
 const config = {
   title: 'orun',
-  tagline: 'Policy-aware planner that compiles intent into deterministic execution DAGs',
+  tagline: 'The planner–cockpit for platform engineering. Plan once, run anywhere, operate from one cockpit.',
   url: 'https://orun-docs.pages.dev',
   baseUrl: '/',
   organizationName: 'sourceplane',
@@ -41,14 +41,18 @@ const config = {
       defaultMode: 'light',
       respectPrefersColorScheme: true,
     },
+    metadata: [
+      { name: 'theme-color', content: '#7c3aed' },
+      { name: 'description', content: 'orun is the planner–cockpit for platform engineering. Compile declarative intent into a deterministic execution DAG, then operate it through a unified CLI + TUI cockpit.' },
+    ],
     navbar: {
       title: 'orun',
       items: [
-        {
-          to: '/',
-          label: 'Documentation',
-          position: 'left',
-        },
+        { to: '/', label: 'Docs', position: 'left' },
+        { to: '/principles', label: 'Principles', position: 'left' },
+        { to: '/cockpit/overview', label: 'Cockpit', position: 'left' },
+        { to: '/cli/orun', label: 'CLI', position: 'left' },
+        { to: '/release-notes/v2.9.0', label: 'Releases', position: 'right' },
         {
           href: 'https://github.com/sourceplane/orun',
           label: 'GitHub',
@@ -60,30 +64,42 @@ const config = {
       style: 'dark',
       links: [
         {
-          title: 'Getting Started',
+          title: 'Start',
           items: [
-            { label: 'Installation', to: '/getting-started/installation' },
-            { label: 'Quick Start', to: '/getting-started/quick-start' },
+            { label: 'Installation', to: '/start/installation' },
+            { label: 'Quick start', to: '/start/quick-start' },
+            { label: 'Design principles', to: '/principles' },
           ],
         },
         {
-          title: 'Core Concepts',
+          title: 'Model',
           items: [
-            { label: 'Intent Model', to: '/concepts/intent-model' },
+            { label: 'Intent model', to: '/concepts/intent-model' },
             { label: 'Compositions', to: '/concepts/compositions' },
-            { label: 'Execution Model', to: '/concepts/execution-model' },
+            { label: 'Plan DAG', to: '/concepts/plan-dag' },
+            { label: 'Trigger bindings', to: '/concepts/trigger-bindings' },
           ],
         },
         {
-          title: 'Reference',
+          title: 'Operate',
           items: [
-            { label: 'CLI Overview', to: '/cli/orun' },
-            { label: 'Configuration', to: '/reference/configuration' },
-            { label: 'Deploy Docs', to: '/contributing/deploying-docs' },
+            { label: 'Cockpit overview', to: '/cockpit/overview' },
+            { label: 'Runners', to: '/execute/runners' },
+            { label: 'CLI', to: '/cli/orun' },
+            { label: 'Reference', to: '/reference/configuration' },
+          ],
+        },
+        {
+          title: 'Build',
+          items: [
+            { label: 'Architecture', to: '/architecture/internals' },
+            { label: 'Contributing', to: '/contributing/' },
+            { label: 'Extending orun', to: '/contributing/extending-orun' },
+            { label: 'GitHub', href: 'https://github.com/sourceplane/orun' },
           ],
         },
       ],
-      copyright: `Copyright ${new Date().getFullYear()} sourceplane`,
+      copyright: `▲ orun · MIT licensed · © ${new Date().getFullYear()} sourceplane contributors`,
     },
     prism: {
       additionalLanguages: ['bash', 'go', 'json', 'yaml'],

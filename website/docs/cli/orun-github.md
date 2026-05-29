@@ -178,4 +178,4 @@ When some job shards are missing (cancelled run, in-progress execution), `orun g
 ## See also
 
 - [Execution model: CI artifacts](../concepts/execution-model.md#ci-artifacts)
-- [GitHub artifacts workflow example](../examples/github-artifacts-workflow.yaml)
+- [GitHub artifacts workflow example](https://github.com/sourceplane/orun/blob/main/docs/examples/github-artifacts-workflow.yaml)

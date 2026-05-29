@@ -1,130 +1,218 @@
 ---
-title: orun documentation
+title: orun
 slug: /
+description: orun is the planner–cockpit for platform engineering. Compile declarative intent into a deterministic execution DAG, then operate it through a single cockpit shared by the CLI and the TUI.
 ---
 
 <div className="heroFrame">
-  <div className="eyebrow">CNCF-grade planning docs</div>
-  <h1 className="heroTitle">Compile policy-aware intent into execution DAGs you can review, diff, and run anywhere.</h1>
+  <div className="eyebrow">planner · cockpit · runtime</div>
+  <h1 className="heroTitle">Plan once. Run anywhere. <em>Operate from one cockpit.</em></h1>
   <p className="heroCopy">
-    <code>orun</code> separates desired state, composition logic, and runtime execution. Platform teams define intent once,
-    validate it against schemas, bind it to reusable compositions, and materialize a deterministic plan that can run on a
-    local shell, inside Docker, or through a GitHub Actions-compatible backend.
+    <code>orun</code> compiles policy-aware platform intent into a deterministic execution DAG,
+    then runs it through the backend you choose — local shell, Docker, or GitHub Actions.
+    The CLI and the TUI render the same plan, the same state, the same glyphs. Drift between
+    surfaces is a compile error, not a visual regression.
   </p>
   <div className="heroActions">
-    <a className="button button--primary button--lg" href="/getting-started/quick-start">Start with the quick start</a>
-    <a className="button button--secondary button--lg" href="/architecture/compiler-pipeline">Read the compiler pipeline</a>
+    <a className="button button--primary button--lg" href="/start/quick-start">Quick start →</a>
+    <a className="button button--secondary button--lg" href="/principles">The principles</a>
+    <a className="button button--secondary button--lg" href="/cockpit/overview">See the cockpit</a>
   </div>
+
+<div className="cockpitFrame">
+  <div className="cf-chrome">
+    <span className="cf-dots"><span/><span/><span/></span>
+    <span>orun status · examples/.orun · live</span>
+  </div>
+<pre>
+{`▲ orun multi-environment-platform
+  Plan: sha256-ad6ce · Run: gh-26563885741-... · State: completed · Duration: 1m42s
+  Scope: 6 components · 14 jobs · 3 environments
+
+  Status:   ✓ 12 succeeded · ◐ 1 running · ○ 1 queued · ✗ 0 failed
+  Progress: ▓▓▓▓▓▓▓▓▓▓▓▓▓░░ 86%
+
+  ● api-edge-worker
+  │  ├─ ✓ build              4.1s
+  │  ├─ ✓ test               12.3s
+  │  └─ ✓ verify-deploy      19.0s
+  ● database
+  │  └─ ◐ apply              running 38.2s
+  ○ web-app
+     └─ ○ deploy             queued`}
+</pre>
 </div>
 
-<div className="cardGrid">
-  <article className="featureCard">
-    <h3>Intent stays declarative</h3>
-    <p>Keep policy, environment defaults, and component subscriptions in intent files instead of leaking execution details into app repos.</p>
+</div>
+
+<div className="pillarGrid">
+  <article className="pillarCard">
+    <span className="glyph">▲</span>
+    <strong>plan</strong>
+    <h3>A deterministic compiler</h3>
+    <p>
+      Six-stage pipeline — load, normalize, expand, bind, resolve, materialize — turns
+      <code>intent.yaml</code> plus discovered components and composition packages into
+      <code>plan.json</code>: an immutable DAG you can diff, archive, and review.
+    </p>
+    <p><a href="/concepts/plan-dag">Plan DAG →</a></p>
   </article>
-  <article className="featureCard">
-    <h3>Compositions stay reusable</h3>
-    <p>Each composition package exports self-describing composition documents, so platform teams can evolve execution contracts centrally and ship them as local, archived, or OCI-hosted sources.</p>
+  <article className="pillarCard">
+    <span className="glyph">◐</span>
+    <strong>cockpit</strong>
+    <h3>One UX for status, logs, runs</h3>
+    <p>
+      <code>orun status</code>, <code>orun logs</code>, <code>orun tui</code> and live
+      <code>--watch</code> mode all flow through the same view-model and the same design
+      tokens. The CLI is the TUI compressed to a frame; the TUI is the CLI with navigation.
+    </p>
+    <p><a href="/cockpit/overview">Cockpit →</a></p>
   </article>
-  <article className="featureCard">
-    <h3>Plans stay deterministic</h3>
-    <p>The generated plan is an immutable DAG with explicit jobs, steps, dependencies, retries, and state-file metadata.</p>
-  </article>
-  <article className="featureCard">
-    <h3>Runtimes stay swappable</h3>
-    <p>Compile once, then preview or execute through the local shell, a Docker runner, or GitHub Actions compatibility mode.</p>
+  <article className="pillarCard">
+    <span className="glyph">→</span>
+    <strong>execute</strong>
+    <h3>Backend-swappable runtime</h3>
+    <p>
+      The plan is the boundary. Execute it on the local shell, inside Docker, or on
+      GitHub Actions without recompiling. Trigger bindings and dependency rules adapt the
+      DAG to the event that fired it — PR validation, merge-to-main, tagged release.
+    </p>
+    <p><a href="/execute/runners">Runners →</a></p>
   </article>
 </div>
 
-## What orun is for
+## What orun is
 
-Use `orun` when you need a planner that can scale from a single repository to a platform estate without collapsing intent, validation, and execution into one format.
-
-- Define desired state in `intent.yaml` plus discovered `component.yaml` files.
-- Declare composition sources in `intent.yaml` and lock their resolved digests beside the intent.
-- Validate platform contracts through JSON schema.
-- Bind component types to reusable compositions exported from packages.
-- Render a reviewable `plan.json` before anything executes.
-- Run the plan in dry-run or execute mode with explicit backend selection.
-
-## Mental model
-
-```text
-intent.yaml + component.yaml + composition packages
-          ↓
-      load, normalize, validate
-          ↓
-    resolve and lock composition sources
-          ↓
-  expand environment × component matrix
-          ↓
-  bind jobs and resolve dependencies
-          ↓
-      render immutable plan.json
-          ↓
-   dry-run or execute with a runner
-```
+`orun` is a **planner** and a **cockpit** for the platform-engineering layer that sits
+between application repos and deployment automation. It is shaped by four ideas:
 
 <div className="signalGrid">
   <article className="signalCard">
-    <strong>Desired state</strong>
-    <h3>Intent and components</h3>
-    <p>Intent declares environments, group-level policy, discovery roots, inline components, and change-scoping inputs. Component manifests declare type, inputs, labels, overrides, and dependencies.</p>
+    <strong>desired state</strong>
+    <h3>Intent, not scripts</h3>
+    <p>
+      Platform teams declare environments, group policies, discovery roots, and trigger
+      bindings in <code>intent.yaml</code>. App teams declare component types and inputs in
+      <code>component.yaml</code>. Neither side owns the runtime details.
+    </p>
   </article>
   <article className="signalCard">
-    <strong>Execution contract</strong>
-    <h3>Compositions and schemas</h3>
-    <p>Each composition source exports typed `Composition` documents with an input schema, explicit default job, and portable job definitions. That keeps platform logic versioned and reusable.</p>
+    <strong>execution contract</strong>
+    <h3>Compositions as packages</h3>
+    <p>
+      A composition is a typed, versioned execution contract — input schema, job templates,
+      profiles. Distribute them as a directory, an archive, or an OCI artifact. The plan
+      pins the resolved digest in <code>compositions.lock.yaml</code>.
+    </p>
   </article>
   <article className="signalCard">
-    <strong>Compiled artifact</strong>
-    <h3>Plan DAG</h3>
-    <p>The plan records explicit jobs, step order, phase boundaries, dependencies, and runtime hints. It is the artifact you diff, archive, and execute.</p>
+    <strong>compiled artifact</strong>
+    <h3>The plan is the audit trail</h3>
+    <p>
+      Every implicit default, policy merge, and dependency edge becomes explicit in
+      <code>plan.json</code>. You diff plans in pull requests, archive them as deployment
+      records, and replay them against different runners.
+    </p>
+  </article>
+  <article className="signalCard">
+    <strong>operator surface</strong>
+    <h3>Cockpit-grade observability</h3>
+    <p>
+      The same view-model that paints <code>orun status</code> drives the TUI cockpit and
+      future surfaces. State is on disk under <code>.orun/</code>; <code>orun status
+      --watch</code> and the TUI subscribe to the same polling stream.
+    </p>
   </article>
 </div>
 
-## Typical workflow
+## The compile → cockpit → execute loop
 
-```bash
-./orun compositions lock --intent examples/intent.yaml
-
-./orun validate \
-  --intent examples/intent.yaml
-
-./orun plan \
-  --intent examples/intent.yaml \
-  --output /tmp/orun-plan.json
-
-./orun run --plan /tmp/orun-plan.json --dry-run
+```text
+intent.yaml ── component.yaml ── compositions ──┐
+                                                ├──▶  orun plan  ──▶  plan.json
+                  trigger context ──────────────┘                       │
+                                                                        │
+                                            ┌───────────────────────────┘
+                                            ▼
+                                       orun run  ──▶  .orun/ state
+                                            │
+                            ┌───────────────┼───────────────┐
+                            ▼               ▼               ▼
+                       orun status     orun logs       orun tui
+                            └─────── cockpit (one design system) ───────┘
 ```
 
-`orun run` executes by default. Add `--dry-run` when teams need to inspect the resolved jobs and steps without running them.
-
-The lock command and planning flow write `examples/.orun/compositions.lock.yaml`, which records the resolved composition digests used for the compiled plan.
+The boundary on the left is **planning**. The boundary on the right is **operations**.
+`plan.json` and `.orun/` are the only contracts between them — both versioned, both
+deterministic, both reviewable.
 
 ## How to read these docs
 
 <div className="pathGrid">
   <article className="pathCard">
-    <strong>Start here</strong>
-    <h3>Getting started</h3>
-    <p>Install the CLI, compile the example intent, and inspect the generated plan before executing anything.</p>
+    <strong>start</strong>
+    <h3>Install, build, ship the example</h3>
+    <p>
+      <a href="/start/installation">Install</a> the CLI, run the
+      <a href="/start/quick-start">quick start</a>, and watch the cockpit light up against
+      a real example intent.
+    </p>
   </article>
   <article className="pathCard">
-    <strong>Then learn</strong>
-    <h3>Concepts and architecture</h3>
-    <p>Understand the separation between intent, compositions, plans, and runners before authoring your own platform contracts.</p>
+    <strong>learn</strong>
+    <h3>Principles & concepts</h3>
+    <p>
+      Start with the <a href="/principles">design principles</a>, then read
+      <a href="/concepts/intent-model">intent</a>, <a href="/concepts/compositions">compositions</a>,
+      and <a href="/concepts/plan-dag">plans</a> in that order.
+    </p>
   </article>
   <article className="pathCard">
-    <strong>Then operate</strong>
-    <h3>CLI and reference</h3>
-    <p>Use the command reference, schema reference, and environment variable matrix when integrating `orun` into CI or platform automation.</p>
+    <strong>operate</strong>
+    <h3>Cockpit, CLI, runners</h3>
+    <p>
+      The <a href="/cockpit/overview">cockpit guide</a> covers status, logs, and the TUI.
+      The <a href="/cli/orun">CLI reference</a> and <a href="/execute/runners">runners</a>
+      cover day-to-day operation and CI integration.
+    </p>
+  </article>
+  <article className="pathCard">
+    <strong>extend</strong>
+    <h3>Architecture & contributing</h3>
+    <p>
+      <a href="/architecture/compiler-pipeline">Architecture</a> explains every stage of
+      the planner and cockpit bridge. <a href="/build/contributing">Build</a> covers
+      packaging your own compositions, runners, or surfaces.
+    </p>
   </article>
 </div>
 
-## Next steps
+## Why this design
 
-1. Follow the [installation](./getting-started/installation.md) guide.
-2. Run the repository-backed [quick start](./getting-started/quick-start.md).
-3. Read [intent model](./concepts/intent-model.md) and [plan DAG](./concepts/plan-dag.md) before writing new compositions.
-4. Share [AI context for Orun repositories](./ai-context/orun-repositories.md) with coding agents that need to work in component-modeled repos.
+<div className="cardGrid">
+  <article className="featureCard">
+    <h3>Determinism is non-negotiable</h3>
+    <p>Identical inputs produce identical plans — byte-for-byte. The planner is a pure
+    function of intent + components + locked composition digests.</p>
+  </article>
+  <article className="featureCard">
+    <h3>Policy at compile time</h3>
+    <p>Group policies and domain constraints are enforced when the plan is built, not when
+    it runs. A non-compliant intent fails fast with a structured error.</p>
+  </article>
+  <article className="featureCard">
+    <h3>One design language, many surfaces</h3>
+    <p>Glyphs, palette, status pills, progress bars and tree connectors live in
+    <code>internal/cockpit/style</code>. Reskinning the cockpit is one file.</p>
+  </article>
+  <article className="featureCard">
+    <h3>OCI-native distribution</h3>
+    <p>orun ships as a <a href="https://github.com/sourceplane/kiox">kiox</a> provider at
+    <code>ghcr.io/sourceplane/orun</code>. Compositions distribute the same way.</p>
+  </article>
+</div>
+
+---
+
+Ready to compile your first plan? Jump to the [quick start](/start/quick-start), or read the
+[design principles](/principles) for the why behind the architecture.
