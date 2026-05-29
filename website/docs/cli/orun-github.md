@@ -37,7 +37,7 @@ List workflow runs with artifact shard counts. Three levels of detail:
 ```bash
 orun github runs
 orun github runs --branch main --failed
-orun github runs --sha abc123 --details --limit 5
+orun github runs --sha 0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b --details --limit 5
 ```
 
 **Flags:**
@@ -85,24 +85,32 @@ orun github pull --latest --orun-dir /tmp/my-orun
 | `--latest` | `false` | Pull the latest run |
 | `--failed` | `false` | Pull the latest failed run |
 | `--include-raw` | `false` | Include unredacted logs |
-| `--orun-dir` | `.` | Target `.orun` directory |
+| `--orun-dir` | `.` | Target working directory. A `.orun/` subdirectory is created/used inside it (e.g. `--orun-dir /tmp/foo` writes to `/tmp/foo/.orun/`). For back-compat, a path that already ends in `.orun` is also accepted as-is. |
+
+> **SHA note:** `--sha` is forwarded to the GitHub API, which expects the **full 40-char commit SHA**. Short SHAs (`abc123`) return *"no runs found"*. Use `git rev-parse HEAD` to expand.
 
 **Resolution order** (when no explicit `--run-id` is given):
 
 1. `--exec-id`: parse `gh-{run_id}-{attempt}-{sha}`, fetch that run
-2. `--sha`: list runs for the SHA, pick the latest
-3. `--failed`: list runs with `conclusion=failure`, pick the latest
-4. Default: latest run for the current branch
+2. `--sha`: list runs for the full SHA, pick the latest
+3. `--branch`: latest run on that branch
+4. `--failed`: latest run with `conclusion=failure`
+5. `--latest` / default: latest run for the current branch
 
 ---
 
 ### `orun github status`
 
-Lightweight remote status: lists artifact shards grouped by execution ID without downloading full shard contents.
+Lightweight remote status: lists artifact shards grouped by execution ID without downloading full shard contents. Accepts the same resolution flags as `pull` / `logs`.
 
 ```bash
-orun github status
+orun github status                                   # latest run on current branch
+orun github status --latest --branch main
+orun github status --exec-id gh-26606158847-1-896da6b09c29
+orun github status --run-id 26606158847
 ```
+
+**Flags:** `--run-id`, `--exec-id`, `--sha` (full SHA), `--branch`, `--latest`, `--failed` — same semantics as `orun github pull`.
 
 ---
 
@@ -132,6 +140,8 @@ orun github logs --failed
 | `--failed` | `false` | Latest failed run |
 | `--latest` | `false` | Latest run |
 | `--job` | | Job ID to fetch logs for |
+
+> **`--job` matching:** Currently a substring match against the GitHub artifact name (e.g. `--job job_896da6b` or `--job api-edge-worker`), not a structured component/env/job lookup. Use `orun github runs --details` to discover available shard names. See improvements doc.
 
 ## Artifact naming
 

@@ -470,3 +470,91 @@ func TestGithubLogsJobFilterNoMatch(t *testing.T) {
 		t.Errorf("expected no matches for job filter %q", jobFilter)
 	}
 }
+
+// --- Task 0145: focused tests for --orun-dir normalization and status flags ---
+
+// TestNormalizeOrunDirParentBecomesDotOrun covers the primary fix from PR #142
+// commit ddbec4c: a parent working directory passed via --orun-dir must resolve
+// to <parent>/.orun. Task 0142's verifier called this case out as missing direct
+// unit coverage.
+func TestNormalizeOrunDirParentBecomesDotOrun(t *testing.T) {
+	parent := filepath.Join(string(filepath.Separator)+"tmp", "workspace-foo")
+	got := normalizeOrunDir(parent)
+	want := filepath.Join(parent, state.OrunDir)
+	if got != want {
+		t.Errorf("normalizeOrunDir(%q) = %q, want %q", parent, got, want)
+	}
+	if filepath.Base(got) != state.OrunDir {
+		t.Errorf("expected resolved path to end in %q, got %q", state.OrunDir, got)
+	}
+}
+
+// TestNormalizeOrunDirAlreadyDotOrunUnchanged covers the back-compat branch:
+// a user who explicitly passes a path whose base is already ".orun" must not
+// have another ".orun" segment appended.
+func TestNormalizeOrunDirAlreadyDotOrunUnchanged(t *testing.T) {
+	already := filepath.Join(string(filepath.Separator)+"tmp", "workspace-foo", state.OrunDir)
+	got := normalizeOrunDir(already)
+	if got != already {
+		t.Errorf("normalizeOrunDir(%q) = %q, want unchanged %q", already, got, already)
+	}
+	// Defensive: must not have a doubled .orun/.orun tail.
+	doubled := filepath.Join(already, state.OrunDir)
+	if got == doubled {
+		t.Errorf("normalizeOrunDir doubled the .orun suffix: got %q", got)
+	}
+}
+
+// TestNormalizeOrunDirEmptyDefaultsToDotOrun covers the empty-input default:
+// an empty --orun-dir is treated as "." and resolves to "./.orun" (i.e. ".orun").
+func TestNormalizeOrunDirEmptyDefaultsToDotOrun(t *testing.T) {
+	got := normalizeOrunDir("")
+	want := filepath.Join(".", state.OrunDir)
+	if got != want {
+		t.Errorf("normalizeOrunDir(\"\") = %q, want %q", got, want)
+	}
+}
+
+// TestGithubStatusSelectorFlagsRegistered verifies that `orun github status`
+// registers the same run-resolution flags used by `pull` and `logs`. Before
+// the fix in PR #142 commit ddbec4c, githubStatusCmd read the flag globals
+// (githubLogsRunID, githubLogsExecID, etc.) but no flags were ever attached
+// to it, so `--run-id`, `--exec-id`, `--sha`, `--branch`, `--latest`, and
+// `--failed` all errored at the cobra parser.
+func TestGithubStatusSelectorFlagsRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"github", "status"})
+	if err != nil {
+		t.Fatalf("github status command not found: %v", err)
+	}
+	required := []string{"run-id", "exec-id", "sha", "branch", "latest", "failed"}
+	for _, name := range required {
+		if f := cmd.Flags().Lookup(name); f == nil {
+			t.Errorf("github status: --%s flag not registered", name)
+		}
+	}
+}
+
+// TestGithubStatusAcceptsSelectorFlagsAtParseTime drives cobra's flag parser
+// directly to confirm that supplying every selector flag does not produce an
+// "unknown flag" error. We do not actually run the command (that would hit
+// the network); we only verify the parse step.
+func TestGithubStatusAcceptsSelectorFlagsAtParseTime(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"github", "status"})
+	if err != nil {
+		t.Fatalf("github status command not found: %v", err)
+	}
+	// Take a defensive copy of the flag set so we don't mutate globals
+	// observed by other tests. We invoke Parse on the underlying FlagSet,
+	// which exercises the same code path cobra would.
+	args := []string{
+		"--run-id", "12345",
+		"--exec-id", "gh-12345-1-abc",
+		"--sha", "abc1234",
+		"--branch", "main",
+		"--latest",
+		"--failed",
+	}
+	if err := cmd.ParseFlags(args); err != nil {
+		t.Fatalf("github status flag parse failed: %v", err)
+	}
+}

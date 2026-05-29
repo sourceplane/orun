@@ -16,6 +16,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// normalizeOrunDir resolves --orun-dir into the actual .orun directory path.
+// Semantics: --orun-dir is treated as a working/parent directory whose
+// .orun/ child is used. For backward compatibility, a path whose base is
+// already ".orun" is returned unchanged. Empty input defaults to ".".
+func normalizeOrunDir(orunDir string) string {
+	if orunDir == "" {
+		orunDir = "."
+	}
+	if filepath.Base(orunDir) == state.OrunDir {
+		return orunDir
+	}
+	return filepath.Join(orunDir, state.OrunDir)
+}
+
 var (
 	githubRunsWorkflow string
 	githubRunsBranch   string
@@ -105,10 +119,16 @@ func registerGithubCommand(root *cobra.Command) {
 	githubPullCmd.Flags().BoolVar(&githubPullLatest, "latest", false, "Pull latest run")
 	githubPullCmd.Flags().BoolVar(&githubPullFailed, "failed", false, "Pull latest failed run")
 	githubPullCmd.Flags().BoolVar(&githubPullIncludeRaw, "include-raw", false, "Include unredacted logs")
-	githubPullCmd.Flags().StringVar(&githubPullOrunDir, "orun-dir", ".", "Target .orun directory")
+	githubPullCmd.Flags().StringVar(&githubPullOrunDir, "orun-dir", ".", "Target working directory (a .orun/ subdirectory is created/used inside it)")
 
 	// Status subcommand
 	githubCmd.AddCommand(githubStatusCmd)
+	githubStatusCmd.Flags().Int64Var(&githubLogsRunID, "run-id", 0, "Explicit GitHub run ID")
+	githubStatusCmd.Flags().StringVar(&githubLogsExecID, "exec-id", "", "Execution ID (gh-<run>-<attempt>-<sha>)")
+	githubStatusCmd.Flags().StringVar(&githubLogsSHA, "sha", "", "Latest run for this SHA")
+	githubStatusCmd.Flags().StringVar(&githubLogsBranch, "branch", "", "Latest run for this branch")
+	githubStatusCmd.Flags().BoolVar(&githubLogsFailed, "failed", false, "Latest failed run")
+	githubStatusCmd.Flags().BoolVar(&githubLogsLatest, "latest", false, "Latest run")
 
 	// Logs subcommand
 	githubCmd.AddCommand(githubLogsCmd)
@@ -350,10 +370,7 @@ func runGithubPull() error {
 		break // first group
 	}
 
-	orunDir := githubPullOrunDir
-	if orunDir == "." {
-		orunDir = filepath.Join(storeDir(), state.OrunDir)
-	}
+	orunDir := normalizeOrunDir(githubPullOrunDir)
 
 	// Download all shards
 	fmt.Fprintf(os.Stderr, "Downloading %d shard(s) for %s...\n", len(targetShards), targetExecID)
