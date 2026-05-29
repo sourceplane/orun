@@ -1,6 +1,36 @@
+/**
+ * orun documentation sidebar
+ *
+ * IA shaped around the operator journey:
+ *
+ *   1. start      → install, quick-start
+ *   2. principles → design ethos (load-bearing)
+ *   3. concepts   → the model (intent, compositions, plans, triggers)
+ *   4. cockpit    → the operator surface (overview, architecture)
+ *   5. execute    → runners, execution model
+ *   6. cli        → command reference
+ *   7. workflows  → real end-to-end examples
+ *   8. compositions → authoring guide
+ *   9. architecture → internals (compiler, runtime, artifacts)
+ *  10. reference   → schemas, env vars, configuration
+ *  11. ai-context  → for coding agents working with orun repos
+ *  12. build       → contributing, extending, deploying docs
+ *  13. release-notes
+ *  14. downstream  → migration / integration notes
+ */
 const sidebars = {
   docsSidebar: [
     'intro',
+    'principles',
+    {
+      type: 'category',
+      label: 'Start',
+      collapsed: false,
+      items: [
+        'start/installation',
+        'start/quick-start',
+      ],
+    },
     {
       type: 'category',
       label: 'Concepts',
@@ -8,13 +38,13 @@ const sidebars = {
         'concepts/intent-model',
         'concepts/compositions',
         'concepts/stacks',
+        'concepts/plan-dag',
+        'concepts/execution-model',
         'concepts/trigger-bindings',
         'concepts/profile-rules',
         'concepts/dependency-rules',
         'concepts/environment-promotion',
         'concepts/runtime-environment',
-        'concepts/plan-dag',
-        'concepts/execution-model',
         'concepts/change-detection',
         'concepts/change-watches',
         'concepts/context-discovery',
@@ -23,13 +53,18 @@ const sidebars = {
     },
     {
       type: 'category',
-      label: 'Getting Started',
-      items: ['getting-started/installation', 'getting-started/quick-start'],
+      label: 'Cockpit',
+      items: [
+        'cockpit/overview',
+        'cockpit/architecture',
+      ],
     },
     {
       type: 'category',
-      label: 'AI Context',
-      items: ['ai-context/orun-repositories'],
+      label: 'Execute',
+      items: [
+        'execute/runners',
+      ],
     },
     {
       type: 'category',
@@ -54,16 +89,7 @@ const sidebars = {
     },
     {
       type: 'category',
-      label: 'Compositions',
-      items: [
-        'compositions/composition-contract',
-        'compositions/writing-compositions',
-        'compositions/composition-examples',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Examples',
+      label: 'Workflows',
       items: [
         'examples/review-pull-request',
         'examples/run-github-actions',
@@ -75,12 +101,20 @@ const sidebars = {
     },
     {
       type: 'category',
+      label: 'Authoring compositions',
+      items: [
+        'compositions/composition-contract',
+        'compositions/writing-compositions',
+        'compositions/composition-examples',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Architecture',
       items: [
         'architecture/internals',
         'architecture/compiler-pipeline',
         'architecture/execution-runtime',
-        'architecture/tui-cockpit',
         'architecture/github-artifacts',
       ],
     },
@@ -95,7 +129,12 @@ const sidebars = {
     },
     {
       type: 'category',
-      label: 'Contributing',
+      label: 'AI context',
+      items: ['ai-context/orun-repositories'],
+    },
+    {
+      type: 'category',
+      label: 'Build',
       items: [
         'contributing/contributing',
         'contributing/extending-orun',
@@ -104,13 +143,13 @@ const sidebars = {
     },
     {
       type: 'category',
-      label: 'Downstream',
-      items: ['downstream/v2.6-integration'],
+      label: 'Release notes',
+      items: ['release-notes/v2.9.0', 'release-notes/v2.8.0', 'release-notes/v2.7.0', 'release-notes/v2.6.0'],
     },
     {
       type: 'category',
-      label: 'Release Notes',
-      items: ['release-notes/v2.9.0', 'release-notes/v2.8.0', 'release-notes/v2.7.0', 'release-notes/v2.6.0'],
+      label: 'Downstream',
+      items: ['downstream/v2.6-integration'],
     },
   ],
 };
