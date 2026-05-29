@@ -176,6 +176,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.planStudio = m.planStudio.MarkGenerating()
 		return m, views.GeneratePlanCmd(m.svc, req)
 
+	case views.PlanStudioDryRunRequestedMsg:
+		// Dispatch RunPlan synchronously so we can capture the channel
+		// and decide whether to transition into Run Dashboard. The
+		// service contract guarantees RunPlan returns quickly: it
+		// validates and spins a goroutine, it does not block on
+		// runner.Run itself.
+		ch, err := m.svc.RunPlan(context.Background(), services.RunRequest{
+			Plan:   msg.Plan,
+			DryRun: true,
+		})
+		if err != nil {
+			m.lastErr = err
+			return m, nil
+		}
+		m.lastErr = nil
+		var cmd tea.Cmd
+		m.runView, cmd = m.runView.StartStream(ch, true)
+		m.activeMode = ModeRunDashboard
+		return m, cmd
+
+	case services.RunEventMsg:
+		var cmd tea.Cmd
+		m.runView, cmd = m.runView.Update(msg)
+		return m, cmd
+
 	case services.ErrMsg:
 		m.lastErr = msg.Err
 		if m.activeMode == ModePlanStudio {

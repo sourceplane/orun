@@ -140,6 +140,40 @@ func TestPlanStudioModel_SaveEmitsMessage(t *testing.T) {
 	}
 }
 
+func TestPlanStudioModel_DryRunFromReviewEmitsMessage(t *testing.T) {
+	m := NewPlanStudioModel().MarkGenerating()
+	plan := &model.Plan{Jobs: []model.PlanJob{{ID: "x"}}}
+	m, _ = m.Update(services.PlanGeneratedMsg{Result: &services.PlanResult{Plan: plan}})
+	_, cmd := m.Update(keyMsg("d"))
+	if cmd == nil {
+		t.Fatal("expected dry-run cmd")
+	}
+	got, ok := cmd().(PlanStudioDryRunRequestedMsg)
+	if !ok {
+		t.Fatalf("msg = %T, want PlanStudioDryRunRequestedMsg", cmd())
+	}
+	if got.Plan != plan {
+		t.Errorf("Plan pointer mismatch")
+	}
+}
+
+func TestPlanStudioModel_DryRunNoopFromIdle(t *testing.T) {
+	m := NewPlanStudioModel()
+	_, cmd := m.Update(keyMsg("d"))
+	if cmd != nil {
+		t.Fatal("dry-run from Idle should be a no-op")
+	}
+}
+
+func TestPlanStudioModel_DryRunNoopWhenResultPlanNil(t *testing.T) {
+	m := NewPlanStudioModel().MarkGenerating()
+	m, _ = m.Update(services.PlanGeneratedMsg{Result: &services.PlanResult{Plan: nil}})
+	_, cmd := m.Update(keyMsg("d"))
+	if cmd != nil {
+		t.Fatal("dry-run with nil Plan should be a no-op")
+	}
+}
+
 func TestPlanStudioModel_SaveNoopWithoutResult(t *testing.T) {
 	m := NewPlanStudioModel()
 	_, cmd := m.Update(keyMsg("s"))

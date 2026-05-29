@@ -63,6 +63,7 @@ func (s PlanStudioState) String() string {
 type PlanStudioKeyMap struct {
 	Generate key.Binding
 	Save     key.Binding
+	DryRun   key.Binding
 	Up       key.Binding
 	Down     key.Binding
 	Clear    key.Binding
@@ -73,6 +74,7 @@ func DefaultPlanStudioKeyMap() PlanStudioKeyMap {
 	return PlanStudioKeyMap{
 		Generate: key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "generate plan")),
 		Save:     key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "save plan")),
+		DryRun:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "dry-run")),
 		Up:       key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "prev job")),
 		Down:     key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "next job")),
 		Clear:    key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clear plan")),
@@ -172,6 +174,18 @@ func (m PlanStudioModel) Update(msg tea.Msg) (PlanStudioModel, tea.Cmd) {
 			// Caller (root model) intercepts the marker and dispatches.
 			return m, func() tea.Msg {
 				return PlanStudioSaveRequestedMsg{Name: m.saveName}
+			}
+		case key.Matches(msg, m.keys.DryRun):
+			// Only valid from Review with a generated plan. The root
+			// model intercepts the emitted marker, dispatches RunPlan
+			// against m.Result.Plan with DryRun=true, and transitions
+			// to ModeRunDashboard only after the service returns a
+			// non-nil event channel.
+			if m.State != PlanStudioReview || m.Result == nil || m.Result.Plan == nil {
+				return m, nil
+			}
+			return m, func() tea.Msg {
+				return PlanStudioDryRunRequestedMsg{Plan: m.Result.Plan}
 			}
 		case key.Matches(msg, m.keys.Clear):
 			if m.State == PlanStudioGenerating {
@@ -302,6 +316,16 @@ func (m PlanStudioModel) MarkGenerating() PlanStudioModel {
 // store.SavePlan directly on the current result).
 type PlanStudioSaveRequestedMsg struct {
 	Name string
+}
+
+// PlanStudioDryRunRequestedMsg signals that the user pressed `d` from
+// Review. The root model is responsible for calling
+// svc.RunPlan(ctx, RunRequest{Plan: Plan, DryRun: true}) and, on
+// success, installing the returned event channel into the Run Dashboard
+// before switching modes. Failure paths must surface an error banner
+// and leave the active mode unchanged so the plan stays visible.
+type PlanStudioDryRunRequestedMsg struct {
+	Plan *model.Plan
 }
 
 // GeneratePlanCmd is a helper the root model can use to invoke the
