@@ -36,11 +36,6 @@ var _ OrunService = (*LiveOrunService)(nil)
 // Phase 1 / Phase 2 tasks.
 var errNotImplemented = errors.New("not implemented")
 
-// RunPlan: Phase 3 (Task 18) will replace this stub.
-func (s *LiveOrunService) RunPlan(ctx context.Context, req RunRequest) (<-chan RunEvent, error) {
-	return nil, errNotImplemented
-}
-
 // Describe: Phase 3 (Task 21) will replace this stub.
 func (s *LiveOrunService) Describe(ctx context.Context, ref ResourceRef) (*ResourceDescription, error) {
 	return nil, errNotImplemented

@@ -7,7 +7,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/tui/services"
+	"github.com/sourceplane/orun/internal/tui/views"
 )
 
 func TestNewModel_Defaults(t *testing.T) {
@@ -183,6 +185,61 @@ func TestPanelHelpers(t *testing.T) {
 	}
 	if prevPanel(PanelMain) != PanelNavigator {
 		t.Error("prev main -> navigator")
+	}
+}
+
+func TestModel_DryRunRequested_DispatchesRunPlanAndSwitchesMode(t *testing.T) {
+	plan := &model.Plan{Jobs: []model.PlanJob{{ID: "j1"}}}
+	var got services.RunRequest
+	called := make(chan struct{}, 1)
+	svc := &services.MockOrunService{
+		RunPlanFn: func(ctx context.Context, req services.RunRequest) (<-chan services.RunEvent, error) {
+			got = req
+			ch := make(chan services.RunEvent)
+			close(ch)
+			called <- struct{}{}
+			return ch, nil
+		},
+	}
+	m := NewModel(svc)
+	next, _ := m.Update(views.PlanStudioDryRunRequestedMsg{Plan: plan})
+	m = next.(Model)
+
+	select {
+	case <-called:
+	default:
+		t.Fatal("svc.RunPlan was not invoked")
+	}
+	if got.Plan != plan {
+		t.Error("plan pointer not forwarded")
+	}
+	if !got.DryRun {
+		t.Error("DryRun=true should be set")
+	}
+	if m.ActiveMode() != ModeRunDashboard {
+		t.Errorf("ActiveMode = %v, want ModeRunDashboard", m.ActiveMode())
+	}
+	if m.LastError() != nil {
+		t.Errorf("unexpected error: %v", m.LastError())
+	}
+}
+
+func TestModel_DryRunRequested_RunPlanErrorStaysInPlanStudio(t *testing.T) {
+	boom := errors.New("validation failure")
+	svc := &services.MockOrunService{
+		RunPlanFn: func(ctx context.Context, req services.RunRequest) (<-chan services.RunEvent, error) {
+			return nil, boom
+		},
+	}
+	m := NewModel(svc)
+	m.activeMode = ModePlanStudio
+	next, _ := m.Update(views.PlanStudioDryRunRequestedMsg{Plan: &model.Plan{}})
+	m = next.(Model)
+	if m.ActiveMode() != ModePlanStudio {
+		t.Errorf("ActiveMode = %v, want ModePlanStudio (no transition on error)", m.ActiveMode())
+	}
+	if !errors.Is(m.LastError(), boom) {
+		t.Errorf("LastError = %v, want %v", m.LastError(), boom)
 	}
 }
 
