@@ -109,7 +109,7 @@ const sidebars = {
     {
       type: 'category',
       label: 'Release Notes',
-      items: ['release-notes/v2.6.0'],
+      items: ['release-notes/v2.7.0', 'release-notes/v2.6.0'],
     },
   ],
 };

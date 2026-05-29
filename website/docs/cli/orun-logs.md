@@ -53,6 +53,29 @@ orun logs run/<exec-id>
 orun logs job/<job-id>
 ```
 
+## Output
+
+`orun logs` renders through the shared cockpit layer — same brand
+wedge, status legend, and component tree as `orun status`, with log
+content grouped per job/step:
+
+```
+▲ orun my-plan
+  Run: my-plan-20240601-a1b2c3 · State: completed · Duration: 4m12s
+  Scope: 7 components · 38 jobs
+  Status:   ✓ 38 succeeded · ◐ 0 running · ○ 0 queued
+
+  ● api-edge-worker
+  │  └─ ✓ deploy           19.0s
+  │     │  Uploading bundle to edge…
+  │     │  Bundle hash: sha256-3f4f0bf
+  │     │  Deploy id: dep_01HVZ…
+  │     │  … 4 more lines
+```
+
+Default truncation is 8 lines per step (configurable via `LogsOptions`
+on the renderer); pass `--raw` to print every line.
+
 ## Flags
 
 | Flag | Meaning |

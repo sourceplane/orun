@@ -95,6 +95,38 @@ Service-layer streams reach the model as Bubble Tea messages:
 
 Each is produced by a `tea.Cmd` returned by the service layer. In addition, `spinner.TickMsg` drives a four-frame wall-clock pulse glyph used to mark live jobs — the spinner is stateless (frame derived from `time.Now()`), so multiple panes can pulse in sync without coordinating state.
 
+## Cockpit bridge
+
+The TUI shares its rendering layer with `orun status`, `orun get runs`, and `orun logs` through the `internal/cockpit/*` packages:
+
+```text
+.orun/  ──▶  cockpit/bridge  ──▶  cockpit/viewmodel  ──▶  cockpit/render
+                  │                                              │
+                  └──▶  cockpit/watch (live updates) ─────────────┤
+                                                                  ▼
+                                            cockpit/surface  →  stdout / TUI
+```
+
+- `internal/cockpit/style` is the design-token source of truth (palette,
+  glyphs, separators). `internal/tui/theme` wraps it via
+  `lipgloss.AdaptiveColor`; `internal/ui` consumes the same hex codes
+  for ANSI output. One file changes a colour everywhere.
+- `internal/cockpit/viewmodel` exposes `RunView`, `RunListView`, and
+  `LogsView` — pure value objects built from `state.Store` or the
+  remote `statebackend.Backend` via a single `bridge.Source` interface.
+- `internal/cockpit/render` formats those view-models into surface-
+  agnostic lines (brand wedge, status legend, progress bar, component
+  tree, grouped log frames).
+- `internal/cockpit/watch` ships a polling stream emitting
+  `Update{View, Err, Terminal}`. Both `orun status --watch` and the
+  TUI's `LiveOrunService.WatchRunView` subscribe to the same loop, so
+  refresh cadence and terminal-state semantics are identical across
+  surfaces.
+
+The TUI is the CLI with navigation; the CLI is the TUI compressed into
+one frame. Drift between them is now a compile error rather than a
+visual regression.
+
 ## Layout sizing
 
 `propagateSize()` is the single owner of geometry. On `tea.WindowSizeMsg` it:

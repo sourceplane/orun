@@ -38,33 +38,57 @@ orun status --exec-id my-plan-20240601-a1b2c3
 
 ## Output
 
-The default view shows a compact execution header followed by a job list sorted by priority (running first, then failed, then completed, then pending):
+`orun status` renders through the shared **cockpit** layer (see
+[TUI cockpit architecture](../architecture/tui-cockpit.md) and
+the [Cockpit UX](#cockpit-ux) section below). The output is the TUI's
+run pane compressed into a single frame — same palette, same glyphs,
+same view-model, no drift.
+
+Default view — single execution:
 
 ```
-EXECUTION my-plan-20240601-a1b2c3  ● running  4/38 jobs  2m
-Plan: my-plan
-
-  ● api-edge-worker@production.deploy           12s
-  ✓ platform-shared@production.build            8s
-  ○ web-console@staging.deploy
+▲ orun my-plan
+  Plan: sha256-ad6ce · Run: my-plan-20240601-a1b2c3 · State: running · Duration: 2m
+  Scope: 7 components · 38 jobs
+  Status:   ✓ 22 succeeded · ◐ 4 running · ○ 12 queued
+  Progress: ▓▓▓▓▓▓▓▓░░░░░░░░ 58%
+  ● api-edge-worker
+  │  └─ ◐ deploy           12.0s
+  ● platform-shared
+  │  └─ ✓ build             8.0s
+  ○ web-console
+     └─ ○ deploy
 ```
 
-The `--all` view lists all executions with running ones sorted first:
+`--all` view — all executions:
 
 ```
-EXECUTION                              STATUS        PLAN                 JOBS      DURATION      AGE
-● my-plan-20240601-a1b2c3             running       my-plan              4/38      2m            now
-✓ my-plan-20240531-d4e5f6             completed     my-plan              38/38     4m12s         1d
+▲ orun
+  3 runs · 1 running · 1 succeeded · 1 failed
+
+  ◐ my-plan-20240601-a1b2c3   my-plan          4/38     2m       now
+  ✓ my-plan-20240531-d4e5f6   my-plan         38/38    4m12s     1d
+  ✗ my-plan-20240530-7a8b9c   my-plan         12/38    1m05s     2d
 ```
+
+`--watch` re-renders this exact frame on a poll loop driven by
+`internal/cockpit/watch` — the same loop the TUI subscribes to — and
+exits cleanly on a terminal status (`completed` / `failed`).
 
 ## Status icons
 
 | Icon | Meaning |
 | --- | --- |
-| `●` | Running |
+| `●` | Component group with at least one running job |
+| `◐` | Running job (pulse) |
 | `✓` | Completed |
 | `✗` | Failed |
-| `○` | Pending |
+| `○` | Pending / queued |
+| `↷` | Skipped |
+| `▲` | Brand wedge — anchors every cockpit frame |
+
+Glyphs are stable across `NO_COLOR`, CI logs, and the TUI. Colour can
+be stripped; the iconography stays.
 
 ## Flags
 
@@ -95,3 +119,24 @@ The same rendering is used for local and remote state.  `--watch` polls the back
 Outside GitHub Actions, remote status uses the local Orun CLI session from `orun auth login` and the backend URL from `--backend-url`, `ORUN_BACKEND_URL`, `intent.yaml`, or `~/.orun/config.yaml`.
 
 Use `orun describe run <id>` for a fuller breakdown including metadata, timing, and job-level errors.
+
+## Cockpit UX
+
+`orun status`, `orun get runs`, `orun logs`, `orun status --watch`, and
+`orun tui` all render through the same `internal/cockpit/*` packages:
+
+- `cockpit/style` — palette (violet `#7c3aed` light / `#a78bfa` dark),
+  glyphs, separators. CLI ANSI and TUI lipgloss both consume it.
+- `cockpit/viewmodel` — pure value objects (`RunView`, `RunListView`,
+  `LogsView`) built from `.orun` state.
+- `cockpit/render` — surface-agnostic formatters (brand wedge, status
+  legend, progress bar, component tree, log groups).
+- `cockpit/bridge` — one `Source` interface over local `state.Store`
+  *or* the remote `statebackend.Backend`, so `--remote-state` lands the
+  same frame as the local path.
+- `cockpit/watch` — poll loop emitting `Update{View, Err, Terminal}`.
+  Shared by `--watch` and the TUI.
+
+One place to reskin Orun. See
+[TUI cockpit architecture](../architecture/tui-cockpit.md) for the
+TUI-side wiring.
