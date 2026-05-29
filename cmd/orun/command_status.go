@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/sourceplane/orun/internal/cockpit/bridge"
+	"github.com/sourceplane/orun/internal/cockpit/render"
+	watchpkg "github.com/sourceplane/orun/internal/cockpit/watch"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/state"
@@ -208,26 +210,31 @@ func watchExecution(store *state.Store, resolve func() (string, error), color bo
 	fmt.Print("\x1b[?25l")
 	defer fmt.Print("\x1b[?25h\n")
 
-	for {
-		execID, err := resolve()
-		if err != nil {
-			fmt.Print("\x1b[H\x1b[J")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	src := bridge.FromStore(store)
+	ch := watchpkg.Run(ctx, src, watchpkg.Options{
+		Interval:      interval,
+		ResolveExecID: resolve,
+	})
+
+	for u := range ch {
+		fmt.Print("\x1b[H\x1b[J")
+		if u.Err != nil {
 			fmt.Println(ui.Dim(color, "Waiting for a run..."))
-		} else {
-			fmt.Print("\x1b[H\x1b[J")
-			if err := showExecution(store, execID, color); err != nil {
-				return err
-			}
-			meta, _ := store.LoadMetadata(execID)
-			if meta != nil {
-				s := strings.ToLower(strings.TrimSpace(meta.Status))
-				if s == "completed" || s == "failed" {
-					return nil
-				}
-			}
+			continue
 		}
-		time.Sleep(interval)
+		// Re-render through the cockpit; this is byte-identical to the
+		// frame `orun status` (no --watch) would print.
+		s := cockpitSurface(os.Stdout)
+		for _, line := range render.RunStatus(s, u.View) {
+			fmt.Fprintln(os.Stdout, line)
+		}
+		if u.Terminal {
+			return nil
+		}
 	}
+	return nil
 }
 
 func showAllExecutions(store *state.Store, color bool) error {

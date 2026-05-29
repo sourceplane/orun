@@ -6,6 +6,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/cockpit/bridge"
 	"github.com/sourceplane/orun/internal/cockpit/viewmodel"
+	"github.com/sourceplane/orun/internal/cockpit/watch"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statebackend"
 )
@@ -71,4 +72,18 @@ func (s *LiveOrunService) source() bridge.Source {
 		return bridge.FromStore(s.cfg.Store)
 	}
 	return nil
+}
+
+// WatchRunView subscribes to live cockpit updates for execID. Both the
+// CLI's `status --watch` and TUI panes consume this channel — same poll
+// loop, same terminal-state semantics.
+func (s *LiveOrunService) WatchRunView(ctx context.Context, execID string, opts watch.Options) (<-chan watch.Update, error) {
+	src := s.source()
+	if src == nil {
+		return nil, errors.New("no state source configured")
+	}
+	if opts.ExecID == "" {
+		opts.ExecID = execID
+	}
+	return watch.Run(ctx, src, opts), nil
 }

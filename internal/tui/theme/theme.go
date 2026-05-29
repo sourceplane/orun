@@ -3,29 +3,39 @@
 // internal/tui/views import from here so the look stays consistent.
 package theme
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/charmbracelet/lipgloss"
 
-// Palette — a soft modern accent system inspired by Claude Code / Linear.
-// All colors are AdaptiveColor so the cockpit reads well on both light
-// and dark terminals.
+	"github.com/sourceplane/orun/internal/cockpit/style"
+)
+
+// Palette — sourced from the shared cockpit/style.DefaultPalette so the
+// TUI and any future themed CLI never drift. To reskin Orun, edit
+// style.DefaultPalette in one place.
 var (
-	colorFG      = lipgloss.AdaptiveColor{Light: "#1f2933", Dark: "#e2e8f0"}
-	colorFGDim   = lipgloss.AdaptiveColor{Light: "#64748b", Dark: "#64748b"}
-	colorFGMuted = lipgloss.AdaptiveColor{Light: "#94a3b8", Dark: "#475569"}
+	pal = style.DefaultPalette
 
-	colorAccent     = lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"}
-	colorAccentSoft = lipgloss.AdaptiveColor{Light: "#c4b5fd", Dark: "#6d28d9"}
-	colorSecondary  = lipgloss.AdaptiveColor{Light: "#0891b2", Dark: "#22d3ee"}
+	adaptive = func(light, dark string) lipgloss.AdaptiveColor {
+		return lipgloss.AdaptiveColor{Light: light, Dark: dark}
+	}
 
-	colorSuccess = lipgloss.AdaptiveColor{Light: "#059669", Dark: "#34d399"}
-	colorWarning = lipgloss.AdaptiveColor{Light: "#b45309", Dark: "#fbbf24"}
-	colorError   = lipgloss.AdaptiveColor{Light: "#dc2626", Dark: "#f87171"}
+	colorFG      = adaptive(pal.FG, pal.FGDark)
+	colorFGDim   = adaptive(pal.Dim, pal.DimDark)
+	colorFGMuted = adaptive(pal.Muted, pal.MutedDark)
 
-	colorBorder      = lipgloss.AdaptiveColor{Light: "#cbd5e1", Dark: "#334155"}
-	colorBorderFocus = lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"}
+	colorAccent     = adaptive(pal.Brand, pal.BrandDark)
+	colorAccentSoft = adaptive(pal.BrandSoft, pal.BrandSoftDark)
+	colorSecondary  = adaptive(pal.Secondary, pal.SecondaryDark)
 
-	colorRowAlt = lipgloss.AdaptiveColor{Light: "#f1f5f9", Dark: "#1e293b"}
-	colorRowSel = lipgloss.AdaptiveColor{Light: "#ede9fe", Dark: "#312e81"}
+	colorSuccess = adaptive(pal.Success, pal.SuccessDark)
+	colorWarning = adaptive(pal.Warning, pal.WarningDark)
+	colorError   = adaptive(pal.Error, pal.ErrorDark)
+
+	colorBorder      = adaptive(pal.Border, pal.BorderDark)
+	colorBorderFocus = adaptive(pal.Brand, pal.BrandDark)
+
+	colorRowAlt = adaptive(pal.RowAlt, pal.RowAltDark)
+	colorRowSel = adaptive(pal.RowSel, pal.RowSelDark)
 )
 
 // Style constants. Views should compose these instead of inlining lipgloss

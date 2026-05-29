@@ -193,6 +193,54 @@ orun logs --failed
 | `--gha` | | Shortcut for `--runner github-actions` |
 | `--runner` | | Execution backend: `local`, `github-actions`, `docker` |
 
+## Cockpit UX
+
+Every Orun surface — `orun status`, `orun get`, `orun logs`,
+`orun status --watch`, and `orun tui` — renders through the same
+**cockpit** layer. The CLI is the TUI compressed to a single frame; the
+TUI is the CLI with navigation.
+
+```
+.orun/  ──▶  cockpit/bridge  ──▶  cockpit/viewmodel  ──▶  cockpit/render
+                  │                                              │
+                  └──▶  cockpit/watch (live updates) ─────────────┤
+                                                                  ▼
+                                            cockpit/surface  →  stdout / TUI
+```
+
+- `internal/cockpit/style` — single source of truth for the palette
+  (Linear/Claude Code violet `#a78bfa`/`#7c3aed`), glyphs, separators.
+  Both the CLI ANSI layer and the TUI's lipgloss theme import this; one
+  edit reskins both.
+- `internal/cockpit/viewmodel` — pure value objects (`RunView`,
+  `RunListView`, `LogsView`) built from `.orun` state.
+- `internal/cockpit/render` — surface-agnostic formatters that produce
+  the run header, status legend, progress bar, component tree, log
+  groups, and `… N more lines` truncation.
+- `internal/cockpit/bridge` — one read path (`bridge.Source`) over
+  either a local `state.Store` or a remote `statebackend.Backend`.
+- `internal/cockpit/watch` — polling stream that emits
+  `Update{View, Err, Terminal}`. Both `orun status --watch` and the
+  TUI subscribe to the same loop with the same terminal-state
+  semantics.
+
+What you get in practice:
+
+```
+▲ orun multi-environment-platform
+  Plan: sha256-ad6ce · Run: gh-26563885741-... · State: completed · Duration: 0ms
+  Scope: 1 component · 1 job
+  Status:   ✓ 1 succeeded · ◐ 0 running · ○ 0 queued
+  Progress: ▓▓▓▓▓▓▓ 100%
+  ● api-edge-worker
+  │  └─ ✓ verify-deploy  19.0s
+```
+
+`NO_COLOR` strips colour while keeping glyphs; `--output=json` (Phase 4)
+falls through the same renderers via the `JSONSurface`. See
+[`docs/plans/2026-05-29-cockpit-ux-redesign.md`](docs/plans/2026-05-29-cockpit-ux-redesign.md)
+for the phased rollout.
+
 ## Architecture
 
 ### Six-stage compiler pipeline

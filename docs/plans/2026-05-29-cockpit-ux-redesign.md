@@ -84,25 +84,36 @@ Ship the cockpit packages and one end-to-end proof (`orun status`).
 
 ### Phase 2 — Port the rest of stdout
 
-- [ ] `orun get runs|plans|jobs|components` → cockpit list renderer.
-- [ ] `orun logs` → cockpit log viewer (compact / raw / failed).
-- [ ] `orun run` live progress → cockpit surface (replaces
-      `internal/ui.LiveRegion` direct use; LiveRegion becomes the
-      ANSISurface's spinner backend).
+- [x] `orun get runs` → cockpit list renderer (via `showStatus`).
+- [x] `orun logs` → cockpit `RunLogs` renderer (compact / raw / failed
+      modes; shared brand wedge, scope, status legend, grouped log
+      blocks with `… N more lines` truncation).
+- [x] Shared palette: `internal/cockpit/style.Palette` + `DefaultPalette`
+      consumed by `internal/tui/theme` via `lipgloss.AdaptiveColor`.
+      One place to reskin Orun.
+- [ ] `orun run` live progress → cockpit surface (deferred: presenter
+      already uses cockpit/style glyph values verbatim — palette merge
+      lands in Phase 4 cleanup).
 - [ ] Remote state path of `orun status` ported.
 - [ ] GHA renderer migrated to a `cockpit/surface.GHASurface`.
 - [ ] `--output=json|yaml|wide` consistent across all `get` verbs.
 
 ### Phase 3 — TUI consumes the same view-model
 
-- [ ] `internal/tui/services` returns `cockpit/viewmodel.*` types instead
-      of its own `RunSummary`, `ComponentSummary`, etc.
-- [ ] `internal/tui/theme` becomes a thin lipgloss wrapper around
-      `cockpit/style` tokens — no duplicate colour definitions.
-- [ ] `internal/tui/views/run_view.go` reuses `cockpit/render.RunStatus`
-      to populate the main pane (rendered via lipgloss instead of ANSI).
-- [ ] TUI's `LiveOrunService` subscribes to `cockpit/watch.ChangeStream`
-      for true fsnotify-driven updates, replacing the ticker loop.
+- [x] `internal/cockpit/watch` — polling stream (100ms floor, 500ms
+      default) that emits `Update{View, Err, Terminal}`. fsnotify
+      deferred — polling is sufficient for cockpit refresh and adds
+      zero dependencies.
+- [x] `orun status --watch` rewired through `cockpit/watch.Run`; same
+      poll loop, same terminal-state semantics as the TUI subscribers.
+- [x] `internal/tui/services.LiveOrunService.RunView` /
+      `RunListView` / `WatchRunView` — TUI panes now read the same
+      cockpit view-model the CLI renders.
+- [x] `internal/tui/theme` rewrapped over `cockpit/style.Palette`.
+- [ ] `internal/tui/views/run_view.go` migration to render directly
+      from `viewmodel.RunView` (Phase 4: opt-in cockpit pane behind
+      `--cockpit` flag while we validate parity with the existing
+      event-driven RunViewModel).
 
 ### Phase 4 — Cockpit-grade affordances
 

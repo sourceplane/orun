@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/cockpit/render"
+	"github.com/sourceplane/orun/internal/cockpit/viewmodel"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/state"
@@ -235,6 +237,53 @@ func collectRemoteLogEntries(ctx context.Context, backend statebackend.Backend, 
 }
 
 func renderLogEntries(execID string, meta *state.ExecMetadata, counts executionCounts, entries []logEntry, color bool) {
+	// Route through the cockpit renderer so `orun logs` and the TUI log
+	// pane (Phase 3) share the same brand/header/grouping language.
+	st := &state.ExecState{}
+	v := viewmodel.LogsView{
+		ExecID:  execID,
+		Run:     viewmodel.BuildRunView(execID, meta, st),
+		Entries: toCockpitLogEntries(entries),
+	}
+	// Override the synthetic Counts (we built RunView with an empty state
+	// so it would have zeroed totals) with the caller's authoritative
+	// per-job counts.
+	v.Run.Counts = viewmodel.Counts{
+		Total:     counts.total,
+		Completed: counts.completed,
+		Failed:    counts.failed,
+		Running:   counts.running,
+		Pending:   counts.pending,
+	}
+	s := cockpitSurface(os.Stdout)
+	lines := render.RunLogs(s, v, render.LogsOptions{Raw: logsRaw})
+	for _, line := range lines {
+		fmt.Fprintln(os.Stdout, line)
+	}
+	_ = color
+}
+
+func toCockpitLogEntries(in []logEntry) []viewmodel.LogEntry {
+	out := make([]viewmodel.LogEntry, 0, len(in))
+	for _, e := range in {
+		comp, env, short := splitJobID(e.jobID)
+		all := viewmodel.SplitLines(e.content)
+		out = append(out, viewmodel.LogEntry{
+			JobID:       e.jobID,
+			Component:   comp,
+			Environment: env,
+			Short:       short,
+			StepID:      e.stepID,
+			Status:      e.status,
+			Lines:       all,
+			TotalLines:  len(all),
+		})
+	}
+	viewmodel.SortLogEntries(out)
+	return out
+}
+
+func renderLogEntriesLegacy(execID string, meta *state.ExecMetadata, counts executionCounts, entries []logEntry, color bool) {
 	status := "unknown"
 	duration := ""
 	if meta != nil {

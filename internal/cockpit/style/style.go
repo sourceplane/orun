@@ -148,6 +148,45 @@ func StatusLabel(status string) string {
 	return s
 }
 
+// Palette is the canonical hex colour table for Orun's design tokens.
+//
+// Both the TUI (internal/tui/theme via lipgloss.AdaptiveColor) and any
+// future themed CLI surface read from this struct so the cockpit can be
+// reskinned in one place. Light/Dark pairs are required even for tokens
+// the TUI currently renders identically — terminals may flip.
+type Palette struct {
+	FG, FGDark             string
+	Dim, DimDark           string
+	Muted, MutedDark       string
+	Brand, BrandDark       string // accent (violet)
+	BrandSoft, BrandSoftDark string
+	Secondary, SecondaryDark string
+	Success, SuccessDark   string
+	Warning, WarningDark   string
+	Error, ErrorDark       string
+	Border, BorderDark     string
+	RowAlt, RowAltDark     string
+	RowSel, RowSelDark     string
+}
+
+// DefaultPalette is the soft modern accent system inspired by Claude
+// Code / Linear. Mutating fields at runtime is unsupported — define a
+// fresh Palette instead.
+var DefaultPalette = Palette{
+	FG: "#1f2933", FGDark: "#e2e8f0",
+	Dim: "#64748b", DimDark: "#64748b",
+	Muted: "#94a3b8", MutedDark: "#475569",
+	Brand: "#7c3aed", BrandDark: "#a78bfa",
+	BrandSoft: "#c4b5fd", BrandSoftDark: "#6d28d9",
+	Secondary: "#0891b2", SecondaryDark: "#22d3ee",
+	Success: "#059669", SuccessDark: "#34d399",
+	Warning: "#b45309", WarningDark: "#fbbf24",
+	Error: "#dc2626", ErrorDark: "#f87171",
+	Border: "#cbd5e1", BorderDark: "#334155",
+	RowAlt: "#f1f5f9", RowAltDark: "#1e293b",
+	RowSel: "#ede9fe", RowSelDark: "#312e81",
+}
+
 func normalizeStatus(s string) string {
 	out := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
