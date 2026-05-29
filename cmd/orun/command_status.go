@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sourceplane/orun/internal/cockpit/bridge"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/state"
@@ -234,6 +235,14 @@ func showAllExecutions(store *state.Store, color bool) error {
 	if err != nil {
 		return err
 	}
+	return cockpitRenderRunList(execs)
+}
+
+func showAllExecutionsLegacy(store *state.Store, color bool) error {
+	execs, err := store.ListExecutions()
+	if err != nil {
+		return err
+	}
 	if len(execs) == 0 {
 		fmt.Println(ui.Dim(color, "No runs yet."))
 		fmt.Println()
@@ -331,8 +340,8 @@ func collectJobViews(st *state.ExecState) []jobView {
 }
 
 func showExecution(store *state.Store, execID string, color bool) error {
-	meta, _ := store.LoadMetadata(execID)
-	st, _ := store.LoadState(execID)
+	src := bridge.FromStore(store)
+	meta, st, _ := src.LoadRun(context.Background(), execID)
 	if statusJSON {
 		return renderExecutionJSON(execID, meta, st)
 	}
@@ -340,6 +349,15 @@ func showExecution(store *state.Store, execID string, color bool) error {
 }
 
 func renderExecution(execID string, meta *state.ExecMetadata, st *state.ExecState, color bool) error {
+	// Cockpit bridge: unified renderer shared with TUI.
+	if _, err := cockpitRenderExecution(execID, meta, st); err == nil {
+		return nil
+	}
+	// Fallback: legacy renderer (kept until Phase 2 deprecation pass).
+	return renderExecutionLegacy(execID, meta, st, color)
+}
+
+func renderExecutionLegacy(execID string, meta *state.ExecMetadata, st *state.ExecState, color bool) error {
 	counts := executionCountsFromState(meta, st)
 
 	status := "unknown"
