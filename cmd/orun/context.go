@@ -60,7 +60,11 @@ func ResolveScope(
 
 	resolver := expand.NewDependencyResolver(normalized)
 	seedSet := map[string]bool{componentName: true}
-	included := resolver.ResolveComponentSet(seedSet)
+	// CWD context scope: "give me this component + everything it needs"
+	// — intentionally pulls all transitive dependencies regardless of
+	// include policy, so the user sees the full footprint of a fresh
+	// plan starting from cwd.
+	included := resolver.ResolveComponentSetAll(seedSet)
 
 	scoped := make([]string, 0, len(included))
 	for name := range included {

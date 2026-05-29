@@ -257,6 +257,31 @@ type Dependency struct {
 	Environment string `yaml:"environment" json:"environment"`
 	Scope       string `yaml:"scope" json:"scope"`         // same-environment, cross-environment
 	Condition   string `yaml:"condition" json:"condition"` // success, always, failure
+	// Include controls plan selection behavior (orthogonal to ordering).
+	//   "if-selected" (default): order only when both ends are already in
+	//                            the plan; do NOT pull the dependency in.
+	//   "always":                pull the dependency into the plan when
+	//                            the dependent is selected, then order.
+	Include string `yaml:"include,omitempty" json:"include,omitempty"`
+	// Reason is a free-form note explaining why include=always was chosen.
+	// Surfaced in plan output for auditability; never affects behavior.
+	Reason string `yaml:"reason,omitempty" json:"reason,omitempty"`
+}
+
+// Dependency include modes.
+const (
+	IncludeIfSelected = "if-selected"
+	IncludeAlways     = "always"
+)
+
+// IsValidInclude reports whether s is a recognized include mode.
+func IsValidInclude(s string) bool {
+	switch s {
+	case IncludeIfSelected, IncludeAlways:
+		return true
+	default:
+		return false
+	}
 }
 
 // NormalizedIntent is the canonical internal representation
@@ -307,4 +332,10 @@ type ResolvedDependency struct {
 	Environment   string
 	Scope         string
 	Condition     string
+	// Include carries the resolved selection policy: "if-selected" or
+	// "always". Always populated (never empty) after normalization so
+	// downstream code can switch on it without re-defaulting.
+	Include string
+	// Reason mirrors Dependency.Reason for audit trails in plan output.
+	Reason string
 }

@@ -105,6 +105,16 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 			if dep.Condition == "" {
 				dep.Condition = "success"
 			}
+			// Default include policy: order-only ("if-selected").
+			// Change-detection should not silently pull in unchanged
+			// components.
+			if dep.Include == "" {
+				dep.Include = model.IncludeIfSelected
+			}
+			if !model.IsValidInclude(dep.Include) {
+				return nil, fmt.Errorf("component %s: dependsOn[%d].include %q is invalid (expected %q or %q)",
+					comp.Name, i, dep.Include, model.IncludeIfSelected, model.IncludeAlways)
+			}
 		}
 
 		normalized.Components[comp.Name] = comp

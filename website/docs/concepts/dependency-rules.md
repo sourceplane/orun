@@ -147,3 +147,84 @@ Keeping these axes independent keeps the compiled plan DAG the single source of 
 - If components are genuinely independent in *all* contexts, remove the `dependsOn` declaration instead of marking it `disabled`.
 - If you want different *steps*, use profile rules — dependency rules do not change what runs, only what waits.
 - For sequencing across environments (e.g. dev before staging) use `environment.promotion.dependsOn`, which is its own promotion-aware mechanism.
+
+## Include policy (plan selection)
+
+Since v2.9.0, `dependsOn` separates two orthogonal questions:
+
+1. **Ordering** — should A wait for B when both are in the plan? (existing `dependencyMode` / `condition`)
+2. **Inclusion** — should B be pulled into the plan when only A was selected by `--changed`? (new `include`)
+
+The new `include` field controls inclusion:
+
+| Value         | Plan selection behavior                                              | Best for                                                |
+|---------------|----------------------------------------------------------------------|---------------------------------------------------------|
+| `if-selected` | Only add an ordering edge if the dependency is already in the plan   | Default — most component dependencies                   |
+| `always`      | Pull the dependency into the plan, then add the ordering edge        | Migrations, codegen, shared infra, parent package build |
+
+`if-selected` is the built-in default and is applied during normalization. Change-detection no longer silently includes unchanged components.
+
+### Default: order-only
+
+```yaml
+metadata:
+  name: web-console
+spec:
+  type: cloudflare-pages-turbo
+  dependsOn:
+    - component: ui-package
+      # include: if-selected  (default)
+```
+
+```text
+changed: web-console            -> plan: web-console
+changed: ui-package             -> plan: ui-package
+changed: web-console + ui-pkg   -> plan: ui-package -> web-console
+full plan                       -> plan: ui-package -> web-console
+```
+
+### Opt-in: always pull the dependency in
+
+```yaml
+metadata:
+  name: api-edge-worker
+spec:
+  type: cloudflare-worker-turbo
+  dependsOn:
+    - component: identity-schema
+      include: always
+      reason: api requires latest generated identity contract before deploy
+```
+
+```text
+changed: api-edge-worker  -> plan: identity-schema -> api-edge-worker
+```
+
+`reason` is free-form text surfaced for auditability; it never affects behavior.
+
+### Relationship to `dependencyMode`
+
+`include` and `dependencyMode` are orthogonal — combine freely:
+
+| `dependencyMode` | `include`     | Effect                                                                              |
+|------------------|---------------|-------------------------------------------------------------------------------------|
+| `enforced`       | `if-selected` | Default. Blocking edge, only present if both ends are selected.                     |
+| `enforced`       | `always`      | Dependency is pulled in and acts as a hard ordering edge.                           |
+| `advisory`       | `if-selected` | PR pattern: parallel feedback, no transitive selection of unchanged components.     |
+| `advisory`       | `always`      | Pulls the dependency in but records the edge as advisory rather than blocking.      |
+| `disabled`       | *(any)*       | Edge omitted from the plan entirely.                                                |
+
+### Validation
+
+Invalid `include` values fail at plan time:
+
+```text
+component api: dependsOn[0].include "sometimes" is invalid
+  (expected "if-selected" or "always")
+```
+
+Missing-dependency errors are now scoped to `include: always`. Under the default `if-selected`, a dependency target that isn't in the plan is just a silently-dropped order edge — exactly what `--changed` wants. With `include: always` it remains a real misconfiguration:
+
+```text
+dependency not found: api.pr depends on db.pr (include: always)
+```

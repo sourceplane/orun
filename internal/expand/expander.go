@@ -390,6 +390,8 @@ func (e *Expander) resolveDependencies(comp model.Component, envName string) []m
 			Environment:   targetEnv,
 			Scope:         dep.Scope,
 			Condition:     dep.Condition,
+			Include:       dep.Include,
+			Reason:        dep.Reason,
 		})
 	}
 

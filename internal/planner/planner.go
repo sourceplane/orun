@@ -427,7 +427,20 @@ func (jp *JobPlanner) resolveDependencies(jobInstances map[string]*model.JobInst
 				depKey := fmt.Sprintf("%s.%s", dep.ComponentName, dep.Environment)
 				depJobs, exists := compToJobs[depKey]
 				if !exists {
-					return fmt.Errorf("dependency not found: %s depends on %s", key, depKey)
+					// Include policy decides whether a missing dep is an
+					// error or just a no-op order edge. "if-selected"
+					// (the default) means the edge is order-only: if the
+					// other end isn't in this plan, silently drop it.
+					// "always" means the author asserted the dep MUST run,
+					// so a missing target is a real misconfiguration.
+					include := dep.Include
+					if include == "" {
+						include = model.IncludeIfSelected
+					}
+					if include == model.IncludeAlways {
+						return fmt.Errorf("dependency not found: %s depends on %s (include: always)", key, depKey)
+					}
+					continue
 				}
 
 				// Branch by the dependent job's resolved DependencyMode.

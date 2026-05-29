@@ -82,6 +82,11 @@ Focus on changed components:
 orun plan -i examples/intent.yaml --changed --base main
 ```
 
+Since v2.9.0 `--changed` only includes components whose files
+actually changed. Dependencies are pulled in only when their edge
+declares `include: always` — see
+[Dependency rules → Include policy](../concepts/dependency-rules.md#include-policy-plan-selection).
+
 Debug how `--changed` resolved its git refs:
 
 ```bash
