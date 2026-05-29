@@ -32,8 +32,8 @@ from this PR's diff.
 
 ## PR Number and URL
 
-- PR: #__PR_NUMBER__
-- URL: __PR_URL__
+- PR: #144
+- URL: https://github.com/sourceplane/orun/pull/144
 
 ## Branch / base
 
@@ -160,7 +160,36 @@ fallback ("No root intent.yaml; Orun validation not applicable").
 
 ## CI Status / Re-run Evidence
 
-(To be filled in after `gh pr create` returns.)
+PR #144 — `mergeStateStatus: CLEAN` after Orun Plan completed.
+
+```
+$ gh pr view 144 --json mergeStateStatus,statusCheckRollup
+mergeStateStatus: CLEAN
+  CI/Orun Plan:                                          status=COMPLETED conclusion=SUCCESS
+  orun remote-state conformance/Harness dry-run guard:   status=COMPLETED conclusion=SUCCESS
+  CI/${{ matrix.component }}/${{ matrix.env }}:          status=COMPLETED conclusion=SKIPPED
+  orun remote-state conformance/Compile plan:            status=COMPLETED conclusion=SKIPPED
+  orun remote-state conformance/Run: matrix.job:         status=COMPLETED conclusion=SKIPPED
+  orun remote-state conformance/Env fanout:              status=COMPLETED conclusion=SKIPPED
+  orun remote-state conformance/Verify remote status:    status=COMPLETED conclusion=SKIPPED
+```
+
+The two non-skipped checks (`CI/Orun Plan` and `orun remote-state
+conformance/Harness dry-run guard`) both PASS. The remaining matrix
+checks are SKIPPED because no Orun component subscribes to the PR
+trigger's activated environments — expected for a CLI/docs-only PR
+that touches no Terraform components. No check is queued or unknown.
+
+PR #142 disposition confirmed:
+
+```
+$ gh pr view 142 --json state,title,url
+state: CLOSED
+title: chore: update happy-patch-113
+url:   https://github.com/sourceplane/orun/pull/142
+```
+
+Closure comment posted on #142 links #144 as the supersession target.
 
 ## Assumptions
 
