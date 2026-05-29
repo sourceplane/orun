@@ -1,23 +1,23 @@
 {
   "goal": "Phase 1 trigger-first revision-first local state model for Orun",
-  "current_task": "0001",
-  "completed": [],
+  "current_task": "0002",
+  "completed": ["0001"],
   "repo_health": "green",
-  "next_focus": "orun-state-redesign-M0-foundation",
+  "next_focus": "orun-state-redesign-M1-triggerctx",
   "active_spec": "specs/orun-state-redesign",
-  "active_milestone": "M0",
+  "active_milestone": "M1",
   "secondary_specs": [
     ".kiro/specs/orun-tui-cockpit",
     ".kiro/specs/github-artifacts"
   ],
   "last_verified": "2026-05-29",
   "waiting_for_input": "false",
-  "task_agent": "/ai/tasks/task-0001.md",
+  "task_agent": "/ai/tasks/task-0002.md",
   "notes": [
-    "Roadmap pivot 2026-05-30: TUI cockpit work paused at PR #146 merged (Task 0147.1). New active spec is specs/orun-state-redesign/ (Phase 1, local-only). Task numbering restarts at 0001 for this spec lineage.",
-    "Milestone M0 (Foundation) selected as the first task. Goal: add github.com/oklog/ulid/v2 dependency, scaffold internal/testfx/statefs helper package (NewWorkspace, AssertJSONFile, ReadJSON[T]), and add make test-state-redesign Makefile target (initially a no-op until M1+ packages land). No production code touched.",
-    "Spec drift to flag during M0: test-plan.md §1 still references github.com/flyingmutant/rapid as the property-test library but go.mod already pins pgregory.net/rapid v1.1.0 (the same module under its current import path). Worth a small spec-clarification proposal; not a blocker for M0.",
-    "Local fs state: ai/ directory was deleted in the working tree during the pivot; this orchestrator cycle re-establishes state.json, context/, tasks/, waiting_for_input.md from scratch under the new spec.",
-    "Previous TUI cockpit lineage (tasks 0139-0147 + sub-tasks) is preserved in git history; not re-listed in completed[] under the new state-redesign lineage."
+    "Task 0001 verified PASS and merged via PR #152 (squash) → main commit 4ea1980e8822d21908b09ab70316fe3953bb75ce on 2026-05-29T19:11:11Z. Foundation now on main: github.com/oklog/ulid/v2 v2.1.1 direct require, internal/testfx/statefs (NewWorkspace/AssertJSONFile/ReadJSON[T] with fakeT failure-path coverage), make test-state-redesign target, full specs/orun-state-redesign/ pack, agents/orchestrator.md updates, ai/ tree rebuilt under the new lineage, TUI-era ai/tasks/task-014*.md and ai/reports/task-014*.md deleted.",
+    "Verifier report at ai/reports/task-0001-verifier.md. CI on PR (run 26656333958 Orun Plan + 26656333939 Harness dry-run guard) reviewed at log level — confirmed 0 components × 3 envs → 0 jobs is the legitimate empty-matrix M0 shape, and Harness dry-run guard exercised real assertions (bash syntax, duplicate-claim PASS/FAIL, status helper PASS/FAIL).",
+    "flyingmutant/rapid → pgregory.net/rapid drift in specs/orun-state-redesign/test-plan.md §3 formally deferred to Task 0002. Forcing function: the first real `rapid` import will fail to compile under the wrong path; M1 implementer files ai/proposals/task-0002-spec-update.md as part of that work.",
+    "M1 (Task 0002, internal/triggerctx) scope reminders: (1) Remove internal/testfx/statefs/tools.go when the first production import of github.com/oklog/ulid/v2 lands; verify `go mod tidy` keeps the require in the direct block. (2) Use the correct `rapid` import path empirically; file the spec-clarification proposal. (3) Preserve internal/testfx/statefs as leaf-clean (no internal/* imports) — additional helper surfaces go in sibling packages under internal/testfx/.",
+    "Local environment quirk (not a regression): kiox -- orun plan --changed --intent examples/intent.yaml fails locally on the composition-cache resolution (`stack.yaml has no spec.compositions`) on both main and PR branches. CI passes the same invocation. Unrelated to state-redesign work; revisit only if it persists into M1+ verification cycles."
   ]
 }
