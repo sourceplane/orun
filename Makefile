@@ -102,4 +102,8 @@ test-state-redesign:
 	@echo "🧪 Running state-redesign test suites..."
 	@go test -count=1 ./internal/testfx/statefs/...
 	@go test -count=1 ./internal/triggerctx/...
+	@echo "🧪 Coverage gate: ./internal/statestore/... (>= 95%)"
+	@COVER=$$(go test -count=1 -cover ./internal/statestore/... | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
+	  echo "   measured: $$COVER%"; \
+	  awk -v c=$$COVER 'BEGIN { if (c+0 < 95.0) { printf "❌ coverage %.1f%% below 95%% threshold\n", c+0; exit 1 } }'
 	# add packages as state-redesign milestones land
