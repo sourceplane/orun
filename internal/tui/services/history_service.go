@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/sourceplane/orun/internal/state"
 )
 
 // ListRuns returns recent execution summaries, ordered newest-first.
@@ -74,6 +76,7 @@ func (s *LiveOrunService) ListRuns(ctx context.Context, req ListRunsRequest) ([]
 			Duration:   duration,
 			Trigger:    trigger,
 			DryRun:     dryRun,
+			Components: resolveRunComponents(s, planID),
 		})
 	}
 
@@ -98,4 +101,35 @@ func parseTimestampPtr(s string) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+// resolveRunComponents looks up the saved plan for an exec and returns the
+// unique component names referenced by its jobs. Returns nil on any error
+// (missing plan file, parse failure, no store) — callers must tolerate an
+// empty slice and fall back to substring matching on PlanName.
+func resolveRunComponents(s *LiveOrunService, planID string) []string {
+	if s == nil || s.cfg.Store == nil || planID == "" {
+		return nil
+	}
+	path, err := s.cfg.Store.ResolvePlanRef(planID)
+	if err != nil {
+		return nil
+	}
+	plan, err := state.LoadPlanFile(path)
+	if err != nil || plan == nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(plan.Jobs))
+	out := make([]string, 0, len(plan.Jobs))
+	for _, j := range plan.Jobs {
+		if j.Component == "" {
+			continue
+		}
+		if _, ok := seen[j.Component]; ok {
+			continue
+		}
+		seen[j.Component] = struct{}{}
+		out = append(out, j.Component)
+	}
+	return out
 }

@@ -3,51 +3,18 @@
 // `orun`; all data and actions flow through services.OrunService.
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import "github.com/sourceplane/orun/internal/tui/theme"
 
-// Color tokens. Kept small and tasteful for the first cut; theme work
-// expands in Phase 2.
+// Style re-exports for backwards compatibility with older tui-internal
+// references. New code should import the theme package directly.
 var (
-	colorFG          = lipgloss.AdaptiveColor{Light: "#1f2933", Dark: "#e0e6f0"}
-	colorFGDim       = lipgloss.AdaptiveColor{Light: "#6b7280", Dark: "#7a869a"}
-	colorAccent      = lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#7dd3fc"}
-	colorBorder      = lipgloss.AdaptiveColor{Light: "#cbd5e1", Dark: "#3b4252"}
-	colorBorderFocus = lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#7dd3fc"}
-	colorError       = lipgloss.AdaptiveColor{Light: "#b91c1c", Dark: "#fca5a5"}
-	colorSuccess     = lipgloss.AdaptiveColor{Light: "#15803d", Dark: "#86efac"}
-	colorWarning     = lipgloss.AdaptiveColor{Light: "#a16207", Dark: "#fde68a"}
-)
-
-// Style constants. View files must use these and never inline lipgloss
-// literals.
-var (
-	StylePanel = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorBorder).
-			Padding(0, 1)
-
-	StylePanelFocused = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(colorBorderFocus).
-				Padding(0, 1)
-
-	StyleStatusBar = lipgloss.NewStyle().
-			Foreground(colorFG).
-			Padding(0, 1)
-
-	StyleKeyHint = lipgloss.NewStyle().
-			Foreground(colorFGDim).
-			Padding(0, 1)
-
-	StyleErrorBanner = lipgloss.NewStyle().
-				Foreground(colorError).
-				Padding(0, 1)
-
-	StyleLoading = lipgloss.NewStyle().
-			Foreground(colorAccent).
-			Padding(1, 2)
-
-	StyleDimmed = lipgloss.NewStyle().Foreground(colorFGDim)
-	StyleTitle  = lipgloss.NewStyle().Bold(true).Foreground(colorFG)
-	StyleAccent = lipgloss.NewStyle().Foreground(colorAccent)
+	StylePanel        = theme.StylePanel
+	StylePanelFocused = theme.StylePanelFocused
+	StyleStatusBar    = theme.StyleStatusBar
+	StyleKeyHint      = theme.StyleKeyHint
+	StyleErrorBanner  = theme.StyleErrorBanner
+	StyleLoading      = theme.StyleLoading
+	StyleDimmed       = theme.StyleDimmed
+	StyleTitle        = theme.StyleTitle
+	StyleAccent       = theme.StyleAccent
 )

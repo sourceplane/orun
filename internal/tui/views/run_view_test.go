@@ -13,7 +13,7 @@ func TestRunViewModel_HeaderShowsDryRun(t *testing.T) {
 	close(ch)
 	m, _ = m.StartStream(ch, true)
 	view := m.View()
-	if !strings.Contains(view, "Run Dashboard") || !strings.Contains(view, "dry-run") {
+	if !strings.Contains(view, "Activity") || !strings.Contains(view, "dry-run") {
 		t.Fatalf("expected dry-run header, got:\n%s", view)
 	}
 }

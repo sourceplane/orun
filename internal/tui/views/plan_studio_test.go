@@ -64,7 +64,7 @@ func TestPlanStudioModel_PlanGeneratedSuccess(t *testing.T) {
 		t.Errorf("Result not stored")
 	}
 	view := m.View()
-	for _, want := range []string{"abc12345", "a ", "b ", "deps=a"} {
+	for _, want := range []string{"abc12345", "alpha", "beta", "Jobs"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("View missing %q\n---\n%s", want, view)
 		}

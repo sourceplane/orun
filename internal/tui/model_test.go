@@ -28,19 +28,38 @@ func TestNewModel_Defaults(t *testing.T) {
 	}
 }
 
-func TestModel_TabCyclesPanels(t *testing.T) {
-	keys := DefaultGlobalKeyMap()
+func TestModel_TabTogglesTopLevelMode(t *testing.T) {
 	tab := tea.KeyMsg{Type: tea.KeyTab}
-	_ = keys
-
 	m := NewModel(&services.MockOrunService{})
-	wantSeq := []Panel{PanelInspector, PanelNavigator, PanelMain}
-	for i, want := range wantSeq {
-		next, _ := m.Update(tab)
-		m = next.(Model)
-		if m.ActivePanel() != want {
-			t.Fatalf("step %d: got panel %v, want %v", i, m.ActivePanel(), want)
-		}
+	if m.ActiveMode() != ModeBrowse {
+		t.Fatalf("expected ModeBrowse at start, got %v", m.ActiveMode())
+	}
+	next, _ := m.Update(tab)
+	m = next.(Model)
+	if m.ActiveMode() != ModeActivity {
+		t.Fatalf("after tab: ActiveMode = %v, want ModeActivity", m.ActiveMode())
+	}
+	next, _ = m.Update(tab)
+	m = next.(Model)
+	if m.ActiveMode() != ModeBrowse {
+		t.Fatalf("after second tab: ActiveMode = %v, want ModeBrowse", m.ActiveMode())
+	}
+}
+
+func TestModel_InspectorToggle(t *testing.T) {
+	m := NewModel(&services.MockOrunService{})
+	// Force inspector on regardless of any persisted user preference so the
+	// test is independent of ~/.orun/cockpit.json on the developer machine.
+	m.showInspector = true
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = next.(Model)
+	if m.showInspector {
+		t.Fatal("expected inspector hidden after first `i` toggle")
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = next.(Model)
+	if !m.showInspector {
+		t.Fatal("expected inspector visible after second `i` toggle")
 	}
 }
 
@@ -216,8 +235,8 @@ func TestModel_DryRunRequested_DispatchesRunPlanAndSwitchesMode(t *testing.T) {
 	if !got.DryRun {
 		t.Error("DryRun=true should be set")
 	}
-	if m.ActiveMode() != ModeRunDashboard {
-		t.Errorf("ActiveMode = %v, want ModeRunDashboard", m.ActiveMode())
+	if m.ActiveMode() != ModeActivity {
+		t.Errorf("ActiveMode = %v, want ModeActivity", m.ActiveMode())
 	}
 	if m.LastError() != nil {
 		t.Errorf("unexpected error: %v", m.LastError())

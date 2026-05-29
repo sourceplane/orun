@@ -193,6 +193,11 @@ type RunSummary struct {
 	Duration   time.Duration
 	Trigger    string
 	DryRun     bool
+	// Components is the set of component names this run touched. Populated
+	// best-effort by ListRuns (resolved from the saved plan). May be empty
+	// for legacy runs whose plan is no longer on disk — consumers should
+	// fall back to substring matching on PlanName in that case.
+	Components []string
 }
 
 // ResourceDescription is the structured payload rendered by the Inspector.

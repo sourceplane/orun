@@ -10,6 +10,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/tui/events"
 	"github.com/sourceplane/orun/internal/tui/services"
+	"github.com/sourceplane/orun/internal/tui/theme"
 )
 
 // RunViewModel is the minimal live timeline rendered by the Run Dashboard
@@ -24,8 +25,13 @@ type RunViewModel struct {
 	// in the header for user reassurance (matches Spec 6.9 / 14.8).
 	DryRun bool
 
+	// ExecID is the most recently observed execution ID (carried in
+	// RunEvent.JobID-adjacent payloads; reserved for log tailing).
+	ExecID string
+
 	rows    map[string]*runRow
 	order   []string
+	cursor  int
 	done    bool
 	endedAt time.Time
 	startAt time.Time
@@ -77,6 +83,27 @@ func (m RunViewModel) StartStream(ch <-chan services.RunEvent, dryRun bool) (Run
 // it receives a terminal RunEventRunDone.
 func (m RunViewModel) Update(msg tea.Msg) (RunViewModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "down", "j":
+			if m.cursor+1 < len(m.order) {
+				m.cursor++
+			}
+			return m, nil
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+			return m, nil
+		case "enter":
+			if m.cursor >= 0 && m.cursor < len(m.order) {
+				jobID := m.order[m.cursor]
+				return m, func() tea.Msg {
+					return RunJobSelectedMsg{JobID: jobID, ExecID: m.ExecID}
+				}
+			}
+			return m, nil
+		}
 	case services.RunEventMsg:
 		ev := msg.Event
 		switch ev.Kind {
@@ -127,19 +154,19 @@ func (m RunViewModel) Update(msg tea.Msg) (RunViewModel, tea.Cmd) {
 // grouped rows by environment, then a footer summarizing terminal state.
 func (m RunViewModel) View() string {
 	var b strings.Builder
-	header := "Run Dashboard"
+	header := theme.StyleSectionTitle.Render("Activity · live")
 	if m.DryRun {
-		header += " (dry-run)"
+		header += "  " + theme.StyleChipAccent.Render("(dry-run)")
 	}
-	fmt.Fprintln(&b, header)
+	b.WriteString(header + "\n\n")
 
 	if len(m.rows) == 0 {
 		if m.Events == nil {
-			b.WriteString("press `d` in Plan Studio to start a dry-run.\n")
+			b.WriteString(theme.StyleDim.Render("open a component (1) and press d for a dry-run.\n"))
 		} else if m.done {
-			b.WriteString("run completed with no jobs reported.\n")
+			b.WriteString(theme.StyleDim.Render("run completed with no jobs reported.\n"))
 		} else {
-			b.WriteString("starting run…\n")
+			b.WriteString(theme.StyleAccent.Render("◐ starting run…\n"))
 		}
 		return b.String()
 	}
@@ -163,17 +190,40 @@ func (m RunViewModel) View() string {
 		if label == "" {
 			label = "(no-env)"
 		}
-		fmt.Fprintf(&b, "\nenv=%s\n", label)
+		fmt.Fprintf(&b, "\n%s\n", theme.StyleChipAccent.Render("env "+label))
 		for _, id := range byEnv[env] {
 			row := m.rows[id]
-			icon := statusIcon(row.Status)
+			icon := styledStatusIcon(row.Status)
 			comp := row.Component
 			if comp == "" {
 				comp = "-"
 			}
-			fmt.Fprintf(&b, "  %s %-32s [%s] %s\n", icon, row.JobID, comp, row.Status)
+			elapsed := ""
+			if !row.StartedAt.IsZero() {
+				end := row.EndedAt
+				if end.IsZero() {
+					end = time.Now()
+				}
+				d := end.Sub(row.StartedAt)
+				if d > 0 {
+					elapsed = theme.StyleDim.Render(humanShortDur(d))
+				}
+			}
+			cursor := "  "
+			if id == m.SelectedJobID() {
+				cursor = theme.StyleCursorBar.Render("▌") + " "
+			}
+			fmt.Fprintf(&b, "%s%s %s %s %s %s\n",
+				cursor,
+				icon,
+				theme.StyleValue.Render(fmt.Sprintf("%-32s", row.JobID)),
+				theme.StyleChipDim.Render(comp),
+				renderRunStatus(row.Status),
+				elapsed,
+			)
 			if row.Status == "failed" && row.Err != "" {
-				fmt.Fprintf(&b, "      err: %s\n", truncateErr(row.Err))
+				fmt.Fprintf(&b, "      %s %s\n",
+					theme.StylePillError.Render("err:"), truncateErr(row.Err))
 			}
 			switch row.Status {
 			case "completed":
@@ -188,13 +238,65 @@ func (m RunViewModel) View() string {
 
 	b.WriteString("\n")
 	if m.done {
-		fmt.Fprintf(&b, "✓ run done — completed=%d failed=%d (jobs total=%d)\n",
-			done, failed, len(m.rows))
+		fmt.Fprintf(&b, "%s  %s  %s  %s\n",
+			theme.StylePillSuccess.Render("✓ done"),
+			theme.StylePillSuccess.Render(fmt.Sprintf("done %d", done)),
+			pillFor(failed),
+			theme.StyleDim.Render(fmt.Sprintf("total %d", len(m.rows))),
+		)
 	} else {
-		fmt.Fprintf(&b, "… in flight — running=%d completed=%d failed=%d (total=%d)\n",
-			running, done, failed, len(m.rows))
+		fmt.Fprintf(&b, "%s  %s  %s  %s  %s\n",
+			theme.StylePillRunning.Render("◐ in flight"),
+			theme.StylePillRunning.Render(fmt.Sprintf("running %d", running)),
+			theme.StylePillSuccess.Render(fmt.Sprintf("done %d", done)),
+			pillFor(failed),
+			theme.StyleDim.Render(fmt.Sprintf("total %d", len(m.rows))),
+		)
 	}
 	return b.String()
+}
+
+func pillFor(failed int) string {
+	if failed > 0 {
+		return theme.StylePillError.Render(fmt.Sprintf("failed %d", failed))
+	}
+	return theme.StyleDim.Render("failed 0")
+}
+
+func styledStatusIcon(status string) string {
+	switch status {
+	case "running":
+		return theme.StylePillRunning.Render("◐")
+	case "completed":
+		return theme.StylePillSuccess.Render("✓")
+	case "failed":
+		return theme.StylePillError.Render("✗")
+	default:
+		return theme.StyleDim.Render("·")
+	}
+}
+
+func renderRunStatus(status string) string {
+	switch status {
+	case "running":
+		return theme.StylePillRunning.Render("● running")
+	case "completed":
+		return theme.StylePillSuccess.Render("● done")
+	case "failed":
+		return theme.StylePillError.Render("● failed")
+	default:
+		return theme.StyleDim.Render("· " + status)
+	}
+}
+
+func humanShortDur(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
 }
 
 // Done reports whether the streaming run has emitted RunEventRunDone.
@@ -230,4 +332,35 @@ func truncateErr(s string) string {
 		return s
 	}
 	return s[:max] + "…"
+}
+
+// RunJobSelectedMsg is emitted when the user presses `enter` on a job
+// row. The root model uses it to open the Log Explorer attached to a
+// TailLogs stream for that job.
+type RunJobSelectedMsg struct {
+	JobID  string
+	ExecID string
+	StepID string
+}
+
+// SelectedJobID returns the job ID under the cursor, or "" if none.
+func (m RunViewModel) SelectedJobID() string {
+	if m.cursor < 0 || m.cursor >= len(m.order) {
+		return ""
+	}
+	return m.order[m.cursor]
+}
+
+// SelectedRow returns the row under the cursor (or nil).
+func (m RunViewModel) SelectedRow() *runRow {
+	id := m.SelectedJobID()
+	if id == "" {
+		return nil
+	}
+	row := m.rows[id]
+	if row == nil {
+		return nil
+	}
+	cp := *row
+	return &cp
 }

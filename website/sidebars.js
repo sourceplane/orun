@@ -43,6 +43,7 @@ const sidebars = {
         'cli/orun-describe',
         'cli/orun-gc',
         'cli/orun-github',
+        'cli/orun-tui',
         'cli/orun-validate',
         'cli/orun-debug',
         'cli/orun-compositions',
@@ -78,6 +79,8 @@ const sidebars = {
         'architecture/internals',
         'architecture/compiler-pipeline',
         'architecture/execution-runtime',
+        'architecture/tui-cockpit',
+        'architecture/github-artifacts',
       ],
     },
     {
@@ -97,6 +100,16 @@ const sidebars = {
         'contributing/extending-orun',
         'contributing/deploying-docs',
       ],
+    },
+    {
+      type: 'category',
+      label: 'Downstream',
+      items: ['downstream/v2.6-integration'],
+    },
+    {
+      type: 'category',
+      label: 'Release Notes',
+      items: ['release-notes/v2.6.0'],
     },
   ],
 };

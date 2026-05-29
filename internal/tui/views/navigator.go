@@ -1,61 +1,86 @@
-// Package views holds the per-mode Bubble Tea models that render inside
-// the cockpit's Main panel, plus the Navigator, Inspector, and overlay
-// models.
-//
-// Phase 1 ships compiling stubs for every view named in the spec; the
-// fully-implemented behavior lands in later phases (Browse + Plan Studio
-// from Phase 2, Run Dashboard / Log Explorer / History / command palette
-// from Phase 3).
 package views
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	"strings"
 
-// NavItem is one entry in the resource-type tree.
-type NavItem struct {
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/sourceplane/orun/internal/tui/theme"
+)
+
+// SidebarItem is one entry in the cockpit's left rail.
+type SidebarItem struct {
+	Icon  string
 	Label string
 	Mode  string // mode name this item activates
 }
 
-// NavigatorModel renders the fixed-width resource-type navigator on the
-// left.
+// NavigatorModel renders the collapsible icon+label sidebar on the left.
 type NavigatorModel struct {
-	Items   []NavItem
-	Cursor  int
-	Focused bool
-	Width   int
-	Height  int
+	Items     []SidebarItem
+	Cursor    int
+	Focused   bool
+	Collapsed bool
+	Width     int
+	Height    int
 }
 
-// NewNavigatorModel returns a navigator pre-populated with the default
-// resource-type rows from the spec.
+// NavItem is the historical name kept for compatibility.
+type NavItem = SidebarItem
+
+// NewNavigatorModel returns a navigator pre-populated with the cockpit's
+// canonical sidebar items.
 func NewNavigatorModel() NavigatorModel {
 	return NavigatorModel{
-		Items: []NavItem{
-			{Label: "Components", Mode: "browse"},
-			{Label: "Environments", Mode: "browse"},
-			{Label: "Plans", Mode: "plan-studio"},
-			{Label: "Runs", Mode: "run-dashboard"},
-			{Label: "Jobs", Mode: "run-dashboard"},
-			{Label: "Logs", Mode: "log-explorer"},
-			{Label: "History", Mode: "history"},
+		Items: []SidebarItem{
+			{Icon: "◆", Label: "Components", Mode: "browse"},
+			{Icon: "▶", Label: "Activity", Mode: "activity"},
 		},
 	}
 }
 
-func (m NavigatorModel) Init() tea.Cmd { return nil }
-
-func (m NavigatorModel) Update(msg tea.Msg) (NavigatorModel, tea.Cmd) {
-	return m, nil
+// SetActiveMode highlights the row matching mode (no-op if not found).
+func (m NavigatorModel) SetActiveMode(mode string) NavigatorModel {
+	for i, it := range m.Items {
+		if it.Mode == mode {
+			m.Cursor = i
+			return m
+		}
+	}
+	return m
 }
 
+func (m NavigatorModel) Init() tea.Cmd                              { return nil }
+func (m NavigatorModel) Update(_ tea.Msg) (NavigatorModel, tea.Cmd) { return m, nil }
+
+// View renders the sidebar; honors the Collapsed flag.
 func (m NavigatorModel) View() string {
-	out := ""
-	for i, item := range m.Items {
-		prefix := "  "
-		if i == m.Cursor {
-			prefix = "› "
-		}
-		out += prefix + item.Label + "\n"
+	var b strings.Builder
+	if !m.Collapsed {
+		b.WriteString(theme.StyleSidebarTitle.Render("ORUN"))
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString("\n")
 	}
-	return out
+	for i, it := range m.Items {
+		active := i == m.Cursor
+		bar := " "
+		if active {
+			bar = theme.StyleSidebarBar.Render("▌")
+		}
+		var label string
+		if m.Collapsed {
+			label = it.Icon
+		} else {
+			label = it.Icon + "  " + it.Label
+		}
+		row := label
+		if active {
+			row = theme.StyleSidebarItemActive.Render(label)
+		} else {
+			row = theme.StyleSidebarItem.Render(label)
+		}
+		b.WriteString(bar + row + "\n")
+	}
+	return b.String()
 }
