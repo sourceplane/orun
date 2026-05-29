@@ -3,8 +3,9 @@
 Phase 1 ships with three test tiers:
 
 1. **Unit tests** colocated with the package under test (`*_test.go`).
-2. **Property-based tests** using `github.com/flyingmutant/rapid` (already
-   pinned by the TUI cockpit spec).
+2. **Property-based tests** using `pgregory.net/rapid` (the canonical current
+   import path; already pinned at `v1.1.0` by the TUI cockpit spec — see
+   `ai/proposals/task-0002-spec-update.md` for the path clarification).
 3. **End-to-end CLI tests** under `cmd/orun/state_e2e_test.go`.
 
 A `make test-state-redesign` target gates coverage on the four new packages.

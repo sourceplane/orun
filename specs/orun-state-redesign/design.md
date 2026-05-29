@@ -307,7 +307,7 @@ Tracked in `risks-and-open-questions.md`. Highlights:
 |--------|-----|
 | `github.com/oklog/ulid/v2` | Monotonic ULIDs for `triggerId` / `revisionId` / `executionId`. |
 
-`github.com/flyingmutant/rapid` is already pinned per the TUI cockpit spec and
+`pgregory.net/rapid` is already pinned per the TUI cockpit spec and
 is reused here for property-based tests.
 
 No other dependencies. All other functionality is stdlib.
