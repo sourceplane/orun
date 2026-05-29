@@ -150,6 +150,65 @@ func ValidateProfileRules(intent *model.Intent) []error {
 	return errs
 }
 
+// ValidateDependencyRules checks that dependencyMode values are valid and
+// that dependencyRules in subscriptions reference existing trigger bindings.
+func ValidateDependencyRules(intent *model.Intent) []error {
+	var errs []error
+
+	bindingNames := make(map[string]struct{})
+	for name := range intent.Automation.TriggerBindings {
+		bindingNames[name] = struct{}{}
+	}
+
+	for envName, env := range intent.Environments {
+		if env.DependencyMode != "" && !model.IsValidDependencyMode(env.DependencyMode) {
+			errs = append(errs, fmt.Errorf(
+				"environment %q: dependencyMode %q is not one of enforced|advisory|disabled",
+				envName, env.DependencyMode,
+			))
+		}
+	}
+
+	for _, comp := range intent.Components {
+		for _, sub := range comp.Subscribe.Environments {
+			if sub.DependencyMode != "" && !model.IsValidDependencyMode(sub.DependencyMode) {
+				errs = append(errs, fmt.Errorf(
+					"component %q subscription %q: dependencyMode %q is not one of enforced|advisory|disabled",
+					comp.Name, sub.Name, sub.DependencyMode,
+				))
+			}
+
+			for i, rule := range sub.DependencyRules {
+				if rule.Mode == "" {
+					errs = append(errs, fmt.Errorf(
+						"component %q subscription %q: dependencyRules[%d].mode is required",
+						comp.Name, sub.Name, i,
+					))
+				} else if !model.IsValidDependencyMode(rule.Mode) {
+					errs = append(errs, fmt.Errorf(
+						"component %q subscription %q: dependencyRules[%d].mode %q is not one of enforced|advisory|disabled",
+						comp.Name, sub.Name, i, rule.Mode,
+					))
+				}
+
+				if rule.When.TriggerRef == "" {
+					errs = append(errs, fmt.Errorf(
+						"component %q subscription %q: dependencyRules[%d].when.triggerRef is required",
+						comp.Name, sub.Name, i,
+					))
+				} else if _, exists := bindingNames[rule.When.TriggerRef]; !exists {
+					errs = append(errs, fmt.Errorf(
+						"component %q subscription %q: dependencyRules[%d].when.triggerRef %q does not exist in automation.triggerBindings",
+						comp.Name, sub.Name, i, rule.When.TriggerRef,
+					))
+				}
+			}
+		}
+	}
+
+	return errs
+}
+
 // FormatErrors joins multiple validation errors into a single message.
 func FormatErrors(errs []error) error {
 	if len(errs) == 0 {

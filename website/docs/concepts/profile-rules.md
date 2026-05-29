@@ -123,3 +123,4 @@ The `triggerRef` must reference a key declared in `automation.triggerBindings`.
 - If you need different *environments* per trigger, use environment activation (`activation.triggerRefs`) instead
 - If you want *all* components in an environment to use the same profile, set it as the composition's `defaultProfile`
 - Profile rules are best for cases where a single environment needs different behavior depending on the triggering event
+- To change whether a `dependsOn` edge blocks execution (e.g. parallel PR plans), use [Dependency rules](./dependency-rules.md) — they operate on the DAG, not the steps

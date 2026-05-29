@@ -23,6 +23,17 @@ const (
 type Renderer struct{}
 
 // NewRenderer creates a new renderer
+
+// sortedStrings returns a sorted copy of the input slice (nil if empty).
+func sortedStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	sort.Strings(out)
+	return out
+}
 func NewRenderer() *Renderer {
 	return &Renderer{}
 }
@@ -80,6 +91,10 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 			Profile:       job.Profile,
 			ProfileSource: job.ProfileSource,
 			ProfileRuleTriggerRef: job.ProfileRuleTriggerRef,
+			DependencyMode:           job.DependencyMode,
+			DependencySource:         job.DependencySource,
+			DependencyRuleTriggerRef: job.DependencyRuleTriggerRef,
+			AdvisoryDependsOn:        sortedStrings(job.AdvisoryDependsOn),
 			JobRegistry:   registryName,
 			Job:           job.Name, // The specific job name from the registry
 			RunsOn:        job.RunsOn,

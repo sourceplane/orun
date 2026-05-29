@@ -118,7 +118,17 @@ func (pv *PlanViewer) ViewDAG() string {
 				}
 				profileTag = fmt.Sprintf(" [%s]", tag)
 			}
-			sb.WriteString(fmt.Sprintf("%s%s%s\n", envPrefix, env, profileTag))
+			depModeTag := ""
+			if len(jobs) > 0 && jobs[0].DependencyMode != "" && jobs[0].DependencyMode != model.DependencyModeEnforced {
+				tag := jobs[0].DependencyMode + " deps"
+				if jobs[0].DependencyRuleTriggerRef != "" {
+					tag += " via " + jobs[0].DependencyRuleTriggerRef
+				} else if jobs[0].DependencySource != "" {
+					tag += " (" + jobs[0].DependencySource + ")"
+				}
+				depModeTag = fmt.Sprintf(" (%s)", tag)
+			}
+			sb.WriteString(fmt.Sprintf("%s%s%s%s\n", envPrefix, env, profileTag, depModeTag))
 
 			for k, job := range jobs {
 				isLastJob := k == len(jobs)-1
@@ -144,12 +154,26 @@ func (pv *PlanViewer) ViewDAG() string {
 				if len(job.DependsOn) > 0 {
 					sort.Strings(job.DependsOn)
 					for l, dep := range job.DependsOn {
-						isLastDep := l == len(job.DependsOn)-1 && len(job.Steps) == 0
+						isLastDep := l == len(job.DependsOn)-1 && len(job.AdvisoryDependsOn) == 0 && len(job.Steps) == 0
 						depPrefix := jobConnector + "├─ "
 						if isLastDep {
 							depPrefix = jobConnector + "└─ "
 						}
 						sb.WriteString(fmt.Sprintf("%s(depends on) %s\n", depPrefix, dep))
+					}
+				}
+
+				// Show advisory dependencies (recorded but non-blocking)
+				if len(job.AdvisoryDependsOn) > 0 {
+					advisory := append([]string(nil), job.AdvisoryDependsOn...)
+					sort.Strings(advisory)
+					for l, dep := range advisory {
+						isLastDep := l == len(advisory)-1 && len(job.Steps) == 0
+						depPrefix := jobConnector + "├─ "
+						if isLastDep {
+							depPrefix = jobConnector + "└─ "
+						}
+						sb.WriteString(fmt.Sprintf("%s(advisory) %s\n", depPrefix, dep))
 					}
 				}
 
@@ -322,16 +346,36 @@ func (pv *PlanViewer) ViewDependencies() string {
 
 		sb.WriteString(fmt.Sprintf("%s%s (%s/%s)\n", prefix, job.Name, job.Component, job.Environment))
 
-		if len(job.DependsOn) == 0 {
+		if len(job.DependsOn) == 0 && len(job.AdvisoryDependsOn) == 0 {
 			sb.WriteString("   └─ no dependencies\n")
 		} else {
-			for j, dep := range job.DependsOn {
+			total := len(job.DependsOn) + len(job.AdvisoryDependsOn)
+			idx := 0
+			for _, dep := range job.DependsOn {
 				depPrefix := "  ├─ "
-				if j == len(job.DependsOn)-1 {
+				if idx == total-1 {
 					depPrefix = "  └─ "
 				}
 				sb.WriteString(fmt.Sprintf("%sdepends-on: %s\n", depPrefix, dep))
+				idx++
 			}
+			advisory := append([]string(nil), job.AdvisoryDependsOn...)
+			sort.Strings(advisory)
+			for _, dep := range advisory {
+				depPrefix := "  ├─ "
+				if idx == total-1 {
+					depPrefix = "  └─ "
+				}
+				sb.WriteString(fmt.Sprintf("%sadvisory:   %s\n", depPrefix, dep))
+				idx++
+			}
+		}
+		if job.DependencyMode != "" && job.DependencyMode != model.DependencyModeEnforced {
+			source := job.DependencySource
+			if job.DependencyRuleTriggerRef != "" {
+				source = "rule:" + job.DependencyRuleTriggerRef
+			}
+			sb.WriteString(fmt.Sprintf("   mode: %s (%s)\n", job.DependencyMode, source))
 		}
 		sb.WriteString("\n")
 	}

@@ -65,6 +65,9 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 					Profile:       compInst.ProfileRef,
 					ProfileSource: compInst.ProfileSource,
 					ProfileRuleTriggerRef: compInst.ProfileRuleTriggerRef,
+					DependencyMode:           compInst.DependencyMode,
+					DependencySource:         compInst.DependencySource,
+					DependencyRuleTriggerRef: compInst.DependencyRuleTriggerRef,
 					RunsOn:        jobEntry.job.RunsOn,
 					Path:          compInst.Path,
 					Timeout:       jobEntry.job.Timeout,
@@ -427,9 +430,24 @@ func (jp *JobPlanner) resolveDependencies(jobInstances map[string]*model.JobInst
 					return fmt.Errorf("dependency not found: %s depends on %s", key, depKey)
 				}
 
-				// Link all my jobs to all dependency jobs
+				// Branch by the dependent job's resolved DependencyMode.
+				// Falls back to enforced for legacy paths that did not
+				// populate the field.
 				for _, myJob := range myJobs {
-					jobInstances[myJob].DependsOn = append(jobInstances[myJob].DependsOn, depJobs...)
+					mode := jobInstances[myJob].DependencyMode
+					if mode == "" {
+						mode = model.DependencyModeEnforced
+					}
+					switch mode {
+					case model.DependencyModeAdvisory:
+						jobInstances[myJob].AdvisoryDependsOn = append(
+							jobInstances[myJob].AdvisoryDependsOn, depJobs...)
+					case model.DependencyModeDisabled:
+						// drop dependency entirely
+					default: // enforced
+						jobInstances[myJob].DependsOn = append(
+							jobInstances[myJob].DependsOn, depJobs...)
+					}
 				}
 			}
 		}

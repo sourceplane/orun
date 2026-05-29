@@ -87,6 +87,10 @@ type PlanJob struct {
 	Path          string                 `json:"path,omitempty" yaml:"path,omitempty"` // Working directory for job execution
 	Steps         []PlanStep             `json:"steps" yaml:"steps"`
 	DependsOn     []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
+	AdvisoryDependsOn        []string `json:"advisoryDependsOn,omitempty" yaml:"advisoryDependsOn,omitempty"`
+	DependencyMode           string   `json:"dependencyMode,omitempty" yaml:"dependencyMode,omitempty"`
+	DependencySource         string   `json:"dependencySource,omitempty" yaml:"dependencySource,omitempty"`
+	DependencyRuleTriggerRef string   `json:"dependencyRuleTriggerRef,omitempty" yaml:"dependencyRuleTriggerRef,omitempty"`
 	Gates         []PlanPromotionGate    `json:"gates,omitempty" yaml:"gates,omitempty"`
 	Timeout       string                 `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	Retries       int                    `json:"retries,omitempty" yaml:"retries,omitempty"`

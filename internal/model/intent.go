@@ -64,6 +64,28 @@ type Environment struct {
 	ParameterDefaults map[string]map[string]interface{} `yaml:"parameterDefaults" json:"parameterDefaults"`
 	Policies          map[string]interface{}            `yaml:"policies" json:"policies"`
 	Env               map[string]string                 `yaml:"env,omitempty" json:"env,omitempty"`
+	// DependencyMode controls how component dependsOn edges are emitted
+	// for components subscribing to this environment. One of "enforced"
+	// (default), "advisory", "disabled". See concepts/dependency-rules.md.
+	DependencyMode string `yaml:"dependencyMode,omitempty" json:"dependencyMode,omitempty"`
+}
+
+// Dependency-mode constants. Default is DependencyModeEnforced.
+const (
+	DependencyModeEnforced = "enforced"
+	DependencyModeAdvisory = "advisory"
+	DependencyModeDisabled = "disabled"
+)
+
+// IsValidDependencyMode reports whether mode is one of the supported values
+// (empty string is also accepted: it means "use the parent default").
+func IsValidDependencyMode(mode string) bool {
+	switch mode {
+	case "", DependencyModeEnforced, DependencyModeAdvisory, DependencyModeDisabled:
+		return true
+	default:
+		return false
+	}
 }
 
 // EnvironmentPromotion declares ordering/gating relationships between environments.
@@ -129,8 +151,15 @@ type EnvironmentSubscription struct {
 	Name         string                 `yaml:"name" json:"name"`
 	Profile      string                 `yaml:"profile,omitempty" json:"profile,omitempty"`
 	ProfileRules []ProfileRule          `yaml:"profileRules,omitempty" json:"profileRules,omitempty"`
-	Env          map[string]string      `yaml:"env,omitempty" json:"env,omitempty"`
-	Parameters   map[string]interface{} `yaml:"parameters,omitempty" json:"parameters,omitempty"`
+	// DependencyMode optionally overrides the environment's dependency mode
+	// for this single component. When unset, the environment default applies.
+	DependencyMode string `yaml:"dependencyMode,omitempty" json:"dependencyMode,omitempty"`
+	// DependencyRules conditionally override DependencyMode based on the
+	// matched triggerRef. First match wins; if nothing matches, the
+	// subscription/environment DependencyMode (or default) is used.
+	DependencyRules []DependencyRule       `yaml:"dependencyRules,omitempty" json:"dependencyRules,omitempty"`
+	Env             map[string]string      `yaml:"env,omitempty" json:"env,omitempty"`
+	Parameters      map[string]interface{} `yaml:"parameters,omitempty" json:"parameters,omitempty"`
 }
 
 // ProfileRule is a conditional override that selects a different execution profile
@@ -142,6 +171,18 @@ type ProfileRule struct {
 
 // ProfileRuleWhen defines the condition for a profile rule.
 type ProfileRuleWhen struct {
+	TriggerRef string `yaml:"triggerRef" json:"triggerRef"`
+}
+
+// DependencyRule is a conditional override that selects a different
+// dependency mode when a particular trigger fires. First-match-wins.
+type DependencyRule struct {
+	Mode string             `yaml:"mode" json:"mode"`
+	When DependencyRuleWhen `yaml:"when" json:"when"`
+}
+
+// DependencyRuleWhen defines the condition for a dependency rule.
+type DependencyRuleWhen struct {
 	TriggerRef string `yaml:"triggerRef" json:"triggerRef"`
 }
 
@@ -249,6 +290,15 @@ type ComponentInstance struct {
 	ProfileName   string
 	ProfileSource string
 	ProfileRuleTriggerRef string
+	// DependencyMode is the resolved enforcement policy for this instance's
+	// dependsOn edges (enforced | advisory | disabled). Default enforced.
+	DependencyMode string
+	// DependencySource records which layer set DependencyMode:
+	// "default", "environment", "subscription", or "subscription-rule".
+	DependencySource string
+	// DependencyRuleTriggerRef records which trigger ref matched the rule
+	// (only when DependencySource == "subscription-rule").
+	DependencyRuleTriggerRef string
 }
 
 // ResolvedDependency is a dependency with resolved target component

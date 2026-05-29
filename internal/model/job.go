@@ -111,6 +111,19 @@ type JobInstance struct {
 	Path          string
 	Steps         []RenderedStep
 	DependsOn     []string
+	// AdvisoryDependsOn lists dependency job IDs that exist semantically
+	// but are NOT enforced by the executor — used when DependencyMode is
+	// "advisory". Kept for plan auditability ("api normally depends on
+	// database, but for this trigger it ran in parallel").
+	AdvisoryDependsOn []string
+	// DependencyMode is the resolved enforcement policy for this job.
+	DependencyMode string
+	// DependencySource: "default", "environment", "subscription", or
+	// "subscription-rule".
+	DependencySource string
+	// DependencyRuleTriggerRef: the matching triggerRef when source is
+	// "subscription-rule".
+	DependencyRuleTriggerRef string
 	Gates         []PromotionGate
 	Timeout       string
 	Retries       int

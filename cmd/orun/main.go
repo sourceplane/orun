@@ -99,6 +99,9 @@ func generatePlan() error {
 	if errs := trigger.ValidateProfileRules(intent); len(errs) > 0 {
 		return trigger.FormatErrors(errs)
 	}
+	if errs := trigger.ValidateDependencyRules(intent); len(errs) > 0 {
+		return trigger.FormatErrors(errs)
+	}
 
 	// Resolve trigger context and determine active environments
 	triggerCtx, err := buildTriggerContext()
@@ -552,6 +555,9 @@ func validateFiles() error {
 	}
 
 	if errs := trigger.ValidateProfileRules(intent); len(errs) > 0 {
+		return trigger.FormatErrors(errs)
+	}
+	if errs := trigger.ValidateDependencyRules(intent); len(errs) > 0 {
 		return trigger.FormatErrors(errs)
 	}
 

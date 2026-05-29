@@ -80,6 +80,12 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 				}
 			}
 
+			// Resolve dependency mode (independent of profile resolution
+			// so it works even for components without a composition registry).
+			if err := e.resolveDependencyMode(instance, comp, env, envName); err != nil {
+				return nil, err
+			}
+
 			// Merge all properties (including path) with template interpolation
 			merged := e.mergeProperties(comp, env, envName, compName)
 			instance.Parameters = merged
@@ -434,5 +440,25 @@ func (e *Expander) resolveProfile(instance *model.ComponentInstance, comp model.
 	if matchedRule != nil {
 		instance.ProfileRuleTriggerRef = matchedRule.TriggerRef
 	}
+	return nil
+}
+
+// resolveDependencyMode populates DependencyMode/Source/RuleTriggerRef on
+// the instance using the env default + subscription override + dependency
+// rules precedence chain.
+func (e *Expander) resolveDependencyMode(
+	instance *model.ComponentInstance,
+	comp model.Component,
+	env model.Environment,
+	envName string,
+) error {
+	subscription := comp.Subscribe.FindSubscription(envName)
+	resolved, err := compositionpkg.ResolveDependencyMode(env, subscription, e.matchedTriggers)
+	if err != nil {
+		return fmt.Errorf("component %s environment %s: %w", comp.Name, envName, err)
+	}
+	instance.DependencyMode = resolved.Mode
+	instance.DependencySource = resolved.Source
+	instance.DependencyRuleTriggerRef = resolved.RuleTriggerRef
 	return nil
 }
