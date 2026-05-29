@@ -1,6 +1,6 @@
 {
   "goal": "Orun TUI cockpit roadmap and open PR verification",
-  "current_task": "0146.1",
+  "current_task": null,
   "completed": [
     "0139.1",
     "0140",
@@ -12,20 +12,20 @@
     "0145",
     "0145.1",
     "0146",
-    "0146.1"
+    "0146.1",
+    "0147",
+    "0147.1"
   ],
   "repo_health": "green",
-  "next_focus": "tui-cockpit-phase-3-runplan-describe-taillogs",
+  "next_focus": "tui-cockpit-phase-3-next-slice-describe-or-remote-state-polling",
   "last_verified": "2026-05-29",
   "waiting_for_input": "false",
-  "task_agent": "",
+  "task_agent": null,
   "notes": [
-    "Task 0146.1 verified PASS and merged PR #145 at 5beb334 (2026-05-29). Plan Studio Phase 2 slice landed on main. Repo health stays green.",
-    "Durable outcome on main: LiveOrunService.GeneratePlan calls Orun internals directly (loader/composition/trigger/expand/planner/render) — no shell-out from internal/tui. PlanStudioModel has Idle/Configuring/Generating/Review/Saved/Error state machine with cursor nav, generate (g) / save (s) / clear (c) bindings. Root model routes services.PlanGeneratedMsg and PlanStudioSaveRequestedMsg, mode-switches p/b/h. Save reuses GeneratePlan with NamedPlan for byte-identical persisted plan. NamedPlan nil-store path emits a clear warning. Property tests (pgregory.net/rapid) cover state-set invariants and deterministic rendering.",
-    "Task 0145.1 verified PASS and merged PR #144 at 300a436 (2026-05-29T00:14:11Z). Repo health returns to green.",
-    "PR #142 is CLOSED as superseded (closedAt 2026-05-29T00:01:57Z); no remaining open-dirty PRs.",
-    "Durable outcome on main: normalizeOrunDir() helper centralizes --orun-dir resolution; orun github status registers the same six selector flags as pull/logs (--run-id, --exec-id, --sha, --branch, --latest, --failed); website/docs/cli/orun-github.md matches; focused tests cover parent-input, already-.orun-input, empty-input, status flag registration, and status selector parse-time acceptance.",
-    "docs/github-log-pull-ux-review.md landed alongside as a short UX-review note; section 3 documents open follow-ups (short-SHA support, --job logical-id matching, --latest branch disclosure).",
-    "Next orchestrator cycle should scope Task 0146: TUI Cockpit Phase 2 (Plan Studio) via internal/planner GeneratePlan, or pick up docs/github-log-pull-ux-review.md section 3 follow-ups."
+    "Task 0147 verified PASS and merged via PR #146 at merge commit 8b6f609 on 2026-05-29. LiveOrunService.RunPlan landed for local dry-run with fail-closed validation (nil plan / DryRun:false / RemoteState:true rejected), Plan Studio d-key dispatch with success-only transition to Run Dashboard, and minimal streaming event timeline that stops re-arming after RunEventRunDone.",
+    "Implementer report ai/reports/task-0147-implementer.md was missing from the PR branch; verifier authored and committed it from PR evidence (1abb9cb) prior to merge, per Task 0147 prompt allowance. Recurring gap — recommend tightening implementer skill to commit reports in the same PR push.",
+    "Safety posture confirmed: zero exec.Command / os/exec / orun subprocess usage anywhere under internal/tui; runner constructed with hard-coded dryRun=true; sends are ctx.Done-guarded; final RunDone uses non-blocking send so runner cannot deadlock if UI stops draining.",
+    "Local checks PASS: go test internal/tui + internal/runner + cmd/orun, go build cmd/orun, kiox orun validate/plan/dry-run (2 components × 5 envs → 3 jobs, all simulated).",
+    "Next orchestrator cycle: pick the next Phase 3 slice (Task 21 Describe, or remote-state event polling) per .kiro/specs/orun-tui-cockpit/tasks.md."
   ]
 }

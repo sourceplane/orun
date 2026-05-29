@@ -145,3 +145,28 @@
 |- Objective: verify PR #145 against Task 0146, the implementer report, `.kiro/specs/orun-tui-cockpit` Requirements 4/13/14, and the Verifier Standard; merge only on PASS.
 |- Scope boundary: verification of PR #145 only. Confirmed diff narrowness (Plan Studio service+view+model+tests only), absence of `exec.Command`/`os/exec`/`"orun"` literals in `internal/tui/`, code parity vs `cmd/orun/main.go:generatePlan`, ctx-cancellation at stage boundaries, nil-store warning path, no `RunPlan` execution path leaked, deterministic view rendering, property-test convergence, local `go test`/`go build` green, PR CI green, `mergeStateStatus=CLEAN`, no secret/token leakage in reports/logs.
 |- Durable outcome: PR #145 merged to main at 5beb334; repo health stays green; TUI Cockpit Phase 3 (`RunPlan`/`Describe`/`TailLogs(Follow=true)`) is now unblocked.
+
+## Task 0147
+
+|- Agent: Implementer
+|- Prompt: `ai/tasks/task-0147.md`
+|- Status: implemented, opened PR #146 from `impl/task-0147-tui-dryrun` at head `59d2102` (2026-05-29). Implementer report omitted from PR push; reconstructed by verifier from PR evidence and committed at `1abb9cb` before merge.
+|- Implementation: PR #146 — feat(tui): wire Plan Studio dry-run via LiveOrunService.RunPlan (Task 0147). Branch `impl/task-0147-tui-dryrun`. Merge commit `8b6f609`.
+|- PR CI: CI/Orun Plan SUCCESS (runs 26611755239 pre-fix, re-ran green after verifier report commit); orun remote-state conformance/Harness dry-run guard SUCCESS (run 26611755245 + re-run); matrix jobs skipped as expected (TUI-only diff).
+|- Reports: ai/reports/task-0147-implementer.md (verifier-authored from PR evidence).
+|- Objective: Ship the first TUI Cockpit Phase 3 execution slice: local dry-run `LiveOrunService.RunPlan`, Plan Studio `d` dry-run dispatch from a reviewed plan, and a minimal streaming Run Dashboard event timeline.
+|- Scope boundary: One PR covering dry-run-only RunPlan service wiring, Plan Studio `d` transition, Run Dashboard event accumulation/rendering, and focused tests. Out of scope: real apply/destroy execution, remote-state execution/polling, full Log Explorer, full History/Replay, command palette completion, Phase 4 features, and GitHub CLI UX follow-ups.
+|- Durable outcome: `LiveOrunService.RunPlan(ctx, RunRequest)` is live on main — fail-closed for nil plan / `DryRun:false` / `RemoteState:true`, constructs `internal/runner.Runner` directly with hard-coded `dryRun=true`, streams `RunEvent` values through a buffered (64) channel, `ctx.Done()`-guarded sends, non-blocking final `RunEventRunDone`. Plan Studio `d` dispatches dry-run only from Review with a generated plan; Run Dashboard mode entered only on `RunPlan` success. `RunViewModel` accumulates per-job rows grouped by env and stops re-arming after `RunEventRunDone`. Zero `exec.Command`/`os/exec`/`"orun"` under `internal/tui/`.
+
+
+## Task 0147.1
+
+|- Agent: Verifier
+|- Prompt: `ai/tasks/task-0147-verifier.md`
+|- Status: verified PASS, PR #146 merged as `8b6f609` (2026-05-29)
+|- Implementation: verifier task only; verified and merged PR #146; authored and pushed missing implementer report (`1abb9cb`) before merge per task allowance.
+|- PR CI: pre-fix `26611755239`/`26611755245` SUCCESS; post-report-commit re-run SUCCESS (mergeStateStatus CLEAN at merge).
+|- Reports: ai/reports/task-0147-verifier.md
+|- Objective: Verify PR #146 for Task 0147 against the TUI Cockpit Phase 3 dry-run execution contract, implementer evidence, local/CI checks, dry-run-only safety, shell-out absence, and the Verifier Merge Protocol.
+|- Scope boundary: Verification of PR #146 only. Confirmed local dry-run `LiveOrunService.RunPlan`, Plan Studio `d` transition, minimal Run Dashboard event timeline, fail-closed unsupported modes, focused tests; no scope expansion to real execution, remote-state polling, full Log Explorer, History/Replay, command palette completion, or Phase 4 features.
+|- Durable outcome: PR #146 merged to main at `8b6f609`; Phase 3 slice 1 (safe TUI dry-run execution + minimal Run Dashboard) is durable on `main`. Repo health stays green. TUI cockpit is now ready for the next Phase 3 slice (likely `Describe` + Inspector wiring, or Log Explorer/`TailLogs`).
