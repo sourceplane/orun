@@ -337,8 +337,14 @@ type PlanJobRef struct {
 }
 
 // describeRevision renders the revision document and its embedded
-// trigger summary. ref="" resolves the latest revision.
+// trigger summary. ref="" resolves the latest revision; the literal
+// "latest" is normalized to "" so users can type either form (Option A
+// from ai/proposals/task-0019-spec-update.md — CLI-side normalization,
+// no resolver change).
 func describeRevision(ref string) error {
+	if ref == "latest" {
+		ref = ""
+	}
 	color := ui.ColorEnabledForWriter(os.Stdout)
 	store, _, err := openLocalStateStore()
 	if err != nil {
@@ -401,8 +407,12 @@ func describeRevision(ref string) error {
 }
 
 // describeTrigger renders trigger.json under a revision. ref="" resolves
-// the latest revision and shows its trigger.
+// the latest revision and shows its trigger; the literal "latest" is
+// normalized to "" for consistency with describeRevision (Option A).
 func describeTrigger(ref string) error {
+	if ref == "latest" {
+		ref = ""
+	}
 	color := ui.ColorEnabledForWriter(os.Stdout)
 	store, _, err := openLocalStateStore()
 	if err != nil {
