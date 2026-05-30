@@ -100,18 +100,20 @@ all: clean build test run-validate run-debug run-plan
 
 test-state-redesign:
 	@echo "🧪 Running state-redesign test suites..."
-	@go test -count=1 ./internal/testfx/statefs/...
-	@go test -count=1 ./internal/triggerctx/...
+	@go test -count=1 -race ./internal/testfx/statefs/...
+	@go test -count=1 -race ./internal/triggerctx/...
 	@echo "🧪 Coverage gate: ./internal/statestore/... (>= 95%)"
-	@COVER=$$(go test -count=1 -cover ./internal/statestore/... | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
+	@COVER=$$(go test -count=1 -race -cover ./internal/statestore/... | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
 	  echo "   measured: $$COVER%"; \
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 95.0) { printf "❌ coverage %.1f%% below 95%% threshold\n", c+0; exit 1 } }'
 	@echo "🧪 Coverage gate: ./internal/revision/... (>= 90%)"
-	@COVER=$$(go test -count=1 -cover ./internal/revision/... | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
+	@COVER=$$(go test -count=1 -race -cover ./internal/revision/... | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
 	  echo "   measured: $$COVER%"; \
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 90.0) { printf "❌ coverage %.1f%% below 90%% threshold\n", c+0; exit 1 } }'
 	@echo "🧪 Coverage gate: ./internal/executionstate/... (>= 90%)"
-	@COVER=$$(go test -count=1 -cover ./internal/executionstate/... | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
+	@COVER=$$(go test -count=1 -race -cover ./internal/executionstate/... | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
 	  echo "   measured: $$COVER%"; \
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 90.0) { printf "❌ coverage %.1f%% below 90%% threshold\n", c+0; exit 1 } }'
+	@echo "🧪 End-to-end revision-first walk (test-plan.md §4)"
+	@go test -count=1 -race -run TestStateE2E ./cmd/orun/...
 	# add packages as state-redesign milestones land
