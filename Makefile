@@ -106,4 +106,8 @@ test-state-redesign:
 	@COVER=$$(go test -count=1 -cover ./internal/statestore/... | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
 	  echo "   measured: $$COVER%"; \
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 95.0) { printf "❌ coverage %.1f%% below 95%% threshold\n", c+0; exit 1 } }'
+	@echo "🧪 Coverage gate: ./internal/revision/... (>= 90%)"
+	@COVER=$$(go test -count=1 -cover ./internal/revision/... | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
+	  echo "   measured: $$COVER%"; \
+	  awk -v c=$$COVER 'BEGIN { if (c+0 < 90.0) { printf "❌ coverage %.1f%% below 90%% threshold\n", c+0; exit 1 } }'
 	# add packages as state-redesign milestones land
