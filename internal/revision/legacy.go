@@ -1,6 +1,7 @@
 package revision
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -74,6 +75,35 @@ func normalizeLegacyChecksum(planHash string) (string, error) {
 		}
 	}
 	return h, nil
+}
+
+// WriteLegacyNamedPlan writes a `.orun/plans/<name>.json` alias byte-identical
+// to the canonical plan.json, supporting the preserved `orun plan --name <n>`
+// workflow (compatibility-and-migration.md §1). The path component is
+// validated through statestore.ValidateComponent so the same alphabet rules
+// apply as the rest of the store. Errors wrap statestore.ErrInvalid for bad
+// names; transport errors propagate verbatim from the store.
+//
+// This helper is the in-revision-package seam for the legacy named-alias
+// write — keeping it here (alongside legacyPlanPath / legacyLatestPlanPath)
+// means cmd/orun never opens os.WriteFile against `.orun/` for compat work.
+func WriteLegacyNamedPlan(ctx context.Context, store statestore.StateStore, name string, planBytes []byte) error {
+	if store == nil {
+		return fmt.Errorf("%w: WriteLegacyNamedPlan store is nil", statestore.ErrInvalid)
+	}
+	if err := statestore.ValidateComponent(name); err != nil {
+		return fmt.Errorf("%w: invalid named-plan name %q: %v", statestore.ErrInvalid, name, err)
+	}
+	if name == legacyPlanLatestStem {
+		// "latest" collides with legacyLatestPlanPath() — refuse to clobber
+		// the canonical alias.
+		return fmt.Errorf("%w: named-plan %q is reserved", statestore.ErrInvalid, name)
+	}
+	path := legacyPlansDir + "/" + name + ".json"
+	if _, err := store.Write(ctx, path, planBytes, statestore.WriteOptions{}); err != nil {
+		return fmt.Errorf("write legacy named plan %s: %w", path, err)
+	}
+	return nil
 }
 
 // isHexLower reports whether s is non-empty and entirely composed of

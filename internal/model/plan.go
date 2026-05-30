@@ -17,8 +17,9 @@ type PlanMetadata struct {
 	Namespace   string       `json:"namespace,omitempty" yaml:"namespace,omitempty"`
 	GeneratedAt string       `json:"generatedAt,omitempty" yaml:"generatedAt,omitempty"`
 	Checksum    string       `json:"checksum,omitempty" yaml:"checksum,omitempty"`
-	Scope       *PlanScope   `json:"scope,omitempty" yaml:"scope,omitempty"`
-	Trigger     *PlanTrigger `json:"trigger,omitempty" yaml:"trigger,omitempty"`
+	Scope       *PlanScope        `json:"scope,omitempty" yaml:"scope,omitempty"`
+	Trigger     *PlanTrigger      `json:"trigger,omitempty" yaml:"trigger,omitempty"`
+	Revision    *PlanRevisionMeta `json:"revision,omitempty" yaml:"revision,omitempty"`
 	// WorkDir is the intent directory path relative to the workspace root
 	// (the directory where orun plan was invoked). orun run uses this when
 	// intent auto-discovery fails (e.g. in GHA where the intent lives in a
@@ -26,8 +27,13 @@ type PlanMetadata struct {
 	WorkDir string `json:"workDir,omitempty" yaml:"workDir,omitempty"`
 }
 
-// PlanTrigger records which trigger bindings activated the plan.
+// PlanTrigger records which trigger bindings activated the plan. Type / Name
+// were added in M5 (cli-surface.md §1.3) so the embedded block in plan.json
+// matches the canonical TriggerOccurrence shape (data-model.md §2.1) without
+// requiring readers to consult revision.json.
 type PlanTrigger struct {
+	Type               string   `json:"type,omitempty" yaml:"type,omitempty"`
+	Name               string   `json:"name,omitempty" yaml:"name,omitempty"`
 	Mode               string   `json:"mode" yaml:"mode"`
 	Provider           string   `json:"provider,omitempty" yaml:"provider,omitempty"`
 	Event              string   `json:"event,omitempty" yaml:"event,omitempty"`
@@ -37,6 +43,14 @@ type PlanTrigger struct {
 	Scope              string   `json:"scope" yaml:"scope"`
 	Base               string   `json:"base,omitempty" yaml:"base,omitempty"`
 	Head               string   `json:"head,omitempty" yaml:"head,omitempty"`
+}
+
+// PlanRevisionMeta is the in-plan reference to the canonical PlanRevision the
+// compiled plan was persisted under (cli-surface.md §1.3). Populated by the
+// CLI after triggerctx + revision.WriteRevision derive the revisionKey.
+type PlanRevisionMeta struct {
+	Key      string `json:"key" yaml:"key"`
+	PlanHash string `json:"planHash" yaml:"planHash"`
 }
 
 // PlanScope records the component scoping applied when the plan was generated.

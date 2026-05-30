@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,9 +21,12 @@ import (
 	"github.com/sourceplane/orun/internal/planner"
 	"github.com/sourceplane/orun/internal/preset"
 	"github.com/sourceplane/orun/internal/render"
+	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/runbundle"
 	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/trigger"
+	"github.com/sourceplane/orun/internal/triggerctx"
 	"github.com/sourceplane/orun/internal/ui"
 )
 
@@ -312,23 +318,61 @@ func generatePlan() error {
 	plan := renderer.RenderPlanWithOrder(intent.Metadata, jobInstances, jobBindings, sorted)
 	plan.Spec.CompositionSources = compositionRegistry.Sources
 
-	// Attach trigger metadata to plan
-	if triggerResolution != nil {
-		planTrigger := &model.PlanTrigger{
-			Mode:               triggerCtx.Mode,
-			MatchedBindings:    triggerResolution.MatchedTriggerNames,
-			ActiveEnvironments: triggerResolution.ActiveEnvironments,
-			Scope:              triggerResolution.PlanScope,
-			Base:               triggerResolution.Base,
-			Head:               triggerResolution.Head,
-		}
-		if triggerCtx.Event != nil {
-			planTrigger.Provider = triggerCtx.Event.Provider
-			planTrigger.Event = triggerCtx.Event.Event
-			planTrigger.Action = triggerCtx.Event.Action
-		}
-		plan.Metadata.Trigger = planTrigger
+	// --- M5A: always resolve TriggerOccurrence and write a PlanRevision.
+	// The new pipeline replaces the legacy `state.SavePlan` call below.
+	// triggerCtx (legacy) was already populated above; we translate its
+	// branches into triggerctx.ResolveOptions so the canonical path runs
+	// regardless of whether the user passed --trigger / --from-ci or not.
+	resolveOpts := triggerctx.ResolveOptions{
+		Kind:               triggerctx.ResolveKindSystem,
+		SystemFlavor:       triggerctx.SystemManual,
+		ActivationMode:     "",
+		ActiveEnvironments: nil,
+		ChangedComponents:  nil,
 	}
+	if triggerResolution != nil {
+		resolveOpts.ActiveEnvironments = triggerResolution.ActiveEnvironments
+		resolveOpts.PlanScopeMode = triggerResolution.PlanScope
+		resolveOpts.PlanBase = triggerResolution.Base
+		resolveOpts.PlanHead = triggerResolution.Head
+	}
+	if triggerCtx.Mode == "named-trigger" && triggerName != "" {
+		resolveOpts.Kind = triggerctx.ResolveKindDeclaredByName
+		resolveOpts.TriggerName = triggerName
+	} else if triggerCtx.Mode == "event-file" && triggerCtx.Event != nil {
+		resolveOpts.Kind = triggerctx.ResolveKindFromCI
+		resolveOpts.ProviderEvent = triggerCtx.Event
+		resolveOpts.Action = triggerCtx.Event.Action
+	} else if changedOnly {
+		resolveOpts.SystemFlavor = triggerctx.SystemManualChanged
+	}
+	trig, err := triggerctx.ResolveTriggerContext(resolveOpts, intent, nil)
+	if err != nil {
+		return fmt.Errorf("trigger resolution failed: %w", err)
+	}
+
+	// Embed PlanTrigger metadata (Type/Name + scope/bindings) so plan.json
+	// is self-describing per cli-surface.md §1.3.
+	planTrigger := &model.PlanTrigger{
+		Type:               trig.TriggerType,
+		Name:               trig.TriggerName,
+		Mode:               trig.Mode,
+		Provider:           trig.Provider,
+		Event:              trig.Event,
+		Action:             trig.Action,
+		MatchedBindings:    append([]string(nil), trig.MatchedBindings...),
+		ActiveEnvironments: append([]string(nil), trig.PlanScope.ActiveEnvironments...),
+		Scope:              trig.PlanScope.Mode,
+		Base:               trig.PlanScope.Base,
+		Head:               trig.PlanScope.Head,
+	}
+	if planTrigger.MatchedBindings == nil {
+		planTrigger.MatchedBindings = []string{}
+	}
+	if planTrigger.ActiveEnvironments == nil {
+		planTrigger.ActiveEnvironments = []string{}
+	}
+	plan.Metadata.Trigger = planTrigger
 
 	// Embed the intent directory as a workspace-relative path so that
 	// orun run can resolve component paths correctly when auto-discovery
@@ -345,20 +389,98 @@ func generatePlan() error {
 		fmt.Println("\n" + renderer.DebugDump(plan))
 	}
 
-	// Write plan to file
+	// Compute planHash from the plan with metadata.revision and
+	// metadata.checksum cleared — that is the spec-canonical "plan content
+	// without its self-reference" (data-model.md §3.1). We then embed
+	// metadata.revision pointing at the resulting key and marshal the final
+	// plan bytes that will be persisted as plan.json. The checksum field
+	// retains the legacy "sha256-<hex>" form computed by the renderer for
+	// back-compat with tooling that reads .orun/plans/.
+	planHash, err := computePlanHashForRevision(plan)
+	if err != nil {
+		return fmt.Errorf("compute plan hash: %w", err)
+	}
+	revKey, err := revision.RevisionKey(trig, planHash)
+	if err != nil {
+		return fmt.Errorf("derive revision key: %w", err)
+	}
+	plan.Metadata.Revision = &model.PlanRevisionMeta{
+		Key:      revKey,
+		PlanHash: planHash,
+	}
+
+	// Final canonical plan.json bytes (with metadata.revision embedded).
+	planBytes, err := canonicalPlanJSON(plan)
+	if err != nil {
+		return fmt.Errorf("marshal canonical plan: %w", err)
+	}
+
+	// Write plan via revision.WriteRevision (canonical layout) plus optional
+	// compatibility writes (.orun/plans/<checksum>.json + latest.json) and
+	// optional named alias.
 	store := state.NewStore(storeDir())
 	planID := state.PlanChecksumShort(plan)
-
 	color := ui.ColorEnabledForWriter(os.Stdout)
 
+	absStoreRoot, err := filepath.Abs(filepath.Join(storeDir(), ".orun"))
+	if err != nil {
+		return fmt.Errorf("resolve store root: %w", err)
+	}
+	stateStore, err := statestore.NewLocalStore(statestore.LocalConfig{Root: absStoreRoot})
+	if err != nil {
+		return fmt.Errorf("open state store: %w", err)
+	}
+	revCfg := revision.Config{
+		Store:    stateStore,
+		JobCount: len(plan.Jobs),
+	}.WithCompatibilityWrites(true)
+
+	rev, err := revision.WriteRevision(context.Background(), revCfg, trig, planBytes, planHash)
+	if err != nil {
+		return fmt.Errorf("write plan revision: %w", err)
+	}
+	if err := revision.WriteManifest(context.Background(), revCfg, rev, trig); err != nil {
+		return fmt.Errorf("write revision manifest: %w", err)
+	}
+	if planName != "" {
+		if err := revision.WriteLegacyNamedPlan(context.Background(), stateStore, planName, planBytes); err != nil {
+			return fmt.Errorf("write named plan alias: %w", err)
+		}
+	}
+
+	// `-o/--output` writes an additional copy to the user-specified path on
+	// top of the canonical layout (cli-surface.md §1.1).
 	if outputFile != "" {
 		if err := renderer.WritePlan(plan, outputFile); err != nil {
-			return fmt.Errorf("failed to write plan: %w", err)
+			return fmt.Errorf("failed to write plan to %s: %w", outputFile, err)
 		}
-	} else {
-		if err := store.SavePlan(plan, planName); err != nil {
-			return fmt.Errorf("failed to save plan: %w", err)
-		}
+	}
+	_ = store // legacy state.Store retained for any downstream plan resolution; SavePlan superseded by revision pipeline.
+
+	// On-success M5.a summary block (cli-surface.md §1.1). Printed before the
+	// legacy "components × envs → jobs" detail line so existing tooling that
+	// scans for that line keeps working.
+	canonicalPlanPath := filepath.Join(absStoreRoot, "revisions", rev.RevisionKey, "plan.json")
+	triggerScope := trig.PlanScope.Mode
+	if triggerScope == "" {
+		triggerScope = "manual"
+	}
+	headRev := trig.Source.HeadRevision
+	if len(headRev) > 7 {
+		headRev = headRev[:7]
+	}
+	if headRev == "" {
+		headRev = "no-head"
+	}
+	fmt.Println()
+	fmt.Println(ui.Green(color, "✓") + " Plan revision created")
+	fmt.Println()
+	fmt.Printf("  Revision: %s\n", rev.RevisionKey)
+	fmt.Printf("  Trigger:  %s / %s / %s\n", trig.TriggerName, triggerScope, headRev)
+	fmt.Printf("  Jobs:     %d\n", len(plan.Jobs))
+	fmt.Printf("  Path:     %s\n", canonicalPlanPath)
+	if outputFile != "" {
+		fmt.Printf("  Output:   %s\n", outputFile)
 	}
 
 	// Modern compact summary — derive component count from filtered instances
@@ -537,6 +659,36 @@ func generatePlan() error {
 	}
 
 	return nil
+}
+
+// computePlanHashForRevision returns the canonical "sha256:<hex>" digest of
+// the plan's content with self-referential metadata (checksum, revision)
+// cleared. This matches data-model.md §3.1: the plan hash is stable across
+// re-runs of the same intent on the same SHA, irrespective of which alias
+// it was previously persisted under.
+func computePlanHashForRevision(plan *model.Plan) (string, error) {
+	if plan == nil {
+		return "", fmt.Errorf("plan is nil")
+	}
+	clone := *plan
+	clone.Metadata.Checksum = ""
+	clone.Metadata.Revision = nil
+	payload, err := json.Marshal(&clone)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(payload)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+// canonicalPlanJSON marshals plan as deterministic indented JSON suitable
+// for persistence as canonical plan.json (and for byte-identical compat
+// aliases under .orun/plans/).
+func canonicalPlanJSON(plan *model.Plan) ([]byte, error) {
+	if plan == nil {
+		return nil, fmt.Errorf("plan is nil")
+	}
+	return json.MarshalIndent(plan, "", "  ")
 }
 
 func validateFiles() error {

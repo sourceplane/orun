@@ -760,6 +760,40 @@ history; reports/prompts are no longer present in the working tree.
 - Expected next emission: **Task 0016 = M5.a (`orun plan` rewire)
   implementer.** Branch base: `main` @ `d51e828`.
 
+## Task 0016
+
+|- Agent: Implementer
+|- Prompt: `ai/tasks/task-0016.md`
+|- Status: **scoped and ready to begin (2026-05-30)**
+|- Milestone: M5.a — `orun plan` rewire
+|- Branch (to be created from `main` @ `d51e828`): `impl/task-0016-m5a-orun-plan-rewire`
+|- Objective: rewire `orun plan` to the canonical revision-first flow per
+   `cli-surface.md` §1 — always resolve `TriggerOccurrence` via
+   `internal/triggerctx`, embed `metadata.trigger` + `metadata.revision`,
+   persist via `internal/revision.WriteRevision` (canonical layout + refs +
+   indexes), write byte-identical compat aliases at
+   `.orun/plans/<checksum>.json` and `.orun/plans/latest.json`, preserve
+   `-o/--output`, emit the new on-success summary block.
+|- Scope boundary (in): `cmd/orun/command_plan.go` and friends + tests +
+   minimal additive seams in `internal/revision`/`internal/triggerctx` only
+   if required to wire the rewire. (out): `orun run` (M5.b), `orun status`
+   / `logs` / `describe` / `get plans` (M5.c), hidden `orun state migrate`
+   (M5.d), `internal/runner` / `internal/runbundle` / `internal/state` /
+   `internal/executionstate`.
+|- Acceptance: canonical revision dir + refs + indexes + byte-identical
+   compat aliases + summary block all produced from a single `orun plan`
+   against `examples/intent.yaml`; `metadata.trigger` + `metadata.revision`
+   embedded for both `system.manual` and a synthesized provider trigger;
+   coverage gates preserved (`internal/revision` ≥ 90 %, `internal/triggerctx`
+   ≥ 90 %, `internal/statestore` ≥ 95 %, `internal/executionstate` ≥ 90 %
+   floor must not regress); local quality gates green; PR CI both required
+   checks SUCCESS at log level on final head SHA; PR Number reported (no
+   TBD).
+|- Expected outcome: `orun plan` end-to-end on the new layout while every
+   preserved workflow in `compatibility-and-migration.md` §1 keeps working
+   via the compat aliases. Unblocks Task 0018 (M5.b `orun run` rewire +
+   bridge wiring + `--revision`).
+
 ## Historical Notes
 
 - 2026-05-30: roadmap pivoted from TUI cockpit (Phase 3) to orun-state-redesign

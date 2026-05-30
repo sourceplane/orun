@@ -35,8 +35,8 @@ rewire — always resolve trigger, always write revision-first layout, preserve
 ## Past Completed (0012 / 0013 — M4 PR-A)
 PR #159 → `ed48633` "feat(executionstate): land M4 PR-A — internal/executionstate model + writer + resolver". Verified PASS by Task 0013 on 2026-05-30.
 
-## Current Task (0016 — M5.a `orun plan` rewire Implementer, to be emitted)
-- Prompt: TBD (`ai/tasks/task-0016.md`).
+## Current Task (0016 — M5.a `orun plan` rewire Implementer, EMITTED 2026-05-30)
+- Prompt: `ai/tasks/task-0016.md` (emitted).
 - Branch (to be created from `main` @ `d51e828`):
   `impl/task-0016-m5a-orun-plan-rewire`.
 - Objective: rewire `orun plan` to always resolve trigger, always write the
@@ -62,7 +62,7 @@ PR #159 → `ed48633` "feat(executionstate): land M4 PR-A — internal/execution
 | Last verified | 2026-05-30 (Task 0015, PR #160) |
 | Active milestone | M5 (CLI rewire) — awaiting Task 0016 (M5.a `orun plan`) implementer |
 | Tasks completed | 0001, 0002, 0003, 0004, 0005, 0007, 0008, 0009, 0010, 0011, 0012, 0013, 0014, 0015 (14 total) |
-| Current task | **0016** (M5.a implementer — to be emitted) |
+| Current task | **0016** (M5.a implementer — emitted 2026-05-30) |
 
 ## Roadmap (M0 → M6)
 1. ✅ **M0 Foundation** — landed on main at `4ea1980` (PR #152).
