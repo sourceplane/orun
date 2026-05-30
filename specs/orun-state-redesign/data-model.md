@@ -390,6 +390,46 @@ type-specific payload. Phase 1 emits at minimum:
 - Future kinds (`job-started`, `step-completed`, …) are runner-owned and not
   required in Phase 1.
 
+### 9.1 `bridge-mirror-failed` payload (Phase 1, pinned)
+
+Emitted by `internal/executionstate.Bridge` whenever a mirror tick fails
+to promote a runner artifact (`state.json` or `metadata.json`) from
+`.orun/executions/<legacyExecID>/` into
+`revisions/<revKey>/executions/<execKey>/`. The bridge does NOT abort the
+run on failure — it logs the event and continues, leaving
+`.orun/executions/` authoritative for that artifact.
+
+```json
+{
+  "kind": "bridge-mirror-failed",
+  "at": "2026-05-30T13:32:51.78312Z",
+  "payload": {
+    "executionKey": "exec-…",
+    "revisionKey":  "rev-…",
+    "legacyExecId": "exec_<legacy>",
+    "artifact":     "state.json",
+    "stage":        "link",
+    "mode":         "hardlink",
+    "error":        "link …: invalid cross-device link"
+  }
+}
+```
+
+| Field          | Type     | Description                                                             |
+|----------------|----------|-------------------------------------------------------------------------|
+| `executionKey` | string   | The new-layout execution key (matches the parent `executions/<execKey>/`). |
+| `revisionKey`  | string   | The new-layout revision key.                                             |
+| `legacyExecId` | string   | The legacy execution ID under `.orun/executions/`. Differs from `executionKey` when M5.b synthesises a fresh run. |
+| `artifact`     | string   | Source filename: `state.json` \| `metadata.json`.                       |
+| `stage`        | string   | Failure stage: `read-source` \| `read-dest` \| `translate-dest` \| `mkdir-dest` \| `remove-dest` \| `link` \| `copy`. |
+| `mode`         | string   | Mirror mode in effect: `hardlink` \| `copy` \| `auto`.                  |
+| `error`        | string   | Human-readable error message from the underlying syscall.               |
+
+Adding fields is non-breaking; renaming or removing fields is. Schema
+match is pinned by
+`internal/executionstate.bridgeMirrorFailedPayload` and exercised by
+`TestMirrorRunnerOutput_*` in `bridge_test.go`.
+
 ---
 
 ## 10. ID generation

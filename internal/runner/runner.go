@@ -46,6 +46,14 @@ type RunnerHooks struct {
 	// is treated as already complete and execution is skipped. An error cancels
 	// the run.
 	BeforeJob func(jobID string) (skipExec bool, err error)
+	// AfterStateUpdate is called after the runner persists ExecState to
+	// the on-disk store via SaveState. M5.b CLI rewire uses this to
+	// drive the executionstate Bridge mirror per cli-surface.md §2.2
+	// ("on each runner tick: bridge mirrors legacy
+	// .orun/executions/<legacyExecID> into the new layout"). The hook
+	// runs synchronously while r.stateMu is held — implementations
+	// MUST be fast and non-blocking.
+	AfterStateUpdate func()
 }
 
 type Runner struct {
@@ -946,6 +954,9 @@ func (r *Runner) updateState(persist bool, execState *state.ExecState, update fu
 		return
 	}
 	r.Store.SaveState(r.ExecID, execState)
+	if r.Hooks != nil && r.Hooks.AfterStateUpdate != nil {
+		r.Hooks.AfterStateUpdate()
+	}
 }
 
 func (r *Runner) persistState(persist bool, execState *state.ExecState) {

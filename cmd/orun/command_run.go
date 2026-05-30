@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sourceplane/orun/internal/artifactstore/github"
+	"github.com/sourceplane/orun/internal/executionstate"
 	"github.com/sourceplane/orun/internal/executor"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/remotestate"
@@ -98,6 +99,13 @@ func registerRunCommand(root *cobra.Command) {
 
 	runCmd.Flags().BoolVar(&runRemoteState, "remote-state", false, "Use orun-backend for distributed run coordination (sets ORUN_REMOTE_STATE=true)")
 	runCmd.Flags().StringVar(&runBackendURL, "backend-url", "", "orun-backend URL for remote state (or set ORUN_BACKEND_URL)")
+
+	// --revision short-circuits the seven-branch resolver in
+	// internal/revision.ResolveRevision (cli-surface.md §2.3). When set,
+	// the value is passed verbatim to the resolver — a "rev-…" prefix
+	// dispatches branch 3, a named-ref alias dispatches branch 4, and
+	// `latest`/empty dispatches branch 1.
+	runCmd.Flags().StringVar(&runRevision, "revision", "", "Execute the named PlanRevision (skips resolution chain)")
 
 	runCmd.Flags().StringVar(&artifactBackend, "artifact", "", "Artifact backend for upload (e.g. github)")
 
@@ -304,7 +312,42 @@ func runPlan() error {
 		setupLocalStateHooks(r, plan, execID)
 	}
 
+	// M5.b — revision-first execution path (cli-surface.md §2.2).
+	// Resolve the PlanRevision, persist the ExecutionRun under it, and
+	// hook the bridge mirror onto the runner's AfterStateUpdate tick.
+	// Skipped for --dry-run (no on-disk runner state to mirror) and for
+	// remote runs (which own their state lifecycle via the backend).
+	var rx *revisionExecution
+	if !runDryRun && !remoteActive {
+		ctx := context.Background()
+		built, rxErr := setupRevisionExecution(ctx, store, plan, loadedIntent, execID)
+		if rxErr != nil {
+			color := ui.ColorEnabledForWriter(os.Stderr)
+			fmt.Fprintf(os.Stderr, "%s revision execution disabled: %v\n",
+				ui.Yellow(color, "warning:"), rxErr)
+		} else {
+			rx = built
+			installRevisionHooks(r, rx, execID)
+		}
+	}
+
 	runErr := r.Run(plan)
+
+	// Finalize the revision-first ExecutionRun: flip to terminal status,
+	// refresh refs/latest-execution.json, mirror final state, and print
+	// the post-run summary block.
+	if rx != nil {
+		if finErr := finalizeRevisionExecution(context.Background(), rx, store, execID, runErr); finErr != nil {
+			color := ui.ColorEnabledForWriter(os.Stderr)
+			fmt.Fprintf(os.Stderr, "%s finalize execution: %v\n",
+				ui.Yellow(color, "warning:"), finErr)
+		}
+		finalStatus := executionstate.StatusCompleted
+		if runErr != nil {
+			finalStatus = executionstate.StatusFailed
+		}
+		printRevisionRunSummary(rx, finalStatus)
+	}
 
 	// Job shard upload: runs after the runner completes, even on failure.
 	// The original exit code is preserved — a failed upload only warns.
