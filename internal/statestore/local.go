@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -45,6 +46,25 @@ type LocalConfig struct {
 type LocalStore struct {
 	root  string
 	clock func() time.Time
+
+	// casLocks serializes CompareAndSwap operations on the same logical
+	// path within this process. The local Phase-1 contract is "best-effort
+	// on local; native on remote (future)" (state-store.md §6); the
+	// per-path mutex tightens the in-process behavior so the property test
+	// for two-CAS-one-wins is deterministic without breaking the
+	// documented cross-process race in §3.3.
+	casLocks sync.Map // map[string]*sync.Mutex
+}
+
+// casMutex returns (creating if necessary) the per-path mutex used to
+// serialize in-process CompareAndSwap on a single logical path.
+func (s *LocalStore) casMutex(p string) *sync.Mutex {
+	if v, ok := s.casLocks.Load(p); ok {
+		return v.(*sync.Mutex)
+	}
+	m := &sync.Mutex{}
+	actual, _ := s.casLocks.LoadOrStore(p, m)
+	return actual.(*sync.Mutex)
 }
 
 // NewLocalStore returns a LocalStore rooted at cfg.Root, creating the root
@@ -205,17 +225,150 @@ func (s *LocalStore) CreateIfAbsent(ctx context.Context, p string, data []byte) 
 	}, nil
 }
 
-// CompareAndSwap is not implemented in PR A. It is part of PR B and currently
-// returns an error wrapping ErrInvalid. Higher layers MUST NOT call it until
-// PR B lands; the interface signature is part of the M2 contract freeze.
+// CompareAndSwap implements StateStore.CompareAndSwap as a Read-then-Write
+// pair per state-store.md §3.3. It returns an error wrapping ErrNotFound if
+// the target object does not exist, and an error wrapping ErrConflict if the
+// current revision does not match oldRev.
+//
+// Phase-1 caveat: the read-then-write window is not atomic across processes;
+// a concurrent writer between the two calls may cause a successful CAS to
+// race with a non-CAS Write. This is documented as acceptable in §3.3
+// because CAS is used only on refs/indexes where loser-retries are cheap.
+// The future remote driver will use the object store's native conditional
+// update.
+//
+// Within a single process the implementation takes a per-path mutex so two
+// goroutines calling CompareAndSwap with the same oldRev see a deterministic
+// winner; this strengthens (not weakens) the documented contract.
 func (s *LocalStore) CompareAndSwap(ctx context.Context, p string, oldRev string, data []byte) (ObjectMeta, error) {
-	return ObjectMeta{}, fmt.Errorf("%w: CompareAndSwap not implemented in PR A (M2 PR B)", ErrInvalid)
+	if err := ctx.Err(); err != nil {
+		return ObjectMeta{}, err
+	}
+	if err := ValidatePath(p); err != nil {
+		return ObjectMeta{}, err
+	}
+	mu := s.casMutex(p)
+	mu.Lock()
+	defer mu.Unlock()
+
+	_, meta, err := s.Read(ctx, p)
+	if err != nil {
+		// Read already wraps ErrNotFound / ErrInvalid appropriately;
+		// pass through unchanged so callers can errors.Is.
+		return ObjectMeta{}, err
+	}
+	if meta.Revision != oldRev {
+		return ObjectMeta{}, fmt.Errorf("%w: path %s: have %s, want %s", ErrConflict, p, meta.Revision, oldRev)
+	}
+	return s.Write(ctx, p, data, WriteOptions{})
 }
 
-// List is not implemented in PR A. It is part of PR B and currently returns
-// an error wrapping ErrInvalid.
+// List implements StateStore.List by walking the translated directory tree
+// rooted at the prefix. Per state-store.md §3.4: order is unspecified,
+// symlinks are not followed (Phase-1 layout introduces none), `.orun-tmp-*`
+// orphan tempfiles are filtered out, and returned paths are logical
+// (forward-slash, root-relative, no leading slash).
+//
+// An empty prefix lists every object under the store root. A non-empty
+// prefix is validated as a logical path and may name either a directory or
+// a single file; if it names a missing path, an empty slice (no error) is
+// returned, matching the "list-as-scan" semantics callers expect.
 func (s *LocalStore) List(ctx context.Context, prefix string) ([]ObjectInfo, error) {
-	return nil, fmt.Errorf("%w: List not implemented in PR A (M2 PR B)", ErrInvalid)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var startAbs string
+	if prefix == "" {
+		startAbs = s.root
+	} else {
+		abs, err := s.translate(prefix)
+		if err != nil {
+			return nil, err
+		}
+		startAbs = abs
+	}
+
+	info, err := os.Stat(startAbs)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return []ObjectInfo{}, nil
+		}
+		return nil, fmt.Errorf("statestore: stat %s: %w", prefix, err)
+	}
+
+	out := make([]ObjectInfo, 0)
+
+	// If prefix names a single file, return just that entry.
+	if !info.IsDir() {
+		if strings.HasPrefix(filepath.Base(startAbs), orphanTempPrefix) {
+			return out, nil
+		}
+		logical := s.logicalPath(startAbs)
+		return []ObjectInfo{{
+			Path:      logical,
+			Size:      info.Size(),
+			UpdatedAt: info.ModTime(),
+		}}, nil
+	}
+
+	walkErr := filepath.WalkDir(startAbs, func(path string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		// Skip symlinks per §3.4 ("symlinks not followed"). DirEntry.Type
+		// reports the lstat-derived mode bits without following links.
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		// Skip non-regular entries (sockets, devices, pipes) — Phase-1
+		// layout never produces these, so they are necessarily noise.
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		name := d.Name()
+		if strings.HasPrefix(name, orphanTempPrefix) {
+			return nil
+		}
+		fi, ierr := d.Info()
+		if ierr != nil {
+			// Skip vanished entries (race with concurrent Delete);
+			// surface other stat errors.
+			if errors.Is(ierr, fs.ErrNotExist) {
+				return nil
+			}
+			return ierr
+		}
+		logical := s.logicalPath(path)
+		out = append(out, ObjectInfo{
+			Path:      logical,
+			Size:      fi.Size(),
+			UpdatedAt: fi.ModTime(),
+		})
+		return nil
+	})
+	if walkErr != nil {
+		if errors.Is(walkErr, context.Canceled) || errors.Is(walkErr, context.DeadlineExceeded) {
+			return nil, walkErr
+		}
+		return nil, fmt.Errorf("statestore: list %s: %w", prefix, walkErr)
+	}
+	return out, nil
+}
+
+// logicalPath converts an absolute filesystem path under s.root back to a
+// logical (forward-slash, root-relative, no leading slash) path. The caller
+// is responsible for only passing paths that come from a WalkDir rooted at
+// s.root, so the "outside root" / "is root" cases are unreachable here and
+// we keep the function trivially correct.
+func (s *LocalStore) logicalPath(abs string) string {
+	rel, _ := filepath.Rel(s.root, abs)
+	return filepath.ToSlash(rel)
 }
 
 // Delete implements StateStore.Delete: a no-op for absent files, ErrInvalid

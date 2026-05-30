@@ -383,20 +383,9 @@ func TestNewLocalStore_DefaultClockIsTimeNow(t *testing.T) {
 	}
 }
 
-func TestCompareAndSwap_NotImplementedInPRA(t *testing.T) {
-	s := newStore(t)
-	_, err := s.CompareAndSwap(context.Background(), "refs/named/x.json", "rev", []byte("y"))
-	if !errors.Is(err, statestore.ErrInvalid) {
-		t.Fatalf("CompareAndSwap err=%v want ErrInvalid", err)
-	}
-}
-
-func TestList_NotImplementedInPRA(t *testing.T) {
-	s := newStore(t)
-	_, err := s.List(context.Background(), "refs/")
-	if !errors.Is(err, statestore.ErrInvalid) {
-		t.Fatalf("List err=%v want ErrInvalid", err)
-	}
+func TestStateStoreInterfaceCompliance(t *testing.T) {
+	// Compile-time check that *LocalStore satisfies StateStore.
+	var _ statestore.StateStore = (*statestore.LocalStore)(nil)
 }
 
 func TestContextCancellation(t *testing.T) {
@@ -415,11 +404,12 @@ func TestContextCancellation(t *testing.T) {
 	if err := s.Delete(ctx, "x.json"); !errors.Is(err, context.Canceled) {
 		t.Errorf("Delete canceled err=%v", err)
 	}
-}
-
-func TestStateStoreInterfaceCompliance(t *testing.T) {
-	// Compile-time check that *LocalStore satisfies StateStore.
-	var _ statestore.StateStore = (*statestore.LocalStore)(nil)
+	if _, err := s.CompareAndSwap(ctx, "x.json", "rev", []byte("y")); !errors.Is(err, context.Canceled) {
+		t.Errorf("CompareAndSwap canceled err=%v", err)
+	}
+	if _, err := s.List(ctx, "refs"); !errors.Is(err, context.Canceled) {
+		t.Errorf("List canceled err=%v", err)
+	}
 }
 
 func TestWrite_EXDEVFallbackSucceeds(t *testing.T) {
