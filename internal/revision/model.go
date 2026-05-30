@@ -51,6 +51,10 @@ const (
 	// the layout name. Bumping it requires a migration plan in
 	// compatibility-and-migration.md.
 	StateStoreVersionCurrent = 1
+
+	// ManifestKind is the Kind written into revisions/<key>/manifest.json
+	// (data-model.md §4).
+	ManifestKind = "RevisionManifest"
 )
 
 // PlanRevision is the persisted shape of revision.json (data-model.md §3).

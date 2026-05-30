@@ -37,11 +37,23 @@ type Config struct {
 	// §3). When nil, a monotonic ULID prefixed "rev_" is generated.
 	NewID func() string
 
-	// CompatibilityWrites toggles the legacy-mirror branch (currently a
-	// // TODO(m5) stub — see writeCompatibilityMirror). The zero-value
-	// resolution lives in resolveDefaults so the caller's intent — explicit
-	// false vs unset — is preserved.
+	// CompatibilityWrites toggles the legacy-mirror branch (see
+	// writeCompatibilityMirror — promoted from the PR-A no-op stub to the
+	// real conditional write in M3 PR-B per
+	// compatibility-and-migration.md §2). The zero-value resolution lives
+	// in resolveDefaults so the caller's intent — explicit false vs unset —
+	// is preserved.
 	CompatibilityWrites bool
+
+	// JobCount is the planner-supplied job count threaded into both the
+	// persisted RevSummary and the manifest's summary.jobCount field
+	// (data-model.md §3, §4). Callers that do not yet know the count (none
+	// in tree today; M5 wires the real planner output) leave this at 0 —
+	// the writer faithfully persists that exact value rather than guessing,
+	// matching the conservative-on-unknowns posture of the rest of the
+	// package. See ai/reports/task-0010-implementer.md for the Option A vs
+	// Option B trade-off discussion.
+	JobCount int
 
 	// compatibilityWritesSet is set in resolveDefaults to disambiguate the
 	// "user explicitly passed false" case from "user didn't touch the
@@ -107,15 +119,16 @@ func validateTrigger(trig triggerctx.TriggerOccurrence) error {
 
 // summaryFromScope derives a RevSummary from the trigger's PlanScope. The
 // summary fields cloned here are the ones revision.json surfaces; other
-// PlanScope fields stay only inside trigger.json. JobCount is left at zero
-// in PR-A — the planner-supplied count threads through in PR-B (Task 0008)
-// once WriteManifest lands.
-func summaryFromScope(trig triggerctx.TriggerOccurrence) RevSummary {
+// PlanScope fields stay only inside trigger.json. jobCount is threaded
+// from Config.JobCount — callers that don't yet know the count (none in
+// tree today) supply zero per data-model.md §3.
+func summaryFromScope(trig triggerctx.TriggerOccurrence, jobCount int) RevSummary {
 	scope := trig.PlanScope.Mode
 	if scope == "" {
 		scope = triggerctx.PlanScopeFull
 	}
 	out := RevSummary{
+		JobCount:           jobCount,
 		Scope:              scope,
 		ActiveEnvironments: append([]string(nil), trig.PlanScope.ActiveEnvironments...),
 	}
@@ -210,7 +223,7 @@ func WriteRevision(
 		PlanHash:      planHash,
 		PlanShortHash: short,
 		Source:        trig.Source,
-		Summary:       summaryFromScope(trig),
+		Summary:       summaryFromScope(trig, cfg.JobCount),
 		CreatedAt:     now,
 	}
 	if _, err := store.Write(ctx, statestore.RevisionDocPath(revKey),
@@ -380,21 +393,45 @@ func EnsureStateStoreVersion(ctx context.Context, store statestore.StateStore, n
 	return fmt.Errorf("write version doc: %w", err)
 }
 
-// writeCompatibilityMirror is the legacy mirror branch. PR-A ships the seam
-// only — actual mirroring of .orun/plans/<checksum>.json + latest.json
-// happens during M5 CLI rewire (compatibility-and-migration.md §4).
+// writeCompatibilityMirror writes the legacy plan aliases described in
+// compatibility-and-migration.md §2:
 //
-// TODO(m5): mirror plan.json as .orun/plans/<sha256-of-plan>.json and
-// update .orun/plans/latest.json so legacy `orun run` paths keep working
-// during the rollover window.
+//	plans/<planHash>.json   # byte-identical copy of canonical plan.json
+//	plans/latest.json       # byte-identical copy of canonical plan.json
+//
+// Both writes go through the same StateStore so atomic-write semantics
+// carry over (compat §2). The planHash is normalized to bare lowercase
+// hex (the "sha256:" prefix is stripped) — that's the form legacy
+// `orun run <hash>` callers will use, and what resolver branch 5 reads
+// back. planBytes are forwarded verbatim — they ARE the canonical plan
+// the writer already persisted at revisions/<key>/plan.json, so the
+// aliases are byte-identical by construction.
+//
+// This function is a no-op when cfg.CompatibilityWrites is false (the
+// caller checks that before invoking us).
 func writeCompatibilityMirror(
-	_ context.Context,
-	_ statestore.StateStore,
-	_ PlanRevision,
-	_ []byte,
+	ctx context.Context,
+	store statestore.StateStore,
+	rev PlanRevision,
+	planBytes []byte,
 ) error {
-	// Intentionally a no-op in PR-A. The function is invoked when
-	// CompatibilityWrites is true so M5 has a single, already-wired seam
-	// to flesh out — see Config.CompatibilityWrites.
+	checksum, err := normalizeLegacyChecksum(rev.PlanHash)
+	if err != nil {
+		return fmt.Errorf("compat mirror: %w", err)
+	}
+	checksumPath, err := legacyPlanPath(checksum)
+	if err != nil {
+		return fmt.Errorf("compat mirror: %w", err)
+	}
+	latestPath, err := legacyLatestPlanPath()
+	if err != nil {
+		return fmt.Errorf("compat mirror: %w", err)
+	}
+	if _, err := store.Write(ctx, checksumPath, planBytes, statestore.WriteOptions{}); err != nil {
+		return fmt.Errorf("write legacy plan alias %s: %w", checksumPath, err)
+	}
+	if _, err := store.Write(ctx, latestPath, planBytes, statestore.WriteOptions{}); err != nil {
+		return fmt.Errorf("write legacy plan latest %s: %w", latestPath, err)
+	}
 	return nil
 }
