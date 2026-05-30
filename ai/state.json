@@ -1,23 +1,25 @@
 {
   "goal": "Phase 1 trigger-first revision-first local state model for Orun",
-  "current_task": "0002",
-  "completed": ["0001"],
+  "current_task": "0004",
+  "completed": ["0001", "0002", "0003"],
   "repo_health": "green",
-  "next_focus": "orun-state-redesign-M1-triggerctx",
+  "next_focus": "orun-state-redesign-M2-statestore-PR-B-cas-list-property-suite",
   "active_spec": "specs/orun-state-redesign",
-  "active_milestone": "M1",
+  "active_milestone": "M2",
   "secondary_specs": [
     ".kiro/specs/orun-tui-cockpit",
     ".kiro/specs/github-artifacts"
   ],
   "last_verified": "2026-05-29",
   "waiting_for_input": "false",
-  "task_agent": "/ai/tasks/task-0002.md",
+  "task_agent": "",
   "notes": [
-    "Task 0001 verified PASS and merged via PR #152 (squash) → main commit 4ea1980e8822d21908b09ab70316fe3953bb75ce on 2026-05-29T19:11:11Z. Foundation now on main: github.com/oklog/ulid/v2 v2.1.1 direct require, internal/testfx/statefs (NewWorkspace/AssertJSONFile/ReadJSON[T] with fakeT failure-path coverage), make test-state-redesign target, full specs/orun-state-redesign/ pack, agents/orchestrator.md updates, ai/ tree rebuilt under the new lineage, TUI-era ai/tasks/task-014*.md and ai/reports/task-014*.md deleted.",
-    "Verifier report at ai/reports/task-0001-verifier.md. CI on PR (run 26656333958 Orun Plan + 26656333939 Harness dry-run guard) reviewed at log level — confirmed 0 components × 3 envs → 0 jobs is the legitimate empty-matrix M0 shape, and Harness dry-run guard exercised real assertions (bash syntax, duplicate-claim PASS/FAIL, status helper PASS/FAIL).",
-    "flyingmutant/rapid → pgregory.net/rapid drift in specs/orun-state-redesign/test-plan.md §3 formally deferred to Task 0002. Forcing function: the first real `rapid` import will fail to compile under the wrong path; M1 implementer files ai/proposals/task-0002-spec-update.md as part of that work.",
-    "M1 (Task 0002, internal/triggerctx) scope reminders: (1) Remove internal/testfx/statefs/tools.go when the first production import of github.com/oklog/ulid/v2 lands; verify `go mod tidy` keeps the require in the direct block. (2) Use the correct `rapid` import path empirically; file the spec-clarification proposal. (3) Preserve internal/testfx/statefs as leaf-clean (no internal/* imports) — additional helper surfaces go in sibling packages under internal/testfx/.",
-    "Local environment quirk (not a regression): kiox -- orun plan --changed --intent examples/intent.yaml fails locally on the composition-cache resolution (`stack.yaml has no spec.compositions`) on both main and PR branches. CI passes the same invocation. Unrelated to state-redesign work; revisit only if it persists into M1+ verification cycles."
+    "Task 0003 (M2 PR A — internal/statestore frozen interface, four-error taxonomy, paths.go helpers, LocalStore non-CAS ops) verified PASS and squash-merged via PR #154 → main commit 9b0a39c on 2026-05-29. impl/task-0003-m2-statestore-pra branch deleted. Verifier report at ai/reports/task-0003-verifier.md. Coverage on internal/statestore measured locally at 95.4 % (gate ≥95 %). Local quality gates (build/vet/race-test/cover/make test-state-redesign) all green. CI runs 26665146437 (Orun Plan) + 26665146435 (Harness dry-run guard) reviewed at log level: real orun plan invocation with 0 components × 3 envs → 0 jobs (legitimate empty-matrix M2-PR-A shape) and 30+ [guard] PASS assertions in dry-run-guard.sh.",
+    "StateStore interface is now FROZEN on main. Future divergence requires a spec-update proposal under ai/proposals/. Methods: Root, Read, Write, CreateIfAbsent, CompareAndSwap, List, Delete. Companion types: ObjectMeta{Path,Size,Revision,UpdatedAt}, ObjectInfo{Path,Size,UpdatedAt}, WriteOptions{} (empty in Phase 1), LocalConfig{Root, Clock} (Clock is an additive test-injection hook beyond state-store.md §5; non-breaking).",
+    "Path helpers in internal/statestore/paths.go cover every entry from state-store.md §2.1. Alphabet policy ([a-zA-Z0-9._-] per segment, no .. / leading slash / backslash / empty segment) is centralized in ValidateComponent / ValidatePath. M3 (internal/revision) has full path-helper coverage; no private helpers should be needed downstream.",
+    "Local-driver atomicity (state-store.md §3): Write uses temp-file + fsync + os.Rename with EXDEV cross-device fallback that copies into a fresh tempfile inside the destination directory and renames atomically. CreateIfAbsent uses O_EXCL → ErrExists on collision. Delete is no-op on absent paths and refuses non-empty directories with ErrInvalid (also refuses empty directories — slightly stricter than spec §3.4, called out as a Minor in verifier report; non-blocker). Orphan-tempfile sweep at construction removes .orun-tmp-* older than 1 hour using LocalConfig.Clock; sweep failures are best-effort.",
+    "CompareAndSwap and List are stubbed returning ErrInvalid-wrapped 'not implemented in PR A' so the interface compiles. Higher layers MUST NOT call them until PR B lands. No production callers wired in PR A (cmd/orun, internal/state, internal/runner, internal/runbundle untouched).",
+    "Next task = Task 0004 = M2 PR B: real CompareAndSwap + List + 100-goroutine atomicity/exclusivity property suite per test-plan.md §2/§3 (Write+Read atomicity, CreateIfAbsent exclusivity, concurrent CAS one-wins, rapid path-alphabet round-trip). Coverage gate stays ≥95 %; PR B should leave it ≥96 %. Still no production-caller wiring in PR B. PR C (typed refs/indexes marshallers) follows.",
+    "Persistent local environment quirk (NOT a regression): kiox -- orun plan --changed --intent examples/intent.yaml fails on composition-cache resolution (stack.yaml at ~/.orun/cache/compositions/c41fc08… has no spec.compositions). Reproduces from Task 0001 onward on main and PR branches. CI passes the same invocation; CI is authoritative."
   ]
 }
