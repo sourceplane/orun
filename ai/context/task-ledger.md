@@ -898,6 +898,21 @@ history; reports/prompts are no longer present in the working tree.
    `bridge-mirror-failed` events on stderr/metrics, expose new triplet
    shape in describe output).
 
+## Task 0019 — M5.c `orun status / logs / describe / get plans` rewire
+
+|- Agent: Implementer (closed) → Verifier (emitted)
+|- Implementer prompt: `ai/tasks/task-0019.md`
+|- Implementer report: `ai/reports/task-0019-implementer.md`
+|- Verifier prompt: `ai/tasks/task-0019-verifier.md`
+|- PR: **#163** on `impl/task-0019-m5c-orun-read-commands-rewire`, head `947773d` (+`fb364f1` housekeeping). mergeable=MERGEABLE / mergeStateStatus=CLEAN.
+|- Required CI on final head SHA: `CI / Orun Plan` run 26686932774 PASS (56s); `Harness dry-run guard` run 26686932783 PASS (13s). 5 matrix legs SKIPPED.
+|- Status: implementer COMPLETE 2026-05-30; verifier scoped and emitted.
+|- Objective: rewire `orun status` / `orun logs` / `orun describe` / `orun get plans` onto canonical revision-first layout (`revisions/<revKey>/executions/<execKey>/{execution,snapshot.latest}.json`, `refs/latest-execution.json`, `indexes/executions/`, `indexes/triggers/`, `refs/named/`) with `.orun/executions/<id>/` as transparent fallback per `compatibility-and-migration.md` §3–§4. Surface `bridge-mirror-failed` events on stderr (best-effort, non-blocking). Expose triplet (revisionKey + executionKey + legacyExecID) in describe.
+|- Scope boundary (in): `cmd/orun/read_resolve.go` (new, 98 LOC), `cmd/orun/bridge_mirror_warn.go` (new, 57 LOC), `command_status.go` (+10), `command_logs.go` (+25/-11), `command_describe.go` (+161), `command_get.go` (+166), `cmd/orun/command_read_revision_test.go` (new, 385 LOC), `ai/reports/task-0019-implementer.md`. Diff: 8 files, +959/-12. (out, held): writer/runner/executor/executionstate-writer/revision-writer/statestore edits, spec behavioral edits, new event kinds, `--persist-revision`, `orun state migrate` (M5.d), TUI cockpit, GHA artifact pipeline.
+|- Acceptance (per implementer report, verifier-confirmed pending): all four read commands route through `executionstate.ResolveExecution` / `revision.ResolveRevision` with legacy fallback; `--revision` / `--exec-id` / `--all` flags wired on `status` / `logs` per cli-surface.md §3.2 / §4; `describe revision|trigger|execution` aliases functional; `get plans` revision-first table with legacy fallback + stable `--json`; `bridge-mirror-failed` one-line stderr per distinct execution + silent degradation on malformed events. Coverage held: statestore 95.7% / revision 90.4% / executionstate 90.0% (exact floor). go build/vet, go test -race ./..., make test-state-redesign all green per implementer.
+|- Verifier scope: PR-boundary diff scan; quality-gate replay on PR head; fresh / legacy / mixed temp-workspace walks; new flag/alias exercise; bridge-mirror-failed surfacing + malformed-events silent-degradation check; `gh run view --log` on both required checks; coverage gates preserved. If PASS → squash-merge #163 + ff-pull main + emit Task 0020 (M5.d hidden `orun state migrate` implementer). If FAIL → leave PR open with explicit blockers.
+|- Unblocks (on PASS+merge): Task 0020 (M5.d hidden `orun state migrate` implementer per `compatibility-and-migration.md` §5), which closes M5 and opens M6 (E2E + property gates).
+
 ## Historical Notes
 
 - 2026-05-30: roadmap pivoted from TUI cockpit (Phase 3) to orun-state-redesign

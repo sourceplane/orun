@@ -6,10 +6,10 @@ local state model. See `specs/orun-state-redesign/README.md` for the index and
 read order.
 
 ## Active Milestone
-**M5 — CLI rewire.** M4 fully closed; M5.a closed (PR #161 → `7a9c494`); **M5.b
-closed** (PR #162 → `59d06f3`). **Next: Task 0019 = M5.c implementer**
-(`orun status / logs / describe / get` rewire onto
-`revisions/<key>/executions/<execKey>/`).
+**M5 — CLI rewire.** M4 fully closed; M5.a closed (PR #161 → `7a9c494`); M5.b
+closed (PR #162 → `59d06f3`); **M5.c closed** (PR #163 → `73108ee`).
+**Next: Task 0020 = M5.d implementer** — hidden `orun state migrate` command
+per `compatibility-and-migration.md` §5. Closes M5 and unlocks M6.
 
 ## Last Completed Implementer/Verifier (0018 — M5.b)
 - Implementer + verifier both Task 0018 (single-pass) → PR **#162** on
@@ -53,41 +53,33 @@ PR #160 → `d51e828`. Bridge + EXDEV fallback. Verified PASS by Task 0015.
 ## Past Completed (0012 / 0013 — M4 PR-A)
 PR #159 → `ed48633`. Verified PASS by Task 0013.
 
-## Current Task (0019 — M5.c `orun status / logs / describe / get` rewire Implementer, to be emitted)
-- Prompt: TBD (`ai/tasks/task-0019.md`).
-- Branch (to be created from `main` @ `59d06f3`):
-  `impl/task-0019-m5c-orun-read-commands-rewire`.
-- Objective: rewire `orun status` / `orun logs` / `orun describe` /
-  `orun get` to read the execution lifecycle from
-  `revisions/<key>/executions/<execKey>/` (execution.json + state.json +
-  metadata.json + events/), using `refs/latest-execution.json` and the
-  resolver legacy-fallback path for compatibility with `.orun/executions/<id>/`.
-  Surface `bridge-mirror-failed` events on stderr / metrics. Expose new
-  triplet shape in describe output (revisionKey + executionKey +
-  legacyExecID).
-- Scope boundary: read-only commands only — `cmd/orun/command_status.go`,
-  `cmd/orun/command_logs.go`, `cmd/orun/command_describe.go`,
-  `cmd/orun/command_get.go` (the `executions` / `runs` subcommands at
-  least). EXCLUDES hidden `orun state migrate` (M5.d), runner / writer
-  edits, executionstate API changes.
-- Acceptance: `orun status` / `logs` / `describe` against a fresh
-  `orun plan && orun run` workspace report from the new layout; against
-  a legacy `.orun/executions/<id>/` workspace they fall through via the
-  resolver legacy-fallback path; `bridge-mirror-failed` events surface
-  on stderr (never block). Coverage gates preserved.
+## Last Completed Implementer/Verifier (0019 — M5.c)
+- Task 0019 read-side rewire (`orun status / logs / describe / get plans`) verified PASS and squash-merged to `main` as `73108ee` on 2026-05-30T15:16:16Z via PR **#163**.
+- Verifier head SHA: `cb33a8e` (verifier report + spec proposal commit on top of feature `947773d` + housekeeping `fb364f1`).
+- Required CI on final head SHA: both PASS at log level. `CI / Orun Plan` SUCCESS — real `orun plan --from-ci github` step rendered Revision `rev-github-pull-request-fb364f1-pbfd83933`, plan artifact uploaded. `Harness dry-run guard` SUCCESS — 30+ `[guard] PASS:` assertions, final `DRY-RUN GUARD PASSED`.
+- Coverage gates preserved (zero changes to those packages): statestore 95.7%, revision 90.4%, executionstate 90.0%.
+- Verifier walks confirmed: fresh revision-first happy path; legacy-only fallback transparent across all four commands; bridge-mirror-failed single-line stderr warning per execution (dedup on multi-event, silent on malformed body / no events, exit code unchanged); new `--revision` / `--exec-id` / `--all` flags wired on `status` and `logs`; `describe revision|trigger|execution` aliases functional; describe execution prints triplet (revisionKey/executionKey/legacyExecID); `get plans -o json` stable key order with `[]` legacy fallback.
+- One non-blocking spec proposal filed: `ai/proposals/task-0019-spec-update.md`. `cli-surface.md` §5.1 documents `describe revision latest` / `describe trigger latest` / `describe trigger <triggerName>` as canonical, but the resolver lacks a `latest`-literal branch and a trigger-name lookup branch (workarounds exist via empty-arg / explicit revision key). Recommendation: fold Option A normalization (`ref==\"latest\" → ref=\"\"`) and Option B trigger-name lookup into M5.d scope.
+- Reports: `ai/reports/task-0019-implementer.md`, `ai/reports/task-0019-verifier.md`.
+
+## Current Task (0020 — M5.d hidden `orun state migrate` implementer, NOT YET EMITTED)
+- Spec ref: `specs/orun-state-redesign/compatibility-and-migration.md` §5 (legacy `.orun/executions/<id>/` → `revisions/<key>/executions/<execKey>/` backfill).
+- Task base branch: `main` at the post-#163-merge tip (`73108ee`).
+- Recommended scope nudge from Task 0019 verifier: roll the `describe revision/trigger latest` literal-arg fix + trigger-name lookup branch from `ai/proposals/task-0019-spec-update.md` into this task. Two-line CLI normalization (`ref==\"latest\" → ref=\"\"`) for the literal; resolver-side branch reading `refs/triggers/<name>/latest.json` for trigger-name lookup.
+- Closes M5 once merged. Unlocks M6 (E2E + property gates).
 
 ## Repo Checkpoint
 
 | Attribute | Value |
 |---|---|
-| Branch (local checkout) | `main` (clean post-Task-0018 merge) |
-| `main` tip | `59d06f3` — M5.b: rewire `orun run` onto the revision-first execution path (#162) |
-| Open PRs (state-redesign lineage) | none (PR #162 merged) |
-| Repo health | 🟢 Green — M5.b closed; awaiting Task 0019 emission |
-| Last verified | 2026-05-30 (Task 0018, PR #162) |
-| Active milestone | M5 (CLI rewire) — awaiting Task 0019 (M5.c read-command rewire) implementer |
-| Tasks completed | 0001, 0002, 0003, 0004, 0005, 0007, 0008, 0009, 0010, 0011, 0012, 0013, 0014, 0015, 0016, 0018 (16 total) |
-| Current task | **0019** (M5.c implementer — to be emitted) |
+| Branch (local checkout) | `main` (clean post-#163 merge) |
+| `main` tip | `73108ee` — Task 0019: M5.c — orun read-side commands revision-first rewire (#163) |
+| Open PRs (state-redesign lineage) | none — #163 merged on 2026-05-30 |
+| Repo health | 🟢 Green — Task 0019 PASS+merged; awaiting Task 0020 (M5.d) implementer emission |
+| Last verified | 2026-05-30 (Task 0019, PR #163, merge `73108ee`) |
+| Active milestone | M5 (CLI rewire) — M5.a/b/c closed, M5.d pending |
+| Tasks completed | 0001, 0002, 0003, 0004, 0005, 0007, 0008, 0009, 0010, 0011, 0012, 0013, 0014, 0015, 0016, 0018, 0019 (17 total) |
+| Current task | **0020** (M5.d implementer — to be emitted) |
 
 ## Roadmap (M0 → M6)
 1. ✅ **M0 Foundation** — landed on main at `4ea1980` (PR #152).
@@ -97,14 +89,16 @@ PR #159 → `ed48633`. Verified PASS by Task 0013.
 5. ✅ **M4 `internal/executionstate` + runner bridge** — closed.
    - ✅ PR-A — model + writer + resolver (PR #159 → `ed48633`).
    - ✅ PR-B — bridge + EXDEV fallback (PR #160 → `d51e828`).
-6. **M5 CLI rewire** ← current. Sub-tasks: ✅ M5.a `orun plan` (Task 0016, PR #161 → `7a9c494`), ✅ M5.b `orun run` + bridge wiring (Task 0018, PR #162 → `59d06f3`), M5.c `orun status / logs / describe / get` (Task 0019), M5.d hidden `orun state migrate`.
+6. **M5 CLI rewire** ← current. Sub-tasks: ✅ M5.a `orun plan` (Task 0016, PR #161 → `7a9c494`), ✅ M5.b `orun run` + bridge wiring (Task 0018, PR #162 → `59d06f3`), ✅ M5.c `orun status / logs / describe / get` (Task 0019, PR #163 → `73108ee`), M5.d hidden `orun state migrate` (Task 0020, pending).
 7. M6 End-to-end + property gates
 
 ## Next Task After 0019 (proposed)
-**M5.d implementer** — hidden `orun state migrate` command for legacy
-`.orun/executions/<id>/` → `revisions/<key>/executions/<execKey>/`
-backfill. After M5.d PASS+merge, M5 closes and M6 (E2E + property gates)
-opens.
+**Task 0020 = M5.d implementer** — hidden `orun state migrate` command per
+`compatibility-and-migration.md` §5 for legacy `.orun/executions/<id>/` →
+`revisions/<key>/executions/<execKey>/` backfill. After M5.d PASS+merge,
+M5 closes and M6 (E2E + property gates) opens. Branch base: `main` at
+the post-#163-merge tip. Pin literal legacy-execution defaults
+(carry-forward from Task 0013) in compat §4 as part of that task.
 
 ## Known Spec Drift / Open Questions
 - ~~**`bridge-mirror-failed` payload schema not pinned in `data-model.md` §9**~~
@@ -121,9 +115,12 @@ opens.
   legacy-fallback (PR-A) remains the convergence path for legacy on-disk state.
 - **`MirrorModeHardlink` is currently a test/drift-detection mode.** If no
   production caller emerges by M6, fold into a debug flag.
-- **`emitFailure` is best-effort** — events-dir-unwritable failures are
-  silently dropped. M5.c should add stderr/metric fallback when surfacing
-  bridge-mirror-failed events to the read-command audience.
+- ~~**`emitFailure` is best-effort** — events-dir-unwritable failures are
+  silently dropped.~~ ADDRESSED in M5.c — `cmd/orun/bridge_mirror_warn.go`
+  now surfaces dropped events as one-line stderr warnings to the read-command
+  audience (filename-based detection, payload-shape-agnostic, dedup per
+  execution). Future work: parse `data-model.md` §9.1 fields for richer
+  diagnostics.
 - **Event-sequence retry budget of 32** is acceptable for single-writer
   Phase 1; re-evaluate when remote drivers come online.
 - **Manifest required for `UpdateLatestExecutionSummary`** (Task 0013
