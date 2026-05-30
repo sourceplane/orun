@@ -489,6 +489,70 @@ history; reports/prompts are no longer present in the working tree.
 |- Durable outcome on `main`: `internal/revision` model (`PlanRevision`, `RevSummary`, `StateStoreVersion`) byte-matching `data-model.md` §3 / §1; revision-key generator + collision-suffix resolver with 100-iteration uniqueness/collision property test; `WriteRevision` seven-step ordered writer (claim-first index reservation → bodies → refs → index finalize → version doc → optional compat-mirror seam) wired against the frozen `internal/statestore` interface; coverage gate ≥ 90 % on `internal/revision`; leaf-clean imports (`statestore` + `triggerctx` only).
 |- Next: Task 0010 = M3 PR-B implementer.
 
+## Task 0010
+
+|- Agent: Implementer
+|- Prompt: `ai/tasks/task-0010.md`
+|- Status: **implemented; PR #158 OPEN, MERGEABLE, CLEAN, both required CI checks SUCCESS at log level** — awaiting Task 0011 verifier (2026-05-30)
+|- Milestone: M3 — `internal/revision` (PR-B; closes M3)
+|- Branch: `impl/task-0010-m3-revision-prb` @ `ec74af1` (parent `e538b90`)
+|- Objective: close out M3 by adding the manifest writer (`WriteManifest`,
+   `UpdateLatestExecutionSummary`), the seven-branch `ResolveRevision` resolver
+   per `compatibility-and-migration.md` §3, the legacy `.orun/plans/<hex>.json`
+   + `latest.json` mirror body promoting the `// TODO(m5)` stub to a real
+   conditional write gated by `Config.CompatibilityWrites`, and `JobCount`
+   plumbing — without touching production callers.
+|- Scope boundary: `internal/revision/{errors,legacy,manifest,resolver}.go`
+   (new), `internal/revision/{model,writer}.go` (edits — `ManifestKind`,
+   compat-mirror body, `Config.JobCount`, `summaryFromScope`), tests
+   `internal/revision/{manifest,resolver,writer_compat,coverage_extra}_test.go`.
+   NO `cmd/orun`, NO `internal/state`, NO `internal/runner`, NO
+   `internal/runbundle`, NO `internal/statestore` / `internal/triggerctx` /
+   `internal/testfx/statefs` edits, NO `internal/executionstate` (M4), NO
+   `--persist-revision` flag, NO `orun state migrate`.
+|- Acceptance: ≥ 90 % coverage on `internal/revision`; all 7 resolver branches
+   tested with explicit `ResolveSource` assertions; compat-writes flag exercises
+   both true and false paths; idempotent re-run on same plan succeeds; CAS
+   contention + budget-exhaustion + idempotent-short-circuit tested on
+   `UpdateLatestExecutionSummary`; `<planHashHex>` strip helper has its own
+   unit test; no new sentinels in `internal/statestore`.
+|- Implementer report: `ai/reports/task-0010-implementer.md` — coverage
+   `internal/revision` **90.4 %** (gate ≥ 90 %); `internal/statestore` **96.1 %**
+   (M2 floor preserved). PR Number: **158**.
+|- Implementer decisions (to be adjudicated by Task 0011 verifier): Option A
+   for JobCount (planner-supplied, `0` means "unknown"); resolver branch 3
+   fallthrough on `ErrNotFound`; `.orun/plans/latest.json` written via
+   `statestore.Write` (last-write-wins per spec §2). Typed sentinels
+   `ErrAmbiguousArg`, `ErrComponentRunUnchanged` in `internal/revision/errors.go`.
+|- Expected outcome: M3 closes on Task 0011 PASS + PR #158 merge; M4
+   (`internal/executionstate` + runner bridge) becomes the next milestone.
+
+## Task 0011
+
+|- Agent: Verifier
+|- Prompt: `ai/tasks/task-0011-verifier.md`
+|- Status: scoped and ready to begin (2026-05-30)
+|- Verifying: PR **#158** (`impl/task-0010-m3-revision-prb` @ `ec74af1`)
+|- Milestone: M3 — `internal/revision` (PR-B verification)
+|- Objective: validate Task 0010 against the M3 "Done when" checklist (≥ 90 %
+   coverage, all 7 resolver branches with explicit `ResolveSource` assertions,
+   compat-writes flag exercises both true and false paths, key
+   uniqueness/collision property carried from PR-A still green); adjudicate
+   the three implementer decisions (JobCount Option A, branch-3 fallthrough,
+   `latest.json` `Write`-not-`CreateIfAbsent`) inline OR via a single
+   `ai/proposals/task-0010-spec-update.md`; inspect both required CI runs at
+   log level; merge per the Verifier Merge Protocol on PASS.
+|- Scope boundary: verification only. May commit `ai/reports/task-0011-verifier.md`
+   and optional `ai/proposals/task-0010-spec-update.md` to the PR branch as
+   verifier-only artifacts. NO production-code edits beyond a verifier-only
+   typo/TODO fix strictly required for mergeability. NO M4 work.
+|- Acceptance: PR #158 squash-merged to main on PASS (branch deleted, local
+   `main` fast-forwarded, `git status --short` clean); OR left OPEN with
+   explicit blockers on FAIL. Required CI both SUCCESS at log level on the
+   final head SHA before merge.
+|- Expected outcome: M3 closed; next implementer = Task 0012 = M4 PR-A
+   (`internal/executionstate` model + writer; bridge optionally separable).
+
 ## Historical Notes
 
 - 2026-05-30: roadmap pivoted from TUI cockpit (Phase 3) to orun-state-redesign

@@ -6,93 +6,93 @@ local state model. See `specs/orun-state-redesign/README.md` for the index and
 read order.
 
 ## Active Milestone
-**M3 — `internal/revision`**. M2 closed at PR #156 (`cd8b3e8`, verified PASS).
-M3 PR-A (Task 0007 model + keys + writer skeleton) verified PASS and
-squash-merged via PR **#157** at main commit `7f1e53d` on 2026-05-30T03:33:16Z.
-**Next: M3 PR-B (Task 0010).**
+**M3 — `internal/revision`**. PR-A landed at PR #157 (`7f1e53d`, verified PASS
+2026-05-30). M3 PR-B implementer (Task 0010) shipped on branch
+`impl/task-0010-m3-revision-prb` as PR **#158** — OPEN, MERGEABLE, CLEAN, both
+required CI checks SUCCESS at log level. **Next: Task 0011 = M3 PR-B verifier.**
 
-## Last Completed Task (0009 — M3 PR-A Verifier)
-- Result: **PASS** — PR #157 squash-merged → `main` `7f1e53d` at 2026-05-30T03:33:16Z; branch `impl/task-0007-m3-revision-pra` deleted.
-- Verifier report: `ai/reports/task-0009-verifier.md`.
-- Coverage on `internal/revision` 93.3 % (gate ≥ 90 %); `internal/statestore` 96.1 % (no regression).
-- Both required CI checks SUCCESS at log level on the verifier-side commit (`Orun Plan` 59 s, `Harness dry-run guard` 19 s).
-- Claim-first ordering deviation from `cli-surface.md` §1.2 ACCEPTED in-place; no spec proposal filed (rationale in verifier report).
-- Risk Notes carried forward: `stateStoreVersionPath()` lives in `internal/revision` (deferred relocation); `writeCompatibilityMirror` is a no-op stub gated by default-true `Config.CompatibilityWrites` (M5 fills the body); `RevSummary.JobCount` = 0 in PR-A (PR-B threads it via `WriteManifest`).
+## Last Completed Implementer Task (0010 — M3 PR-B)
+- Branch: `impl/task-0010-m3-revision-prb` @ `ec74af1` (parent `e538b90` "feat(revision): land M3 PR-B …", child `ec74af1` "docs(ai): task-0010 implementer report")
+- PR: **#158** — title `feat(revision): land M3 PR-B — manifest, resolver, compat-mirror, JobCount`
+- State: OPEN, MERGEABLE, mergeStateStatus CLEAN, base `main`, head `ec74af1`.
+- Required CI both SUCCESS at log level:
+  - `CI / Orun Plan` — run `26674136935`, completed 2026-05-30T04:12:02Z.
+  - `Harness dry-run guard` — run `26674136948`, completed 2026-05-30T04:11:21Z.
+- Diff stat (12 files, +1966 / -22):
+  - new: `internal/revision/{errors,legacy,manifest,resolver}.go` and tests `internal/revision/{manifest,resolver,writer_compat,coverage_extra}_test.go`
+  - edits: `internal/revision/{model,writer}.go` (added `ManifestKind`; compat-mirror body, `Config.JobCount`, `summaryFromScope` plumbing)
+  - artifacts: `ai/tasks/task-0010.md`, `ai/reports/task-0010-implementer.md`
+- Coverage: `internal/revision` **90.4 %** (gate ≥ 90 %); `internal/statestore` **96.1 %** (M2 floor preserved).
+- Implementer report: `ai/reports/task-0010-implementer.md`.
 
-## Last Implementer Task (0008 — delivery chore)
-- Implementer prompts: `ai/tasks/task-0007.md`, `ai/tasks/task-0008.md`
-- Implementer reports: `ai/reports/task-0007-implementer.md` (PR #157, coverage 93.3 % on `internal/revision`),
-  `ai/reports/task-0008-implementer.md` (chore-only delivery; no production-code changes beyond Task 0007's tree)
-- Branch `impl/task-0007-m3-revision-pra` pushed; PR **#157** opened.
-  Implementer-side commits: `96621ed` (Task 0007 tree), `500218c` (PR-number
-  backfill into reports).
-- Outstanding flag for verifier: claim-first ordering deviation from
-  `cli-surface.md` §1.2 step-7 (index slot reserved via `CreateIfAbsent`
-  BEFORE body writes; rationale in
-  `ai/reports/task-0007-implementer.md` § "Step-Order Deviation From
-  cli-surface.md §1.2"). Implementer also flagged `version.json` helper
-  location as a defer-or-relocate decision.
+## Implementer Decisions to Adjudicate (Task 0011)
+1. **`JobCount` Option A** — planner-supplied via `Config.JobCount`; `0` means "unknown" (writer does not parse `plan.json`).
+2. **Resolver branch 3 fallthrough** — on `ErrNotFound`, regex-matching `rev-…` arg falls through to subsequent branches rather than bubbling up; only returns `ErrAmbiguousArg` if branches 4–7 also fail. Implementer rationale plausible but not in `compatibility-and-migration.md` §3 verbatim.
+3. **`latest.json` last-write-wins** — `.orun/plans/latest.json` written via `statestore.Write`, not `CreateIfAbsent`. Implementer cites `compatibility-and-migration.md` §2.
+
+Each must be adjudicated by Task 0011 either inline (Risk Notes) OR via a single `ai/proposals/task-0010-spec-update.md`.
 
 ## Repo Checkpoint
 
 | Attribute | Value |
 |---|---|
-| Branch (local checkout) | `main` (clean post-merge) |
+| Branch (local checkout) | `main` (clean post-Task-0009 merge) |
 | `main` tip | `7f1e53d` — Task 0007: M3 PR-A — internal/revision model + keys + writer skeleton (#157) |
-| Open PRs (state-redesign lineage) | None |
-| Repo health | 🟢 Green — M3 PR-A on main; ready for Task 0010 |
+| Open PRs (state-redesign lineage) | **#158** (Task 0010, M3 PR-B; OPEN, MERGEABLE, CLEAN) |
+| Repo health | 🟢 Green — M3 PR-B awaiting verification |
 | Last verified | 2026-05-30 (Task 0009, PR #157) |
-| Active milestone | M3 (`internal/revision`) — PR-A merged; PR-B next |
-| Tasks completed | 0001, 0002, 0003, 0004, 0005, 0007, 0008, 0009 (8 total) |
-| Current task | None (awaiting Task 0010 emission) |
+| Active milestone | M3 (`internal/revision`) — PR-A merged; PR-B awaiting verifier |
+| Tasks completed | 0001, 0002, 0003, 0004, 0005, 0007, 0008, 0009, 0010 (9 total) |
+| Current task | **0011** (M3 PR-B verifier — emitted) |
 
 ## Roadmap (M0 → M6)
 1. ✅ **M0 Foundation** — landed on main at `4ea1980` (PR #152).
 2. ✅ **M1 `internal/triggerctx`** — landed on main at `db342dd` (PR #153).
 3. ✅ **M2 `internal/statestore`** — closed at PR #156 (`cd8b3e8`, 2026-05-30).
-   - PR A — frozen interface + local driver non-CAS ops (PR #154 → `9b0a39c`)
-   - PR B — `CompareAndSwap`, `List`, atomicity/exclusivity/CAS/`rapid` property suite (PR #155 → `0fa2111`)
-   - PR C — typed refs/indexes marshallers + `RebuildIndexes()` stub (PR #156 → `cd8b3e8`)
 4. **M3 `internal/revision`** ← current
    - ✅ PR-A — model + keys + writer skeleton (PR #157 → `7f1e53d`, verified PASS via Task 0009 on 2026-05-30)
-   - PR-B — `ResolveRevision` seven-branch resolver + `WriteManifest` + legacy `.orun/plans/**` mirror body (Task 0010, next)
+   - **PR-B — manifest + resolver + compat-mirror body + JobCount (PR #158, awaiting Task 0011 verifier)**
 5. M4 `internal/executionstate` + runner bridge
 6. M5 CLI rewire (`orun plan/run/status/logs/describe/get plans` + hidden `state migrate`)
 7. M6 End-to-end + property gates
 
-## Next Task After 0009 (proposed)
-**Task 0010 — M3 PR-B Implementer.** Adds `manifest.go`
-(`WriteManifest`, `UpdateLatestExecutionSummary`), `resolver.go`
-(`ResolveRevision` seven-branch resolver per
-`compatibility-and-migration.md` §3), and promotes the `// TODO(m5)`
-compatibility-mirror stub in `writer.go` to a real conditional write of
-the legacy `.orun/plans/<checksum>.json` body gated by
-`Config.CompatibilityWrites`. Coverage gate stays ≥ 90 %; resolver test
-matrix MUST cover all 7 resolution branches; compat-writes flag MUST
-exercise both true and false paths. Branch suggestion:
-`impl/task-0010-m3-revision-prb`.
+## Next Task After 0011 (proposed)
+**Task 0012 — M4 implementer.** Opens `internal/executionstate` + the runner
+bridge per `specs/orun-state-redesign/implementation-plan.md` §M4:
 
-If Task 0009 verifier rejects the claim-first ordering and files
-`ai/proposals/task-0007-spec-update.md`, the orchestrator will accept,
-revise, defer, or query the user about it before generating Task 0010 —
-and may interpose a small spec-update task between 0009 and 0010.
+- `model.go` — `ExecutionRun`, `RunnerProfile`, `ExecSummary`.
+- `writer.go` — `NextExecutionKey`, `SanitizeExecID`, `CreateExecution`,
+  `UpdateSnapshot`, `MarkTerminal`. Emits `execution-created` event.
+- `bridge.go` — `Bridge{Store, LegacyRoot, MirrorMode}`,
+  `MirrorRunnerOutput(ctx, execKey, revKey, legacyExecID)`. Hardlink with copy
+  fallback. Failures emit `bridge-mirror-failed` event and return nil.
+- `resolver.go` — `ResolveExecution(ctx, store, arg, revHint)`. Legacy
+  fallback to `.orun/executions/` scan.
+
+Suggested branch: `impl/task-0012-m4-executionstate-pra`. Suggested PR scope:
+1–2 PRs (the bridge is naturally separable from the writer/resolver).
+Coverage gate ≥ 90 % on `internal/executionstate`.
+
+If Task 0011 verifier rejects any of the three implementer decisions and files
+`ai/proposals/task-0010-spec-update.md`, the orchestrator will accept, revise,
+defer, or query the user about it before generating Task 0012 — and may
+interpose a small spec-update task between 0011 and 0012.
 
 ## Known Spec Drift / Open Questions
-- **Claim-first vs `cli-surface.md` §1.2 step-7 ordering.** Task 0009 verifier
-  ACCEPTED the deviation in-place (no proposal filed). Rationale:
-  `CreateIfAbsent` is the only exclusive primitive in `state-store.md` §3,
-  claim-first is the only ordering producing distinct revision keys before any
-  body write occurs under concurrent `(TriggerKey, planHash)` duplicates, refs
-  still land after bodies preserving `state-store.md` §6 crash-recovery, and
-  `cli-surface.md` §1.2 is a high-level descriptive flow not a normative
-  atomicity proof. RESOLVED.
-- **`version.json` helper location.** Task 0009 verifier deferred relocation —
-  `stateStoreVersionPath()` stays in `internal/revision`. If M5 migration
-  tooling needs a statestore-side helper, that PR can lift the constant up.
-  RESOLVED.
-- **Half-shipped delivery anti-pattern.** Task 0007 was the first observed
-  case of "implemented locally" with no PR (see `open-risks.md` R-005).
-  Task 0008 corrective chore landed PR #157; future implementer prompts
-  should keep the `PR Creation Requirement` section explicit and acceptance
-  criteria should include a `gh pr list --head <branch>` check returning a
-  non-empty array.
+- **Resolver branch 3 fallthrough vs `compatibility-and-migration.md` §3.**
+  Implementer Task 0010 chose fallthrough on `ErrNotFound` rather than bubble-up.
+  Adjudication owed by Task 0011 verifier (accept-and-document inline OR file
+  `ai/proposals/task-0010-spec-update.md`).
+- **`JobCount=0` ambiguity.** Option A treats `0` as "unknown". `data-model.md`
+  §3 `RevSummary` does not normatively distinguish "no jobs" from "unknown".
+  Adjudication owed by Task 0011 verifier.
+- **`latest.json` `Write` vs `CreateIfAbsent`.** Implementer cites spec §2
+  ("last-write-wins is acceptable for this alias"). Verifier confirms vs
+  `compatibility-and-migration.md` §2.
+- **`stateStoreVersionPath()` helper location** (carried from M3 PR-A). If M5
+  migration tooling needs a statestore-side helper, that PR can lift the
+  constant up. RESOLVED — defer.
+- **Half-shipped delivery anti-pattern.** Task 0007 was the first observed case.
+  Task 0010 prompt embedded the explicit `gh pr list --head <branch>` check;
+  PR #158 was created on the first delivery cycle. Pattern guard remains in
+  every implementer prompt going forward.
