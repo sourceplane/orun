@@ -123,10 +123,41 @@ func ManifestPath(revKey string) string {
 	return RevisionDir(revKey) + "/manifest.json"
 }
 
+// ExecutionsDir returns "revisions/<revKey>/executions" — the directory
+// prefix for List() scans across every execution under a revision. Callers
+// pass this to StateStore.List to enumerate execution keys without
+// concatenating their own strings (path policy bans string-built paths
+// elsewhere; the same rule applies inside this package's siblings).
+func ExecutionsDir(revKey string) string {
+	return RevisionDir(revKey) + "/executions"
+}
+
 // ExecutionDir returns "revisions/<revKey>/executions/<execKey>".
 func ExecutionDir(revKey, execKey string) string {
-	return RevisionDir(revKey) + "/executions/" + joinComponents(execKey)
+	return ExecutionsDir(revKey) + "/" + joinComponents(execKey)
 }
+
+// LegacyExecutionDir returns "executions/<execID>" — the legacy on-disk
+// directory inside `.orun/` used by pre-state-redesign runners.
+// compatibility-and-migration.md §4 requires the new resolvers to read this
+// path as a fallback when the new layout has no match. The helper exists
+// here (not in internal/executionstate) so the executionstate package
+// stays free of "executions/" string literals per the M4 PR-A constraint.
+func LegacyExecutionDir(execID string) string {
+	return "executions/" + joinComponents(execID)
+}
+
+// LegacyExecutionDocPath returns "executions/<execID>/execution.json", the
+// legacy on-disk per-execution record. Used by ResolveExecution's legacy
+// fallback branch — read-only per compatibility-and-migration.md §4.
+func LegacyExecutionDocPath(execID string) string {
+	return LegacyExecutionDir(execID) + "/execution.json"
+}
+
+// LegacyExecutionsRoot returns "executions" — the bare listing prefix for
+// scanning every legacy execution directory under `.orun/`. Used only by
+// the executionstate resolver's legacy-fallback branch.
+func LegacyExecutionsRoot() string { return "executions" }
 
 // ExecutionDocPath returns
 // "revisions/<revKey>/executions/<execKey>/execution.json".
@@ -184,7 +215,11 @@ func RevisionIndexPath(revKey string) string {
 	return "indexes/revisions/" + joinComponents(revKey) + ".json"
 }
 
+// ExecutionIndexDir returns "indexes/executions" — the listing prefix for
+// the executions index, used by ResolveExecution's prefix scan.
+func ExecutionIndexDir() string { return "indexes/executions" }
+
 // ExecutionIndexPath returns "indexes/executions/<execKey>.json".
 func ExecutionIndexPath(execKey string) string {
-	return "indexes/executions/" + joinComponents(execKey) + ".json"
+	return ExecutionIndexDir() + "/" + joinComponents(execKey) + ".json"
 }
