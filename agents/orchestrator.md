@@ -17,6 +17,14 @@ The Orchestrator owns roadmap, sequencing, quality, and state.
 
 For every cycle:
 
+0. **Warm boot** — Read `/ai/context/orchestrator-brief.md` FIRST (see "Orchestrator
+   Context Cache" below). If it exists and its cache fingerprint still matches
+   reality (HEAD SHA, state.json hash, merged-PR count, open-PR count, age ≤ 3
+   cycles), trust its compressed mental model and skip steps 1–7 unless the
+   brief itself flags them as stale. This is the default fast path. Only
+   fall through to a full cold read when the fingerprint mismatches, the
+   brief is missing, the brief's `next_cycle_hypothesis` was invalidated by
+   the latest worker result, or the brief is older than 3 cycles.
 1. Read `/ai/context/current.md`
 2. Read `/ai/context/task-ledger.md`, `/ai/context/decisions.md`, and `/ai/context/open-risks.md`
 3. Read `/ai/state.json`
@@ -41,7 +49,14 @@ For every cycle:
 13. If human input is required, follow the Human Input Pause Protocol instead of generating or running a task
 14. Wait for worker result
 15. Update state and the compact context files (also update `task_agent` if a verify report was the last file written)
-16. Repeat
+16. **Write the cycle-end brief** — Persist a compressed mental model to
+    `/ai/context/orchestrator-brief.md` so the next cycle can warm-boot
+    without re-reading every spec, ledger entry, and PR. This is mandatory
+    at the end of every cycle that emitted a task, accepted a verifier
+    result, deferred a candidate, or made any state mutation. See the
+    "Orchestrator Context Cache" section below for the required schema and
+    budget. Treat this artifact as your handoff to your future self.
+17. Repeat
 
 ---
 
@@ -245,6 +260,150 @@ Preferred task prompt budget:
   constraints, acceptance criteria, and reporting expectations.
 - Link to specs and compact context instead of pasting long prior task content.
 - Avoid duplicating file inventories that can be discovered with `rg --files`.
+
+---
+
+# Orchestrator Context Cache
+
+The Orchestrator's most expensive operation is the cold-read warmup: scanning
+specs, ledgers, decision logs, open risks, repo code, and PR state to rebuild
+the mental model that produced the *last* decision. Most of that work is
+redundant — the world rarely shifts more than one PR's worth between cycles.
+
+To eliminate that waste, the Orchestrator MUST persist a compressed,
+self-validating handoff artifact at the end of every cycle:
+
+`/ai/context/orchestrator-brief.md`
+
+This file is the Orchestrator's note-to-self. The next cycle reads it first
+(loop step 0) and uses it as a warm-boot cache. Treat it the way a senior
+engineer treats their end-of-day notes: dense, decision-oriented, honest
+about uncertainty, and trustworthy enough to start tomorrow without
+re-reading the whole codebase.
+
+## Design principles
+
+1. **Compression over completeness.** The brief is a *summary of judgment*,
+   not a transcript. If a fact is in `state.json`, the ledger, or the spec,
+   do not duplicate it — link it. Capture only the synthesis: what matters,
+   why, and what the Orchestrator was thinking.
+2. **Self-invalidating.** The brief carries a fingerprint. If reality has
+   moved past the fingerprint, the cache is stale and the next cycle does
+   a full cold read. The brief never lies silently — it either matches
+   reality or is detected as stale within seconds.
+3. **Forward-biased.** The brief predicts the *next* cycle's decision
+   ("if verifier PASSes PR #X, the next task is Y at milestone Z"). Future
+   cycles validate the prediction in O(1) instead of re-deriving it.
+4. **Bounded budget.** Hard cap ≈ 400 lines / ~12 KB. Anything longer is a
+   signal that durable knowledge belongs in `/ai/context/decisions.md`,
+   `/ai/context/open-risks.md`, or a spec proposal — not the brief.
+5. **Cycle-end discipline.** Always written last, after `state.json` and
+   the compact context files are updated. The brief reflects the *post*
+   state, not the in-flight state.
+
+## Required schema
+
+The brief is a single Markdown file with the following top-level sections,
+in this order. Sections may be empty (`_none_`) but must not be omitted —
+their absence is itself a signal.
+
+```md
+# Orchestrator Brief
+
+## Cache Fingerprint
+- generated_at: <ISO 8601 UTC>
+- cycle_seq: <monotonically increasing integer>
+- head_sha: <git rev-parse HEAD on main>
+- state_json_sha256: <sha256 of /ai/state.json>
+- merged_pr_count: <int from `gh pr list --state merged --limit 1000 | wc -l`>
+- open_pr_count: <int from `gh pr list --state open | wc -l`>
+- last_task_agent: <path from state.json>
+- last_worker_result: implementer-pass | implementer-blocked | verifier-pass | verifier-fail | none
+
+## Cache Validity Rule
+The next cycle MAY skip the cold read (loop steps 1–7) iff ALL of:
+- head_sha matches `git rev-parse HEAD`
+- state_json_sha256 matches recomputed hash
+- merged_pr_count and open_pr_count match live `gh` queries
+- cycle_seq is within 3 of the next cycle's seq
+Otherwise: discard this brief and do a full cold read.
+
+## Mental Model (the synthesis)
+A 5–15 line prose paragraph: where the project actually is right now,
+in the Orchestrator's own words. Not a status table — a narrative.
+What just shipped, what it unlocked, what the next leverage point is,
+and any non-obvious tension between spec direction and code reality.
+This is what you would tell a teammate at a whiteboard in 60 seconds.
+
+## Active Spec Pointer
+- spec: <path, e.g. specs/orun-component-catalog>
+- milestone: <ID, e.g. C3>
+- milestone_done_when_remaining: <bullets — only the criteria still
+  outstanding for the current milestone, copied or paraphrased from
+  implementation-plan.md>
+- next_milestone_after: <ID + one-line "what it unlocks">
+
+## Open PRs (one line each)
+- #<num> <title> — <author> — <state: green|red|review-pending> — <one-line orchestrator-relevance note>
+
+## Deferred Backlog (parking lot summary)
+One bullet per `/ai/deferred.md` entry: name + unblock signal. Empty if none.
+
+## Active Proposals
+One bullet per `/ai/proposals/**` file the Orchestrator has not yet
+adjudicated: file path + one-line orchestrator stance (accept-leaning,
+revise, defer, ask-user) + the decision the next cycle owes.
+
+## Last Decision Rationale
+3–6 bullets explaining *why* the most recent task was the highest-leverage
+choice — not what it does (that's in the task file), but why it beat the
+alternatives the Orchestrator considered. This is the artifact that
+prevents the next cycle from re-litigating the same choice.
+
+## Next Cycle Hypothesis
+The Orchestrator's prediction for what the next cycle will produce,
+conditional on each plausible worker outcome:
+- if implementer-pass on <task>: next task is <X> at milestone <Y>, because <reason>
+- if implementer-blocked: pivot to <X>, because <reason>
+- if verifier-pass: merge unlocks <X>; emit task <Y>
+- if verifier-fail: expected blocker is <X>; remediation task is <Y>
+A future cycle that finds the actual outcome already covered here can
+skip re-derivation entirely. A future cycle that finds the outcome
+*not* covered must invalidate the cache and cold-read.
+
+## Stale Signals (what would invalidate this brief early)
+Bullets naming concrete events that, if they occur, force a cold read
+even when the fingerprint still matches:
+- new spec proposal arrives at /ai/proposals/
+- user redirects to a different milestone
+- CI starts failing on main
+- a deferred entry's unblock condition is met
+```
+
+## Lifecycle
+
+- **Read at cycle start** (loop step 0). Validate fingerprint before trust.
+- **Write at cycle end** (loop step 16). Always overwrite — the brief is
+  always current-only; history lives in the ledger and decisions log.
+- **Bypass on user override.** If the user explicitly redirects scope or
+  asks the Orchestrator to "re-evaluate from scratch," ignore the cached
+  brief for that cycle and do a full cold read; then write a fresh brief.
+- **Never use the brief to override hard sources.** `state.json`,
+  `task-ledger.md`, specs, and live `gh` are still the source of truth
+  when the brief and they disagree. The brief is an accelerator, not an
+  authority.
+
+## Anti-patterns
+
+- Pasting full task prompts, full PR diffs, or full spec sections into the
+  brief — that's what links are for.
+- Letting the brief drift past 400 lines — split durable content into
+  `decisions.md` / `open-risks.md` instead.
+- Writing the brief before `state.json` is updated — fingerprint will lie.
+- Treating the brief as historical log — it is always overwritten, never
+  appended. Use the ledger for history.
+- Skipping the brief because "nothing changed" — the fingerprint refresh
+  itself is valuable; always rewrite.
 
 ---
 

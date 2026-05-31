@@ -1293,6 +1293,94 @@ schema). Milestones C0–C9 per `implementation-plan.md`.
    graph builder + `catalogHash`) opens as Task 0028. PR #171 squash-merged
    at `74b88e0`; branch deleted; main fast-forwarded.
 
+## Task 0028 (C3 implementer — `CatalogSnapshot` + graph builder + `catalogHash`)
+
+|- Agent: Implementer
+|- Prompt: `ai/tasks/task-0028.md`
+|- Status: implemented; PR #172 opened on branch `task-0028-catalog-c3-snapshot-graph` (head `ffb5ee9`); implementer report `ai/reports/task-0028-implementer.md`. **Awaiting Task 0029 verifier.** Coverage claim: `internal/catalogresolve` 90.2 → 90.9.
+|- Milestone: **C3** (per `specs/orun-component-catalog/implementation-plan.md` §C3) — single PR
+|- Active spec sections: `resolution-pipeline.md` §1 stages 11–13 + §7 (determinism); `identity-and-keys.md` §9 (catalogHash inputs) + §3 (CatalogSnapshotKey shape); `data-model.md` §2 (CatalogSnapshot) + §4 (CatalogGraph); `test-plan.md` §1 + T-IDK-1
+|- Objective: Add post-resolution stages (graph build / catalogHash / snapshot
+   assembly) on top of the existing `Resolve` pipeline. Export
+   `BuildCatalog(ctx, opts, ResolverInputs) (*CatalogView,
+   []ValidationIssue, error)` returning a deterministic
+   `(*CatalogSnapshot, []*CatalogGraph)` view with `summary.*` counts from
+   sorted distinct collections, byte-stable graph files, and `catalogHash`
+   per `identity-and-keys.md` §9.
+|- Scope boundary:
+   1. New files only in `internal/catalogresolve/`: `graph.go`,
+      `catalog_hash.go`, `catalog_snapshot.go` (+ test files).
+   2. `ResolverInputs` struct caller-supplied (no invented values for
+      `authoritative`, `preview`, `sourceSnapshotKey`, `catalogInputHash`,
+      `headRevision`, `treeHash`, `workingTree`, `createdAt`).
+   3. Five `CatalogGraph` siblings — `dependencies`, `systems`, `apis`,
+      `resources`, `owners`. Sorted nodes (by `key`) and edges (by
+      `(from, to, type, optional)`).
+   4. `catalogHash` inputs: `(catalogInputHash, sorted (componentKey,
+      manifestHash) pairs, canonical encoding of each CatalogGraph in
+      fixed order, resolver.resolverVersion)` per §9 verbatim.
+|- Non-goals: any FS writes; `internal/catalogstore`; CLI surface;
+   `orun plan` / `orun run` integration; `ComponentHistoryEvent`;
+   `internal/catalogdiff`; `internal/catalogsync`; edits to Phase 1
+   packages; edits to existing files in `internal/catalogresolve/`
+   beyond strict wiring (prefer additive sibling files — convention
+   adopted in C2 PR-1).
+|- Acceptance:
+   1. T-IDK-1 (1000 random orderings of input bundle ⇒ identical
+      `catalogHash`) green via `pgregory.net/rapid`.
+   2. `metadata.owner` edit changes `catalogHash` and `manifestHash`.
+   3. Provenance-only (`resolution.inheritedFrom`) edit does NOT change
+      `manifestHash` AND does NOT change `catalogHash` (T-IDK-2 carries
+      forward into C3 layer).
+   4. Two consecutive `BuildCatalog` calls produce byte-identical encoded
+      `(*CatalogSnapshot, []*CatalogGraph)`.
+   5. `summary.*` counts equal sorted-distinct enumeration of resolved
+      manifest fields (`components`, `systems`, `apis`, `resources`,
+      `owners`, `domains`).
+   6. `catalogSnapshotKey` regex-matches `^cat-[a-f0-9]{6,16}$` and
+      passes `catalogmodel.ValidateCatalogSnapshotKey`.
+   7. Coverage: `internal/catalogresolve` ≥ 90.2 % (no regression);
+      Phase 2 floors held; Phase 1 floors held byte-for-byte.
+   8. `make verify-generated` green; full `go test ./... -race` green.
+|- Expected outcome: single squash-merged PR closing Milestone C3.
+   `BuildCatalog` becomes the deterministic data-only entry point that
+   C4 (`internal/catalogstore` Writer) consumes verbatim.
+
+## Task 0029 (C3 verifier — PR #172)
+
+|- Agent: Verifier
+|- Prompt: `ai/tasks/task-0029-verifier.md`
+|- Status: ✅ verified PASS on 2026-05-31. Squash-merged PR #172 at `75082ca`; branch `task-0028-catalog-c3-snapshot-graph` deleted; `main` fast-forwarded.
+|- Implementation: PR #172 (squash `75082ca`), branch `task-0028-catalog-c3-snapshot-graph`, head `ffb5ee9` pre-merge.
+|- PR CI: `Orun Plan` SUCCESS (run 26708921448), `Harness dry-run guard` SUCCESS (run 26708921463), `state-redesign-tests / test` SUCCESS (run 26708921479). 3/3 required, branch CLEAN/MERGEABLE pre-merge.
+|- Reports: implementer at `ai/reports/task-0028-implementer.md`; verifier at `ai/reports/task-0029-verifier.md`.
+|- Objective: validate PR #172 against C3 acceptance, `resolution-pipeline.md` §1 stages 11–13, `identity-and-keys.md` §3 + §9, and `data-model.md` §2 + §4; PASS-and-merge or FAIL-and-block per Verifier Merge Protocol.
+|- Scope boundary: 7 files changed (+1273 / -0); three new sibling files in `internal/catalogresolve/` (`graph.go`, `catalog_hash.go`, `catalog_snapshot.go`) + their test siblings + the implementer report. **Zero edits to existing source files.** Bounded as scoped.
+|- Durable outcome on main: Milestone C3 ✅ closed. `BuildCatalog(ctx, opts, ResolverInputs) (*CatalogView, []ValidationIssue, error)` is the deterministic data-only entry point that C4 (`internal/catalogstore` Writer) will consume verbatim. T-IDK-1 (rapid 1000) green; deterministic backstops for owner-edit propagation, provenance-only stability (`manifestHash` AND `catalogHash` both invariant under `resolution.inheritedFrom` changes), two-call byte-identical determinism, summary sorted-distinct counts, `^cat-[a-f0-9]{6,16}$` snapshot key shape, and `ErrResolverInputsIncomplete` (extractable via `IsResolverInputsIncomplete`) all green. Source-block back-fill happens AFTER `manifestHash` is finalised at C2 stage 10 — `hash.go` excludes the entire Source block from the hashed payload, so back-fill is invariant-safe by construction. Coverage on main: catalogresolve **90.9 %** (90.2 → 90.9, +0.7 pp); catalogmodel 91.1, sourcectx 91.1, Sanitize* 100; Phase 1 floors held byte-for-byte (statestore 95.7, revision 90.3, executionstate 90.0).
+|- Risk note: C3 trusts the caller to compute `Authoritative`/`Preview` correctly (no zero-value sentinel for booleans). C4 writer is the next guardrail (`authoritative=true` ⇒ `workingTree=clean` per data-model §2). Minor non-blocking spec wording mismatch noted in verifier report (data-model §4 / resolution-pipeline §7 describe node ordering as `(kind, key, type)`; implementer + prompt sort by `key` alone — functionally identical because nodes sharing a key always share a kind, but worth a future editorial pass).
+
+## Task 0030 (C4 PR-1 implementer — `internal/catalogstore` paths + body writer)
+
+|- Agent: Implementer
+|- Prompt: `ai/tasks/task-0030.md`
+|- Status: ⏳ scoped 2026-05-31 (cycle 4). Awaiting implementer pass.
+|- Milestone: C4 PR-1 of an expected 2–3 PR split per `implementation-plan.md` §C4.
+|- Branch: `task-0030-catalogstore-c4-pr1` (to be created).
+|- Objective: introduce `internal/catalogstore` with `paths.go` (every helper from `catalog-store.md` §2 plus `Validate*` siblings) and a partial `writer.go` covering write-order steps A and B (Source body, manifests in §2 path order, graphs in fixed `dependencies, systems, apis, resources, owners` order, catalog doc, local indexes via `Write`). Public `Writer` / `Resolver` / `Store` interface decls and `New(state statestore.StateStore) Store` ship in this PR exactly as `catalog-store.md` §1 spells them; not-yet-implemented methods (`WriteRefs`, `WriteGlobalIndexes`, `AppendComponentEvent`, all `Resolver` methods) return a typed `ErrNotImplemented` so PR-2 / PR-3 fill bodies without widening the surface. Errors declared this PR: `ErrSourceMismatch`, `ErrCatalogMismatch`, `ErrManifestMismatch`, `ErrInputsInconsistent` (pre-flight cross-reference guard rejecting mismatched `sourceSnapshotKey`/`catalogSnapshotKey` linkage between `src`, `cat`, and `manifests` BEFORE issuing any write).
+|- Files allowed: `internal/catalogstore/{paths,writer,errors,store,doc}.go` and `_test.go` siblings only.
+|- Files forbidden: `internal/catalogstore/{refs,indexes,resolver}.go` (PR-2 / PR-3 territory) and any change to Phase 1 packages, `internal/catalogresolve`, `internal/catalogmodel`, `internal/sourcectx`, `cmd/orun/`, `go.mod`/`go.sum`.
+|- Acceptance:
+   1. Every path helper from §2 exists with `Validate*` sibling; raw `path.Join` of caller-supplied keys forbidden outside helpers.
+   2. `WriteSourceSnapshot` idempotent on byte-identical re-write; mismatch → `ErrSourceMismatch` (preserves `errors.Is(statestore.ErrExists)`).
+   3. `WriteCatalogSnapshot` calls in observable order B.1 manifests → B.2 graphs (fixed) → B.3 catalog doc → B.4 local indexes; pre-flight `ErrInputsInconsistent` issues NO writes when `src`/`cat`/manifest keys disagree.
+   4. Stub methods return `ErrNotImplemented` (or panic per documented policy); covered by smoke tests.
+   5. Canonical-JSON encoder used for every body handed to `statestore`; `encoding/json` defaults forbidden for hashed/persisted payloads.
+   6. Coverage: `internal/catalogstore` ≥ 90 %; Phase 1 floors held byte-for-byte (statestore 95.7, revision 90.3, executionstate 90.0); Phase 2 floors held (catalogmodel 91.1, sourcectx 91.1, catalogresolve 90.9).
+   7. `make verify-generated` clean; `go test ./... -race` green.
+   8. PR titled `catalog: C4 PR-1 — internal/catalogstore paths + body writer (Task 0030)` opened on `task-0030-catalogstore-c4-pr1`; PR body lists every file added, the `internal/catalogstore` cover output, and held floors.
+|- Non-goals: `WriteRefs`, `WriteGlobalIndexes`, `AppendComponentEvent`, `Resolver.*`, `RebuildIndexes`, `-x<n>` collision-suffix logic, `stateCompatibilityWrites` mirror writes, CLI changes, plan/run integration.
+|- Expected outcome: single PR landing the path layer plus the body-write half of `Writer`, with the public surface of `Writer`/`Resolver`/`Store` finalised so PR-2 (refs + indexes) and PR-3 (resolver + fallback chain) only fill bodies.
+
 ## Historical Notes
 
 - 2026-05-30: roadmap pivoted from TUI cockpit (Phase 3) to orun-state-redesign
