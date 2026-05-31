@@ -1223,9 +1223,17 @@ schema). Milestones C0–C9 per `implementation-plan.md`.
 
 |- Agent: Implementer
 |- Prompt: `ai/tasks/task-0026.md`
-|- Status: **implemented; PR #171 OPEN, MERGEABLE, mergeStateStatus CLEAN, all required CI checks SUCCESS** — awaiting Task 0027 verifier (2026-05-31)
+|- Status: **verified PASS and merged via PR #171** (2026-05-31T08:36:04Z, main commit `74b88e0`)
 |- Milestone: C2 — `internal/catalogresolve` (PR-2; closes C2)
-|- Branch: `task-0026-catalogresolve-c2-pr2` @ `9c65e7c` (commits: `73a4a2f` feat + `9c65e7c` docs PR-number backfill)
+|- Branch: `task-0026-catalogresolve-c2-pr2` @ `9c65e7c` (squashed and deleted)
+|- Implementation: PR **#171** squash-merged → main commit `74b88e0c3c607e63143acb9e6fddd3016bf71ee1`. Branch deleted.
+|- PR CI on head `9c65e7c`: `Orun Plan` SUCCESS (run `26706854744`, 43s),
+   `Harness dry-run guard` SUCCESS (run `26706854741`, 18s, full `[guard] PASS`
+   battery), `test` SUCCESS (run `26706854770`, 1m26s). Matrix legs SKIPPED
+   legitimately (PR-time plan-only profile). mergeable=MERGEABLE,
+   mergeStateStatus=CLEAN at merge time.
+|- Reports: implementer at `ai/reports/task-0026-implementer.md`; verifier at
+   `ai/reports/task-0027-verifier.md`.
 |- Objective: close C2 by adding the second `internal/catalogresolve` PR — top-level
    `Resolve(ctx, opts) (*ResolvedCatalog, []ValidationIssue, error)` covering
    resolution-pipeline stages 4 (infer), 5/6 (validate), 7 (assemble), 8 (deps),
@@ -1238,36 +1246,52 @@ schema). Milestones C0–C9 per `implementation-plan.md`.
    pointer-mirror) and `types.go` (+ResolvedCatalog; +Options.{Strict,Repo,
    Namespace,Clock}). NO edits outside `internal/catalogresolve/`. No CLI
    wiring. No catalogstore/graph work (deferred to C3+).
-|- Acceptance (implementer-reported, locally verified): `go build ./...`,
-   `go vet ./...`, `make verify-generated`, `go test -race -count=1 ./...`,
-   `go test -race -count=3 ./internal/catalogresolve/...` all green;
-   coverage `internal/catalogresolve` **90.2%** (gate ≥ 90%); Phase 2 floors
-   held byte-for-byte (catalogmodel 91.1%, sourcectx 91.1%, Sanitize* 100%);
-   Phase 1 floors held (statestore 95.7%, revision 90.3%, executionstate 90.0%);
-   PR opened with real number `#171`; report committed to PR branch.
-|- Implementer report: `ai/reports/task-0026-implementer.md` (10,267 bytes;
-   PR Number `#171` backfilled in commit `9c65e7c`).
-|- Key design decisions documented in report:
-   1. `manifestHash` computed via `catalogmodel.CanonicalEncode` which masks
-      provenance fields automatically per `identity-and-keys.md` §10, so
-      `resolution.inheritedFrom` edits do not perturb the hash.
+|- Durable outcome on main:
+   1. `manifestHash` computed via `catalogmodel.CanonicalEncode` over
+      `{identity, metadata, spec, runtime}` masks provenance fields automatically
+      per `identity-and-keys.md` §10; provenance-only edits do NOT perturb the
+      hash; spec edits DO.
    2. Cross-repo dep refs resolve only when namespace+repo+name triple matches
-      workspace; mismatch ⇒ `ErrDependencyMissing` with both endpoints.
+      workspace; mismatch ⇒ `ErrDependencyMissing` carrying both endpoints.
    3. Inference is `recover()`-safe — failures emit warn-severity
       `ErrInferenceFailed` and skip rather than panic; gated by
-      `intent.catalog.inference.*` toggles.
-   4. Deploy-after cycle = error (always); `calls` cycle = warn (default) /
+      `intent.catalog.inference.{packageJson,dockerfile,terraform,helm,readme}`.
+   4. `deploy-after` cycle = error always; `calls` cycle = warn (default) /
       error (strict).
-|- CI evidence: PR #171 head `9c65e7c`, `Orun Plan` SUCCESS, `Harness dry-run
-   guard` SUCCESS, `test` SUCCESS; matrix legs SKIPPED legitimately; mergeable
-   MERGEABLE / mergeStateStatus CLEAN at orchestrator handoff time.
-|- Expected outcome: Task 0027 verifier validates PR #171 against C2 \"done
-   when\" (T-RES-1 byte-stable across two consecutive `Resolve` calls,
-   T-RES-2 provenance completeness, `ErrDependencyMissing` with both
-   endpoints, deploy-after cycle aborts, `calls` cycle warns by default,
-   coverage ≥ 90%, no edits outside `internal/catalogresolve/`); on PASS
-   merges PR #171 and closes Milestone C2. C3 (`CatalogSnapshot` + graph
-   builder + `catalogHash`) opens after merge.
+   5. Errors-typed surface (`ErrDuplicateComponent`, `ErrDependencyMissing`,
+      `ErrCycle`, `ErrInferenceFailed`) with `errors.Is`/`errors.As` compat.
+|- Coverage on main: `internal/catalogresolve` **90.2%** (+0.2pp headroom over
+   PR-1's exact 90.0%); Phase 2 floors held byte-for-byte (catalogmodel 91.1%,
+   sourcectx 91.1%, Sanitize* 100%); Phase 1 floors held (statestore 95.7%,
+   revision 90.3%, executionstate 90.0%). Determinism stress
+   `go test -count=10 -race ./internal/catalogresolve/...` zero failures.
+
+## Task 0027 (Verifier pass for PR #171)
+
+|- Agent: Verifier
+|- Prompt: `ai/tasks/task-0027-verifier.md`
+|- Status: **verified PASS and merged** (2026-05-31T08:36:04Z)
+|- Verifying: PR #171 (`task-0026-catalogresolve-c2-pr2` @ `9c65e7c`)
+|- Implementation: PR **#171** squash-merged → main commit `74b88e0`. Branch deleted.
+|- PR CI: `Orun Plan` SUCCESS (run `26706854744`), `Harness dry-run guard`
+   SUCCESS (run `26706854741`), `test` SUCCESS (run `26706854770`). All
+   required checks green; mergeable MERGEABLE / mergeStateStatus CLEAN at
+   merge time.
+|- Local checks (all exit 0): `go build ./...`, `go vet ./...`,
+   `make verify-generated`, `go test -race -count=1 ./...`,
+   `go test -race -count=10 ./internal/catalogresolve/...` (zero flake),
+   `make test-state-redesign`, `kiox -- orun validate / plan --changed /
+   run --dry-run`. Coverage measurements match implementer report
+   byte-for-byte.
+|- Reports: verifier at `ai/reports/task-0027-verifier.md`.
+|- Objective: validate PR #171 against the Verifier Standard in
+   `agents/orchestrator.md` and the Milestone C2 "done when" criteria in
+   `specs/orun-component-catalog/implementation-plan.md` §C2; on PASS merge
+   per the Verifier Merge Protocol and close Milestone C2.
+|- Scope boundary: verification only; no production-code edits.
+|- Durable outcome on main: Milestone C2 ✅ closed. C3 (`CatalogSnapshot` +
+   graph builder + `catalogHash`) opens as Task 0028. PR #171 squash-merged
+   at `74b88e0`; branch deleted; main fast-forwarded.
 
 ## Historical Notes
 
