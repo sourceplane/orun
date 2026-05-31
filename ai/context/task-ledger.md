@@ -1409,6 +1409,49 @@ schema). Milestones C0–C9 per `implementation-plan.md`.
 |- On PASS: merge via Verifier Merge Protocol, sync `main`, scope Task 0032 (C4 PR-2 implementer — `refs.go` + `indexes.go` + `AppendComponentEvent` with `seq.lock` retry-up-to-16). On FAIL: leave PR open with blockers; remediation stays in same PR.
 |- Expected outcome: PR #173 squash-merged with `internal/catalogstore` paths + body writer landed on `main`, public `Writer`/`Resolver`/`Store` surface frozen for PR-2/PR-3, all coverage floors held.
 
+## Task 0031 — UPDATE (cycle 6)
+- ✅ PASS on 2026-05-31. PR #173 squash-merged at `c2d7b9d` and branch
+  deleted. All 12 Required Outcomes met under `-race -count=1`. Coverage
+  on `internal/catalogstore` re-measured at exactly 90.7 % (matches
+  implementer claim). Phase 1 floors held byte-for-byte
+  (statestore 95.7, revision 90.3, executionstate 90.0); Phase 2 floors
+  held (catalogmodel 91.1, sourcectx 91.1, catalogresolve 90.9).
+- Verifier-only fix applied: `git mv reports/task-0030-catalogstore-c4-pr1.md
+  ai/reports/task-0030-implementer.md` post-merge to honour the canonical
+  report path; legacy `reports/` directory removed.
+- Verifier report: `ai/reports/task-0031-verifier.md`.
+- Spec proposals: _none_. PR followed `catalog-store.md` §1-§6 exactly.
+
+## Task 0032 — C4 PR-2 implementer (refs + global indexes + events)
+- **Agent:** Implementer
+- **Prompt:** `ai/tasks/task-0032.md`
+- **Scope:** Steps C and D from `catalog-store.md` §3:
+  - `WriteRefs` (CompareAndSwap with 16-retry budget per ref;
+    `ErrRefStale` on exhaust). Six sub-steps D.1-D.6 (current,
+    main if authoritative, branch, pr, latest).
+  - `WriteGlobalIndexes` (sources/catalogs plain Write; component
+    indexes via CompareAndSwap with merge-retry).
+  - `AppendComponentEvent` (seq.lock allocator with 16-retry budget;
+    events written via CreateIfAbsent — events immutable per spec).
+  - `ErrRefStale` added to errors.go; double-wrap pattern
+    (`fmt.Errorf("%w: %w", ErrRefStale, statestore.ErrConflict)`)
+    to chain `errors.Is` to both targets.
+- **New files:** `internal/catalogstore/{refs.go, refs_test.go,
+  indexes.go, indexes_test.go, events.go, events_test.go}`.
+- **Edits permitted:** `errors.go` (add sentinel), `store.go`
+  (replace 3 stubs), `store_test.go` (drop 3 from
+  `TestStubsReturnErrNotImplemented`), `writer_test.go` (extend
+  spy `CompareAndSwap` to record `cas:<path>:<oldRev>`, support
+  conflict-injection, maintain rev counters).
+- **Forbidden:** `resolver.go`, fallback chain, `RebuildIndexes`
+  (PR-3); raw FS imports; `go.mod`/`go.sum` churn beyond main.
+- **Coverage target:** `internal/catalogstore` ≥ 91 % (floor 90;
+  +1 % buffer for PR-3 headroom). Phase 1 + Phase 2 floors held
+  byte-for-byte.
+- **Done when:** PR opened, CI all-green, MERGEABLE/CLEAN,
+  determinism test (same input → byte-identical spy trace), retry
+  budget tests inject 16 conflicts and assert `ErrRefStale` chain.
+
 ## Historical Notes
 
 - 2026-05-30: roadmap pivoted from TUI cockpit (Phase 3) to orun-state-redesign
