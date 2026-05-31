@@ -10,9 +10,13 @@ import (
 	"github.com/sourceplane/orun/internal/catalogstore"
 )
 
-// TestStubsReturnErrNotImplemented locks PR-2/PR-3 placeholder methods
-// to ErrNotImplemented so a future implementer cannot accidentally swap
-// in nil-return without updating both this test and the spec.
+// TestStubsReturnErrNotImplemented locks PR-3 placeholder Resolver
+// methods to ErrNotImplemented so a future implementer cannot
+// accidentally swap in nil-return without updating both this test and
+// the spec. PR-2 dropped WriteRefs / WriteGlobalIndexes /
+// AppendComponentEvent from this list — those are now wired in
+// refs.go / indexes.go / events.go and exercised by their own happy-path
+// tests (see TestPR2WritersImplemented and the per-method test files).
 func TestStubsReturnErrNotImplemented(t *testing.T) {
 	spy := newSpyStore()
 	st := catalogstore.New(spy)
@@ -24,15 +28,42 @@ func TestStubsReturnErrNotImplemented(t *testing.T) {
 		func() error { _, err := st.ResolveCatalog(ctx, catalogstore.RefSelector{}); return err },
 		func() error { _, err := st.ResolveComponent(ctx, catalogstore.RefSelector{}, "n"); return err },
 		func() error { _, err := st.ResolveComponentLatest(ctx, "ns/repo/name"); return err },
-		func() error { return st.WriteRefs(ctx, catalogstore.RefUpdate{}) },
-		func() error { return st.WriteGlobalIndexes(ctx, catalogstore.GlobalIndexUpdate{}) },
-		func() error { return st.AppendComponentEvent(ctx, catalogmodel.ComponentHistoryEvent{}) },
 	}
 	for i, fn := range checks {
 		err := fn()
 		if !errors.Is(err, catalogstore.ErrNotImplemented) {
 			t.Errorf("check[%d]: want ErrNotImplemented, got %v", i, err)
 		}
+	}
+}
+
+// TestPR2WritersImplemented confirms PR-2 wired up the three previously
+// stubbed Writer methods. None of them may return ErrNotImplemented for
+// a representative happy-path call.
+func TestPR2WritersImplemented(t *testing.T) {
+	spy := newSpyStore()
+	st := catalogstore.New(spy)
+	ctx := context.Background()
+
+	// WriteRefs with both Source and Catalog nil → no-op success.
+	if err := st.WriteRefs(ctx, catalogstore.RefUpdate{}); err != nil {
+		t.Errorf("WriteRefs(empty): %v", err)
+	}
+	if errors.Is(nil, catalogstore.ErrNotImplemented) {
+		t.Fatalf("sanity: ErrNotImplemented Is(nil) must be false")
+	}
+	// WriteGlobalIndexes with no entries → no-op success.
+	if err := st.WriteGlobalIndexes(ctx, catalogstore.GlobalIndexUpdate{}); err != nil {
+		t.Errorf("WriteGlobalIndexes(empty): %v", err)
+	}
+	// AppendComponentEvent on a zero event surfaces a validation error,
+	// NOT ErrNotImplemented — that's the contract we're pinning.
+	err := st.AppendComponentEvent(ctx, catalogmodel.ComponentHistoryEvent{})
+	if err == nil {
+		t.Errorf("AppendComponentEvent(zero) should fail validation, got nil")
+	}
+	if errors.Is(err, catalogstore.ErrNotImplemented) {
+		t.Errorf("AppendComponentEvent must NOT return ErrNotImplemented after PR-2: %v", err)
 	}
 }
 

@@ -13,14 +13,21 @@ import (
 )
 
 // spyStore is a minimal in-memory StateStore that records call order and
-// supports the operations WriteSourceSnapshot / WriteCatalogSnapshot
-// invoke. It exists in this test file rather than depending on a Phase 1
-// helper per the PR's "inline locally" rule.
+// supports the operations PR-2 invokes (CreateIfAbsent, CompareAndSwap,
+// Write, Read). It exists in this test file rather than depending on a
+// Phase 1 helper per the PR's "inline locally" rule. PR-3 may move this
+// into a shared internal/catalogstore/storetest package.
 type spyStore struct {
 	mu      sync.Mutex
 	objects map[string][]byte
-	// trace records every write attempt as "<op>:<path>" in call
-	// order; ops are "create" (CreateIfAbsent) and "write" (Write).
+	// revisions is a per-path content-derived revision counter. We use a
+	// monotonic uint64 incremented on every Write/CreateIfAbsent/CAS so
+	// tests don't need to compute SHAs.
+	revisions  map[string]string
+	revCounter uint64
+	// trace records every store operation as a typed string in call
+	// order. PR-1 ops: "create:<path>", "write:<path>". PR-2 adds
+	// "cas:<path>:<oldRev>" and "read:<path>".
 	trace []string
 	// failCreate, when set, returns the supplied error from the next
 	// CreateIfAbsent for path == failCreatePath. Used to inject ErrExists
@@ -31,13 +38,40 @@ type spyStore struct {
 	// preExisting maps path → body that should already be present
 	// (returns ErrExists with that body on CreateIfAbsent).
 	preExisting map[string][]byte
+	// casConflicts queues per-path forced ErrConflict responses. Each
+	// CompareAndSwap on a path with pending count > 0 returns ErrConflict
+	// without modifying state, decrements the counter, and the spy
+	// also bumps the on-disk revision so the caller's re-read picks up
+	// a fresh oldRev. Used to drive retry-budget tests.
+	casConflicts map[string]int
+	// readErr / casErr / createErr inject a one-shot non-standard error
+	// on the next Read / CompareAndSwap / CreateIfAbsent for the given
+	// path. Used by verifier-attached coverage tests for the defensive
+	// "non-Exists" / "non-Conflict" / "Read failed mid-CAS" branches.
+	readErr     map[string]error
+	casErr      map[string]error
+	createNStdE map[string]error
+	writeErr    map[string]error
 }
 
 func newSpyStore() *spyStore {
 	return &spyStore{
-		objects:     map[string][]byte{},
-		preExisting: map[string][]byte{},
+		objects:      map[string][]byte{},
+		revisions:    map[string]string{},
+		preExisting:  map[string][]byte{},
+		casConflicts: map[string]int{},
+		readErr:      map[string]error{},
+		casErr:       map[string]error{},
+		createNStdE:  map[string]error{},
+		writeErr:     map[string]error{},
 	}
+}
+
+// nextRev returns a fresh per-store revision string. Monotonic, unique
+// across paths.
+func (s *spyStore) nextRev() string {
+	s.revCounter++
+	return fmt.Sprintf("rev-%d", s.revCounter)
 }
 
 func (s *spyStore) Root() string { return "(spy)" }
@@ -45,11 +79,18 @@ func (s *spyStore) Root() string { return "(spy)" }
 func (s *spyStore) Read(ctx context.Context, p string) ([]byte, statestore.ObjectMeta, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.trace = append(s.trace, "read:"+p)
+	if e, ok := s.readErr[p]; ok && e != nil {
+		delete(s.readErr, p)
+		return nil, statestore.ObjectMeta{}, e
+	}
 	if b, ok := s.objects[p]; ok {
-		return append([]byte(nil), b...), statestore.ObjectMeta{Path: p, Size: int64(len(b))}, nil
+		rev := s.revisions[p]
+		return append([]byte(nil), b...), statestore.ObjectMeta{Path: p, Size: int64(len(b)), Revision: rev}, nil
 	}
 	if b, ok := s.preExisting[p]; ok {
-		return append([]byte(nil), b...), statestore.ObjectMeta{Path: p, Size: int64(len(b))}, nil
+		rev := s.revisions[p]
+		return append([]byte(nil), b...), statestore.ObjectMeta{Path: p, Size: int64(len(b)), Revision: rev}, nil
 	}
 	return nil, statestore.ObjectMeta{}, fmt.Errorf("%w: %s", statestore.ErrNotFound, p)
 }
@@ -58,14 +99,23 @@ func (s *spyStore) Write(ctx context.Context, p string, data []byte, opts states
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.trace = append(s.trace, "write:"+p)
+	if e, ok := s.writeErr[p]; ok && e != nil {
+		delete(s.writeErr, p)
+		return statestore.ObjectMeta{}, e
+	}
 	s.objects[p] = append([]byte(nil), data...)
-	return statestore.ObjectMeta{Path: p, Size: int64(len(data))}, nil
+	s.revisions[p] = s.nextRev()
+	return statestore.ObjectMeta{Path: p, Size: int64(len(data)), Revision: s.revisions[p]}, nil
 }
 
 func (s *spyStore) CreateIfAbsent(ctx context.Context, p string, data []byte) (statestore.ObjectMeta, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.trace = append(s.trace, "create:"+p)
+	if e, ok := s.createNStdE[p]; ok && e != nil {
+		delete(s.createNStdE, p)
+		return statestore.ObjectMeta{}, e
+	}
 	if s.failCreate != nil && p == s.failCreatePath {
 		err := s.failCreate
 		s.failCreate = nil
@@ -79,15 +129,47 @@ func (s *spyStore) CreateIfAbsent(ctx context.Context, p string, data []byte) (s
 		// Move it into objects so subsequent Reads see the same body and
 		// future CreateIfAbsents continue to ErrExists.
 		s.objects[p] = s.preExisting[p]
+		if _, ok := s.revisions[p]; !ok {
+			s.revisions[p] = s.nextRev()
+		}
 		delete(s.preExisting, p)
 		return statestore.ObjectMeta{}, fmt.Errorf("%w: %s", statestore.ErrExists, p)
 	}
 	s.objects[p] = append([]byte(nil), data...)
-	return statestore.ObjectMeta{Path: p, Size: int64(len(data))}, nil
+	s.revisions[p] = s.nextRev()
+	return statestore.ObjectMeta{Path: p, Size: int64(len(data)), Revision: s.revisions[p]}, nil
 }
 
 func (s *spyStore) CompareAndSwap(ctx context.Context, p string, oldRev string, data []byte) (statestore.ObjectMeta, error) {
-	return statestore.ObjectMeta{}, errors.New("spy: CompareAndSwap not used in PR-1 tests")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.trace = append(s.trace, "cas:"+p+":"+oldRev)
+	if e, ok := s.casErr[p]; ok && e != nil {
+		delete(s.casErr, p)
+		return statestore.ObjectMeta{}, e
+	}
+	// Forced-conflict injection: pretend the rev moved.
+	if n, ok := s.casConflicts[p]; ok && n > 0 {
+		s.casConflicts[p] = n - 1
+		// Bump the on-disk revision so the caller's re-read sees a
+		// new oldRev, but DON'T mutate the body so an idempotent merge
+		// keeps producing the same target body.
+		if _, ok := s.objects[p]; ok {
+			s.revisions[p] = s.nextRev()
+		}
+		return statestore.ObjectMeta{}, fmt.Errorf("%w: %s", statestore.ErrConflict, p)
+	}
+	cur, ok := s.objects[p]
+	if !ok {
+		return statestore.ObjectMeta{}, fmt.Errorf("%w: %s", statestore.ErrNotFound, p)
+	}
+	_ = cur
+	if s.revisions[p] != oldRev {
+		return statestore.ObjectMeta{}, fmt.Errorf("%w: %s", statestore.ErrConflict, p)
+	}
+	s.objects[p] = append([]byte(nil), data...)
+	s.revisions[p] = s.nextRev()
+	return statestore.ObjectMeta{Path: p, Size: int64(len(data)), Revision: s.revisions[p]}, nil
 }
 
 func (s *spyStore) List(ctx context.Context, prefix string) ([]statestore.ObjectInfo, error) {

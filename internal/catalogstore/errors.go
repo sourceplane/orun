@@ -32,14 +32,24 @@ var ErrManifestMismatch = errors.New("catalogstore: manifest body conflict for s
 // disk.
 var ErrInputsInconsistent = errors.New("catalogstore: inputs inconsistent (src/cat/manifests linkage)")
 
-// ErrNotImplemented is returned by Writer/Resolver methods whose bodies
-// are scheduled for later C4 PRs:
+// ErrRefStale is returned by WriteRefs, WriteGlobalIndexes (component
+// global indexes), and AppendComponentEvent (seq.lock allocator) when
+// the CompareAndSwap / CreateIfAbsent retry budget is exhausted without
+// reaching a stable state. Wraps the last underlying statestore conflict
+// (statestore.ErrConflict for CAS, statestore.ErrExists for the seq.lock
+// allocator) via the fmt.Errorf("%w: %w", ...) double-wrap pattern, so
+// callers may use errors.Is against either sentinel.
 //
-//	WriteRefs               — PR-2
-//	WriteGlobalIndexes      — PR-2
-//	AppendComponentEvent    — PR-2
-//	Resolver methods        — PR-3
+// PR-2 picks a single retry-exhausted sentinel for taxonomy minimalism
+// (vs split ErrGlobalIndexStale / ErrEventSeqExhausted): every retry-
+// exhausted path in PR-2 returns ErrRefStale, with the message text and
+// the wrapped statestore sentinel naming the actual surface.
+var ErrRefStale = errors.New("catalogstore: retry budget exhausted (ref / global index / seq.lock CAS)")
+
+// ErrNotImplemented is returned by Resolver methods whose bodies are
+// scheduled for C4 PR-3. PR-2 wires up every Writer method, so the only
+// remaining stubs are on the Resolver surface.
 //
 // The error wraps errors.ErrUnsupported so callers can detect a
 // not-yet-wired surface uniformly with errors.Is(err, errors.ErrUnsupported).
-var ErrNotImplemented = errors.New("catalogstore: not implemented in this PR (filled in by C4 PR-2 / PR-3)")
+var ErrNotImplemented = errors.New("catalogstore: not implemented in this PR (filled in by C4 PR-3)")

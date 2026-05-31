@@ -218,9 +218,9 @@ func (s *store) writeLocalIndexes(
 	idx CatalogLocalIndexes,
 ) error {
 	type axis struct {
-		name   string
+		name    string
 		entries map[string]any
-		path   func(srcKey, catKey, key string) (string, error)
+		path    func(srcKey, catKey, key string) (string, error)
 	}
 	axes := []axis{
 		{"components", idx.Components, ComponentLocalIndexPath},

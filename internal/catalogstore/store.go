@@ -8,10 +8,9 @@ import (
 )
 
 // Writer is the persistence-side contract for catalog objects. PR-1
-// implements the body-writing half (steps A and B in
-// catalog-store.md §3); WriteRefs / WriteGlobalIndexes /
-// AppendComponentEvent return ErrNotImplemented and are filled in by
-// PR-2.
+// shipped steps A and B (source body + catalog body fan-out); PR-2
+// fills in steps C and D (refs, global indexes, history events).
+// All five Writer methods are wired as of PR-2.
 type Writer interface {
 	// WriteSourceSnapshot persists a SourceSnapshot at SourceDocPath.
 	// Idempotent on byte-identical re-write; returns ErrSourceMismatch
@@ -36,13 +35,13 @@ type Writer interface {
 		localIndexes CatalogLocalIndexes,
 	) error
 
-	// WriteRefs is implemented by C4 PR-2.
+	// WriteRefs is implemented by C4 PR-2 in refs.go.
 	WriteRefs(ctx context.Context, refs RefUpdate) error
 
-	// WriteGlobalIndexes is implemented by C4 PR-2.
+	// WriteGlobalIndexes is implemented by C4 PR-2 in indexes.go.
 	WriteGlobalIndexes(ctx context.Context, updates GlobalIndexUpdate) error
 
-	// AppendComponentEvent is implemented by C4 PR-2.
+	// AppendComponentEvent is implemented by C4 PR-2 in events.go.
 	AppendComponentEvent(ctx context.Context, ev catalogmodel.ComponentHistoryEvent) error
 }
 
@@ -173,15 +172,6 @@ func (s *store) ResolveComponentLatest(ctx context.Context, key string) (Compone
 }
 
 // ----- Writer stubs (PR-2) --------------------------------------------
-
-func (s *store) WriteRefs(ctx context.Context, refs RefUpdate) error {
-	return ErrNotImplemented
-}
-
-func (s *store) WriteGlobalIndexes(ctx context.Context, updates GlobalIndexUpdate) error {
-	return ErrNotImplemented
-}
-
-func (s *store) AppendComponentEvent(ctx context.Context, ev catalogmodel.ComponentHistoryEvent) error {
-	return ErrNotImplemented
-}
+//
+// PR-2 moved the WriteRefs / WriteGlobalIndexes / AppendComponentEvent
+// bodies into refs.go / indexes.go / events.go. No stubs remain.

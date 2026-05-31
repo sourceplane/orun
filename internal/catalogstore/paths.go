@@ -113,10 +113,10 @@ func ValidateComponentName(name string) error {
 // thin aliases over ValidateSegment so tests can pin per-helper error
 // surfaces and so future tightening (e.g. per-axis caps) lands at one
 // site.
-func ValidateOwner(owner string) error    { return ValidateSegment(owner) }
-func ValidateSystem(system string) error  { return ValidateSegment(system) }
-func ValidateDomain(domain string) error  { return ValidateSegment(domain) }
-func ValidateType(typ string) error       { return ValidateSegment(typ) }
+func ValidateOwner(owner string) error   { return ValidateSegment(owner) }
+func ValidateSystem(system string) error { return ValidateSegment(system) }
+func ValidateDomain(domain string) error { return ValidateSegment(domain) }
+func ValidateType(typ string) error      { return ValidateSegment(typ) }
 func ValidateBranchSeg(branch string) error {
 	// Branch names are caller-sanitized via catalogmodel.SanitizeBranch
 	// before they reach the path layer; we re-validate the sanitized

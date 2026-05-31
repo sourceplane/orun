@@ -204,8 +204,12 @@ func TestPathHelpers_RejectInvalidArgsAndDoNotPanic(t *testing.T) {
 		func() (string, error) { return catalogstore.SourceDir("../escape") },
 		func() (string, error) { return catalogstore.SourceDocPath("") },
 		func() (string, error) { return catalogstore.CatalogDir("src-ok-cabcdef-tabcdef0", "BAD") },
-		func() (string, error) { return catalogstore.ComponentManifestPath("src-ok-cabcdef-tabcdef0", "cat-deadbeef", "..") },
-		func() (string, error) { return catalogstore.CatalogGraphPath("src-ok-cabcdef-tabcdef0", "cat-deadbeef", "weird") },
+		func() (string, error) {
+			return catalogstore.ComponentManifestPath("src-ok-cabcdef-tabcdef0", "cat-deadbeef", "..")
+		},
+		func() (string, error) {
+			return catalogstore.CatalogGraphPath("src-ok-cabcdef-tabcdef0", "cat-deadbeef", "weird")
+		},
 		func() (string, error) {
 			return catalogstore.ComponentHistoryEventPath("src-ok-cabcdef-tabcdef0", "cat-deadbeef", "name", 1, "")
 		},
