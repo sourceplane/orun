@@ -36,6 +36,12 @@ Show a specific execution:
 orun status --exec-id my-plan-20240601-a1b2c3
 ```
 
+List all executions under a specific `PlanRevision`:
+
+```bash
+orun status --revision rev-pr139-def456a-p8f31c09
+```
+
 ## Output
 
 `orun status` renders through the shared **cockpit** layer (see
@@ -95,6 +101,7 @@ be stripped; the iconography stays.
 | Flag | Meaning |
 | --- | --- |
 | `--exec-id` | Show a specific execution by ID |
+| `--revision` | Pin resolution to a specific `PlanRevision` key (lists all executions under that revision) |
 | `--all` | List all stored executions |
 | `--detailed` | Include step-level status in the output |
 | `--json` | Output in JSON format |

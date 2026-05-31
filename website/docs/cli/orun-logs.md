@@ -81,6 +81,7 @@ on the renderer); pass `--raw` to print every line.
 | Flag | Meaning |
 | --- | --- |
 | `--exec-id` | Target a specific execution (defaults to `latest`) |
+| `--revision` | Pin resolution to a specific `PlanRevision` key (combine with `--exec-id` for an exact lookup) |
 | `--job` | Filter output to a specific job ID |
 | `--step` | Filter output to a specific step ID within the selected job |
 | `--failed` | Show only failed jobs or steps |
