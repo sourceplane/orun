@@ -1,158 +1,131 @@
-# Orchestrator Brief — Cycle 8
+# Orchestrator Brief — Cycle 11
 
 ## Cache Fingerprint
-- generated_at: 2026-05-31
-- cycle_seq: 8
-- head_sha: 30f36cfc493c148b829eb3a23c5ed1273579560e
-- state_json_sha256: 4c7233b0565c436d1e9f1b1b14ea7bd05ef0eb28d02f21ee1ecde113fadf3ca6
-- merged_pr_count: 168 (gh pr list --state merged --limit 1000 | wc -l)
-- open_pr_count: 0 (no PR open at cycle-end; Task 0034 implementer
-  has not yet opened the C4 PR-3 PR)
-- last_task_agent: ai/tasks/task-0034.md
-- last_worker_result: verifier-pass (Task 0033 → PR #174 merged
-  at 73c6e8e on 2026-05-31)
-- worktree_dirty: ai/ only (state.json + current.md + task-ledger.md +
-  ai/tasks/task-0034.md + this brief; bookkeeping commit pending)
+- generated_at: 2026-05-31T00:00:00Z
+- cycle_seq: 11
+- head_sha: 96e3bbda60ce09c30264a76aecd9f726cf95e16e (main; C5 PR-1 / PR #176
+  merged. ai/ bookkeeping for this cycle is uncommitted pending the seal
+  commit — that commit will advance HEAD past 96e3bbd.)
+- state_json_sha256: f35f0c11cd5aa57b8067be01671aeff128ef9be410a9dd84a44a96c28469c6c2
+- merged_pr_count: 170 (gh pr list --state merged --limit 1000 | wc -l)
+- open_pr_count: 0
+- last_task_agent: ai/reports/task-0037-verifier.md
+- last_worker_result: single-pass closure (Task 0036 implementer + Task 0037
+  verifier in one session) → PR #176 merged, C5 PR-1 CLOSED. This cycle
+  EMITTED the next focus (Task 0038 = C5 PR-2 implementer), no worker run yet.
 
 ## Cache Validity Rule
-The next cycle MAY skip the cold read iff ALL of:
-- head_sha matches `git rev-parse HEAD` (will advance once cycle-8
-  bookkeeping commit lands; expected new HEAD = next-tip after
-  `ai: cycle 8 — Task 0033 verifier PASS (PR #174 merged); scope Task 0034 (C4 PR-3)`).
+The next cycle MAY skip the cold read (loop steps 1–7) iff ALL of:
+- head_sha matches `git rev-parse HEAD` (will advance once this cycle's seal
+  commit lands; a C5 PR-2 merge then bumps merged→171 and advances main —
+  that INVALIDATES this brief).
 - state_json_sha256 matches recomputed hash.
-- merged_pr_count = 168; open_pr_count expected 0 OR 1 (1 = the
-  Task 0034 implementer opened the C4 PR-3 PR — that is the
-  expected next state and does NOT invalidate the brief by itself;
-  a PR squash-merge into main DOES invalidate because cycle 9 must
-  scope Task 0035 verifier or a new task, not re-read this one).
+- merged_pr_count = 170 AND open_pr_count tracks Task 0038's PR lifecycle
+  (0 now → 1 when the implementer opens the C5 PR-2 → 0 after merge).
 - cycle_seq within 3 of next cycle's seq.
-Otherwise: discard this brief and do a full cold read.
+Otherwise: discard and cold-read. NOTE: the most likely next event is the
+Task 0038 implementer opening a PR (open→1) — that alone does NOT invalidate;
+cycle 12 then scopes Task 0039 = C5 PR-2 verifier, the predicted path below.
 
 ## Mental Model
-Phase 2 / Milestone C4 / write-side complete. PR-1 (paths + writer
-Steps A & B) and PR-2 (refs/indexes/events Steps C & D) are both
-merged. The `Writer` interface is fully wired; only the `Resolver`
-side remains, with five `ErrNotImplemented` stubs in `store.go`
-and a missing `RebuildIndexes` method (the spec calls for it in §8
-but it isn't on the interface yet — this PR adds it). Task 0034
-scopes the final C4 PR: implement all five Resolver methods using
-the §4 fallback ladder, add `RebuildIndexes` to the `Resolver`
-interface, and prove byte-identical T-STORE-3 rebuild. After this
-PR merges, C4 closes and C5 (the `orun catalog *` CLI) becomes
-the active milestone.
+Phase 2 is into the user surface and C5 PR-1 has landed: `orun catalog
+refresh` + `orun catalog refs` are live, backed by two new pure seams in
+internal/catalogstore — `AssembleBundle` (CatalogView → the four writer-input
+bundles, pure/deterministic) and `ListRefs` (the source⋈catalog ref-tree
+join the Resolver interface couldn't do). The shared CLI foundation is also
+in place: the `orun catalog` root + subcommand index, the single
+`parseCatalogSelector` → catalogstore.RefSelector bridge, and the §11 JSON
+envelope writer. Every later C5 command reuses all three.
 
-The single carry-over tension from cycle 7: PR-2 closed at 90.1 %
-on `internal/catalogstore` (in the PASS-with-note band, after
-the verifier attached 28 tests to recover from the implementer's
-85.3 % landing). The Task 0034 prompt sets the bar at ≥ 91 % and
-explicitly cites that lesson — the goal is for the implementer to
-land cleanly without a verifier coverage rescue this round. The
-three-branch adjudication policy still applies if they don't.
+C5 PR-2 is the remaining read surface: `list`, `describe`, `tree`, `history`,
+`validate` (with `diff` stubbed → C8). These are pure consumers of what PR-1
+built — `list` reuses ListRefs + Resolver.ResolveCatalog; `describe`/`tree`
+walk a resolved CatalogSnapshot + its CatalogGraphs; `history` is read-only
+event enumeration (event APPEND stays C7); `validate` re-runs the resolver in
+strict mode and reports issues. No new write paths, no new on-disk contract.
 
 ## Active Spec Pointer
 - spec: specs/orun-component-catalog
-- milestone: C4 (`internal/catalogstore` Writer + Resolver)
-- milestone_done_when_remaining:
-  - C4 PR-3 (resolver + fallback chain `current → latest → main` +
-    `RebuildIndexes`) — PENDING (Task 0034 implementer slot).
-- next_milestone_after: C5 — Catalog CLI surface (`orun catalog *`
-  subcommands per `cli-surface.md`). Suggested 2 PRs (refresh +
-  list + describe + refs / tree + history + validate; diff stubbed
-  for C8). Unlocked once C4 PR-3 merges.
+- milestone: C5 (Catalog CLI surface) — PR-1 ✅ CLOSED, PR-2 remaining
+- milestone_done_when_remaining (whole C5, PR-2 closes it):
+  - `list` enumerates catalogs/components with `--json`. (Task 0038)
+  - `describe` resolves a component selector; ambiguity exits 4 with
+    candidates. (Task 0038)
+  - `tree` renders the dependency/systems/owners graphs. (Task 0038)
+  - `history` enumerates component events read-only. (Task 0038)
+  - `validate` re-runs resolution strict + reports issues; `diff` stubbed
+    → C8. (Task 0038)
+  - All commands inherit the shared RefSelector parser + §11 envelope +
+    help-fixture gating from PR-1.
+- next_milestone_after: C6 — `orun plan` integration (plans live under
+  (SourceSnapshot, CatalogSnapshot) parents). Unlocked once C5 closes.
 
 ## Open PRs
-_none_ — PR #174 squash-merged at 73c6e8e on 2026-05-31. No PR
-currently in flight. Cycle 9 expects the Task 0034 implementer
-to open the C4 PR-3 PR.
+_none_ — PR #176 (C5 PR-1) merged at 96e3bbd. Task 0038 implementer has not
+opened its PR yet.
 
 ## Deferred Backlog
-_none_ — `/ai/deferred.md` carries no entries. All roadmap
-candidates remain human-independent.
+_none_ — `/ai/deferred.md` carries no entries. All roadmap candidates
+human-independent; loop is running on Task 0038.
 
 ## Active Proposals
-_none_ — no `/ai/proposals/**` entries pending adjudication. The
-retry-budget 8→16 spec drift surfaced in PR-2 was ruled
-non-escalating by the Task 0033 verifier (advisory spec wording,
-harmless single-writer Phase 2 behaviour). Re-evaluate at C9 /
-Phase 3 when remote drivers and concurrency widen.
+_none_ pending. Carry-forward for the PR-2 implementer: CatalogLocalIndexes
+currently emits component-execution indexes only (empty executions[]); the
+owner/system/domain/type axes are unspecified in data-model.md §9. If `list`/
+`describe` need those axes populated, the implementer files
+`ai/proposals/task-0038-spec-update.md` and cycle 12 adjudicates first.
+Standing non-escalated drift: retry-budget 8→16 (advisory, harmless
+single-writer Phase 2, revisit C9/Phase 3).
 
 ## Last Decision Rationale
-Why scope Task 0034 = C4 PR-3 implementer (and NOT, e.g., a
-coverage-buffer remediation on `internal/catalogstore` or a
-preview of a C5 CLI seam):
-- C4 PR-3 is the direct dependency-unblock for C5. No other
-  human-independent PR-sized work is closer to the critical path.
-- The Resolver shape is fully specified by `catalog-store.md` §4
-  + §8 + §9; no design questions to defer or proposals to
-  adjudicate. The implementer can ship inline.
-- The PR-2 coverage lesson (85.3 % implementer landing → 90.1 %
-  verifier-attached recovery) is a one-time cost — the prompt
-  explicitly sets the ≥ 91 % bar and the same three-branch
-  adjudication tree, but doesn't gold-plate around it.
-- Adding `RebuildIndexes` to the `Resolver` interface in this PR
-  rather than splitting it out is the right scope: the function
-  belongs naturally with the other read-side bodies, the
-  T-STORE-3 byte-identical proof is the canonical close-out test
-  for the milestone, and splitting would force an awkward
-  one-method-only PR that doesn't ship a meaningful surface.
-- Coverage buffer remediation as a standalone task would be busy
-  work — PR-3 will move the denominator anyway, and the floor
-  is held.
-- `RefSelector.Snapshot` (C8 diff input) explicitly out of scope
-  to keep PR-3 narrow; documented as a "not yet implemented (C8)"
-  rejection path the implementer must include for safety.
+Why this cycle closed C5 PR-1 as a single-pass closure (implementer +
+verifier in one session) rather than two cycles:
+- The user issued a full-ship-cycle directive ("do your full duties … always
+  produce new tasks or verifier as suited"), which the user-profile exception
+  treats as standing approval to run end-to-end (implement → PR → CI → verify
+  → merge) without per-phase pauses.
+- The verification gates were still run in full inline (scope, code
+  inspection, dependency-direction grep, no-raw-FS grep, -race, coverage,
+  verify-generated, CI watch) — only the agent identity collapsed.
+- Seam-home call confirmed at verification: AssembleBundle landed in
+  catalogstore (not catalogresolve as the scope hint suggested) because it
+  returns catalogstore types and the architecture rule forbids
+  catalogresolve importing catalogstore. This is the correct, invariant-
+  preserving home — recorded so PR-2 doesn't relitigate it.
 
 ## Next Cycle Hypothesis
-- if **implementer-pass on Task 0034 (PR opened, CI green,
-  coverage ≥ 91 %)**: cycle 9 scopes Task 0035 = C4 PR-3 verifier.
-  Verifier inspects fallback ladder code path, re-runs T-STORE-3
-  byte-identical assertion, audits `errors.Is` chain through
-  `ErrCatalogNotFound` / `ErrComponentNotFound` /
-  `statestore.ErrNotFound`, confirms zero `ErrNotImplemented`
-  surfaces remain, validates ctx-cancellation behaviour in walks.
-  PASS = merge → C4 closes → cycle 10 scopes Task 0036 = C5 PR-1
-  implementer (`orun catalog refresh|list|describe|refs`).
-- if **implementer-pass with coverage 90 ≤ x < 91**: cycle 9 still
-  scopes Task 0035 verifier; verifier may attach a 6–10-test
-  top-up (PR-2 precedent) and merge in path (a). C5 then unlocks.
-- if **implementer-blocked (e.g. fallback walk perf budget
-  unmeetable, or T-STORE-3 byte-identity reveals encoder
-  non-determinism)**: cycle 9 scopes a remediation Task 0034.1
-  scoped to whichever specific failure surfaced. Most likely
-  trigger is encoder/merge-policy non-determinism (e.g. component
-  preview ordering instability under specific input shapes).
-- if **implementer raises a spec proposal**: most likely candidate
-  is `RebuildIndexes` placement (interface vs free function) or
-  the §4 `ResolveComponentLatest` fallback walk's source-scope
-  filter rule. Cycle 9 reviews the proposal first; default
-  posture is accept-with-revision unless it changes the on-disk
-  contract.
-- if **verifier-pass via attached fix (cycle 9 path c→a)**:
-  same as the clean implementer-pass branch; cycle 10 still
-  scopes Task 0036 = C5 PR-1.
-- if **verifier-fail with no attached fix viable**: cycle 10
-  scopes Task 0035.1 implementer-fix on the same PR branch;
-  PR stays open until cleared.
+- if **implementer-pass on Task 0038** (PR opened, CI green): cycle 12 scopes
+  Task 0039 = C5 PR-2 verifier — verify the read-surface commands, re-measure
+  coverage on catalogstore/catalogresolve/sourcectx/cmd-orun, adjudicate via
+  the three-branch policy (path-a attach tests if a floor is missed — the
+  recurring C4 pattern), confirm reuse of the PR-1 seams + envelope + parser,
+  then merge. On merge **C5 CLOSES** and C6 (plan integration) unlocks.
+- if **implementer-blocked** (a read command needs an index axis the spec
+  doesn't define, e.g. owner/system/domain/type for `list`): cycle 12 reads
+  the blocker/proposal, adjudicates the axis shape, re-emits a narrowed
+  Task 0038.1.
+- if **implementer files ai/proposals/task-0038-spec-update.md** (likely
+  candidate: CatalogLocalIndexes axis population or the `describe` ambiguity/
+  exit-4 candidate-list shape): cycle 12 adjudicates first; default posture
+  accept-with-revision unless it changes the on-disk index contract (touches
+  identity-and-keys.md / data-model.md §9 — handle with care).
+- if **verifier later FAILs on a coverage floor** (recurring C4 pattern):
+  scope a path-(a) attach-tests top-up on the same PR branch; PR stays open
+  until ≥ 90 %.
+- if **executionstate flaps red again** on Task 0038 CI (R-008): not a
+  blocker (rerun clears); promote R-008 to a scoped micro-task only if it
+  reds a third time. Do NOT fold into the catalog PR.
 
 ## Stale Signals
-- A new PR opened on the repo before cycle 9 starts —
-  invalidates `open_pr_count` from 0 to 1; that is the EXPECTED
-  next state and only forces a cold read if cycle 9 needs to
-  scope a verifier rather than just confirm Task 0034 progress.
-- `main` advances past `30f36cf` by anything other than the
-  cycle-8 bookkeeping commit before cycle 9 starts.
-- Squash-merge of the Task 0034 implementer PR before cycle 9
-  evaluates — invalidates the brief because cycle 9 must scope
-  Task 0035 verifier rather than re-read this one.
-- New file under `ai/proposals/` (e.g. `RebuildIndexes`
-  placement, `ResolveComponentLatest` walk filter, encoder
-  determinism question).
-- A user redirect away from C4 PR-3 (e.g. "skip resolver, ship
-  the CLI on top of stubs") — would force cold read and update
-  of Active Spec Pointer.
-- Any drop in a sibling coverage floor — invalidates the
-  "floors held byte-for-byte" precondition this brief assumes.
-- A surprise rebuild non-determinism finding (encoder map
-  iteration, sorting drift) on `internal/catalogresolve` or
-  `internal/catalogmodel` — would force re-read of those packages
-  and possibly a Phase 2 hash-stability proposal before C4 closes.
+- Task 0038 implementer opens its PR → open_pr_count 0→1 (expected; cycle 12
+  scopes the verifier, does NOT re-read this brief's planning).
+- The C5 PR-2 PR squash-merges → merged→171, main advances past 96e3bbd →
+  forces cold read; **C5 CLOSES**, cycle then scopes C6 (plan integration).
+- A new file under `ai/proposals/` (CatalogLocalIndexes axis or describe
+  candidate-list shape).
+- User redirect away from C5 PR-2 (e.g. "jump to plan integration" or "fold
+  remaining catalog commands differently").
+- The implementer reuses a PR-1 seam incorrectly — re-implements ListRefs/
+  AssembleBundle instead of importing, or buries read logic in cobra RunE
+  instead of a tested helper — verifier must catch this.
+- Any Phase-1 or Phase-2 coverage floor drops below its recorded value.

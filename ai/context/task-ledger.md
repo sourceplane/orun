@@ -1579,3 +1579,175 @@ schema). Milestones C0–C9 per `implementation-plan.md`.
   `task-0034-catalogstore-c4-pr3-resolver`, ready for Task 0035
   verifier. After merge: Milestone C4 closes, Milestone C5 (CLI
   surface) becomes the active milestone.
+- **Outcome (2026-05-31):** PR **#175** opened. CI all-green /
+  mergeStateStatus CLEAN. NOTE: `test` job flapped red once on an
+  `executionstate` coverage measurement (89.6 % vs 90.0 % floor —
+  a Phase-1 package PR-3 does not touch); rerun → 90.0 % green.
+  **Coverage shortfall:** implementer landed `internal/catalogstore`
+  at **88.9 %** — below the 90 % floor / 91 % target (low funcs are
+  the new `rebuild.go` bodies, 72–79 %). catalogstore has no CI gate,
+  so green CI did not catch it. Adjudication handed to Task 0035
+  verifier. Awaiting verification.
+
+## Task 0035 — C4 PR-3 verifier (PR #175)
+- **Agent:** Verifier
+- **Prompt:** `ai/tasks/task-0035-verifier.md`
+- **Status:** scoped and ready to begin (2026-05-31)
+- **Objective:** Verify PR #175 (Task 0034 C4 PR-3 read-side Resolver
+  + RebuildIndexes) against acceptance criteria + the Verifier
+  Standard. Primary focus: adjudicate the `internal/catalogstore`
+  88.9 % coverage shortfall via the three-branch policy (mirror Task
+  0033 PR-2), inspect the §4 reader fallback ladder, and validate the
+  T-STORE-3 byte-identical rebuild proof. Execute the merge protocol.
+- **Scope boundary:** verify PR #175 only — no scope expansion. May
+  attach focused coverage tests to the PR branch (path (a)) to lift
+  `internal/catalogstore` ≥ 90 % before merge. Must NOT touch
+  executionstate or any package outside catalogstore.
+- **Required outcomes:** coverage re-measured + adjudication branch
+  chosen (a/b/c) with final number stated; §4 fallback ladder code
+  path verified (refs→walk→typed sentinel; `ErrComponentNotFound` vs
+  `ErrCatalogNotFound`; `errors.Is` chain; ctx cancellation; zero
+  live `ErrNotImplemented` surfaces); T-STORE-3 byte-identity proven
+  across all three index kinds; no-raw-FS guard empty; implementer's
+  3 open questions adjudicated; secret review clean; carry-forward
+  executionstate floor-flap recorded as R-008.
+- **Acceptance:** `Result: PASS` requires PR #175 MERGED, C4 CLOSED
+  (zero `ErrNotImplemented` Resolver surfaces, T-STORE-3 green on
+  main), adjacent floors held, verifier report filed.
+- **Expected outcome:** PASS → PR #175 squash-merged, C4 closes, C5
+  (`orun catalog *` CLI) becomes the active milestone; or
+  PASS-with-attached-fix → coverage top-up committed to #175 then
+  merged; or FAIL → PR stays open, Task 0035.1 implementer-fix scoped.
+- **Verifier outcome (2026-05-31):**
+  - **Result: PASS (with verifier-attached coverage fix, path a).**
+    PR **#175** squash-merged → `main` commit
+    `42eace5f7a475bbf48d82b9f1847031e25068c1f` at 2026-05-31T12:51:14Z;
+    branch deleted. **Milestone C4 CLOSED.**
+  - **Coverage adjudication:** implementer landed
+    `internal/catalogstore` at **88.9 %** (below 90 % floor; package
+    has no CI gate). Gap concentrated in NEW `rebuild.go` bodies
+    (reachable walk/merge/write logic, not defensive returns) →
+    path (a). Verifier attached two test files
+    (`rebuild_coverage_test.go` 321 L + `resolver_coverage_test.go`
+    193 L, 514 insertions, `package catalogstore_test`, `writeRaw`
+    helper) on commit `cb563be`, lifting to **90.3 %** (progression
+    88.9 → 89.5 → 89.8 → 90.2 → 90.3). Healthy margin above floor to
+    avoid the executionstate "flap problem". No production code changed.
+  - **§4 fallback ladder:** verified — refs-first → walk-fallback →
+    typed-sentinel; `current → latest → main`; `ErrComponentNotFound`
+    vs `ErrCatalogNotFound` with intact `errors.Is` chains; ctx
+    cancellation honoured; non-`NotFound` read errors surfaced not
+    swallowed. Zero live `ErrNotImplemented` Resolver surfaces.
+  - **T-STORE-3:** scrub-then-rebuild byte-identity test present and
+    green across all three index kinds.
+  - **No-raw-FS guard:** `grep` for `os`/`io/ioutil`/`path/filepath`
+    in `internal/catalogstore/` empty. Secret review clean.
+  - **Adjudications:** RefSelector.Snapshot accept-and-document
+    (spec reserves for C8; implementer's `readSourceByKey` wiring is a
+    permitted superset). Implementer's 3 open questions resolved
+    inline (no proposals): CGI test-helper duplication = harness
+    hygiene; stale-index-scrub → C8; corrupt-manifest silent skip =
+    acceptable + now covered.
+  - **Carry-forward:** executionstate zero-margin floor flapped once
+    (89.6 % vs 90.0 %) on the PR #175 CI `test` job — recorded as
+    R-008 in `ai/context/open-risks.md`; not fixed in-PR (PR-boundary).
+  - **Quality gates on merged tree:** `go vet ./...`, `go build ./...`,
+    `go test -race -count=1 ./...`, `make verify-generated` all green;
+    adjacent floors held; post-merge main CI (CI, state-redesign-tests,
+    conformance) all PASS.
+  - **Reports:** implementer `ai/reports/task-0034-implementer.md`;
+    verifier `ai/reports/task-0035-verifier.md`.
+  - **Next:** Task 0036 = C5 PR-1 implementer (`orun catalog
+    refresh|list|describe|refs` per `cli-surface.md`).
+
+## Task 0036 — C5 PR-1 implementer (catalog CLI foundation + refresh + refs)
+- **Agent:** Implementer
+- **Prompt:** `ai/tasks/task-0036.md`
+- **Status:** scoped and ready to begin (2026-05-31)
+- **Milestone:** C5 — Catalog CLI surface (first of the suggested 2 C5
+  PRs). C4 closed via PR #175; the `internal/catalogstore` read+write
+  engine + `catalogresolve.BuildCatalog` + `sourcectx.
+  ResolveSourceSnapshot` are all live.
+- **Objective:** Ship `cmd/orun/catalog.go` (root + dispatch) and the
+  first two subcommands forming one coherent write→read slice:
+  `orun catalog refresh` (resolve→build→persist the
+  `(SourceSnapshot, CatalogSnapshot)` pair through the live engine;
+  idempotent reuse; dirty banner; `--source`/`--catalog-source`/
+  `--catalog-snapshot`/`--strict`/`--no-infer`/`--json`/`--sync`; §2
+  exit codes) and `orun catalog refs` (enumerate refs + `authoritative`;
+  `--json`). Plus shared plumbing reused by every later C5 command:
+  `RefSelector` parser, §11 JSON envelope writer (`kind` ∈
+  `{CatalogRefreshResult, CatalogRefsResult}`), help fixtures.
+- **Two new seams (the leverage):** (1) persistence-bundle assembly
+  (`CatalogView` → `CatalogGraphs`/`CatalogLocalIndexes`/
+  `GlobalIndexUpdate`/`RefUpdate`) — no helper exists; recommended
+  `internal/catalogresolve`, pure + unit-tested. (2) ref enumeration —
+  `Resolver` resolves per-selector but cannot LIST; add a typed
+  `ListRefs`-style reader over `statestore` dir reads with **no raw FS
+  imports in `internal/catalogstore/`** (no-raw-FS lint stays green).
+- **Scope boundary:** one PR, additive only. NO `list`/`describe`/`tree`/
+  `history`/`validate` (later C5 PRs), no `diff` (C8), no `plan`/`run`
+  integration (C6/C7), no `AppendComponentEvent` (C7), no networking.
+- **Acceptance:** `go build`/`go vet`/`go test -race -count=1 ./...`/
+  `make verify-generated`/`make test-state-redesign` green; floors held
+  (catalogstore/catalogresolve/sourcectx ≥ 90 %, any new pkg ≥ 90 %,
+  Phase-1 floors byte-for-byte); two-run refresh idempotent + ref
+  appears; `--json` envelopes correct; help fixtures gated; PR opened.
+- **Expected outcome:** implementer-pass → Task 0037 = C5 PR-1 verifier;
+  on merge the C5 PR-2 read surface (`list`/`describe`/...) unlocks.
+
+## Task 0036 — UPDATE (cycle 11, implementer pass — single-pass closure)
+- **Status:** ✅ implemented; shipped via PR #176, merged at `96e3bbd`.
+- **Implementation:** branch `feat/c5-pr1-catalog-cli`. `cmd/orun/`:
+  `catalog.go` (root + subcommand index; §11 envelope writer;
+  `parseCatalogSelector` → `catalogstore.RefSelector` shared bridge;
+  pure input-builders incl. `shortRepoName`/`computeCatalogAuthoritative`),
+  `catalog_refresh.go` (resolve→build→assemble→commit; idempotent reuse;
+  dirty banner; authoritative vs preview; §2 exit codes; `--sync` no-op),
+  `catalog_refs.go` (enumeration via `ListRefs`), `main.go` (exit-code
+  unwrap via `errors.As`). `internal/catalogstore/`: `bundle.go`
+  (`AssembleBundle` — pure, deterministic) + `listrefs.go` (`ListRefs`).
+- **Seam-home decision (differs from scope hint):** persistence-bundle
+  assembly landed in `internal/catalogstore` (NOT catalogresolve) — it must
+  return catalogstore types and catalogresolve may not import catalogstore.
+  Architecture rule (catalogstore → catalogresolve, never reverse) held.
+- **Tests:** `cmd/orun/catalog_test.go` (selector forms + malformed exit-1,
+  envelope shape, authoritative matrix, refresh→reused E2E, refs E2E, empty
+  store, sync no-op); `internal/catalogstore/seams_test.go` (AssembleBundle
+  purity/determinism/scope-carry; ListRefs empty/join/sorted).
+- **Validation:** build/vet clean; `-race -count=1` (4 pkgs) PASS;
+  `make verify-generated` up-to-date; no-raw-FS grep clean; catalogstore
+  coverage 90.2% (floor); 7-scenario manual smoke green.
+- **Reports:** `ai/reports/task-0036-implementer.md`.
+
+## Task 0037 — C5 PR-1 verifier (PR #176)
+- **Agent:** Verifier (single-pass closure — same session as implementer,
+  full-ship-cycle directive)
+- **Prompt:** `ai/tasks/task-0037-verifier.md`
+- **Objective:** Verify PR #176 (Task 0036 C5 PR-1: catalog refresh/refs +
+  shared CLI foundation + two pure seams) against acceptance criteria.
+- **Scope boundary:** verify PR #176 only — no expansion to C5 PR-2.
+- **Verifier outcome (2026-05-31):**
+  - **Result: PASS, no fixes required.** PR **#176** squash-merged → `main`
+    commit `96e3bbd` at 2026-05-31T15:17:22Z; branch deleted. **C5 PR-1
+    CLOSED.**
+  - **Scope:** PR maps to exactly one task; no unrelated churn; no spec
+    drift (no `ai/proposals/` entry needed).
+  - **Code inspection:** dependency direction clean (catalogstore does NOT
+    import catalogresolve — matches are comments only); no raw FS in
+    catalogstore non-test files except `paths.go`; `AssembleBundle` pure +
+    deterministic; exit-code plumbing correct; no secrets.
+  - **Coverage:** `internal/catalogstore` held at **90.2 %** (floor).
+    `cmd/orun` 24.1 % (long-standing baseline, no enforced floor) — new
+    seams + refresh→refs E2E covered; uncovered arms are text-render +
+    io-error sentinels (defensive).
+  - **Static guards:** `go build ./...`, `go vet`, `go test -race -count=1`
+    (4 pkgs), `make verify-generated`, no-raw-FS grep all green.
+  - **CI:** PR CI green on HEAD `88e104d` (run 26716370631 — test, Orun
+    Plan, Harness dry-run guard).
+  - **Carry-forward to C5 PR-2:** `CatalogLocalIndexes` owner/system/domain/
+    type axes still empty (data-model §9 under-specifies; history is C7).
+  - **Reports:** implementer `ai/reports/task-0036-implementer.md`;
+    verifier `ai/reports/task-0037-verifier.md`.
+  - **Next:** Task 0038 = C5 PR-2 implementer (`orun catalog list|describe|
+    tree|history|validate`; `diff` stubbed for C8).

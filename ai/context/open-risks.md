@@ -14,6 +14,28 @@
 
 ## Operational
 
+- **R-008: `internal/executionstate` zero-margin coverage floor (CI-stability
+  liability).** The package sits at *exactly* 90.0 % statement coverage — the
+  Makefile `test-state-redesign` gate floor — with no buffer. On the Task 0034
+  PR #175 CI run it measured **89.6 %** (Linux + `-race`) and the `test` job
+  failed; a rerun measured 90.0 % and went green. The package is byte-identical
+  to main and untouched by Phase 2 C4. Root: the low-coverage functions are the
+  EXDEV/hardlink mirror + legacy-resolver fallback paths (`bridge.go`
+  `linkArtifact`/`destAbs` 75 %, `resolver.go` legacy walks 83–87 %,
+  `writer.go` `finalizeExecution`/`scanForNextRunSeq` 77 %) whose branch
+  execution is environment-sensitive (darwin vs linux, race scheduler). Any
+  future PR can randomly red on this floor even when it doesn't touch the
+  package. **Mitigation (deferred, NOT to be folded into a catalog PR):** add
+  2–4 targeted tests to lift `internal/executionstate` ~1–2 pp off the exact
+  floor, OR widen the Makefile gate tolerance (e.g. floor 89.5 % with the
+  documented target staying 90 %). **Trigger to action:** if the flap recurs a
+  third time on any PR, the orchestrator scopes a standalone micro-task. First
+  observed 2026-05-31 (Task 0034 / PR #175, now merged at `42eace5`; the flap
+  did NOT recur on the Task 0035 verifier's PR-branch or post-merge main CI
+  runs). **Status: open, low-priority, watch.**
+
+## Operational (historical)
+
 - **R-004: `ai/` directory rebuilt from scratch.** The 2026-05-30 pivot left the old `ai/` tree as unstaged deletions in `git status`. The orchestrator has rebuilt the four compact context files plus `state.json` and `task-0001.md`. The deletions of old TUI-era tasks/reports must be committed (or reverted) when the first M0 PR opens — currently they sit dirty in the working tree. Implementer for Task 0001 will fold these `ai/` deletions into their PR so main has a coherent tree. **Resolved** at PR #152 (Task 0001).
 
 - **R-005: Implementer "implemented locally" anti-pattern.** Task 0007 (M3 PR-A) was the first observed case of an implementer running quality gates to green on a local branch but never committing, pushing, or opening a PR. The implementer report was filed without a `PR Number` line. **Mitigation landed:** Task 0008 corrective delivery chore committed the staged tree (`96621ed`), pushed branch `impl/task-0007-m3-revision-pra`, opened PR **#157**, and backfilled the PR number into both implementer reports (`500218c`). PR #157 is OPEN+MERGEABLE+CLEAN with required CI SUCCESS at log level. **Status: mitigated for this incident; pattern guard remains open.** **Forward action:** future implementer prompts must keep the `PR Creation Requirement` section explicit and acceptance criteria should include a `gh pr list --head <branch>` check returning a non-empty array. If the same anti-pattern recurs, escalate by adding a pre-flight self-check to the implementer prompt template.
