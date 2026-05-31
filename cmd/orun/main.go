@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1041,6 +1042,10 @@ func printComponentCompact(comp *expand.ComponentMerged, color bool) {
 func main() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "✕ %v\n", err)
+		var coder interface{ ExitCode() int }
+		if errors.As(err, &coder) {
+			os.Exit(coder.ExitCode())
+		}
 		os.Exit(1)
 	}
 }

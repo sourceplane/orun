@@ -194,4 +194,5 @@ func init() {
 	registerGithubCommand(rootCmd)
 	registerTuiCommand(rootCmd)
 	registerStateCommand(rootCmd)
+	registerCatalogCommand(rootCmd)
 }
