@@ -18,6 +18,12 @@ The optional positional argument controls what gets run:
 - **plan hash or name** — runs the matching saved plan from `.orun/plans/`
 - _(omitted)_ — generates a fresh plan from the current intent and runs it
 
+Since v2.10.0 every execution is filed under its `PlanRevision` at
+`.orun/revisions/<revisionKey>/executions/run-NNN/`. Use
+`--revision <key>` to skip the resolution chain and execute a specific
+revision directly. See [State model](../concepts/state-model.md) for
+the resolution order and the on-disk layout.
+
 ```bash
 # Generate and run a fresh plan scoped to one component
 orun run network-foundation
@@ -54,6 +60,12 @@ Execute a specific plan file:
 
 ```bash
 orun run --plan /tmp/plan.json
+```
+
+Execute a specific `PlanRevision` by key (skips the resolution chain):
+
+```bash
+orun run --revision rev-pr139-def456a-p8f31c09
 ```
 
 Execute inside Docker:
@@ -176,6 +188,7 @@ orun run --changed --explain
 | Flag | Meaning |
 | --- | --- |
 | `--plan`, `-p` | Plan reference: file path, name, or checksum prefix _(deprecated — pass the reference as a positional argument instead)_ |
+| `--revision` | Execute a specific `PlanRevision` by key (e.g. `rev-pr139-def456a-p8f31c09`). Skips the resolution chain. |
 
 ### Change detection flags
 

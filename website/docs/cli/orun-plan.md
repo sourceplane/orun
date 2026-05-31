@@ -18,7 +18,29 @@ orun plan network-foundation
 
 When run without `--intent`, `orun` automatically discovers `intent.yaml` by walking up the directory tree to the git root. The plan is always **global** — it always includes all components. Use the positional argument or `--component` to explicitly restrict compilation to specific components.
 
-The generated plan is saved to `.orun/plans/{checksum}.json` and also written as `.orun/plans/latest.json`. `orun run` resolves `latest` automatically, so you rarely need to specify an output path.
+Since v2.10.0 every successful compile produces a **`PlanRevision`**.
+The plan is filed under
+`.orun/revisions/<revisionKey>/plan.json` together with the
+`TriggerOccurrence` (`trigger.json`) that produced it. The legacy
+`.orun/plans/{checksum}.json` and `.orun/plans/latest.json` paths are
+still written by default as a compatibility mirror so existing tooling
+keeps working — see [State model](../concepts/state-model.md) for the
+full layout. `orun run` resolves `latest` automatically, so you rarely
+need to specify an output path.
+
+A successful `orun plan` prints the new summary block, e.g.
+
+```
+✓ Plan revision created
+
+Revision: rev-pr139-def456a-p8f31c09
+Trigger:  github-pull-request / pr-139 / def456a
+Jobs:     12
+Path:     .orun/revisions/rev-pr139-def456a-p8f31c09/plan.json
+```
+
+Bare `orun plan` invocations resolve a `system.manual` trigger so the
+revision/trigger chain is unbroken even for ad-hoc local runs.
 
 ## Common examples
 

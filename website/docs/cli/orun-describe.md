@@ -10,7 +10,7 @@ title: orun describe
 orun describe <resource> [name]
 ```
 
-Supported resources: `run`, `plan`, `job`, `component`.
+Supported resources: `run`, `plan`, `job`, `component`, `revision`, `trigger`, `execution`.
 
 ## Common examples
 
@@ -52,6 +52,29 @@ Describe a component:
 orun describe component network-foundation
 ```
 
+Describe a `PlanRevision` (latest or by key):
+
+```bash
+orun describe revision latest
+orun describe revision rev-pr139-def456a-p8f31c09
+```
+
+Describe the `TriggerOccurrence` for the latest revision (or pinned by
+trigger name):
+
+```bash
+orun describe trigger latest
+orun describe trigger github-pull-request
+```
+
+Describe a specific execution (`run-NNN` under a revision, or a legacy
+exec id):
+
+```bash
+orun describe execution run-001
+orun describe execution my-plan-20240601-a1b2c3
+```
+
 ## Slash notation
 
 `describe` also accepts slash notation directly on the parent command:
@@ -80,6 +103,26 @@ Shows component, environment, composition, working directory, timeout, retries, 
 ### `describe component`
 
 Equivalent to `orun component <name> --long`. Shows the merged view with all inputs, labels, overrides, and per-environment instances.
+
+### `describe revision`
+
+Renders the `revision.json` + `manifest.json` pair for the resolved
+`PlanRevision`. Includes the trigger summary, plan hash, job count,
+on-disk path, and the latest execution's status. `latest` resolves to
+the newest revision in `refs/latest-revision.json`.
+
+### `describe trigger`
+
+Renders the `TriggerOccurrence` (`trigger.json`) for the resolved
+revision. `latest` follows the same ref as `describe revision latest`;
+passing a trigger name resolves through `refs/triggers/<name>/latest.json`.
+
+### `describe execution`
+
+Renders the `ExecutionRun` (`execution.json` + `snapshot.latest.json`)
+for the resolved execution. Falls back to the legacy
+`.orun/executions/<id>/` tree when the new layout has no match. See
+[State model](../concepts/state-model.md) for the resolution chain.
 
 ## Related commands
 
