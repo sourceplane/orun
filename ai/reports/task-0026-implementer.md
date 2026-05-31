@@ -4,7 +4,7 @@
 - **Task:** 0026
 - **Milestone:** C2 (Phase 2 — `specs/orun-component-catalog/`) — second / closing PR
 - **Branch:** `task-0026-catalogresolve-c2-pr2`
-- **PR Number:** TBD (filled in after `gh pr create`)
+- **PR Number:** #171
 
 ## Summary
 
@@ -194,4 +194,4 @@ two packages; all new surface area lives inside
 
 ## PR Number
 
-TBD — filled in after `gh pr create`.
+#171.
