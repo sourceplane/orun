@@ -1,0 +1,6 @@
+apiVersion: orun.io/v1alpha1
+kind: Component
+metadata:
+  name: alone
+spec:
+  type: cloudflare-worker

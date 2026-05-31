@@ -1,0 +1,23 @@
+apiVersion: orun.io/v1alpha1
+kind: Component
+metadata:
+  name: api-edge
+  title: API Edge Worker
+  labels:
+    domain: edge
+    tier: critical
+  annotations:
+    github.com/team: platform-edge
+spec:
+  type: cloudflare-worker
+  lifecycle: production
+  owner: team/platform-edge
+  system: sourceplane-control-plane
+  path: apps/api-edge
+  dependsOn:
+    - component: identity-worker
+      relationship: calls
+  providesApis: [public-api]
+  consumesApis: [identity-api]
+  environments:
+    production: { profile: worker.release }

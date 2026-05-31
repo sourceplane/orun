@@ -1,0 +1,4 @@
+apiVersion: orun.io/v1alpha1
+kind: Component
+metadata: [this is not a mapping
+spec: {}

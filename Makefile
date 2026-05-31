@@ -129,6 +129,13 @@ test-state-redesign:
 	  go tool cover -func=/tmp/orun-sourcectx.cov | tail -n 1 | awk '{gsub("%","",$$3); print $$3}'); \
 	  echo "   measured: $$COVER%"; \
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 90.0) { printf "❌ sourcectx coverage %.1f%% below 90%% threshold\n", c+0; exit 1 } }'
+	@echo "🧪 Component-catalog resolution pipeline (Phase 2 C2)"
+	@go test -count=1 -race ./internal/catalogresolve/...
+	@echo "🧪 Coverage gate: ./internal/catalogresolve/ (>= 90%)"
+	@COVER=$$(go test -count=1 -cover -coverprofile=/tmp/orun-catalogresolve.cov ./internal/catalogresolve/ >/dev/null && \
+	  go tool cover -func=/tmp/orun-catalogresolve.cov | tail -n 1 | awk '{gsub("%","",$$3); print $$3}'); \
+	  echo "   measured: $$COVER%"; \
+	  awk -v c=$$COVER 'BEGIN { if (c+0 < 90.0) { printf "❌ catalogresolve coverage %.1f%% below 90%% threshold\n", c+0; exit 1 } }'
 	@echo "🧪 Coverage gate: ./internal/catalogmodel/ Sanitize* (== 100%)"
 	@COVER=$$(go test -count=1 -cover -coverprofile=/tmp/orun-catalogmodel.cov ./internal/catalogmodel/ >/dev/null && \
 	  go tool cover -func=/tmp/orun-catalogmodel.cov | \

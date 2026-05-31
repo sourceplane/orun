@@ -1,0 +1,8 @@
+apiVersion: orun.io/v1alpha1
+kind: Component
+metadata:
+  name: yml-form
+  annotations:
+    pre-existing: authored
+spec:
+  type: cloudflare-worker

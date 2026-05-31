@@ -1,0 +1,13 @@
+catalog:
+  namespace: sourceplane
+  defaults:
+    lifecycle: experimental
+    owner: team/platform
+    labels:
+      repo: orun
+      namespace: sourceplane
+    annotations:
+      datadoghq.com/owner: team/platform
+  discovery:
+    exclude:
+      - fixtures-skip

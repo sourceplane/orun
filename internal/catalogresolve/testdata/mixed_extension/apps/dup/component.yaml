@@ -1,0 +1,6 @@
+apiVersion: orun.io/v1alpha1
+kind: Component
+metadata:
+  name: mixed-yaml
+spec:
+  type: cloudflare-worker

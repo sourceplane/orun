@@ -1,0 +1,5 @@
+apiVersion: orun.io/v1alpha1
+kind: Component
+metadata:
+  name: BAD NAME WITH SPACES AND $$$
+spec: {}

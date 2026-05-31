@@ -1,0 +1,7 @@
+catalog:
+  defaults:
+    annotations:
+      pre-existing: from-intent
+      added-by-intent: hello
+    labels:
+      filled: yes

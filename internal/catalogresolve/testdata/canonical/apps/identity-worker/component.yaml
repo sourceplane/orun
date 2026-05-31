@@ -1,0 +1,9 @@
+apiVersion: orun.io/v1alpha1
+kind: Component
+metadata:
+  name: identity-worker
+  labels:
+    tier: critical
+spec:
+  type: cloudflare-worker
+  path: apps/identity-worker
