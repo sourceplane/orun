@@ -1219,6 +1219,56 @@ schema). Milestones C0–C9 per `implementation-plan.md`.
    provenance. Mini-T-RES-1 asserted in-package. Ready for Task 0026
    (C2 PR-2: infer + deps + validate + `manifestHash`).
 
+## Task 0026
+
+|- Agent: Implementer
+|- Prompt: `ai/tasks/task-0026.md`
+|- Status: **implemented; PR #171 OPEN, MERGEABLE, mergeStateStatus CLEAN, all required CI checks SUCCESS** — awaiting Task 0027 verifier (2026-05-31)
+|- Milestone: C2 — `internal/catalogresolve` (PR-2; closes C2)
+|- Branch: `task-0026-catalogresolve-c2-pr2` @ `9c65e7c` (commits: `73a4a2f` feat + `9c65e7c` docs PR-number backfill)
+|- Objective: close C2 by adding the second `internal/catalogresolve` PR — top-level
+   `Resolve(ctx, opts) (*ResolvedCatalog, []ValidationIssue, error)` covering
+   resolution-pipeline stages 4 (infer), 5/6 (validate), 7 (assemble), 8 (deps),
+   9 (validate post-deps), 10 (`manifestHash`). T-RES-1 (resolver determinism),
+   T-RES-2 (provenance completeness), and `ErrDependencyMissing` land here.
+|- Scope boundary: `internal/catalogresolve/` (new files: `assemble.go`, `clock.go`,
+   `dependencies.go`, `errors.go`, `hash.go`, `infer.go`, `resolve_full.go`,
+   `validate.go`, `resolve_full_test.go`, `testdata/resolve_e2e/`,
+   `testdata/resolve_cycle/`); additive edits to `intent.go` (+intentInference
+   pointer-mirror) and `types.go` (+ResolvedCatalog; +Options.{Strict,Repo,
+   Namespace,Clock}). NO edits outside `internal/catalogresolve/`. No CLI
+   wiring. No catalogstore/graph work (deferred to C3+).
+|- Acceptance (implementer-reported, locally verified): `go build ./...`,
+   `go vet ./...`, `make verify-generated`, `go test -race -count=1 ./...`,
+   `go test -race -count=3 ./internal/catalogresolve/...` all green;
+   coverage `internal/catalogresolve` **90.2%** (gate ≥ 90%); Phase 2 floors
+   held byte-for-byte (catalogmodel 91.1%, sourcectx 91.1%, Sanitize* 100%);
+   Phase 1 floors held (statestore 95.7%, revision 90.3%, executionstate 90.0%);
+   PR opened with real number `#171`; report committed to PR branch.
+|- Implementer report: `ai/reports/task-0026-implementer.md` (10,267 bytes;
+   PR Number `#171` backfilled in commit `9c65e7c`).
+|- Key design decisions documented in report:
+   1. `manifestHash` computed via `catalogmodel.CanonicalEncode` which masks
+      provenance fields automatically per `identity-and-keys.md` §10, so
+      `resolution.inheritedFrom` edits do not perturb the hash.
+   2. Cross-repo dep refs resolve only when namespace+repo+name triple matches
+      workspace; mismatch ⇒ `ErrDependencyMissing` with both endpoints.
+   3. Inference is `recover()`-safe — failures emit warn-severity
+      `ErrInferenceFailed` and skip rather than panic; gated by
+      `intent.catalog.inference.*` toggles.
+   4. Deploy-after cycle = error (always); `calls` cycle = warn (default) /
+      error (strict).
+|- CI evidence: PR #171 head `9c65e7c`, `Orun Plan` SUCCESS, `Harness dry-run
+   guard` SUCCESS, `test` SUCCESS; matrix legs SKIPPED legitimately; mergeable
+   MERGEABLE / mergeStateStatus CLEAN at orchestrator handoff time.
+|- Expected outcome: Task 0027 verifier validates PR #171 against C2 \"done
+   when\" (T-RES-1 byte-stable across two consecutive `Resolve` calls,
+   T-RES-2 provenance completeness, `ErrDependencyMissing` with both
+   endpoints, deploy-after cycle aborts, `calls` cycle warns by default,
+   coverage ≥ 90%, no edits outside `internal/catalogresolve/`); on PASS
+   merges PR #171 and closes Milestone C2. C3 (`CatalogSnapshot` + graph
+   builder + `catalogHash`) opens after merge.
+
 ## Historical Notes
 
 - 2026-05-30: roadmap pivoted from TUI cockpit (Phase 3) to orun-state-redesign

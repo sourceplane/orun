@@ -113,32 +113,90 @@ Phase 1 CLI workflows. Phase 2 floors held: `internal/catalogmodel`
   validate --intent intent.yaml`, `go test -count=10 -race
   ./internal/catalogresolve/...` all green.
 
-## Current Task (0026 — C2 PR-2, queued)
-- **Agent:** Orchestrator (next cycle scopes the implementer prompt).
-- **Goal:** infer + deps + validate + `manifestHash` on top of merged
-  catalogresolve. Adds resolution-pipeline stages 6 / 8 / 9 / 10 plus
-  `Resolve(ctx, opts)` top-level entry. T-RES-1 (resolver determinism),
-  T-RES-2 (provenance completeness), and `ErrDependencyMissing` land
-  here. After Task 0026 closes, C2 is done and C3 (CatalogSnapshot +
-  graph builder + `catalogHash`) opens.
-- **PR-Boundary wording for the prompt:** use the tightened version
-  from `ai/proposals/task-0025-spec-update.md` so additive sibling
-  files in `catalogmodel/` (e.g. another small typed view if needed)
-  remain explicitly permitted without re-litigating.
+## Just Implemented — Task 0026 (C2 PR-2, awaiting verifier)
+- **Status:** PR **#171** OPEN, MERGEABLE, mergeStateStatus CLEAN, all
+  required CI checks SUCCESS (`Orun Plan`, `Harness dry-run guard`,
+  `test`). Branch `task-0026-catalogresolve-c2-pr2` @ `9c65e7c`
+  (commits: `73a4a2f` feat + `9c65e7c` docs PR-number backfill).
+  Implementer report: `ai/reports/task-0026-implementer.md`.
+- **What landed:** top-level
+  `Resolve(ctx, opts) (*ResolvedCatalog, []ValidationIssue, error)`
+  covering resolution-pipeline stages 4 (infer), 5/6 (validate),
+  7 (assemble), 8 (deps), 9 (validate post-deps), 10 (`manifestHash`).
+  New files in `internal/catalogresolve/`: `assemble.go`, `clock.go`,
+  `dependencies.go`, `errors.go`, `hash.go`, `infer.go`, `resolve_full.go`,
+  `validate.go` + `resolve_full_test.go` + `testdata/resolve_e2e/` +
+  `testdata/resolve_cycle/`. Additive edits to `intent.go` (intentInference
+  pointer-mirror) and `types.go` (+`ResolvedCatalog`; +`Options.{Strict,
+  Repo, Namespace, Clock}`). NO edits outside `internal/catalogresolve/`.
+- **Coverage:** `internal/catalogresolve` **90.2%** (gate ≥ 90%, +0.2pp
+  headroom over PR-1). Phase 2 floors held byte-for-byte: catalogmodel
+  91.1%, sourcectx 91.1%, Sanitize* 100%. Phase 1 floors held: statestore
+  95.7%, revision 90.3%, executionstate 90.0%. Determinism stress
+  `go test -count=3 -race ./internal/catalogresolve/...` zero failures.
+- **Key design decisions** (verifier should adjudicate):
+  1. `manifestHash` via `catalogmodel.CanonicalEncode` masks provenance
+     fields automatically per `identity-and-keys.md` §10 — provenance
+     edits do not perturb the hash.
+  2. Cross-repo dep refs resolve only when namespace+repo+name triple
+     matches workspace; mismatch ⇒ `ErrDependencyMissing` with both
+     endpoints.
+  3. Inference is `recover()`-safe — failures emit warn-severity
+     `ErrInferenceFailed` and skip rather than panic.
+  4. Deploy-after cycle = error always; `calls` cycle = warn (default) /
+     error (strict).
+
+## Current Task (0027 — C2 PR-2 verifier)
+- **Agent:** Verifier.
+- **Prompt:** `ai/tasks/task-0027-verifier.md`.
+- **Goal:** validate PR #171 against C2 "done when" criteria
+  (`implementation-plan.md` §C2): T-RES-1 byte-stable across two
+  consecutive `Resolve` calls, T-RES-2 provenance completeness,
+  `ErrDependencyMissing` carries both endpoints, `deploy-after` cycle
+  aborts, `calls` cycle warns by default, coverage ≥ 90%, no edits
+  outside `internal/catalogresolve/`. On PASS merge per Verifier Merge
+  Protocol and close Milestone C2; on FAIL leave PR open with blocker
+  list.
+- **Verifier-specific checks:** PR-boundary fidelity vs `origin/main`
+  (no leakage into `catalogmodel/`, `sourcectx/`, Phase 1 packages,
+  `cmd/orun/`); `manifestHash` provenance-exclusion property
+  (`identity-and-keys.md` §10); errors-typed surface
+  (`errors.Is`/`errors.As` for `ErrDependencyMissing`, `ErrCycle`,
+  `ErrDuplicateComponent`, `ErrInferenceFailed`); secret/credential
+  audit on diff; CI evidence at log level.
+
+## Next Task After 0027 — Task 0028 (C3 implementer)
+- **Milestone:** C3 — `CatalogSnapshot` and graph builder (single PR
+  per `implementation-plan.md` §C3).
+- **Adds:** `internal/catalogresolve/graph.go` building `dependencies`,
+  `systems`, `apis`, `resources`, `owners` graphs;
+  `internal/catalogresolve/resolver.go` (or extension of `resolve_full.go`)
+  surfacing `ResolvedCatalog` with `CatalogGraph`, `summary.*` counts
+  from sorted collections, and `catalogHash` per `identity-and-keys.md`
+  §9 (inputs: `catalogInputHash` + sorted `(componentKey, manifestHash)`
+  pairs + canonical `CatalogGraph` + `resolver.resolverVersion`).
+- **"Done when":** T-IDK-1 (same source + inputs ⇒ same `catalogHash`);
+  `metadata.owner` edit changes `catalogHash`; `resolution.inheritedFrom`
+  edit does NOT change `manifestHash` (already proven by Task 0026 —
+  verifier confirms this still holds); graph files byte-stable across
+  runs.
+- **Spec sources:** `implementation-plan.md` §C3, `resolution-pipeline.md`
+  §1 + §7, `identity-and-keys.md` §9 + §10, `data-model.md` §3 + §6 + §7.
 
 ## Repo Checkpoint
 
 | Attribute | Value |
 |---|---|
-| Branch (local checkout) | `main` (clean) |
-| `main` tip | `723be32` — Task 0025 / C2 PR-1 catalogresolve discover+load+inherit (PR #170) on 2026-05-31 |
-| Open PRs | none |
-| Repo health | 🟢 Green — C2 PR-1 done; ready for Task 0026 (C2 PR-2) |
-| Last verified | 2026-05-31 (Task 0025 verifier PASS, merged) |
+| Branch (local checkout) | `task-0026-catalogresolve-c2-pr2` (pushed) |
+| `main` tip | `723be32` — Task 0025 / C2 PR-1 (PR #170) on 2026-05-31 |
+| Open PRs | **#171** (Task 0026 / C2 PR-2) — OPEN, MERGEABLE, CLEAN, CI green; awaiting Task 0027 verifier |
+| Repo health | 🟢 Green — C2 PR-2 implemented, all gates green, ready for verification |
+| Last verified | 2026-05-31 (Task 0025 verifier PASS) |
 | Active phase | Phase 2 (orun-component-catalog) |
-| Active milestone | C2 (`internal/catalogresolve` — Tasks 0025 ✅ + 0026 queued) |
-| Tasks completed | 0001–0005, 0007–0016, 0018–0025 (23 total) |
-| Current task | **0026 (C2 PR-2: infer + deps + validate + manifestHash)** — orchestrator to scope |
+| Active milestone | C2 (`internal/catalogresolve` — Task 0025 ✅ + Task 0026 awaiting verifier) |
+| Tasks completed | 0001–0005, 0007–0016, 0018–0025 (23 total; +Task 0026 pending verify) |
+| Current task | **0027 (C2 PR-2 verifier for PR #171)** — see `ai/tasks/task-0027-verifier.md` |
+| Next task after 0027 | **0028 (C3 implementer: `CatalogSnapshot` + graph builder + `catalogHash`)** |
 
 ---
 
