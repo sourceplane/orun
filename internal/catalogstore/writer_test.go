@@ -173,7 +173,23 @@ func (s *spyStore) CompareAndSwap(ctx context.Context, p string, oldRev string, 
 }
 
 func (s *spyStore) List(ctx context.Context, prefix string) ([]statestore.ObjectInfo, error) {
-	return nil, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]statestore.ObjectInfo, 0, len(s.objects))
+	for p, body := range s.objects {
+		if prefix != "" && !hasPrefix(p, prefix) {
+			continue
+		}
+		out = append(out, statestore.ObjectInfo{Path: p, Size: int64(len(body))})
+	}
+	return out, nil
+}
+
+func hasPrefix(s, p string) bool {
+	if len(s) < len(p) {
+		return false
+	}
+	return s[:len(p)] == p
 }
 
 func (s *spyStore) Delete(ctx context.Context, p string) error { return nil }

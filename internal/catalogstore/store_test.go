@@ -10,14 +10,13 @@ import (
 	"github.com/sourceplane/orun/internal/catalogstore"
 )
 
-// TestStubsReturnErrNotImplemented locks PR-3 placeholder Resolver
-// methods to ErrNotImplemented so a future implementer cannot
-// accidentally swap in nil-return without updating both this test and
-// the spec. PR-2 dropped WriteRefs / WriteGlobalIndexes /
-// AppendComponentEvent from this list — those are now wired in
-// refs.go / indexes.go / events.go and exercised by their own happy-path
-// tests (see TestPR2WritersImplemented and the per-method test files).
-func TestStubsReturnErrNotImplemented(t *testing.T) {
+// TestPR3ResolversImplemented confirms PR-3 wired up the five
+// previously-stubbed Resolver methods. None of them may return
+// ErrNotImplemented for a representative happy-or-NotFound call. The
+// PR-2 sibling TestPR2WritersImplemented mirrors this idiom for the
+// writer side; once both pass, ErrNotImplemented is unreachable from
+// the public surface.
+func TestPR3ResolversImplemented(t *testing.T) {
 	spy := newSpyStore()
 	st := catalogstore.New(spy)
 	ctx := context.Background()
@@ -26,14 +25,35 @@ func TestStubsReturnErrNotImplemented(t *testing.T) {
 		func() error { _, err := st.ResolveCurrentSource(ctx); return err },
 		func() error { _, err := st.ResolveSource(ctx, catalogstore.RefSelector{}); return err },
 		func() error { _, err := st.ResolveCatalog(ctx, catalogstore.RefSelector{}); return err },
-		func() error { _, err := st.ResolveComponent(ctx, catalogstore.RefSelector{}, "n"); return err },
+		func() error {
+			_, err := st.ResolveComponent(ctx, catalogstore.RefSelector{}, "n")
+			return err
+		},
 		func() error { _, err := st.ResolveComponentLatest(ctx, "ns/repo/name"); return err },
 	}
 	for i, fn := range checks {
 		err := fn()
-		if !errors.Is(err, catalogstore.ErrNotImplemented) {
-			t.Errorf("check[%d]: want ErrNotImplemented, got %v", i, err)
+		if errors.Is(err, catalogstore.ErrNotImplemented) {
+			t.Errorf("check[%d]: must NOT return ErrNotImplemented after PR-3: %v", i, err)
 		}
+		// Each check runs against an empty spy store, so the resolver
+		// must report a typed not-found via statestore.ErrNotFound's
+		// chain. A nil error here would mean the implementation is
+		// silently fabricating data — fail loudly.
+		if err == nil {
+			t.Errorf("check[%d]: empty store must surface a not-found error, got nil", i)
+		}
+	}
+
+	// RebuildIndexes is also a Resolver method (catalog-store.md §8,
+	// T-STORE-3). On an empty store it must return nil — not
+	// ErrNotImplemented and not a not-found — because "nothing to walk"
+	// is success. Asserted separately from the not-found checks above.
+	if err := st.RebuildIndexes(ctx); err != nil {
+		t.Errorf("RebuildIndexes on empty store: want nil, got %v", err)
+	}
+	if errors.Is(st.RebuildIndexes(ctx), catalogstore.ErrNotImplemented) {
+		t.Errorf("RebuildIndexes must NOT return ErrNotImplemented after PR-3")
 	}
 }
 

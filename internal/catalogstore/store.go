@@ -53,6 +53,14 @@ type Resolver interface {
 	ResolveCatalog(ctx context.Context, selector RefSelector) (catalogmodel.CatalogSnapshot, error)
 	ResolveComponent(ctx context.Context, sel RefSelector, name string) (catalogmodel.ComponentManifest, error)
 	ResolveComponentLatest(ctx context.Context, key string) (ComponentLatest, error)
+
+	// RebuildIndexes reconstructs every global index file
+	// (indexes/sources/*, indexes/catalogs/*, indexes/components/*) from
+	// the authoritative source tree under sources/*. The rebuild is
+	// idempotent and byte-identical for the same input tree per
+	// catalog-store.md §8 (T-STORE-3). Used by `orun catalog validate
+	// --rebuild-indexes` (C8).
+	RebuildIndexes(ctx context.Context) error
 }
 
 // Store is the union surface implemented by New().
@@ -149,27 +157,7 @@ var _ Writer = (*store)(nil)
 var _ Resolver = (*store)(nil)
 var _ Store = (*store)(nil)
 
-// ----- Resolver stubs (PR-3) ------------------------------------------
-
-func (s *store) ResolveCurrentSource(ctx context.Context) (catalogmodel.SourceSnapshot, error) {
-	return catalogmodel.SourceSnapshot{}, ErrNotImplemented
-}
-
-func (s *store) ResolveSource(ctx context.Context, selector RefSelector) (catalogmodel.SourceSnapshot, error) {
-	return catalogmodel.SourceSnapshot{}, ErrNotImplemented
-}
-
-func (s *store) ResolveCatalog(ctx context.Context, selector RefSelector) (catalogmodel.CatalogSnapshot, error) {
-	return catalogmodel.CatalogSnapshot{}, ErrNotImplemented
-}
-
-func (s *store) ResolveComponent(ctx context.Context, sel RefSelector, name string) (catalogmodel.ComponentManifest, error) {
-	return catalogmodel.ComponentManifest{}, ErrNotImplemented
-}
-
-func (s *store) ResolveComponentLatest(ctx context.Context, key string) (ComponentLatest, error) {
-	return ComponentLatest{}, ErrNotImplemented
-}
+// ----- Resolver method bodies live in resolver.go (PR-3) --------------
 
 // ----- Writer stubs (PR-2) --------------------------------------------
 //
