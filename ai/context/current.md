@@ -12,76 +12,73 @@ interface + `NoopSyncer` (C9).
 (Task 0030 / PR #173 / `c2d7b9d`) merged 2026-05-31. PR-2 (Task 0032)
 is the next implementer slot.
 
-## Just Completed — Task 0032 (C4 PR-2 implementer — PR #174 OPEN)
-- **Status:** ✅ Implementer pass complete; PR #174 OPEN.
-  Branch `task-0032-catalogstore-c4-pr2`. CI 3/3 SUCCESS,
-  `mergeStateStatus: CLEAN`, MERGEABLE. Diff +1602 / -52 across 14
-  files (all `internal/catalogstore/`). Implementer report at
-  canonical `ai/reports/task-0032-implementer.md`.
-- **Surface delivered:** `refs.go` (D.1–D.6 ordering, CreateIfAbsent
-  → CAS retry loop, idempotency on byte-identical re-write,
-  `catalogmodel.SanitizeBranch` for D.4); `indexes.go` (C.1/C.2 plain
-  `Write`, C.3 per-component CAS w/ merge-on-conflict via
-  `mergeComponentGlobalIndex`); `events.go` (`AppendComponentEvent`
-  with seq.lock allocator: `CreateIfAbsent next=2` → CAS+1 retry,
-  immutable event body via `CreateIfAbsent`); `errors.go`
-  (`ErrRefStale` sentinel for retry-exhaust, double-wraps last
-  `statestore.ErrConflict`).
-- **Retry budget unification:** all three sites at 16 (spec §5
-  advises 8 — implementer documented inline; verifier must adjudicate
-  whether a spec proposal is owed).
-- **Stub-pin updated:** `TestStubsReturnErrNotImplemented` narrowed
-  to 5 Resolver methods; new `TestPR2WritersImplemented` pins the
-  3 writers no longer return `ErrNotImplemented`.
-- **⚠️ COVERAGE FLAG:** Implementer self-reports `internal/catalogstore`
-  at **85.3 %** with the line "target ≥ 85 %". Task 0032 acceptance
-  required **≥ 91 %** with floor **90 %** (PR-1 baseline 90.7 %).
-  This is a contract deviation the verifier must adjudicate — see
-  Task 0033 Outcome 11 for the three-branch decision tree
-  (≥91 PASS / 90–91 PASS-with-note / <90 HARD FAIL → verifier-attached
-  fix preferred, else Task 0033.1 remediation).
+## Just Completed — Task 0033 (C4 PR-2 verifier — PR #174 MERGED)
+- **Status:** ✅ Verifier PASS with path-(a) attached coverage fix. PR
+  #174 squash-merged into `main` at `73c6e8e1` on 2026-05-31T11:30:39Z.
+  Reports:
+  - Implementer: `ai/reports/task-0032-implementer.md`
+  - Verifier: `ai/reports/task-0033-verifier.md`
+- **Coverage adjudication outcome:** Path (c) → path (a) verifier-
+  attached fix. Implementer landed at 85.3 % (HARD FAIL vs 90 % floor);
+  verifier added 28 focused tests across two files —
+  `internal/catalogstore/writer_test.go` (extended `spyStore` with
+  `readErr` / `casErr` / `createNStdE` / `writeErr` one-shot injection
+  maps) and new `internal/catalogstore/verifier_coverage_test.go` —
+  lifting coverage to **90.1 %** (484/537 statements, +4.8 pp). Cleared
+  the floor; landed inside the 90–91 % "PASS with note" band.
+- **Branches covered by attached tests:** WriteRefs scope arms
+  (catalog-only nil-source closure, Authoritative D.3, Branch D.4, PR
+  D.5, branch sanitised-to-empty rejection); WriteRefs / WriteGlobalIndexes
+  / AppendComponentEvent error paths (CreateIfAbsent non-Exists,
+  post-Exists Read, CAS non-Conflict, decode failures, Write failures);
+  allocateEventSeq corrupt envelope (next=0, unparseable JSON);
+  validation rejection paths (invalid component names, branch
+  sanitised to empty, malformed snapshot/catalog keys);
+  WriteCatalogSnapshot manifest path validation, manifest non-Exists
+  / post-Exists Read errors.
+- **Branches LEFT uncovered (documented in verifier report §"Branches
+  Left Unexercised"):** `paths.go` first-line CatalogDir error
+  returns inside path builders (unreachable through public Store API
+  thanks to upstream `preflightCatalogInputs`); `events.go:98`
+  `componentKeyTail` no-slash return (gated by `ValidateComponentKey`);
+  `writer.go:23,27` source path/encode error (gated by
+  `ValidateSourceKey`, `PrettyEncode` cannot fail on validated input);
+  `refs.go:54-129` closure pathFn / encode error returns (closures
+  receive validated keys); `refs.go:176-181` re-Read-after-conflict
+  error (symmetric to covered post-Exists Read; would require
+  Read-after-N-calls hook on spy); `events.go:153-159` seq.lock
+  encode error (fixed-shape struct); `writer.go:239-244`
+  writeLocalIndexes PrettyEncode error (caller-supplied JSON-marshalable
+  shapes). All are defensive returns guarded by upstream validation
+  that runs first; carrying them at zero coverage rather than
+  introducing white-box hooks keeps the test suite using only the
+  public `Store` interface.
+- **Static guards held:** `go vet`, `go build`, `go test -race
+  -count=1 ./...`, no raw FS imports in `internal/catalogstore/`
+  (verified `grep -RE '^\s*"(os|io/ioutil|path/filepath)"'` empty).
+- **Spec drift call-out:** retry-budget 8 → 16 deviation noted in
+  implementer's inline comments; verifier did NOT escalate to a spec
+  proposal. Acceptable: spec wording is advisory, implementer
+  documented justification, behaviour is harmless under
+  single-writer Phase 2. Re-evaluate at C9 / Phase 3 when remote
+  drivers and concurrency widen.
+- **Adjacent floors held:** statestore 95.7 %, revision 90.3 %,
+  executionstate 90.0 %, catalogmodel 91.1 %, sourcectx 91.1 %,
+  catalogresolve 90.9 % — all byte-for-byte vs PR-1 close.
+- **Post-merge main CI:** `Orun Plan` (run 26711390108), `CI` (run
+  26711390118), `state-redesign-tests` (run 26711390118) all PASS.
 
-## Current Task — Task 0033 (C4 PR-2 verifier — PR #174)
-- **Status:** Scoped 2026-05-31. Prompt at
-  `ai/tasks/task-0033-verifier.md`.
-- **PR under verification:** #174 (branch
-  `task-0032-catalogstore-c4-pr2`).
-- **15 Required Outcomes:** PR-boundary audit, D.1–D.6 ordering,
-  branch sanitisation, C.1–C.3 ordering + plain-`Write` audit,
-  `mergeComponentGlobalIndex` per-clause coverage, CAS retry
-  semantics + `ErrRefStale` chain, `AppendComponentEvent` allocator
-  concurrency, `seq.lock` path location confirmation, `ErrRefStale`
-  taxonomy code-inspection, stub-pin updates, **coverage
-  adjudication**, Phase 1/2 floors held, static guards (vet/build/
-  test/verify-generated/no-raw-FS), CI green at merge, kiox guards.
-- **Coverage adjudication paths (Outcome 11):**
-  a) ≥ 91 % → PASS (acceptance met).
-  b) 90 % ≤ x < 91 % → PASS with explicit note + Risk Note for PR-3
-     headroom. NOT silent.
-  c) < 90 % → HARD FAIL. Two remediation options:
-     - Verifier-attached fix (preferred): add focused tests on PR
-       branch, lift to ≥ 90 % (target ≥ 91 %), re-green CI, merge.
-     - Task 0033.1 (implementer-fix): leave PR open, document
-       uncovered branches, request implementer to add tests.
-- **Spec drift to flag:** retry-budget 8 → 16. Inline justification
-  + advisory wording → one-sentence note in verifier report
-  (proposal OPTIONAL). If verifier reads spec as prescriptive →
-  write `/ai/proposals/task-0033-spec-update.md` + FAIL with that as
-  blocker.
-- **Verifier-only fixes allowed:** Outcome 11 path (a) coverage
-  top-up tests, doc/polish strictly required to PASS, retry-budget
-  proposal file. Anything more becomes Task 0033.x.
-- **On PASS:** `gh pr merge 174 --squash --delete-branch`,
-  fast-forward `main`, write `ai/reports/task-0033-verifier.md`,
-  scope Task 0034 (C4 PR-3 implementer: `resolver.go`, fallback
-  chain `current → latest → main`, all 5 Resolver methods,
-  `RebuildIndexes`). On FAIL: leave PR open with blockers + name
-  smallest remediation (most likely Task 0033.1 implementer-fix).
-- **Expected outcome:** PR #174 squash-merged with
-  `internal/catalogstore` Writer surface complete (Steps A/B/C/D),
-  3 stubs replaced, `ErrRefStale` in error taxonomy, coverage at
-  ≥ 90 % on `internal/catalogstore` (≥ 91 % preferred), all other
-  floors held. C4 PR-3 (resolver) becomes the next implementer slot.
+## Current Task — none (between cycles)
+- C4 PR-2 closed; orchestrator may now scope **Task 0034** (C4 PR-3
+  implementer: `resolver.go` + fallback chain `current → latest →
+  main` + `RebuildIndexes`). Final C4 PR. Closes Milestone C4 and
+  unlocks **C5 (CLI surface)** — the new `orun catalog *` subcommands
+  per `cli-surface.md`.
+
+## Just Completed — Task 0032 (C4 PR-2 implementer — PR #174 MERGED via Task 0033)
+- **Status:** ✅ Implementer pass complete; merged via Task 0033
+  verifier-attached coverage fix. See "Just Completed — Task 0033"
+  block above for the merge details and coverage adjudication.
 
 ## Next Task After Task 0033
 - **Task 0034 — C4 PR-3 implementer (resolver + fallback chain).**
@@ -152,15 +149,15 @@ is the next implementer slot.
 | Attribute | Value |
 |---|---|
 | Branch (local checkout) | `main` |
-| `main` tip | `fdf72f5` — Task 0032 / C4 PR-2 implementer push committed (PR #174 OPEN), ahead by cycle-7 bookkeeping commit |
-| Open PRs | **#174** (Task 0032 / C4 PR-2 — MERGEABLE/CLEAN, CI 3/3 SUCCESS, awaiting Task 0033 verifier) |
-| Repo health | 🟡 Yellow — implementer self-reports `internal/catalogstore` coverage at 85.3 % vs floor 90 %; verifier must adjudicate per Task 0033 Outcome 11 |
-| Last verified | 2026-05-31 (Task 0031 verifier PASS, PR #173 merged) |
+| `main` tip | `73c6e8e1` — Task 0032/0033 / C4 PR-2 (PR #174) merged 2026-05-31T11:30:39Z |
+| Open PRs | (none) |
+| Repo health | 🟢 Green — `internal/catalogstore` at 90.1 % (above 90 % floor; 0.6 pp under PR-1's 90.7 %, captured as PR-3 headroom risk in Task 0033 verifier report) |
+| Last verified | 2026-05-31 (Task 0033 verifier PASS, PR #174 merged) |
 | Active phase | Phase 2 (orun-component-catalog) |
-| Active milestone | C4 (`internal/catalogstore` writer) — PR-1 ✅ merged, PR-2 ▶ verifier slot, PR-3 next |
-| Tasks completed | 0001–0005, 0007–0016, 0018–0031 (29 total). 0032 implementer pass complete; awaiting verifier merge to mark complete. |
-| Current task | **0033 (C4 PR-2 verifier: PR #174)** |
-| Next task | Task 0034 (C4 PR-3 implementer: `resolver.go` + fallback chain + `RebuildIndexes`) once PR #174 merges |
+| Active milestone | C4 (`internal/catalogstore` writer) — PR-1 ✅ merged, PR-2 ✅ merged, PR-3 ▶ next implementer slot |
+| Tasks completed | 0001–0005, 0007–0016, 0018–0033 (31 total) |
+| Current task | (none — between cycles) |
+| Next task | Task 0034 (C4 PR-3 implementer: `resolver.go` + fallback chain + `RebuildIndexes`) |
 
 ## Milestone Sequence (C0 → C9)
 | C  | Status | Goal |
