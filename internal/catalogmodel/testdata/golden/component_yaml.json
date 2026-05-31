@@ -1,0 +1,47 @@
+{
+  "apiVersion": "orun.io/v1alpha1",
+  "kind": "Component",
+  "metadata": {
+    "annotations": {
+      "datadoghq.com/service-name": "api-edge",
+      "github.com/team": "platform-edge"
+    },
+    "description": "Public API gateway for tenant traffic",
+    "labels": {
+      "domain": "edge",
+      "tier": "critical"
+    },
+    "name": "api-edge",
+    "title": "API Edge Worker"
+  },
+  "spec": {
+    "consumesApis": [
+      "identity-api"
+    ],
+    "dependsOn": [
+      {
+        "component": "identity-worker",
+        "relationship": "calls"
+      }
+    ],
+    "environments": {
+      "development": {
+        "profile": "worker.verify"
+      },
+      "production": {
+        "profile": "worker.release"
+      },
+      "staging": {
+        "profile": "worker.pull_request"
+      }
+    },
+    "lifecycle": "production",
+    "owner": "team/platform-edge",
+    "path": "apps/api-edge",
+    "providesApis": [
+      "public-api"
+    ],
+    "system": "sourceplane-control-plane",
+    "type": "cloudflare-worker"
+  }
+}

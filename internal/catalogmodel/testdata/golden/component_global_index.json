@@ -1,0 +1,23 @@
+{
+  "apiVersion": "orun.io/v1alpha1",
+  "componentKey": "sourceplane/orun/api-edge",
+  "kind": "ComponentGlobalIndex",
+  "latest": {
+    "catalogSnapshotKey": "cat-c8e91d2a",
+    "sourceSnapshotKey": "src-branch-main-cdef456a-t5ab21c3"
+  },
+  "main": {
+    "catalogSnapshotKey": "cat-c8e91d2a",
+    "manifestPath": "components/api-edge/manifest.json",
+    "sourceSnapshotKey": "src-branch-main-cdef456a-t5ab21c3"
+  },
+  "name": "api-edge",
+  "previews": [
+    {
+      "catalogSnapshotKey": "cat-9f81a4d2",
+      "sourceScope": "pr",
+      "sourceSnapshotKey": "src-pr-139-abc123-t9f81a4d"
+    }
+  ],
+  "repo": "sourceplane/orun"
+}

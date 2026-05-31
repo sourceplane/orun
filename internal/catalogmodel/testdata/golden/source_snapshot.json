@@ -1,0 +1,17 @@
+{
+  "apiVersion": "orun.io/v1alpha1",
+  "branch": "main",
+  "catalogInputHash": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "createdAt": "2026-05-31T00:00:00Z",
+  "dirtyHash": "",
+  "headRevision": "def456a1b2c3",
+  "kind": "SourceSnapshot",
+  "ref": "refs/heads/main",
+  "remoteUrl": "git@github.com:sourceplane/orun.git",
+  "repo": "sourceplane/orun",
+  "sourceScope": "branch-main",
+  "sourceSnapshotId": "src_01JABCDEF0123456789ABCDEF",
+  "sourceSnapshotKey": "src-branch-main-cdef456a-t5ab21c3",
+  "treeHash": "5ab21c3",
+  "workingTree": "clean"
+}

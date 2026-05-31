@@ -1,0 +1,42 @@
+{
+  "apiVersion": "orun.io/v1alpha1",
+  "authoritative": true,
+  "catalogHash": "sha256:c8e91d2a0000000000000000000000000000000000000000000000000000000",
+  "catalogSnapshotId": "cat_01JABCDEF0123456789ABCDEF",
+  "catalogSnapshotKey": "cat-c8e91d2a",
+  "createdAt": "2026-05-31T00:00:00Z",
+  "headRevision": "def456a1b2c3",
+  "kind": "CatalogSnapshot",
+  "objects": {
+    "components": [
+      {
+        "key": "sourceplane/orun/api-edge",
+        "manifestHash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "name": "api-edge",
+        "path": "components/api-edge/manifest.json"
+      }
+    ]
+  },
+  "preview": false,
+  "repo": "sourceplane/orun",
+  "resolver": {
+    "orunVersion": "0.18.0",
+    "resolverVersion": 1,
+    "schemaVersion": "orun.io/v1alpha1",
+    "stackSources": [
+      "ghcr.io/sourceplane/stack-tectonic:0.12.0"
+    ]
+  },
+  "sourceScope": "branch-main",
+  "sourceSnapshotKey": "src-branch-main-cdef456a-t5ab21c3",
+  "summary": {
+    "apis": 12,
+    "components": 42,
+    "domains": 4,
+    "owners": 8,
+    "resources": 18,
+    "systems": 6
+  },
+  "treeHash": "5ab21c3",
+  "workingTree": "clean"
+}

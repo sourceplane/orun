@@ -1,4 +1,4 @@
-.PHONY: build run validate debug plan clean test help examples-validate examples-debug examples-plan examples-gha-smoke test-state-redesign
+.PHONY: build run validate debug plan clean test help examples-validate examples-debug examples-plan examples-gha-smoke test-state-redesign verify-generated
 
 BINARY_NAME=orun
 BINARY_PATH=./cmd/$(BINARY_NAME)
@@ -116,4 +116,33 @@ test-state-redesign:
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 90.0) { printf "❌ coverage %.1f%% below 90%% threshold\n", c+0; exit 1 } }'
 	@echo "🧪 End-to-end revision-first walk (test-plan.md §4)"
 	@go test -count=1 -race -run TestStateE2E ./cmd/orun/...
+	@echo "🧪 Component-catalog packages (Phase 2 C0)"
+	@go test -count=1 -race ./internal/catalogmodel/...
+	@go test -count=1 -race ./internal/sourcectx/...
+	@echo "🧪 Coverage gate: ./internal/catalogmodel/ (>= 90%)"
+	@COVER=$$(go test -count=1 -cover -coverprofile=/tmp/orun-catalogmodel.cov ./internal/catalogmodel/ >/dev/null && \
+	  go tool cover -func=/tmp/orun-catalogmodel.cov | tail -n 1 | awk '{gsub("%","",$$3); print $$3}'); \
+	  echo "   measured: $$COVER%"; \
+	  awk -v c=$$COVER 'BEGIN { if (c+0 < 90.0) { printf "❌ catalogmodel coverage %.1f%% below 90%% threshold\n", c+0; exit 1 } }'
+	@echo "🧪 Coverage gate: ./internal/sourcectx/ (>= 90%)"
+	@COVER=$$(go test -count=1 -cover -coverprofile=/tmp/orun-sourcectx.cov ./internal/sourcectx/ >/dev/null && \
+	  go tool cover -func=/tmp/orun-sourcectx.cov | tail -n 1 | awk '{gsub("%","",$$3); print $$3}'); \
+	  echo "   measured: $$COVER%"; \
+	  awk -v c=$$COVER 'BEGIN { if (c+0 < 90.0) { printf "❌ sourcectx coverage %.1f%% below 90%% threshold\n", c+0; exit 1 } }'
+	@echo "🧪 Coverage gate: ./internal/catalogmodel/ Sanitize* (== 100%)"
+	@COVER=$$(go test -count=1 -cover -coverprofile=/tmp/orun-catalogmodel.cov ./internal/catalogmodel/ >/dev/null && \
+	  go tool cover -func=/tmp/orun-catalogmodel.cov | \
+	  awk '/Sanitize|ShortHex/ {gsub("%","",$$3); s+=$$3+0; n++} END {if (n>0) printf "%.1f", s/n; else print "0"}'); \
+	  echo "   measured: $$COVER%"; \
+	  awk -v c=$$COVER 'BEGIN { if (c+0 < 100.0) { printf "❌ Sanitize* coverage %.1f%% below 100%% threshold\n", c+0; exit 1 } }'
 	# add packages as state-redesign milestones land
+
+verify-generated:
+	@echo "🧪 Verifying generated artifacts are up-to-date..."
+	@go generate ./internal/catalogmodel/...
+	@if ! git diff --exit-code -- internal/catalogmodel/schema/ >/dev/null 2>&1; then \
+	  echo "❌ generated schema is stale; run 'go generate ./internal/catalogmodel/...' and commit"; \
+	  git --no-pager diff -- internal/catalogmodel/schema/; \
+	  exit 1; \
+	fi
+	@echo "✅ generated artifacts up-to-date"

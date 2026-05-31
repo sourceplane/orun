@@ -1,0 +1,138 @@
+{
+  "apiVersion": "orun.io/v1alpha1",
+  "identity": {
+    "componentId": "cmp_01JABCDEF0123456789ABCDEF",
+    "componentKey": "sourceplane/orun/api-edge",
+    "name": "api-edge",
+    "namespace": "sourceplane",
+    "path": "apps/api-edge",
+    "repo": "sourceplane/orun",
+    "sourceFile": "apps/api-edge/component.yaml"
+  },
+  "kind": "ComponentManifest",
+  "metadata": {
+    "annotations": {
+      "datadoghq.com/service-name": "api-edge",
+      "github.com/team": "platform-edge"
+    },
+    "contacts": {
+      "email": "platform-edge@example.com",
+      "slack": "#platform-edge"
+    },
+    "description": "Public API gateway for tenant traffic",
+    "labels": {
+      "domain": "edge",
+      "namespace": "sourceplane",
+      "repo": "orun",
+      "tier": "critical"
+    },
+    "maintainers": [
+      "team/platform-edge"
+    ],
+    "owner": "team/platform-edge",
+    "tags": [
+      "cloudflare",
+      "api",
+      "edge"
+    ],
+    "title": "API Edge Worker"
+  },
+  "resolution": {
+    "inferredFrom": {
+      "runtime.inferred.frameworks": [
+        "apps/api-edge/package.json"
+      ],
+      "runtime.inferred.languages": [
+        "apps/api-edge/package.json"
+      ]
+    },
+    "inheritedFrom": {
+      "metadata.labels.repo": "intent.yaml:catalog.defaults.labels.repo",
+      "metadata.owner": "component.yaml:spec.owner",
+      "spec.environments.production.profile": "component.yaml:spec.environments.production.profile"
+    }
+  },
+  "runtime": {
+    "files": {
+      "dockerfile": null,
+      "package": "apps/api-edge/package.json",
+      "readme": "apps/api-edge/README.md"
+    },
+    "inferred": {
+      "frameworks": [
+        "hono"
+      ],
+      "infra": [
+        "cloudflare-worker"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "packageManagers": [
+        "pnpm"
+      ]
+    }
+  },
+  "source": {
+    "branch": "main",
+    "catalogSnapshotKey": "cat-c8e91d2a",
+    "headRevision": "def456a1b2c3",
+    "manifestHash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "ref": "refs/heads/main",
+    "sourceSnapshotKey": "src-branch-main-cdef456a-t5ab21c3",
+    "treeHash": "5ab21c3",
+    "workingTree": "clean"
+  },
+  "spec": {
+    "composition": {
+      "source": "ghcr.io/sourceplane/stack-tectonic:0.12.0",
+      "type": "cloudflare-worker"
+    },
+    "dependencies": {
+      "apis": {
+        "consumes": [
+          "identity-api"
+        ],
+        "provides": [
+          "public-api"
+        ]
+      },
+      "components": [
+        {
+          "key": "sourceplane/orun/identity-worker",
+          "name": "identity-worker",
+          "optional": false,
+          "relationship": "calls"
+        }
+      ],
+      "resources": {
+        "uses": [
+          "sourceplane/prod/main-postgres"
+        ]
+      }
+    },
+    "domain": "edge",
+    "environments": {
+      "development": {
+        "active": true,
+        "profile": "worker.verify"
+      },
+      "production": {
+        "active": true,
+        "profile": "worker.release"
+      },
+      "staging": {
+        "active": true,
+        "profile": "worker.pull_request"
+      }
+    },
+    "lifecycle": "production",
+    "parameters": {
+      "stackName": "api-edge",
+      "workerName": "api-edge"
+    },
+    "system": "sourceplane-control-plane",
+    "tier": "critical",
+    "type": "cloudflare-worker"
+  }
+}

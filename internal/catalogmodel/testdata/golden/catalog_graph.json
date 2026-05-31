@@ -1,0 +1,26 @@
+{
+  "apiVersion": "orun.io/v1alpha1",
+  "catalogSnapshotKey": "cat-c8e91d2a",
+  "edges": [
+    {
+      "from": "sourceplane/orun/api-edge",
+      "optional": false,
+      "to": "sourceplane/orun/identity-worker",
+      "type": "calls"
+    }
+  ],
+  "kind": "CatalogGraph",
+  "nodes": [
+    {
+      "key": "sourceplane/orun/api-edge",
+      "kind": "Component",
+      "name": "api-edge"
+    },
+    {
+      "key": "sourceplane/orun/identity-worker",
+      "kind": "Component",
+      "name": "identity-worker"
+    }
+  ],
+  "sourceSnapshotKey": "src-branch-main-cdef456a-t5ab21c3"
+}

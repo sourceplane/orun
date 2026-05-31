@@ -1,0 +1,15 @@
+{
+  "apiVersion": "orun.io/v1alpha1",
+  "at": "2026-05-31T00:03:00Z",
+  "catalogSnapshotKey": "cat-c8e91d2a",
+  "componentKey": "sourceplane/orun/api-edge",
+  "environment": "production",
+  "eventType": "execution.completed",
+  "executionKey": "run-001",
+  "kind": "ComponentCatalogEvent",
+  "profile": "worker.release",
+  "revisionKey": "rev-main-def456a-p8f31c09",
+  "sourceSnapshotKey": "src-branch-main-cdef456a-t5ab21c3",
+  "status": "completed",
+  "triggerName": "github-push-main"
+}
