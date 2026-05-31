@@ -44,6 +44,14 @@ type spyStore struct {
 	// also bumps the on-disk revision so the caller's re-read picks up
 	// a fresh oldRev. Used to drive retry-budget tests.
 	casConflicts map[string]int
+	// readErr / casErr / createErr inject a one-shot non-standard error
+	// on the next Read / CompareAndSwap / CreateIfAbsent for the given
+	// path. Used by verifier-attached coverage tests for the defensive
+	// "non-Exists" / "non-Conflict" / "Read failed mid-CAS" branches.
+	readErr     map[string]error
+	casErr      map[string]error
+	createNStdE map[string]error
+	writeErr    map[string]error
 }
 
 func newSpyStore() *spyStore {
@@ -52,6 +60,10 @@ func newSpyStore() *spyStore {
 		revisions:    map[string]string{},
 		preExisting:  map[string][]byte{},
 		casConflicts: map[string]int{},
+		readErr:      map[string]error{},
+		casErr:       map[string]error{},
+		createNStdE:  map[string]error{},
+		writeErr:     map[string]error{},
 	}
 }
 
@@ -68,6 +80,10 @@ func (s *spyStore) Read(ctx context.Context, p string) ([]byte, statestore.Objec
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.trace = append(s.trace, "read:"+p)
+	if e, ok := s.readErr[p]; ok && e != nil {
+		delete(s.readErr, p)
+		return nil, statestore.ObjectMeta{}, e
+	}
 	if b, ok := s.objects[p]; ok {
 		rev := s.revisions[p]
 		return append([]byte(nil), b...), statestore.ObjectMeta{Path: p, Size: int64(len(b)), Revision: rev}, nil
@@ -83,6 +99,10 @@ func (s *spyStore) Write(ctx context.Context, p string, data []byte, opts states
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.trace = append(s.trace, "write:"+p)
+	if e, ok := s.writeErr[p]; ok && e != nil {
+		delete(s.writeErr, p)
+		return statestore.ObjectMeta{}, e
+	}
 	s.objects[p] = append([]byte(nil), data...)
 	s.revisions[p] = s.nextRev()
 	return statestore.ObjectMeta{Path: p, Size: int64(len(data)), Revision: s.revisions[p]}, nil
@@ -92,6 +112,10 @@ func (s *spyStore) CreateIfAbsent(ctx context.Context, p string, data []byte) (s
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.trace = append(s.trace, "create:"+p)
+	if e, ok := s.createNStdE[p]; ok && e != nil {
+		delete(s.createNStdE, p)
+		return statestore.ObjectMeta{}, e
+	}
 	if s.failCreate != nil && p == s.failCreatePath {
 		err := s.failCreate
 		s.failCreate = nil
@@ -120,6 +144,10 @@ func (s *spyStore) CompareAndSwap(ctx context.Context, p string, oldRev string, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.trace = append(s.trace, "cas:"+p+":"+oldRev)
+	if e, ok := s.casErr[p]; ok && e != nil {
+		delete(s.casErr, p)
+		return statestore.ObjectMeta{}, e
+	}
 	// Forced-conflict injection: pretend the rev moved.
 	if n, ok := s.casConflicts[p]; ok && n > 0 {
 		s.casConflicts[p] = n - 1
