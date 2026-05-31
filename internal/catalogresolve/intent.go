@@ -22,6 +22,20 @@ type intentCatalogBlock struct {
 	Namespace string                 `yaml:"namespace"`
 	Defaults  *intentCatalogDefaults `yaml:"defaults"`
 	Discovery *intentDiscovery       `yaml:"discovery"`
+	Inference *intentInference       `yaml:"inference"`
+}
+
+// intentInference mirrors the catalog.inference block of intent.yaml
+// per resolution-pipeline.md §4. Pointer fields distinguish "absent"
+// from "explicitly false"; absent toggles default to TRUE when
+// catalog.inference.enabled is on.
+type intentInference struct {
+	Enabled     *bool `yaml:"enabled"`
+	PackageJSON *bool `yaml:"packageJson"`
+	Dockerfile  *bool `yaml:"dockerfile"`
+	Terraform   *bool `yaml:"terraform"`
+	Helm        *bool `yaml:"helm"`
+	Readme      *bool `yaml:"readme"`
 }
 
 type intentCatalogDefaults struct {

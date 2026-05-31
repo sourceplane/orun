@@ -1,0 +1,11 @@
+apiVersion: orun.io/v1alpha1
+kind: Component
+metadata:
+  name: a
+spec:
+  type: worker
+  lifecycle: production
+  owner: team/x
+  dependsOn:
+    - component: b
+      relationship: deploy-after

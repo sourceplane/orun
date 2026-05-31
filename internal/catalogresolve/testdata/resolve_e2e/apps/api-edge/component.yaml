@@ -1,0 +1,18 @@
+apiVersion: orun.io/v1alpha1
+kind: Component
+metadata:
+  name: api-edge
+  title: API Edge
+  labels:
+    tier: critical
+spec:
+  type: cloudflare-worker
+  owner: team/platform-edge
+  path: apps/api-edge
+  dependsOn:
+    - component: identity-worker
+      relationship: calls
+    - component: ghost-service
+      relationship: depends-on
+  providesApis: [public-api]
+  consumesApis: [identity-api]

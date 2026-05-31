@@ -60,10 +60,42 @@ type DiscoveryResult struct {
 	IntentPath string
 }
 
-// Options configures DiscoverAndLoad. Exactly one of WorkspaceRoot must
-// be set; IntentPath defaults to "<WorkspaceRoot>/intent.yaml" and is
-// optional (a missing intent file is not an error — the discover+load
-// pipeline simply has no defaults to apply).
+// ResolvedCatalog is the output of the full Resolve pipeline (stages
+// 1–10). It carries the resolved per-component manifests with their
+// computed manifestHash plus the validation issues collected during
+// the run. The caller (writer at C4) consumes this verbatim — no
+// further computation required.
+//
+// ResolvedCatalog is deterministic: two consecutive Resolve calls
+// against the same workspace produce a byte-identical encoding (T-RES-1).
+type ResolvedCatalog struct {
+	// Manifests is the resolved component set, ordered by
+	// Identity.ComponentKey. Each entry has Source.ManifestHash filled
+	// in.
+	Manifests []*catalogmodel.ComponentManifest
+
+	// Issues is the collected validation issues from stage 9, ordered
+	// by (severity desc, code, file, pointer). May be empty.
+	Issues []ValidationIssue
+
+	// IntentPath is the workspace-relative path of the intent file used
+	// for inheritance, or "" when none.
+	IntentPath string
+
+	// Namespace is the effective namespace used for componentKey
+	// construction.
+	Namespace string
+
+	// Repo is the effective repo segment used for componentKey
+	// construction.
+	Repo string
+}
+
+// Options configures DiscoverAndLoad and Resolve. Exactly one of
+// WorkspaceRoot must be set; IntentPath defaults to
+// "<WorkspaceRoot>/intent.yaml" and is optional (a missing intent file
+// is not an error — the discover+load pipeline simply has no defaults
+// to apply).
 type Options struct {
 	// WorkspaceRoot is the absolute path to the workspace root the
 	// resolver walks. Must exist and be a directory.
@@ -73,6 +105,29 @@ type Options struct {
 	// resolves to filepath.Join(WorkspaceRoot, "intent.yaml"). A missing
 	// file is OK; a present-but-malformed file is a typed error.
 	IntentPath string
+
+	// Strict shifts validation severities per resolution-pipeline.md §6.
+	// In strict mode every "warn" becomes "error" and the resolver
+	// aborts on the first non-fatal validation issue.
+	Strict bool
+
+	// Repo is the workspace's Git repo short name used for
+	// componentKey construction (`<namespace>/<repo>/<name>`). When
+	// empty, the resolver falls back to filepath.Base(WorkspaceRoot).
+	// Cross-repo dependency keys (`<namespace>/<otherRepo>/<name>`)
+	// are still permitted in spec.dependsOn but resolve against the
+	// discovered set only when the namespace+repo+name triple matches
+	// a workspace component.
+	Repo string
+
+	// Namespace overrides intent.catalog.namespace. When both are
+	// unset the namespace defaults to "default".
+	Namespace string
+
+	// Clock is the time seam — the resolver itself does not call
+	// time.Now; reserved for inference layers that want to stamp
+	// scanned-at timestamps. Nil → defaultClock(); never panics.
+	Clock Clock
 }
 
 // ErrManifestInvalid is returned when an authored component.yaml fails

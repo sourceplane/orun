@@ -1,0 +1,7 @@
+catalog:
+  namespace: sourceplane
+  defaults:
+    lifecycle: production
+    owner: team/platform
+  inference:
+    enabled: true
