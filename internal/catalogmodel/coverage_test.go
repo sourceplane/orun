@@ -154,6 +154,54 @@ func TestFormatSourceSnapshotKeyLocalNoGitEmptyDirty(t *testing.T) {
 	}
 }
 
+// TestCanonicalEncodeStringEscapeBranches deterministically exercises every
+// escape branch in writeQuotedString (canonical.go). The rapid-driven property
+// tests in property_test.go cover most of these branches MOST of the time,
+// but the seed occasionally lands without drawing strings containing '\b' or
+// '\f' (lines 161-164), which dropped writeQuotedString coverage from 100 % to
+// 93.5 % and tipped the package over the 90 % gate boundary intermittently
+// (measured locally: ~1-in-15 runs at 87.9 % on this branch). This test pins
+// every escape branch — '"', '\\', '\n', '\r', '\t', '\b', '\f', the generic
+// control-byte default, and U+2028/U+2029 — under deterministic input so the
+// floor cannot drop below 90 % regardless of rapid seed.
+func TestCanonicalEncodeStringEscapeBranches(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"quote", `a"b`, `"a\"b"`},
+		{"backslash", `a\b`, `"a\\b"`},
+		{"newline", "a\nb", `"a\nb"`},
+		{"carriage_return", "a\rb", `"a\rb"`},
+		{"tab", "a\tb", `"a\tb"`},
+		{"backspace", "a\bb", `"a\bb"`},
+		{"formfeed", "a\fb", `"a\fb"`},
+		{"control_default_0x01", "a\x01b", `"a\u0001b"`},
+		{"control_default_0x1f", "a\x1fb", `"a\u001fb"`},
+		{"line_separator_u2028", "a\u2028b", `"a\u2028b"`},
+		{"paragraph_separator_u2029", "a\u2029b", `"a\u2029b"`},
+		{"plain_ascii", "abc", `"abc"`},
+		{"empty", "", `""`},
+		// Leading/trailing escaped run boundaries.
+		{"leading_escape", "\nabc", `"\nabc"`},
+		{"trailing_escape", "abc\n", `"abc\n"`},
+		// Multi-byte UTF-8 that should pass through untouched (decode path).
+		{"multibyte_utf8", "héllo→", `"héllo→"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := CanonicalEncodeString(tc.in)
+			if err != nil {
+				t.Fatalf("CanonicalEncodeString(%q): %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Fatalf("CanonicalEncodeString(%q):\n got  %q\n want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestValidateSourceSnapshotKeyOverLength(t *testing.T) {
 	// The pattern matches but the length check should still fail. Build a key
 	// that satisfies the regex but exceeds SourceKeyMaxLen.
