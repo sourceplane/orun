@@ -68,12 +68,31 @@ is the next implementer slot.
 - **Post-merge main CI:** `Orun Plan` (run 26711390108), `CI` (run
   26711390118), `state-redesign-tests` (run 26711390118) all PASS.
 
-## Current Task — none (between cycles)
-- C4 PR-2 closed; orchestrator may now scope **Task 0034** (C4 PR-3
-  implementer: `resolver.go` + fallback chain `current → latest →
-  main` + `RebuildIndexes`). Final C4 PR. Closes Milestone C4 and
-  unlocks **C5 (CLI surface)** — the new `orun catalog *` subcommands
-  per `cli-surface.md`.
+## Current Task — Task 0034 (C4 PR-3 implementer — Resolver + RebuildIndexes)
+- **Status:** scoped 2026-05-31, awaiting implementer.
+- **Prompt:** `ai/tasks/task-0034.md`
+- **Objective:** Ship the read side of `internal/catalogstore`: all five
+  Resolver methods (`ResolveCurrentSource`, `ResolveSource`,
+  `ResolveCatalog`, `ResolveComponent`, `ResolveComponentLatest`) per
+  `catalog-store.md` §4 fallback ladder, plus `RebuildIndexes` (added to
+  the `Resolver` interface) for byte-identical T-STORE-3 rebuild. Closes
+  Milestone C4. After merge, **C5 (CLI surface)** is unblocked.
+- **PR boundary:** `internal/catalogstore/{resolver.go, resolver_test.go,
+  rebuild.go, rebuild_test.go}` + the one-line `Resolver` interface
+  extension in `store.go` + the stub-pin update in `store_test.go`.
+  Strictly nothing outside `internal/catalogstore/`.
+- **Coverage target:** `internal/catalogstore` ≥ 91 % (floor 90 %).
+  Three-branch adjudication still applies; implementer is asked to land
+  ≥ 91 % cleanly so the verifier doesn't have to attach a fix again.
+- **Suggested branch:** `task-0034-catalogstore-c4-pr3-resolver`.
+
+## Next Task After 0034
+- **Task 0035 (verifier).** Verify the C4 PR-3 PR — fallback ladder
+  correctness via direct code-path inspection, T-STORE-3 byte-identical
+  rebuild test coverage, ErrCatalogNotFound / ErrComponentNotFound
+  wrapping chain, coverage adjudication, no stub `ErrNotImplemented`
+  surfaces remaining. On PASS: merge, scope **Task 0036** =
+  C5 PR-1 implementer (catalog CLI: refresh + list + describe + refs).
 
 ## Just Completed — Task 0032 (C4 PR-2 implementer — PR #174 MERGED via Task 0033)
 - **Status:** ✅ Implementer pass complete; merged via Task 0033

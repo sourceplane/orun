@@ -1531,3 +1531,51 @@ schema). Milestones C0–C9 per `implementation-plan.md`.
   Writer surface complete (Steps A/B/C/D), `ErrRefStale` in error
   taxonomy, `internal/catalogstore` coverage ≥ 90 % (≥ 91 % preferred),
   all sibling floors held. C4 PR-3 (resolver) becomes next slot.
+
+## Task 0033 — UPDATE (cycle 7 verifier close)
+- ✅ Verifier PASS (path-(a) verifier-attached coverage fix). PR #174
+  squash-merged at `73c6e8e1` on 2026-05-31T11:30:39Z. Implementer
+  baseline coverage 85.3 % → verifier added 28 focused tests
+  (`writer_test.go` extension + new `verifier_coverage_test.go`) →
+  final 90.1 % (484/537 statements, +4.8 pp). Cleared 90 % floor in
+  the PASS-with-note band (90–91 %).
+- Adjacent floors held byte-for-byte: statestore 95.7, revision 90.3,
+  executionstate 90.0, catalogmodel 91.1, sourcectx 91.1,
+  catalogresolve 90.9.
+- Retry-budget 8→16 spec drift documented but not escalated to a
+  proposal (advisory spec wording; harmless under single-writer
+  Phase 2). Re-evaluate at C9 / Phase 3.
+- Verifier report: `ai/reports/task-0033-verifier.md`.
+
+## Task 0034 — C4 PR-3 implementer (Resolver + fallback chain + RebuildIndexes)
+- **Agent:** Implementer
+- **Prompt:** `ai/tasks/task-0034.md`
+- **Status:** scoped and ready to begin (2026-05-31)
+- **Objective:** Implement the read side of `internal/catalogstore`
+  per `catalog-store.md` §4 (reader fallback) and §8 (index rebuild).
+  Wire all five `Resolver` methods on `*store` with the documented
+  fallback ladder and add `RebuildIndexes` (one-line interface
+  extension) for byte-identical T-STORE-3 rebuild. Closes Milestone C4
+  and unblocks C5 (catalog CLI).
+- **Scope boundary:** `internal/catalogstore/` only — new
+  `resolver.go`, `resolver_test.go`, `rebuild.go`, `rebuild_test.go`;
+  one-line `Resolver` interface extension in `store.go`; stub-pin
+  update in `store_test.go`. No CLI, no `internal/*` outside
+  catalogstore, no spec edits, no new error sentinels beyond §6.
+- **Required outcomes:** five Resolver methods + `RebuildIndexes`
+  implemented; T-STORE-3 byte-identical rebuild proven by
+  scrub-then-rebuild test; reader fallback ladder per §4 preserved
+  exactly; no raw FS imports; `errors.Is` chain through
+  `ErrCatalogNotFound` / `ErrComponentNotFound` /
+  `statestore.ErrNotFound` preserved; ctx cancellation honoured in
+  walks; `internal/catalogstore` ≥ 91 % coverage (floor 90 %);
+  adjacent floors held byte-for-byte; CI green / MERGEABLE / CLEAN
+  before reporting complete; `TestStubsReturnErrNotImplemented`
+  reduced to zero entries (or removed).
+- **Acceptance:** PR opened, all green CI, MERGEABLE / CLEAN, no
+  `[PR]` / TBD placeholders left in report or context files,
+  coverage table in implementer report.
+- **Expected outcome:** PR opened on
+  `task-0034-catalogstore-c4-pr3-resolver`, ready for Task 0035
+  verifier. After merge: Milestone C4 closes, Milestone C5 (CLI
+  surface) becomes the active milestone.
