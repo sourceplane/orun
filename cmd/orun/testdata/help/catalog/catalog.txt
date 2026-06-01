@@ -11,7 +11,7 @@ Subcommands:
   tree      Render the catalog relationship graphs
   history   Enumerate a component's execution history
   validate  Re-resolve in strict mode and report validation issues
-  diff      Compare two catalog snapshots (not yet implemented — C8)
+  diff      Compare two catalog snapshots
   refs      List every catalog ref with its resolved source/catalog keys
 
 Run 'orun catalog <subcommand> --help' for details on each.
@@ -22,7 +22,7 @@ Usage:
 
 Available Commands:
   describe    Show the full resolved manifest for one component
-  diff        Compare two catalog snapshots (not yet implemented — C8)
+  diff        Compare two catalog snapshots
   history     Enumerate a component's execution history
   list        List the components in the selected catalog
   refresh     Resolve the current workspace and persist a catalog snapshot

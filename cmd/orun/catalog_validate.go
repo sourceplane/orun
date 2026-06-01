@@ -9,8 +9,10 @@ package main
 // against the live workspace and renders the issues without persisting. This
 // matches the §9 contract — validate is a lint pass, not a writer.
 //
-// --rebuild-indexes is reserved for C8 and is accepted as a documented no-op
-// here so the flag is stable across the milestone.
+// --rebuild-indexes (C8) reconstructs every global index file from the
+// authoritative source tree via catalogstore.RebuildIndexes (catalog-store.md
+// §8). The rebuild is byte-identical for the same input tree (T-STORE-3) and
+// runs after the read/validate pass; a rebuild failure surfaces as exit 3.
 
 import (
 	"context"
@@ -20,6 +22,7 @@ import (
 	"time"
 
 	"github.com/sourceplane/orun/internal/catalogresolve"
+	"github.com/sourceplane/orun/internal/catalogstore"
 	"github.com/sourceplane/orun/internal/sourcectx"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
@@ -59,13 +62,14 @@ them to errors.
 Examples:
   orun catalog validate
   orun catalog validate --strict
+  orun catalog validate --rebuild-indexes
   orun catalog validate --json
 
 Exit codes:
   0  No errors (warnings allowed unless --strict).
   1  At least one validation error (or any warning under --strict).
   2  Resolver internal error.
-  3  StateStore failure.`,
+  3  StateStore failure (including a global-index rebuild failure).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCatalogValidate(cmd.Context())
@@ -75,7 +79,7 @@ Exit codes:
 	addCatalogSelectorFlags(cmd)
 	cmd.Flags().BoolVar(&catalogStrictFlag, "catalog-strict", false, "Promote validation warnings to errors")
 	cmd.Flags().BoolVar(&catalogStrictFlag, "strict", false, "Alias for --catalog-strict")
-	cmd.Flags().BoolVar(&catalogValidateRebuildFlag, "rebuild-indexes", false, "C8: reserved, currently a no-op")
+	cmd.Flags().BoolVar(&catalogValidateRebuildFlag, "rebuild-indexes", false, "Rebuild every global index from the source tree (catalog-store.md §8)")
 	cmd.Flags().BoolVar(&catalogJSONFlag, "json", false, "Stable machine-readable output")
 
 	parent.AddCommand(cmd)
@@ -138,8 +142,38 @@ func runCatalogValidate(ctx context.Context) error {
 		return rerr
 	}
 
+	// --rebuild-indexes (C8): reconstruct every global index from the
+	// authoritative source tree. Runs after the read/validate render so the
+	// report is always emitted; a rebuild failure is a StateStore-class
+	// failure (exit 3) and takes precedence over the validation-error exit.
+	if catalogValidateRebuildFlag {
+		if rerr := rebuildCatalogIndexes(ctx); rerr != nil {
+			return rerr
+		}
+	}
+
 	if data.Errors > 0 {
 		return exitErr(1, "catalog validation failed: %d error(s)", data.Errors)
+	}
+	return nil
+}
+
+// rebuildCatalogIndexes opens the local state store and rebuilds every global
+// index via catalogstore.RebuildIndexes (catalog-store.md §8). A clear status
+// line is printed (suppressed in --json mode so the envelope stays the sole
+// stdout payload). Failures surface as exit 3.
+func rebuildCatalogIndexes(ctx context.Context) error {
+	stateStore, _, err := openLocalStateStore()
+	if err != nil {
+		return exitErr(3, "open state store: %w", err)
+	}
+	store := catalogstore.New(stateStore)
+	if err := store.RebuildIndexes(ctx); err != nil {
+		return exitErr(3, "rebuild global indexes: %w", err)
+	}
+	if !catalogJSONFlag {
+		color := ui.ColorEnabledForWriter(os.Stdout)
+		fmt.Fprintf(os.Stdout, "\n%s\n", ui.Bold(color, "✓ Global indexes rebuilt"))
 	}
 	return nil
 }

@@ -14,7 +14,7 @@ package main
 //     exits 1.
 //   - history:  empty history (no executions yet in C5) exits 0.
 //   - validate: clean workspace is valid, exit 0.
-//   - diff:     stub exits 5.
+//   - diff:     real engine — see catalog_diff_test.go.
 
 import (
 	"encoding/json"
@@ -222,18 +222,5 @@ func TestCatalogValidate_E2E_CleanExit0(t *testing.T) {
 	}
 	if !data.Valid || data.Errors != 0 {
 		t.Errorf("clean workspace should be valid, got %+v", data)
-	}
-}
-
-func TestCatalogDiff_E2E_StubExit5(t *testing.T) {
-	refreshSeededCatalog(t)
-
-	err := runCatalogDiff(nil)
-	if err == nil {
-		t.Fatal("diff stub must return a non-nil exit error")
-	}
-	var coder interface{ ExitCode() int }
-	if !asExit(err, &coder) || coder.ExitCode() != 5 {
-		t.Errorf("expected exit 5 for diff stub, got %v", err)
 	}
 }
