@@ -1,28 +1,33 @@
-Compare two catalog snapshots.
+Compare two resolved catalog snapshots and report what changed.
 
-NOT YET IMPLEMENTED. The diff engine (changed / added / removed components and
-graph changes) lands in milestone C8. This command is registered now so the
-flag grammar and subcommand index are stable; it currently prints a
-not-implemented notice and exits 5.
+Resolves a base and a head snapshot via the shared ref selector grammar and
+reports the differences: changed components (with field path, base value, and
+head value), added and removed components, and graph changes. Set-shaped
+fields (tags, providesApis, consumesApis) are compared order-insensitively;
+dependsOn is order-sensitive. A bare component argument narrows the report to
+that component.
 
-Examples (future):
+Defaults are --base main --head current.
+
+Examples:
   orun catalog diff --base main --head current
-  orun catalog diff api-edge --base main --head pr-139
+  orun catalog diff --base main --head pr-139
+  orun catalog diff api-edge --base main --head current
   orun catalog diff --json
 
 Exit codes:
-  5  Not yet implemented (C8). Will become: 0 on success, 5 on resolver failure.
+  0  Comparison succeeded (differences, if any, are reported — not an error).
+  1  Invalid base/head selector.
+  3  StateStore failure.
+  6  A base/head catalog or the named component did not resolve.
 
 Usage:
   orun catalog diff [component] [flags]
 
 Flags:
-      --base string               Base snapshot selector (C8)
-      --catalog-snapshot string   Bypass refs; pin to an explicit catalogSnapshotKey
-      --catalog-source string     Resolve catalog by ref selector (current|main|latest|branches/<name>|prs/<n>|cat-<key>)
-      --head string               Head snapshot selector (C8)
-      --json                      Stable machine-readable output (C8)
-      --source string             Alias for --catalog-source
+      --base string   Base snapshot selector (default main)
+      --head string   Head snapshot selector (default current)
+      --json          Stable machine-readable output
 
 Global Flags:
       --all                 Disable CWD-based component scoping; process all components

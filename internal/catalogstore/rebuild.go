@@ -129,12 +129,26 @@ func (s *store) RebuildIndexes(ctx context.Context) error {
 	return nil
 }
 
+// listDir converts a directory prefix (which the rest of the code carries in
+// the trailing-slash form used for path matching/trimming) into the bare form
+// StateStore.List accepts. The real LocalStore validates its argument as a
+// logical path and rejects a trailing slash; the in-memory test spy matches on
+// raw string prefix and tolerates either. Stripping the slash is correct for
+// both: `List("sources")` stats the sources directory and walks it, and every
+// returned object path still begins with the trailing-slash form the callers
+// TrimPrefix against.
+func listDir(prefix string) string {
+	return strings.TrimSuffix(prefix, "/")
+}
+
 // listAllSources lists every `sources/<srcKey>/source.json` and decodes
 // each body. Skips entries that fail to read or decode — a corrupt
 // source.json must not blacklist the whole rebuild.
 func (s *store) listAllSources(ctx context.Context) ([]catalogmodel.SourceSnapshot, error) {
 	const prefix = "sources/"
-	infos, err := s.state.List(ctx, prefix)
+	// List with the directory prefix (no trailing slash — the StateStore
+	// path validator rejects one) but match/trim against the slash form.
+	infos, err := s.state.List(ctx, listDir(prefix))
 	if err != nil {
 		return nil, fmt.Errorf("List %s: %w", prefix, err)
 	}
@@ -171,7 +185,7 @@ func (s *store) collectAllCatalogs(ctx context.Context, sources []catalogmodel.S
 			continue
 		}
 		prefix := "sources/" + srcKey + "/catalogs/"
-		infos, err := s.state.List(ctx, prefix)
+		infos, err := s.state.List(ctx, listDir(prefix))
 		if err != nil {
 			return nil, fmt.Errorf("List %s: %w", prefix, err)
 		}
@@ -209,7 +223,7 @@ func (s *store) listManifestsForSource(ctx context.Context, srcKey string) ([]ca
 		return nil, err
 	}
 	prefix := "sources/" + srcKey + "/catalogs/"
-	infos, err := s.state.List(ctx, prefix)
+	infos, err := s.state.List(ctx, listDir(prefix))
 	if err != nil {
 		return nil, fmt.Errorf("List %s: %w", prefix, err)
 	}
@@ -335,6 +349,13 @@ func buildComponentGlobalIndexShard(
 		ComponentKey: m.Identity.ComponentKey,
 		Name:         m.Identity.Name,
 		Repo:         src.Repo,
+		// Canonical empty form is a non-nil slice so every write path —
+		// the writer's CreateIfAbsent (raw shard), the writer's CAS merge,
+		// and RebuildIndexes' pre-merge — encodes `"previews": []` for a
+		// main-scope component. A nil here would encode `null` on the
+		// first write and `[]` on a merge, breaking the byte-identical
+		// rebuild post-condition (T-STORE-3).
+		Previews: []catalogmodel.ComponentIndexPreview{},
 	}
 	switch src.SourceScope {
 	case catalogmodel.SourceScopeBranchMain, catalogmodel.SourceScopeBranchProtected:

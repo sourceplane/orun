@@ -127,7 +127,7 @@ Subcommands:
   tree      Render the catalog relationship graphs
   history   Enumerate a component's execution history
   validate  Re-resolve in strict mode and report validation issues
-  diff      Compare two catalog snapshots (not yet implemented — C8)
+  diff      Compare two catalog snapshots
   refs      List every catalog ref with its resolved source/catalog keys
 
 Run 'orun catalog <subcommand> --help' for details on each.`,
