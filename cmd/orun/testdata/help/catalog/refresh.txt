@@ -5,9 +5,15 @@ A byte-identical re-refresh is idempotent: it reuses the existing snapshot,
 prints the "up to date" form, and creates no new snapshot directory. When the
 worktree is dirty the snapshot is marked local-only and a banner is printed.
 
+With --sync the local refresh runs exactly as above and the resulting snapshot
+is then pushed through the configured syncer. Phase 2 ships no remote driver,
+so --sync reports "remote sync not configured (Phase 3)" and still exits 0; the
+local catalog is persisted regardless.
+
 Examples:
   orun catalog refresh
   orun catalog refresh --json
+  orun catalog refresh --sync
 
 Exit codes:
   0  Snapshot created or reused (idempotent).
@@ -26,7 +32,7 @@ Flags:
       --no-infer                  Disable the inference layer (stage 6)
       --source string             Alias for --catalog-source
       --strict                    Alias for --catalog-strict
-      --sync                      Phase 2: prints 'remote sync not configured' and exits 0
+      --sync                      Refresh locally, then push through the configured syncer (Phase 2: no remote configured)
 
 Global Flags:
       --all                 Disable CWD-based component scoping; process all components

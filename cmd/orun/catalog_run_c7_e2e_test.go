@@ -373,6 +373,10 @@ spec:
 	runGit("init", "-q")
 	runGit("config", "user.email", "t@t.co")
 	runGit("config", "user.name", "t")
+	// Hermetic: ignore any host-global commit signing config (see
+	// seedGitCatalogWorkspace in catalog_test.go).
+	runGit("config", "commit.gpgsign", "false")
+	runGit("config", "tag.gpgsign", "false")
 	runGit("remote", "add", "origin", "https://github.com/sourceplane/orun.git")
 	runGit("checkout", "-q", "-b", "main")
 	runGit("add", "-A")

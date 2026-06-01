@@ -178,6 +178,11 @@ func seedGitCatalogWorkspace(t *testing.T, dir string) {
 	run("init", "-q")
 	run("config", "user.email", "t@t.co")
 	run("config", "user.name", "t")
+	// Disable commit signing locally so the seed is hermetic regardless of the
+	// host's global git signing config (some CI/dev sandboxes force an ssh/gpg
+	// signer that would fail on an unrelated test commit).
+	run("config", "commit.gpgsign", "false")
+	run("config", "tag.gpgsign", "false")
 	run("remote", "add", "origin", "https://github.com/sourceplane/orun.git")
 	run("checkout", "-q", "-b", "main")
 
@@ -307,14 +312,66 @@ func TestCatalogRefs_E2E_EmptyStore(t *testing.T) {
 	}
 }
 
+// TestCatalogRefresh_SyncNoop proves --sync still performs the full local
+// refresh and then pushes through the NoopSyncer: the command exits 0 and
+// prints the documented "remote sync not configured" notice.
 func TestCatalogRefresh_SyncNoop(t *testing.T) {
-	withTempIntentRoot(t)
+	dir := withTempIntentRoot(t)
+	seedGitCatalogWorkspace(t, dir)
+
 	resetCatalogFlags(t)
 	catalogSyncFlag = true
 
+	// captureStdout fails the test if runCatalogRefresh returns a non-nil
+	// (non-zero exit) error, so reaching the assertions proves exit 0.
 	out := captureStdout(t, func() error { return runCatalogRefresh(nil) })
-	if !strings.Contains(out, "remote sync not configured") {
+	if !strings.Contains(out, "Catalog snapshot created") {
+		t.Errorf("expected local refresh to run, got %q", out)
+	}
+	if !strings.Contains(out, "remote sync not configured (Phase 3)") {
 		t.Errorf("expected sync no-op line, got %q", out)
+	}
+}
+
+// TestCatalogRefresh_SyncNoop_JSON proves --sync --json exposes the sync
+// result deterministically in the envelope without disturbing existing
+// fields, and that a non-sync refresh omits the sync fields entirely.
+func TestCatalogRefresh_SyncNoop_JSON(t *testing.T) {
+	dir := withTempIntentRoot(t)
+	seedGitCatalogWorkspace(t, dir)
+
+	// First: refresh WITHOUT --sync. The envelope must not carry sync fields.
+	resetCatalogFlags(t)
+	catalogJSONFlag = true
+	out := captureStdout(t, func() error { return runCatalogRefresh(nil) })
+	if strings.Contains(out, "synced") || strings.Contains(out, "syncWarnings") {
+		t.Errorf("non-sync envelope leaked sync fields: %s", out)
+	}
+
+	// Then: refresh WITH --sync --json (idempotent reuse). Sync fields appear.
+	resetCatalogFlags(t)
+	catalogJSONFlag = true
+	catalogSyncFlag = true
+	out = captureStdout(t, func() error { return runCatalogRefresh(nil) })
+
+	var env catalogEnvelope
+	env.Data = &catalogRefreshData{}
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("sync envelope: %v\n%s", err, out)
+	}
+	d := env.Data.(*catalogRefreshData)
+	if !d.Synced {
+		t.Errorf("expected synced=true, got %+v", d)
+	}
+	if d.SyncAccepted {
+		t.Errorf("NoopSyncer must not accept, got syncAccepted=true")
+	}
+	if len(d.SyncWarnings) != 1 || !strings.Contains(d.SyncWarnings[0], "remote sync not configured") {
+		t.Errorf("syncWarnings = %v, want the not-configured notice", d.SyncWarnings)
+	}
+	// Existing fields still populated alongside the sync data.
+	if d.CatalogSnapshotKey == "" || d.Components != 1 {
+		t.Errorf("sync envelope dropped base fields: %+v", d)
 	}
 }
 
@@ -326,7 +383,7 @@ func TestCatalogRefresh_SyncNoop(t *testing.T) {
 func resetCatalogFlags(t *testing.T) {
 	t.Helper()
 	prev := struct {
-		src, snap, diffBase, diffHead       string
+		src, snap, diffBase, diffHead        string
 		strict, noInfer, json, sync, rebuild bool
 	}{catalogSourceFlag, catalogSnapshotFlag, catalogDiffBaseFlag, catalogDiffHeadFlag, catalogStrictFlag, catalogNoInferFlag, catalogJSONFlag, catalogSyncFlag, catalogValidateRebuildFlag}
 	catalogSourceFlag, catalogSnapshotFlag = "", ""
