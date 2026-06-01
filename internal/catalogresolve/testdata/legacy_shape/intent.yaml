@@ -1,0 +1,5 @@
+catalog:
+  namespace: sourceplane
+  defaults:
+    lifecycle: experimental
+    owner: team/platform

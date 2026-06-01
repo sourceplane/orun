@@ -1,0 +1,21 @@
+# Forward-compatibility + observability fixture: a not-yet-modeled spec key,
+# a typo inside a subscribe environment, and a nested-map parameter value.
+apiVersion: sourceplane.io/v1
+kind: Component
+metadata:
+  name: svc
+spec:
+  type: cloudflare-worker
+  domain: edge
+  futureField: accepted-but-unknown
+  subscribe:
+    environments:
+      - name: production
+        profile: release
+        profle: typo-here
+  parameters:
+    config:
+      retries: 3
+      regions:
+        - us-east-1
+        - eu-west-1

@@ -76,6 +76,19 @@ func validate(authored []AuthoredManifest, manifests []*catalogmodel.ComponentMa
 				Severity: SeverityWarning,
 			})
 		}
+
+		// Unrecognized authored keys — warn default, error strict. The
+		// authoring schema is open so these do not fail schema validation;
+		// the warning keeps typos and dropped legacy fields visible.
+		for _, ptr := range am.UnknownFields {
+			add(ValidationIssue{
+				File:     file,
+				Pointer:  ptr,
+				Code:     "component.field.unknown",
+				Message:  "unrecognized field " + ptr + "; accepted but not interpreted by the catalog",
+				Severity: SeverityWarning,
+			})
+		}
 	}
 
 	// Resolver-wide: component key uniqueness — error in both modes.

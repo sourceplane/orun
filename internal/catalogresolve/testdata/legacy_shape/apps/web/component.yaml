@@ -1,0 +1,29 @@
+# Legacy plan-engine authoring shape: spec.domain / spec.subscribe (object
+# form with profileRules) / spec.parameters / spec.labels / spec.env. The
+# catalog must validate and resolve this unchanged.
+apiVersion: sourceplane.io/v1
+kind: Component
+metadata:
+  name: web
+spec:
+  type: cloudflare-pages-turbo
+  domain: platform-ui
+  subscribe:
+    environments:
+      - name: staging
+        profile: verify
+      - name: production
+        profile: release
+        profileRules:
+          - profile: deploy
+            when:
+              triggerRef: github-push-main
+  parameters:
+    nodeVersion: "20"
+    buildCommand: pnpm build
+    replicas: 3
+  labels:
+    team: platform
+    surface: web
+  env:
+    BASE_DOMAIN: example.com

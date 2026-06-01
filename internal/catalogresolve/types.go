@@ -38,6 +38,13 @@ type AuthoredManifest struct {
 	// Provenance entry. Inheritance fills entries from the intent file
 	// when authored leaves the field unset.
 	Provenance map[string]Provenance
+
+	// UnknownFields lists RFC 6901 pointers to authored keys the catalog
+	// does not recognize (e.g. "/spec/inputs"). The authoring schema is
+	// deliberately open so such keys do not fail validation, but the
+	// resolver surfaces them as warnings so typos and dropped legacy
+	// fields stay observable. See unknownFields. Sorted, deterministic.
+	UnknownFields []string
 }
 
 // Provenance attributes a single resolved field to its origin. File is

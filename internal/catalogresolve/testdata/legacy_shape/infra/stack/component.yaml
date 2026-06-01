@@ -1,0 +1,23 @@
+# Exercises the bare-string subscribe shorthand, the legacy spec.inputs field
+# (renamed to parameters in the plan engine and now ignored), and a
+# spec.labels + metadata.labels merge where metadata wins on conflict.
+apiVersion: sourceplane.io/v1
+kind: Component
+metadata:
+  name: stack
+  labels:
+    scope: database
+    surface: metadata-wins
+spec:
+  type: terraform
+  domain: infra
+  subscribe:
+    environments:
+      - dev
+      - production
+  inputs:
+    registry: ghcr.io/example/stack
+    version: "1.0.0"
+  labels:
+    surface: spec-loses
+    provider: orun

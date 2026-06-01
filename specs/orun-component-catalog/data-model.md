@@ -309,6 +309,101 @@ spec:
     production:  { profile: worker.release }
 ```
 
+### 6.1 Plan-engine authoring compatibility
+
+A single `component.yaml` is authored for both the plan engine and the
+catalog. The catalog schema therefore accepts the full plan-engine authoring
+vocabulary (see `internal/model.Component`) in addition to the canonical fields
+above. The authored object validates leniently: declared fields are
+type-checked, but **unknown keys are accepted and ignored** rather than
+rejected, mirroring the plan engine's `yaml.Unmarshal` tolerance. This keeps
+existing repositories (and legacy fields such as `spec.inputs`, renamed to
+`spec.parameters`) valid against the catalog without modification.
+
+Additional authored fields the catalog reads:
+
+- **`spec.domain`** — folds into the resolved `spec.domain` (and the
+  `summary.domains` count).
+- **`spec.parameters`** — author-defined map; folds into the resolved
+  `spec.parameters` (values are rendered to strings).
+- **`spec.labels`** — merged into the resolved `metadata.labels`. On a key
+  conflict `metadata.labels` wins.
+- **`spec.env`** — accepted for compatibility; not surfaced in the resolved
+  manifest.
+
+**Environment bindings — two accepted forms.** The canonical `spec.environments`
+map (above) and the legacy `spec.subscribe` list both fold into the resolved
+`spec.environments` map; the map form wins on a per-env key conflict. The
+`subscribe` list mirrors `internal/model.ComponentSubscribe` and carries the
+richer per-environment authoring vocabulary (`profileRules`, `dependencyMode`,
+`dependencyRules`, `env`, `parameters`). Only the base `profile` is folded into
+the resolved manifest; the rest is accepted but not interpreted by the resolver.
+Each entry may be an object or the bare-string shorthand (`- production`), which
+binds the environment with no explicit profile:
+
+```yaml
+# legacy subscribe form (folds into the resolved spec.environments map)
+spec:
+  type: cloudflare-worker
+  domain: edge
+  subscribe:
+    environments:
+      - name: staging
+        profile: worker.pull_request
+      - name: production
+        profile: worker.release
+        profileRules:
+          - profile: worker.deploy
+            when: { triggerRef: github-push-main }
+      - dev            # bare-string shorthand → bound, no explicit profile
+  parameters:
+    workerName: api-edge
+  labels: { team: platform }
+```
+
+### 6.2 Limitations
+
+The catalog reads `component.yaml` for inventory and provenance, not for
+execution — the plan engine remains the authority on how a component deploys.
+Known limitations of the catalog's view, by design:
+
+1. **Unknown keys are accepted, not rejected.** The authoring schema is open,
+   so a misspelled or unmodeled key (e.g. `spec.inputs`, a typo'd
+   `spec.subscribe.environments[].profle`) validates rather than failing. Each
+   is surfaced as a `component.field.unknown` **warning** (promoted to an error
+   under `--strict` / `catalog validate`). Linting is bounded to the document
+   root, `metadata`, `spec`, and `spec.subscribe.environments[]` objects;
+   free-form maps (`spec.parameters`, `spec.labels`, `spec.env`,
+   per-environment maps) and `spec.dependsOn` entries are **not** key-checked,
+   so typos there pass silently.
+
+2. **`subscribe` is folded to base profiles only.** From each subscribe entry
+   the catalog records `name` and the base `profile`. `profileRules`,
+   `dependencyMode`, `dependencyRules`, per-environment `env`, and
+   per-environment `parameters` are accepted but **not interpreted** — the
+   catalog's resolved `environments` map is a static snapshot, not a
+   trigger-time evaluation. The bare-string shorthand binds an environment with
+   an empty profile.
+
+3. **`spec.env` is not surfaced.** It validates for plan-engine compatibility
+   but has no slot in the resolved manifest.
+
+4. **`spec.parameters` values are stringified.** Scalars render to their string
+   form; nested maps/lists render to canonical (sorted-key) JSON. The resolved
+   `spec.parameters` is `map[string]string`, so structure is preserved only as
+   an encoded string, not as typed data.
+
+5. **`spec.labels` merges into `metadata.labels`.** On a key conflict
+   `metadata.labels` wins. The catalog has a single resolved label namespace;
+   the authored split between `metadata.labels` and `spec.labels` is not
+   preserved.
+
+6. **Two parsers, one contract.** The authoring vocabulary is owned by the plan
+   engine (`internal/model.Component`); the catalog mirrors it. When the plan
+   engine gains a field, the catalog accepts it immediately via the open schema
+   but will not interpret it until explicitly modeled. Keep the two in sync —
+   see the compatibility tests in `internal/catalogresolve`.
+
 ## 7. `intent.yaml` catalog defaults
 
 Optional new top-level block.

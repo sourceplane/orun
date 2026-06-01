@@ -103,9 +103,10 @@ func loadAuthored(workspaceRoot, rel string) (AuthoredManifest, error) {
 	prov := authoredProvenance(rel, &typed)
 
 	return AuthoredManifest{
-		SourceFile: rel,
-		Component:  typed,
-		Provenance: prov,
+		SourceFile:    rel,
+		Component:     typed,
+		Provenance:    prov,
+		UnknownFields: unknownFields(validatable),
 	}, nil
 }
 
@@ -185,8 +186,35 @@ func authoredProvenance(file string, c *catalogmodel.ComponentYAML) map[string]P
 	if c.Spec.System != "" {
 		put("spec.system", "/spec/system")
 	}
+	if c.Spec.Domain != "" {
+		put("spec.domain", "/spec/domain")
+	}
 	if c.Spec.Path != "" {
 		put("spec.path", "/spec/path")
+	}
+	// spec.labels fold into the resolved metadata.labels map. Record each
+	// key under its resolved field path; metadata.labels keys (emitted
+	// above) take precedence and overwrite the entry when both are set.
+	for k := range c.Spec.Labels {
+		if _, ok := c.Metadata.Labels[k]; ok {
+			continue
+		}
+		put("metadata.labels."+k, "/spec/labels/"+escapeJSONPointerToken(k))
+	}
+	for k := range c.Spec.Parameters {
+		put("spec.parameters."+k, "/spec/parameters/"+escapeJSONPointerToken(k))
+	}
+	for k := range c.Spec.Env {
+		put("spec.env."+k, "/spec/env/"+escapeJSONPointerToken(k))
+	}
+	if c.Spec.Subscribe != nil {
+		for i, e := range c.Spec.Subscribe.Environments {
+			if e.Name == "" {
+				continue
+			}
+			put("spec.subscribe.environments."+e.Name,
+				fmt.Sprintf("/spec/subscribe/environments/%d", i))
+		}
 	}
 	if c.Spec.DependsOn != nil {
 		put("spec.dependsOn", "/spec/dependsOn")

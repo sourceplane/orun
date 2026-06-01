@@ -53,11 +53,37 @@ func main() {
 	}
 }
 
+// schemaOverrider lets a type supply its own JSON Schema fragment instead of
+// the reflection-derived one. Used for polymorphic authoring shapes (e.g. a
+// subscribe environment that may be a bare string or an object) that a plain
+// struct cannot express.
+type schemaOverrider interface {
+	JSONSchemaOverride() map[string]any
+}
+
+// openSchema marks a struct that should accept undeclared properties
+// (additionalProperties: true). The authored component.yaml mirrors the plan
+// engine, which silently ignores unknown keys (yaml.Unmarshal drops them); an
+// open schema keeps the catalog from rejecting legacy or plan-engine-only
+// fields it does not interpret, while still type-checking the declared ones.
+type openSchema interface {
+	OpenSchema() bool
+}
+
 func schemaForType(t reflect.Type) map[string]any {
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
+	// A value or pointer of t may carry a hand-written schema override.
+	if ov, ok := reflect.New(t).Interface().(schemaOverrider); ok {
+		return ov.JSONSchemaOverride()
+	}
 	switch t.Kind() {
+	case reflect.Interface:
+		// `any` / interface{} accepts any JSON value. An empty schema is
+		// the draft-07 "anything goes" form — used for passthrough fields
+		// like spec.parameters whose values are author-defined.
+		return map[string]any{}
 	case reflect.String:
 		return map[string]any{"type": "string"}
 	case reflect.Bool:
@@ -103,10 +129,14 @@ func schemaForStruct(t reflect.Type) map[string]any {
 		}
 	}
 	sort.Strings(required)
+	additional := any(false)
+	if os, ok := reflect.New(t).Interface().(openSchema); ok && os.OpenSchema() {
+		additional = true
+	}
 	out := map[string]any{
 		"type":                 "object",
 		"properties":           props,
-		"additionalProperties": false,
+		"additionalProperties": additional,
 	}
 	if len(required) > 0 {
 		out["required"] = required
