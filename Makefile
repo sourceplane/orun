@@ -142,6 +142,8 @@ test-state-redesign:
 	  awk '/Sanitize|ShortHex/ {gsub("%","",$$3); s+=$$3+0; n++} END {if (n>0) printf "%.1f", s/n; else print "0"}'); \
 	  echo "   measured: $$COVER%"; \
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 100.0) { printf "❌ Sanitize* coverage %.1f%% below 100%% threshold\n", c+0; exit 1 } }'
+	@echo "🧪 Component-catalog sync seam (Phase 2 C9)"
+	@go test -count=1 -race ./internal/catalogsync/...
 	# add packages as state-redesign milestones land
 
 verify-generated:
