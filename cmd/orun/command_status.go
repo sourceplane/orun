@@ -13,8 +13,8 @@ import (
 	"github.com/sourceplane/orun/internal/cockpit/render"
 	watchpkg "github.com/sourceplane/orun/internal/cockpit/watch"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -139,6 +139,14 @@ func showStatus() error {
 
 	if statusWatch {
 		return watchExecution(store, resolveExecID, color)
+	}
+
+	if rx, err := resolveExecutionForRead(context.Background(), statusExecID, statusRevision); err == nil {
+		readStore := rx.Store
+		if readStore == nil {
+			readStore = store
+		}
+		return showExecution(readStore, rx.LegacyExecID, color)
 	}
 
 	execID, err := resolveExecID()

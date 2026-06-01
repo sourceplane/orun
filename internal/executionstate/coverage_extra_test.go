@@ -73,6 +73,13 @@ func TestResolveLegacyLatest_NoDirEntries(t *testing.T) {
 	}
 }
 
+func TestResolveLegacy_NoRoot(t *testing.T) {
+	_, err := resolveLegacy("", "run-001")
+	if !errors.Is(err, statestore.ErrNotFound) {
+		t.Fatalf("err=%v want ErrNotFound", err)
+	}
+}
+
 // TestResolvePrefixScan_EmptyArg covers the early-return when
 // ResolveExecution sends an empty-after-validation arg into
 // resolvePrefixScan via a non-component (e.g. arg with slash). The

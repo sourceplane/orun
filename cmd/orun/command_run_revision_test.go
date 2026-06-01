@@ -66,14 +66,20 @@ func resetRunFlags(t *testing.T) {
 	prevRev := runRevision
 	prevExec := runExecID
 	prevRunner := runRunner
+	prevPlanRef := runPlanRef
+	prevResolvedRev := runResolvedRevisionArg
 	t.Cleanup(func() {
 		runRevision = prevRev
 		runExecID = prevExec
 		runRunner = prevRunner
+		runPlanRef = prevPlanRef
+		runResolvedRevisionArg = prevResolvedRev
 	})
 	runRevision = ""
 	runExecID = ""
 	runRunner = ""
+	runPlanRef = ""
+	runResolvedRevisionArg = ""
 }
 
 func TestSynthesizeRevisionForRun_PersistsRevisionTriplet(t *testing.T) {
@@ -129,6 +135,9 @@ func TestSetupAndFinalizeRevisionExecution_HappyPath(t *testing.T) {
 	if rx.revKey == "" || rx.execKey == "" {
 		t.Fatalf("rx missing keys: rev=%q exec=%q", rx.revKey, rx.execKey)
 	}
+	if rx.execKey != "exec-test-001" {
+		t.Fatalf("execKey = %q; want preserved runner exec id", rx.execKey)
+	}
 	if rx.exec.Status != executionstate.StatusPending {
 		t.Fatalf("exec.Status = %q; want pending", rx.exec.Status)
 	}
@@ -153,7 +162,7 @@ func TestSetupAndFinalizeRevisionExecution_HappyPath(t *testing.T) {
 		t.Fatalf("SaveState: %v", err)
 	}
 
-	if err := finalizeRevisionExecution(context.Background(), rx, store, "exec-test-001", nil); err != nil {
+	if _, err := finalizeRevisionExecution(context.Background(), rx, store, "exec-test-001", nil); err != nil {
 		t.Fatalf("finalizeRevisionExecution: %v", err)
 	}
 
@@ -170,6 +179,26 @@ func TestSetupAndFinalizeRevisionExecution_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(got, `"completed": 1`) {
 		t.Fatalf("execution.json summary.completed not 1: %s", got)
+	}
+}
+
+func TestSetupRevisionExecution_PreservesGitHubActionsExecID(t *testing.T) {
+	dir := withTempIntentRoot(t)
+	resetRunFlags(t)
+
+	store := state.NewStore(dir)
+	plan := minimalPlan(t)
+	ghaExecID := "gh-123456789-2-abcdef0"
+
+	rx, err := setupRevisionExecution(context.Background(), store, plan, nil, ghaExecID)
+	if err != nil {
+		t.Fatalf("setupRevisionExecution: %v", err)
+	}
+	if rx.execKey != ghaExecID {
+		t.Fatalf("execKey = %q; want %q", rx.execKey, ghaExecID)
+	}
+	if rx.exec.OriginalKey != ghaExecID {
+		t.Fatalf("OriginalKey = %q; want %q", rx.exec.OriginalKey, ghaExecID)
 	}
 }
 
@@ -193,7 +222,7 @@ func TestSetupRevisionExecution_FailedRunMarksFailed(t *testing.T) {
 	// Pass a non-nil runErr to finalize → status MUST be failed even
 	// if the legacy ExecutionCounts say zero failures (the runner can
 	// fail to start before persisting any per-job status).
-	if err := finalizeRevisionExecution(context.Background(), rx, store, "exec-fail-001",
+	if _, err := finalizeRevisionExecution(context.Background(), rx, store, "exec-fail-001",
 		errFakeRunner); err != nil {
 		t.Fatalf("finalizeRevisionExecution: %v", err)
 	}
@@ -249,6 +278,30 @@ func TestSetupRevisionExecution_RevisionFlagShortCircuit(t *testing.T) {
 	}
 }
 
+func TestResolveAndLoadPlan_RevisionPrefixUsesGlobalIndex(t *testing.T) {
+	dir := withTempIntentRoot(t)
+	resetRunFlags(t)
+
+	stateStore, _ := statestore.NewLocalStore(statestore.LocalConfig{Root: filepath.Join(dir, ".orun")})
+	plan := minimalPlan(t)
+	revKey, err := synthesizeRevisionForRun(context.Background(), stateStore, plan, nil)
+	if err != nil {
+		t.Fatalf("synthesizeRevisionForRun: %v", err)
+	}
+
+	runPlanRef = revKey[:len("rev-manual-")+4]
+	got, err := resolveAndLoadPlan(state.NewStore(dir))
+	if err != nil {
+		t.Fatalf("resolveAndLoadPlan(%q): %v", runPlanRef, err)
+	}
+	if got.Metadata.Name != "test-plan" {
+		t.Fatalf("plan name = %q; want test-plan", got.Metadata.Name)
+	}
+	if runResolvedRevisionArg != revKey {
+		t.Fatalf("runResolvedRevisionArg = %q; want %q", runResolvedRevisionArg, revKey)
+	}
+}
+
 func TestSetupRevisionExecution_NilPlanRejected(t *testing.T) {
 	withTempIntentRoot(t)
 	resetRunFlags(t)
@@ -269,7 +322,7 @@ func TestSetupRevisionExecution_EmptyExecIDRejected(t *testing.T) {
 // caller installs setupRevisionExecution best-effort and may have a nil
 // rx if the local store was unwritable. Finalize must not crash.
 func TestFinalizeRevisionExecution_NilRxIsNoOp(t *testing.T) {
-	if err := finalizeRevisionExecution(context.Background(), nil, nil, "", nil); err != nil {
+	if _, err := finalizeRevisionExecution(context.Background(), nil, nil, "", nil); err != nil {
 		t.Fatalf("finalizeRevisionExecution(nil) = %v; want nil", err)
 	}
 }

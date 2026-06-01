@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,10 +25,10 @@ import (
 // downstream callers (M5 `orun run`) can drive UX cues — e.g. printing a
 // "synthesized from legacy plan" notice for branch 5.
 type RevisionRef struct {
-	Source     ResolveSource
-	Revision   PlanRevision
-	Trigger    triggerctx.TriggerOccurrence
-	PlanBytes  []byte
+	Source    ResolveSource
+	Revision  PlanRevision
+	Trigger   triggerctx.TriggerOccurrence
+	PlanBytes []byte
 	// Synthesized is true when the revision was produced in-memory (compat
 	// §3 branches 2 and 5). Synthesized revisions are NOT written to disk
 	// by ResolveRevision; the caller materializes them iff
@@ -77,13 +79,13 @@ type ResolveOptions struct {
 
 // ResolveRevision implements the seven-branch resolver from compat §3:
 //
-//	1. arg == ""        → refs/latest-revision.json
-//	2. arg is a file    → load plan from file; synthesize manual revision
-//	3. arg matches the revision-key regex → revisions/<arg>/{plan,revision,trigger}.json
-//	4. arg matches refs/named/<arg>.json   → indirect to revision key
-//	5. arg is hex       → plans/<arg>.json (legacy) + synthesize migrated revision
-//	6. arg names a component (per opts.IsComponentName) → ErrComponentRunUnchanged
-//	7. otherwise        → ErrAmbiguousArg
+//  1. arg == ""        → refs/latest-revision.json
+//  2. arg is a file    → load plan from file; synthesize manual revision
+//  3. arg matches the revision-key regex → revisions/<arg>/{plan,revision,trigger}.json
+//  4. arg matches refs/named/<arg>.json   → indirect to revision key
+//  5. arg is hex       → plans/<arg>.json (legacy) + synthesize migrated revision
+//  6. arg names a component (per opts.IsComponentName) → ErrComponentRunUnchanged
+//  7. otherwise        → ErrAmbiguousArg
 //
 // Branch ordering matches the spec exactly; we do NOT reorder for
 // performance because precedence collisions (an arg that is both a file
@@ -124,6 +126,21 @@ func ResolveRevision(
 		// ALSO happens to match the regex be tried as a legacy plan in
 		// branch 5; in practice the regex requires a "rev-" prefix so
 		// this fall-through is paranoia.
+		if !errors.Is(err, statestore.ErrNotFound) {
+			return RevisionRef{}, err
+		}
+	}
+
+	// Branch 3b — revision-key prefix via the global revision index. This is
+	// additive to the original seven-branch resolver and keeps `orun run
+	// <revision-prefix>` on the same indexed lookup path as exact revision
+	// keys. Prefixes only participate when they look revision-shaped so an
+	// ordinary component name still falls through to branch 6.
+	if strings.HasPrefix(arg, "rev-") {
+		ref, err := resolveFromRevisionPrefix(ctx, store, arg)
+		if err == nil {
+			return ref, nil
+		}
 		if !errors.Is(err, statestore.ErrNotFound) {
 			return RevisionRef{}, err
 		}
@@ -193,15 +210,36 @@ func resolveFromRevisionKey(ctx context.Context, store statestore.StateStore, re
 	if err := ValidateRevisionKey(revKey); err != nil {
 		return RevisionRef{}, err
 	}
-	planBytes, _, err := store.Read(ctx, statestore.PlanPath(revKey))
+
+	if entry, _, err := statestore.ReadRevisionIndex(ctx, store, revKey); err == nil && strings.TrimSpace(entry.Path) != "" {
+		ref, rerr := resolveFromRevisionDir(ctx, store, entry.Path, revKey)
+		if rerr == nil {
+			return ref, nil
+		}
+		if !errors.Is(rerr, statestore.ErrNotFound) {
+			return RevisionRef{}, rerr
+		}
+	} else if err != nil && !errors.Is(err, statestore.ErrNotFound) {
+		return RevisionRef{}, fmt.Errorf("read revision index %q: %w", revKey, err)
+	}
+
+	return resolveFromRevisionDir(ctx, store, statestore.RevisionDir(revKey), revKey)
+}
+
+func resolveFromRevisionDir(ctx context.Context, store statestore.StateStore, dir, revKey string) (RevisionRef, error) {
+	dir = strings.Trim(strings.TrimSpace(dir), "/")
+	if dir == "" {
+		return RevisionRef{}, fmt.Errorf("%w: empty revision path for %q", statestore.ErrNotFound, revKey)
+	}
+	planBytes, _, err := store.Read(ctx, path.Join(dir, "plan.json"))
 	if err != nil {
 		return RevisionRef{}, fmt.Errorf("read plan.json: %w", err)
 	}
-	revBytes, _, err := store.Read(ctx, statestore.RevisionDocPath(revKey))
+	revBytes, _, err := store.Read(ctx, path.Join(dir, "revision.json"))
 	if err != nil {
 		return RevisionRef{}, fmt.Errorf("read revision.json: %w", err)
 	}
-	trigBytes, _, err := store.Read(ctx, statestore.TriggerPath(revKey))
+	trigBytes, _, err := store.Read(ctx, path.Join(dir, "trigger.json"))
 	if err != nil {
 		return RevisionRef{}, fmt.Errorf("read trigger.json: %w", err)
 	}
@@ -219,6 +257,42 @@ func resolveFromRevisionKey(ctx context.Context, store statestore.StateStore, re
 		Trigger:   trig,
 		PlanBytes: planBytes,
 	}, nil
+}
+
+func resolveFromRevisionPrefix(ctx context.Context, store statestore.StateStore, prefix string) (RevisionRef, error) {
+	if strings.TrimSpace(prefix) == "" {
+		return RevisionRef{}, fmt.Errorf("%w: empty revision prefix", statestore.ErrNotFound)
+	}
+	infos, err := store.List(ctx, statestore.RevisionIndexDir())
+	if err != nil {
+		return RevisionRef{}, fmt.Errorf("list revision index: %w", err)
+	}
+	var matches []string
+	for _, info := range infos {
+		base := path.Base(info.Path)
+		base = strings.TrimSuffix(base, ".json")
+		if base == "" {
+			continue
+		}
+		if strings.HasPrefix(base, prefix) {
+			matches = append(matches, base)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return RevisionRef{}, fmt.Errorf("%w: no revision matches prefix %q", statestore.ErrNotFound, prefix)
+	case 1:
+		ref, err := resolveFromRevisionKey(ctx, store, matches[0])
+		if err != nil {
+			return RevisionRef{}, err
+		}
+		ref.Source = ResolveSourceRevisionKey
+		return ref, nil
+	default:
+		sort.Strings(matches)
+		return RevisionRef{}, fmt.Errorf("%w: prefix %q matches %d revisions: %v",
+			statestore.ErrConflict, prefix, len(matches), matches)
+	}
 }
 
 // resolveFromFile is branch 2 — reads a plan file from the local

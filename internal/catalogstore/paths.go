@@ -346,6 +346,26 @@ func CatalogExecutionDir(srcKey, catKey, revKey, execKey string) (string, error)
 	return pathJoin(dir, "executions", execKey), nil
 }
 
+// CatalogExecutionDocPath returns
+// ".../revisions/<revKey>/executions/<execKey>/execution.json".
+func CatalogExecutionDocPath(srcKey, catKey, revKey, execKey string) (string, error) {
+	dir, err := CatalogExecutionDir(srcKey, catKey, revKey, execKey)
+	if err != nil {
+		return "", err
+	}
+	return pathJoin(dir, "execution.json"), nil
+}
+
+// CatalogExecutionFilePath returns
+// ".../revisions/<revKey>/executions/<execKey>/<name>".
+func CatalogExecutionFilePath(srcKey, catKey, revKey, execKey, name string) (string, error) {
+	dir, err := CatalogExecutionDir(srcKey, catKey, revKey, execKey)
+	if err != nil {
+		return "", err
+	}
+	return pathJoin(dir, name), nil
+}
+
 // ----- Path helpers: refs ---------------------------------------------
 
 // SourceRefPath returns "refs/sources/<name>.json" where name is one of

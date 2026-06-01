@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sourceplane/orun/internal/catalogstore"
+	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/testfx/statefs"
 )
@@ -186,6 +188,105 @@ func TestMirrorRunnerOutput_Hardlink_Success(t *testing.T) {
 	}
 	if evts := f.listEvents(); len(evts) != 0 {
 		t.Errorf("unexpected bridge-mirror-failed events on success path: %+v", evts)
+	}
+}
+
+func TestMirrorRunnerOutput_CatalogParentStateMetadataAndLogs(t *testing.T) {
+	f := newBridgeFixture(t, MirrorModeCopy)
+	f.bridge.CatalogParent = revision.CatalogParentRef{
+		SourceKey:  "src-branch-main-abcdef0",
+		CatalogKey: "cat-abcdef",
+	}
+	logDir := filepath.Join(f.legacyRoot, f.legacyID, "logs", "api.dev.echo")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	mustWrite(t, filepath.Join(logDir, "run.log"), []byte("hello from catalog log\n"))
+
+	if err := f.bridge.MirrorRunnerOutput(context.Background(), f.execKey, f.revKey, f.legacyID); err != nil {
+		t.Fatalf("MirrorRunnerOutput: %v", err)
+	}
+	if err := f.bridge.MirrorRunnerLog(context.Background(), f.execKey, f.revKey, f.legacyID, "api.dev.echo", "run"); err != nil {
+		t.Fatalf("MirrorRunnerLog: %v", err)
+	}
+
+	for _, name := range bridgeMirroredFiles {
+		p, err := catalogstore.CatalogExecutionFilePath(f.bridge.CatalogParent.SourceKey, f.bridge.CatalogParent.CatalogKey, f.revKey, f.execKey, name)
+		if err != nil {
+			t.Fatalf("CatalogExecutionFilePath(%s): %v", name, err)
+		}
+		if _, _, err := f.store.Read(context.Background(), p); err != nil {
+			t.Fatalf("read catalog %s: %v", name, err)
+		}
+	}
+	dir, err := catalogstore.CatalogExecutionDir(f.bridge.CatalogParent.SourceKey, f.bridge.CatalogParent.CatalogKey, f.revKey, f.execKey)
+	if err != nil {
+		t.Fatalf("CatalogExecutionDir: %v", err)
+	}
+	raw, _, err := f.store.Read(context.Background(), dir+"/logs/api.dev.echo/run.log")
+	if err != nil {
+		t.Fatalf("read catalog log: %v", err)
+	}
+	if string(raw) != "hello from catalog log\n" {
+		t.Fatalf("catalog log = %q", raw)
+	}
+}
+
+func TestMirrorRunnerLog_GlobalOnlyAndValidation(t *testing.T) {
+	f := newBridgeFixture(t, MirrorModeCopy)
+
+	if got := runnerLogSegment("///"); got != "unknown" {
+		t.Fatalf("runnerLogSegment empty = %q; want unknown", got)
+	}
+	jobID := "api/dev:verify @ prod"
+	stepID := "run step"
+	logDir := filepath.Join(f.legacyRoot, f.legacyID, "logs", legacyRunnerLogSegment(jobID))
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	mustWrite(t, filepath.Join(logDir, legacyRunnerLogSegment(stepID)+".log"), []byte("global-only log\n"))
+
+	if err := f.bridge.MirrorRunnerLog(context.Background(), f.execKey, f.revKey, f.legacyID, jobID, stepID); err != nil {
+		t.Fatalf("MirrorRunnerLog: %v", err)
+	}
+	globalPath := statestore.ExecutionDir(f.revKey, f.execKey) + "/logs/" + runnerLogSegment(jobID) + "/" + runnerLogSegment(stepID) + ".log"
+	raw, _, err := f.store.Read(context.Background(), globalPath)
+	if err != nil {
+		t.Fatalf("read global log: %v", err)
+	}
+	if string(raw) != "global-only log\n" {
+		t.Fatalf("global log = %q", raw)
+	}
+
+	noSource := newBridgeFixture(t, MirrorModeCopy)
+	if err := noSource.bridge.MirrorRunnerLog(context.Background(), noSource.execKey, noSource.revKey, noSource.legacyID, "missing", "missing"); err != nil {
+		t.Fatalf("missing source log should be a noop, got %v", err)
+	}
+
+	bad := *f.bridge
+	bad.Store = nil
+	if err := bad.MirrorRunnerLog(context.Background(), f.execKey, f.revKey, f.legacyID, jobID, stepID); !errors.Is(err, statestore.ErrInvalid) {
+		t.Fatalf("nil store err=%v want ErrInvalid", err)
+	}
+	bad = *f.bridge
+	bad.LegacyRoot = ""
+	if err := bad.MirrorRunnerLog(context.Background(), f.execKey, f.revKey, f.legacyID, jobID, stepID); !errors.Is(err, statestore.ErrInvalid) {
+		t.Fatalf("empty legacy root err=%v want ErrInvalid", err)
+	}
+	if err := f.bridge.MirrorRunnerLog(context.Background(), f.execKey, "bad-rev", f.legacyID, jobID, stepID); err == nil {
+		t.Fatal("invalid revision key unexpectedly succeeded")
+	}
+	if err := f.bridge.MirrorRunnerLog(context.Background(), "bad/exec", f.revKey, f.legacyID, jobID, stepID); !errors.Is(err, statestore.ErrInvalid) {
+		t.Fatalf("invalid exec key err=%v want ErrInvalid", err)
+	}
+}
+
+func TestBridgeDestAbsEmptyRoot(t *testing.T) {
+	f := newBridgeFixture(t, MirrorModeHardlink)
+	b := *f.bridge
+	b.Store = emptyRootStore{StateStore: f.store}
+	if _, err := b.destAbs("revisions/rev-main-p12345678/executions/run-001/state.json"); !errors.Is(err, statestore.ErrInvalid) {
+		t.Fatalf("destAbs err=%v want ErrInvalid", err)
 	}
 }
 
@@ -765,3 +866,9 @@ func TestStatestore_ExecutionFilePath(t *testing.T) {
 		t.Errorf("ExecutionFilePath = %q want %q", got, want)
 	}
 }
+
+type emptyRootStore struct {
+	statestore.StateStore
+}
+
+func (s emptyRootStore) Root() string { return "" }

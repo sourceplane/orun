@@ -82,6 +82,31 @@ func TestWriteRevision_CompatMirror_StripsSha256Prefix(t *testing.T) {
 	}
 }
 
+func TestWriteCompatibilityMirror_WriteErrors(t *testing.T) {
+	rev := PlanRevision{PlanHash: "feedface00112233445566778899aabbccddeeff00112233"}
+	plan := []byte(`{"jobs":[]}`)
+	for _, tc := range []struct {
+		name       string
+		failPrefix string
+	}{
+		{"checksum alias", "plans/feedface"},
+		{"latest alias", "plans/latest"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sentinel := errors.New("write failed")
+			store := failingStore{
+				StateStore: newTestStore(t),
+				failPrefix: tc.failPrefix,
+				err:        sentinel,
+			}
+			err := writeCompatibilityMirror(context.Background(), store, rev, plan)
+			if !errors.Is(err, sentinel) {
+				t.Fatalf("err=%v want %v", err, sentinel)
+			}
+		})
+	}
+}
+
 func TestWriteRevision_JobCountThreaded(t *testing.T) {
 	store := newTestStore(t)
 	trig := newTestTrigger(t)

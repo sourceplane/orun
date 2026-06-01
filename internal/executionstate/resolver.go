@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -198,6 +199,10 @@ func resolveLatestRef(ctx context.Context, store statestore.StateStore) (Executi
 	if err != nil {
 		return ExecutionRef{}, fmt.Errorf("read latest-execution ref: %w", err)
 	}
+	if ref, err := resolveExactByIndex(ctx, store, latest.ExecutionKey); err == nil {
+		ref.Source = ResolveSourceLatestRef
+		return ref, nil
+	}
 	ref, err := resolveByRevAndKey(ctx, store, latest.RevisionKey, latest.ExecutionKey)
 	if err != nil {
 		return ExecutionRef{}, fmt.Errorf("latest-execution %q/%q: %w",
@@ -211,15 +216,33 @@ func resolveLatestRef(ctx context.Context, store statestore.StateStore) (Executi
 // branches 1, 3, 4 once they have produced a (revKey, execKey) pair).
 func resolveByRevAndKey(ctx context.Context, store statestore.StateStore, revKey, execKey string) (ExecutionRef, error) {
 	raw, _, err := store.Read(ctx, statestore.ExecutionDocPath(revKey, execKey))
-	if err != nil {
+	if err == nil {
+		return decodeExecutionRef(raw, ResolveSourceRevisionScoped, revKey)
+	}
+	if !errors.Is(err, statestore.ErrNotFound) {
 		return ExecutionRef{}, err
 	}
+	if entry, _, ierr := statestore.ReadExecutionIndex(ctx, store, execKey); ierr == nil &&
+		entry.RevisionKey == revKey && strings.TrimSpace(entry.Path) != "" {
+		ref, rerr := resolveByIndexEntry(ctx, store, entry)
+		if rerr == nil {
+			ref.Source = ResolveSourceRevisionScoped
+			return ref, nil
+		}
+		if !errors.Is(rerr, statestore.ErrNotFound) {
+			return ExecutionRef{}, rerr
+		}
+	}
+	return ExecutionRef{}, err
+}
+
+func decodeExecutionRef(raw []byte, source ResolveSource, revKey string) (ExecutionRef, error) {
 	var rec ExecutionRun
 	if err := strictJSON(raw, &rec); err != nil {
 		return ExecutionRef{}, fmt.Errorf("decode execution.json: %w", err)
 	}
 	return ExecutionRef{
-		Source:      ResolveSourceRevisionScoped,
+		Source:      source,
 		Execution:   rec,
 		RevisionKey: revKey,
 	}, nil
@@ -232,13 +255,32 @@ func resolveExactByIndex(ctx context.Context, store statestore.StateStore, arg s
 	if err != nil {
 		return ExecutionRef{}, err
 	}
-	ref, err := resolveByRevAndKey(ctx, store, entry.RevisionKey, entry.ExecutionKey)
+	ref, err := resolveByIndexEntry(ctx, store, entry)
 	if err != nil {
-		return ExecutionRef{}, fmt.Errorf("index entry %q → %q/%q: %w",
-			arg, entry.RevisionKey, entry.ExecutionKey, err)
+		if !errors.Is(err, statestore.ErrNotFound) {
+			return ExecutionRef{}, fmt.Errorf("index entry %q → %q/%q: %w",
+				arg, entry.RevisionKey, entry.ExecutionKey, err)
+		}
+		ref, err = resolveByRevAndKey(ctx, store, entry.RevisionKey, entry.ExecutionKey)
+		if err != nil {
+			return ExecutionRef{}, fmt.Errorf("index entry %q → %q/%q: %w",
+				arg, entry.RevisionKey, entry.ExecutionKey, err)
+		}
 	}
 	ref.Source = ResolveSourceExactKey
 	return ref, nil
+}
+
+func resolveByIndexEntry(ctx context.Context, store statestore.StateStore, entry statestore.ExecutionIndexEntry) (ExecutionRef, error) {
+	dir := strings.Trim(strings.TrimSpace(entry.Path), "/")
+	if dir == "" {
+		dir = statestore.ExecutionDir(entry.RevisionKey, entry.ExecutionKey)
+	}
+	raw, _, err := store.Read(ctx, path.Join(dir, "execution.json"))
+	if err != nil {
+		return ExecutionRef{}, err
+	}
+	return decodeExecutionRef(raw, ResolveSourceExactKey, entry.RevisionKey)
 }
 
 // resolvePrefixScan implements branch 4 — list every executions index

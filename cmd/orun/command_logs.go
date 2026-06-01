@@ -11,22 +11,22 @@ import (
 	"github.com/sourceplane/orun/internal/cockpit/render"
 	"github.com/sourceplane/orun/internal/cockpit/viewmodel"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
 
 var (
-	logsExecID        string
-	logsRevision      string
-	logsAll           bool
-	logsJob           string
-	logsStep          string
-	logsFailed        bool
-	logsRaw           bool
-	logsRemoteState   bool
-	logsBackendURL    string
+	logsExecID      string
+	logsRevision    string
+	logsAll         bool
+	logsJob         string
+	logsStep        string
+	logsFailed      bool
+	logsRaw         bool
+	logsRemoteState bool
+	logsBackendURL  string
 )
 
 type logEntry struct {
@@ -117,6 +117,7 @@ func showLogs() error {
 	}
 
 	store := state.NewStore(storeDir())
+	readStore := store
 
 	execID := logsExecID
 	// M5.c: prefer the new revision-first resolver (handles
@@ -124,6 +125,9 @@ func showLogs() error {
 	// to the legacy state.Store resolver.
 	if rx, err := resolveExecutionForRead(context.Background(), logsExecID, logsRevision); err == nil {
 		execID = rx.LegacyExecID
+		if rx.Store != nil {
+			readStore = rx.Store
+		}
 	} else if execID == "" {
 		var lerr error
 		execID, lerr = store.ResolveExecID("latest")
@@ -139,10 +143,10 @@ func showLogs() error {
 		}
 	}
 
-	meta, _ := store.LoadMetadata(execID)
-	st, _ := store.LoadState(execID)
+	meta, _ := readStore.LoadMetadata(execID)
+	st, _ := readStore.LoadState(execID)
 	counts := executionCountsFromState(meta, st)
-	entries, err := loadLogEntries(store, execID, st)
+	entries, err := loadLogEntries(readStore, execID, st)
 	if err != nil {
 		return err
 	}

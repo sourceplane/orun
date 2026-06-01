@@ -233,6 +233,10 @@ func RevisionIndexPath(revKey string) string {
 	return "indexes/revisions/" + joinComponents(revKey) + ".json"
 }
 
+// RevisionIndexDir returns "indexes/revisions" — the listing prefix for
+// scanning revision index entries by prefix.
+func RevisionIndexDir() string { return "indexes/revisions" }
+
 // ExecutionIndexDir returns "indexes/executions" — the listing prefix for
 // the executions index, used by ResolveExecution's prefix scan.
 func ExecutionIndexDir() string { return "indexes/executions" }

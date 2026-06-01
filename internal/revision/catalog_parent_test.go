@@ -114,7 +114,7 @@ func TestWriteRevision_CatalogParent_Inactive(t *testing.T) {
 
 // TestWriteRevision_CatalogParent_PartialKeysSkip verifies that a half-filled
 // CatalogParent (only one key set) is treated as inactive — no parent writes,
-// no error. Guards the active() invariant.
+// no error. Guards the Active() invariant.
 func TestWriteRevision_CatalogParent_PartialKeysSkip(t *testing.T) {
 	cases := []CatalogParentRef{
 		{SourceKey: testSrcKey},  // catalog key empty
@@ -146,11 +146,11 @@ func TestWriteRevision_CatalogParent_PartialKeysSkip(t *testing.T) {
 
 // TestCatalogParentRef_Active is a direct unit check on the gating predicate.
 func TestCatalogParentRef_Active(t *testing.T) {
-	if !(CatalogParentRef{SourceKey: "s", CatalogKey: "c"}).active() {
+	if !(CatalogParentRef{SourceKey: "s", CatalogKey: "c"}).Active() {
 		t.Error("both keys set should be active")
 	}
 	for _, c := range []CatalogParentRef{{}, {SourceKey: "s"}, {CatalogKey: "c"}} {
-		if c.active() {
+		if c.Active() {
 			t.Errorf("%+v should be inactive", c)
 		}
 	}

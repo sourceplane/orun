@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sourceplane/orun/internal/catalogstore"
 	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/statestore"
 )
@@ -101,6 +102,13 @@ type Bridge struct {
 	// event. Same shape as Config.Now — when nil, time.Now().UTC is
 	// used. Mirrors the PR-A clock shim; no new abstraction.
 	Now func() time.Time
+
+	// CatalogParent, when both keys are non-empty, causes the bridge to
+	// also mirror state.json/metadata.json under the catalog-parent layout
+	// sources/<SourceKey>/catalogs/<CatalogKey>/revisions/<revKey>/executions/<execKey>/
+	// per implementation-plan.md C7. When either key is empty the
+	// catalog-parent mirror is skipped.
+	CatalogParent revision.CatalogParentRef
 }
 
 // linkFn is the test seam for os.Link. Production code links via
@@ -168,6 +176,58 @@ func (b *Bridge) MirrorRunnerOutput(ctx context.Context, execKey, revKey, legacy
 			// nil per the M4 contract so callers (runner) keep
 			// progressing the execution.
 			_ = err
+		}
+	}
+
+	// Catalog-parent dual-write (C7). After mirroring to the Phase 1
+	// layout above, also copy state.json/metadata.json under the
+	// catalog-parent execution dir. Best-effort — errors logged, not
+	// propagated. Uses Store.Write (copy mode) since the source bytes
+	// are already in memory from the legacy read.
+	if b.CatalogParent.Active() {
+		b.mirrorToCatalogParent(ctx, revKey, execKey, legacyExecID)
+	}
+
+	return nil
+}
+
+// MirrorRunnerLog mirrors one legacy step log into the revision-first and,
+// when configured, catalog-parent execution directories. It is best-effort
+// like MirrorRunnerOutput: malformed preconditions are returned, while missing
+// or failed artifact writes are skipped so runner execution is never blocked.
+func (b *Bridge) MirrorRunnerLog(ctx context.Context, execKey, revKey, legacyExecID, jobID, stepID string) error {
+	if b.Store == nil {
+		return fmt.Errorf("%w: Bridge.Store is nil", statestore.ErrInvalid)
+	}
+	if b.LegacyRoot == "" {
+		return fmt.Errorf("%w: Bridge.LegacyRoot is empty", statestore.ErrInvalid)
+	}
+	if err := revision.ValidateRevisionKey(revKey); err != nil {
+		return err
+	}
+	if err := statestore.ValidateComponent(execKey); err != nil {
+		return err
+	}
+	if err := statestore.ValidateComponent(legacyExecID); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	srcJobSeg := legacyRunnerLogSegment(jobID)
+	srcStepSeg := legacyRunnerLogSegment(stepID)
+	jobSeg := runnerLogSegment(jobID)
+	stepSeg := runnerLogSegment(stepID)
+	srcAbs := filepath.Join(b.LegacyRoot, legacyExecID, "logs", srcJobSeg, srcStepSeg+".log")
+	srcBytes, err := os.ReadFile(srcAbs)
+	if err != nil {
+		return nil
+	}
+	globalPath := statestore.ExecutionDir(revKey, execKey) + "/logs/" + jobSeg + "/" + stepSeg + ".log"
+	_, _ = b.Store.Write(ctx, globalPath, srcBytes, statestore.WriteOptions{})
+	if b.CatalogParent.Active() {
+		if dir, derr := catalogstore.CatalogExecutionDir(b.CatalogParent.SourceKey, b.CatalogParent.CatalogKey, revKey, execKey); derr == nil {
+			_, _ = b.Store.Write(ctx, dir+"/logs/"+jobSeg+"/"+stepSeg+".log", srcBytes, statestore.WriteOptions{})
 		}
 	}
 	return nil
@@ -420,4 +480,52 @@ func (b *Bridge) nextEventSeq(ctx context.Context, revKey, execKey string) (uint
 	return maxSeq + 1, nil
 }
 
+// mirrorToCatalogParent copies each bridgeMirroredFile from the legacy
+// execution directory to the catalog-parent execution path. Best-effort:
+// a failure on any artifact is silently swallowed so the run is not
+// blocked by a catalog-write issue.
+func (b *Bridge) mirrorToCatalogParent(ctx context.Context, revKey, execKey, legacyExecID string) {
+	for _, name := range bridgeMirroredFiles {
+		srcAbs := filepath.Join(b.LegacyRoot, legacyExecID, name)
+		srcBytes, err := os.ReadFile(srcAbs)
+		if err != nil {
+			continue
+		}
+		dstLogical, err := catalogstore.CatalogExecutionFilePath(
+			b.CatalogParent.SourceKey, b.CatalogParent.CatalogKey,
+			revKey, execKey, name)
+		if err != nil {
+			continue
+		}
+		_, _ = b.Store.Write(ctx, dstLogical, srcBytes, statestore.WriteOptions{})
+	}
+}
 
+func runnerLogSegment(s string) string {
+	s = strings.NewReplacer("/", "_", "\\", "_", ":", "_").Replace(s)
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '.' || r == '_' || r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := strings.Trim(b.String(), "._-")
+	if out == "" {
+		return "unknown"
+	}
+	return out
+}
+
+func legacyRunnerLogSegment(s string) string {
+	return strings.NewReplacer("/", "_", "\\", "_", ":", "_").Replace(s)
+}

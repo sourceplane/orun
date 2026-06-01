@@ -198,7 +198,7 @@ func TestStateE2E(t *testing.T) {
 		if err := legacyStore.SaveState("exec-e2e-001", es); err != nil {
 			t.Fatalf("SaveState: %v", err)
 		}
-		if err := finalizeRevisionExecution(ctx, rx, legacyStore, "exec-e2e-001", nil); err != nil {
+		if _, err := finalizeRevisionExecution(ctx, rx, legacyStore, "exec-e2e-001", nil); err != nil {
 			t.Fatalf("finalizeRevisionExecution: %v", err)
 		}
 	})

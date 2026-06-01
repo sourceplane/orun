@@ -34,6 +34,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/catalogstore"
 	"github.com/sourceplane/orun/internal/executionstate"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/revision"
@@ -54,13 +55,15 @@ var runRevision string
 // already-configured Bridge so the caller can wire it into the runner with
 // no further plumbing.
 type revisionExecution struct {
-	cfg      executionstate.Config
-	bridge   *executionstate.Bridge
-	revKey   string
-	execKey  string
-	exec     executionstate.ExecutionRun
-	source   revision.ResolveSource
-	planFile string // canonical plan.json path, for the summary block
+	cfg           executionstate.Config
+	bridge        *executionstate.Bridge
+	revKey        string
+	execKey       string
+	exec          executionstate.ExecutionRun
+	source        revision.ResolveSource
+	planFile      string // canonical plan.json path, for the summary block
+	catalogParent revision.CatalogParentRef
+	triggerName   string
 }
 
 // setupRevisionExecution is the M5.b entry point. It opens the StateStore
@@ -112,6 +115,9 @@ func setupRevisionExecution(
 	//      "if no revision exists … materialize system.manual")
 	//   7) ambiguous → error
 	resolverArg := runRevision
+	if resolverArg == "" {
+		resolverArg = runResolvedRevisionArg
+	}
 	ref, resolveErr := revision.ResolveRevision(ctx, stateStore, resolverArg, revision.ResolveOptions{})
 
 	if resolveErr != nil {
@@ -133,6 +139,15 @@ func setupRevisionExecution(
 	}
 	revKey := ref.Revision.RevisionKey
 
+	// Extract catalog parent from the resolved revision (C7). If the
+	// revision was planned with catalog context (C6), the snapshot keys
+	// are populated; otherwise the zero-value CatalogParentRef keeps the
+	// catalog-parent mirror inactive.
+	catParent := revision.CatalogParentRef{
+		SourceKey:  ref.Revision.SourceSnapshotKey,
+		CatalogKey: ref.Revision.CatalogSnapshotKey,
+	}
+
 	// Step 2 — execution-state writer config. The Config shape mirrors
 	// revision.Config so `orun plan` and `orun run` share the same clock
 	// + ID generators by default.
@@ -141,6 +156,7 @@ func setupRevisionExecution(
 		RevisionConfig: revision.Config{
 			Store: stateStore,
 		},
+		CatalogParent: catParent,
 	}
 
 	// Step 3 — create the execution. The runner profile is recorded
@@ -155,7 +171,7 @@ func setupRevisionExecution(
 		RevisionID:  ref.Revision.RevisionID,
 		TriggerID:   ref.Trigger.TriggerID,
 		TriggerKey:  ref.Trigger.TriggerKey,
-		OriginalKey: runExecID,
+		OriginalKey: legacyExecID,
 		Reason:      executionstate.ReasonDirectRun,
 		Status:      executionstate.StatusPending,
 		Runner: executionstate.RunnerProfile{
@@ -180,22 +196,39 @@ func setupRevisionExecution(
 	// every tick. MirrorModeAuto = hardlink with copy fallback on EXDEV
 	// per design.md §11.
 	bridge := &executionstate.Bridge{
-		Store:      stateStore,
-		LegacyRoot: store.ExecDir(),
-		MirrorMode: executionstate.MirrorModeAuto,
+		Store:         stateStore,
+		LegacyRoot:    store.ExecDir(),
+		MirrorMode:    executionstate.MirrorModeAuto,
+		CatalogParent: catParent,
 	}
 
 	canonicalPlan := filepath.Join(absStoreRoot, "revisions", revKey, "plan.json")
+	if catParent.Active() {
+		if catalogRevDir, err := catalogstore.CatalogRevisionDir(catParent.SourceKey, catParent.CatalogKey, revKey); err == nil {
+			canonicalPlan = filepath.Join(absStoreRoot, filepath.FromSlash(catalogRevDir), "plan.json")
+		}
+	}
 
 	return &revisionExecution{
-		cfg:      cfg,
-		bridge:   bridge,
-		revKey:   revKey,
-		execKey:  exec.ExecutionKey,
-		exec:     exec,
-		source:   ref.Source,
-		planFile: canonicalPlan,
+		cfg:           cfg,
+		bridge:        bridge,
+		revKey:        revKey,
+		execKey:       exec.ExecutionKey,
+		exec:          exec,
+		source:        ref.Source,
+		planFile:      canonicalPlan,
+		catalogParent: catParent,
+		triggerName:   firstNonEmptyString(ref.Trigger.TriggerName, ref.Trigger.TriggerKey),
 	}, nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // synthesizeRevisionForRun materializes a fresh manual revision when the
@@ -273,6 +306,13 @@ func installRevisionHooks(r *runner.Runner, rx *revisionExecution, legacyExecID 
 		// authoritative for the legacy fallback resolver).
 		_ = rx.bridge.MirrorRunnerOutput(context.Background(), rx.execKey, rx.revKey, legacyExecID)
 	}
+	prevLog := r.Hooks.AfterStepLog
+	r.Hooks.AfterStepLog = func(jobID, stepID, output string) {
+		if prevLog != nil {
+			prevLog(jobID, stepID, output)
+		}
+		_ = rx.bridge.MirrorRunnerLog(context.Background(), rx.execKey, rx.revKey, legacyExecID, jobID, stepID)
+	}
 }
 
 // finalizeRevisionExecution flips the execution to a terminal status once
@@ -292,9 +332,9 @@ func finalizeRevisionExecution(
 	store *state.Store,
 	legacyExecID string,
 	runErr error,
-) error {
+) (string, error) {
 	if rx == nil {
-		return nil
+		return executionstate.StatusCompleted, nil
 	}
 	// Force one last mirror pass so the post-run state.json is promoted
 	// into the new layout. Non-precondition failures are best-effort.
@@ -332,9 +372,9 @@ func finalizeRevisionExecution(
 	}
 
 	if _, err := executionstate.MarkTerminal(ctx, rx.cfg, rx.revKey, rx.execKey, status, summary); err != nil {
-		return fmt.Errorf("mark execution %s/%s terminal: %w", rx.revKey, rx.execKey, err)
+		return status, fmt.Errorf("mark execution %s/%s terminal: %w", rx.revKey, rx.execKey, err)
 	}
-	return nil
+	return status, nil
 }
 
 // printRevisionRunSummary emits the post-run summary block (Revision /

@@ -83,10 +83,10 @@ type CatalogParentRef struct {
 	CatalogKey string
 }
 
-// active reports whether the catalog-parent mirror should be written: both
+// Active reports whether the catalog-parent mirror should be written: both
 // keys must be present. A zero-value CatalogParentRef (the Phase 1 default,
 // and the `--no-catalog-refresh` case) returns false.
-func (c CatalogParentRef) active() bool {
+func (c CatalogParentRef) Active() bool {
 	return c.SourceKey != "" && c.CatalogKey != ""
 }
 
@@ -316,7 +316,7 @@ func WriteRevision(
 	// global-layout writes above are unaffected, so the compat suite stays
 	// green. The mirror reuses the exact trigger.json / revision.json /
 	// plan.json bytes already persisted so the two layouts are byte-identical.
-	if cfg.CatalogParent.active() {
+	if cfg.CatalogParent.Active() {
 		if err := writeCatalogParentRevision(ctx, store, cfg.CatalogParent, rev, trig, planBytes); err != nil {
 			return PlanRevision{}, err
 		}

@@ -105,6 +105,169 @@ func TestResolveRevision_Branch3_RevisionKey(t *testing.T) {
 	}
 }
 
+func TestResolveRevision_RevisionPrefixViaGlobalIndex(t *testing.T) {
+	store, want, plan := writeFixture(t)
+	prefix := want.RevisionKey[:len(want.RevisionKey)-4]
+
+	got, err := ResolveRevision(context.Background(), store, prefix, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveRevision(%q): %v", prefix, err)
+	}
+	if got.Source != ResolveSourceRevisionKey {
+		t.Errorf("Source=%q want %q", got.Source, ResolveSourceRevisionKey)
+	}
+	if got.Revision.RevisionKey != want.RevisionKey {
+		t.Errorf("RevisionKey=%q want %q", got.Revision.RevisionKey, want.RevisionKey)
+	}
+	if string(got.PlanBytes) != string(plan) {
+		t.Error("plan bytes mismatch")
+	}
+}
+
+func TestResolveRevision_RevisionPrefixConflict(t *testing.T) {
+	store := newTestStore(t)
+	trig := newTestTrigger(t)
+	cfg := newWriterCfg(store, time.Date(2026, 5, 30, 18, 0, 0, 0, time.UTC))
+	if _, err := WriteRevision(context.Background(), cfg, trig, []byte(`{"jobs":[]}`), "feedface00112233445566778899aabbccddeeff00112233"); err != nil {
+		t.Fatalf("first WriteRevision: %v", err)
+	}
+	if _, err := WriteRevision(context.Background(), cfg, trig, []byte(`{"jobs":[1]}`), "deadbeef00112233445566778899aabbccddeeff00112233"); err != nil {
+		t.Fatalf("second WriteRevision: %v", err)
+	}
+
+	_, err := ResolveRevision(context.Background(), store, "rev-main-abcdef0-p", ResolveOptions{})
+	if !errors.Is(err, statestore.ErrConflict) {
+		t.Fatalf("err=%v want ErrConflict", err)
+	}
+}
+
+func TestResolveFromRevisionPrefix_NotFoundAndListError(t *testing.T) {
+	store := newTestStore(t)
+	_, err := resolveFromRevisionPrefix(context.Background(), store, "")
+	if !errors.Is(err, statestore.ErrNotFound) {
+		t.Fatalf("empty-prefix err=%v want ErrNotFound", err)
+	}
+
+	_, err = resolveFromRevisionPrefix(context.Background(), store, "rev-does-not-exist")
+	if !errors.Is(err, statestore.ErrNotFound) {
+		t.Fatalf("not-found err=%v want ErrNotFound", err)
+	}
+
+	sentinel := errors.New("list denied")
+	_, err = resolveFromRevisionPrefix(context.Background(), listErrStore{StateStore: store, err: sentinel}, "rev-")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("list err=%v want %v", err, sentinel)
+	}
+}
+
+func TestResolveRevision_IndexReadErrorPropagates(t *testing.T) {
+	store, want, _ := writeFixture(t)
+	sentinel := errors.New("index read denied")
+	wrapped := readPathErrStore{
+		StateStore: store,
+		path:       statestore.RevisionIndexPath(want.RevisionKey),
+		err:        sentinel,
+	}
+	_, err := ResolveRevision(context.Background(), wrapped, want.RevisionKey, ResolveOptions{})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("err=%v want %v", err, sentinel)
+	}
+}
+
+func TestResolveRevision_IndexPathSuccess(t *testing.T) {
+	store, want, plan := writeFixture(t)
+	catalogDir := "sources/src-branch-main-abcdef0/catalogs/cat-abcdef/revisions/" + want.RevisionKey
+	for _, item := range []struct {
+		from string
+		name string
+	}{
+		{statestore.PlanPath(want.RevisionKey), "plan.json"},
+		{statestore.RevisionDocPath(want.RevisionKey), "revision.json"},
+		{statestore.TriggerPath(want.RevisionKey), "trigger.json"},
+	} {
+		raw, _, err := store.Read(context.Background(), item.from)
+		if err != nil {
+			t.Fatalf("read %s: %v", item.from, err)
+		}
+		if _, err := store.Write(context.Background(), catalogDir+"/"+item.name, raw, statestore.WriteOptions{}); err != nil {
+			t.Fatalf("write catalog %s: %v", item.name, err)
+		}
+	}
+	entry := statestore.RevisionIndexEntry{
+		RevisionKey: want.RevisionKey,
+		RevisionID:  want.RevisionID,
+		TriggerKey:  want.TriggerKey,
+		PlanHash:    want.PlanHash,
+		CreatedAt:   want.CreatedAt,
+		Path:        catalogDir,
+	}
+	if _, err := store.Write(context.Background(), statestore.RevisionIndexPath(want.RevisionKey), marshalCanonicalJSON(entry), statestore.WriteOptions{}); err != nil {
+		t.Fatalf("overwrite revision index: %v", err)
+	}
+
+	got, err := ResolveRevision(context.Background(), store, want.RevisionKey, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveRevision: %v", err)
+	}
+	if got.Revision.RevisionKey != want.RevisionKey || string(got.PlanBytes) != string(plan) {
+		t.Fatalf("catalog-path resolution mismatch: rev=%q plan=%q", got.Revision.RevisionKey, got.PlanBytes)
+	}
+}
+
+func TestResolveRevision_IndexPathFallbackToGlobal(t *testing.T) {
+	store, want, plan := writeFixture(t)
+	badEntry := statestore.RevisionIndexEntry{
+		RevisionKey: want.RevisionKey,
+		RevisionID:  want.RevisionID,
+		TriggerKey:  want.TriggerKey,
+		PlanHash:    want.PlanHash,
+		CreatedAt:   want.CreatedAt,
+		Path:        "sources/src-branch-main-abcdef0/catalogs/cat-abcdef/revisions/" + want.RevisionKey,
+	}
+	if _, err := store.Write(context.Background(), statestore.RevisionIndexPath(want.RevisionKey), marshalCanonicalJSON(badEntry), statestore.WriteOptions{}); err != nil {
+		t.Fatalf("overwrite revision index: %v", err)
+	}
+
+	got, err := ResolveRevision(context.Background(), store, want.RevisionKey, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveRevision: %v", err)
+	}
+	if got.Revision.RevisionKey != want.RevisionKey || string(got.PlanBytes) != string(plan) {
+		t.Fatalf("fallback mismatch: rev=%q plan=%q", got.Revision.RevisionKey, got.PlanBytes)
+	}
+}
+
+func TestResolveFromRevisionDir_ReadErrors(t *testing.T) {
+	store, want, _ := writeFixture(t)
+	if _, err := resolveFromRevisionDir(context.Background(), store, "", want.RevisionKey); !errors.Is(err, statestore.ErrNotFound) {
+		t.Fatalf("empty dir err=%v want ErrNotFound", err)
+	}
+	missingDir := "sources/src-branch-main-abcdef0/catalogs/cat-abcdef/revisions/" + want.RevisionKey
+	if _, err := resolveFromRevisionDir(context.Background(), store, missingDir, want.RevisionKey); !errors.Is(err, statestore.ErrNotFound) {
+		t.Fatalf("missing plan err=%v want ErrNotFound", err)
+	}
+	planRaw, _, err := store.Read(context.Background(), statestore.PlanPath(want.RevisionKey))
+	if err != nil {
+		t.Fatalf("read plan: %v", err)
+	}
+	if _, err := store.Write(context.Background(), missingDir+"/plan.json", planRaw, statestore.WriteOptions{}); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
+	if _, err := resolveFromRevisionDir(context.Background(), store, missingDir, want.RevisionKey); !errors.Is(err, statestore.ErrNotFound) {
+		t.Fatalf("missing revision err=%v want ErrNotFound", err)
+	}
+	revRaw, _, err := store.Read(context.Background(), statestore.RevisionDocPath(want.RevisionKey))
+	if err != nil {
+		t.Fatalf("read revision: %v", err)
+	}
+	if _, err := store.Write(context.Background(), missingDir+"/revision.json", revRaw, statestore.WriteOptions{}); err != nil {
+		t.Fatalf("write revision: %v", err)
+	}
+	if _, err := resolveFromRevisionDir(context.Background(), store, missingDir, want.RevisionKey); !errors.Is(err, statestore.ErrNotFound) {
+		t.Fatalf("missing trigger err=%v want ErrNotFound", err)
+	}
+}
+
 func TestResolveRevision_Branch4_NamedRef(t *testing.T) {
 	store, want, _ := writeFixture(t)
 	// Plant a named ref pointing at the persisted revision.
@@ -248,4 +411,26 @@ func TestResolveRevision_FilePathPrecedesRevisionKey(t *testing.T) {
 	if string(got.PlanBytes) != string(overlayBytes) {
 		t.Error("plan bytes did not match overlay")
 	}
+}
+
+type listErrStore struct {
+	statestore.StateStore
+	err error
+}
+
+func (s listErrStore) List(context.Context, string) ([]statestore.ObjectInfo, error) {
+	return nil, s.err
+}
+
+type readPathErrStore struct {
+	statestore.StateStore
+	path string
+	err  error
+}
+
+func (s readPathErrStore) Read(ctx context.Context, p string) ([]byte, statestore.ObjectMeta, error) {
+	if p == s.path {
+		return nil, statestore.ObjectMeta{}, s.err
+	}
+	return s.StateStore.Read(ctx, p)
 }

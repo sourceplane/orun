@@ -20,9 +20,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
+	"github.com/sourceplane/orun/internal/catalogstore"
 	"github.com/sourceplane/orun/internal/executionstate"
+	"github.com/sourceplane/orun/internal/revision"
+	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statestore"
 )
 
@@ -35,6 +39,7 @@ type resolvedExec struct {
 	Ref          executionstate.ExecutionRef
 	RevisionKey  string
 	ExecutionKey string
+	Store        *state.Store
 	// LegacyExecID is the directory name under `.orun/executions/`
 	// that holds the runner-on-disk artifacts (state.json,
 	// metadata.json, logs/). When the resolver hit
@@ -81,11 +86,19 @@ func resolveExecutionForRead(ctx context.Context, arg, revHint string) (*resolve
 	if legacy == "" {
 		legacy = ref.Execution.ExecutionKey
 	}
+	readStore := state.NewStore(storeDir())
+	if !executionArtifactsExist(readStore, legacy) {
+		if catStore, catExecID, ok := catalogExecutionReadStore(ctx, store, abs, ref); ok {
+			readStore = catStore
+			legacy = catExecID
+		}
+	}
 	out := &resolvedExec{
 		Source:       ref.Source,
 		Ref:          ref,
 		RevisionKey:  ref.RevisionKey,
 		ExecutionKey: ref.Execution.ExecutionKey,
+		Store:        readStore,
 		LegacyExecID: legacy,
 	}
 	// Surface bridge-mirror-failed warnings once per resolved
@@ -95,4 +108,49 @@ func resolveExecutionForRead(ctx context.Context, arg, revHint string) (*resolve
 		warnBridgeMirrorFailures(ctx, store, ref.RevisionKey, ref.Execution.ExecutionKey)
 	}
 	return out, nil
+}
+
+func executionArtifactsExist(store *state.Store, execID string) bool {
+	if store == nil || execID == "" {
+		return false
+	}
+	if fileExistsCheck(store.StatePath(execID)) || fileExistsCheck(store.MetadataPath(execID)) {
+		return true
+	}
+	if info, err := os.Stat(filepath.Join(store.ExecPath(execID), "logs")); err == nil && info.IsDir() {
+		return true
+	}
+	return false
+}
+
+func catalogExecutionReadStore(
+	ctx context.Context,
+	store statestore.StateStore,
+	root string,
+	ref executionstate.ExecutionRef,
+) (*state.Store, string, bool) {
+	if ref.RevisionKey == "" || ref.Execution.ExecutionKey == "" {
+		return nil, "", false
+	}
+	revRef, err := revision.ResolveRevision(ctx, store, ref.RevisionKey, revision.ResolveOptions{})
+	if err != nil {
+		return nil, "", false
+	}
+	if revRef.Revision.SourceSnapshotKey == "" || revRef.Revision.CatalogSnapshotKey == "" {
+		return nil, "", false
+	}
+	revDir, err := catalogstore.CatalogRevisionDir(
+		revRef.Revision.SourceSnapshotKey,
+		revRef.Revision.CatalogSnapshotKey,
+		ref.RevisionKey,
+	)
+	if err != nil {
+		return nil, "", false
+	}
+	catStore := &state.Store{BaseDir: filepath.Join(root, filepath.FromSlash(revDir))}
+	execID := ref.Execution.ExecutionKey
+	if !executionArtifactsExist(catStore, execID) {
+		return nil, "", false
+	}
+	return catStore, execID, true
 }

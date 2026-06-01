@@ -123,7 +123,7 @@ func WriteManifest(
 	// projection under sources/<srcKey>/catalogs/<catKey>/revisions/<revKey>/.
 	// Only runs when a (source, catalog) pair was resolved; the Phase 1
 	// manifest above is unaffected so the compat suite stays green.
-	if cfg.CatalogParent.active() {
+	if cfg.CatalogParent.Active() {
 		if err := writeCatalogParentManifest(ctx, cfg.Store, cfg.CatalogParent, manifest, rev.RevisionKey); err != nil {
 			return err
 		}

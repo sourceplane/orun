@@ -33,7 +33,7 @@ import (
 // writeCatalogParentRevision mirrors trigger.json, revision.json, and
 // plan.json under the catalog parent. It is invoked by WriteRevision after
 // the Phase 1 layout and compat mirror have been written, and only when
-// CatalogParent.active() is true.
+// CatalogParent.Active() is true.
 //
 // The writes follow the same body-before-ref discipline as the global
 // layout: bodies are written here; the catalog-parent index/ref bookkeeping
@@ -80,7 +80,7 @@ func writeCatalogParentRevision(
 
 // writeCatalogParentManifest mirrors manifest.json under the catalog parent.
 // Invoked by WriteManifest after the Phase 1 manifest is written, and only
-// when CatalogParent.active() is true. The manifest is a derived projection,
+// when CatalogParent.Active() is true. The manifest is a derived projection,
 // so an unconditional overwrite preserves the consistent-snapshot guarantee
 // documented on WriteManifest.
 func writeCatalogParentManifest(

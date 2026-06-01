@@ -203,3 +203,77 @@ func mergeComponentGlobalIndex(current, want catalogmodel.ComponentGlobalIndex) 
 	out.Previews = merged
 	return out
 }
+
+// WriteComponentExecutionIndex appends a ComponentExecutionRow to the
+// catalog-local component execution index at
+// sources/<srcKey>/catalogs/<catKey>/indexes/components/<name>.json.
+// Uses a read-modify-CAS loop so concurrent writers converge. A missing
+// index (first execution for this component) is bootstrapped via
+// CreateIfAbsent.
+func WriteComponentExecutionIndex(
+	ctx context.Context,
+	state statestore.StateStore,
+	srcKey, catKey, name string,
+	row catalogmodel.ComponentExecutionRow,
+) error {
+	if err := ValidateSourceKey(srcKey); err != nil {
+		return fmt.Errorf("WriteComponentExecutionIndex: %w", err)
+	}
+	if err := ValidateCatalogKey(catKey); err != nil {
+		return fmt.Errorf("WriteComponentExecutionIndex: %w", err)
+	}
+	if err := ValidateComponentName(name); err != nil {
+		return fmt.Errorf("WriteComponentExecutionIndex: %w", err)
+	}
+
+	p, err := ComponentLocalIndexPath(srcKey, catKey, name)
+	if err != nil {
+		return fmt.Errorf("WriteComponentExecutionIndex: %w", err)
+	}
+
+	initial := catalogmodel.ComponentExecutionIndex{
+		APIVersion:         catalogmodel.APIVersionV1Alpha1,
+		Kind:               "ComponentExecutionIndex",
+		ComponentKey:       name,
+		SourceSnapshotKey:  srcKey,
+		CatalogSnapshotKey: catKey,
+		Executions:         []catalogmodel.ComponentExecutionRow{row},
+	}
+	initBody, err := catalogmodel.PrettyEncode(initial)
+	if err != nil {
+		return fmt.Errorf("WriteComponentExecutionIndex: encode initial: %w", err)
+	}
+	_, createErr := state.CreateIfAbsent(ctx, p, initBody)
+	if createErr == nil {
+		return nil
+	}
+	if !errors.Is(createErr, statestore.ErrExists) {
+		return fmt.Errorf("WriteComponentExecutionIndex: CreateIfAbsent %s: %w", p, createErr)
+	}
+
+	var lastConflict error
+	for attempt := 0; attempt < indexesRetryBudget; attempt++ {
+		got, meta, readErr := state.Read(ctx, p)
+		if readErr != nil {
+			return fmt.Errorf("WriteComponentExecutionIndex: Read %s: %w", p, readErr)
+		}
+		var current catalogmodel.ComponentExecutionIndex
+		if err := json.Unmarshal(got, &current); err != nil {
+			return fmt.Errorf("WriteComponentExecutionIndex: decode %s: %w", p, err)
+		}
+		current.Executions = append(current.Executions, row)
+		merged, err := catalogmodel.PrettyEncode(current)
+		if err != nil {
+			return fmt.Errorf("WriteComponentExecutionIndex: encode merged: %w", err)
+		}
+		_, casErr := state.CompareAndSwap(ctx, p, meta.Revision, merged)
+		if casErr == nil {
+			return nil
+		}
+		if !errors.Is(casErr, statestore.ErrConflict) {
+			return fmt.Errorf("WriteComponentExecutionIndex: CompareAndSwap %s: %w", p, casErr)
+		}
+		lastConflict = casErr
+	}
+	return fmt.Errorf("%w: %w", ErrRefStale, lastConflict)
+}

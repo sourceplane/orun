@@ -13,6 +13,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
+	"github.com/sourceplane/orun/internal/catalogstore"
 	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/statestore"
 )
@@ -70,6 +71,15 @@ type Config struct {
 	// (data-model.md §5). When nil, a monotonic ULID prefixed "exec_"
 	// is generated.
 	NewID func() string
+
+	// CatalogParent, when both keys are non-empty, requests that
+	// CreateExecution/MarkTerminal additionally mirror execution.json
+	// under the catalog-parent layout
+	// sources/<SourceKey>/catalogs/<CatalogKey>/revisions/<revKey>/executions/<execKey>/
+	// per design.md §7 / implementation-plan.md C7. The Phase 1 global-layout
+	// writes are emitted unconditionally. When either key is empty the
+	// catalog-parent mirror is skipped and only the Phase 1 layout is written.
+	CatalogParent revision.CatalogParentRef
 }
 
 // resolveDefaults returns a Config copy with nil functions filled in.
@@ -389,6 +399,13 @@ func finalizeExecution(ctx context.Context, cfg Config, rec ExecutionRun, now ti
 		CreatedAt:    now,
 		Path:         statestore.ExecutionDir(rec.RevisionKey, rec.ExecutionKey),
 	}
+	if cfg.CatalogParent.Active() {
+		p, err := catalogstore.CatalogExecutionDir(cfg.CatalogParent.SourceKey, cfg.CatalogParent.CatalogKey, rec.RevisionKey, rec.ExecutionKey)
+		if err != nil {
+			return fmt.Errorf("catalog-parent execution index path: %w", err)
+		}
+		idx.Path = p
+	}
 	if _, err := statestore.WriteExecutionIndex(ctx, store, idx); err != nil &&
 		!errors.Is(err, statestore.ErrExists) {
 		return fmt.Errorf("write execution index: %w", err)
@@ -434,6 +451,16 @@ func finalizeExecution(ctx context.Context, cfg Config, rec ExecutionRun, now ti
 		// loud surfacing here exposes that gap rather than hiding it.
 		return fmt.Errorf("update revision manifest: %w", err)
 	}
+
+	// Step 7 — catalog-parent execution mirror (C7). Additive: only
+	// runs when the caller resolved a (source, catalog) pair. Phase 1
+	// layout above is unaffected.
+	if cfg.CatalogParent.Active() {
+		if err := writeCatalogParentExecution(ctx, store, cfg.CatalogParent, rec); err != nil {
+			return fmt.Errorf("write catalog-parent execution: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -553,6 +580,14 @@ func MarkTerminal(
 				}); err != nil {
 				return ExecutionRun{}, fmt.Errorf("refresh latest-execution ref: %w", err)
 			}
+			// Catalog-parent execution mirror (C7). Overwrite the
+			// catalog-parent copy with the terminal status so both
+			// layouts stay byte-identical.
+			if cfg.CatalogParent.Active() {
+				if err := writeCatalogParentExecution(ctx, store, cfg.CatalogParent, next); err != nil {
+					return ExecutionRun{}, fmt.Errorf("write catalog-parent execution: %w", err)
+				}
+			}
 			return next, nil
 		}
 		if errors.Is(err, statestore.ErrConflict) {
@@ -634,3 +669,22 @@ func listExecutionKeys(ctx context.Context, store statestore.StateStore, revKey 
 // pathBase exists so callers do not import path/filepath just to pluck
 // the trailing segment of a logical path. Kept tiny and local.
 func pathBase(p string) string { return path.Base(p) }
+
+// writeCatalogParentExecution mirrors execution.json under the catalog-parent
+// layout: sources/<srcKey>/catalogs/<catKey>/revisions/<revKey>/executions/<execKey>/execution.json.
+// Pattern mirrors writeCatalogParentRevision in internal/revision/catalog_parent.go.
+func writeCatalogParentExecution(
+	ctx context.Context,
+	store statestore.StateStore,
+	parent revision.CatalogParentRef,
+	rec ExecutionRun,
+) error {
+	docPath, err := catalogstore.CatalogExecutionDocPath(parent.SourceKey, parent.CatalogKey, rec.RevisionKey, rec.ExecutionKey)
+	if err != nil {
+		return fmt.Errorf("catalog-parent execution path: %w", err)
+	}
+	if _, err := store.Write(ctx, docPath, marshalCanonicalJSON(rec), statestore.WriteOptions{}); err != nil {
+		return fmt.Errorf("write catalog-parent execution.json: %w", err)
+	}
+	return nil
+}

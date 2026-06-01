@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sourceplane/orun/internal/catalogstore"
 	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/testfx/statefs"
@@ -180,6 +181,92 @@ func TestCreateExecution_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"latestExecutionStatus": "pending"`) {
 		t.Fatalf("manifest missing latestExecutionStatus: %s", raw)
+	}
+}
+
+func TestCreateExecution_CatalogParentWritesCanonicalExecution(t *testing.T) {
+	cfg, revKey, occ := newWriterFixture(t)
+	cfg.CatalogParent = revision.CatalogParentRef{
+		SourceKey:  "src-branch-main-abcdef0",
+		CatalogKey: "cat-abcdef",
+	}
+	rec, err := CreateExecution(context.Background(), cfg, validInput(revKey, occ.TriggerKey, occ.TriggerID))
+	if err != nil {
+		t.Fatalf("CreateExecution: %v", err)
+	}
+
+	catalogPath, err := catalogstore.CatalogExecutionDocPath(cfg.CatalogParent.SourceKey, cfg.CatalogParent.CatalogKey, revKey, rec.ExecutionKey)
+	if err != nil {
+		t.Fatalf("CatalogExecutionDocPath: %v", err)
+	}
+	if _, _, err := cfg.Store.Read(context.Background(), catalogPath); err != nil {
+		t.Fatalf("read catalog execution.json: %v", err)
+	}
+	if _, _, err := cfg.Store.Read(context.Background(), statestore.ExecutionDocPath(revKey, rec.ExecutionKey)); err != nil {
+		t.Fatalf("read global execution mirror: %v", err)
+	}
+	idx, _, err := statestore.ReadExecutionIndex(context.Background(), cfg.Store, rec.ExecutionKey)
+	if err != nil {
+		t.Fatalf("ReadExecutionIndex: %v", err)
+	}
+	wantDir, _ := catalogstore.CatalogExecutionDir(cfg.CatalogParent.SourceKey, cfg.CatalogParent.CatalogKey, revKey, rec.ExecutionKey)
+	if idx.Path != wantDir {
+		t.Fatalf("index Path = %q; want catalog dir %q", idx.Path, wantDir)
+	}
+
+	if _, err := MarkTerminal(context.Background(), cfg, revKey, rec.ExecutionKey, StatusCompleted, ExecSummary{Total: 1, Completed: 1}); err != nil {
+		t.Fatalf("MarkTerminal: %v", err)
+	}
+	raw, _, err := cfg.Store.Read(context.Background(), catalogPath)
+	if err != nil {
+		t.Fatalf("read terminal catalog execution.json: %v", err)
+	}
+	if !strings.Contains(string(raw), `"status": "completed"`) {
+		t.Fatalf("catalog execution not terminal:\n%s", raw)
+	}
+}
+
+func TestWriteCatalogParentExecution_Errors(t *testing.T) {
+	cfg, revKey, _ := newWriterFixture(t)
+	rec := ExecutionRun{RevisionKey: revKey, ExecutionKey: "run-001"}
+
+	err := writeCatalogParentExecution(context.Background(), cfg.Store,
+		revision.CatalogParentRef{SourceKey: "bad/source", CatalogKey: "cat-abcdef"}, rec)
+	if err == nil {
+		t.Fatal("invalid parent unexpectedly succeeded")
+	}
+
+	sentinel := errors.New("catalog write failed")
+	err = writeCatalogParentExecution(context.Background(),
+		writePrefixErrStore{StateStore: cfg.Store, prefix: "sources/", err: sentinel},
+		revision.CatalogParentRef{SourceKey: "src-branch-main-abcdef0", CatalogKey: "cat-abcdef"}, rec)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("write err=%v want %v", err, sentinel)
+	}
+}
+
+func TestCreateExecution_CatalogParentInvalidIndexPath(t *testing.T) {
+	cfg, revKey, occ := newWriterFixture(t)
+	cfg.CatalogParent = revision.CatalogParentRef{SourceKey: "bad/source", CatalogKey: "cat-abcdef"}
+	_, err := CreateExecution(context.Background(), cfg, validInput(revKey, occ.TriggerKey, occ.TriggerID))
+	if err == nil {
+		t.Fatal("CreateExecution unexpectedly succeeded with invalid catalog parent")
+	}
+}
+
+func TestMarkTerminal_CatalogParentWriteError(t *testing.T) {
+	cfg, revKey, occ := newWriterFixture(t)
+	cfg.CatalogParent = revision.CatalogParentRef{SourceKey: "src-branch-main-abcdef0", CatalogKey: "cat-abcdef"}
+	rec, err := CreateExecution(context.Background(), cfg, validInput(revKey, occ.TriggerKey, occ.TriggerID))
+	if err != nil {
+		t.Fatalf("CreateExecution: %v", err)
+	}
+
+	sentinel := errors.New("catalog terminal write failed")
+	cfg.Store = writePrefixErrStore{StateStore: cfg.Store, prefix: "sources/", err: sentinel}
+	_, err = MarkTerminal(context.Background(), cfg, revKey, rec.ExecutionKey, StatusCompleted, ExecSummary{Total: 1, Completed: 1})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("MarkTerminal err=%v want %v", err, sentinel)
 	}
 }
 
@@ -420,4 +507,17 @@ func TestConfig_ResolveDefaults(t *testing.T) {
 	if c.Now().IsZero() {
 		t.Fatal("Now zero")
 	}
+}
+
+type writePrefixErrStore struct {
+	statestore.StateStore
+	prefix string
+	err    error
+}
+
+func (s writePrefixErrStore) Write(ctx context.Context, p string, b []byte, opts statestore.WriteOptions) (statestore.ObjectMeta, error) {
+	if strings.HasPrefix(p, s.prefix) {
+		return statestore.ObjectMeta{}, s.err
+	}
+	return s.StateStore.Write(ctx, p, b, opts)
 }

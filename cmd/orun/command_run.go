@@ -12,12 +12,12 @@ import (
 	"time"
 
 	"github.com/sourceplane/orun/internal/artifactstore/github"
-	"github.com/sourceplane/orun/internal/executionstate"
 	"github.com/sourceplane/orun/internal/executor"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/remotestate"
-	"github.com/sourceplane/orun/internal/runner"
+	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/runbundle"
+	"github.com/sourceplane/orun/internal/runner"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/ui"
@@ -27,6 +27,7 @@ import (
 
 var (
 	runPlanRef              string
+	runResolvedRevisionArg  string
 	runDryRun               bool
 	runVerbose              bool
 	runWorkDir              string
@@ -328,6 +329,7 @@ func runPlan() error {
 		} else {
 			rx = built
 			installRevisionHooks(r, rx, execID)
+			emitCatalogExecutionStarted(ctx, rx, plan, rx.cfg.Store)
 		}
 	}
 
@@ -337,14 +339,13 @@ func runPlan() error {
 	// refresh refs/latest-execution.json, mirror final state, and print
 	// the post-run summary block.
 	if rx != nil {
-		if finErr := finalizeRevisionExecution(context.Background(), rx, store, execID, runErr); finErr != nil {
+		finalStatus, finErr := finalizeRevisionExecution(context.Background(), rx, store, execID, runErr)
+		if finErr != nil {
 			color := ui.ColorEnabledForWriter(os.Stderr)
 			fmt.Fprintf(os.Stderr, "%s finalize execution: %v\n",
 				ui.Yellow(color, "warning:"), finErr)
-		}
-		finalStatus := executionstate.StatusCompleted
-		if runErr != nil {
-			finalStatus = executionstate.StatusFailed
+		} else {
+			emitCatalogExecutionTerminal(context.Background(), rx, plan, rx.cfg.Store, finalStatus)
 		}
 		printRevisionRunSummary(rx, finalStatus)
 	}
@@ -462,7 +463,7 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	if namespaceID == "" && os.Getenv("GITHUB_ACTIONS") != "true" {
 		if os.Getenv("ORUN_TOKEN") != "" {
 			return fmt.Errorf(
-				"local remote-state with ORUN_TOKEN requires a pre-linked namespace; " +
+				"local remote-state with ORUN_TOKEN requires a pre-linked namespace; "+
 					"run `orun cloud link --backend-url %s` first to cache the namespace ID",
 				backendURL,
 			)
@@ -894,6 +895,7 @@ func findJobByIDInPlan(plan *model.Plan, jobID string) model.PlanJob {
 }
 
 func resolveAndLoadPlan(store *state.Store) (*model.Plan, error) {
+	runResolvedRevisionArg = ""
 	ref := runPlanRef
 	if ref == "" {
 		ref = os.Getenv("ORUN_PLAN_ID")
@@ -902,10 +904,26 @@ func resolveAndLoadPlan(store *state.Store) (*model.Plan, error) {
 	// If a specific ref was given, try to resolve it as a saved plan first.
 	if ref != "" {
 		if path, err := store.ResolvePlanRef(ref); err == nil {
-			return loadPlan(path)
+			plan, err := loadPlan(path)
+			if err != nil {
+				return nil, err
+			}
+			noteRunPlanRevision(plan)
+			return plan, nil
 		}
 		if fileExistsCheck(ref) {
-			return loadPlan(ref)
+			plan, err := loadPlan(ref)
+			if err != nil {
+				return nil, err
+			}
+			noteRunPlanRevision(plan)
+			return plan, nil
+		}
+		if plan, revKey, err := loadPlanFromRevisionRef(ref); err == nil {
+			runResolvedRevisionArg = revKey
+			return plan, nil
+		} else if ref == "latest" || strings.HasPrefix(ref, "rev-") {
+			return nil, err
 		}
 		// Not a plan ref or file path — treat as a component name to scope the fresh plan.
 		planComponents = []string{ref}
@@ -927,7 +945,45 @@ func resolveAndLoadPlan(store *state.Store) (*model.Plan, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load generated plan: %w", err)
 	}
-	return loadPlan(path)
+	plan, err := loadPlan(path)
+	if err != nil {
+		return nil, err
+	}
+	noteRunPlanRevision(plan)
+	return plan, nil
+}
+
+func noteRunPlanRevision(plan *model.Plan) {
+	if plan == nil || plan.Metadata.Revision == nil {
+		return
+	}
+	if key := strings.TrimSpace(plan.Metadata.Revision.Key); key != "" {
+		runResolvedRevisionArg = key
+	}
+}
+
+func loadPlanFromRevisionRef(ref string) (*model.Plan, string, error) {
+	stateStore, _, err := openLocalStateStore()
+	if err != nil {
+		return nil, "", err
+	}
+	arg := ref
+	if arg == "latest" {
+		arg = ""
+	}
+	revRef, err := revision.ResolveRevision(context.Background(), stateStore, arg, revision.ResolveOptions{})
+	if err != nil {
+		return nil, "", err
+	}
+	plan, err := parsePlanBytes(revRef.PlanBytes, ref)
+	if err != nil {
+		return nil, "", err
+	}
+	noteRunPlanRevision(plan)
+	if runResolvedRevisionArg == "" {
+		runResolvedRevisionArg = revRef.Revision.RevisionKey
+	}
+	return plan, revRef.Revision.RevisionKey, nil
 }
 
 func resolveRunnerName(flagValue string) string {
@@ -1005,8 +1061,12 @@ func loadPlan(path string) (*model.Plan, error) {
 		return nil, fmt.Errorf("failed to read plan file %s: %w", path, err)
 	}
 
+	return parsePlanBytes(data, path)
+}
+
+func parsePlanBytes(data []byte, label string) (*model.Plan, error) {
 	var plan model.Plan
-	ext := filepath.Ext(path)
+	ext := filepath.Ext(label)
 	switch ext {
 	case ".yaml", ".yml":
 		if err := yaml.Unmarshal(data, &plan); err != nil {

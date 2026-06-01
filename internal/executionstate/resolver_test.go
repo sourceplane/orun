@@ -106,6 +106,20 @@ func TestResolveExecution_Branch1_ExactKey(t *testing.T) {
 	}
 }
 
+func TestResolveByIndexEntry_EmptyPathUsesGlobalLayout(t *testing.T) {
+	cfg, revKey, rec, _ := resolverFixture(t)
+	ref, err := resolveByIndexEntry(context.Background(), cfg.Store, statestore.ExecutionIndexEntry{
+		ExecutionKey: rec.ExecutionKey,
+		RevisionKey:  revKey,
+	})
+	if err != nil {
+		t.Fatalf("resolveByIndexEntry: %v", err)
+	}
+	if ref.Execution.ExecutionKey != rec.ExecutionKey || ref.RevisionKey != revKey {
+		t.Fatalf("resolved ref mismatch: %+v", ref)
+	}
+}
+
 func TestResolveExecution_Branch2_RevHint(t *testing.T) {
 	cfg, revKey, rec, _ := resolverFixture(t)
 	ref, err := ResolveExecution(context.Background(), cfg.Store, rec.ExecutionKey, revKey, ResolveOptions{})
@@ -117,6 +131,43 @@ func TestResolveExecution_Branch2_RevHint(t *testing.T) {
 	}
 	if ref.RevisionKey != revKey {
 		t.Fatalf("RevisionKey=%q want %q", ref.RevisionKey, revKey)
+	}
+}
+
+func TestResolveExecution_RevHintUsesExecutionIndexPath(t *testing.T) {
+	cfg, revKey, rec, _ := resolverFixture(t)
+	ctx := context.Background()
+	altDir := "sources/src-branch-main-abcdef0/catalogs/cat-abcdef/revisions/" + revKey + "/executions/" + rec.ExecutionKey
+	raw, _, err := cfg.Store.Read(ctx, statestore.ExecutionDocPath(revKey, rec.ExecutionKey))
+	if err != nil {
+		t.Fatalf("read global execution: %v", err)
+	}
+	if _, err := cfg.Store.Write(ctx, altDir+"/execution.json", raw, statestore.WriteOptions{}); err != nil {
+		t.Fatalf("write alternate execution: %v", err)
+	}
+	if _, err := cfg.Store.Write(ctx, statestore.ExecutionIndexPath(rec.ExecutionKey), marshalCanonicalJSON(statestore.ExecutionIndexEntry{
+		ExecutionKey: rec.ExecutionKey,
+		ExecutionID:  rec.ExecutionID,
+		RevisionKey:  revKey,
+		Status:       rec.Status,
+		CreatedAt:    rec.CreatedAt,
+		Path:         altDir,
+	}), statestore.WriteOptions{}); err != nil {
+		t.Fatalf("overwrite execution index: %v", err)
+	}
+	if err := cfg.Store.Delete(ctx, statestore.ExecutionDocPath(revKey, rec.ExecutionKey)); err != nil {
+		t.Fatalf("delete global execution: %v", err)
+	}
+
+	ref, err := ResolveExecution(ctx, cfg.Store, rec.ExecutionKey, revKey, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveExecution: %v", err)
+	}
+	if ref.Source != ResolveSourceRevisionScoped {
+		t.Fatalf("Source=%q want revision-scoped", ref.Source)
+	}
+	if ref.Execution.ExecutionKey != rec.ExecutionKey {
+		t.Fatalf("ExecutionKey=%q want %q", ref.Execution.ExecutionKey, rec.ExecutionKey)
 	}
 }
 
