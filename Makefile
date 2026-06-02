@@ -1,4 +1,4 @@
-.PHONY: build run validate debug plan clean test help examples-validate examples-debug examples-plan examples-gha-smoke test-state-redesign verify-generated
+.PHONY: build run validate debug plan clean test help examples-validate examples-debug examples-plan examples-gha-smoke test-state-redesign test-object-model verify-generated
 
 BINARY_NAME=orun
 BINARY_PATH=./cmd/$(BINARY_NAME)
@@ -143,6 +143,14 @@ test-state-redesign:
 	  echo "   measured: $$COVER%"; \
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 100.0) { printf "❌ Sanitize* coverage %.1f%% below 100%% threshold\n", c+0; exit 1 } }'
 	# add packages as state-redesign milestones land
+
+test-object-model:
+	@echo "🧪 object-model: lint gate (claude-goals.md §3)"
+	@bash scripts/check-object-model.sh
+	@echo "🧪 object-model: testfx/objfs"
+	@go test -count=1 -race ./internal/testfx/objfs/...
+	# coverage gates for ./internal/objectstore (>=95%) and ./internal/nodes (>=90%)
+	# are added as those packages land (M1+).
 
 verify-generated:
 	@echo "🧪 Verifying generated artifacts are up-to-date..."
