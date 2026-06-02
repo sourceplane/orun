@@ -58,6 +58,10 @@ func TestSealObjectModelRunDisabledByDefault(t *testing.T) {
 
 func TestSealObjectModelRunSeals(t *testing.T) {
 	t.Setenv("ORUN_OBJECT_RUNNER", "1")
+	// The hook re-resolves the workspace catalog/source against the process cwd;
+	// run from an isolated temp dir so it never writes a stray .orun/ into the
+	// repository tree (cwd is restored on cleanup).
+	t.Chdir(t.TempDir())
 	execID := "exec-seal-1"
 	ls, plan := legacyStoreWithExecution(t, execID)
 	orunDir := filepath.Join(t.TempDir(), ".orun")
