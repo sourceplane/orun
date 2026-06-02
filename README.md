@@ -88,6 +88,9 @@ The OCI image is a kiox provider artifact. Use `oras pull ghcr.io/sourceplane/or
 ## Quick start
 
 ```sh
+# 0. Open the cockpit (interactive). Bare `orun` on a terminal launches the TUI.
+orun
+
 # 1. Validate an intent file
 orun validate --intent examples/intent.yaml
 
@@ -100,6 +103,12 @@ orun plan --intent examples/intent.yaml --output plan.json
 # 4. Run the plan
 orun run --plan plan.json
 ```
+
+Running `orun` with no arguments on an interactive terminal opens the
+[Cockpit TUI](https://orun.sourceplane.ai/cli/orun-tui) (equivalent to `orun tui`).
+In a non-interactive shell — CI, pipes, redirected output — or when
+`ORUN_NO_TUI=1` is set, a bare `orun` prints help instead, so scripts stay
+predictable. Explicit subcommands (`orun plan`, `orun run`, …) are unaffected.
 
 ## Command reference
 

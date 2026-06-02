@@ -79,6 +79,17 @@ That command runs a dependency-free GitHub Actions-compatible job from the embed
 
 `status` shows a compact execution summary. `get jobs` shows the grouped job tree with status icons. `logs` streams the raw step output.
 
+Prefer an interactive view? Just run the binary with no arguments:
+
+```bash
+./orun
+```
+
+A bare `orun` opens the [Cockpit TUI](../cli/orun-tui.md) (the same as `orun tui`),
+where you can browse components, generate plans, launch dry-runs or real runs, and
+watch logs stream live. In non-interactive shells — or with `ORUN_NO_TUI=1` — `orun`
+prints help instead.
+
 ## 10. Run from a component subdirectory
 
 ```bash

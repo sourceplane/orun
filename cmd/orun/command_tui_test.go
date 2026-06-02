@@ -18,6 +18,42 @@ func TestTuiCommand_RegisteredOnRoot(t *testing.T) {
 	t.Fatal("expected `tui` subcommand to be registered on rootCmd")
 }
 
+func TestRootCommand_BareInvocationHasRunE(t *testing.T) {
+	if rootCmd.RunE == nil {
+		t.Fatal("rootCmd must have a RunE so a bare `orun` can open the TUI")
+	}
+}
+
+func TestShouldLaunchDefaultTUI_RespectsNoTUIEnv(t *testing.T) {
+	t.Setenv(noTUIEnvVar, "1")
+	if shouldLaunchDefaultTUI() {
+		t.Fatal("ORUN_NO_TUI=1 must suppress the default TUI")
+	}
+}
+
+func TestShouldLaunchDefaultTUI_NonInteractiveFallsBackToHelp(t *testing.T) {
+	t.Setenv(noTUIEnvVar, "")
+	// `go test` stdout/stdin are not TTYs, so the bare invocation must NOT
+	// launch the TUI — this is what keeps CI and pipes scriptable.
+	if shouldLaunchDefaultTUI() {
+		t.Fatal("non-interactive invocation must fall back to help, not the TUI")
+	}
+}
+
+func TestRootCommand_BareInvocationPrintsHelpWhenSuppressed(t *testing.T) {
+	t.Setenv(noTUIEnvVar, "1")
+	buf := &bytes.Buffer{}
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	t.Cleanup(func() { rootCmd.SetOut(nil); rootCmd.SetErr(nil) })
+	if err := rootCmd.RunE(rootCmd, []string{}); err != nil {
+		t.Fatalf("bare RunE with TUI suppressed should print help, got: %v", err)
+	}
+	if !strings.Contains(buf.String(), cliName) {
+		t.Errorf("expected help output to mention %q; got:\n%s", cliName, buf.String())
+	}
+}
+
 func TestTuiCommand_HelpDoesNotLaunch(t *testing.T) {
 	cmd, _, err := rootCmd.Find([]string{"tui"})
 	if err != nil {

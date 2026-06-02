@@ -121,13 +121,22 @@ Log Explorer pane.
 ### `orun tui` — the full cockpit
 
 ```bash
-orun tui
+orun tui      # explicit
+orun          # bare invocation opens the cockpit on an interactive terminal
 ```
 
 A three-pane Bubble Tea shell: sidebar (modes), main pane (active view), inspector
 (field list for the selection). Modes are `Browse`, `Plan Studio`, `Activity`, `Logs`,
 `History`. See [cockpit architecture](/cockpit/architecture) for the full mode and
 drilldown machine.
+
+The cockpit is the **default command** — a bare `orun` opens it on an interactive
+terminal, and falls back to printing help in non-interactive shells or when
+`ORUN_NO_TUI` is set. From Plan Studio you can **dry-run** (`d`) or **real-run**
+(`R`, behind a confirm) a plan; a real run executes through the same internal
+runner as `orun run`, persists state and per-step logs to `.orun/`, and streams
+those logs into the Activity and Logs surfaces live. See the
+[TUI reference](/cli/orun-tui) for the run and live-log workflow.
 
 ## State, on disk
 
@@ -157,8 +166,10 @@ the same shape over the wire — `bridge.FromBackend` normalises them into the s
 - **Not a CI UI.** GitHub Actions, Buildkite, and friends remain the systems of record
   for who triggered what. The cockpit shows you the **plan** and the **execution** of
   one run; the CI shows you the context.
-- **Not a state editor.** The cockpit reads `.orun/`. It does not mutate state. Even
-  `orun run --resume` writes new state; it doesn't rewrite the old.
+- **Not a state editor.** The cockpit reads `.orun/`, and a real run from Plan Studio
+  *appends* new run state and logs through the same runner as `orun run`. It never
+  rewrites or hand-edits existing state — even `orun run --resume` writes new state
+  rather than mutating the old.
 
 ## Next
 

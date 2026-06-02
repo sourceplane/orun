@@ -13,26 +13,25 @@ import (
 	"github.com/sourceplane/orun/internal/state"
 )
 
-// runPlanLocalDryRun is the unsupported-mode guard / canonical scope for
-// the Phase 3 RunPlan implementation. It exposes the validation logic so
-// tests can assert fail-closed behavior without spinning up a runner.
+// validateRunRequest is the canonical scope guard for RunPlan. It exposes
+// the validation logic so tests can assert fail-closed behavior without
+// spinning up a runner.
 //
 // Supported scope:
 //   - req.Plan != nil
-//   - req.DryRun == true
+//   - req.DryRun in {true, false} — dry-run preview and real local execution
 //   - req.RemoteState == false
 //
-// Anything else returns a sentinel error; callers must surface it instead
-// of silently executing.
+// Real execution writes per-step logs and persists state to the local
+// store, which is what powers live log streaming in the cockpit. Remote
+// state remains gated until its own phase; anything out of scope returns a
+// sentinel error so callers surface it instead of silently executing.
 func validateRunRequest(req RunRequest) error {
 	if req.Plan == nil {
 		return errors.New("RunPlan: req.Plan is required")
 	}
-	if !req.DryRun {
-		return errors.New("RunPlan: only DryRun=true is supported from the TUI (Phase 3); real execution remains CLI-only")
-	}
 	if req.RemoteState {
-		return errors.New("RunPlan: RemoteState=true is not supported from the TUI (Phase 3)")
+		return errors.New("RunPlan: RemoteState=true is not supported from the TUI yet")
 	}
 	return nil
 }
@@ -106,6 +105,11 @@ func (s *LiveOrunService) RunPlan(ctx context.Context, req RunRequest) (<-chan R
 		if ev.Timestamp.IsZero() {
 			ev.Timestamp = time.Now()
 		}
+		// Stamp the resolved execID on every event so the UI can scope live
+		// log tailing to this run without a separate lookup.
+		if ev.ExecID == "" {
+			ev.ExecID = execID
+		}
 		select {
 		case <-ctx.Done():
 		case ch <- ev:
@@ -117,7 +121,7 @@ func (s *LiveOrunService) RunPlan(ctx context.Context, req RunRequest) (<-chan R
 		useOverride,
 		io.Discard,
 		io.Discard,
-		true, // dryRun
+		req.DryRun, // real execution when false — persists state + per-step logs
 		req.JobID,
 		false, // retry
 		false, // verbose
@@ -181,6 +185,7 @@ func (s *LiveOrunService) RunPlan(ctx context.Context, req RunRequest) (<-chan R
 		if err := ctx.Err(); err != nil {
 			ch <- RunEvent{
 				Kind:      RunEventRunDone,
+				ExecID:    execID,
 				Status:    "cancelled",
 				Error:     err.Error(),
 				Timestamp: time.Now(),
@@ -192,6 +197,7 @@ func (s *LiveOrunService) RunPlan(ctx context.Context, req RunRequest) (<-chan R
 
 		done := RunEvent{
 			Kind:      RunEventRunDone,
+			ExecID:    execID,
 			Timestamp: time.Now(),
 		}
 		switch {

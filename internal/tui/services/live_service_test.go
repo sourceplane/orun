@@ -102,16 +102,24 @@ func TestLiveOrunService_ListRuns_RemoteStateNotImplemented(t *testing.T) {
 	}
 }
 
-func TestLiveOrunService_TailLogs_RejectsRemoteAndFollow(t *testing.T) {
+func TestLiveOrunService_TailLogs_GuardsAndFollowSupported(t *testing.T) {
 	svc := NewLiveOrunService(LiveServiceConfig{Store: state.NewStore(t.TempDir())})
 	if _, err := svc.TailLogs(context.Background(), LogRequest{ExecID: "e", JobID: "j", RemoteState: true}); err == nil {
 		t.Error("expected error for RemoteState=true")
 	}
-	if _, err := svc.TailLogs(context.Background(), LogRequest{ExecID: "e", JobID: "j", Follow: true}); err == nil {
-		t.Error("expected error for Follow=true")
-	}
 	if _, err := svc.TailLogs(context.Background(), LogRequest{}); err == nil {
 		t.Error("expected error for missing ExecID")
+	}
+	// Follow is now supported even when the execution dir does not exist yet
+	// (live run not yet flushed): it returns a channel and waits for files.
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := svc.TailLogs(ctx, LogRequest{ExecID: "e", JobID: "j", Follow: true})
+	if err != nil {
+		t.Fatalf("Follow=true should be supported, got %v", err)
+	}
+	cancel()
+	// Draining must terminate once the context is cancelled.
+	for range ch {
 	}
 }
 

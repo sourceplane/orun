@@ -10,17 +10,22 @@ import (
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 const (
-	cliName           = "orun"
-	configDirEnvVar   = "ORUN_CONFIG_DIR"
-	runnerEnvVar      = "ORUN_RUNNER"
-	execIDEnvVar      = "ORUN_EXEC_ID"
-	planIDEnvVar      = "ORUN_PLAN_ID"
-	noColorEnvVar     = "ORUN_NO_COLOR"
-	dryRunEnvVar      = "ORUN_DRY_RUN"
-	stateDirEnvVar    = "ORUN_STATE_DIR"
+	cliName         = "orun"
+	configDirEnvVar = "ORUN_CONFIG_DIR"
+	runnerEnvVar    = "ORUN_RUNNER"
+	execIDEnvVar    = "ORUN_EXEC_ID"
+	planIDEnvVar    = "ORUN_PLAN_ID"
+	noColorEnvVar   = "ORUN_NO_COLOR"
+	dryRunEnvVar    = "ORUN_DRY_RUN"
+	stateDirEnvVar  = "ORUN_STATE_DIR"
+	// noTUIEnvVar, when truthy, makes a bare `orun` invocation print help
+	// instead of opening the cockpit TUI — an escape hatch for scripts and
+	// users who prefer the classic default.
+	noTUIEnvVar = "ORUN_NO_TUI"
 	// Remote state env vars
 	remoteStateEnvVar = "ORUN_REMOTE_STATE"
 	backendURLEnvVar  = "ORUN_BACKEND_URL"
@@ -57,12 +62,24 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:           cliName,
-	Short:         "Plan and run changes from intent",
-	Long:          "orun turns intent into deterministic plans and runs them with clear, resumable execution feedback",
+	Use:   cliName,
+	Short: "Plan and run changes from intent",
+	Long: "orun turns intent into deterministic plans and runs them with clear, resumable execution feedback.\n\n" +
+		"Run `orun` with no arguments in an interactive terminal to open the Cockpit TUI; " +
+		"set ORUN_NO_TUI=1 (or run in a non-interactive shell) to print help instead.",
 	Version:       version,
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	// A bare `orun` opens the cockpit TUI on an interactive terminal and
+	// otherwise prints help. NoArgs keeps `orun <typo>` reporting an unknown
+	// command rather than being swallowed by this handler.
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if shouldLaunchDefaultTUI() {
+			return runTUI(cmd.Context())
+		}
+		return cmd.Help()
+	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if commandNeedsConfig(cmd) && configDir == "" {
 			if envConfigDir := configDirEnvValue(); envConfigDir != "" {
@@ -101,6 +118,21 @@ func envValue(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// shouldLaunchDefaultTUI reports whether a bare `orun` invocation should
+// open the cockpit. It launches only on a real interactive terminal (both
+// stdin and stdout are TTYs) and never when ORUN_NO_TUI is set truthy — so
+// CI, pipes, and redirected output fall back to printing help, preserving
+// scriptable behavior.
+func shouldLaunchDefaultTUI() bool {
+	switch os.Getenv(noTUIEnvVar) {
+	case "", "0", "false", "no":
+		// fall through — TUI allowed
+	default:
+		return false
+	}
+	return term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd()))
 }
 
 func configDirEnvValue() string {

@@ -160,7 +160,12 @@ const (
 
 // RunEvent is a single event from a streaming run.
 type RunEvent struct {
-	Kind      RunEventKind
+	Kind RunEventKind
+	// ExecID is the resolved execution ID for this run. It is stamped on
+	// every event the service emits so the TUI can scope live log tailing
+	// to the in-flight run without a separate round-trip. Empty only for
+	// the synthetic terminal event produced when the run channel is dropped.
+	ExecID    string
 	JobID     string
 	StepID    string
 	Component string

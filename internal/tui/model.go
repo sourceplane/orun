@@ -145,6 +145,11 @@ type Model struct {
 	// Active run execution ID, used to scope TailLogs.
 	currentExecID string
 
+	// logCancel cancels the in-flight follow-mode log tail. We keep at most
+	// one live tail: starting a new one (or the run finishing) cancels the
+	// previous so follow goroutines never leak across navigations.
+	logCancel context.CancelFunc
+
 	// Overlays
 	commandPalette     views.CommandPaletteModel
 	showHelp           bool
@@ -383,11 +388,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case views.RunJobSelectedMsg:
-		ch, err := m.svc.TailLogs(context.Background(), services.LogRequest{
+		// Follow only while the run is still streaming; a finished run's logs
+		// are read once and the channel closes.
+		follow := !m.runView.Done()
+		ctx := m.newLogContext(follow)
+		ch, err := m.svc.TailLogs(ctx, services.LogRequest{
 			ExecID: msg.ExecID,
 			JobID:  msg.JobID,
 			StepID: msg.StepID,
-			Follow: true,
+			Follow: follow,
 		})
 		if err != nil {
 			m.lastErr = err
@@ -395,16 +404,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.lastErr = nil
 		var cmd tea.Cmd
-		m.logView, cmd = m.logView.Attach(ch, msg.JobID, msg.StepID, true)
+		m.logView, cmd = m.logView.Attach(ch, msg.JobID, msg.StepID, follow)
 		m = m.switchMode(ModeLogExplorer)
 		return m, cmd
 
 	case views.ActivityTailLogsMsg:
-		ch, err := m.svc.TailLogs(context.Background(), services.LogRequest{
+		ctx := m.newLogContext(msg.Live)
+		ch, err := m.svc.TailLogs(ctx, services.LogRequest{
 			ExecID: msg.ExecID,
 			JobID:  msg.JobID,
 			StepID: msg.StepID,
-			Follow: true,
+			Follow: msg.Live,
 		})
 		if err != nil {
 			m.lastErr = err
@@ -420,10 +430,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.runStarting {
 			m.runStarting = false
 		}
+		// Learn the execution ID from the stream so live log tailing and the
+		// activity run row resolve to the real run rather than an empty ID.
+		if msg.Event.ExecID != "" && m.liveExecID == "" {
+			m.liveExecID = msg.Event.ExecID
+		}
 		var cmd tea.Cmd
 		m.runView, cmd = m.runView.Update(msg)
 		m.refreshActivityRuns()
-		return m, cmd
+		cmds := []tea.Cmd{cmd}
+		if msg.Event.Kind == services.RunEventRunDone {
+			// The run is finished and all step logs are on disk. Give the
+			// follow poll one more interval to drain the final step, then
+			// stop it so the tail goroutine exits cleanly.
+			cmds = append(cmds, tea.Tick(600*time.Millisecond, func(time.Time) tea.Msg {
+				return stopFollowMsg{}
+			}))
+		}
+		return m, tea.Batch(cmds...)
+
+	case stopFollowMsg:
+		if m.logCancel != nil {
+			m.logCancel()
+			m.logCancel = nil
+		}
+		return m, nil
 
 	case services.LogEventMsg:
 		// Route to whichever surface is consuming logs.
@@ -971,9 +1002,9 @@ func planJobDesc(j *model.PlanJob) *services.ResourceDescription {
 // (phase, run, use, with) live in the drilled-in StudioLevelStep view so
 // the inspector never overflows for jobs with many or large steps.
 //
-//	1. build-image
-//	2. push-image
-//	3. deploy
+//  1. build-image
+//  2. push-image
+//  3. deploy
 func planStepsBlock(steps []model.PlanStep) string {
 	var b strings.Builder
 	for i, s := range steps {
@@ -1465,6 +1496,28 @@ func (m Model) dispatchPendingRun() (tea.Model, tea.Cmd) {
 	m.showConfirm = false
 	m.pendingRun = nil
 	return m, tea.Batch(cmd, m.spinner.Tick)
+}
+
+// stopFollowMsg is dispatched a short interval after a run completes so the
+// follow-mode log tail drains its final step and then shuts down.
+type stopFollowMsg struct{}
+
+// newLogContext returns a context for a log tail. For a follow tail it
+// cancels any previous follow and stores the new cancel func so the tail's
+// lifetime is bounded (cancelled on the next tail, on run completion, or at
+// program exit). A non-follow (one-shot) tail self-terminates when the log
+// files are exhausted, so it needs no stored cancel.
+func (m *Model) newLogContext(follow bool) context.Context {
+	if m.logCancel != nil {
+		m.logCancel()
+		m.logCancel = nil
+	}
+	if !follow {
+		return context.Background()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.logCancel = cancel
+	return ctx
 }
 
 // ToastTickMsg drives the 1-second tick that auto-dismisses toasts after

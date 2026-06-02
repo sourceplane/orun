@@ -312,11 +312,14 @@ func (m ActivityModel) AttachLogs(ch <-chan services.LogEvent, jobID, stepID str
 	return m, cmd
 }
 
-// ActivityTailLogsMsg asks the root model to dispatch TailLogs.
+// ActivityTailLogsMsg asks the root model to dispatch TailLogs. Live is
+// true when the selected run is still in flight, which the root model uses
+// to decide between follow-mode tailing and a one-shot historical read.
 type ActivityTailLogsMsg struct {
 	ExecID string
 	JobID  string
 	StepID string
+	Live   bool
 }
 
 // AutoAttachCmd issues a tail-logs request for the current selection
@@ -357,8 +360,9 @@ func (m ActivityModel) requestTailForSelection() (ActivityModel, tea.Cmd) {
 		return m, nil
 	}
 	exec := r.ExecID
+	live := r.Live
 	return m, func() tea.Msg {
-		return ActivityTailLogsMsg{ExecID: exec, JobID: job, StepID: step}
+		return ActivityTailLogsMsg{ExecID: exec, JobID: job, StepID: step, Live: live}
 	}
 }
 
