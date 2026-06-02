@@ -227,4 +227,5 @@ func init() {
 	registerTuiCommand(rootCmd)
 	registerStateCommand(rootCmd)
 	registerCatalogCommand(rootCmd)
+	registerObjectsCommand(rootCmd)
 }
