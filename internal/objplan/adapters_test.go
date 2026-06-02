@@ -57,18 +57,18 @@ func TestItoa(t *testing.T) {
 func TestSourceAndCatalogRefs(t *testing.T) {
 	t.Parallel()
 	main := nodes.SourceSnapshot{Scope: nodes.ScopeMain}
-	if got := SourceRefs(main); len(got) != 2 || got[1] != "refs/sources/main" {
+	if got := SourceRefs(main); len(got) != 2 || got[1] != "sources/main" {
 		t.Fatalf("main source refs = %v", got)
 	}
-	if got := CatalogRefs(main); got[1] != "refs/catalogs/main" {
+	if got := CatalogRefs(main); got[1] != "catalogs/main" {
 		t.Fatalf("main catalog refs = %v", got)
 	}
 	branch := nodes.SourceSnapshot{Scope: nodes.ScopeBranch, Branch: "feat/x"}
-	if got := SourceRefs(branch); got[1] != "refs/sources/branches/feat-x" {
+	if got := SourceRefs(branch); got[1] != "sources/branches/feat-x" {
 		t.Fatalf("branch source refs = %v", got)
 	}
 	pr := nodes.SourceSnapshot{Scope: nodes.ScopePR, PR: "139"}
-	if got := CatalogRefs(pr); got[1] != "refs/catalogs/prs/139" {
+	if got := CatalogRefs(pr); got[1] != "catalogs/prs/139" {
 		t.Fatalf("pr catalog refs = %v", got)
 	}
 	// nogit / branch-without-name => only the current pointer.
@@ -78,10 +78,10 @@ func TestSourceAndCatalogRefs(t *testing.T) {
 	if got := SourceRefs(nodes.SourceSnapshot{Scope: nodes.ScopeBranch}); len(got) != 1 {
 		t.Fatalf("branch-no-name refs = %v", got)
 	}
-	if got := TriggerRefs("system.manual"); got[0] != "refs/triggers/system.manual/latest" {
+	if got := TriggerRefs("system.manual"); got[0] != "triggers/system.manual/latest" {
 		t.Fatalf("trigger refs = %v", got)
 	}
-	if RevisionRefs()[0] != "refs/revisions/latest" {
+	if RevisionRefs()[0] != "revisions/latest" {
 		t.Fatalf("revision refs")
 	}
 }

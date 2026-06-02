@@ -58,6 +58,11 @@ type planCatalogResolution struct {
 	// population. Nil when !Resolved.
 	Source  *catalogmodel.SourceSnapshot
 	Catalog *catalogmodel.CatalogSnapshot
+
+	// View is the full resolved catalog (manifests + graphs), threaded out so
+	// the object-model plan hook (M5b) can persist the content-addressed catalog
+	// without re-resolving. Nil on the existing-catalog / skip paths.
+	View *catalogresolve.CatalogView
 }
 
 // planCatalogOptions controls resolvePlanCatalog. All fields default to the
@@ -228,6 +233,7 @@ func resolveAndPersistPlanCatalog(ctx context.Context, strict bool) (planCatalog
 			Parent:   parent,
 			Source:   &src,
 			Catalog:  cat,
+			View:     view,
 		}, nil
 	}
 
@@ -264,5 +270,6 @@ func resolveAndPersistPlanCatalog(ctx context.Context, strict bool) (planCatalog
 		Parent:   parent,
 		Source:   &src,
 		Catalog:  cat,
+		View:     view,
 	}, nil
 }

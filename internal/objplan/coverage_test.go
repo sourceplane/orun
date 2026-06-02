@@ -43,10 +43,10 @@ func TestResolveMemoPutMkdirFailure(t *testing.T) {
 
 func TestRefsRemainingCases(t *testing.T) {
 	t.Parallel()
-	if got := SourceRefs(nodes.SourceSnapshot{Scope: nodes.ScopePR, PR: "7"}); got[1] != "refs/sources/prs/7" {
+	if got := SourceRefs(nodes.SourceSnapshot{Scope: nodes.ScopePR, PR: "7"}); got[1] != "sources/prs/7" {
 		t.Fatalf("source pr refs = %v", got)
 	}
-	if got := CatalogRefs(nodes.SourceSnapshot{Scope: nodes.ScopeBranch, Branch: "dev"}); got[1] != "refs/catalogs/branches/dev" {
+	if got := CatalogRefs(nodes.SourceSnapshot{Scope: nodes.ScopeBranch, Branch: "dev"}); got[1] != "catalogs/branches/dev" {
 		t.Fatalf("catalog branch refs = %v", got)
 	}
 	// branch/pr without identifiers collapse to the current pointer only.
