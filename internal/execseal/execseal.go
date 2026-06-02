@@ -11,6 +11,7 @@ package execseal
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -22,6 +23,30 @@ import (
 // refExecutionsLatest is the pointer to the most recently sealed (or live)
 // execution. Logical name, relative to the ref store's refs/ dir.
 const refExecutionsLatest = "executions/latest"
+
+// refExecutionsByID is the prefix under which each sealed execution gets its own
+// stable pointer (executions/by-id/<execId>). Unlike executions/latest, these
+// are never overwritten by a newer run, so every execution stays reachable —
+// enumerable by listing the prefix and safe from reachability GC.
+const refExecutionsByIDPrefix = "executions/by-id/"
+
+// sanitizeIDSeg folds an execution id into a single ref-path segment.
+func sanitizeIDSeg(id string) string {
+	var b strings.Builder
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-._")
+	if out == "" {
+		return "x"
+	}
+	return out
+}
 
 // Sealer seals executions over an object graph. It reuses a nodewriter.Writer
 // for object storage and ref moves; only execution id minting is its own.
@@ -109,8 +134,12 @@ func (s *Sealer) Seal(ctx context.Context, in SealInput) (objectstore.ObjectID, 
 	if err != nil {
 		return "", fmt.Errorf("execseal: assemble: %w", err)
 	}
-	if err := s.w.MoveRefs(ctx, []string{refExecutionsLatest}, id); err != nil {
-		return "", fmt.Errorf("execseal: publish executions/latest: %w", err)
+	refs := []string{
+		refExecutionsLatest,
+		refExecutionsByIDPrefix + sanitizeIDSeg(execID),
+	}
+	if err := s.w.MoveRefs(ctx, refs, id); err != nil {
+		return "", fmt.Errorf("execseal: publish execution refs: %w", err)
 	}
 	return id, nil
 }

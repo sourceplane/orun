@@ -7,9 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sourceplane/orun/internal/clock"
+	"github.com/sourceplane/orun/internal/execseal"
 	"github.com/sourceplane/orun/internal/nodes"
+	"github.com/sourceplane/orun/internal/nodewriter"
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
 )
@@ -137,5 +140,48 @@ func TestSanitizeCheckoutName(t *testing.T) {
 		if got := sanitizeCheckoutName(in); got != want {
 			t.Fatalf("sanitizeCheckoutName(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestRunObjectsLogAndReindex(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store, refs, root, revID := objectsRig(t)
+
+	// Seal an execution under the revision.
+	sealer := execseal.New(nodewriter.New(store, refs))
+	if _, err := sealer.Seal(ctx, execseal.SealInput{
+		RevisionID: revID, ExecutionID: "exec_001", ExecutionKey: "run-001",
+		Status: nodes.StatusSucceeded, StartedAt: time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC),
+		Jobs: []nodes.JobInput{{Record: nodes.JobRun{JobID: "a", Folder: "j-1", Status: nodes.StatusSucceeded},
+			Attempts: []nodes.AttemptInput{{Record: nodes.JobAttempt{Attempt: 1, Status: nodes.StatusSucceeded}}}}},
+	}); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := runObjectsLog(ctx, store, refs, root, &buf); err != nil {
+		t.Fatalf("log: %v", err)
+	}
+	if !strings.Contains(buf.String(), "exec_001") || !strings.Contains(buf.String(), "succeeded") {
+		t.Fatalf("log output = %s", buf.String())
+	}
+
+	buf.Reset()
+	if err := runObjectsReindex(ctx, store, refs, root, &buf); err != nil {
+		t.Fatalf("reindex: %v", err)
+	}
+	if !strings.Contains(buf.String(), "reindexed 1 executions") {
+		t.Fatalf("reindex output = %s", buf.String())
+	}
+
+	// Empty store → "no executions".
+	s2, r2, root2, _ := objectsRig(t)
+	buf.Reset()
+	if err := runObjectsLog(ctx, s2, r2, root2, &buf); err != nil {
+		t.Fatalf("log empty: %v", err)
+	}
+	if !strings.Contains(buf.String(), "no executions") {
+		t.Fatalf("empty log output = %s", buf.String())
 	}
 }

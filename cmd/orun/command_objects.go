@@ -8,6 +8,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
+	"github.com/sourceplane/orun/internal/objindex"
 	"github.com/sourceplane/orun/internal/workingview"
 	"github.com/spf13/cobra"
 )
@@ -94,8 +95,68 @@ func registerObjectsCommand(root *cobra.Command) {
 		},
 	}
 
-	objectsCmd.AddCommand(catCmd, lsTreeCmd, revParseCmd, fsckCmd, checkoutCmd)
+	logCmd := &cobra.Command{
+		Use:   "log",
+		Short: "List executions newest-first (index-backed, walk fallback)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, refs, root, err := openObjectModel()
+			if err != nil {
+				return err
+			}
+			return runObjectsLog(cmd.Context(), store, refs, root, cmd.OutOrStdout())
+		},
+	}
+
+	reindexCmd := &cobra.Command{
+		Use:   "reindex",
+		Short: "Rebuild the derived indexes from refs + objects",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, refs, root, err := openObjectModel()
+			if err != nil {
+				return err
+			}
+			return runObjectsReindex(cmd.Context(), store, refs, root, cmd.OutOrStdout())
+		},
+	}
+
+	objectsCmd.AddCommand(catCmd, lsTreeCmd, revParseCmd, fsckCmd, checkoutCmd, logCmd, reindexCmd)
 	root.AddCommand(objectsCmd)
+}
+
+func runObjectsLog(ctx context.Context, store objectstore.ObjectStore, refs refstore.RefStore, root string, out io.Writer) error {
+	entries, err := objindex.New(store, refs, root).ListExecutions(ctx)
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		fmt.Fprintln(out, "no executions")
+		return nil
+	}
+	for _, e := range entries {
+		started := e.StartedAt
+		if started == "" {
+			started = "-"
+		}
+		fmt.Fprintf(out, "%-24s %-9s %s rev=%s jobs=%d/%d\n",
+			e.ExecutionID, e.Status, started, shortID(objectstore.ObjectID(e.RevisionID)),
+			e.Summary.JobsSucceeded, e.Summary.JobsTotal)
+	}
+	return nil
+}
+
+func runObjectsReindex(ctx context.Context, store objectstore.ObjectStore, refs refstore.RefStore, root string, out io.Writer) error {
+	ix := objindex.New(store, refs, root)
+	if err := ix.Reindex(ctx); err != nil {
+		return err
+	}
+	entries, err := ix.ListExecutions(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "reindexed %d executions\n", len(entries))
+	return nil
 }
 
 // openObjectModel opens the object + ref stores rooted at .orun/objectmodel/.
