@@ -106,6 +106,11 @@ func (m RunViewModel) Update(msg tea.Msg) (RunViewModel, tea.Cmd) {
 		}
 	case services.RunEventMsg:
 		ev := msg.Event
+		// Capture the execution ID so RunJobSelectedMsg can scope a log tail
+		// to this run. Every event carries it; record the first non-empty.
+		if ev.ExecID != "" {
+			m.ExecID = ev.ExecID
+		}
 		switch ev.Kind {
 		case services.RunEventRunDone:
 			m.done = true

@@ -2,15 +2,33 @@
 title: orun tui
 ---
 
-`orun tui` opens the Orun Cockpit — an interactive terminal UI for browsing components, generating plans, and watching runs.
+`orun tui` opens the Orun Cockpit — an interactive terminal UI for browsing components, generating plans, running them, and watching logs stream live.
 
 ## Launch
 
 ```bash
-orun tui
+orun tui     # explicit
+orun         # bare invocation — opens the cockpit on an interactive terminal
 ```
 
-The command takes no positional arguments. It auto-discovers the nearest `intent.yaml` and `.orun/` directory the same way `orun plan` and `orun status` do.
+The cockpit is the **default command**: running `orun` with no arguments and no
+subcommand opens it, so `orun` and `orun tui` are equivalent in an interactive
+terminal.
+
+To keep scripts and CI predictable, a bare `orun` falls back to printing help
+(it does **not** launch the TUI) when **any** of the following are true:
+
+- standard input or output is not a TTY (pipes, redirects, CI logs), or
+- `ORUN_NO_TUI` is set to a truthy value (`1`, `true`, `yes`).
+
+```bash
+ORUN_NO_TUI=1 orun        # print help even on an interactive terminal
+orun | cat                # non-TTY → prints help, never launches the TUI
+orun plan ...             # explicit subcommands are always unaffected
+orun bogus                # unknown command → error (not swallowed by the TUI)
+```
+
+The command takes no positional arguments. It auto-discovers the nearest `intent.yaml` and `.orun/` directory the same way `orun plan` and `orun status` do — including when launched as a bare `orun` from a subdirectory.
 
 ## Layout
 
@@ -97,6 +115,44 @@ The bottom panel (toggle `b`) is level-aware:
 | Step | capability, phase, timeout, retry, shell |
 
 Job step bodies live in the drill-in view rather than the inspector — the inspector only shows a flat list of step names, so jobs with large bodies don't overflow.
+
+## Running plans from the cockpit
+
+The cockpit runs plans through the same internal packages as `orun run` — it
+never shells out to the `orun` binary.
+
+| Key | Action | Effect |
+| --- | --- | --- |
+| `d` | **Dry run** | Previews execution. Emits per-job lifecycle events but runs no commands and writes no logs. |
+| `R` | **Real run** | Executes the plan locally. Pops a confirmation modal first (`y` to proceed, `n`/`esc` to cancel) because real runs invoke real commands. |
+
+A real run:
+
+- executes each job's steps with the local executor,
+- persists run state and **per-step logs** to `.orun/` (exactly like `orun run`), and
+- streams lifecycle events into the Activity surface as they happen.
+
+Both run types kick over to **Activity** with the in-flight run pinned to the
+top of the run list, pulsing live until it reaches a terminal state.
+
+### Live logs while running
+
+Logs stream into the cockpit **as a real run executes** — you don't have to
+wait for it to finish:
+
+- **Activity → Step level.** Drill into a running job's step (`⏎`) and the log
+  pane attaches to that run and follows it, surfacing each step's output as the
+  step completes. The tail stops automatically when the run finishes.
+- **Run dashboard.** Press `⏎` on a job row to open the Log Explorer attached to
+  that job; while the run is live the explorer follows new output, and for a
+  finished run it replays the stored logs once.
+
+Follow-mode tailing is scoped to the active run's execution ID and is cancelled
+automatically when the run completes, when you attach a different job/step, or
+when you leave the logs surface — so background tails never accumulate.
+
+Dry runs intentionally produce no logs (they execute nothing); use a **real
+run** (`R`) when you want to watch live output.
 
 ## Activity
 

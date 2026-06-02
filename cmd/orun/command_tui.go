@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sourceplane/orun/internal/discovery"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/tui"
@@ -62,6 +63,20 @@ func resolveTUIBackend(store *state.Store) (statebackend.Backend, func(), error)
 }
 
 func runTUI(ctx context.Context) error {
+	// Auto-discover the intent root so the cockpit (and the state/log store
+	// it reads) resolves to the repo root regardless of which command path
+	// launched it (`orun` vs `orun tui`) or which subdirectory we are in.
+	// The tui command is not covered by the shared PersistentPreRunE
+	// discovery, so we do it here, idempotently.
+	if intentRoot == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			if foundPath, foundDir, derr := discovery.FindIntentFile(cwd); derr == nil {
+				intentFile = foundPath
+				intentRoot = foundDir
+			}
+		}
+	}
+
 	store := state.NewStore(storeDir())
 
 	backend, cleanup, err := resolveTUIBackend(store)

@@ -11,23 +11,32 @@ import (
 	"time"
 )
 
+// followPollInterval is how often follow-mode rescans a job's log directory
+// for newly written step logs. The runner writes each step's log file once,
+// atomically, when the step completes (see runner.writeStepLog), so polling
+// for new/changed files — rather than byte-tailing a single file — matches
+// how logs actually land on disk.
+const followPollInterval = 250 * time.Millisecond
+
 // TailLogs streams log lines for a job from local on-disk state.
 //
-// Phase 1 boundary: this implementation reads the existing log files for
-// the requested execID + jobID once and closes the channel. Live "follow"
-// tailing and the remote-state code path are deferred — when Follow=true
-// or RemoteState=true is requested, a clear error is returned rather than
-// silently degrading to a non-follow read, so callers can surface the
-// limitation explicitly.
+// Two modes:
+//
+//   - Follow == false: read every existing step log for the job once, in
+//     deterministic order, then close. Used for completed/historical runs.
+//   - Follow == true: emit existing step logs, then keep watching the job's
+//     log directory for newly written step logs until the context is
+//     cancelled. Used for the in-flight run so logs appear in the run and
+//     activity views while the run is executing. The caller owns the
+//     lifetime via ctx — cancelling it drains and closes the channel.
+//
+// Remote-state log retrieval remains gated behind its own phase.
 func (s *LiveOrunService) TailLogs(ctx context.Context, req LogRequest) (<-chan LogEvent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if req.RemoteState {
-		return nil, errors.New("TailLogs: remote-state log retrieval not yet implemented (Phase 3)")
-	}
-	if req.Follow {
-		return nil, errors.New("TailLogs: follow-mode tailing not yet implemented (Phase 3)")
+		return nil, errors.New("TailLogs: remote-state log retrieval not yet implemented")
 	}
 	if s.cfg.Store == nil {
 		return nil, errors.New("TailLogs: no state store configured")
@@ -35,60 +44,103 @@ func (s *LiveOrunService) TailLogs(ctx context.Context, req LogRequest) (<-chan 
 	if req.ExecID == "" {
 		return nil, errors.New("TailLogs: ExecID is required")
 	}
+	if req.JobID == "" {
+		return nil, errors.New("TailLogs: JobID is required")
+	}
 
+	// Resolve the execID. For an in-flight follow the execution directory
+	// may not exist yet (the first step has not finished writing), so fall
+	// back to the caller-supplied ID and let the follow loop pick up files
+	// as they appear rather than failing closed.
 	resolvedExecID, err := s.cfg.Store.ResolveExecID(req.ExecID)
 	if err != nil {
-		return nil, err
+		if !req.Follow {
+			return nil, err
+		}
+		resolvedExecID = req.ExecID
 	}
 
-	jobID := req.JobID
-	if jobID == "" {
-		return nil, errors.New("TailLogs: JobID is required (job-wide log aggregation arrives in Phase 3)")
-	}
+	logDir := s.cfg.Store.LogDir(resolvedExecID, req.JobID)
 
-	logDir := s.cfg.Store.LogDir(resolvedExecID, jobID)
-
-	// Resolve step files: if StepID is set, just that one; otherwise all
-	// *.log files in sorted order so output is deterministic.
-	var logPaths []string
-	if req.StepID != "" {
-		logPaths = []string{s.cfg.Store.LogPath(resolvedExecID, jobID, req.StepID)}
-	} else {
+	// stepPaths resolves the set of step log files to read. With a StepID it
+	// targets exactly one file; otherwise it lists every *.log in the job's
+	// log directory in sorted (deterministic) order.
+	stepPaths := func() []string {
+		if req.StepID != "" {
+			return []string{s.cfg.Store.LogPath(resolvedExecID, req.JobID, req.StepID)}
+		}
 		entries, derr := os.ReadDir(logDir)
 		if derr != nil {
-			if os.IsNotExist(derr) {
-				ch := make(chan LogEvent)
-				close(ch)
-				return ch, nil
-			}
-			return nil, derr
+			return nil
 		}
+		var paths []string
 		for _, e := range entries {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
 				continue
 			}
-			logPaths = append(logPaths, filepath.Join(logDir, e.Name()))
+			paths = append(paths, filepath.Join(logDir, e.Name()))
 		}
-		sort.Strings(logPaths)
+		sort.Strings(paths)
+		return paths
 	}
 
 	ch := make(chan LogEvent, 64)
+
+	if !req.Follow {
+		go func() {
+			defer close(ch)
+			for _, path := range stepPaths() {
+				if ctx.Err() != nil {
+					return
+				}
+				streamLogFile(ctx, ch, path, req.JobID, deriveStepID(path))
+			}
+		}()
+		return ch, nil
+	}
+
 	go func() {
 		defer close(ch)
-		for _, path := range logPaths {
-			if err := ctx.Err(); err != nil {
-				return
+		// emitted tracks step log files already streamed so each is sent
+		// exactly once even though we rescan the directory every tick.
+		emitted := map[string]bool{}
+		drain := func() {
+			for _, path := range stepPaths() {
+				if emitted[path] {
+					continue
+				}
+				if ctx.Err() != nil {
+					return
+				}
+				if streamLogFile(ctx, ch, path, req.JobID, deriveStepID(path)) {
+					emitted[path] = true
+				}
 			}
-			streamLogFile(ctx, ch, path, jobID, deriveStepID(path))
+		}
+
+		drain()
+		ticker := time.NewTicker(followPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				drain()
+			}
 		}
 	}()
 	return ch, nil
 }
 
-func streamLogFile(ctx context.Context, ch chan<- LogEvent, path, jobID, stepID string) {
+// streamLogFile reads a single step log file and emits one LogEvent per
+// line. It returns true when the file existed and was read (so follow mode
+// can mark it consumed) and false when the file is not yet present, in
+// which case the caller should retry on a later poll.
+func streamLogFile(ctx context.Context, ch chan<- LogEvent, path, jobID, stepID string) bool {
 	f, err := os.Open(path)
 	if err != nil {
-		return
+		return false
 	}
 	defer f.Close()
 
@@ -98,7 +150,7 @@ func streamLogFile(ctx context.Context, ch chan<- LogEvent, path, jobID, stepID 
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			return
+			return true
 		case ch <- LogEvent{
 			JobID:     jobID,
 			StepID:    stepID,
@@ -107,6 +159,7 @@ func streamLogFile(ctx context.Context, ch chan<- LogEvent, path, jobID, stepID 
 		}:
 		}
 	}
+	return true
 }
 
 func deriveStepID(path string) string {
