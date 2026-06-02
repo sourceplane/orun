@@ -177,3 +177,20 @@ func TestRecordTriggerValidationError(t *testing.T) {
 		t.Fatalf("RecordTrigger bad = %v, want ErrInvalid", err)
 	}
 }
+
+func TestWriterAccessorsAndMoveRefs(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := &stubRefs{m: map[string]string{}}
+	store := objectstore.NewMemStore("")
+	w := New(store, s)
+	if w.Store() != store {
+		t.Fatalf("Store() did not return the underlying store")
+	}
+	if err := w.MoveRefs(ctx, []string{"a", "b"}, target); err != nil {
+		t.Fatalf("MoveRefs: %v", err)
+	}
+	if s.m["a"] != string(target) || s.m["b"] != string(target) {
+		t.Fatalf("MoveRefs did not move both refs: %v", s.m)
+	}
+}

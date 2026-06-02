@@ -19,7 +19,7 @@ fail=0
 note() { echo "❌ $*"; fail=1; }
 
 # Object-model package set.
-OM_DIRS="internal/objectstore internal/nodes internal/nodewriter internal/objindex internal/objremote internal/workingview"
+OM_DIRS="internal/objectstore internal/nodes internal/nodewriter internal/objplan internal/objindex internal/objremote internal/workingview"
 
 # 1. time.Now() ban (production files only).
 for d in $OM_DIRS; do

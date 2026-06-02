@@ -55,6 +55,10 @@ func New(store objectstore.ObjectStore, refs refstore.RefStore, opts ...Option) 
 	return w
 }
 
+// Store returns the underlying object store, for callers (e.g. objplan) that
+// need Has checks against the same store the writer persists to.
+func (w *Writer) Store() objectstore.ObjectStore { return w.store }
+
 // moveRef points name at target via compare-and-swap, retrying on a lost race
 // (another writer moved the same ref concurrently). A no-op when the ref already
 // points at target.
@@ -84,6 +88,14 @@ func (w *Writer) moveRef(ctx context.Context, name string, target objectstore.Ob
 		return fmt.Errorf("nodewriter: move ref %q: %w", name, err)
 	}
 	return fmt.Errorf("nodewriter: move ref %q: too many conflicts", name)
+}
+
+// MoveRefs points each named ref at target via compare-and-swap (forward,
+// retry-on-conflict). Exported for orchestration layers (e.g. objplan) that
+// reuse an already-written object — such as a memoized catalog — and only need
+// to refresh its pointers.
+func (w *Writer) MoveRefs(ctx context.Context, names []string, target objectstore.ObjectID) error {
+	return w.moveRefs(ctx, names, target)
 }
 
 func (w *Writer) moveRefs(ctx context.Context, names []string, target objectstore.ObjectID) error {

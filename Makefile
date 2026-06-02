@@ -165,6 +165,10 @@ test-object-model:
 	@COVER=$$(go test -count=1 -race -cover ./internal/nodewriter | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
 	  echo "   measured: $$COVER%"; \
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 90.0) { printf "❌ nodewriter coverage %.1f%% below 90%% threshold\n", c+0; exit 1 } }'
+	@echo "🧪 object-model: objplan (>= 90%)"
+	@COVER=$$(go test -count=1 -race -cover ./internal/objplan | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
+	  echo "   measured: $$COVER%"; \
+	  awk -v c=$$COVER 'BEGIN { if (c+0 < 90.0) { printf "❌ objplan coverage %.1f%% below 90%% threshold\n", c+0; exit 1 } }'
 	# coverage gate for ./internal/objindex (>= 90%) is added with that package (M8).
 
 verify-generated:
