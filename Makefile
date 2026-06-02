@@ -157,7 +157,11 @@ test-object-model:
 	@COVER=$$(go test -count=1 -race -cover ./internal/objectstore/refstore | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
 	  echo "   measured: $$COVER%"; \
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 88.0) { printf "❌ refstore coverage %.1f%% below 88%% threshold\n", c+0; exit 1 } }'
-	# coverage gate for ./internal/nodes (>= 90%) is added with that package (M3).
+	@echo "🧪 object-model: nodes (>= 90%)"
+	@COVER=$$(go test -count=1 -race -cover ./internal/nodes | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
+	  echo "   measured: $$COVER%"; \
+	  awk -v c=$$COVER 'BEGIN { if (c+0 < 90.0) { printf "❌ nodes coverage %.1f%% below 90%% threshold\n", c+0; exit 1 } }'
+	# coverage gate for ./internal/nodewriter (>= 90%) is added with that package (M4).
 
 verify-generated:
 	@echo "🧪 Verifying generated artifacts are up-to-date..."
