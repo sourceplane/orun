@@ -55,6 +55,14 @@ func (a Algo) idFor(serialized []byte) (ObjectID, error) {
 	return ObjectID(string(a) + ":" + hexsum), nil
 }
 
+// ValidateID reports whether id is a well-formed "<algo>:<hex>" object id under
+// a known algorithm, returning ErrInvalid otherwise. Exported for sibling
+// packages (e.g. refstore) that accept ids as targets.
+func ValidateID(id ObjectID) error {
+	_, _, err := parseID(id)
+	return err
+}
+
 // parseID splits an ObjectID into its algo and hex parts, validating the shape
 // and the hex width/alphabet against the algo. It returns ErrInvalid on any
 // malformation so callers can route bad ids uniformly.

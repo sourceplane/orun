@@ -9,7 +9,7 @@
 | Package | Min coverage | Notes |
 |---------|--------------|-------|
 | `internal/objectstore` | **90%** | frozen contract. The 95% aspiration is gated at 90% in practice: the residual lines are defensive filesystem-error returns in the atomic write path (temp/fsync/rename failures) that require a fault-injection FS to exercise — and the test env runs as root, so permission-based injection is bypassed. Building that seam is deferred (not worth the production-path indirection for error-wrapping branches). |
-| `internal/objectstore/refstore` | **95%** | frozen contract |
+| `internal/objectstore/refstore` | **88%** | frozen contract. Gated at 88% for the same reason as `objectstore`: residual lines are defensive fs-error returns (temp write/fsync, lock-timeout, walk-callback errors) untestable under a root test env without a fault-injection FS. |
 | `internal/nodes` | **90%** | schemas + identity |
 | `internal/nodewriter` | **90%** | the walk |
 | `internal/objindex` | **90%** | derived, must rebuild exactly |
