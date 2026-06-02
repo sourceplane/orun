@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func newLocal(t *testing.T) *LocalStore {
@@ -312,5 +313,26 @@ func TestRootAndAlgoAccessors(t *testing.T) {
 	m := NewMemStore("")
 	if m.Root() != "mem://" || m.Algo() != AlgoSHA256 {
 		t.Fatalf("mem accessors: root=%q algo=%q", m.Root(), m.Algo())
+	}
+}
+
+func TestLocalModTime(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	ls := newLocal(t)
+	id, _ := ls.PutBlob(ctx, []byte("timed"))
+	mt, err := ls.ModTime(ctx, id)
+	if err != nil {
+		t.Fatalf("ModTime: %v", err)
+	}
+	if time.Since(mt) > time.Minute {
+		t.Fatalf("ModTime looks stale: %v", mt)
+	}
+	absent := ObjectID("sha256:" + strings.Repeat("0", 64))
+	if _, err := ls.ModTime(ctx, absent); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ModTime(absent) = %v, want ErrNotFound", err)
+	}
+	if _, err := ls.ModTime(ctx, "garbage"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("ModTime(garbage) = %v, want ErrInvalid", err)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -80,6 +81,26 @@ func (l *LocalStore) Root() string { return l.root }
 
 // Algo returns the store's hash algorithm.
 func (l *LocalStore) Algo() Algo { return l.algo }
+
+// ModTime returns the on-disk modification time of an object — when its loose
+// file was written. It is used by garbage collection's grace window to avoid
+// sweeping objects that were just written but whose ref has not moved yet. This
+// is a local-driver convenience, not part of the ObjectStore interface (a remote
+// driver exposes age differently). Returns ErrNotFound if absent.
+func (l *LocalStore) ModTime(_ context.Context, id ObjectID) (time.Time, error) {
+	path, err := l.objectPath(id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return time.Time{}, ErrNotFound
+		}
+		return time.Time{}, err
+	}
+	return info.ModTime(), nil
+}
 
 // objectPath maps an id to its on-disk path: objects/<algo>/<hex[:2]>/<hex[2:]>.
 func (l *LocalStore) objectPath(id ObjectID) (string, error) {

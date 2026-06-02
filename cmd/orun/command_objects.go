@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"time"
 
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
+	"github.com/sourceplane/orun/internal/objgc"
 	"github.com/sourceplane/orun/internal/objindex"
 	"github.com/sourceplane/orun/internal/workingview"
 	"github.com/spf13/cobra"
@@ -121,8 +123,48 @@ func registerObjectsCommand(root *cobra.Command) {
 		},
 	}
 
-	objectsCmd.AddCommand(catCmd, lsTreeCmd, revParseCmd, fsckCmd, checkoutCmd, logCmd, reindexCmd)
+	var (
+		gcDryRun bool
+		gcKeep   int
+		gcGrace  time.Duration
+	)
+	gcCmd := &cobra.Command{
+		Use:   "gc",
+		Short: "Garbage-collect unreachable objects (reachability mark-sweep + retention)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, refs, root, err := openObjectModel()
+			if err != nil {
+				return err
+			}
+			return runObjectsGC(cmd.Context(), store, refs, root, objgc.Options{
+				KeepExecutions: gcKeep,
+				GracePeriod:    gcGrace,
+				DryRun:         gcDryRun,
+			}, cmd.OutOrStdout())
+		},
+	}
+	gcCmd.Flags().BoolVar(&gcDryRun, "dry-run", false, "Report what would be removed without deleting")
+	gcCmd.Flags().IntVar(&gcKeep, "keep", 0, "Retain only the newest N executions (0 = keep all)")
+	gcCmd.Flags().DurationVar(&gcGrace, "grace", time.Hour, "Never sweep objects written within this window")
+
+	objectsCmd.AddCommand(catCmd, lsTreeCmd, revParseCmd, fsckCmd, checkoutCmd, logCmd, reindexCmd, gcCmd)
 	root.AddCommand(objectsCmd)
+}
+
+func runObjectsGC(ctx context.Context, store objectstore.ObjectStore, refs refstore.RefStore, root string, opts objgc.Options, out io.Writer) error {
+	ix := objindex.New(store, refs, root)
+	res, err := objgc.Collect(ctx, store, refs, ix, opts)
+	if err != nil {
+		return err
+	}
+	if !opts.DryRun {
+		// Retention may have pruned executions; refresh the derived index.
+		_ = ix.Reindex(ctx)
+	}
+	fmt.Fprintf(out, "gc: scanned=%d marked=%d pruned-exec-refs=%d swept=%d skipped-grace=%d dry-run=%v\n",
+		res.Scanned, res.Marked, res.PrunedExecRefs, res.Swept, res.Skipped, res.DryRun)
+	return nil
 }
 
 func runObjectsLog(ctx context.Context, store objectstore.ObjectStore, refs refstore.RefStore, root string, out io.Writer) error {

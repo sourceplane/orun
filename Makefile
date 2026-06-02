@@ -185,6 +185,10 @@ test-object-model:
 	@COVER=$$(go test -count=1 -race -cover ./internal/objindex | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
 	  echo "   measured: $$COVER%"; \
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 88.0) { printf "❌ objindex coverage %.1f%% below 88%% threshold\n", c+0; exit 1 } }'
+	@echo "🧪 object-model: objgc (>= 85%)"
+	@COVER=$$(go test -count=1 -race -cover ./internal/objgc | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
+	  echo "   measured: $$COVER%"; \
+	  awk -v c=$$COVER 'BEGIN { if (c+0 < 85.0) { printf "❌ objgc coverage %.1f%% below 85%% threshold\n", c+0; exit 1 } }'
 
 verify-generated:
 	@echo "🧪 Verifying generated artifacts are up-to-date..."
