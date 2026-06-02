@@ -15,6 +15,7 @@ import (
 	"github.com/sourceplane/orun/internal/nodewriter"
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
+	"github.com/sourceplane/orun/internal/objgc"
 )
 
 func objectsRig(t *testing.T) (*objectstore.LocalStore, *refstore.LocalRefStore, string, objectstore.ObjectID) {
@@ -183,5 +184,32 @@ func TestRunObjectsLogAndReindex(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "no executions") {
 		t.Fatalf("empty log output = %s", buf.String())
+	}
+}
+
+func TestRunObjectsGC(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store, refs, root, revID := objectsRig(t)
+	// Seal an execution (reachable), then add an unreachable orphan.
+	sealer := execseal.New(nodewriter.New(store, refs))
+	if _, err := sealer.Seal(ctx, execseal.SealInput{
+		RevisionID: revID, ExecutionID: "exec_001", Status: nodes.StatusSucceeded, StartedAt: time.Now(),
+		Jobs: []nodes.JobInput{{Record: nodes.JobRun{JobID: "a", Folder: "j-1", Status: nodes.StatusSucceeded},
+			Attempts: []nodes.AttemptInput{{Record: nodes.JobAttempt{Attempt: 1, Status: nodes.StatusSucceeded}}}}},
+	}); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	orphan, _ := store.PutBlob(ctx, []byte("unreachable orphan"))
+
+	var buf bytes.Buffer
+	if err := runObjectsGC(ctx, store, refs, root, objgc.Options{}, &buf); err != nil {
+		t.Fatalf("gc: %v", err)
+	}
+	if !strings.Contains(buf.String(), "swept=") {
+		t.Fatalf("gc output = %s", buf.String())
+	}
+	if has, _ := store.Has(ctx, orphan); has {
+		t.Fatalf("gc did not sweep the orphan")
 	}
 }
