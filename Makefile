@@ -150,9 +150,13 @@ test-object-model:
 	@echo "🧪 object-model: testfx/objfs"
 	@go test -count=1 -race ./internal/testfx/objfs/...
 	@echo "🧪 object-model: objectstore (>= 90%)"
-	@COVER=$$(go test -count=1 -race -cover ./internal/objectstore/... | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
+	@COVER=$$(go test -count=1 -race -cover ./internal/objectstore | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
 	  echo "   measured: $$COVER%"; \
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 90.0) { printf "❌ objectstore coverage %.1f%% below 90%% threshold\n", c+0; exit 1 } }'
+	@echo "🧪 object-model: refstore (>= 88%)"
+	@COVER=$$(go test -count=1 -race -cover ./internal/objectstore/refstore | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
+	  echo "   measured: $$COVER%"; \
+	  awk -v c=$$COVER 'BEGIN { if (c+0 < 88.0) { printf "❌ refstore coverage %.1f%% below 88%% threshold\n", c+0; exit 1 } }'
 	# coverage gate for ./internal/nodes (>= 90%) is added with that package (M3).
 
 verify-generated:
