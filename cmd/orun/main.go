@@ -417,7 +417,7 @@ func generatePlan() error {
 	if catRes.Resolved && catRes.Catalog != nil {
 		plan.Metadata.Catalog = &model.PlanCatalogMeta{
 			SnapshotKey:       catRes.Catalog.CatalogSnapshotKey,
-			CatalogHash:      catRes.Catalog.CatalogHash,
+			CatalogHash:       catRes.Catalog.CatalogHash,
 			SourceSnapshotKey: catRes.Catalog.SourceSnapshotKey,
 		}
 	} else if catRes.Skipped {
@@ -493,6 +493,11 @@ func generatePlan() error {
 		}
 	}
 	_ = store // legacy state.Store retained for any downstream plan resolution; SavePlan superseded by revision pipeline.
+
+	// Additionally write the content-addressed object graph when the
+	// ORUN_OBJECT_MODEL flag is set (M5b). Best-effort and isolated under
+	// .orun/objectmodel/; a no-op when the flag is unset.
+	writeObjectModelPlan(absStoreRoot, plan, planBytes, planHash, rev.RevisionKey, trig, catRes)
 
 	// On-success M5.a summary block (cli-surface.md §1.1). Printed before the
 	// legacy "components × envs → jobs" detail line so existing tooling that

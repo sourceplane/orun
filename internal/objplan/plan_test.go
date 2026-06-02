@@ -61,10 +61,10 @@ func TestPlanHappyWithCatalog(t *testing.T) {
 		t.Fatalf("incomplete: %+v", res)
 	}
 	// Catalog ref points at the catalog; revision ref at the revision.
-	if r, _ := refs.Read(ctx, "refs/catalogs/main"); r.Target != string(res.CatalogID) {
+	if r, _ := refs.Read(ctx, "catalogs/main"); r.Target != string(res.CatalogID) {
 		t.Fatalf("catalog ref = %s, want %s", r.Target, res.CatalogID)
 	}
-	if r, _ := refs.Read(ctx, "refs/revisions/latest"); r.Target != string(res.RevisionID) {
+	if r, _ := refs.Read(ctx, "revisions/latest"); r.Target != string(res.RevisionID) {
 		t.Fatalf("revision ref mismatch")
 	}
 }
