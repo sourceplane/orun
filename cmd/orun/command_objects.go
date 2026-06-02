@@ -11,6 +11,8 @@ import (
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
 	"github.com/sourceplane/orun/internal/objgc"
 	"github.com/sourceplane/orun/internal/objindex"
+	"github.com/sourceplane/orun/internal/objmigrate"
+	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/workingview"
 	"github.com/spf13/cobra"
 )
@@ -148,8 +150,33 @@ func registerObjectsCommand(root *cobra.Command) {
 	gcCmd.Flags().IntVar(&gcKeep, "keep", 0, "Retain only the newest N executions (0 = keep all)")
 	gcCmd.Flags().DurationVar(&gcGrace, "grace", time.Hour, "Never sweep objects written within this window")
 
-	objectsCmd.AddCommand(catCmd, lsTreeCmd, revParseCmd, fsckCmd, checkoutCmd, logCmd, reindexCmd, gcCmd)
+	var migrateDryRun bool
+	migrateCmd := &cobra.Command{
+		Use:   "migrate",
+		Short: "Ingest the legacy .orun/ state into the object graph (additive, idempotent)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, refs, _, err := openObjectModel()
+			if err != nil {
+				return err
+			}
+			return runObjectsMigrate(cmd.Context(), state.NewStore(storeDir()), store, refs, migrateDryRun, cmd.OutOrStdout())
+		},
+	}
+	migrateCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Report what would be ingested without writing")
+
+	objectsCmd.AddCommand(catCmd, lsTreeCmd, revParseCmd, fsckCmd, checkoutCmd, logCmd, reindexCmd, gcCmd, migrateCmd)
 	root.AddCommand(objectsCmd)
+}
+
+func runObjectsMigrate(ctx context.Context, legacy *state.Store, store objectstore.ObjectStore, refs refstore.RefStore, dryRun bool, out io.Writer) error {
+	res, err := objmigrate.Migrate(ctx, legacy, store, refs, dryRun)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "migrate: plans=%d executions=%d orphan-executions=%d dry-run=%v\n",
+		res.Plans, res.Executions, res.OrphanExecutions, res.DryRun)
+	return nil
 }
 
 func runObjectsGC(ctx context.Context, store objectstore.ObjectStore, refs refstore.RefStore, root string, opts objgc.Options, out io.Writer) error {
