@@ -11,11 +11,13 @@ import (
 
 	"github.com/sourceplane/orun/internal/clock"
 	"github.com/sourceplane/orun/internal/execseal"
+	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/nodewriter"
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
 	"github.com/sourceplane/orun/internal/objgc"
+	"github.com/sourceplane/orun/internal/state"
 )
 
 func objectsRig(t *testing.T) (*objectstore.LocalStore, *refstore.LocalRefStore, string, objectstore.ObjectID) {
@@ -211,5 +213,35 @@ func TestRunObjectsGC(t *testing.T) {
 	}
 	if has, _ := store.Has(ctx, orphan); has {
 		t.Fatalf("gc did not sweep the orphan")
+	}
+}
+
+func TestRunObjectsMigrate(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	// Legacy store with one plan + one execution.
+	legacy := state.NewStore(t.TempDir())
+	if err := legacy.EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+	plan := &model.Plan{Metadata: model.PlanMetadata{Name: "demo"}, Jobs: []model.PlanJob{{ID: "a"}}}
+	if err := legacy.SavePlan(plan, "demo"); err != nil {
+		t.Fatalf("SavePlan: %v", err)
+	}
+	checksum := state.PlanChecksumShort(plan)
+	if _, err := legacy.CreateExecution("exec-1", plan); err != nil {
+		t.Fatalf("CreateExecution: %v", err)
+	}
+	_ = legacy.SaveState("exec-1", &state.ExecState{ExecID: "exec-1", PlanChecksum: checksum,
+		Jobs: map[string]*state.JobState{"a": {Status: "success"}}})
+	_ = legacy.SaveMetadata("exec-1", &state.ExecMetadata{ExecID: "exec-1", Status: "success"})
+
+	store, refs, _, _ := objectsRig(t)
+	var buf bytes.Buffer
+	if err := runObjectsMigrate(ctx, legacy, store, refs, false, &buf); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if !strings.Contains(buf.String(), "plans=1") || !strings.Contains(buf.String(), "executions=1") {
+		t.Fatalf("migrate output = %s", buf.String())
 	}
 }
