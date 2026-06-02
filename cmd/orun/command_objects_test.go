@@ -17,6 +17,7 @@ import (
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
 	"github.com/sourceplane/orun/internal/objgc"
+	"github.com/sourceplane/orun/internal/objremote"
 	"github.com/sourceplane/orun/internal/state"
 )
 
@@ -243,5 +244,48 @@ func TestRunObjectsMigrate(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "plans=1") || !strings.Contains(buf.String(), "executions=1") {
 		t.Fatalf("migrate output = %s", buf.String())
+	}
+}
+
+func TestRunObjectsSyncPushPull(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	local := func() objremote.Endpoint {
+		s, r, _, revID := objectsRig(t)
+		if _, err := execseal.New(nodewriter.New(s, r)).Seal(ctx, execseal.SealInput{
+			RevisionID: revID, ExecutionID: "exec_001", Status: nodes.StatusSucceeded, StartedAt: time.Now(),
+			Jobs: []nodes.JobInput{{Record: nodes.JobRun{JobID: "a", Folder: "j-1", Status: nodes.StatusSucceeded},
+				Attempts: []nodes.AttemptInput{{Record: nodes.JobAttempt{Attempt: 1, Status: nodes.StatusSucceeded}}}}},
+		}); err != nil {
+			t.Fatalf("Seal: %v", err)
+		}
+		return objremote.Endpoint{Objects: s, Refs: r}
+	}()
+
+	remote, err := openRemoteEndpoint(filepath.Join(t.TempDir(), "remote"))
+	if err != nil {
+		t.Fatalf("openRemoteEndpoint: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := runObjectsSync(ctx, local, remote, "executions/latest", true, &buf); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	if !strings.Contains(buf.String(), "pushed") || !strings.Contains(buf.String(), "copied=") {
+		t.Fatalf("push output = %s", buf.String())
+	}
+	if _, err := remote.Refs.Read(ctx, "executions/latest"); err != nil {
+		t.Fatalf("remote ref missing after push: %v", err)
+	}
+
+	// Pull into a fresh local endpoint.
+	s2, r2, _, _ := objectsRig(t)
+	fresh := objremote.Endpoint{Objects: s2, Refs: r2}
+	buf.Reset()
+	if err := runObjectsSync(ctx, fresh, remote, "executions/latest", false, &buf); err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+	if !strings.Contains(buf.String(), "pulled") {
+		t.Fatalf("pull output = %s", buf.String())
 	}
 }
