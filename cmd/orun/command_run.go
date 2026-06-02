@@ -359,6 +359,13 @@ func runPlan() error {
 		}
 	}
 
+	// Seal the finished run into the content-addressed object graph when
+	// ORUN_OBJECT_RUNNER is set (M7c). Best-effort and isolated under
+	// .orun/objectmodel/; a no-op when the flag is unset.
+	if absStoreRoot, absErr := filepath.Abs(filepath.Join(storeDir(), ".orun")); absErr == nil {
+		sealObjectModelRun(absStoreRoot, plan, store, execID)
+	}
+
 	return runErr
 }
 
