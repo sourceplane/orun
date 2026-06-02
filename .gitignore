@@ -61,6 +61,8 @@ Thumbs.db
 /examples/examples/.orun/
 /examples/gha-actions/.orun/
 /examples/gha-actions/.orun-state.json
+# Stray .orun/ written by tests that resolve the workspace from cmd/orun's cwd.
+/cmd/orun/.orun/
 /examples/gha-actions/plan.json
 /website/.docusaurus/
 /website/docs-build/
