@@ -12,7 +12,7 @@
 | `internal/objectstore/refstore` | **88%** | frozen contract. Gated at 88% for the same reason as `objectstore`: residual lines are defensive fs-error returns (temp write/fsync, lock-timeout, walk-callback errors) untestable under a root test env without a fault-injection FS. |
 | `internal/nodes` | **90%** | schemas + identity |
 | `internal/nodewriter` | **90%** | the walk |
-| `internal/objindex` | **90%** | derived, must rebuild exactly |
+| `internal/objindex` | **88%** | derived, must rebuild exactly. Gated at 88% — residual lines are defensive fs-error returns in the atomic index write (temp/write/close) untestable under a root test env. |
 | `internal/objremote` | **85%** | file:// driver + sync |
 | `internal/workingview` | **85%** | derived |
 | `internal/runner` (object path) | **85%** | working tree + seal |

@@ -156,3 +156,24 @@ func TestSummarizeEmpty(t *testing.T) {
 		t.Fatalf("empty summary = %+v", got)
 	}
 }
+
+func TestSealPublishesByIDRef(t *testing.T) {
+	t.Parallel()
+	s, _, refs := rig(t)
+	ctx := context.Background()
+	id, err := s.Seal(ctx, SealInput{
+		RevisionID: revID(), ExecutionID: "gh-1/2@x", Status: nodes.StatusSucceeded, Jobs: sampleJobs(),
+	})
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	// The per-execution ref is published under a sanitized id and never collides
+	// with executions/latest.
+	r, err := refs.Read(ctx, "executions/by-id/gh-1-2-x")
+	if err != nil || r.Target != string(id) {
+		t.Fatalf("by-id ref = %s,%v want %s", r.Target, err, id)
+	}
+	if sanitizeIDSeg("") != "x" || sanitizeIDSeg("***") != "x" || sanitizeIDSeg("exec_1") != "exec_1" {
+		t.Fatalf("sanitizeIDSeg wrong")
+	}
+}
