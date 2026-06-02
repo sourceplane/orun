@@ -12,6 +12,7 @@ import (
 	"github.com/sourceplane/orun/internal/objgc"
 	"github.com/sourceplane/orun/internal/objindex"
 	"github.com/sourceplane/orun/internal/objmigrate"
+	"github.com/sourceplane/orun/internal/objremote"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/workingview"
 	"github.com/spf13/cobra"
@@ -165,8 +166,82 @@ func registerObjectsCommand(root *cobra.Command) {
 	}
 	migrateCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Report what would be ingested without writing")
 
-	objectsCmd.AddCommand(catCmd, lsTreeCmd, revParseCmd, fsckCmd, checkoutCmd, logCmd, reindexCmd, gcCmd, migrateCmd)
+	pushCmd := &cobra.Command{
+		Use:   "push <remote-dir> [ref]",
+		Short: "Push a ref's object closure to a remote (file://) store",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, refs, _, err := openObjectModel()
+			if err != nil {
+				return err
+			}
+			remote, err := openRemoteEndpoint(args[0])
+			if err != nil {
+				return err
+			}
+			return runObjectsSync(cmd.Context(), objremote.Endpoint{Objects: store, Refs: refs}, remote, refArg(args), true, cmd.OutOrStdout())
+		},
+	}
+	pullCmd := &cobra.Command{
+		Use:   "pull <remote-dir> [ref]",
+		Short: "Pull a ref's object closure from a remote (file://) store",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, refs, _, err := openObjectModel()
+			if err != nil {
+				return err
+			}
+			remote, err := openRemoteEndpoint(args[0])
+			if err != nil {
+				return err
+			}
+			return runObjectsSync(cmd.Context(), objremote.Endpoint{Objects: store, Refs: refs}, remote, refArg(args), false, cmd.OutOrStdout())
+		},
+	}
+
+	objectsCmd.AddCommand(catCmd, lsTreeCmd, revParseCmd, fsckCmd, checkoutCmd, logCmd, reindexCmd, gcCmd, migrateCmd, pushCmd, pullCmd)
 	root.AddCommand(objectsCmd)
+}
+
+// refArg returns the ref name from a push/pull arg list (default executions/latest).
+func refArg(args []string) string {
+	if len(args) == 2 {
+		return args[1]
+	}
+	return "executions/latest"
+}
+
+// openRemoteEndpoint opens a file:// remote (an object + ref store at dir).
+func openRemoteEndpoint(dir string) (objremote.Endpoint, error) {
+	store, err := objectstore.NewLocalStore(objectstore.LocalConfig{Root: dir})
+	if err != nil {
+		return objremote.Endpoint{}, fmt.Errorf("open remote object store: %w", err)
+	}
+	refs, err := refstore.NewLocalRefStore(refstore.LocalConfig{Root: dir, Writer: "cli"})
+	if err != nil {
+		return objremote.Endpoint{}, fmt.Errorf("open remote ref store: %w", err)
+	}
+	return objremote.Endpoint{Objects: store, Refs: refs}, nil
+}
+
+func runObjectsSync(ctx context.Context, local, remote objremote.Endpoint, ref string, push bool, out io.Writer) error {
+	var (
+		res objremote.Result
+		err error
+	)
+	verb := "pulled"
+	if push {
+		res, err = objremote.Push(ctx, local, remote, ref)
+		verb = "pushed"
+	} else {
+		res, err = objremote.Pull(ctx, local, remote, ref)
+	}
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "%s %s: closure=%d copied=%d skipped=%d ref-moved=%v\n",
+		verb, ref, res.Closure, res.Copied, res.Skipped, res.RefMoved)
+	return nil
 }
 
 func runObjectsMigrate(ctx context.Context, legacy *state.Store, store objectstore.ObjectStore, refs refstore.RefStore, dryRun bool, out io.Writer) error {

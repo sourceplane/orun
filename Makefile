@@ -193,6 +193,10 @@ test-object-model:
 	@COVER=$$(go test -count=1 -race -cover ./internal/objmigrate | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
 	  echo "   measured: $$COVER%"; \
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 85.0) { printf "❌ objmigrate coverage %.1f%% below 85%% threshold\n", c+0; exit 1 } }'
+	@echo "🧪 object-model: objremote (>= 85%)"
+	@COVER=$$(go test -count=1 -race -cover ./internal/objremote | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
+	  echo "   measured: $$COVER%"; \
+	  awk -v c=$$COVER 'BEGIN { if (c+0 < 85.0) { printf "❌ objremote coverage %.1f%% below 85%% threshold\n", c+0; exit 1 } }'
 
 verify-generated:
 	@echo "🧪 Verifying generated artifacts are up-to-date..."
