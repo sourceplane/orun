@@ -263,15 +263,14 @@ func (s *LiveOrunService) GeneratePlan(ctx context.Context, req PlanRequest) (*P
 	checksum := execmodel.PlanChecksumShort(plan)
 	plan.Metadata.Checksum = checksum
 
+	// Named-plan persistence used the legacy plan store; in the object model a
+	// plan is materialized as a revision when it is run (the run path resolves
+	// or creates revisions/by-hash/<planHash>). Saving a standalone named plan
+	// onto the revision graph is a tracked follow-up, so for now NamedPlan is a
+	// no-op surfaced as a warning rather than a legacy-store write.
 	if req.NamedPlan != "" {
-		if s.cfg.Store != nil {
-			if err := s.cfg.Store.SavePlan(plan, req.NamedPlan); err != nil {
-				return nil, fmt.Errorf("save named plan %q: %w", req.NamedPlan, err)
-			}
-		} else {
-			warnings = append(warnings,
-				fmt.Sprintf("NamedPlan %q ignored: no state store configured", req.NamedPlan))
-		}
+		warnings = append(warnings,
+			fmt.Sprintf("NamedPlan %q not persisted: standalone named-plan storage is deferred in the object model", req.NamedPlan))
 	}
 
 	// --- summary metadata ---
