@@ -117,6 +117,26 @@ func showStatus() error {
 
 	store := state.NewStore(storeDir())
 
+	// M12 T3: when the object model is active and present, read executions from
+	// the content-addressed graph (live working trees + sealed objects). Fall
+	// back to the legacy store when it has no matching data, so coexistence and
+	// flag-off behavior are preserved.
+	if reader, ok := openObjectReader(); ok && !statusWatch {
+		if statusAll {
+			if handled, err := objStatusList(reader); handled || err != nil {
+				return err
+			}
+		} else {
+			ref := statusExecID
+			if ref == "" {
+				ref = "executions/latest"
+			}
+			if handled, err := objStatusSingle(reader, ref, color); handled || err != nil {
+				return err
+			}
+		}
+	}
+
 	if statusAll {
 		return showAllExecutions(store, color)
 	}
