@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sourceplane/orun/internal/catalogresolve"
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/nodes"
@@ -18,7 +17,6 @@ import (
 	"github.com/sourceplane/orun/internal/objplan"
 	"github.com/sourceplane/orun/internal/runner"
 	"github.com/sourceplane/orun/internal/runworktree"
-	"github.com/sourceplane/orun/internal/sourcectx"
 )
 
 // object_model_runner.go is the M12 T2 wiring: when ORUN_OBJECT_RUNNER is set,
@@ -40,6 +38,11 @@ type objectRunSession struct {
 // beginObjectModelRun resolves the revision the execution attaches to and opens
 // a live working tree for it. Best-effort: returns nil on any failure (the run
 // proceeds; the legacy path is unaffected).
+//
+// The run path NEVER re-resolves the catalog (that is `orun plan`'s job, which
+// already published the revision under revisions/by-hash/<planHash>). This keeps
+// every run cheap — the common case is a single ref read — which is the
+// prerequisite for making the object model the default.
 func beginObjectModelRun(orunDir string, plan *model.Plan, execID string) *objectRunSession {
 	if !objectRunnerEnabled() || plan == nil || execID == "" {
 		return nil
@@ -57,47 +60,9 @@ func beginObjectModelRun(orunDir string, plan *model.Plan, execID string) *objec
 		warnObjectModel("open ref store: %v", err)
 		return nil
 	}
-	w := nodewriter.New(store, refs)
 
-	planBytes, err := canonicalPlanJSON(plan)
-	if err != nil {
-		warnObjectModel("marshal plan: %v", err)
-		return nil
-	}
-
-	// Resolve source + catalog so the revision id matches the plan's (the
-	// revision tree excludes the trigger, so this dedups to the revision a prior
-	// `orun plan` wrote for the same plan+catalog).
-	catRes, _ := resolvePlanCatalog(ctx, planCatalogOptions{})
-	var ws sourcectx.WorkspaceState
-	if wsRoot, werr := catalogWorkspaceRoot(); werr == nil {
-		if resolved, rerr := sourcectx.ResolveSourceSnapshot(ctx, sourcectx.ResolveOptions{WorkspacePath: wsRoot}); rerr == nil {
-			ws = resolved
-		}
-	}
-	var resolve func() (*catalogresolve.CatalogView, error)
-	if catRes.View != nil {
-		view := catRes.View
-		resolve = func() (*catalogresolve.CatalogView, error) { return view, nil }
-	}
-
-	res, err := objplan.Plan(ctx, w, store, objplan.NewResolveMemo(root), objplan.Input{
-		Workspace:      ws,
-		SourceHumanKey: sourceHumanKey(catRes),
-		Resolve:        resolve,
-		PlanBytes:      planBytes,
-		RevisionScope:  nodes.RevisionScope{Mode: "full"},
-		JobCount:       len(plan.Jobs),
-		Trigger: nodes.TriggerOccurrence{
-			Kind:        nodes.KindTriggerOccurrence,
-			TriggerName: "system.run",
-			Source:      nodes.TriggerSource{Flavor: "system", System: "run"},
-			Scope:       nodes.RevisionScope{Mode: "full"},
-			Actor:       "runner",
-		},
-	}, objplan.Options{NoCatalog: resolve == nil})
-	if err != nil {
-		warnObjectModel("resolve revision: %v", err)
+	revID, ok := resolveRunRevision(ctx, store, refs, root, plan)
+	if !ok {
 		return nil
 	}
 
@@ -109,13 +74,52 @@ func beginObjectModelRun(orunDir string, plan *model.Plan, execID string) *objec
 
 	wt, err := mgr.Open(ctx, runworktree.OpenInput{
 		ExecutionID: execID,
-		RevisionID:  res.RevisionID,
+		RevisionID:  revID,
 	})
 	if err != nil {
 		warnObjectModel("open working tree: %v", err)
 		return nil
 	}
-	return &objectRunSession{mgr: mgr, wt: wt, revID: res.RevisionID}
+	return &objectRunSession{mgr: mgr, wt: wt, revID: revID}
+}
+
+// resolveRunRevision returns the revision the run attaches to. It first looks up
+// the revision `orun plan` already published for this plan
+// (revisions/by-hash/<planHash>) — a cheap ref read that dedups perfectly. On a
+// miss (a run with no prior object-model plan) it materializes a catalog-free
+// degenerate revision (plan only) cheaply, never resolving the catalog.
+func resolveRunRevision(ctx context.Context, store *objectstore.LocalStore, refs *refstore.LocalRefStore, root string, plan *model.Plan) (objectstore.ObjectID, bool) {
+	planHash, herr := computePlanHashForRevision(plan)
+	if herr == nil && planHash != "" {
+		if r, rerr := refs.Read(ctx, revByHashPrefix+sanitizeRevSeg(planHash)); rerr == nil {
+			return objectstore.ObjectID(r.Target), true
+		}
+	}
+
+	planBytes, err := canonicalPlanJSON(plan)
+	if err != nil {
+		warnObjectModel("marshal plan: %v", err)
+		return "", false
+	}
+	w := nodewriter.New(store, refs)
+	res, err := objplan.Plan(ctx, w, store, objplan.NewResolveMemo(root), objplan.Input{
+		PlanBytes:      planBytes,
+		RevisionScope:  nodes.RevisionScope{Mode: "full"},
+		JobCount:       len(plan.Jobs),
+		LegacyChecksum: planHash,
+		Trigger: nodes.TriggerOccurrence{
+			Kind:        nodes.KindTriggerOccurrence,
+			TriggerName: "system.run",
+			Source:      nodes.TriggerSource{Flavor: "system", System: "run"},
+			Scope:       nodes.RevisionScope{Mode: "full"},
+			Actor:       "runner",
+		},
+	}, objplan.Options{NoCatalog: true})
+	if err != nil {
+		warnObjectModel("resolve revision: %v", err)
+		return "", false
+	}
+	return res.RevisionID, true
 }
 
 // installObjectRunnerHooks chains the live working-tree writes onto the runner's
