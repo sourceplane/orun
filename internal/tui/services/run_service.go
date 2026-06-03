@@ -7,10 +7,10 @@ import (
 	"io"
 	"time"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/executor"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/runner"
-	"github.com/sourceplane/orun/internal/state"
 )
 
 // validateRunRequest is the canonical scope guard for RunPlan. It exposes
@@ -80,7 +80,7 @@ func (s *LiveOrunService) RunPlan(ctx context.Context, req RunRequest) (<-chan R
 		if name == "" {
 			name = "tui-dryrun"
 		}
-		execID = state.GenerateExecID(name)
+		execID = execmodel.GenerateExecID(name)
 	}
 
 	concurrency := req.Concurrency
@@ -133,7 +133,7 @@ func (s *LiveOrunService) RunPlan(ctx context.Context, req RunRequest) (<-chan R
 		req.Components,
 		"", // env filter — not part of RunRequest scope today
 	)
-	r.PlanID = state.PlanChecksumShort(req.Plan)
+	r.PlanID = execmodel.PlanChecksumShort(req.Plan)
 
 	// Index jobs so hooks can attach component/env metadata to events.
 	jobIndex := make(map[string]model.PlanJob, len(req.Plan.Jobs))

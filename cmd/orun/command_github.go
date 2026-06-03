@@ -11,7 +11,6 @@ import (
 	"github.com/sourceplane/orun/internal/artifactstore"
 	"github.com/sourceplane/orun/internal/artifactstore/github"
 	"github.com/sourceplane/orun/internal/runbundle"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -24,10 +23,10 @@ func normalizeOrunDir(orunDir string) string {
 	if orunDir == "" {
 		orunDir = "."
 	}
-	if filepath.Base(orunDir) == state.OrunDir {
+	if filepath.Base(orunDir) == ".orun" {
 		return orunDir
 	}
-	return filepath.Join(orunDir, state.OrunDir)
+	return filepath.Join(orunDir, ".orun")
 }
 
 var (

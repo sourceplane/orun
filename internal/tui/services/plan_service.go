@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/expand"
 	"github.com/sourceplane/orun/internal/git"
 	"github.com/sourceplane/orun/internal/loader"
@@ -16,7 +17,6 @@ import (
 	"github.com/sourceplane/orun/internal/planner"
 	"github.com/sourceplane/orun/internal/preset"
 	"github.com/sourceplane/orun/internal/render"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/trigger"
 )
 
@@ -260,7 +260,7 @@ func (s *LiveOrunService) GeneratePlan(ctx context.Context, req PlanRequest) (*P
 	}
 
 	// --- compute checksum + persist if requested ---
-	checksum := state.PlanChecksumShort(plan)
+	checksum := execmodel.PlanChecksumShort(plan)
 	plan.Metadata.Checksum = checksum
 
 	if req.NamedPlan != "" {
