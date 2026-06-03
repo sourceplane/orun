@@ -29,8 +29,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sourceplane/orun/internal/catalogstore"
-	"github.com/sourceplane/orun/internal/executionstate"
 	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statestore"
@@ -266,127 +264,6 @@ func TestDescribeRevision_Latest_EmptyArg(t *testing.T) {
 // ------------------------------------------------------------------
 // resolveExecutionForRead — status/logs glue
 // ------------------------------------------------------------------
-
-func TestResolveExecutionForRead_LegacyFallback(t *testing.T) {
-	dir := withTempIntentRoot(t)
-	// No revisions/, no refs/. Plant a legacy execution dir and prove
-	// the resolver returns ResolveSourceLegacyFallback with the right
-	// LegacyExecID echoed back.
-	legacyDir := filepath.Join(dir, ".orun", "executions", "exec-legacy-001")
-	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(legacyDir, "execution.json"), []byte(`{"id":"exec-legacy-001"}`), 0o644); err != nil {
-		t.Fatalf("write execution.json: %v", err)
-	}
-	rx, err := resolveExecutionForRead(context.Background(), "exec-legacy-001", "")
-	if err != nil {
-		t.Fatalf("resolveExecutionForRead: %v", err)
-	}
-	if rx.LegacyExecID != "exec-legacy-001" {
-		t.Fatalf("LegacyExecID = %q; want exec-legacy-001", rx.LegacyExecID)
-	}
-}
-
-func TestResolveExecutionForRead_CatalogOwnedExecutionStore(t *testing.T) {
-	dir := withTempIntentRoot(t)
-	ctx := context.Background()
-	store, err := statestore.NewLocalStore(statestore.LocalConfig{Root: filepath.Join(dir, ".orun")})
-	if err != nil {
-		t.Fatalf("NewLocalStore: %v", err)
-	}
-	now := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
-	trig := triggerctx.NewSystemManual(triggerctx.SystemOptions{Now: now})
-	parent := revision.CatalogParentRef{
-		SourceKey:  "src-branch-main-abcdef0",
-		CatalogKey: "cat-abcdef",
-	}
-	revCfg := revision.Config{
-		Store:         store,
-		Now:           func() time.Time { return now },
-		NewID:         func() string { return "rev_01KTESTCATALOG000000000" },
-		JobCount:      1,
-		CatalogParent: parent,
-	}.WithCompatibilityWrites(false)
-	planBytes := []byte(`{"metadata":{"name":"catalog-plan"},"jobs":[{"id":"api.dev.echo","component":"api","environment":"dev"}]}` + "\n")
-	rev, err := revision.WriteRevision(ctx, revCfg, trig, planBytes, "sha256:feedface00112233445566778899aabbccddeeff00112233445566778899aabb")
-	if err != nil {
-		t.Fatalf("WriteRevision: %v", err)
-	}
-	if err := revision.WriteManifest(ctx, revCfg, rev, trig); err != nil {
-		t.Fatalf("WriteManifest: %v", err)
-	}
-	execCfg := executionstate.Config{
-		Store:          store,
-		RevisionConfig: revCfg,
-		Now:            func() time.Time { return now },
-		NewID:          func() string { return "exec_01KTESTCATALOG00000000" },
-		CatalogParent:  parent,
-	}
-	rec, err := executionstate.CreateExecution(ctx, execCfg, executionstate.CreateExecutionInput{
-		RevisionKey: rev.RevisionKey,
-		RevisionID:  rev.RevisionID,
-		TriggerID:   trig.TriggerID,
-		TriggerKey:  trig.TriggerKey,
-		OriginalKey: "catalog-run-001",
-		Reason:      executionstate.ReasonDirectRun,
-		Status:      executionstate.StatusPending,
-		Runner:      executionstate.RunnerProfile{Mode: "direct", Backend: "local", Platform: "test"},
-		Summary:     executionstate.ExecSummary{Total: 1, Pending: 1},
-	})
-	if err != nil {
-		t.Fatalf("CreateExecution: %v", err)
-	}
-
-	catRevDir, err := catalogstore.CatalogRevisionDir(parent.SourceKey, parent.CatalogKey, rev.RevisionKey)
-	if err != nil {
-		t.Fatalf("CatalogRevisionDir: %v", err)
-	}
-	catState := &state.Store{BaseDir: filepath.Join(dir, ".orun", filepath.FromSlash(catRevDir))}
-	es := &state.ExecState{
-		ExecID: rec.ExecutionKey,
-		Jobs: map[string]*state.JobState{
-			"api.dev.echo": {Status: "completed", Steps: map[string]string{"run": "completed"}},
-		},
-	}
-	if err := catState.SaveState(rec.ExecutionKey, es); err != nil {
-		t.Fatalf("SaveState(catalog): %v", err)
-	}
-	if err := catState.SaveMetadata(rec.ExecutionKey, &state.ExecMetadata{
-		ExecID:   rec.ExecutionKey,
-		PlanName: "catalog-plan",
-		Status:   "completed",
-		JobTotal: 1,
-		JobDone:  1,
-	}); err != nil {
-		t.Fatalf("SaveMetadata(catalog): %v", err)
-	}
-	logDir := filepath.Join(catState.ExecPath(rec.ExecutionKey), "logs", "api.dev.echo")
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		t.Fatalf("mkdir catalog log dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(logDir, "run.log"), []byte("catalog log\n"), 0o644); err != nil {
-		t.Fatalf("write catalog log: %v", err)
-	}
-
-	rx, err := resolveExecutionForRead(ctx, "", "")
-	if err != nil {
-		t.Fatalf("resolveExecutionForRead: %v", err)
-	}
-	if rx.Store == nil || rx.Store.BaseDir != catState.BaseDir {
-		t.Fatalf("resolved store base = %v; want %s", rx.Store, catState.BaseDir)
-	}
-	if rx.LegacyExecID != rec.ExecutionKey {
-		t.Fatalf("LegacyExecID = %q; want catalog exec key %q", rx.LegacyExecID, rec.ExecutionKey)
-	}
-	loaded, err := rx.Store.LoadState(rx.LegacyExecID)
-	if err != nil {
-		t.Fatalf("LoadState(catalog): %v", err)
-	}
-	if loaded.Jobs["api.dev.echo"].Status != "completed" {
-		t.Fatalf("catalog state not loaded: %+v", loaded.Jobs)
-	}
-}
 
 // ------------------------------------------------------------------
 // bridge-mirror-failed surfacing

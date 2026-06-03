@@ -4,14 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/sourceplane/orun/internal/cockpit/render"
 	"github.com/sourceplane/orun/internal/cockpit/viewmodel"
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
@@ -116,61 +115,20 @@ func showLogs() error {
 		return showRemoteLogs(runID, backend, color)
 	}
 
-	// M12 T3: read logs from the content-addressed graph when the object model
-	// is active and present; fall back to the legacy store on a miss.
-	if reader, ok := openObjectReader(); ok {
-		ref := logsExecID
-		if ref == "" {
-			ref = "executions/latest"
-		}
-		if handled, err := objShowLogs(reader, ref, color); handled || err != nil {
-			return err
-		}
-	}
-
-	store := state.NewStore(storeDir())
-	readStore := store
-
-	execID := logsExecID
-	// M5.c: prefer the new revision-first resolver (handles
-	// --revision pinning + legacy fallback). On miss, fall through
-	// to the legacy state.Store resolver.
-	if rx, err := resolveExecutionForRead(context.Background(), logsExecID, logsRevision); err == nil {
-		execID = rx.LegacyExecID
-		if rx.Store != nil {
-			readStore = rx.Store
-		}
-	} else if execID == "" {
-		var lerr error
-		execID, lerr = store.ResolveExecID("latest")
-		if lerr != nil {
-			fmt.Println(ui.Dim(color, "No runs yet."))
-			return nil
-		}
-	} else {
-		var lerr error
-		execID, lerr = store.ResolveExecID(execID)
-		if lerr != nil {
-			return lerr
-		}
-	}
-
-	meta, _ := readStore.LoadMetadata(execID)
-	st, _ := readStore.LoadState(execID)
-	counts := executionCountsFromState(meta, st)
-	entries, err := loadLogEntries(readStore, execID, st)
-	if err != nil {
-		return err
-	}
-	if len(entries) == 0 {
-		fmt.Println(ui.Dim(color, "No logs for this run yet."))
+	// Read logs from the content-addressed object graph.
+	reader, ok := openObjectReader()
+	if !ok {
+		fmt.Println(ui.Dim(color, "No runs yet."))
 		return nil
 	}
-
-	sortLogEntries(entries)
-	entries = selectRelevantLogEntries(entries)
-
-	renderLogEntries(execID, meta, counts, entries, color)
+	ref := logsExecID
+	if ref == "" {
+		ref = "executions/latest"
+	}
+	if handled, err := objShowLogs(reader, ref, color); handled || err != nil {
+		return err
+	}
+	fmt.Println(ui.Dim(color, "No runs yet."))
 	return nil
 }
 
@@ -213,7 +171,7 @@ func showRemoteLogs(runID string, backend statebackend.Backend, color bool) erro
 	return nil
 }
 
-func collectRemoteLogEntries(ctx context.Context, backend statebackend.Backend, runID string, st *state.ExecState) ([]logEntry, error) {
+func collectRemoteLogEntries(ctx context.Context, backend statebackend.Backend, runID string, st *execmodel.ExecState) ([]logEntry, error) {
 	if st == nil {
 		return nil, nil
 	}
@@ -243,10 +201,10 @@ func collectRemoteLogEntries(ctx context.Context, backend statebackend.Backend, 
 	return entries, nil
 }
 
-func renderLogEntries(execID string, meta *state.ExecMetadata, counts executionCounts, entries []logEntry, color bool) {
+func renderLogEntries(execID string, meta *execmodel.ExecMetadata, counts executionCounts, entries []logEntry, color bool) {
 	// Route through the cockpit renderer so `orun logs` and the TUI log
 	// pane (Phase 3) share the same brand/header/grouping language.
-	st := &state.ExecState{}
+	st := &execmodel.ExecState{}
 	v := viewmodel.LogsView{
 		ExecID:  execID,
 		Run:     viewmodel.BuildRunView(execID, meta, st),
@@ -290,7 +248,7 @@ func toCockpitLogEntries(in []logEntry) []viewmodel.LogEntry {
 	return out
 }
 
-func renderLogEntriesLegacy(execID string, meta *state.ExecMetadata, counts executionCounts, entries []logEntry, color bool) {
+func renderLogEntriesLegacy(execID string, meta *execmodel.ExecMetadata, counts executionCounts, entries []logEntry, color bool) {
 	status := "unknown"
 	duration := ""
 	if meta != nil {
@@ -358,76 +316,6 @@ func renderLogEntriesLegacy(execID string, meta *state.ExecMetadata, counts exec
 			}
 		}
 	}
-}
-
-func loadLogEntries(store *state.Store, execID string, st *state.ExecState) ([]logEntry, error) {
-	logsBase := filepath.Join(store.ExecPath(execID), "logs")
-	if _, err := os.Stat(logsBase); os.IsNotExist(err) {
-		return nil, nil
-	}
-
-	entries := make([]logEntry, 0)
-	err := filepath.Walk(logsBase, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(path, ".log") {
-			return nil
-		}
-
-		rel, _ := filepath.Rel(logsBase, path)
-		parts := strings.SplitN(rel, string(filepath.Separator), 2)
-		jobID := ""
-		stepID := ""
-		if len(parts) >= 1 {
-			jobID = parts[0]
-		}
-		if len(parts) >= 2 {
-			stepID = strings.TrimSuffix(parts[1], ".log")
-		}
-
-		if logsJob != "" && !strings.Contains(jobID, logsJob) {
-			return nil
-		}
-		if logsStep != "" && !strings.Contains(stepID, logsStep) {
-			return nil
-		}
-
-		status := "completed"
-		if st != nil {
-			if js, ok := st.Jobs[jobID]; ok && js != nil {
-				if stepStatus, ok := js.Steps[stepID]; ok && strings.TrimSpace(stepStatus) != "" {
-					status = stepStatus
-				} else if strings.TrimSpace(js.Status) != "" {
-					status = js.Status
-				}
-			}
-		}
-		if logsFailed && !strings.EqualFold(status, "failed") {
-			return nil
-		}
-
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return nil
-		}
-		content := strings.TrimSpace(string(data))
-		if content == "" {
-			return nil
-		}
-
-		entries = append(entries, logEntry{
-			jobID:   jobID,
-			stepID:  stepID,
-			status:  status,
-			content: content,
-		})
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return entries, nil
 }
 
 func compactLogLines(content string, raw bool) []string {

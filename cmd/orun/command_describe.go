@@ -11,7 +11,6 @@ import (
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/objview"
 	"github.com/sourceplane/orun/internal/revision"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
@@ -129,54 +128,26 @@ func registerDescribeCommand(root *cobra.Command) {
 func describeRun(ref string) error {
 	color := ui.ColorEnabledForWriter(os.Stdout)
 
-	// M12 T3: read the execution from the object graph when active.
-	if reader, ok := openObjectReader(); ok {
-		r := ref
-		if r == "" {
-			r = "executions/latest"
-		}
-		if v, err := reader.Get(context.Background(), r); err == nil {
-			return renderDescribeRun(v.ExecutionID, objview.ToMeta(v), objview.ToState(v), nil, color)
-		}
+	reader, ok := openObjectReader()
+	if !ok {
+		return fmt.Errorf("no executions found")
 	}
-
-	store := state.NewStore(storeDir())
-
-	// M5.c: route through the seven-branch resolver. On miss
-	// (e.g. a workspace that hasn't materialized any revisions yet)
-	// fall back to the legacy state.Store resolver so existing
-	// `.orun/executions/<id>/` rows keep working.
-	var execID string
-	var rx *resolvedExec
-	if r, err := resolveExecutionForRead(context.Background(), ref, ""); err == nil {
-		rx = r
-		execID = r.LegacyExecID
-	} else {
-		var err2 error
-		execID, err2 = store.ResolveExecID(ref)
-		if err2 != nil {
-			return err2
-		}
+	r := ref
+	if r == "" {
+		r = "executions/latest"
 	}
-
-	meta, _ := store.LoadMetadata(execID)
-	st, _ := store.LoadState(execID)
-	return renderDescribeRun(execID, meta, st, rx, color)
+	v, err := reader.Get(context.Background(), r)
+	if err != nil {
+		return fmt.Errorf("execution not found: %s", ref)
+	}
+	return renderDescribeRun(v.ExecutionID, objview.ToMeta(v), objview.ToState(v), color)
 }
 
-// renderDescribeRun prints the execution detail block, shared by the
-// object-model and legacy paths.
-func renderDescribeRun(execID string, meta *execmodel.ExecMetadata, st *execmodel.ExecState, rx *resolvedExec, color bool) error {
+// renderDescribeRun prints the execution detail block.
+func renderDescribeRun(execID string, meta *execmodel.ExecMetadata, st *execmodel.ExecState, color bool) error {
 
 	fmt.Fprintf(os.Stdout, "\n%s\n", ui.Bold(color, "Execution: "+execID))
 	fmt.Fprintln(os.Stdout, strings.Repeat("─", 60))
-
-	if rx != nil {
-		fmt.Fprintf(os.Stdout, "Revision Key: %s\n", rx.RevisionKey)
-		fmt.Fprintf(os.Stdout, "Execution Key: %s\n", rx.ExecutionKey)
-		fmt.Fprintf(os.Stdout, "Legacy Exec ID: %s\n", rx.LegacyExecID)
-		fmt.Fprintf(os.Stdout, "Source: %s\n", string(rx.Source))
-	}
 
 	if meta != nil {
 		fmt.Fprintf(os.Stdout, "Plan:        %s\n", meta.PlanName)
@@ -221,18 +192,10 @@ func renderDescribeRun(execID string, meta *execmodel.ExecMetadata, st *execmode
 func describePlan(ref string) error {
 	color := ui.ColorEnabledForWriter(os.Stdout)
 
-	// M12 T3: resolve the plan from the object-model revision graph when active.
+	// Resolve the plan from the object-model revision graph.
 	plan, ok := objResolvePlan(ref)
 	if !ok {
-		store := state.NewStore(storeDir())
-		path, err := store.ResolvePlanRef(ref)
-		if err != nil {
-			return err
-		}
-		plan, err = loadPlan(path)
-		if err != nil {
-			return err
-		}
+		return fmt.Errorf("plan not found: %s", ref)
 	}
 
 	if getOutputFormat == "json" {
@@ -273,18 +236,10 @@ func describePlan(ref string) error {
 func describeJob(jobRef string) error {
 	color := ui.ColorEnabledForWriter(os.Stdout)
 
-	// Load latest plan to find job details (object model first).
+	// Load latest plan to find job details from the object-model revision graph.
 	plan, ok := objResolvePlan("latest")
 	if !ok {
-		store := state.NewStore(storeDir())
-		path, err := store.ResolvePlanRef("latest")
-		if err != nil {
-			return fmt.Errorf("no plan found: %w", err)
-		}
-		plan, err = loadPlan(path)
-		if err != nil {
-			return err
-		}
+		return fmt.Errorf("no plan found")
 	}
 
 	var job *PlanJobRef
@@ -333,20 +288,13 @@ func describeJob(jobRef string) error {
 		}
 	}
 
-	// Show state from latest execution if available (object model first).
+	// Show state from the latest execution if available (object graph).
 	var execID string
 	var st *execmodel.ExecState
 	if reader, ok := openObjectReader(); ok {
 		if v, err := reader.Get(context.Background(), "executions/latest"); err == nil {
 			execID = v.ExecutionID
 			st = objview.ToState(v)
-		}
-	}
-	if st == nil {
-		store := state.NewStore(storeDir())
-		if id, resolveErr := store.ResolveExecID("latest"); resolveErr == nil {
-			execID = id
-			st, _ = store.LoadState(id)
 		}
 	}
 	if st != nil {
