@@ -5,21 +5,53 @@ as implemented. This is the as-built record; the design docs describe the intent
 
 ## Summary
 
-Milestones **M0–M11 + M13 are implemented, merged to `main`, and tested
-end-to-end.** The object model is a complete, content-addressed (git/Nix-shaped)
-state layer that runs **additively behind two feature flags** — with the flags
-unset, `orun` behavior is byte-identical to before. The one milestone **not**
-done is the true cutover (**M12** — native runner rewrite + legacy deletion),
-which is scoped in `M12-native-runner-rewrite.md`.
+Milestones **M0–M11 + M13 are implemented, merged, and tested end-to-end**, and
+**M12 (the native runner rewrite + legacy cutover) is in progress** — the runner
+now **writes and reads** the content-addressed graph natively behind the flag.
+The object model runs **additively behind two feature flags** — with the flags
+unset, `orun` behavior is byte-identical to before.
 
 | Field | Value |
 |-------|-------|
-| Milestones done | M0, M1, M2, M3, M4, M5, M5b, M6, M7, M7b, M7c, M8, M9, M10, M11, M13 |
-| Milestone open | **M12** (native runner rewrite + legacy delete) |
-| PRs merged | 19 (#191 spec … #208 e2e) |
+| Milestones done | M0–M11, M13 |
+| Milestone in progress | **M12** — native runner rewrite + legacy delete (see §"M12 cutover") |
 | Test status | full module suite green; object-model gate green; `-race` clean; `verify-generated` clean |
-| Flags | `ORUN_OBJECT_MODEL=1` (plan writes), `ORUN_OBJECT_RUNNER=1` (run seals) — default off |
+| Flags | `ORUN_OBJECT_MODEL=1` (plan writes), `ORUN_OBJECT_RUNNER=1` (run + seal) — default off |
 | Isolation | object graph lives under `.orun/objectmodel/`; legacy `.orun/` untouched |
+
+## M12 cutover — in progress
+
+The native-runner rewrite is being landed in the staged, flag-gated order from
+`M12-native-runner-rewrite.md`. Done so far (each a merged, green PR):
+
+| Step | What landed |
+|------|-------------|
+| **T1** | `internal/runworktree` — live working-tree writer (the git-index analogue): open → mutate job/attempt/step + heartbeat → seal via `execseal`; crash-recovery scan. |
+| **T2** | Native object-model runner: `orun run` drives the working tree live from the runner's lifecycle hooks and seals on terminal (replacing the M7c post-hoc legacy translation). Closes parity rows 3–7, 12. |
+| **T3 (read layer)** | `internal/objread` — native execution detail (header/jobs/attempts/steps/logs) from refs + sealed objects **and** the live working tree; `orun objects log` lists live runs, new `orun objects show`. |
+| **T4 (step 1)** | `Runner.SnapshotState()` — the object path projects the runner's in-memory state instead of re-reading `state.json` (decoupled from legacy persistence). |
+| **types** | `internal/execmodel` extracted (durable execution value types + helpers); 9 types-only consumers repointed off `internal/state` (importers 35 → 26). |
+| **T3 (`status`)** | `orun status` reads executions from the object graph via an `objread → execmodel` adapter, with legacy fallback behind the flag. |
+
+Remaining for full cutover (legacy deletion):
+
+- **T3 (rest):** repoint `orun get`/`logs`/`describe`, the TUI services, the
+  cockpit view-model, and `runbundle` onto `objread` (same adapter pattern).
+- **T4 (step 2):** stop the runner writing `internal/state` when the flag is on
+  (working tree authoritative); drop the `objexec` legacy-seal fall-through.
+- **T5:** flip `ORUN_OBJECT_RUNNER`/`ORUN_OBJECT_MODEL` default **on**; relocate
+  `.orun/objectmodel/` → `.orun/` root; un-hide `orun objects`.
+- **T6:** delete `internal/state` (file store), `internal/statebackend/file.go`,
+  `internal/executionstate/bridge.go`, the dual-write writers, and
+  `internal/objexec`; add the no-`internal/state`-import grep gate; remove flags.
+- **T7:** live `orun run` → crash-mid-run → recover → seal e2e + the disk-win
+  assertion under the native writer.
+
+The blocker for T6 is that **~26 files still use the legacy `.orun/` file store**
+(the read commands, TUI, cockpit, runbundle, `statebackend` coordination, the
+runner's persistence, `gc`/`migrate`); each is repointed onto the object model
+before the store is deleted. `internal/execmodel` is the legacy-store-free home
+for the in-memory execution types those consumers keep using.
 
 ## What was implemented
 
@@ -35,6 +67,9 @@ which is scoped in `M12-native-runner-rewrite.md`.
 | `internal/objplan` | — | adapter: `sourcectx`/`catalogresolve` → node types; resolve memo cache; degenerate `local-nogit` | 92.0% |
 | `internal/workingview` | L4 | `fsck`, materialized checkout, `cat`/`ls-tree`/`rev-parse` read primitives | 85.7% |
 | `internal/execseal` | — | seal a finished run into an immutable `ExecutionRun` tree + publish refs | 100% |
+| `internal/runworktree` | — | live working-tree writer (M12): open/mutate/seal + crash recovery | 92.4% |
+| `internal/objread` | L4 | native execution read views (sealed + live working tree) | 85.4% |
+| `internal/execmodel` | — | durable execution value types + helpers, legacy-store-free | 94.6% |
 | `internal/objindex` | L3 | derived executions index (build/reindex/list) with walk fallback | 88.2% |
 | `internal/objgc` | — | reachability mark-sweep GC + retention + grace window | 91.0% |
 | `internal/objremote` | — | object substitution (push/pull = closure set-difference + ref move) | 96.8% |
@@ -54,7 +89,8 @@ ORUN_OBJECT_RUNNER=1 orun run     # + seal ExecutionRun (native job/attempt/step
 orun objects cat <id|ref>         # pretty-print an object
 orun objects ls-tree <id|ref>     # list tree entries
 orun objects rev-parse <ref>      # resolve a ref to an id
-orun objects log                  # executions newest-first
+orun objects log                  # executions newest-first (live runs first)
+orun objects show [ref]           # one execution's jobs/steps (live or sealed)
 orun objects fsck                 # integrity + closure verification
 orun objects checkout [ref]       # materialize a readable tree
 orun objects reindex              # rebuild derived indexes
@@ -84,6 +120,12 @@ The M12 cutover relocates this to the `.orun/` root and makes it canonical.
 
 ### Properties verified by tests
 
+- **Native live run** — the runner writes a live working tree (`run.json` +
+  heartbeat) and seals it on terminal; `orun objects show`/`log` read job/step
+  progress from the graph for a live run, with no `state.json` dependency for the
+  object path.
+- **Crash recovery** — a working tree whose heartbeat went stale is sealed on the
+  next invocation (already-terminal finishes idempotently; mid-run crash → failed).
 - **Content integrity** — every object hashes to its id (`fsck`, read-time verify).
 - **Revision dedup across triggers** — identical plan ⇒ one revision; each trigger a distinct event.
 - **Catalog memoization** — unchanged source skips the resolver; clean-tree re-plan is near-free.
@@ -98,21 +140,23 @@ The M12 cutover relocates this to the `.orun/` root and makes it canonical.
 go build ./...            OK
 go vet ./...              OK
 go test ./...             all packages ok, 0 failures (incl. cmd/orun, legacy suites)
-make test-object-model    all 12 packages 85–100% + e2e — green
+make test-object-model    all object-model packages 85–100% + e2e — green
 make verify-generated     OK
 go test -race (obj pkgs)  clean
 CLI smoke (real binary)   objects fsck/log/migrate/gc all run
 ```
 
-## The remaining gap — M12 (true cutover)
+## The remaining gap — finishing M12
 
-The object model **bridges from** legacy state: `orun run` (under
-`ORUN_OBJECT_RUNNER`) lets the legacy runner write its `state.json`, then
-`objexec` reads that and seals a native execution. Therefore **`internal/state`
-cannot be deleted** — the seal depends on it.
+The native runner is in place: `orun run` (under `ORUN_OBJECT_RUNNER`) writes the
+working tree live and seals it **natively** (no `objexec` legacy read on the live
+path — that fall-through remains only for remote/dry-run runs and `objmigrate`).
 
-True cutover requires rewriting `internal/runner` to write the working-tree/seal
-**natively** (no legacy read), satisfying the parity matrix in
-`runner-integration.md` §4, then flipping the default and deleting the legacy
-module + the two bridges. That work is specified in
-`M12-native-runner-rewrite.md`.
+What's left to delete `internal/state` is the read-side + write-side cutover
+tracked in §"M12 cutover" above: repoint the remaining file-store consumers
+(`get`/`logs`/`describe`, TUI, cockpit, `runbundle`) onto `objread` (T3), stop
+the runner's legacy writes (T4 step 2), flip the default and relocate the layout
+(T5), then delete the legacy module + bridges and remove the flags (T6), and add
+the live crash-recovery e2e (T7). Each remaining file-store consumer is repointed
+before the store is removed; `internal/execmodel` already provides the
+legacy-store-free home for the in-memory execution types they keep using.
