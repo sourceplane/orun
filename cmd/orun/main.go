@@ -14,6 +14,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/artifactstore/github"
 	"github.com/sourceplane/orun/internal/ci"
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/expand"
 	"github.com/sourceplane/orun/internal/git"
 	"github.com/sourceplane/orun/internal/loader"
@@ -24,7 +25,6 @@ import (
 	"github.com/sourceplane/orun/internal/render"
 	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/runbundle"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/trigger"
 	"github.com/sourceplane/orun/internal/triggerctx"
@@ -450,11 +450,9 @@ func generatePlan() error {
 		return fmt.Errorf("marshal canonical plan: %w", err)
 	}
 
-	// Write plan via revision.WriteRevision (canonical layout) plus optional
-	// compatibility writes (.orun/plans/<checksum>.json + latest.json) and
-	// optional named alias.
-	store := state.NewStore(storeDir())
-	planID := state.PlanChecksumShort(plan)
+	// Write plan via revision.WriteRevision (canonical layout) and the
+	// content-addressed object model (writeObjectModelPlan, below).
+	planID := execmodel.PlanChecksumShort(plan)
 	color := ui.ColorEnabledForWriter(os.Stdout)
 
 	absStoreRoot, err := filepath.Abs(filepath.Join(storeDir(), ".orun"))
@@ -492,7 +490,6 @@ func generatePlan() error {
 			return fmt.Errorf("failed to write plan to %s: %w", outputFile, err)
 		}
 	}
-	_ = store // legacy state.Store retained for any downstream plan resolution; SavePlan superseded by revision pipeline.
 
 	// Additionally write the content-addressed object graph when the
 	// ORUN_OBJECT_MODEL flag is set (M5b). Best-effort and isolated under
