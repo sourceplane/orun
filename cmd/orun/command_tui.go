@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	"github.com/sourceplane/orun/internal/discovery"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/tui"
 	"github.com/sourceplane/orun/internal/tui/services"
@@ -38,12 +38,14 @@ func registerTuiCommand(root *cobra.Command) {
 		fmt.Sprintf("orun-backend URL (or set %s)", backendURLEnvVar))
 }
 
-// resolveTUIBackend constructs the appropriate state backend. It fails
-// closed when --remote-state is set without a resolvable backend URL so
-// no half-launched TUI ever runs with invalid remote config.
-func resolveTUIBackend(store *state.Store) (statebackend.Backend, func(), error) {
+// resolveTUIBackend returns the remote state backend when --remote-state is
+// set, else nil — the local TUI reads the content-addressed object graph
+// directly (no backend). It fails closed when --remote-state is set without a
+// resolvable backend URL so no half-launched TUI ever runs with invalid remote
+// config.
+func resolveTUIBackend() (statebackend.Backend, func(), error) {
 	if !tuiRemoteState {
-		return statebackend.NewFileStateBackend(store), func() {}, nil
+		return nil, func() {}, nil
 	}
 
 	backendURL := tuiBackendURL
@@ -77,21 +79,26 @@ func runTUI(ctx context.Context) error {
 		}
 	}
 
-	store := state.NewStore(storeDir())
-
-	backend, cleanup, err := resolveTUIBackend(store)
+	backend, cleanup, err := resolveTUIBackend()
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
+	// The local TUI reads/writes the content-addressed object graph under
+	// .orun/objectmodel; only --remote-state attaches a backend.
+	orunRoot, err := filepath.Abs(filepath.Join(storeDir(), ".orun"))
+	if err != nil {
+		return fmt.Errorf("resolve object-model root: %w", err)
+	}
+
 	svc := services.NewLiveOrunService(services.LiveServiceConfig{
-		IntentFile: intentFile,
-		IntentRoot: intentRoot,
-		ConfigDir:  configDir,
-		Store:      store,
-		Backend:    backend,
-		Version:    version,
+		IntentFile:      intentFile,
+		IntentRoot:      intentRoot,
+		ConfigDir:       configDir,
+		ObjectModelRoot: orunRoot,
+		Backend:         backend,
+		Version:         version,
 	})
 
 	p := tui.NewProgram(svc)

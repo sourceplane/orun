@@ -11,19 +11,15 @@ import (
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/objread"
 	"github.com/sourceplane/orun/internal/objview"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statebackend"
 )
 
-// Source abstracts the place state lives. The local store, the remote
-// statebackend, and the content-addressed object model all implement it.
+// Source abstracts the place state lives. The remote statebackend and the
+// content-addressed object model both implement it.
 type Source interface {
 	LoadRun(ctx context.Context, execID string) (*execmodel.ExecMetadata, *execmodel.ExecState, error)
 	ListRuns(ctx context.Context) ([]execmodel.ExecEntry, error)
 }
-
-// FromStore wraps a local *state.Store as a Source.
-func FromStore(s *state.Store) Source { return &storeSource{s: s} }
 
 // FromBackend wraps a remote statebackend.Backend as a Source.
 func FromBackend(b statebackend.Backend) Source { return &backendSource{b: b} }
@@ -58,24 +54,6 @@ func LoadRunListView(ctx context.Context, src Source) (viewmodel.RunListView, er
 }
 
 // --- adapters --------------------------------------------------------
-
-type storeSource struct{ s *state.Store }
-
-func (a *storeSource) LoadRun(_ context.Context, execID string) (*execmodel.ExecMetadata, *execmodel.ExecState, error) {
-	if a.s == nil {
-		return nil, nil, fmt.Errorf("nil store")
-	}
-	meta, _ := a.s.LoadMetadata(execID)
-	st, _ := a.s.LoadState(execID)
-	return meta, st, nil
-}
-
-func (a *storeSource) ListRuns(_ context.Context) ([]execmodel.ExecEntry, error) {
-	if a.s == nil {
-		return nil, fmt.Errorf("nil store")
-	}
-	return a.s.ListExecutions()
-}
 
 type objReaderSource struct{ r *objread.Reader }
 
