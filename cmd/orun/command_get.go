@@ -12,7 +12,6 @@ import (
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/objview"
 	"github.com/sourceplane/orun/internal/revision"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
@@ -93,11 +92,9 @@ func getPlans() error {
 	} else if ok {
 		return renderRevisionPlanTable(rows)
 	}
-	// M12 T3: object-model revisions (plans live in the revision graph).
-	if rows, ok := objListPlanRows(); ok {
-		return renderPlanEntryTable(rows)
-	}
-	return renderLegacyPlanTable()
+	// Object-model revisions (plans live in the revision graph).
+	rows, _ := objListPlanRows()
+	return renderPlanEntryTable(rows)
 }
 
 // revisionPlanRow is the projected row used by `orun get plans` after the
@@ -244,17 +241,8 @@ func renderRevisionPlanTable(rows []revisionPlanRow) error {
 	return nil
 }
 
-func renderLegacyPlanTable() error {
-	store := state.NewStore(storeDir())
-	plans, err := store.ListPlans()
-	if err != nil {
-		return err
-	}
-	return renderPlanEntryTable(plans)
-}
-
-// renderPlanEntryTable renders a plan listing (legacy store or object-model
-// revisions) as the `orun get plans` table / JSON.
+// renderPlanEntryTable renders a plan listing (object-model revisions) as the
+// `orun get plans` table / JSON.
 func renderPlanEntryTable(plans []execmodel.PlanEntry) error {
 	if len(plans) == 0 {
 		if getOutputFormat == "json" {
@@ -315,31 +303,19 @@ func renderPlanEntryTable(plans []execmodel.PlanEntry) error {
 }
 
 func getJobs() error {
-	store := state.NewStore(storeDir())
-
 	ref := getPlanRef
 	if ref == "" {
 		ref = "latest"
 	}
 
-	// M12 T3: resolve the plan from the object-model revision graph when active;
-	// fall back to the legacy plan store.
-	var plan *model.Plan
-	if p, ok := objResolvePlan(ref); ok {
-		plan = p
-	} else {
-		path, err := store.ResolvePlanRef(ref)
-		if err != nil {
-			color := ui.ColorEnabledForWriter(os.Stdout)
-			fmt.Println(ui.Dim(color, "No jobs found."))
-			fmt.Println()
-			fmt.Printf("  Generate a plan first:  %s\n", ui.Bold(color, "orun plan"))
-			return nil
-		}
-		plan, err = loadPlan(path)
-		if err != nil {
-			return err
-		}
+	// Resolve the plan from the object-model revision graph.
+	plan, ok := objResolvePlan(ref)
+	if !ok {
+		color := ui.ColorEnabledForWriter(os.Stdout)
+		fmt.Println(ui.Dim(color, "No jobs found."))
+		fmt.Println()
+		fmt.Printf("  Generate a plan first:  %s\n", ui.Bold(color, "orun plan"))
+		return nil
 	}
 
 	// Context-aware scoping: filter jobs by detected component
@@ -362,16 +338,11 @@ func getJobs() error {
 		}
 	}
 
-	// M12 T3: overlay execution status from the object graph when active.
+	// Overlay execution status from the object graph's latest execution.
 	var execState *execmodel.ExecState
 	if reader, ok := openObjectReader(); ok {
 		if v, err := reader.Get(context.Background(), "executions/latest"); err == nil {
 			execState = objview.ToState(v)
-		}
-	}
-	if execState == nil {
-		if execID, resolveErr := store.ResolveExecID("latest"); resolveErr == nil {
-			execState, _ = store.LoadState(execID)
 		}
 	}
 
@@ -406,7 +377,7 @@ func resolveViewMode(viewFlag, outputFlag string) string {
 	return "tree"
 }
 
-func getJobsTree(plan *model.Plan, execState *state.ExecState, color bool) {
+func getJobsTree(plan *model.Plan, execState *execmodel.ExecState, color bool) {
 	checksum := ""
 	if plan.Metadata.Checksum != "" {
 		cs := strings.TrimPrefix(plan.Metadata.Checksum, "sha256-")
@@ -472,7 +443,7 @@ func getJobsTree(plan *model.Plan, execState *state.ExecState, color bool) {
 	}
 }
 
-func getJobsCompact(plan *model.Plan, execState *state.ExecState, color bool) {
+func getJobsCompact(plan *model.Plan, execState *execmodel.ExecState, color bool) {
 	compositionMap := make(map[string]string)
 	for _, job := range plan.Jobs {
 		if job.Composition != "" {
@@ -494,7 +465,7 @@ func getJobsCompact(plan *model.Plan, execState *state.ExecState, color bool) {
 	}
 }
 
-func getJobsTable(plan *model.Plan, execState *state.ExecState, color bool) {
+func getJobsTable(plan *model.Plan, execState *execmodel.ExecState, color bool) {
 	fmt.Fprintf(os.Stdout, "%-50s %-18s %-14s %s\n",
 		"JOB ID", "COMPONENT", "ENV", "STATUS")
 

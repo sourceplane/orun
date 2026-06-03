@@ -162,26 +162,18 @@ func TestGetPlans_RevisionFirstTable_JSON(t *testing.T) {
 	}
 }
 
-func TestGetPlans_LegacyOnly_FallbackTable(t *testing.T) {
-	dir := withTempIntentRoot(t)
+func TestGetPlans_NoRevisions_Empty(t *testing.T) {
+	_ = withTempIntentRoot(t)
 	prevFmt := getOutputFormat
 	getOutputFormat = ""
 	t.Cleanup(func() { getOutputFormat = prevFmt })
 
-	// Seed one legacy plan via state.Store; do NOT create any revisions/.
-	store := state.NewStore(dir)
-	plan := minimalPlan(t)
-	if err := store.SavePlan(plan, "latest"); err != nil {
-		t.Fatalf("SavePlan: %v", err)
-	}
-
+	// No revisions and no object model: `get plans` surfaces nothing. The legacy
+	// .orun/plans/ store is no longer read (M12 cutover); old workspaces use
+	// `orun objects migrate`.
 	out := captureStdout(t, getPlans)
-	// Legacy header has REVISION + AGE + STATUS but no TRIGGER column.
-	if strings.Contains(out, "TRIGGER") || strings.Contains(out, "LATEST EXEC") {
-		t.Fatalf("legacy fallback should not render revision-first columns:\n%s", out)
-	}
-	if !strings.Contains(out, "REVISION") || !strings.Contains(out, "AGE") {
-		t.Fatalf("legacy header missing:\n%s", out)
+	if !strings.Contains(out, "No plans yet") {
+		t.Fatalf("expected 'No plans yet', got:\n%s", out)
 	}
 }
 
