@@ -34,7 +34,7 @@ import (
 
 // objectRunnerEnabled reports whether the experimental object-model run seal is
 // turned on.
-func objectRunnerEnabled() bool { return os.Getenv("ORUN_OBJECT_RUNNER") != "" }
+func objectRunnerEnabled() bool { return flagDefaultOn("ORUN_OBJECT_RUNNER") }
 
 // sealObjectModelRun re-resolves the object-model revision for plan and seals
 // the finished legacy execution (execID) under it. orunDir is the absolute path

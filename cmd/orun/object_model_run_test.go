@@ -46,13 +46,13 @@ func legacyStoreWithExecution(t *testing.T, execID string) (*state.Store, *model
 	return ls, plan
 }
 
-func TestSealObjectModelRunDisabledByDefault(t *testing.T) {
-	os.Unsetenv("ORUN_OBJECT_RUNNER")
+func TestSealObjectModelRunDisabledByFlag(t *testing.T) {
+	t.Setenv("ORUN_OBJECT_RUNNER", "0")
 	orunDir := filepath.Join(t.TempDir(), ".orun")
 	ls, plan := legacyStoreWithExecution(t, "exec-off")
 	sealObjectModelRun(orunDir, plan, ls, "exec-off")
 	if _, err := os.Stat(objectModelRoot(orunDir)); !os.IsNotExist(err) {
-		t.Fatalf("object-model root created with flag off: %v", err)
+		t.Fatalf("object-model root created with flag explicitly disabled: %v", err)
 	}
 }
 

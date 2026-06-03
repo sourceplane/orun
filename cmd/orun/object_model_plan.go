@@ -29,7 +29,16 @@ import (
 // canonical.
 
 // objectModelEnabled reports whether the experimental object-model write is on.
-func objectModelEnabled() bool { return os.Getenv("ORUN_OBJECT_MODEL") != "" }
+func objectModelEnabled() bool { return flagDefaultOn("ORUN_OBJECT_MODEL") }
+
+func flagDefaultOn(name string) bool {
+	switch os.Getenv(name) {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
+}
 
 // objectModelRoot returns the isolated object-graph root under the .orun dir.
 func objectModelRoot(orunDir string) string { return filepath.Join(orunDir, "objectmodel") }

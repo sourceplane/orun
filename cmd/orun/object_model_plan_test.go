@@ -24,12 +24,14 @@ func countFiles(t *testing.T, dir string) int {
 	return n
 }
 
-func TestWriteObjectModelPlanDisabledByDefault(t *testing.T) {
-	os.Unsetenv("ORUN_OBJECT_MODEL")
+func TestWriteObjectModelPlanDisabledByFlag(t *testing.T) {
+	// The object model is on by default (M12 cutover); ORUN_OBJECT_MODEL=0 is
+	// the explicit escape hatch.
+	t.Setenv("ORUN_OBJECT_MODEL", "0")
 	orunDir := filepath.Join(t.TempDir(), ".orun")
 	writeObjectModelPlan(orunDir, &model.Plan{}, []byte(`{}`), "", "", triggerctx.TriggerOccurrence{}, planCatalogResolution{})
 	if _, err := os.Stat(objectModelRoot(orunDir)); !os.IsNotExist(err) {
-		t.Fatalf("object-model root created with flag off: %v", err)
+		t.Fatalf("object-model root created with flag explicitly disabled: %v", err)
 	}
 }
 
