@@ -333,6 +333,17 @@ func runPlan() error {
 		}
 	}
 
+	// M12 T2 — native object-model runner. When ORUN_OBJECT_RUNNER is set (and
+	// not dry-run / remote), open a live working tree and drive it from the
+	// runner's lifecycle hooks; it seals natively on terminal. Best-effort and
+	// isolated under .orun/objectmodel/; the legacy state writes continue.
+	var objRun *objectRunSession
+	objStoreRoot, objStoreErr := filepath.Abs(filepath.Join(storeDir(), ".orun"))
+	if objStoreErr == nil && !runDryRun && !remoteActive {
+		objRun = beginObjectModelRun(objStoreRoot, plan, execID)
+		installObjectRunnerHooks(r, objRun, store, execID)
+	}
+
 	runErr := r.Run(plan)
 
 	// Finalize the revision-first ExecutionRun: flip to terminal status,
@@ -359,11 +370,14 @@ func runPlan() error {
 		}
 	}
 
-	// Seal the finished run into the content-addressed object graph when
-	// ORUN_OBJECT_RUNNER is set (M7c). Best-effort and isolated under
-	// .orun/objectmodel/; a no-op when the flag is unset.
-	if absStoreRoot, absErr := filepath.Abs(filepath.Join(storeDir(), ".orun")); absErr == nil {
-		sealObjectModelRun(absStoreRoot, plan, store, execID)
+	// Seal the run into the content-addressed object graph when ORUN_OBJECT_RUNNER
+	// is set. The native live working tree (T2) seals itself; the post-hoc
+	// legacy-translation seal (M7c) covers the remote / dry-run fall-through where
+	// no working tree was opened. Best-effort, isolated under .orun/objectmodel/.
+	if objRun != nil {
+		finishObjectModelRun(objRun, store, execID, runErr)
+	} else if objStoreErr == nil {
+		sealObjectModelRun(objStoreRoot, plan, store, execID)
 	}
 
 	return runErr

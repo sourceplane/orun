@@ -349,6 +349,90 @@ func (wt *WorkTree) FinishJob(jobID, status, lastErr string) error {
 	return wt.persist(now, jobID)
 }
 
+// ProjectedStep / ProjectedJob describe an authoritative external view of a
+// job's progress (e.g. the runner's own state) for Project to reconcile into the
+// working tree. The legacy runner has no attempt dimension, so projection
+// targets attempt 1.
+type ProjectedStep struct {
+	StepID   string
+	Status   string
+	ExitCode int
+}
+
+type ProjectedJob struct {
+	JobID     string
+	Status    string
+	LastError string
+	Steps     []ProjectedStep
+}
+
+// Project reconciles the working tree to the given authoritative job/step state
+// in a single atomic flush — the runner pushes its full state each tick. It is
+// additive (steps/jobs not mentioned are preserved, so streamed logs survive)
+// and idempotent. Statuses must be known; terminal statuses stamp a finishedAt.
+func (wt *WorkTree) Project(jobs []ProjectedJob) error {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	now := wt.mgr.clk.Now()
+	for _, pj := range jobs {
+		if !knownStatus(pj.Status) {
+			return fmt.Errorf("runworktree: job %q status %q: %w", pj.JobID, pj.Status, ErrInvalid)
+		}
+		j := wt.job(pj.JobID)
+		if j.StartedAt == nil {
+			j.StartedAt = ptr(now)
+		}
+		j.Status = pj.Status
+		j.LastError = pj.LastError
+		a := wt.currentAttempt(pj.JobID, now)
+		a.Status = pj.Status
+		if nodes.IsTerminalStatus(pj.Status) {
+			if j.FinishedAt == nil {
+				j.FinishedAt = ptr(now)
+			}
+			if a.FinishedAt == nil {
+				a.FinishedAt = ptr(now)
+			}
+		}
+		for _, ps := range pj.Steps {
+			if !knownStatus(ps.Status) {
+				return fmt.Errorf("runworktree: step %q status %q: %w", ps.StepID, ps.Status, ErrInvalid)
+			}
+			s := stepRef(a, ps.StepID)
+			if s.StartedAt == nil {
+				s.StartedAt = ptr(now)
+			}
+			s.Status = ps.Status
+			s.ExitCode = ps.ExitCode
+			if nodes.IsTerminalStatus(ps.Status) && s.FinishedAt == nil {
+				s.FinishedAt = ptr(now)
+			}
+		}
+	}
+	return wt.persist(now, "")
+}
+
+// SetStepLog attaches (or replaces) a step's captured output, streaming it to
+// the working tree where it becomes a content blob at seal. A no-op for empty
+// output.
+func (wt *WorkTree) SetStepLog(jobID, stepID string, log []byte) error {
+	if len(log) == 0 {
+		return nil
+	}
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	now := wt.mgr.clk.Now()
+	j := wt.job(jobID)
+	a := wt.currentAttempt(jobID, now)
+	s := stepRef(a, stepID)
+	rel := filepath.Join(logsDir, j.Folder, sanitizeName(stepID)+".log")
+	if err := writeFileAtomic(filepath.Join(wt.dir, rel), log); err != nil {
+		return fmt.Errorf("runworktree: write step log: %w", err)
+	}
+	s.LogFile = rel
+	return wt.persist(now, "")
+}
+
 // AddLink attaches an external link (CI page, etc.) to the execution.
 func (wt *WorkTree) AddLink(link nodes.ExecLink) error {
 	wt.mu.Lock()
@@ -529,6 +613,16 @@ func sealStatus(s string) string {
 }
 
 func liveRefName(execID string) string { return refLivePrefix + sanitizeName(execID) }
+
+// knownStatus reports whether s is any valid node status (terminal or not).
+func knownStatus(s string) bool {
+	switch s {
+	case nodes.StatusPending, nodes.StatusRunning, nodes.StatusSucceeded, nodes.StatusFailed, nodes.StatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
 
 // jobFolder derives the sanitized j-<shortHash> folder for a job id (the
 // original id is preserved in the record). Matches the sealed convention.

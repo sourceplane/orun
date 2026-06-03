@@ -1,0 +1,90 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/sourceplane/orun/internal/runner"
+	"github.com/sourceplane/orun/internal/state"
+)
+
+func TestBeginObjectModelRunDisabled(t *testing.T) {
+	os.Unsetenv("ORUN_OBJECT_RUNNER")
+	orunDir := filepath.Join(t.TempDir(), ".orun")
+	_, plan := legacyStoreWithExecution(t, "exec-off")
+	if s := beginObjectModelRun(orunDir, plan, "exec-off"); s != nil {
+		t.Fatalf("begin returned a session with flag off")
+	}
+	if _, err := os.Stat(objectModelRoot(orunDir)); !os.IsNotExist(err) {
+		t.Fatalf("object-model root created with flag off")
+	}
+}
+
+func TestObjectModelRunnerLivePathSeals(t *testing.T) {
+	t.Setenv("ORUN_OBJECT_RUNNER", "1")
+	// begin re-resolves the workspace against cwd; isolate it.
+	t.Chdir(t.TempDir())
+
+	execID := "exec-live-1"
+	ls, plan := legacyStoreWithExecution(t, execID)
+	orunDir := filepath.Join(t.TempDir(), ".orun")
+
+	sess := beginObjectModelRun(orunDir, plan, execID)
+	if sess == nil {
+		t.Fatalf("begin returned nil session")
+	}
+	root := objectModelRoot(orunDir)
+
+	// A live working tree + in-flight handle exist mid-run.
+	if _, err := os.Stat(filepath.Join(root, "run")); err != nil {
+		t.Fatalf("working tree dir missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "refs", "executions", "live")); err != nil {
+		t.Fatalf("live ref missing: %v", err)
+	}
+
+	// Drive a state tick + a step log through the runner hooks, then finish.
+	r := &runner.Runner{}
+	installObjectRunnerHooks(r, sess, ls, execID)
+	if r.Hooks == nil || r.Hooks.AfterStateUpdate == nil || r.Hooks.AfterStepLog == nil {
+		t.Fatalf("hooks not installed")
+	}
+	r.Hooks.AfterStateUpdate()
+	r.Hooks.AfterStepLog("api@deploy", "build", "build output\n")
+
+	finishObjectModelRun(sess, ls, execID, nil)
+
+	// Sealed: objects + executions/latest written; working tree + live handle gone.
+	if n := countObjectFiles(t, filepath.Join(root, "objects")); n == 0 {
+		t.Fatalf("no objects written")
+	}
+	if _, err := os.Stat(filepath.Join(root, "refs", "executions", "latest.json")); err != nil {
+		t.Fatalf("executions/latest not published: %v", err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, "run")); len(entries) != 0 {
+		t.Fatalf("working tree survived seal: %d entries", len(entries))
+	}
+	if _, err := os.Stat(filepath.Join(root, "refs", "executions", "live", "exec-live-1.json")); !os.IsNotExist(err) {
+		t.Fatalf("live handle survived seal")
+	}
+}
+
+func TestProjectFromExecStateSorted(t *testing.T) {
+	st := &state.ExecState{Jobs: map[string]*state.JobState{
+		"b@deploy": {Status: "running", Steps: map[string]string{"z": "running", "a": "success"}},
+		"a@deploy": {Status: "success", Steps: map[string]string{"build": "success"}},
+	}}
+	out := projectFromExecState(st)
+	if len(out) != 2 || out[0].JobID != "a@deploy" || out[1].JobID != "b@deploy" {
+		t.Fatalf("jobs not sorted: %+v", out)
+	}
+	// Steps within a job are sorted too.
+	if out[1].Steps[0].StepID != "a" || out[1].Steps[1].StepID != "z" {
+		t.Fatalf("steps not sorted: %+v", out[1].Steps)
+	}
+	// Status mapping folded onto the node vocabulary.
+	if out[0].Status != "succeeded" || out[1].Status != "running" {
+		t.Fatalf("status mapping wrong: %+v", out)
+	}
+}
