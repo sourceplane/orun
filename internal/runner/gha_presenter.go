@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/ui"
 )
 
@@ -108,7 +108,7 @@ func (r *Runner) ghaJobScope(job model.PlanJob) string {
 	return strings.Join(parts, " · ")
 }
 
-func (r *Runner) ghaPrintJobHeader(job model.PlanJob, execState *state.ExecState) {
+func (r *Runner) ghaPrintJobHeader(job model.PlanJob, execState *execmodel.ExecState) {
 	buf := r.ghaJobOut(job.ID)
 	if buf == nil {
 		return

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sourceplane/orun/internal/catalogresolve"
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/nodewriter"
@@ -18,7 +19,6 @@ import (
 	"github.com/sourceplane/orun/internal/runner"
 	"github.com/sourceplane/orun/internal/runworktree"
 	"github.com/sourceplane/orun/internal/sourcectx"
-	"github.com/sourceplane/orun/internal/state"
 )
 
 // object_model_runner.go is the M12 T2 wiring: when ORUN_OBJECT_RUNNER is set,
@@ -170,7 +170,7 @@ func finishObjectModelRun(r *runner.Runner, s *objectRunSession, runErr error) {
 	case runErr != nil:
 		status = nodes.StatusFailed
 	case st != nil:
-		if state.SummarizeExecutionState(st).Failed > 0 {
+		if execmodel.SummarizeExecutionState(st).Failed > 0 {
 			status = nodes.StatusFailed
 		}
 	}
@@ -186,7 +186,7 @@ func finishObjectModelRun(r *runner.Runner, s *objectRunSession, runErr error) {
 // projectFromExecState maps the legacy runner state into the working-tree
 // projection input, in deterministic (sorted) order so the sealed tree is
 // reproducible.
-func projectFromExecState(st *state.ExecState) []runworktree.ProjectedJob {
+func projectFromExecState(st *execmodel.ExecState) []runworktree.ProjectedJob {
 	if st == nil || len(st.Jobs) == 0 {
 		return nil
 	}
