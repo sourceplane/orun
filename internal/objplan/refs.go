@@ -70,8 +70,18 @@ func CatalogRefs(src nodes.SourceSnapshot) []string {
 	return refs
 }
 
-// RevisionRefs returns the ref names a fresh revision is published under.
-func RevisionRefs() []string { return []string{"revisions/latest"} }
+// RevisionRefs returns the ref names a fresh revision is published under:
+// always revisions/latest, plus a stable revisions/by-hash/<checksum> pointer
+// when the legacy plan checksum is known (so plans stay enumerable and
+// resolvable by hash off the object graph — the basis for `orun get plans` and
+// `orun run <planhash>` after the legacy plan store is removed).
+func RevisionRefs(legacyChecksum string) []string {
+	refs := []string{"revisions/latest"}
+	if legacyChecksum != "" {
+		refs = append(refs, "revisions/by-hash/"+sanitizeRefSeg(legacyChecksum))
+	}
+	return refs
+}
 
 // TriggerRefs returns the ref names a trigger event is published under, keyed by
 // the trigger name.

@@ -81,8 +81,12 @@ func TestSourceAndCatalogRefs(t *testing.T) {
 	if got := TriggerRefs("system.manual"); got[0] != "triggers/system.manual/latest" {
 		t.Fatalf("trigger refs = %v", got)
 	}
-	if RevisionRefs()[0] != "revisions/latest" {
+	if RevisionRefs("")[0] != "revisions/latest" {
 		t.Fatalf("revision refs")
+	}
+	byHash := RevisionRefs("sha256-abc")
+	if len(byHash) != 2 || byHash[1] != "revisions/by-hash/sha256-abc" {
+		t.Fatalf("revision by-hash refs = %v", byHash)
 	}
 }
 

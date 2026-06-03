@@ -78,7 +78,7 @@ func Plan(ctx context.Context, w *nodewriter.Writer, store objectstore.ObjectSto
 	if rev.Scope.Mode == "" {
 		rev.Scope.Mode = "full"
 	}
-	revID, reused, err := w.WriteRevision(ctx, rev, in.PlanBytes, RevisionRefs()...)
+	revID, reused, err := w.WriteRevision(ctx, rev, in.PlanBytes, RevisionRefs(in.LegacyChecksum)...)
 	if err != nil {
 		return res, fmt.Errorf("objplan: write revision: %w", err)
 	}
