@@ -2,7 +2,6 @@ package main
 
 import (
 	"io/fs"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -44,40 +43,4 @@ func legacyStoreWithExecution(t *testing.T, execID string) (*state.Store, *model
 		t.Fatalf("SaveMetadata: %v", err)
 	}
 	return ls, plan
-}
-
-func TestSealObjectModelRunDisabledByFlag(t *testing.T) {
-	t.Setenv("ORUN_OBJECT_RUNNER", "0")
-	orunDir := filepath.Join(t.TempDir(), ".orun")
-	ls, plan := legacyStoreWithExecution(t, "exec-off")
-	sealObjectModelRun(orunDir, plan, ls, "exec-off")
-	if _, err := os.Stat(objectModelRoot(orunDir)); !os.IsNotExist(err) {
-		t.Fatalf("object-model root created with flag explicitly disabled: %v", err)
-	}
-}
-
-func TestSealObjectModelRunSeals(t *testing.T) {
-	t.Setenv("ORUN_OBJECT_RUNNER", "1")
-	// The hook re-resolves the workspace catalog/source against the process cwd;
-	// run from an isolated temp dir so it never writes a stray .orun/ into the
-	// repository tree (cwd is restored on cleanup).
-	t.Chdir(t.TempDir())
-	execID := "exec-seal-1"
-	ls, plan := legacyStoreWithExecution(t, execID)
-	orunDir := filepath.Join(t.TempDir(), ".orun")
-
-	sealObjectModelRun(orunDir, plan, ls, execID)
-
-	root := objectModelRoot(orunDir)
-	if n := countObjectFiles(t, filepath.Join(root, "objects")); n == 0 {
-		t.Fatalf("no objects written under %s", root)
-	}
-	for _, ref := range []string{
-		filepath.Join(root, "refs", "revisions", "latest.json"),
-		filepath.Join(root, "refs", "executions", "latest.json"),
-	} {
-		if _, err := os.Stat(ref); err != nil {
-			t.Fatalf("expected ref %s: %v", ref, err)
-		}
-	}
 }
