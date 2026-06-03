@@ -8,16 +8,15 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/executor"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/ui"
 )
 
@@ -70,7 +69,6 @@ type Runner struct {
 	Color              bool
 	Executor           executor.Executor
 	Runtime            executor.RuntimeContext
-	Store              *state.Store
 	ExecID             string
 	// PlanID is the plan checksum short-form, injected as ORUN_PLAN_ID into
 	// every step environment. Also used to build ORUN_JOB_RUN_ID.
@@ -92,7 +90,7 @@ type Runner struct {
 	// liveState points at the in-memory ExecState the run mutates, so observers
 	// (the object-model working tree) can snapshot live job/step progress without
 	// reading the legacy on-disk state.json. Set at the start of Run.
-	liveState *state.ExecState
+	liveState *execmodel.ExecState
 
 	live          *ui.LiveRegion
 	gha           *ui.GHARenderer
@@ -120,8 +118,8 @@ type finishedJobEntry struct {
 func (r *Runner) inGHA() bool { return r.gha != nil }
 
 // State is kept for backwards compat with tests referencing old types.
-type State = state.ExecState
-type JobState = state.JobState
+type State = execmodel.ExecState
+type JobState = execmodel.JobState
 
 type runSummary struct {
 	mu        sync.Mutex
@@ -131,7 +129,7 @@ type runSummary struct {
 	failed    int
 	waiting   int
 	cacheHits int
-	links     []state.ExecutionLink
+	links     []execmodel.ExecutionLink
 	linkIndex map[string]struct{}
 }
 
@@ -142,7 +140,7 @@ type runSummarySnapshot struct {
 	failed    int
 	waiting   int
 	cacheHits int
-	links     []state.ExecutionLink
+	links     []execmodel.ExecutionLink
 }
 
 func newRunSummary() *runSummary {
@@ -188,7 +186,7 @@ func (s *runSummary) addCacheHits(n int) {
 	s.cacheHits += n
 }
 
-func (s *runSummary) addLinks(links []state.ExecutionLink) {
+func (s *runSummary) addLinks(links []execmodel.ExecutionLink) {
 	if len(links) == 0 {
 		return
 	}
@@ -217,7 +215,7 @@ func (s *runSummary) snapshot() runSummarySnapshot {
 		failed:    s.failed,
 		waiting:   s.waiting,
 		cacheHits: s.cacheHits,
-		links:     append([]state.ExecutionLink{}, s.links...),
+		links:     append([]execmodel.ExecutionLink{}, s.links...),
 	}
 }
 
@@ -231,7 +229,6 @@ func NewRunner(
 	verbose bool,
 	exec executor.Executor,
 	runtime executor.RuntimeContext,
-	store *state.Store,
 	execID string,
 	concurrency int,
 	filterComponents []string,
@@ -249,7 +246,6 @@ func NewRunner(
 		Color:                ui.ColorEnabledForWriter(stdout),
 		Executor:             exec,
 		Runtime:              runtime,
-		Store:                store,
 		ExecID:               execID,
 		Concurrency:          concurrency,
 		FilterComponents:     filterComponents,
@@ -297,30 +293,13 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	}
 	baseExecContext.Env = executor.MergeEnvironment(baseExecContext.BaseEnv)
 
-	// Create execution and load/create state
+	// The runner keeps execution state in memory; persistence is the object
+	// model's job (the working tree, driven via the lifecycle hooks).
 	persistState := !r.DryRun
-	var execState *state.ExecState
-
-	if r.Store != nil && r.ExecID != "" && persistState {
-		if _, err := r.Store.CreateExecution(r.ExecID, plan); err != nil {
-			return err
-		}
-		execState, err = r.Store.LoadState(r.ExecID)
-		if err != nil {
-			return err
-		}
-		if execState.PlanChecksum == "" {
-			execState.PlanChecksum = plan.Metadata.Checksum
-		}
-
-		// Write initial metadata
-		r.writeMetadata(plan, execState, "running", nil)
-	} else {
-		execState = &state.ExecState{
-			ExecID:       r.ExecID,
-			PlanChecksum: plan.Metadata.Checksum,
-			Jobs:         map[string]*state.JobState{},
-		}
+	execState := &execmodel.ExecState{
+		ExecID:       r.ExecID,
+		PlanChecksum: plan.Metadata.Checksum,
+		Jobs:         map[string]*execmodel.JobState{},
 	}
 
 	if r.JobID != "" && r.Retry {
@@ -440,7 +419,6 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 
 		failed := r.executeJob(job, jobState, execState, baseExecContext, persistState, failFast, summary)
 		if failed && failFast {
-			r.writeMetadata(plan, execState, "failed", summary.snapshot().links)
 			return fmt.Errorf("job %s failed (fail-fast enabled)", job.ID)
 		}
 
@@ -459,12 +437,11 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		finalStatus = "failed"
 	}
 	r.printRunSummary(summary, finalStatus)
-	r.writeMetadata(plan, execState, finalStatus, snap.links)
 
 	return nil
 }
 
-func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execState *state.ExecState, baseExecContext executor.ExecContext, persistState, failFast bool, summary *runSummary) bool {
+func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, execState *execmodel.ExecState, baseExecContext executor.ExecContext, persistState, failFast bool, summary *runSummary) bool {
 	r.updateState(persistState, execState, func() {
 		jobState.Status = "running"
 		jobState.FinishedAt = ""
@@ -587,7 +564,6 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 		jobReport.observeStep(job.ID, stepID, view)
 
 		// Write step log
-		r.writeStepLog(job.ID, stepID, output)
 		if r.Hooks != nil && r.Hooks.AfterStepLog != nil && strings.TrimSpace(output) != "" {
 			r.Hooks.AfterStepLog(job.ID, stepID, output)
 		}
@@ -685,7 +661,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 	return jobFailed
 }
 
-func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState *state.ExecState, baseExecContext executor.ExecContext, persistState, failFast bool, summary *runSummary, concurrency int) error {
+func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState *execmodel.ExecState, baseExecContext executor.ExecContext, persistState, failFast bool, summary *runSummary, concurrency int) error {
 	if r.JobID != "" {
 		var filtered []model.PlanJob
 		for _, job := range jobs {
@@ -909,7 +885,6 @@ func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState
 		finalStatus = "failed"
 	}
 	r.printRunSummary(summary, finalStatus)
-	r.writeMetadata(plan, execState, finalStatus, snap.links)
 
 	return firstErr
 }
@@ -956,16 +931,12 @@ func (r *Runner) initComponentCounts(jobs []model.PlanJob) {
 	}
 }
 
-func (r *Runner) updateState(persist bool, execState *state.ExecState, update func()) {
+func (r *Runner) updateState(persist bool, execState *execmodel.ExecState, update func()) {
 	r.stateMu.Lock()
 	if update != nil {
 		update()
 	}
-	fireHook := false
-	if persist && r.Store != nil && r.ExecID != "" {
-		r.Store.SaveState(r.ExecID, execState)
-		fireHook = true
-	}
+	fireHook := persist && r.ExecID != ""
 	r.stateMu.Unlock()
 
 	// AfterStateUpdate runs OUTSIDE r.stateMu: observers (the object-model
@@ -977,7 +948,7 @@ func (r *Runner) updateState(persist bool, execState *state.ExecState, update fu
 	}
 }
 
-func (r *Runner) persistState(persist bool, execState *state.ExecState) {
+func (r *Runner) persistState(persist bool, execState *execmodel.ExecState) {
 	r.updateState(persist, execState, nil)
 }
 
@@ -986,16 +957,16 @@ func (r *Runner) persistState(persist bool, execState *state.ExecState) {
 // project live job/step progress without depending on the legacy on-disk
 // state.json — the seam that lets the object-model run path stand on its own.
 // Returns nil before Run has initialized state.
-func (r *Runner) SnapshotState() *state.ExecState {
+func (r *Runner) SnapshotState() *execmodel.ExecState {
 	r.stateMu.Lock()
 	defer r.stateMu.Unlock()
 	if r.liveState == nil {
 		return nil
 	}
-	out := &state.ExecState{
+	out := &execmodel.ExecState{
 		ExecID:       r.liveState.ExecID,
 		PlanChecksum: r.liveState.PlanChecksum,
-		Jobs:         make(map[string]*state.JobState, len(r.liveState.Jobs)),
+		Jobs:         make(map[string]*execmodel.JobState, len(r.liveState.Jobs)),
 	}
 	for id, js := range r.liveState.Jobs {
 		if js == nil {
@@ -1014,66 +985,12 @@ func (r *Runner) SnapshotState() *state.ExecState {
 	return out
 }
 
-func (r *Runner) writeMetadata(plan *model.Plan, execState *state.ExecState, status string, links []state.ExecutionLink) {
-	if r.Store == nil || r.ExecID == "" || r.DryRun {
-		return
-	}
-
-	u, _ := user.Current()
-	username := ""
-	if u != nil {
-		username = u.Username
-	}
-	counts := state.SummarizeExecutionState(execState)
-	jobTotal := len(plan.Jobs)
-	if counts.Total > 0 {
-		jobTotal = counts.Total
-	}
-
-	meta := &state.ExecMetadata{
-		ExecID:    r.ExecID,
-		PlanID:    state.PlanChecksumShort(plan),
-		PlanName:  plan.Metadata.Name,
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
-		Status:    status,
-		Trigger:   "cli",
-		User:      username,
-		DryRun:    r.DryRun,
-		JobTotal:  jobTotal,
-		JobDone:   counts.Completed,
-		JobFailed: counts.Failed,
-		Links:     append([]state.ExecutionLink{}, links...),
-	}
-
-	existing, _ := r.Store.LoadMetadata(r.ExecID)
-	if existing != nil {
-		meta.StartedAt = existing.StartedAt
-		if len(meta.Links) == 0 {
-			meta.Links = append([]state.ExecutionLink{}, existing.Links...)
-		}
-		if status != "running" {
-			meta.FinishedAt = time.Now().UTC().Format(time.RFC3339)
-		}
-	}
-
-	r.Store.SaveMetadata(r.ExecID, meta)
-}
-
-func (r *Runner) writeStepLog(jobID, stepID, output string) {
-	if r.Store == nil || r.ExecID == "" || r.DryRun || strings.TrimSpace(output) == "" {
-		return
-	}
-	logPath := r.Store.LogPath(r.ExecID, jobID, stepID)
-	os.MkdirAll(filepath.Dir(logPath), 0755)
-	os.WriteFile(logPath, []byte(output), 0644)
-}
-
 func (r *Runner) printRunHeader(plan *model.Plan, jobs []model.PlanJob) {
 	planLabel := strings.TrimSpace(plan.Metadata.Name)
 	if planLabel == "" {
 		planLabel = "plan"
 	}
-	planID := state.PlanChecksumShort(plan)
+	planID := execmodel.PlanChecksumShort(plan)
 
 	componentSet := map[string]struct{}{}
 	for _, j := range jobs {
@@ -1152,7 +1069,7 @@ func (r *Runner) dashboardHeaderLines(totalJobs int, running int, summary *runSu
 	}
 }
 
-func (r *Runner) printTargetJobSummary(job model.PlanJob, execState *state.ExecState) {
+func (r *Runner) printTargetJobSummary(job model.PlanJob, execState *execmodel.ExecState) {
 	status := "pending"
 	if execState != nil {
 		if st, ok := execState.Jobs[job.ID]; ok && st != nil && strings.TrimSpace(st.Status) != "" {
@@ -1169,7 +1086,7 @@ func (r *Runner) printTargetJobSummary(job model.PlanJob, execState *state.ExecS
 	fmt.Fprintf(r.Stdout, "  └─ state: %s\n", status)
 }
 
-func (r *Runner) printReadinessSnapshot(jobs []model.PlanJob, execState *state.ExecState) {
+func (r *Runner) printReadinessSnapshot(jobs []model.PlanJob, execState *execmodel.ExecState) {
 	ready := 0
 	waiting := 0
 	resumed := 0
@@ -1215,7 +1132,7 @@ func (r *Runner) printReadinessSnapshot(jobs []model.PlanJob, execState *state.E
 	})
 }
 
-func (r *Runner) printWaiting(job model.PlanJob, unmet []string, execState *state.ExecState) {
+func (r *Runner) printWaiting(job model.PlanJob, unmet []string, execState *execmodel.ExecState) {
 	dependencies := make([]string, 0, len(unmet))
 	for _, dep := range unmet {
 		status := "pending"
@@ -1262,9 +1179,6 @@ func normalizeStepPhase(phase string) string {
 }
 
 func (r *Runner) resolveStateFile(plan *model.Plan) string {
-	if r.Store != nil && r.ExecID != "" {
-		return r.Store.StatePath(r.ExecID)
-	}
 	return filepath.Join(r.WorkDir, ".orun-state.json")
 }
 
@@ -1273,27 +1187,27 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-func (r *Runner) loadState(statePath string) (*state.ExecState, error) {
+func (r *Runner) loadState(statePath string) (*execmodel.ExecState, error) {
 	data, err := os.ReadFile(statePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &state.ExecState{Jobs: map[string]*state.JobState{}}, nil
+			return &execmodel.ExecState{Jobs: map[string]*execmodel.JobState{}}, nil
 		}
 		return nil, fmt.Errorf("failed to read state file %s: %w", statePath, err)
 	}
 
-	var st state.ExecState
+	var st execmodel.ExecState
 	if err := json.Unmarshal(data, &st); err != nil {
 		return nil, fmt.Errorf("failed to parse state file %s: %w", statePath, err)
 	}
 	if st.Jobs == nil {
-		st.Jobs = map[string]*state.JobState{}
+		st.Jobs = map[string]*execmodel.JobState{}
 	}
 
 	return &st, nil
 }
 
-func (r *Runner) saveState(statePath string, st *state.ExecState) error {
+func (r *Runner) saveState(statePath string, st *execmodel.ExecState) error {
 	if st == nil {
 		return fmt.Errorf("state cannot be nil")
 	}
@@ -1321,10 +1235,10 @@ func (r *Runner) saveState(statePath string, st *state.ExecState) error {
 	return nil
 }
 
-func ensureJobState(execState *state.ExecState, job model.PlanJob) *state.JobState {
+func ensureJobState(execState *execmodel.ExecState, job model.PlanJob) *execmodel.JobState {
 	jobState, exists := execState.Jobs[job.ID]
 	if !exists || jobState == nil {
-		jobState = &state.JobState{
+		jobState = &execmodel.JobState{
 			Status: "pending",
 			Steps:  map[string]string{},
 		}
@@ -1357,7 +1271,7 @@ func stepIdentifier(step model.PlanStep) string {
 	return "unnamed-step"
 }
 
-func unresolvedDependencies(job model.PlanJob, execState *state.ExecState) []string {
+func unresolvedDependencies(job model.PlanJob, execState *execmodel.ExecState) []string {
 	missing := make([]string, 0)
 	for _, dep := range job.DependsOn {
 		depState, exists := execState.Jobs[dep]
@@ -1500,7 +1414,7 @@ func (r *Runner) printPhaseHeader(phase string) {
 	fmt.Fprintf(r.Stdout, "\n  %s %s\n", ui.Cyan(r.Color, "◦"), ui.Cyan(r.Color, title))
 }
 
-func (r *Runner) printJobHeader(job model.PlanJob, execState *state.ExecState) {
+func (r *Runner) printJobHeader(job model.PlanJob, execState *execmodel.ExecState) {
 	if r.inGHA() {
 		r.ghaPrintJobHeader(job, execState)
 		return
