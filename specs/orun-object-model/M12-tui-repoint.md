@@ -1,5 +1,16 @@
 # Task: M12 TUI Repoint — last `internal/state` consumers
 
+> **Status: complete.** Landed as U1 (#233 history/source), U2 (#234 logs),
+> U3 (#235 run persistence via `internal/objrun`), and U4 (#236 remove the
+> `Store` field, rewire `command_tui`, delete `statebackend/file.go` + flock +
+> cockpit `FromStore`). The TUI and cockpit no longer import `internal/state`;
+> the only remaining non-test importers are the migration/artifact bridges
+> (`objmigrate`, `objexec`, `runbundle/hydrate`, `command_objects`,
+> `command_state_migrate`) — the separate cluster (§7) that gates the final
+> `rm internal/state`. Deferred follow-ups: standalone named-plan storage over
+> the revision graph (TUI `GeneratePlan`/Browse plans section), and the trigger
+> column in run history.
+
 > Repoint the interactive TUI (the `LiveOrunService` cluster + `command_tui`)
 > off the legacy `internal/state` file store onto the content-addressed object
 > graph, then delete `statebackend/file.go` and the cockpit `FromStore` source.
