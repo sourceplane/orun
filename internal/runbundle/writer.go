@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 )
 
 const (
@@ -37,7 +37,7 @@ type WriteJobShardOptions struct {
 	Profile   string
 	Status    string
 	Source    ShardSource
-	State     *state.JobState
+	State     *execmodel.JobState
 	LogsDir   string
 	OutputDir string
 }
@@ -73,8 +73,8 @@ func WritePlanShard(ctx context.Context, opts WritePlanShardOptions) (*Shard, er
 
 	// Build complete file list upfront (including checksums reference).
 	manifestFiles := map[string]string{
-		"manifest": "manifest.json",
-		"plan":     "plan.json",
+		"manifest":  "manifest.json",
+		"plan":      "plan.json",
 		"checksums": "checksums.json",
 	}
 	if opts.Plan.Metadata.Trigger != nil {
@@ -160,9 +160,9 @@ func WriteJobShard(ctx context.Context, opts WriteJobShardOptions) (*Shard, erro
 
 	// Build complete file list upfront.
 	manifestFiles := map[string]string{
-		"manifest": "manifest.json",
-		"job":      "job.json",
-		"state":    "state.json",
+		"manifest":  "manifest.json",
+		"job":       "job.json",
+		"state":     "state.json",
 		"checksums": "checksums.json",
 	}
 	if hasSteps {

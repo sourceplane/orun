@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/ui"
 )
 
@@ -24,7 +24,7 @@ type stepOutputView struct {
 	summary   []string
 	result    []string
 	logs      []string
-	links     []state.ExecutionLink
+	links     []execmodel.ExecutionLink
 	cacheHits int
 	headline  string
 }
@@ -39,7 +39,7 @@ type jobReport struct {
 	slowestStep string
 	slowestDur  time.Duration
 	headline    string
-	links       []state.ExecutionLink
+	links       []execmodel.ExecutionLink
 	cacheHits   int
 	linkIndex   map[string]struct{}
 }
@@ -735,8 +735,8 @@ func splitDisplayLines(output string) []string {
 	return lines
 }
 
-func extractOutputLinks(lines []string) []state.ExecutionLink {
-	links := make([]state.ExecutionLink, 0)
+func extractOutputLinks(lines []string) []execmodel.ExecutionLink {
+	links := make([]execmodel.ExecutionLink, 0)
 	seen := map[string]struct{}{}
 	for _, line := range lines {
 		matches := urlPattern.FindAllStringIndex(line, -1)
@@ -746,7 +746,7 @@ func extractOutputLinks(lines []string) []state.ExecutionLink {
 				continue
 			}
 			seen[url] = struct{}{}
-			links = append(links, state.ExecutionLink{
+			links = append(links, execmodel.ExecutionLink{
 				Label: normalizeLinkLabel(line, url),
 				URL:   url,
 			})

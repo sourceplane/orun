@@ -4,16 +4,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 )
 
 // BackendPlan is the plan format expected by the orun-backend CreateRun API.
 type BackendPlan struct {
-	Checksum  string         `json:"checksum"`
-	Version   string         `json:"version"`
+	Checksum  string           `json:"checksum"`
+	Version   string           `json:"version"`
 	Jobs      []BackendPlanJob `json:"jobs"`
-	CreatedAt string         `json:"createdAt"`
+	CreatedAt string           `json:"createdAt"`
 }
 
 // BackendPlanJob is a job entry in BackendPlan.
@@ -34,7 +34,7 @@ type BackendPlanStep struct {
 // ConvertPlan converts a CLI model.Plan to the BackendPlan format without
 // mutating the original plan.
 func ConvertPlan(plan *model.Plan) *BackendPlan {
-	planID := state.PlanChecksumShort(plan)
+	planID := execmodel.PlanChecksumShort(plan)
 	bp := &BackendPlan{
 		Checksum:  planID,
 		Version:   "sourceplane.io/v1",
@@ -92,7 +92,7 @@ func backendStepID(step model.PlanStep) string {
 }
 
 // BackendJobStatusToLocal converts a backend job status string to the local
-// status string used by state.JobState.
+// status string used by execmodel.JobState.
 func BackendJobStatusToLocal(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "success":

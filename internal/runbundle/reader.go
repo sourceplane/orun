@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 )
 
 // ReadShardManifest reads and validates the manifest from a shard directory.
@@ -69,7 +69,7 @@ func ReadPlanShard(dir string) (*PlanShard, error) {
 type JobShard struct {
 	Dir      string
 	Manifest *RunBundleShardManifest
-	JobState *state.JobState
+	JobState *execmodel.JobState
 }
 
 // ReadJobShard reads a job shard from disk.
@@ -110,12 +110,12 @@ func loadPlanFile(path string) (*model.Plan, error) {
 }
 
 // loadJobState reads a JobState from a JSON file.
-func loadJobState(path string) (*state.JobState, error) {
+func loadJobState(path string) (*execmodel.JobState, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var js state.JobState
+	var js execmodel.JobState
 	if err := json.Unmarshal(data, &js); err != nil {
 		return nil, err
 	}

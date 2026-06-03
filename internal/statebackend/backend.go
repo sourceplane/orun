@@ -3,8 +3,8 @@ package statebackend
 import (
 	"context"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 )
 
 // JobStatus mirrors the backend API terminal status values.
@@ -68,7 +68,7 @@ type Backend interface {
 	RunnableJobs(ctx context.Context, runID string) ([]string, error)
 
 	// LoadRunState reads run state for display (status/logs commands).
-	LoadRunState(ctx context.Context, runID string) (*state.ExecState, *state.ExecMetadata, error)
+	LoadRunState(ctx context.Context, runID string) (*execmodel.ExecState, *execmodel.ExecMetadata, error)
 
 	// ReadJobLog retrieves the combined log for a job.
 	ReadJobLog(ctx context.Context, runID string, jobID string) (string, error)

@@ -8,7 +8,7 @@ import (
 	"github.com/sourceplane/orun/internal/cockpit/render"
 	"github.com/sourceplane/orun/internal/cockpit/surface"
 	"github.com/sourceplane/orun/internal/cockpit/viewmodel"
-	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/ui"
 )
 
@@ -28,7 +28,7 @@ func cockpitSurface(w io.Writer) surface.Surface {
 // render pipeline. Returns (rendered, error). If rendered is false, the
 // caller should fall back to the legacy renderer (e.g. for JSON callers
 // that need shape-specific output).
-func cockpitRenderExecution(execID string, meta *state.ExecMetadata, st *state.ExecState) (bool, error) {
+func cockpitRenderExecution(execID string, meta *execmodel.ExecMetadata, st *execmodel.ExecState) (bool, error) {
 	s := cockpitSurface(os.Stdout)
 	v := viewmodel.BuildRunView(execID, meta, st)
 	lines := render.RunStatus(s, v)
@@ -41,7 +41,7 @@ func cockpitRenderExecution(execID string, meta *state.ExecMetadata, st *state.E
 }
 
 // cockpitRenderRunList paints the all-executions table.
-func cockpitRenderRunList(entries []state.ExecEntry) error {
+func cockpitRenderRunList(entries []execmodel.ExecEntry) error {
 	s := cockpitSurface(os.Stdout)
 	view := viewmodel.BuildRunListView(entries)
 	lines := render.RunList(s, view)
@@ -55,7 +55,7 @@ func cockpitRenderRunList(entries []state.ExecEntry) error {
 
 // statusIsTerminal returns true when meta.Status is a terminal state.
 // Centralised so watch loops in cockpit + legacy callers agree.
-func statusIsTerminal(meta *state.ExecMetadata) bool {
+func statusIsTerminal(meta *execmodel.ExecMetadata) bool {
 	if meta == nil {
 		return false
 	}

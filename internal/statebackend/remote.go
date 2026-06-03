@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/remotestate"
-	"github.com/sourceplane/orun/internal/state"
 )
 
 // RemoteStateBackend implements Backend using the orun-backend HTTP API.
@@ -114,7 +114,7 @@ func (r *RemoteStateBackend) RunnableJobs(ctx context.Context, runID string) ([]
 	return r.client.GetRunnable(ctx, runID)
 }
 
-func (r *RemoteStateBackend) LoadRunState(ctx context.Context, runID string) (*state.ExecState, *state.ExecMetadata, error) {
+func (r *RemoteStateBackend) LoadRunState(ctx context.Context, runID string) (*execmodel.ExecState, *execmodel.ExecMetadata, error) {
 	run, err := r.client.GetRun(ctx, runID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load run state: %w", err)
@@ -124,14 +124,14 @@ func (r *RemoteStateBackend) LoadRunState(ctx context.Context, runID string) (*s
 		return nil, nil, fmt.Errorf("list jobs for run %s: %w", runID, err)
 	}
 
-	st := &state.ExecState{
+	st := &execmodel.ExecState{
 		ExecID:       runID,
 		PlanChecksum: run.PlanChecksum,
-		Jobs:         make(map[string]*state.JobState, len(jobs)),
+		Jobs:         make(map[string]*execmodel.JobState, len(jobs)),
 	}
 	for _, j := range jobs {
 		localStatus := remotestate.BackendJobStatusToLocal(j.Status)
-		js := &state.JobState{
+		js := &execmodel.JobState{
 			Status: localStatus,
 			Steps:  map[string]string{},
 		}
@@ -166,7 +166,7 @@ func (r *RemoteStateBackend) LoadRunState(ctx context.Context, runID string) (*s
 		localRunStatus = "completed"
 	}
 
-	meta := &state.ExecMetadata{
+	meta := &execmodel.ExecMetadata{
 		ExecID:     runID,
 		PlanID:     run.PlanChecksum,
 		StartedAt:  run.CreatedAt,
