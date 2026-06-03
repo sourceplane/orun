@@ -2,6 +2,7 @@ package objread
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -343,6 +344,58 @@ func (r *Reader) StepLog(ctx context.Context, view ExecutionView, jobID, stepID 
 	return nil, ErrNotFound
 }
 
+// PlanSummary reads an execution's compiled plan from its revision tree
+// (the revision's plan.json) and returns the plan's display name and the unique
+// component names it references, in plan order. It is best-effort: any error
+// (no revision id, missing plan.json, decode failure) yields ("", nil) so
+// callers degrade to substring matching / a blank column rather than failing.
+func (r *Reader) PlanSummary(ctx context.Context, view ExecutionView) (name string, components []string) {
+	if view.RevisionID == "" {
+		return "", nil
+	}
+	entries, err := r.store.GetTree(ctx, objectstore.ObjectID(view.RevisionID))
+	if err != nil {
+		return "", nil
+	}
+	for _, e := range entries {
+		if e.Name != filePlan {
+			continue
+		}
+		_, body, gerr := r.store.Get(ctx, e.ID)
+		if gerr != nil {
+			return "", nil
+		}
+		var p struct {
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Jobs []struct {
+				Component string `json:"component"`
+			} `json:"jobs"`
+		}
+		if uerr := json.Unmarshal(body, &p); uerr != nil {
+			return "", nil
+		}
+		seen := make(map[string]struct{}, len(p.Jobs))
+		comps := make([]string, 0, len(p.Jobs))
+		for _, j := range p.Jobs {
+			if j.Component == "" {
+				continue
+			}
+			if _, ok := seen[j.Component]; ok {
+				continue
+			}
+			seen[j.Component] = struct{}{}
+			comps = append(comps, j.Component)
+		}
+		if len(comps) == 0 {
+			comps = nil
+		}
+		return p.Metadata.Name, comps
+	}
+	return "", nil
+}
+
 func (r *Reader) subTree(ctx context.Context, root objectstore.ObjectID, name string) ([]objectstore.TreeEntry, error) {
 	entries, err := r.store.GetTree(ctx, root)
 	if err != nil {
@@ -462,6 +515,7 @@ const (
 	fileExecution = "execution.json"
 	fileJobRun    = "job-run.json"
 	fileAttempt   = "attempt.json"
+	filePlan      = "plan.json"
 	dirJobs       = "jobs"
 	dirAttempts   = "attempts"
 	dirSteps      = "steps"
