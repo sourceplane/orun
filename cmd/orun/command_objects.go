@@ -27,9 +27,8 @@ import (
 
 func registerObjectsCommand(root *cobra.Command) {
 	objectsCmd := &cobra.Command{
-		Use:    "objects",
-		Short:  "Inspect the content-addressed object graph",
-		Hidden: true,
+		Use:   "objects",
+		Short: "Inspect the content-addressed object graph",
 	}
 
 	catCmd := &cobra.Command{
