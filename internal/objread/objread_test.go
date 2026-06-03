@@ -90,6 +90,85 @@ func (e env) openLive(t *testing.T, execID string) {
 	}
 }
 
+func TestPlanSummary(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+
+	// A revision tree carrying a compiled plan.json (name + jobs[].component).
+	planBody := []byte(`{"metadata":{"name":"release"},"jobs":[` +
+		`{"id":"web@deploy","component":"web"},` +
+		`{"id":"api@deploy","component":"api"},` +
+		`{"id":"web@test","component":"web"}]}`)
+	planID, err := e.store.PutBlob(ctx, planBody)
+	if err != nil {
+		t.Fatalf("put plan: %v", err)
+	}
+	revID, err := e.store.PutTree(ctx, []objectstore.TreeEntry{
+		{Name: "plan.json", Kind: objectstore.KindBlob, ID: planID},
+	})
+	if err != nil {
+		t.Fatalf("put revision tree: %v", err)
+	}
+
+	wt, err := e.mgr.Open(ctx, runworktree.OpenInput{ExecutionID: "exec_ps", RevisionID: revID})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := wt.Project([]runworktree.ProjectedJob{{JobID: "web@deploy", Status: nodes.StatusSucceeded}}); err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	if _, err := wt.Seal(ctx, nodes.StatusSucceeded, time.Time{}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	r := New(e.store, e.refs, e.root)
+	view, err := r.Get(ctx, "exec_ps")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+
+	name, comps := r.PlanSummary(ctx, view)
+	if name != "release" {
+		t.Errorf("name = %q, want release", name)
+	}
+	if len(comps) != 2 || comps[0] != "web" || comps[1] != "api" {
+		t.Errorf("components = %v, want [web api] (deduped, plan order)", comps)
+	}
+
+	// Degenerate: a revision that is not a plan tree (e.rev is a bare blob).
+	if n, c := r.PlanSummary(ctx, ExecutionView{RevisionID: string(e.rev)}); n != "" || c != nil {
+		t.Errorf("non-plan revision = (%q, %v), want empty", n, c)
+	}
+	// Degenerate: empty revision id.
+	if n, c := r.PlanSummary(ctx, ExecutionView{}); n != "" || c != nil {
+		t.Errorf("empty revision = (%q, %v), want empty", n, c)
+	}
+	// Degenerate: a plan tree with no components yields a nil component slice.
+	emptyPlanID, err := e.store.PutBlob(ctx, []byte(`{"metadata":{"name":"bare"},"jobs":[]}`))
+	if err != nil {
+		t.Fatalf("put empty plan: %v", err)
+	}
+	emptyRev, err := e.store.PutTree(ctx, []objectstore.TreeEntry{{Name: "plan.json", Kind: objectstore.KindBlob, ID: emptyPlanID}})
+	if err != nil {
+		t.Fatalf("put empty rev: %v", err)
+	}
+	if n, c := r.PlanSummary(ctx, ExecutionView{RevisionID: string(emptyRev)}); n != "bare" || c != nil {
+		t.Errorf("empty-jobs plan = (%q, %v), want (bare, nil)", n, c)
+	}
+	// Degenerate: a plan.json that fails to decode yields ("", nil).
+	badPlanID, err := e.store.PutBlob(ctx, []byte(`{not json`))
+	if err != nil {
+		t.Fatalf("put bad plan: %v", err)
+	}
+	badRev, err := e.store.PutTree(ctx, []objectstore.TreeEntry{{Name: "plan.json", Kind: objectstore.KindBlob, ID: badPlanID}})
+	if err != nil {
+		t.Fatalf("put bad rev: %v", err)
+	}
+	if n, c := r.PlanSummary(ctx, ExecutionView{RevisionID: string(badRev)}); n != "" || c != nil {
+		t.Errorf("undecodable plan = (%q, %v), want empty", n, c)
+	}
+}
+
 func TestGetSealed(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)

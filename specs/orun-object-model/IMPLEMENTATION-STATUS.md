@@ -33,25 +33,34 @@ The native-runner rewrite is being landed in the staged, flag-gated order from
 | **types** | `internal/execmodel` extracted (durable execution value types + helpers); 9 types-only consumers repointed off `internal/state` (importers 35 → 26). |
 | **T3 (`status`)** | `orun status` reads executions from the object graph via an `objread → execmodel` adapter, with legacy fallback behind the flag. |
 
+Also landed since (each a merged, green PR):
+
+| Step | What landed |
+|------|-------------|
+| **T3 (read cutover)** | `orun get`/`logs`/`describe`/`status`/`gc` read the object graph via the `objread → objview → execmodel` adapter; the catalog execution history (`rx` path) is state-free. |
+| **T4 (step 2) / T5** | The runner no longer writes `internal/state` (the working tree is authoritative); `Runner.SnapshotState()` feeds the seal directly. `ORUN_OBJECT_RUNNER`/`ORUN_OBJECT_MODEL` default **on** (escape hatch: set to `0`). Two latent bugs fixed en route: the run path no longer re-resolves the catalog (cheap by-hash revision lookup), and the `AfterStateUpdate` hook fires outside the runner's state lock (deadlock fix). |
+| **run/plan path** | `orun run` + the plan path read/write the object model with no legacy file store; the legacy backend (`internal/state`) is deleted from the runner, run path, and read commands. |
+| **TUI repoint (U1–U4)** | The interactive TUI + cockpit read/write the object graph: history (`objread.List` + `PlanSummary`), `--watch`, and log tail (live working-tree tail + sealed blobs); a TUI run seals a native `ExecutionRun` via the shared `internal/objrun` session glue (same path as `orun run`). Deleted `statebackend/file.go` + the flock helpers and cockpit `bridge.FromStore`. |
+
 Remaining for full cutover (legacy deletion):
 
-- **T3 (rest):** repoint `orun get`/`logs`/`describe`, the TUI services, the
-  cockpit view-model, and `runbundle` onto `objread` (same adapter pattern).
-- **T4 (step 2):** stop the runner writing `internal/state` when the flag is on
-  (working tree authoritative); drop the `objexec` legacy-seal fall-through.
-- **T5:** flip `ORUN_OBJECT_RUNNER`/`ORUN_OBJECT_MODEL` default **on**; relocate
-  `.orun/objectmodel/` → `.orun/` root; un-hide `orun objects`.
-- **T6:** delete `internal/state` (file store), `internal/statebackend/file.go`,
-  `internal/executionstate/bridge.go`, the dual-write writers, and
-  `internal/objexec`; add the no-`internal/state`-import grep gate; remove flags.
+- **bridges:** repoint / retire the **5** remaining non-test `internal/state`
+  importers — the migration + artifact-coordination bridges
+  (`internal/objmigrate`, `internal/objexec`, `internal/runbundle/hydrate`,
+  `cmd/orun/command_objects`, `cmd/orun/command_state_migrate`).
+- **T6:** delete `internal/state` (file store), `internal/executionstate/bridge.go`,
+  and the transitional bridges; add the no-`internal/state`-import grep gate;
+  remove the coexistence flags.
 - **T7:** live `orun run` → crash-mid-run → recover → seal e2e + the disk-win
   assertion under the native writer.
+- **resume follow-up:** reimplement cross-run skip-completed job resume on the
+  object model (the legacy file backend's resume was dropped at the cutover;
+  in-run dependency ordering is preserved).
 
-The blocker for T6 is that **~26 files still use the legacy `.orun/` file store**
-(the read commands, TUI, cockpit, runbundle, `statebackend` coordination, the
-runner's persistence, `gc`/`migrate`); each is repointed onto the object model
-before the store is deleted. `internal/execmodel` is the legacy-store-free home
-for the in-memory execution types those consumers keep using.
+The runner, plan path, read commands, TUI, and cockpit are all off the legacy
+store; the only non-test importers left are the **5 bridges** above.
+`internal/execmodel` is the legacy-store-free home for the in-memory execution
+types those consumers keep using.
 
 ## What was implemented
 
@@ -148,15 +157,17 @@ CLI smoke (real binary)   objects fsck/log/migrate/gc all run
 
 ## The remaining gap — finishing M12
 
-The native runner is in place: `orun run` (under `ORUN_OBJECT_RUNNER`) writes the
-working tree live and seals it **natively** (no `objexec` legacy read on the live
-path — that fall-through remains only for remote/dry-run runs and `objmigrate`).
+The native runner is the default: `orun run` writes the working tree live and
+seals it **natively**, and the runner, plan path, read commands, TUI, and
+cockpit all read/write the object graph with no legacy file store. The legacy
+`objexec` read survives only on the remote/dry-run fall-through and inside the
+migration bridge.
 
-What's left to delete `internal/state` is the read-side + write-side cutover
-tracked in §"M12 cutover" above: repoint the remaining file-store consumers
-(`get`/`logs`/`describe`, TUI, cockpit, `runbundle`) onto `objread` (T3), stop
-the runner's legacy writes (T4 step 2), flip the default and relocate the layout
-(T5), then delete the legacy module + bridges and remove the flags (T6), and add
-the live crash-recovery e2e (T7). Each remaining file-store consumer is repointed
-before the store is removed; `internal/execmodel` already provides the
-legacy-store-free home for the in-memory execution types they keep using.
+What's left to delete `internal/state` is the **bridge cluster**: the 5
+remaining non-test importers are the migration + artifact-coordination bridges
+(`internal/objmigrate`, `internal/objexec`, `internal/runbundle/hydrate`,
+`cmd/orun/command_objects`, `cmd/orun/command_state_migrate`). Once those are
+repointed/retired, delete the legacy module + `internal/executionstate/bridge.go`,
+add the no-`internal/state`-import grep gate, remove the coexistence flags (T6),
+and add the live crash-recovery e2e (T7). `internal/execmodel` already provides
+the legacy-store-free home for the in-memory execution types they keep using.

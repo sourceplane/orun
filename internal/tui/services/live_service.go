@@ -12,7 +12,6 @@ import (
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
 	"github.com/sourceplane/orun/internal/objread"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statebackend"
 )
 
@@ -22,13 +21,11 @@ type LiveServiceConfig struct {
 	IntentRoot string
 	ConfigDir  string
 	// ObjectModelRoot is the absolute .orun directory whose object graph the
-	// TUI reads (executions, history, logs). The content-addressed model is
-	// the canonical local source; the legacy file store is gone.
+	// TUI reads and writes (executions, history, logs). The content-addressed
+	// model is the canonical local source; the legacy file store is gone.
 	ObjectModelRoot string
-	// Store is the legacy file store, retained only for the log/plan paths
-	// not yet repointed (TailLogs, GeneratePlan named-plan write). Removed in
-	// the final TUI-repoint stage.
-	Store   *state.Store
+	// Backend is the remote state backend, set only under --remote-state. When
+	// nil, the local object graph at ObjectModelRoot is the source.
 	Backend statebackend.Backend
 	Version string
 }
