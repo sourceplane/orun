@@ -3,8 +3,8 @@ package runbundle
 import (
 	"testing"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 )
 
 func TestSynthesize_HappyPath(t *testing.T) {
@@ -175,9 +175,9 @@ func TestSynthesizedStatus(t *testing.T) {
 
 func TestSynthesizedSummary(t *testing.T) {
 	exec := &SynthesizedExecution{
-		Status: "partial",
+		Status:  "partial",
 		Partial: true,
-		Counts: JobCounts{Total: 10, Completed: 7, Failed: 1},
+		Counts:  JobCounts{Total: 10, Completed: 7, Failed: 1},
 	}
 	summary := SynthesizedSummary(exec)
 	if summary != "partial  8/10 shards" {
@@ -194,8 +194,8 @@ func planShardFixture(t *testing.T, execID, planID string, jobIDs []string) *Pla
 	for _, jid := range jobIDs {
 		uid := "uid-" + jid
 		jobs = append(jobs, model.PlanJob{
-			ID:  jid,
-			UID: uid,
+			ID:   jid,
+			UID:  uid,
 			Name: jid,
 		})
 	}
@@ -247,7 +247,7 @@ func jobShardFixture(execID, planID, jobUID, jobID, status string) *JobShard {
 			FinishedAt:    finishedAt,
 			Source:        ShardSource{Type: "test"},
 		},
-		JobState: &state.JobState{
+		JobState: &execmodel.JobState{
 			Status:     status,
 			StartedAt:  startedAt,
 			FinishedAt: finishedAt,

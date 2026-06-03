@@ -8,7 +8,6 @@ import (
 
 	"github.com/sourceplane/orun/internal/artifactstore"
 	"github.com/sourceplane/orun/internal/runbundle"
-	"github.com/sourceplane/orun/internal/state"
 )
 
 func TestGithubCommandRegistered(t *testing.T) {
@@ -150,15 +149,15 @@ func TestGithubPullOrunDirDefaultResolvesToDotOrun(t *testing.T) {
 	// Verify that the default orunDir for github pull resolves to a path
 	// ending in ".orun", matching the Hydrate function's expected input.
 	//
-	// This validates the fix: orunDir = filepath.Join(storeDir(), state.OrunDir)
+	// This validates the fix: orunDir = filepath.Join(storeDir(), ".orun")
 	// instead of the previous orunDir = storeDir() which passed the intent root
 	// (missing the ".orun" suffix).
-	got := filepath.Join(storeDir(), state.OrunDir)
+	got := filepath.Join(storeDir(), ".orun")
 
 	// Without intent discovery, storeDir() returns ".".
 	// filepath.Join(".", ".orun") should resolve to ".orun".
-	if got != state.OrunDir {
-		t.Errorf("default orunDir for pull = %q, want %q (the .orun directory)", got, state.OrunDir)
+	if got != ".orun" {
+		t.Errorf("default orunDir for pull = %q, want %q (the .orun directory)", got, ".orun")
 	}
 }
 
@@ -169,8 +168,8 @@ func TestGithubPullOrunDirWithIntentRoot(t *testing.T) {
 	intentRoot = "/tmp/test-project"
 	t.Cleanup(func() { intentRoot = orig })
 
-	got := filepath.Join(storeDir(), state.OrunDir)
-	wantSuffix := string(filepath.Separator) + state.OrunDir
+	got := filepath.Join(storeDir(), ".orun")
+	wantSuffix := string(filepath.Separator) + ".orun"
 	if !strings.HasSuffix(got, wantSuffix) {
 		t.Errorf("orunDir with intent root = %q, want path ending in %q", got, wantSuffix)
 	}
@@ -405,9 +404,9 @@ func TestGithubRunsDetailsFlag(t *testing.T) {
 
 func TestManifestStatus(t *testing.T) {
 	tests := []struct {
-		name   string
-		m      *runbundle.RunBundleShardManifest
-		want   string
+		name string
+		m    *runbundle.RunBundleShardManifest
+		want string
 	}{
 		{"job with status", &runbundle.RunBundleShardManifest{Role: runbundle.ShardRoleJob, Status: "completed"}, "completed"},
 		{"job failed", &runbundle.RunBundleShardManifest{Role: runbundle.ShardRoleJob, Status: "failed"}, "failed"},
@@ -480,12 +479,12 @@ func TestGithubLogsJobFilterNoMatch(t *testing.T) {
 func TestNormalizeOrunDirParentBecomesDotOrun(t *testing.T) {
 	parent := filepath.Join(string(filepath.Separator)+"tmp", "workspace-foo")
 	got := normalizeOrunDir(parent)
-	want := filepath.Join(parent, state.OrunDir)
+	want := filepath.Join(parent, ".orun")
 	if got != want {
 		t.Errorf("normalizeOrunDir(%q) = %q, want %q", parent, got, want)
 	}
-	if filepath.Base(got) != state.OrunDir {
-		t.Errorf("expected resolved path to end in %q, got %q", state.OrunDir, got)
+	if filepath.Base(got) != ".orun" {
+		t.Errorf("expected resolved path to end in %q, got %q", ".orun", got)
 	}
 }
 
@@ -493,13 +492,13 @@ func TestNormalizeOrunDirParentBecomesDotOrun(t *testing.T) {
 // a user who explicitly passes a path whose base is already ".orun" must not
 // have another ".orun" segment appended.
 func TestNormalizeOrunDirAlreadyDotOrunUnchanged(t *testing.T) {
-	already := filepath.Join(string(filepath.Separator)+"tmp", "workspace-foo", state.OrunDir)
+	already := filepath.Join(string(filepath.Separator)+"tmp", "workspace-foo", ".orun")
 	got := normalizeOrunDir(already)
 	if got != already {
 		t.Errorf("normalizeOrunDir(%q) = %q, want unchanged %q", already, got, already)
 	}
 	// Defensive: must not have a doubled .orun/.orun tail.
-	doubled := filepath.Join(already, state.OrunDir)
+	doubled := filepath.Join(already, ".orun")
 	if got == doubled {
 		t.Errorf("normalizeOrunDir doubled the .orun suffix: got %q", got)
 	}
@@ -509,7 +508,7 @@ func TestNormalizeOrunDirAlreadyDotOrunUnchanged(t *testing.T) {
 // an empty --orun-dir is treated as "." and resolves to "./.orun" (i.e. ".orun").
 func TestNormalizeOrunDirEmptyDefaultsToDotOrun(t *testing.T) {
 	got := normalizeOrunDir("")
-	want := filepath.Join(".", state.OrunDir)
+	want := filepath.Join(".", ".orun")
 	if got != want {
 		t.Errorf("normalizeOrunDir(\"\") = %q, want %q", got, want)
 	}

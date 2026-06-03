@@ -3,7 +3,7 @@ package runner
 import (
 	"testing"
 
-	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/execmodel"
 )
 
 func TestSnapshotStateNilBeforeRun(t *testing.T) {
@@ -15,10 +15,10 @@ func TestSnapshotStateNilBeforeRun(t *testing.T) {
 
 func TestSnapshotStateDeepCopy(t *testing.T) {
 	r := &Runner{}
-	r.liveState = &state.ExecState{
+	r.liveState = &execmodel.ExecState{
 		ExecID:       "exec_1",
 		PlanChecksum: "abc",
-		Jobs: map[string]*state.JobState{
+		Jobs: map[string]*execmodel.JobState{
 			"a@deploy": {Status: "running", Steps: map[string]string{"build": "running"}},
 			"b@deploy": nil,
 		},

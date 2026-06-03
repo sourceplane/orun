@@ -11,8 +11,8 @@
 #   2. No json.Marshal of records in the higher object-model packages
 #      (records MUST go through nodes.CanonicalEncode).
 #   3. No raw "objects/" path literals outside internal/objectstore.
-#   4. No new internal/state imports inside object-model packages (the legacy
-#      module must not leak into the new model; deleted entirely at M12).
+#   4. No internal/state imports anywhere — the legacy file store was deleted
+#      at the M12 cutover (its in-memory types live in internal/execmodel).
 set -euo pipefail
 
 fail=0
@@ -43,13 +43,11 @@ if grep -RnE '"objects/' --include='*.go' internal cmd 2>/dev/null \
   note "raw \"objects/\" path literal outside internal/objectstore"
 fi
 
-# 4. internal/state must not leak into object-model packages.
-for d in $OM_DIRS; do
-  [ -d "$d" ] || continue
-  if grep -RnE '"github.com/sourceplane/orun/internal/state"' --include='*.go' "$d"; then
-    note "internal/state imported by $d — object-model packages must not depend on legacy state"
-  fi
-done
+# 4. internal/state was deleted at M12 — no package may import it (production or
+#    test). The in-memory execution types now live in internal/execmodel.
+if grep -RnE '"github.com/sourceplane/orun/internal/state"' --include='*.go' internal cmd 2>/dev/null; then
+  note "internal/state imported — the legacy file store was deleted at M12; use internal/execmodel"
+fi
 
 if [ "$fail" -eq 0 ]; then
   echo "✅ object-model lint gate passed"

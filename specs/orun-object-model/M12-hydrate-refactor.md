@@ -96,29 +96,30 @@ direct `execseal.Seal`.
 - Keep/repoint `hydrate_test.go` (currently asserts the legacy file layout) onto
   the object-graph assertions.
 
-## 5. Remaining — finish `rm internal/state` (T6)
+## 5. `rm internal/state` (T6) — DONE
 
-Hydrate is done, so there are **zero non-test** importers of `internal/state`.
-The legacy file `Store` (NewStore/SaveState/LoadState/…) is now dead production
-code kept alive only by tests. The 14 remaining test importers split into:
+The legacy file store has been deleted. The 14 test importers were repointed:
 
-1. **10 alias-only files** — use just the alias types (`state.ExecState`,
-   `state.JobState`, `state.ExecMetadata`, …). A mechanical `state.` → `execmodel.`
-   swap: `cmd/orun/command_github_test.go`, `cmd/orun/remote_claim_test.go`,
-   `cmd/orun/command_views_test.go`, `internal/runner/{presenter,snapshot}_test.go`,
+1. **10 alias-only files** swapped `state.` → `internal/execmodel`
+   (`command_github_test.go` used only the `state.OrunDir` const → the `".orun"`
+   literal): `remote_claim_test.go`, `command_views_test.go`,
+   `internal/runner/{presenter,snapshot}_test.go`,
    `internal/runbundle/{synthesize,writer,reader}_test.go`,
    `internal/cockpit/watch/watch_test.go`, `internal/cockpit/viewmodel/run_test.go`.
-2. **4 file-Store files** — actually drive the legacy file `Store` as a fixture:
-   `cmd/orun/command_read_revision_test.go`, `cmd/orun/command_run_revision_test.go`,
-   `cmd/orun/object_model_run_test.go`, `cmd/orun/state_e2e_test.go`. These seed a
-   legacy `.orun/` store that the commands-under-test no longer read post-cutover;
-   the Store usage is vestigial and should be dropped (or the test reworked onto
-   the object model) rather than preserved.
+2. **4 file-`Store` files** had their vestigial fixtures dropped: the
+   finalize/read paths take their `ExecutionCounts` directly (not from the
+   store), so the seeded legacy `.orun/` state was dead setup.
+   `cmd/orun/object_model_run_test.go` (a dead-helpers file) was deleted and its
+   one live caller inlined the plan it actually used.
 
-Then: delete `internal/state` and `internal/executionstate/bridge.go` (if unused),
-add the grep gate (no `internal/state` imports anywhere) to
-`scripts/check-object-model.sh`, and remove the `ORUN_OBJECT_MODEL` /
-`ORUN_OBJECT_RUNNER` coexistence flags (default-on becomes the only path).
+`scripts/check-object-model.sh` now bans the `internal/state` import repo-wide.
+
+`internal/executionstate/bridge.go` is **kept** (the spec's "if unused" did not
+hold): `command_run_revision.go` still mirrors the legacy runner's output into
+the new statestore layout through it on every state tick. It has no
+`internal/state` dependency, so it was unaffected by the deletion. Retiring it
+belongs with removing the `ORUN_OBJECT_MODEL` / `ORUN_OBJECT_RUNNER` coexistence
+flags — a runtime-behavior change that is a separate PR.
 
 ## 6. References
 - `internal/objrun` (`Begin`/`PlanHash`/`CanonicalPlanJSON`, the revision-resolve

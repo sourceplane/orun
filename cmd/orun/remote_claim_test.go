@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statebackend"
 )
 
@@ -21,7 +21,7 @@ type fakeBackend struct {
 	runnableIdx   int
 	claimCalls    int
 	runnableCalls int
-	runState      *state.ExecState
+	runState      *execmodel.ExecState
 }
 
 func (f *fakeBackend) InitRun(_ context.Context, _ *model.Plan, opts statebackend.InitRunOptions) (*statebackend.RunHandle, error) {
@@ -60,7 +60,7 @@ func (f *fakeBackend) AppendStepLog(_ context.Context, _, _, _ string) error {
 	return nil
 }
 
-func (f *fakeBackend) LoadRunState(_ context.Context, _ string) (*state.ExecState, *state.ExecMetadata, error) {
+func (f *fakeBackend) LoadRunState(_ context.Context, _ string) (*execmodel.ExecState, *execmodel.ExecMetadata, error) {
 	return f.runState, nil, nil
 }
 
@@ -215,8 +215,8 @@ func TestWaitForJobRunnable_ErrorPropagates(t *testing.T) {
 }
 
 func TestWaitForJobRunnable_DepsFailedDuringPoll(t *testing.T) {
-	execState := &state.ExecState{
-		Jobs: map[string]*state.JobState{
+	execState := &execmodel.ExecState{
+		Jobs: map[string]*execmodel.JobState{
 			"dep-1": {Status: "failed"},
 		},
 	}
@@ -239,8 +239,8 @@ func TestWaitForJobRunnable_DepsFailedDuringPoll(t *testing.T) {
 }
 
 func TestPerformRemoteJobClaim_DepsWaiting_DepFailsDuringPoll(t *testing.T) {
-	execState := &state.ExecState{
-		Jobs: map[string]*state.JobState{
+	execState := &execmodel.ExecState{
+		Jobs: map[string]*execmodel.JobState{
 			"dep-1": {Status: "failed"},
 		},
 	}

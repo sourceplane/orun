@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 )
 
 func TestWritePlanShard_CreatesShardDirectory(t *testing.T) {
@@ -141,7 +141,7 @@ func TestWriteJobShard_CreatesShardDirectory(t *testing.T) {
 	os.WriteFile(filepath.Join(logsDir, "step1.log"), []byte("step1 output"), 0644)
 	os.WriteFile(filepath.Join(logsDir, "step2.log"), []byte("step2 output"), 0644)
 
-	js := &state.JobState{
+	js := &execmodel.JobState{
 		Status:     "completed",
 		StartedAt:  "2026-05-23T12:00:00Z",
 		FinishedAt: "2026-05-23T12:05:00Z",
@@ -213,7 +213,7 @@ func TestWriteJobShard_NoSteps(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 
-	js := &state.JobState{
+	js := &execmodel.JobState{
 		Status: "running",
 		Steps:  map[string]string{},
 	}
@@ -249,7 +249,7 @@ func TestWriteJobShard_NoLogsDir(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 
-	js := &state.JobState{
+	js := &execmodel.JobState{
 		Status: "completed",
 		Steps:  map[string]string{"s1": "completed"},
 	}
