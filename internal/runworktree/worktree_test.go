@@ -360,3 +360,65 @@ func TestOpenWithDegenerateExecID(t *testing.T) {
 		t.Fatalf("dir base = %q", filepath.Base(wt.Dir()))
 	}
 }
+
+func TestProjectAndSeal(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	wt := h.open(t, "exec_proj")
+
+	// Tick 1: a job running with a running step.
+	if err := wt.Project([]ProjectedJob{
+		{JobID: "svc@deploy", Status: nodes.StatusRunning, Steps: []ProjectedStep{
+			{StepID: "build", Status: nodes.StatusRunning},
+		}},
+	}); err != nil {
+		t.Fatalf("project 1: %v", err)
+	}
+	if err := wt.SetStepLog("svc@deploy", "build", []byte("compiling\n")); err != nil {
+		t.Fatalf("set log: %v", err)
+	}
+	// Tick 2: terminal.
+	if err := wt.Project([]ProjectedJob{
+		{JobID: "svc@deploy", Status: nodes.StatusSucceeded, Steps: []ProjectedStep{
+			{StepID: "build", Status: nodes.StatusSucceeded, ExitCode: 0},
+			{StepID: "test", Status: nodes.StatusSucceeded},
+		}},
+	}); err != nil {
+		t.Fatalf("project 2: %v", err)
+	}
+
+	// The streamed log survived the second projection (additive merge).
+	snap := wt.Snapshot()
+	if got := snap.Jobs[0].Attempts[0].Steps[0].LogFile; got == "" {
+		t.Fatalf("step log file lost across projection")
+	}
+
+	id, err := wt.Seal(ctx, nodes.StatusSucceeded, time.Time{})
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	ex := readExecution(t, h.store, id)
+	if ex.Summary.JobsSucceeded != 1 || ex.Summary.StepsTotal != 2 {
+		t.Fatalf("summary = %+v", ex.Summary)
+	}
+}
+
+func TestProjectRejectsUnknownStatus(t *testing.T) {
+	h := newHarness(t)
+	wt := h.open(t, "exec_badproj")
+	if err := wt.Project([]ProjectedJob{{JobID: "j", Status: "bogus"}}); err == nil {
+		t.Fatalf("expected error for unknown job status")
+	}
+	if err := wt.Project([]ProjectedJob{{JobID: "j", Status: nodes.StatusRunning, Steps: []ProjectedStep{{StepID: "s", Status: "bogus"}}}}); err == nil {
+		t.Fatalf("expected error for unknown step status")
+	}
+}
+
+func TestSetStepLogEmptyNoop(t *testing.T) {
+	h := newHarness(t)
+	wt := h.open(t, "exec_emptylog")
+	_ = wt.StartJob("j")
+	if err := wt.SetStepLog("j", "s", nil); err != nil {
+		t.Fatalf("empty log should be a no-op: %v", err)
+	}
+}
