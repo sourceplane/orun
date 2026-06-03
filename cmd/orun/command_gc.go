@@ -6,7 +6,6 @@ import (
 
 	"github.com/sourceplane/orun/internal/objgc"
 	"github.com/sourceplane/orun/internal/objindex"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -36,58 +35,30 @@ func registerGCCommand(root *cobra.Command) {
 }
 
 func runGC() error {
-	// M12: reachability GC over the object graph when active and present.
-	if objStore, objRefs, objRoot, ok := openObjectStores(); ok {
-		keep := gcMaxCount
-		if gcAll {
-			keep = 0
-		}
-		ix := objindex.New(objStore, objRefs, objRoot)
-		res, err := objgc.Collect(context.Background(), objStore, objRefs, ix, objgc.Options{
-			KeepExecutions: keep,
-			DryRun:         gcDryRun,
-		})
-		if err != nil {
-			return err
-		}
-		if !gcDryRun {
-			_ = ix.Reindex(context.Background())
-		}
-		action := "Removed"
-		if gcDryRun {
-			action = "Would remove"
-		}
-		fmt.Printf("%s %d objects (%d execution refs pruned)\n", action, res.Swept, res.PrunedExecRefs)
-		return nil
-	}
-
-	store := state.NewStore(storeDir())
-
-	maxCount := gcMaxCount
-	maxDays := gcMaxDays
-	if gcAll {
-		maxCount = 0
-		maxDays = 0
-	}
-
-	removed, err := store.GC(maxCount, maxDays, gcDryRun)
-	if err != nil {
-		return err
-	}
-
-	if len(removed) == 0 {
+	objStore, objRefs, objRoot, ok := openObjectStores()
+	if !ok {
 		fmt.Println("Nothing to clean up.")
 		return nil
 	}
-
+	keep := gcMaxCount
+	if gcAll {
+		keep = 0
+	}
+	ix := objindex.New(objStore, objRefs, objRoot)
+	res, err := objgc.Collect(context.Background(), objStore, objRefs, ix, objgc.Options{
+		KeepExecutions: keep,
+		DryRun:         gcDryRun,
+	})
+	if err != nil {
+		return err
+	}
+	if !gcDryRun {
+		_ = ix.Reindex(context.Background())
+	}
 	action := "Removed"
 	if gcDryRun {
 		action = "Would remove"
 	}
-
-	for _, id := range removed {
-		fmt.Printf("  %s %s\n", action, id)
-	}
-	fmt.Printf("\n%s %d items\n", action, len(removed))
+	fmt.Printf("%s %d objects (%d execution refs pruned)\n", action, res.Swept, res.PrunedExecRefs)
 	return nil
 }
