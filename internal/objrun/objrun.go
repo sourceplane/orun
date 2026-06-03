@@ -158,6 +158,129 @@ func (s *Session) Finish(ctx context.Context, r *runner.Runner, runErr error) (o
 	return s.wt.Seal(ctx, status, time.Time{})
 }
 
+// SealStep is one step's terminal record for an imported run (see Seal). Status
+// is the source vocabulary (e.g. "success"/"failed"/"skipped"); Seal folds it
+// onto the node status set. Log, when present, is stored as a content blob.
+type SealStep struct {
+	StepID   string
+	Status   string
+	ExitCode int
+	Log      []byte
+}
+
+// SealJob is one job's terminal record for an imported run, with its steps in
+// caller order.
+type SealJob struct {
+	JobID     string
+	Status    string
+	LastError string
+	Steps     []SealStep
+}
+
+// SealLink is an external link recorded on the execution (e.g. the CI run page).
+type SealLink struct {
+	Label string
+	URL   string
+}
+
+// ImportInput describes an already-terminal run to record into the object graph.
+// Status is the source run status (folded onto the node vocabulary; a value that
+// does not fold to a terminal status is sealed as failed, since an imported run
+// is by definition finished).
+type ImportInput struct {
+	ExecID     string
+	Status     string
+	StartedAt  time.Time
+	FinishedAt time.Time
+	Jobs       []SealJob
+	Links      []SealLink
+}
+
+// Seal records an already-terminal run into the content-addressed object graph
+// under root, attaching it to the revision plan resolves to (the same dedup /
+// degenerate-revision logic Begin uses), and returns the sealed execution id.
+//
+// It is the non-runner counterpart to Begin/Finish: callers that import a run
+// that finished elsewhere — e.g. `orun github pull` recording a pulled GitHub
+// Actions run — drive this instead of a live runner. The run is projected and
+// sealed through the same runworktree path the live runner uses, so an imported
+// execution is shaped identically to a natively-run one and is readable by
+// `orun status`/`orun logs`. Idempotent: sealing identical content yields the
+// same id.
+func Seal(ctx context.Context, root string, plan *model.Plan, in ImportInput) (objectstore.ObjectID, error) {
+	if plan == nil {
+		return "", fmt.Errorf("objrun: plan is nil")
+	}
+	if in.ExecID == "" {
+		return "", fmt.Errorf("objrun: exec id is required")
+	}
+
+	store, err := objectstore.NewLocalStore(objectstore.LocalConfig{Root: root})
+	if err != nil {
+		return "", fmt.Errorf("open object store: %w", err)
+	}
+	refs, err := refstore.NewLocalRefStore(refstore.LocalConfig{Root: root, Writer: "import"})
+	if err != nil {
+		return "", fmt.Errorf("open ref store: %w", err)
+	}
+
+	revID, err := resolveRunRevision(ctx, store, refs, root, plan)
+	if err != nil {
+		return "", err
+	}
+
+	mgr := runworktree.NewManager(store, refs, root)
+	wt, err := mgr.Open(ctx, runworktree.OpenInput{
+		ExecutionID: in.ExecID,
+		RevisionID:  revID,
+		StartedAt:   in.StartedAt,
+	})
+	if err != nil {
+		return "", fmt.Errorf("open working tree: %w", err)
+	}
+
+	projected := make([]runworktree.ProjectedJob, 0, len(in.Jobs))
+	for _, j := range in.Jobs {
+		pj := runworktree.ProjectedJob{
+			JobID:     j.JobID,
+			Status:    runnerStatusToNode(j.Status),
+			LastError: j.LastError,
+		}
+		for _, s := range j.Steps {
+			pj.Steps = append(pj.Steps, runworktree.ProjectedStep{
+				StepID:   s.StepID,
+				Status:   runnerStatusToNode(s.Status),
+				ExitCode: s.ExitCode,
+			})
+		}
+		projected = append(projected, pj)
+	}
+	if err := wt.Project(projected); err != nil {
+		return "", fmt.Errorf("project run: %w", err)
+	}
+
+	for _, j := range in.Jobs {
+		for _, s := range j.Steps {
+			if len(s.Log) == 0 {
+				continue
+			}
+			if err := wt.SetStepLog(j.JobID, s.StepID, s.Log); err != nil {
+				return "", fmt.Errorf("attach step log %s/%s: %w", j.JobID, s.StepID, err)
+			}
+		}
+	}
+
+	for _, l := range in.Links {
+		_ = wt.AddLink(nodes.ExecLink{Label: l.Label, URL: l.URL})
+	}
+
+	status := runnerStatusToNode(in.Status)
+	if !nodes.IsTerminalStatus(status) {
+		status = nodes.StatusFailed
+	}
+	return wt.Seal(ctx, status, in.FinishedAt)
+}
+
 // resolveRunRevision returns the revision the run attaches to: the one `orun
 // plan` already published for this plan (revisions/by-hash/<planHash>) when
 // present, else a freshly-materialized catalog-free degenerate revision.
