@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/sourceplane/orun/internal/state"
 )
@@ -84,7 +85,7 @@ func TestLiveOrunService_LoadWorkspace_RespectsCancellation(t *testing.T) {
 
 func TestLiveOrunService_ListRuns_EmptyStore(t *testing.T) {
 	dir := t.TempDir()
-	svc := NewLiveOrunService(LiveServiceConfig{Store: state.NewStore(dir)})
+	svc := NewLiveOrunService(LiveServiceConfig{ObjectModelRoot: orunDir(dir)})
 	runs, err := svc.ListRuns(context.Background(), ListRunsRequest{})
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
@@ -95,10 +96,86 @@ func TestLiveOrunService_ListRuns_EmptyStore(t *testing.T) {
 }
 
 func TestLiveOrunService_ListRuns_RemoteStateNotImplemented(t *testing.T) {
-	svc := NewLiveOrunService(LiveServiceConfig{Store: state.NewStore(t.TempDir())})
+	svc := NewLiveOrunService(LiveServiceConfig{ObjectModelRoot: orunDir(t.TempDir())})
 	_, err := svc.ListRuns(context.Background(), ListRunsRequest{RemoteState: true})
 	if err == nil {
 		t.Fatal("expected error for RemoteState=true, got nil")
+	}
+}
+
+// TestLiveOrunService_ListRuns_FromObjectGraph is the U1 coverage: a sealed
+// execution seeded into the object graph appears in history with its plan name,
+// components, and counts resolved from the revision's plan.json.
+func TestLiveOrunService_ListRuns_FromObjectGraph(t *testing.T) {
+	dir := t.TempDir()
+	older := time.Date(2026, 6, 3, 9, 0, 0, 0, time.UTC)
+	seedObjectExecution(t, dir, seedExec{
+		ExecID:    "exec_old",
+		PlanName:  "nightly",
+		StartedAt: older,
+		Jobs: []seedJob{
+			{ID: "api@deploy", Component: "api", Steps: []seedStep{{ID: "build"}}},
+		},
+	})
+	seedObjectExecution(t, dir, seedExec{
+		ExecID:    "exec_new",
+		PlanName:  "release",
+		StartedAt: older.Add(time.Hour),
+		Jobs: []seedJob{
+			{ID: "web@deploy", Component: "web", Steps: []seedStep{{ID: "build"}, {ID: "test"}}},
+			{ID: "api@deploy", Component: "api", Steps: []seedStep{{ID: "build"}}},
+		},
+	})
+
+	svc := NewLiveOrunService(LiveServiceConfig{ObjectModelRoot: orunDir(dir)})
+	runs, err := svc.ListRuns(context.Background(), ListRunsRequest{})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("want 2 runs, got %d: %+v", len(runs), runs)
+	}
+	// Newest-first.
+	if runs[0].ExecID != "exec_new" || runs[1].ExecID != "exec_old" {
+		t.Fatalf("order wrong: %s, %s", runs[0].ExecID, runs[1].ExecID)
+	}
+	newRun := runs[0]
+	if newRun.PlanName != "release" {
+		t.Errorf("PlanName = %q, want release", newRun.PlanName)
+	}
+	if newRun.Status != "completed" {
+		t.Errorf("Status = %q, want completed", newRun.Status)
+	}
+	if newRun.JobTotal != 2 || newRun.JobDone != 2 {
+		t.Errorf("counts: total=%d done=%d, want 2/2", newRun.JobTotal, newRun.JobDone)
+	}
+	if got := newRun.Components; len(got) != 2 || got[0] != "web" || got[1] != "api" {
+		t.Errorf("Components = %v, want [web api]", got)
+	}
+	if newRun.PlanID == "" {
+		t.Error("PlanID (short revision id) should be populated")
+	}
+}
+
+// TestLiveOrunService_ListRuns_Limit verifies the Limit knob truncates the
+// newest-first list.
+func TestLiveOrunService_ListRuns_Limit(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Date(2026, 6, 3, 9, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		seedObjectExecution(t, dir, seedExec{
+			ExecID:    "exec_" + string(rune('a'+i)),
+			StartedAt: base.Add(time.Duration(i) * time.Hour),
+			Jobs:      []seedJob{{ID: "j", Component: "c"}},
+		})
+	}
+	svc := NewLiveOrunService(LiveServiceConfig{ObjectModelRoot: orunDir(dir)})
+	runs, err := svc.ListRuns(context.Background(), ListRunsRequest{Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("want 2 runs (limit), got %d", len(runs))
 	}
 }
 
