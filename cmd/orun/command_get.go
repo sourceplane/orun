@@ -10,6 +10,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/objview"
 	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statestore"
@@ -365,7 +366,7 @@ func getJobs() error {
 	var execState *execmodel.ExecState
 	if reader, ok := openObjectReader(); ok {
 		if v, err := reader.Get(context.Background(), "executions/latest"); err == nil {
-			execState = objViewToState(v)
+			execState = objview.ToState(v)
 		}
 	}
 	if execState == nil {

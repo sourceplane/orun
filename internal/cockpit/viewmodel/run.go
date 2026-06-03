@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/execmodel"
 )
 
-// Counts mirrors state.ExecutionCounts but lives here so renderers don't
+// Counts mirrors execmodel.ExecutionCounts but lives here so renderers don't
 // need to import the persistence layer.
 type Counts struct {
 	Total     int
@@ -120,9 +120,9 @@ func (r RunSummary) Duration() time.Duration {
 	return r.FinishedAt.Sub(r.StartedAt)
 }
 
-// BuildRunView assembles a RunView from a state.ExecMetadata + ExecState
+// BuildRunView assembles a RunView from a execmodel.ExecMetadata + ExecState
 // pair. Either argument may be nil; the resulting view is best-effort.
-func BuildRunView(execID string, meta *state.ExecMetadata, st *state.ExecState) RunView {
+func BuildRunView(execID string, meta *execmodel.ExecMetadata, st *execmodel.ExecState) RunView {
 	v := RunView{ExecID: execID}
 	if meta != nil {
 		v.PlanID = strings.TrimSpace(meta.PlanID)
@@ -166,7 +166,7 @@ func BuildRunView(execID string, meta *state.ExecMetadata, st *state.ExecState) 
 }
 
 // BuildRunListView builds a list view from state.Store entries.
-func BuildRunListView(entries []state.ExecEntry) RunListView {
+func BuildRunListView(entries []execmodel.ExecEntry) RunListView {
 	out := RunListView{Runs: make([]RunSummary, 0, len(entries))}
 	for _, e := range entries {
 		out.Runs = append(out.Runs, RunSummary{
@@ -195,7 +195,7 @@ func BuildRunListView(entries []state.ExecEntry) RunListView {
 
 // --- internals --------------------------------------------------------
 
-func collectJobs(st *state.ExecState) []Job {
+func collectJobs(st *execmodel.ExecState) []Job {
 	if st == nil {
 		return nil
 	}
@@ -260,7 +260,7 @@ func groupByComponent(jobs []Job) []ComponentGroup {
 	return groups
 }
 
-func summarize(jobs []Job, meta *state.ExecMetadata) Counts {
+func summarize(jobs []Job, meta *execmodel.ExecMetadata) Counts {
 	c := Counts{}
 	for _, j := range jobs {
 		c.Total++

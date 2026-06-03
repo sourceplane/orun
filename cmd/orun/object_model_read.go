@@ -7,10 +7,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
-	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/objread"
+	"github.com/sourceplane/orun/internal/objview"
 	"github.com/sourceplane/orun/internal/ui"
 )
 
@@ -50,89 +49,6 @@ func openObjectReader() (*objread.Reader, bool) {
 	return objread.New(store, refs, r), true
 }
 
-// nodeStatusToLegacy folds the object-model status vocabulary onto the legacy
-// runner vocabulary the renderers expect (succeeded -> completed, etc.).
-func nodeStatusToLegacy(s string) string {
-	switch s {
-	case "succeeded":
-		return "completed"
-	case "failed", "cancelled":
-		return "failed"
-	case "running":
-		return "running"
-	default:
-		return "pending"
-	}
-}
-
-func fmtRFC3339(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339)
-}
-
-func fmtRFC3339Ptr(t *time.Time) string {
-	if t == nil {
-		return ""
-	}
-	return fmtRFC3339(*t)
-}
-
-// objViewToMeta projects an execution header into the legacy ExecMetadata shape.
-func objViewToMeta(v objread.ExecutionView) *execmodel.ExecMetadata {
-	return &execmodel.ExecMetadata{
-		ExecID:     v.ExecutionID,
-		Status:     nodeStatusToLegacy(v.Status),
-		StartedAt:  fmtRFC3339(v.StartedAt),
-		FinishedAt: fmtRFC3339Ptr(v.FinishedAt),
-		DryRun:     v.DryRun,
-		JobTotal:   v.Summary.JobsTotal,
-		JobDone:    v.Summary.JobsSucceeded,
-		JobFailed:  v.Summary.JobsFailed,
-	}
-}
-
-// objViewToState projects an execution's jobs/steps into the legacy ExecState
-// shape (statuses folded to the legacy vocabulary).
-func objViewToState(v objread.ExecutionView) *execmodel.ExecState {
-	st := &execmodel.ExecState{ExecID: v.ExecutionID, Jobs: map[string]*execmodel.JobState{}}
-	for _, j := range v.Jobs {
-		js := &execmodel.JobState{
-			Status:     nodeStatusToLegacy(j.Status),
-			StartedAt:  fmtRFC3339Ptr(j.StartedAt),
-			FinishedAt: fmtRFC3339Ptr(j.FinishedAt),
-			LastError:  j.LastError,
-			Steps:      map[string]string{},
-		}
-		// Flatten the latest attempt's steps (the legacy model has no attempts).
-		if n := len(j.Attempts); n > 0 {
-			for _, s := range j.Attempts[n-1].Steps {
-				js.Steps[s.StepID] = nodeStatusToLegacy(s.Status)
-			}
-		}
-		st.Jobs[j.JobID] = js
-	}
-	return st
-}
-
-// objViewsToEntries projects execution headers into legacy listing rows.
-func objViewsToEntries(views []objread.ExecutionView) []execmodel.ExecEntry {
-	out := make([]execmodel.ExecEntry, 0, len(views))
-	for _, v := range views {
-		out = append(out, execmodel.ExecEntry{
-			ID:         v.ExecutionID,
-			Status:     nodeStatusToLegacy(v.Status),
-			StartedAt:  fmtRFC3339(v.StartedAt),
-			FinishedAt: fmtRFC3339Ptr(v.FinishedAt),
-			JobTotal:   v.Summary.JobsTotal,
-			JobDone:    v.Summary.JobsSucceeded,
-			JobFailed:  v.Summary.JobsFailed,
-		})
-	}
-	return out
-}
-
 // objStatusList renders the execution list from the object graph. handled=false
 // (with nil error) means there is nothing in the object model — fall back to the
 // legacy store.
@@ -141,7 +57,7 @@ func objStatusList(reader *objread.Reader) (handled bool, err error) {
 	if err != nil || len(views) == 0 {
 		return false, nil
 	}
-	return true, cockpitRenderRunList(objViewsToEntries(views))
+	return true, cockpitRenderRunList(objview.ToEntries(views))
 }
 
 // objLogEntries builds the legacy logEntry rows for an execution from the object
@@ -165,7 +81,7 @@ func objLogEntries(reader *objread.Reader, v objread.ExecutionView) []logEntry {
 			if !s.HasLog {
 				continue
 			}
-			status := nodeStatusToLegacy(s.Status)
+			status := objview.NodeStatusToLegacy(s.Status)
 			if logsFailed && status != "failed" {
 				continue
 			}
@@ -190,8 +106,8 @@ func objShowLogs(reader *objread.Reader, ref string, color bool) (handled bool, 
 	if gerr != nil {
 		return false, nil
 	}
-	meta := objViewToMeta(v)
-	st := objViewToState(v)
+	meta := objview.ToMeta(v)
+	st := objview.ToState(v)
 	counts := executionCountsFromState(meta, st)
 	entries := objLogEntries(reader, v)
 	if len(entries) == 0 {
@@ -235,8 +151,8 @@ func objStatusSingle(reader *objread.Reader, ref string, color bool) (handled bo
 	if gerr != nil {
 		return false, nil
 	}
-	meta := objViewToMeta(v)
-	st := objViewToState(v)
+	meta := objview.ToMeta(v)
+	st := objview.ToState(v)
 	if statusJSON {
 		return true, renderExecutionJSON(v.ExecutionID, meta, st)
 	}

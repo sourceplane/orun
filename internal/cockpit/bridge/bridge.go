@@ -8,15 +8,18 @@ import (
 	"fmt"
 
 	"github.com/sourceplane/orun/internal/cockpit/viewmodel"
+	"github.com/sourceplane/orun/internal/execmodel"
+	"github.com/sourceplane/orun/internal/objread"
+	"github.com/sourceplane/orun/internal/objview"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statebackend"
 )
 
-// Source abstracts the place state lives. The local store and the remote
-// statebackend both implement it.
+// Source abstracts the place state lives. The local store, the remote
+// statebackend, and the content-addressed object model all implement it.
 type Source interface {
-	LoadRun(ctx context.Context, execID string) (*state.ExecMetadata, *state.ExecState, error)
-	ListRuns(ctx context.Context) ([]state.ExecEntry, error)
+	LoadRun(ctx context.Context, execID string) (*execmodel.ExecMetadata, *execmodel.ExecState, error)
+	ListRuns(ctx context.Context) ([]execmodel.ExecEntry, error)
 }
 
 // FromStore wraps a local *state.Store as a Source.
@@ -24,6 +27,10 @@ func FromStore(s *state.Store) Source { return &storeSource{s: s} }
 
 // FromBackend wraps a remote statebackend.Backend as a Source.
 func FromBackend(b statebackend.Backend) Source { return &backendSource{b: b} }
+
+// FromObjectReader wraps the object-model read layer as a Source, adapting its
+// native views into the execmodel shapes the view-models render.
+func FromObjectReader(r *objread.Reader) Source { return &objReaderSource{r: r} }
 
 // LoadRunView fetches metadata + state for execID and builds the cockpit
 // view-model in one call.
@@ -54,7 +61,7 @@ func LoadRunListView(ctx context.Context, src Source) (viewmodel.RunListView, er
 
 type storeSource struct{ s *state.Store }
 
-func (a *storeSource) LoadRun(_ context.Context, execID string) (*state.ExecMetadata, *state.ExecState, error) {
+func (a *storeSource) LoadRun(_ context.Context, execID string) (*execmodel.ExecMetadata, *execmodel.ExecState, error) {
 	if a.s == nil {
 		return nil, nil, fmt.Errorf("nil store")
 	}
@@ -63,16 +70,44 @@ func (a *storeSource) LoadRun(_ context.Context, execID string) (*state.ExecMeta
 	return meta, st, nil
 }
 
-func (a *storeSource) ListRuns(_ context.Context) ([]state.ExecEntry, error) {
+func (a *storeSource) ListRuns(_ context.Context) ([]execmodel.ExecEntry, error) {
 	if a.s == nil {
 		return nil, fmt.Errorf("nil store")
 	}
 	return a.s.ListExecutions()
 }
 
+type objReaderSource struct{ r *objread.Reader }
+
+func (a *objReaderSource) LoadRun(ctx context.Context, execID string) (*execmodel.ExecMetadata, *execmodel.ExecState, error) {
+	if a.r == nil {
+		return nil, nil, fmt.Errorf("nil object reader")
+	}
+	ref := execID
+	if ref == "" {
+		ref = "executions/latest"
+	}
+	v, err := a.r.Get(ctx, ref)
+	if err != nil {
+		return nil, nil, err
+	}
+	return objview.ToMeta(v), objview.ToState(v), nil
+}
+
+func (a *objReaderSource) ListRuns(ctx context.Context) ([]execmodel.ExecEntry, error) {
+	if a.r == nil {
+		return nil, fmt.Errorf("nil object reader")
+	}
+	views, err := a.r.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return objview.ToEntries(views), nil
+}
+
 type backendSource struct{ b statebackend.Backend }
 
-func (a *backendSource) LoadRun(ctx context.Context, execID string) (*state.ExecMetadata, *state.ExecState, error) {
+func (a *backendSource) LoadRun(ctx context.Context, execID string) (*execmodel.ExecMetadata, *execmodel.ExecState, error) {
 	if a.b == nil {
 		return nil, nil, fmt.Errorf("nil backend")
 	}
@@ -80,7 +115,7 @@ func (a *backendSource) LoadRun(ctx context.Context, execID string) (*state.Exec
 	return meta, st, err
 }
 
-func (a *backendSource) ListRuns(_ context.Context) ([]state.ExecEntry, error) {
+func (a *backendSource) ListRuns(_ context.Context) ([]execmodel.ExecEntry, error) {
 	// Remote backend doesn't list — Phase 2 will add this when we wire
 	// `orun status --all --remote-state`. For now, callers fall back to
 	// the local store.
