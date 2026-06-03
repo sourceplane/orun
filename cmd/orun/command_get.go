@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/state"
@@ -91,19 +92,23 @@ func getPlans() error {
 	} else if ok {
 		return renderRevisionPlanTable(rows)
 	}
+	// M12 T3: object-model revisions (plans live in the revision graph).
+	if rows, ok := objListPlanRows(); ok {
+		return renderPlanEntryTable(rows)
+	}
 	return renderLegacyPlanTable()
 }
 
 // revisionPlanRow is the projected row used by `orun get plans` after the
 // state-redesign rewire. One row per revision key.
 type revisionPlanRow struct {
-	RevisionKey   string   `json:"revisionKey"`
-	TriggerName   string   `json:"trigger"`
-	PlanHash      string   `json:"plan"`
-	JobCount      int      `json:"jobs"`
-	LatestExec    string   `json:"latestExec,omitempty"`
-	LatestStatus  string   `json:"status,omitempty"`
-	Environments  []string `json:"environments,omitempty"`
+	RevisionKey  string   `json:"revisionKey"`
+	TriggerName  string   `json:"trigger"`
+	PlanHash     string   `json:"plan"`
+	JobCount     int      `json:"jobs"`
+	LatestExec   string   `json:"latestExec,omitempty"`
+	LatestStatus string   `json:"status,omitempty"`
+	Environments []string `json:"environments,omitempty"`
 }
 
 // loadRevisionPlanRows scans revisions/<key>/manifest.json and projects each
@@ -244,6 +249,12 @@ func renderLegacyPlanTable() error {
 	if err != nil {
 		return err
 	}
+	return renderPlanEntryTable(plans)
+}
+
+// renderPlanEntryTable renders a plan listing (legacy store or object-model
+// revisions) as the `orun get plans` table / JSON.
+func renderPlanEntryTable(plans []execmodel.PlanEntry) error {
 	if len(plans) == 0 {
 		if getOutputFormat == "json" {
 			fmt.Fprintln(os.Stdout, "[]")
@@ -302,7 +313,6 @@ func renderLegacyPlanTable() error {
 	return nil
 }
 
-
 func getJobs() error {
 	store := state.NewStore(storeDir())
 
@@ -311,18 +321,24 @@ func getJobs() error {
 		ref = "latest"
 	}
 
-	path, err := store.ResolvePlanRef(ref)
-	if err != nil {
-		color := ui.ColorEnabledForWriter(os.Stdout)
-		fmt.Println(ui.Dim(color, "No jobs found."))
-		fmt.Println()
-		fmt.Printf("  Generate a plan first:  %s\n", ui.Bold(color, "orun plan"))
-		return nil
-	}
-
-	plan, err := loadPlan(path)
-	if err != nil {
-		return err
+	// M12 T3: resolve the plan from the object-model revision graph when active;
+	// fall back to the legacy plan store.
+	var plan *model.Plan
+	if p, ok := objResolvePlan(ref); ok {
+		plan = p
+	} else {
+		path, err := store.ResolvePlanRef(ref)
+		if err != nil {
+			color := ui.ColorEnabledForWriter(os.Stdout)
+			fmt.Println(ui.Dim(color, "No jobs found."))
+			fmt.Println()
+			fmt.Printf("  Generate a plan first:  %s\n", ui.Bold(color, "orun plan"))
+			return nil
+		}
+		plan, err = loadPlan(path)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Context-aware scoping: filter jobs by detected component
@@ -345,10 +361,17 @@ func getJobs() error {
 		}
 	}
 
-	var execState *state.ExecState
-	execID, resolveErr := store.ResolveExecID("latest")
-	if resolveErr == nil {
-		execState, _ = store.LoadState(execID)
+	// M12 T3: overlay execution status from the object graph when active.
+	var execState *execmodel.ExecState
+	if reader, ok := openObjectReader(); ok {
+		if v, err := reader.Get(context.Background(), "executions/latest"); err == nil {
+			execState = objViewToState(v)
+		}
+	}
+	if execState == nil {
+		if execID, resolveErr := store.ResolveExecID("latest"); resolveErr == nil {
+			execState, _ = store.LoadState(execID)
+		}
 	}
 
 	if getOutputFormat == "json" {
