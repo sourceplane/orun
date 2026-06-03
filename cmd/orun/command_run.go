@@ -11,14 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sourceplane/orun/internal/artifactstore/github"
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/executor"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/revision"
-	"github.com/sourceplane/orun/internal/runbundle"
 	"github.com/sourceplane/orun/internal/runner"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
@@ -158,15 +156,8 @@ func runPlan() error {
 		return fmt.Errorf("--gha cannot be combined with --runner %q", runRunner)
 	}
 
-	store := state.NewStore(storeDir())
-
-	// Migrate legacy state if present
-	if migrated, _ := store.MigrateLegacyState(storeDir()); migrated {
-		fmt.Println("✓ Migrated legacy .orun-state.json to .orun/executions/")
-	}
-
-	// Resolve plan reference
-	plan, err := resolveAndLoadPlan(store)
+	// Resolve plan reference (from the object-model revision graph).
+	plan, err := resolveAndLoadPlan()
 	if err != nil {
 		return err
 	}
@@ -218,7 +209,7 @@ func runPlan() error {
 	}
 	runWorkDir = resolveEffectiveWorkDir(runUseWorkDirOverride, runWorkDir, intentRoot)
 
-	planID := state.PlanChecksumShort(plan)
+	planID := execmodel.PlanChecksumShort(plan)
 
 	// Resolve execution ID
 	execID := runExecID
@@ -228,7 +219,7 @@ func runPlan() error {
 	if remoteActive {
 		execID = remotestate.DeriveRunID(execID)
 	} else if execID == "" {
-		execID = state.GenerateExecID(plan.Metadata.Name)
+		execID = execmodel.GenerateExecID(plan.Metadata.Name)
 	}
 
 	if runRetry && runJobID == "" {
@@ -242,11 +233,8 @@ func runPlan() error {
 		if runDryRun {
 			return fmt.Errorf("--background cannot be combined with --dry-run")
 		}
-		if _, err := store.CreateExecution(execID, plan); err != nil {
-			return err
-		}
 		color := ui.ColorEnabledForWriter(os.Stdout)
-		return startBackgroundRun(execID, store, color)
+		return startBackgroundRun(execID, color)
 	}
 
 	// Concurrency override
@@ -310,30 +298,26 @@ func runPlan() error {
 		}
 	}
 
-	// M5.b — revision-first execution path (cli-surface.md §2.2).
-	// Resolve the PlanRevision, persist the ExecutionRun under it, and
-	// hook the bridge mirror onto the runner's AfterStateUpdate tick.
-	// Skipped for --dry-run (no on-disk runner state to mirror) and for
-	// remote runs (which own their state lifecycle via the backend).
+	// Revision-first execution (catalog history): resolve the PlanRevision and
+	// record the ExecutionRun under it for `orun catalog history`. Skipped for
+	// --dry-run and remote runs.
 	var rx *revisionExecution
 	if !runDryRun && !remoteActive {
 		ctx := context.Background()
-		built, rxErr := setupRevisionExecution(ctx, store, plan, loadedIntent, execID)
+		built, rxErr := setupRevisionExecution(ctx, plan, loadedIntent, execID)
 		if rxErr != nil {
 			color := ui.ColorEnabledForWriter(os.Stderr)
 			fmt.Fprintf(os.Stderr, "%s revision execution disabled: %v\n",
 				ui.Yellow(color, "warning:"), rxErr)
 		} else {
 			rx = built
-			installRevisionHooks(r, rx, execID)
 			emitCatalogExecutionStarted(ctx, rx, plan, rx.cfg.Store)
 		}
 	}
 
-	// M12 T2 — native object-model runner. When ORUN_OBJECT_RUNNER is set (and
-	// not dry-run / remote), open a live working tree and drive it from the
-	// runner's lifecycle hooks; it seals natively on terminal. Best-effort and
-	// isolated under .orun/objectmodel/; the legacy state writes continue.
+	// Native object-model runner: open a live working tree and drive it from
+	// the runner's lifecycle hooks; it seals natively on terminal. Isolated
+	// under .orun/objectmodel/.
 	var objRun *objectRunSession
 	objStoreRoot, objStoreErr := filepath.Abs(filepath.Join(storeDir(), ".orun"))
 	if objStoreErr == nil && !runDryRun && !remoteActive {
@@ -343,11 +327,14 @@ func runPlan() error {
 
 	runErr := r.Run(plan)
 
-	// Finalize the revision-first ExecutionRun: flip to terminal status,
-	// refresh refs/latest-execution.json, mirror final state, and print
-	// the post-run summary block.
+	// Finalize the revision-first ExecutionRun from the runner's terminal
+	// tally (catalog history).
 	if rx != nil {
-		finalStatus, finErr := finalizeRevisionExecution(context.Background(), rx, store, execID, runErr)
+		counts := execmodel.ExecutionCounts{}
+		if st := r.SnapshotState(); st != nil {
+			counts = execmodel.SummarizeExecutionState(st)
+		}
+		finalStatus, finErr := finalizeRevisionExecution(context.Background(), rx, counts, runErr)
 		if finErr != nil {
 			color := ui.ColorEnabledForWriter(os.Stderr)
 			fmt.Fprintf(os.Stderr, "%s finalize execution: %v\n",
@@ -358,23 +345,10 @@ func runPlan() error {
 		printRevisionRunSummary(rx, finalStatus)
 	}
 
-	// Job shard upload: runs after the runner completes, even on failure.
-	// The original exit code is preserved — a failed upload only warns.
-	if artifactBackend == "github" && os.Getenv("GITHUB_ACTIONS") == "true" && !runDryRun {
-		if err := uploadJobShardsAfterRun(store, execID, planID, plan); err != nil {
-			color := ui.ColorEnabledForWriter(os.Stderr)
-			fmt.Fprintf(os.Stderr, "%s failed to upload job artifact: %v\n", ui.Yellow(color, "⚠"), err)
-		}
-	}
-
-	// Seal the run into the content-addressed object graph when ORUN_OBJECT_RUNNER
-	// is set. The native live working tree (T2) seals itself; the post-hoc
-	// legacy-translation seal (M7c) covers the remote / dry-run fall-through where
-	// no working tree was opened. Best-effort, isolated under .orun/objectmodel/.
+	// Seal the run into the content-addressed object graph (the live working
+	// tree seals itself from the runner's terminal state).
 	if objRun != nil {
 		finishObjectModelRun(r, objRun, runErr)
-	} else if objStoreErr == nil {
-		sealObjectModelRun(objStoreRoot, plan, store, execID)
 	}
 
 	return runErr
@@ -383,84 +357,6 @@ func runPlan() error {
 // uploadJobShardsAfterRun loads the execution state and uploads job shards
 // for all terminal jobs. The upload is best-effort — errors warn but do not
 // change the job conclusion.
-func uploadJobShardsAfterRun(store *state.Store, execID, planID string, plan *model.Plan) error {
-	execState, err := store.LoadState(execID)
-	if err != nil {
-		return fmt.Errorf("load execution state: %w", err)
-	}
-	if execState == nil || len(execState.Jobs) == 0 {
-		return nil
-	}
-
-	repo := os.Getenv("GITHUB_REPOSITORY")
-	if repo == "" {
-		return fmt.Errorf("GITHUB_REPOSITORY not set")
-	}
-
-	ghClient, err := github.NewClient(context.Background(), repo)
-	if err != nil {
-		return fmt.Errorf("create GitHub client: %w", err)
-	}
-
-	source := runbundle.ShardSource{
-		Type:       "github-actions",
-		Repository: repo,
-		RunID:      os.Getenv("GITHUB_RUN_ID"),
-		RunAttempt: os.Getenv("GITHUB_RUN_ATTEMPT"),
-		Workflow:   os.Getenv("GITHUB_WORKFLOW"),
-		SHA:        os.Getenv("GITHUB_SHA"),
-		Ref:        os.Getenv("GITHUB_REF"),
-		EventName:  os.Getenv("GITHUB_EVENT_NAME"),
-	}
-
-	for jobID, jobState := range execState.Jobs {
-		if jobState.Status == "" || jobState.Status == "running" || jobState.Status == "pending" {
-			continue
-		}
-
-		// Build job shard in a temp directory
-		shardDir, err := os.MkdirTemp("", "orun-job-shard-*")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  ⚠ warning: failed to create temp dir for job %s: %v\n", jobID, err)
-			continue
-		}
-
-		// Look up the plan job for metadata
-		planJob := findJobByIDInPlan(plan, jobID)
-
-		shard, err := runbundle.WriteJobShard(context.Background(), runbundle.WriteJobShardOptions{
-			ExecID:    execID,
-			PlanID:    planID,
-			JobUID:    planJob.UID,
-			JobID:     jobID,
-			Component: planJob.Component,
-			Env:       planJob.Environment,
-			Profile:   planJob.Profile,
-			Status:    jobState.Status,
-			Source:    source,
-			State:     jobState,
-			LogsDir:   store.LogDir(execID, jobID),
-			OutputDir: shardDir,
-		})
-		if err != nil {
-			os.RemoveAll(shardDir)
-			fmt.Fprintf(os.Stderr, "  ⚠ warning: failed to write job shard for %s: %v\n", jobID, err)
-			continue
-		}
-
-		result, err := ghClient.UploadShard(context.Background(), shard)
-		os.RemoveAll(shardDir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  ⚠ warning: failed to upload job artifact for %s: %v\n", jobID, err)
-			continue
-		}
-
-		fmt.Fprintf(os.Stderr, "  ✓ uploaded job artifact for %s: %s (%d bytes)\n", jobID, result.Name, result.Size)
-	}
-
-	return nil
-}
-
 // setupRemoteStateHooks initialises the backend, performs InitRun, and wires
 // hooks for per-job claim, heartbeat, log upload, and terminal update.
 func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, backendURL string) error {
@@ -787,7 +683,7 @@ func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID
 
 // isTransitivelyBlocked returns true if any dependency of depID (recursively)
 // is in "failed" status, meaning depID can never become runnable.
-func isTransitivelyBlocked(execState *state.ExecState, plan *model.Plan, depID string) bool {
+func isTransitivelyBlocked(execState *execmodel.ExecState, plan *model.Plan, depID string) bool {
 	depJob := findJobByIDInPlan(plan, depID)
 	for _, transitiveDep := range depJob.DependsOn {
 		js, ok := execState.Jobs[transitiveDep]
@@ -873,20 +769,16 @@ func findJobByIDInPlan(plan *model.Plan, jobID string) model.PlanJob {
 	return model.PlanJob{}
 }
 
-func resolveAndLoadPlan(store *state.Store) (*model.Plan, error) {
+func resolveAndLoadPlan() (*model.Plan, error) {
 	runResolvedRevisionArg = ""
 	ref := runPlanRef
 	if ref == "" {
 		ref = os.Getenv("ORUN_PLAN_ID")
 	}
 
-	// If a specific ref was given, try to resolve it as a saved plan first.
+	// If a specific ref was given, try the object-model revision graph first.
 	if ref != "" {
-		if path, err := store.ResolvePlanRef(ref); err == nil {
-			plan, err := loadPlan(path)
-			if err != nil {
-				return nil, err
-			}
+		if plan, ok := objResolvePlan(ref); ok {
 			noteRunPlanRevision(plan)
 			return plan, nil
 		}
@@ -920,13 +812,9 @@ func resolveAndLoadPlan(store *state.Store) (*model.Plan, error) {
 	if genErr := generatePlan(); genErr != nil {
 		return nil, fmt.Errorf("failed to generate plan: %w", genErr)
 	}
-	path, err := store.ResolvePlanRef("latest")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load generated plan: %w", err)
-	}
-	plan, err := loadPlan(path)
-	if err != nil {
-		return nil, err
+	plan, ok := objResolvePlan("latest")
+	if !ok {
+		return nil, fmt.Errorf("failed to load generated plan from the object graph")
 	}
 	noteRunPlanRevision(plan)
 	return plan, nil

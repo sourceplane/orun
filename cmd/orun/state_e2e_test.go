@@ -40,6 +40,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statestore"
 )
@@ -177,7 +178,7 @@ func TestStateE2E(t *testing.T) {
 	var rx *revisionExecution
 	t.Run("step06_run_dry_run_setup", func(t *testing.T) {
 		var err error
-		rx, err = setupRevisionExecution(ctx, legacyStore, plan, nil, "exec-e2e-001")
+		rx, err = setupRevisionExecution(ctx, plan, nil, "exec-e2e-001")
 		if err != nil {
 			t.Fatalf("setupRevisionExecution: %v", err)
 		}
@@ -198,7 +199,7 @@ func TestStateE2E(t *testing.T) {
 		if err := legacyStore.SaveState("exec-e2e-001", es); err != nil {
 			t.Fatalf("SaveState: %v", err)
 		}
-		if _, err := finalizeRevisionExecution(ctx, rx, legacyStore, "exec-e2e-001", nil); err != nil {
+		if _, err := finalizeRevisionExecution(ctx, rx, execmodel.ExecutionCounts{Total: 1, Completed: 1}, nil); err != nil {
 			t.Fatalf("finalizeRevisionExecution: %v", err)
 		}
 	})
