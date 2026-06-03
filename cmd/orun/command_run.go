@@ -341,7 +341,7 @@ func runPlan() error {
 	objStoreRoot, objStoreErr := filepath.Abs(filepath.Join(storeDir(), ".orun"))
 	if objStoreErr == nil && !runDryRun && !remoteActive {
 		objRun = beginObjectModelRun(objStoreRoot, plan, execID)
-		installObjectRunnerHooks(r, objRun, store, execID)
+		installObjectRunnerHooks(r, objRun)
 	}
 
 	runErr := r.Run(plan)
@@ -375,7 +375,7 @@ func runPlan() error {
 	// legacy-translation seal (M7c) covers the remote / dry-run fall-through where
 	// no working tree was opened. Best-effort, isolated under .orun/objectmodel/.
 	if objRun != nil {
-		finishObjectModelRun(objRun, store, execID, runErr)
+		finishObjectModelRun(r, objRun, runErr)
 	} else if objStoreErr == nil {
 		sealObjectModelRun(objStoreRoot, plan, store, execID)
 	}
