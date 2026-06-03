@@ -12,6 +12,7 @@ import (
 	"github.com/sourceplane/orun/internal/objgc"
 	"github.com/sourceplane/orun/internal/objindex"
 	"github.com/sourceplane/orun/internal/objmigrate"
+	"github.com/sourceplane/orun/internal/objread"
 	"github.com/sourceplane/orun/internal/objremote"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/workingview"
@@ -102,7 +103,7 @@ func registerObjectsCommand(root *cobra.Command) {
 
 	logCmd := &cobra.Command{
 		Use:   "log",
-		Short: "List executions newest-first (index-backed, walk fallback)",
+		Short: "List executions newest-first (live runs first, then sealed)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, refs, root, err := openObjectModel()
@@ -110,6 +111,23 @@ func registerObjectsCommand(root *cobra.Command) {
 				return err
 			}
 			return runObjectsLog(cmd.Context(), store, refs, root, cmd.OutOrStdout())
+		},
+	}
+
+	showCmd := &cobra.Command{
+		Use:   "show [ref]",
+		Short: "Show one execution's jobs/steps (live working tree or sealed)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, refs, root, err := openObjectModel()
+			if err != nil {
+				return err
+			}
+			ref := "executions/latest"
+			if len(args) > 0 {
+				ref = args[0]
+			}
+			return runObjectsShow(cmd.Context(), store, refs, root, ref, cmd.OutOrStdout())
 		},
 	}
 
@@ -199,7 +217,7 @@ func registerObjectsCommand(root *cobra.Command) {
 		},
 	}
 
-	objectsCmd.AddCommand(catCmd, lsTreeCmd, revParseCmd, fsckCmd, checkoutCmd, logCmd, reindexCmd, gcCmd, migrateCmd, pushCmd, pullCmd)
+	objectsCmd.AddCommand(catCmd, lsTreeCmd, revParseCmd, fsckCmd, checkoutCmd, logCmd, showCmd, reindexCmd, gcCmd, migrateCmd, pushCmd, pullCmd)
 	root.AddCommand(objectsCmd)
 }
 
@@ -270,24 +288,70 @@ func runObjectsGC(ctx context.Context, store objectstore.ObjectStore, refs refst
 }
 
 func runObjectsLog(ctx context.Context, store objectstore.ObjectStore, refs refstore.RefStore, root string, out io.Writer) error {
-	entries, err := objindex.New(store, refs, root).ListExecutions(ctx)
+	views, err := objread.New(store, refs, root).List(ctx)
 	if err != nil {
 		return err
 	}
-	if len(entries) == 0 {
+	if len(views) == 0 {
 		fmt.Fprintln(out, "no executions")
 		return nil
 	}
-	for _, e := range entries {
-		started := e.StartedAt
-		if started == "" {
-			started = "-"
+	for _, v := range views {
+		marker := ""
+		if v.Live {
+			marker = " (live)"
 		}
-		fmt.Fprintf(out, "%-24s %-9s %s rev=%s jobs=%d/%d\n",
-			e.ExecutionID, e.Status, started, shortID(objectstore.ObjectID(e.RevisionID)),
-			e.Summary.JobsSucceeded, e.Summary.JobsTotal)
+		fmt.Fprintf(out, "%-24s %-9s %s rev=%s jobs=%d/%d%s\n",
+			v.ExecutionID, v.Status, formatStarted(v.StartedAt), shortID(objectstore.ObjectID(v.RevisionID)),
+			v.Summary.JobsSucceeded, v.Summary.JobsTotal, marker)
 	}
 	return nil
+}
+
+// runObjectsShow prints one execution's job/attempt/step detail, from the live
+// working tree when in-flight or the sealed object tree otherwise.
+func runObjectsShow(ctx context.Context, store objectstore.ObjectStore, refs refstore.RefStore, root, ref string, out io.Writer) error {
+	v, err := objread.New(store, refs, root).Get(ctx, ref)
+	if err != nil {
+		return err
+	}
+	live := ""
+	if v.Live {
+		live = " (live)"
+	}
+	fmt.Fprintf(out, "execution %s%s\n", v.ExecutionID, live)
+	fmt.Fprintf(out, "  status:   %s\n", v.Status)
+	fmt.Fprintf(out, "  revision: %s\n", shortID(objectstore.ObjectID(v.RevisionID)))
+	fmt.Fprintf(out, "  started:  %s\n", formatStarted(v.StartedAt))
+	if v.FinishedAt != nil {
+		fmt.Fprintf(out, "  finished: %s\n", formatStarted(*v.FinishedAt))
+	}
+	fmt.Fprintf(out, "  jobs:     %d/%d succeeded, %d failed; %d steps\n",
+		v.Summary.JobsSucceeded, v.Summary.JobsTotal, v.Summary.JobsFailed, v.Summary.StepsTotal)
+	for _, j := range v.Jobs {
+		fmt.Fprintf(out, "  • %s [%s]\n", j.JobID, j.Status)
+		for _, a := range j.Attempts {
+			if len(j.Attempts) > 1 {
+				fmt.Fprintf(out, "      attempt %d [%s]\n", a.Attempt, a.Status)
+			}
+			for _, s := range a.Steps {
+				logmark := ""
+				if s.HasLog {
+					logmark = " (log)"
+				}
+				fmt.Fprintf(out, "      - %s [%s]%s\n", s.StepID, s.Status, logmark)
+			}
+		}
+	}
+	return nil
+}
+
+// formatStarted renders a start/finish timestamp for the read commands.
+func formatStarted(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 func runObjectsReindex(ctx context.Context, store objectstore.ObjectStore, refs refstore.RefStore, root string, out io.Writer) error {

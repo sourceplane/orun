@@ -18,6 +18,7 @@ import (
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
 	"github.com/sourceplane/orun/internal/objgc"
 	"github.com/sourceplane/orun/internal/objremote"
+	"github.com/sourceplane/orun/internal/runworktree"
 	"github.com/sourceplane/orun/internal/state"
 )
 
@@ -287,5 +288,70 @@ func TestRunObjectsSyncPushPull(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "pulled") {
 		t.Fatalf("pull output = %s", buf.String())
+	}
+}
+
+func TestRunObjectsShowSealed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store, refs, root, revID := objectsRig(t)
+
+	sealer := execseal.New(nodewriter.New(store, refs))
+	if _, err := sealer.Seal(ctx, execseal.SealInput{
+		RevisionID: revID, ExecutionID: "exec_show", ExecutionKey: "run-1",
+		Status: nodes.StatusSucceeded, StartedAt: time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC),
+		Jobs: []nodes.JobInput{{Record: nodes.JobRun{JobID: "svc@deploy", Folder: "j-1", Status: nodes.StatusSucceeded},
+			Attempts: []nodes.AttemptInput{{Record: nodes.JobAttempt{Attempt: 1, Status: nodes.StatusSucceeded},
+				Steps: []nodes.StepInput{{Record: nodes.StepAttempt{StepID: "build", Status: nodes.StatusSucceeded}, Log: []byte("ok")}}}}}},
+	}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := runObjectsShow(ctx, store, refs, root, "executions/latest", &buf); err != nil {
+		t.Fatalf("show: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"execution exec_show", "svc@deploy [succeeded]", "build [succeeded] (log)"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("show output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "(live)") {
+		t.Fatalf("sealed exec should not be marked live:\n%s", out)
+	}
+}
+
+func TestRunObjectsLogAndShowLive(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store, refs, root, revID := objectsRig(t)
+
+	// Open a live working tree (no seal) via the runtime writer.
+	mgr := runworktree.NewManager(store, refs, root)
+	wt, err := mgr.Open(ctx, runworktree.OpenInput{ExecutionID: "exec_live_cli", RevisionID: revID})
+	if err != nil {
+		t.Fatalf("open live: %v", err)
+	}
+	if err := wt.Project([]runworktree.ProjectedJob{
+		{JobID: "api@build", Status: nodes.StatusRunning, Steps: []runworktree.ProjectedStep{{StepID: "compile", Status: nodes.StatusRunning}}},
+	}); err != nil {
+		t.Fatalf("project: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := runObjectsLog(ctx, store, refs, root, &buf); err != nil {
+		t.Fatalf("log: %v", err)
+	}
+	if !strings.Contains(buf.String(), "exec_live_cli") || !strings.Contains(buf.String(), "(live)") {
+		t.Fatalf("log should surface the live run:\n%s", buf.String())
+	}
+
+	buf.Reset()
+	if err := runObjectsShow(ctx, store, refs, root, "exec_live_cli", &buf); err != nil {
+		t.Fatalf("show live: %v", err)
+	}
+	if !strings.Contains(buf.String(), "(live)") || !strings.Contains(buf.String(), "compile [running]") {
+		t.Fatalf("show live output wrong:\n%s", buf.String())
 	}
 }
