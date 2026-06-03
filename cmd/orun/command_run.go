@@ -14,6 +14,7 @@ import (
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/executor"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/objrun"
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/runner"
@@ -318,7 +319,7 @@ func runPlan() error {
 	// Native object-model runner: open a live working tree and drive it from
 	// the runner's lifecycle hooks; it seals natively on terminal. Isolated
 	// under .orun/objectmodel/.
-	var objRun *objectRunSession
+	var objRun *objrun.Session
 	objStoreRoot, objStoreErr := filepath.Abs(filepath.Join(storeDir(), ".orun"))
 	if objStoreErr == nil && !runDryRun && !remoteActive {
 		objRun = beginObjectModelRun(objStoreRoot, plan, execID)

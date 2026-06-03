@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -20,6 +17,7 @@ import (
 	"github.com/sourceplane/orun/internal/loader"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/normalize"
+	"github.com/sourceplane/orun/internal/objrun"
 	"github.com/sourceplane/orun/internal/planner"
 	"github.com/sourceplane/orun/internal/preset"
 	"github.com/sourceplane/orun/internal/render"
@@ -704,30 +702,17 @@ func generatePlan() error {
 // the plan's content with self-referential metadata (checksum, revision)
 // cleared. This matches data-model.md §3.1: the plan hash is stable across
 // re-runs of the same intent on the same SHA, irrespective of which alias
-// it was previously persisted under.
+// it was previously persisted under. It delegates to objrun so the run path
+// (CLI and TUI) and `orun plan` share one dedup-key implementation.
 func computePlanHashForRevision(plan *model.Plan) (string, error) {
-	if plan == nil {
-		return "", fmt.Errorf("plan is nil")
-	}
-	clone := *plan
-	clone.Metadata.Checksum = ""
-	clone.Metadata.Revision = nil
-	payload, err := json.Marshal(&clone)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(payload)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	return objrun.PlanHash(plan)
 }
 
 // canonicalPlanJSON marshals plan as deterministic indented JSON suitable
 // for persistence as canonical plan.json (and for byte-identical compat
 // aliases under .orun/plans/).
 func canonicalPlanJSON(plan *model.Plan) ([]byte, error) {
-	if plan == nil {
-		return nil, fmt.Errorf("plan is nil")
-	}
-	return json.MarshalIndent(plan, "", "  ")
+	return objrun.CanonicalPlanJSON(plan)
 }
 
 func validateFiles() error {
