@@ -2,59 +2,40 @@ package services
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
-
-	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 )
 
-func writeStepLog(t *testing.T, store *state.Store, execID, jobID, stepID, body string) {
-	t.Helper()
-	path := store.LogPath(execID, jobID, stepID)
-	if err := os.MkdirAll(filepathDir(path), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatalf("write log: %v", err)
-	}
-}
-
-// filepathDir is a tiny local helper so the test does not pull filepath into
-// scope under a name that collides with production helpers.
-func filepathDir(p string) string {
-	for i := len(p) - 1; i >= 0; i-- {
-		if p[i] == '/' {
-			return p[:i]
-		}
-	}
-	return "."
-}
-
 func TestTailLogs_RequiresExecID(t *testing.T) {
-	svc := NewLiveOrunService(LiveServiceConfig{Store: state.NewStore(t.TempDir())})
+	svc := NewLiveOrunService(LiveServiceConfig{ObjectModelRoot: orunDir(t.TempDir())})
 	if _, err := svc.TailLogs(context.Background(), LogRequest{JobID: "j"}); err == nil {
 		t.Fatal("expected ExecID-required error")
 	}
 }
 
 func TestTailLogs_RejectsRemoteState(t *testing.T) {
-	svc := NewLiveOrunService(LiveServiceConfig{Store: state.NewStore(t.TempDir())})
+	svc := NewLiveOrunService(LiveServiceConfig{ObjectModelRoot: orunDir(t.TempDir())})
 	_, err := svc.TailLogs(context.Background(), LogRequest{ExecID: "e", JobID: "j", RemoteState: true})
 	if err == nil {
 		t.Fatal("expected remote-state fail-closed error")
 	}
 }
 
-func TestTailLogs_OneShotReadsExistingLogs(t *testing.T) {
-	store := state.NewStore(t.TempDir())
-	if _, err := store.CreateExecution("exec-1", &model.Plan{}); err != nil {
-		t.Fatalf("create exec: %v", err)
-	}
-	writeStepLog(t, store, "exec-1", "job-a", "step-1", "line-one\nline-two\n")
+// TestTailLogs_OneShotReadsSealedLogs reads a completed run's step logs from the
+// sealed content blobs.
+func TestTailLogs_OneShotReadsSealedLogs(t *testing.T) {
+	dir := t.TempDir()
+	seedObjectExecution(t, dir, seedExec{
+		ExecID:   "exec-1",
+		PlanName: "demo",
+		Jobs: []seedJob{
+			{ID: "job-a", Component: "a", Steps: []seedStep{
+				{ID: "step-1", Log: "line-one\nline-two\n"},
+			}},
+		},
+	})
 
-	svc := NewLiveOrunService(LiveServiceConfig{Store: store})
+	svc := NewLiveOrunService(LiveServiceConfig{ObjectModelRoot: orunDir(dir)})
 	ch, err := svc.TailLogs(context.Background(), LogRequest{
 		ExecID: "exec-1", JobID: "job-a", Follow: false,
 	})
@@ -71,16 +52,61 @@ func TestTailLogs_OneShotReadsExistingLogs(t *testing.T) {
 	}
 }
 
-// TestTailLogs_FollowStreamsLateLogs is the regression guard for "logs don't
-// show while running": a step log written *after* the tail starts must still
-// be delivered, and cancelling the context must close the channel.
-func TestTailLogs_FollowStreamsLateLogs(t *testing.T) {
-	store := state.NewStore(t.TempDir())
-	if _, err := store.CreateExecution("exec-2", &model.Plan{}); err != nil {
-		t.Fatalf("create exec: %v", err)
-	}
+// TestTailLogs_OneShotStepFilter restricts the one-shot read to a single step.
+func TestTailLogs_OneShotStepFilter(t *testing.T) {
+	dir := t.TempDir()
+	seedObjectExecution(t, dir, seedExec{
+		ExecID: "exec-f",
+		Jobs: []seedJob{
+			{ID: "job-a", Component: "a", Steps: []seedStep{
+				{ID: "build", Log: "BUILD\n"},
+				{ID: "test", Log: "TEST\n"},
+			}},
+		},
+	})
 
-	svc := NewLiveOrunService(LiveServiceConfig{Store: store})
+	svc := NewLiveOrunService(LiveServiceConfig{ObjectModelRoot: orunDir(dir)})
+	ch, err := svc.TailLogs(context.Background(), LogRequest{ExecID: "exec-f", JobID: "job-a", StepID: "test"})
+	if err != nil {
+		t.Fatalf("TailLogs: %v", err)
+	}
+	var lines []string
+	for ev := range ch {
+		lines = append(lines, ev.Line)
+	}
+	if len(lines) != 1 || lines[0] != "TEST" {
+		t.Fatalf("step filter failed: %v", lines)
+	}
+}
+
+// TestTailLogs_FollowSupportedWhenAbsent verifies follow returns a live channel
+// even before the working tree appears, and that cancelling closes it.
+func TestTailLogs_FollowSupportedWhenAbsent(t *testing.T) {
+	svc := NewLiveOrunService(LiveServiceConfig{ObjectModelRoot: orunDir(t.TempDir())})
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := svc.TailLogs(ctx, LogRequest{ExecID: "e", JobID: "j", Follow: true})
+	if err != nil {
+		t.Fatalf("Follow=true should be supported, got %v", err)
+	}
+	cancel()
+	for range ch { // must terminate once the context is cancelled
+	}
+}
+
+// TestTailLogs_FollowStreamsLateLogs is the regression guard for "logs don't
+// show while running": a step log streamed into the live working tree *after*
+// the tail starts must still be delivered, and cancelling must close the
+// channel.
+func TestTailLogs_FollowStreamsLateLogs(t *testing.T) {
+	dir := t.TempDir()
+	wt := seedLiveWorkTree(t, dir, seedExec{
+		ExecID: "exec-2",
+		Jobs: []seedJob{
+			{ID: "job-b", Component: "b", Steps: []seedStep{{ID: "step-1"}}},
+		},
+	})
+
+	svc := NewLiveOrunService(LiveServiceConfig{ObjectModelRoot: orunDir(dir)})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -89,10 +115,12 @@ func TestTailLogs_FollowStreamsLateLogs(t *testing.T) {
 		t.Fatalf("TailLogs: %v", err)
 	}
 
-	// Write the step log only after the follow has started.
+	// Stream the step log only after the follow has started; SetStepLog both
+	// writes the file and re-persists the snapshot with the LogFile set, so the
+	// next follow tick discovers it.
 	go func() {
 		time.Sleep(150 * time.Millisecond)
-		writeStepLog(t, store, "exec-2", "job-b", "step-1", "delayed-line\n")
+		_ = wt.SetStepLog("job-b", "step-1", []byte("delayed-line\n"))
 	}()
 
 	select {
@@ -111,9 +139,7 @@ func TestTailLogs_FollowStreamsLateLogs(t *testing.T) {
 	cancel()
 	select {
 	case _, ok := <-ch:
-		// Either an already-buffered event then close, or an immediate close.
 		if ok {
-			// drain until closed
 			for range ch {
 			}
 		}

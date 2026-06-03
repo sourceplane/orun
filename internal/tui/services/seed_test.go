@@ -113,6 +113,53 @@ func seedObjectExecution(t *testing.T, dir string, spec seedExec) string {
 	return wt.ExecutionID()
 }
 
+// seedLiveWorkTree opens a live (unsealed) working tree under dir's object
+// graph, projects the given jobs/steps (without their logs), and returns the
+// live WorkTree so the caller can stream step logs and/or seal it afterwards.
+// Use this for follow-mode tests that must write a step log *after* the tail
+// has started.
+func seedLiveWorkTree(t *testing.T, dir string, spec seedExec) *runworktree.WorkTree {
+	t.Helper()
+	ctx := context.Background()
+	root := objectModelRoot(dir)
+
+	store, err := objectstore.NewLocalStore(objectstore.LocalConfig{Root: root})
+	if err != nil {
+		t.Fatalf("seed: open store: %v", err)
+	}
+	refs, err := refstore.NewLocalRefStore(refstore.LocalConfig{Root: root, Writer: "test"})
+	if err != nil {
+		t.Fatalf("seed: open refs: %v", err)
+	}
+	revID := seedRevision(t, store, spec)
+
+	mgr := runworktree.NewManager(store, refs, root)
+	wt, err := mgr.Open(ctx, runworktree.OpenInput{
+		ExecutionID: spec.ExecID,
+		RevisionID:  revID,
+		StartedAt:   spec.StartedAt,
+	})
+	if err != nil {
+		t.Fatalf("seed: open working tree: %v", err)
+	}
+
+	projected := make([]runworktree.ProjectedJob, 0, len(spec.Jobs))
+	for _, j := range spec.Jobs {
+		pj := runworktree.ProjectedJob{JobID: j.ID, Status: orDefault(j.Status, nodes.StatusRunning)}
+		for _, s := range j.Steps {
+			pj.Steps = append(pj.Steps, runworktree.ProjectedStep{
+				StepID: s.ID,
+				Status: orDefault(s.Status, nodes.StatusRunning),
+			})
+		}
+		projected = append(projected, pj)
+	}
+	if err := wt.Project(projected); err != nil {
+		t.Fatalf("seed: project: %v", err)
+	}
+	return wt
+}
+
 // seedRevision writes a revision tree containing a compiled plan.json built from
 // the seed spec, so PlanSummary resolves the plan name + component set.
 func seedRevision(t *testing.T, store *objectstore.LocalStore, spec seedExec) objectstore.ObjectID {

@@ -62,15 +62,22 @@ func (s *LiveOrunService) LoadWorkspace(ctx context.Context, req WorkspaceReques
 	envNames := environmentNames(intent)
 	components := componentSummaries(intent, normalised)
 
-	plans, _ := s.cfg.Store.ListPlans()
-	planSummaries := make([]PlanSummary, 0, len(plans))
-	for _, p := range plans {
-		planSummaries = append(planSummaries, PlanSummary{
-			Name:        p.Name,
-			Checksum:    p.Checksum,
-			JobCount:    p.Jobs,
-			GeneratedAt: p.CreatedAt,
-		})
+	// Saved-plan listing is the last legacy-store read in the workspace path;
+	// it is repointed onto the revision graph in a later TUI stage. Until then
+	// it degrades to an empty list when no legacy store is configured rather
+	// than failing the read-only snapshot.
+	var planSummaries []PlanSummary
+	if s.cfg.Store != nil {
+		plans, _ := s.cfg.Store.ListPlans()
+		planSummaries = make([]PlanSummary, 0, len(plans))
+		for _, p := range plans {
+			planSummaries = append(planSummaries, PlanSummary{
+				Name:        p.Name,
+				Checksum:    p.Checksum,
+				JobCount:    p.Jobs,
+				GeneratedAt: p.CreatedAt,
+			})
+		}
 	}
 
 	return &WorkspaceSnapshot{
