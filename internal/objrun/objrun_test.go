@@ -106,6 +106,64 @@ func TestLivePathSeals(t *testing.T) {
 	}
 }
 
+func TestSealImportsTerminalRun(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	plan := &model.Plan{Metadata: model.PlanMetadata{Name: "demo"}, Jobs: []model.PlanJob{{ID: "build"}}}
+
+	id, err := Seal(ctx, root, plan, ImportInput{
+		ExecID: "gh-7-1-abc",
+		Status: "completed", // source vocabulary, folded to succeeded
+		Jobs: []SealJob{{
+			JobID:  "build",
+			Status: "success",
+			Steps: []SealStep{
+				{StepID: "compile", Status: "success", Log: []byte("compiling\n")},
+				{StepID: "test", Status: "skipped"},
+			},
+		}},
+		Links: []SealLink{{Label: "GitHub Actions", URL: "https://example/run/7"}},
+	})
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	if id == "" {
+		t.Fatalf("Seal returned empty id")
+	}
+
+	// Published under both executions/latest and executions/by-id/<id>; the
+	// live working tree is gone.
+	if _, err := os.Stat(filepath.Join(root, "refs", "executions", "latest.json")); err != nil {
+		t.Fatalf("executions/latest not published: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "refs", "executions", "by-id", "gh-7-1-abc.json")); err != nil {
+		t.Fatalf("executions/by-id not published: %v", err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, "run")); len(entries) != 0 {
+		t.Fatalf("working tree survived seal: %d entries", len(entries))
+	}
+
+	// Re-importing the same run succeeds (no overwrite protection to trip over).
+	if _, err := Seal(ctx, root, plan, ImportInput{
+		ExecID: "gh-7-1-abc", Status: "completed",
+		Jobs: []SealJob{{JobID: "build", Status: "success"}},
+	}); err != nil {
+		t.Fatalf("re-Seal: %v", err)
+	}
+}
+
+func TestSealRequiresExecIDAndPlan(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	if _, err := Seal(ctx, root, nil, ImportInput{ExecID: "x"}); err == nil {
+		t.Fatal("expected error for nil plan")
+	}
+	plan := &model.Plan{Metadata: model.PlanMetadata{Name: "demo"}}
+	if _, err := Seal(ctx, root, plan, ImportInput{}); err == nil {
+		t.Fatal("expected error for empty exec id")
+	}
+}
+
 func TestProjectFromExecStateSorted(t *testing.T) {
 	st := &execmodel.ExecState{Jobs: map[string]*execmodel.JobState{
 		"b@deploy": {Status: "running", Steps: map[string]string{"z": "running", "a": "success"}},

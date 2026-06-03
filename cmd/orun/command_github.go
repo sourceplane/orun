@@ -430,7 +430,8 @@ func runGithubPull() error {
 	}
 
 	summary := runbundle.SynthesizedSummary(synthesized)
-	fmt.Fprintf(os.Stderr, "✓ hydrated %s  %s\n", targetExecID, summary)
+	fmt.Fprintf(os.Stderr, "✓ imported %s into the object graph  %s\n", targetExecID, summary)
+	fmt.Fprintf(os.Stderr, "  view it with: orun status %s\n", targetExecID)
 
 	return nil
 }

@@ -1,8 +1,18 @@
 # Follow-up: repoint `runbundle.Hydrate` (`orun github pull`) onto the object graph
 
-> **Status: deferred** (chosen during the M12 bridge cleanup). This is the last
-> blocker for deleting `internal/state`: `internal/runbundle/hydrate.go` is the
-> sole remaining non-test importer of the legacy file store.
+> **Status: DONE.** `runbundle.Hydrate` now seals pulled runs into the object
+> graph via `objrun.Seal` (the non-runner counterpart to `Begin`/`Finish`), so
+> `orun github pull` is readable by `orun status`/`orun logs`. There are now
+> **zero** non-test importers of `internal/state`; the remaining work to delete
+> the package is the mechanical test repoint + cleanup in §5 (T6).
+>
+> Implementation note vs. the original plan below: rather than hand-building
+> `execseal.SealInput`, `Hydrate` projects the shards' jobs/steps/logs through
+> `objrun.Seal`, which drives the same `runworktree` path the live runner uses —
+> so an imported run is shaped identically to a native one with no duplicated
+> assembly logic. The source shards carry no per-step timestamps, so per-job/step
+> times are import-time while the execution-level start/finish reflect the real
+> run.
 
 ## 1. Why this exists
 
@@ -86,17 +96,29 @@ direct `execseal.Seal`.
 - Keep/repoint `hydrate_test.go` (currently asserts the legacy file layout) onto
   the object-graph assertions.
 
-## 5. After this lands — finish `rm internal/state`
+## 5. Remaining — finish `rm internal/state` (T6)
 
-Once hydrate is off `internal/state`:
-1. Repoint the remaining **test** importers (`cmd/orun/*_test.go`,
-   `internal/cockpit/*/*_test.go`, `internal/runner/*_test.go`,
-   `internal/runbundle/*_test.go`) from `state.*` to `execmodel.*` (they are
-   aliases — a mechanical swap).
-2. Delete `internal/state` and `internal/executionstate/bridge.go` if unused.
-3. Add the grep gate (no `internal/state` imports anywhere) to
-   `scripts/check-object-model.sh` and remove the `ORUN_OBJECT_MODEL` /
-   `ORUN_OBJECT_RUNNER` coexistence flags (default-on becomes the only path).
+Hydrate is done, so there are **zero non-test** importers of `internal/state`.
+The legacy file `Store` (NewStore/SaveState/LoadState/…) is now dead production
+code kept alive only by tests. The 14 remaining test importers split into:
+
+1. **10 alias-only files** — use just the alias types (`state.ExecState`,
+   `state.JobState`, `state.ExecMetadata`, …). A mechanical `state.` → `execmodel.`
+   swap: `cmd/orun/command_github_test.go`, `cmd/orun/remote_claim_test.go`,
+   `cmd/orun/command_views_test.go`, `internal/runner/{presenter,snapshot}_test.go`,
+   `internal/runbundle/{synthesize,writer,reader}_test.go`,
+   `internal/cockpit/watch/watch_test.go`, `internal/cockpit/viewmodel/run_test.go`.
+2. **4 file-Store files** — actually drive the legacy file `Store` as a fixture:
+   `cmd/orun/command_read_revision_test.go`, `cmd/orun/command_run_revision_test.go`,
+   `cmd/orun/object_model_run_test.go`, `cmd/orun/state_e2e_test.go`. These seed a
+   legacy `.orun/` store that the commands-under-test no longer read post-cutover;
+   the Store usage is vestigial and should be dropped (or the test reworked onto
+   the object model) rather than preserved.
+
+Then: delete `internal/state` and `internal/executionstate/bridge.go` (if unused),
+add the grep gate (no `internal/state` imports anywhere) to
+`scripts/check-object-model.sh`, and remove the `ORUN_OBJECT_MODEL` /
+`ORUN_OBJECT_RUNNER` coexistence flags (default-on becomes the only path).
 
 ## 6. References
 - `internal/objrun` (`Begin`/`PlanHash`/`CanonicalPlanJSON`, the revision-resolve
