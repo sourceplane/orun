@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/objread"
+	"github.com/sourceplane/orun/internal/ui"
 )
 
 // object_model_read.go repoints the read commands at the content-addressed
@@ -138,6 +142,90 @@ func objStatusList(reader *objread.Reader) (handled bool, err error) {
 		return false, nil
 	}
 	return true, cockpitRenderRunList(objViewsToEntries(views))
+}
+
+// objLogEntries builds the legacy logEntry rows for an execution from the object
+// graph, honoring the --job/--step/--failed filters and reading log content from
+// the sealed log blobs (or the live working tree).
+func objLogEntries(reader *objread.Reader, v objread.ExecutionView) []logEntry {
+	ctx := context.Background()
+	var out []logEntry
+	for _, j := range v.Jobs {
+		if logsJob != "" && !strings.Contains(j.JobID, logsJob) {
+			continue
+		}
+		n := len(j.Attempts)
+		if n == 0 {
+			continue
+		}
+		for _, s := range j.Attempts[n-1].Steps {
+			if logsStep != "" && !strings.Contains(s.StepID, logsStep) {
+				continue
+			}
+			if !s.HasLog {
+				continue
+			}
+			status := nodeStatusToLegacy(s.Status)
+			if logsFailed && status != "failed" {
+				continue
+			}
+			content, err := reader.StepLog(ctx, v, j.JobID, s.StepID)
+			if err != nil {
+				continue
+			}
+			trimmed := strings.TrimSpace(string(content))
+			if trimmed == "" {
+				continue
+			}
+			out = append(out, logEntry{jobID: j.JobID, stepID: s.StepID, status: status, content: trimmed})
+		}
+	}
+	return out
+}
+
+// objShowLogs renders an execution's logs from the object graph. handled=false
+// (nil error) means the ref was not found — fall back to the legacy store.
+func objShowLogs(reader *objread.Reader, ref string, color bool) (handled bool, err error) {
+	v, gerr := reader.Get(context.Background(), ref)
+	if gerr != nil {
+		return false, nil
+	}
+	meta := objViewToMeta(v)
+	st := objViewToState(v)
+	counts := executionCountsFromState(meta, st)
+	entries := objLogEntries(reader, v)
+	if len(entries) == 0 {
+		fmt.Println(ui.Dim(color, "No logs for this run yet."))
+		return true, nil
+	}
+	sortLogEntries(entries)
+	entries = selectRelevantLogEntries(entries)
+	renderLogEntries(v.ExecutionID, meta, counts, entries, color)
+	return true, nil
+}
+
+// sortLogEntries orders log rows by component/env, then status, then job/step —
+// the same ordering the legacy logs path uses.
+func sortLogEntries(entries []logEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		ci, ei, _ := splitJobID(entries[i].jobID)
+		cj, ej, _ := splitJobID(entries[j].jobID)
+		if ci != cj {
+			return ci < cj
+		}
+		if ei != ej {
+			return ei < ej
+		}
+		oi := statusSortKey(entries[i].status)
+		oj := statusSortKey(entries[j].status)
+		if oi != oj {
+			return oi < oj
+		}
+		if entries[i].jobID != entries[j].jobID {
+			return entries[i].jobID < entries[j].jobID
+		}
+		return entries[i].stepID < entries[j].stepID
+	})
 }
 
 // objStatusSingle renders one execution from the object graph. handled=false

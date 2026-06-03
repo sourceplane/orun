@@ -116,6 +116,18 @@ func showLogs() error {
 		return showRemoteLogs(runID, backend, color)
 	}
 
+	// M12 T3: read logs from the content-addressed graph when the object model
+	// is active and present; fall back to the legacy store on a miss.
+	if reader, ok := openObjectReader(); ok {
+		ref := logsExecID
+		if ref == "" {
+			ref = "executions/latest"
+		}
+		if handled, err := objShowLogs(reader, ref, color); handled || err != nil {
+			return err
+		}
+	}
+
 	store := state.NewStore(storeDir())
 	readStore := store
 
@@ -155,25 +167,7 @@ func showLogs() error {
 		return nil
 	}
 
-	sort.Slice(entries, func(i, j int) bool {
-		ci, ei, _ := splitJobID(entries[i].jobID)
-		cj, ej, _ := splitJobID(entries[j].jobID)
-		if ci != cj {
-			return ci < cj
-		}
-		if ei != ej {
-			return ei < ej
-		}
-		oi := statusSortKey(entries[i].status)
-		oj := statusSortKey(entries[j].status)
-		if oi != oj {
-			return oi < oj
-		}
-		if entries[i].jobID != entries[j].jobID {
-			return entries[i].jobID < entries[j].jobID
-		}
-		return entries[i].stepID < entries[j].stepID
-	})
+	sortLogEntries(entries)
 	entries = selectRelevantLogEntries(entries)
 
 	renderLogEntries(execID, meta, counts, entries, color)
