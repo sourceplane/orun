@@ -50,9 +50,11 @@ type RunnerHooks struct {
 	// the on-disk store via SaveState. M5.b CLI rewire uses this to
 	// drive the executionstate Bridge mirror per cli-surface.md §2.2
 	// ("on each runner tick: bridge mirrors legacy
-	// .orun/executions/<legacyExecID> into the new layout"). The hook
-	// runs synchronously while r.stateMu is held — implementations
-	// MUST be fast and non-blocking.
+	// .orun/executions/<legacyExecID> into the new layout"); the
+	// object-model working tree uses it to project live state. The hook
+	// runs synchronously but OUTSIDE r.stateMu (so it may call back into
+	// the runner, e.g. SnapshotState); implementations MUST be fast and
+	// non-blocking.
 	AfterStateUpdate func()
 }
 
@@ -956,15 +958,21 @@ func (r *Runner) initComponentCounts(jobs []model.PlanJob) {
 
 func (r *Runner) updateState(persist bool, execState *state.ExecState, update func()) {
 	r.stateMu.Lock()
-	defer r.stateMu.Unlock()
 	if update != nil {
 		update()
 	}
-	if !persist || r.Store == nil || r.ExecID == "" {
-		return
+	fireHook := false
+	if persist && r.Store != nil && r.ExecID != "" {
+		r.Store.SaveState(r.ExecID, execState)
+		fireHook = true
 	}
-	r.Store.SaveState(r.ExecID, execState)
-	if r.Hooks != nil && r.Hooks.AfterStateUpdate != nil {
+	r.stateMu.Unlock()
+
+	// AfterStateUpdate runs OUTSIDE r.stateMu: observers (the object-model
+	// working tree) call back into the runner — e.g. SnapshotState, which takes
+	// r.stateMu — so firing under the lock would self-deadlock. The hook reads
+	// already-persisted/snapshot state, so it does not need the lock held.
+	if fireHook && r.Hooks != nil && r.Hooks.AfterStateUpdate != nil {
 		r.Hooks.AfterStateUpdate()
 	}
 }
