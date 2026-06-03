@@ -181,6 +181,10 @@ test-object-model:
 	@COVER=$$(go test -count=1 -race -cover ./internal/runworktree | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
 	  echo "   measured: $$COVER%"; \
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 85.0) { printf "❌ runworktree coverage %.1f%% below 85%% threshold\n", c+0; exit 1 } }'
+	@echo "🧪 object-model: objread (>= 85%)"
+	@COVER=$$(go test -count=1 -race -cover ./internal/objread | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
+	  echo "   measured: $$COVER%"; \
+	  awk -v c=$$COVER 'BEGIN { if (c+0 < 85.0) { printf "❌ objread coverage %.1f%% below 85%% threshold\n", c+0; exit 1 } }'
 	@echo "🧪 object-model: objexec bridge (>= 85%)"
 	@COVER=$$(go test -count=1 -race -cover ./internal/objexec | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
 	  echo "   measured: $$COVER%"; \
