@@ -9,11 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sourceplane/orun/internal/cockpit/bridge"
-	"github.com/sourceplane/orun/internal/cockpit/render"
-	watchpkg "github.com/sourceplane/orun/internal/cockpit/watch"
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/objread"
+	"github.com/sourceplane/orun/internal/objview"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
@@ -115,72 +114,67 @@ func showStatus() error {
 		return showRemoteExecution(runID, backend, color)
 	}
 
-	store := state.NewStore(storeDir())
-
-	// M12 T3: when the object model is active and present, read executions from
-	// the content-addressed graph (live working trees + sealed objects). Fall
-	// back to the legacy store when it has no matching data, so coexistence and
-	// flag-off behavior are preserved.
-	if reader, ok := openObjectReader(); ok && !statusWatch {
+	// Local executions are read from the content-addressed object graph.
+	reader, ok := openObjectReader()
+	if !ok {
 		if statusAll {
-			if handled, err := objStatusList(reader); handled || err != nil {
-				return err
-			}
-		} else {
-			ref := statusExecID
-			if ref == "" {
-				ref = "executions/latest"
-			}
-			if handled, err := objStatusSingle(reader, ref, color); handled || err != nil {
-				return err
-			}
+			return cockpitRenderRunList(nil)
 		}
+		fmt.Println(ui.Dim(color, "No runs yet."))
+		fmt.Println()
+		fmt.Printf("  Start one with: %s\n", ui.Bold(color, "orun run"))
+		return nil
 	}
 
 	if statusAll {
-		return showAllExecutions(store, color)
+		if handled, err := objStatusList(reader); handled || err != nil {
+			return err
+		}
+		return cockpitRenderRunList(nil)
 	}
 
-	resolveExecID := func() (string, error) {
-		// M5.c: route lookup through executionstate.ResolveExecution
-		// so the seven-branch ladder + legacy fallback are honored.
-		// On miss, fall back to the legacy state.Store resolver to
-		// preserve compatibility with workspaces that haven't run
-		// the M4/M5 writers yet.
-		ref := statusExecID
-		if ref == "" {
-			ref = "latest"
-		}
-		if rx, err := resolveExecutionForRead(context.Background(), statusExecID, statusRevision); err == nil {
-			return rx.LegacyExecID, nil
-		}
-		return store.ResolveExecID(ref)
+	ref := statusExecID
+	if ref == "" {
+		ref = "executions/latest"
 	}
-
 	if statusWatch {
-		return watchExecution(store, resolveExecID, color)
+		return watchObjectExecution(reader, color)
 	}
-
-	if rx, err := resolveExecutionForRead(context.Background(), statusExecID, statusRevision); err == nil {
-		readStore := rx.Store
-		if readStore == nil {
-			readStore = store
-		}
-		return showExecution(readStore, rx.LegacyExecID, color)
-	}
-
-	execID, err := resolveExecID()
-	if err != nil {
-		if statusExecID == "" {
-			fmt.Println(ui.Dim(color, "No runs yet."))
-			fmt.Println()
-			fmt.Printf("  Start one with: %s\n", ui.Bold(color, "orun run"))
-			return nil
-		}
+	if handled, err := objStatusSingle(reader, ref, color); handled || err != nil {
 		return err
 	}
+	fmt.Println(ui.Dim(color, "No runs yet."))
+	fmt.Println()
+	fmt.Printf("  Start one with: %s\n", ui.Bold(color, "orun run"))
+	return nil
+}
 
-	return showExecution(store, execID, color)
+// watchObjectExecution polls the object graph and renders the most recent run
+// (a live working tree if one is in flight, else the latest sealed execution),
+// stopping when it reaches a terminal (sealed) state.
+func watchObjectExecution(reader *objread.Reader, color bool) error {
+	interval := statusInterval
+	if interval < 200*time.Millisecond {
+		interval = time.Second
+	}
+	fmt.Print("\x1b[?25l")
+	defer fmt.Print("\x1b[?25h\n")
+	for {
+		list, err := reader.List(context.Background())
+		fmt.Print("\x1b[H\x1b[J")
+		if err != nil || len(list) == 0 {
+			fmt.Println(ui.Dim(color, "Waiting for a run…"))
+		} else {
+			v, gerr := reader.Get(context.Background(), list[0].ExecutionID)
+			if gerr == nil {
+				_ = renderExecution(v.ExecutionID, objview.ToMeta(v), objview.ToState(v), color)
+				if !v.Live {
+					return nil
+				}
+			}
+		}
+		time.Sleep(interval)
+	}
 }
 
 func showRemoteExecution(runID string, backend statebackend.Backend, color bool) error {
@@ -224,7 +218,7 @@ func watchRemoteExecution(runID string, backend statebackend.Backend, color bool
 	}
 }
 
-func renderExecutionJSON(execID string, meta *state.ExecMetadata, st *state.ExecState) error {
+func renderExecutionJSON(execID string, meta *execmodel.ExecMetadata, st *execmodel.ExecState) error {
 	out := map[string]interface{}{
 		"execID": execID,
 	}
@@ -239,98 +233,6 @@ func renderExecutionJSON(execID string, meta *state.ExecMetadata, st *state.Exec
 	return enc.Encode(out)
 }
 
-func watchExecution(store *state.Store, resolve func() (string, error), color bool) error {
-	interval := statusInterval
-	if interval < 200*time.Millisecond {
-		interval = time.Second
-	}
-	// Hide cursor and clear once on entry; restore on exit.
-	fmt.Print("\x1b[?25l")
-	defer fmt.Print("\x1b[?25h\n")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	src := bridge.FromStore(store)
-	ch := watchpkg.Run(ctx, src, watchpkg.Options{
-		Interval:      interval,
-		ResolveExecID: resolve,
-	})
-
-	for u := range ch {
-		fmt.Print("\x1b[H\x1b[J")
-		if u.Err != nil {
-			fmt.Println(ui.Dim(color, "Waiting for a run..."))
-			continue
-		}
-		// Re-render through the cockpit; this is byte-identical to the
-		// frame `orun status` (no --watch) would print.
-		s := cockpitSurface(os.Stdout)
-		for _, line := range render.RunStatus(s, u.View) {
-			fmt.Fprintln(os.Stdout, line)
-		}
-		if u.Terminal {
-			return nil
-		}
-	}
-	return nil
-}
-
-func showAllExecutions(store *state.Store, color bool) error {
-	execs, err := store.ListExecutions()
-	if err != nil {
-		return err
-	}
-	return cockpitRenderRunList(execs)
-}
-
-func showAllExecutionsLegacy(store *state.Store, color bool) error {
-	execs, err := store.ListExecutions()
-	if err != nil {
-		return err
-	}
-	if len(execs) == 0 {
-		fmt.Println(ui.Dim(color, "No runs yet."))
-		fmt.Println()
-		fmt.Printf("  Start one with: %s\n", ui.Bold(color, "orun run"))
-		return nil
-	}
-
-	sort.SliceStable(execs, func(i, j int) bool {
-		iRunning := strings.ToLower(execs[i].Status) == "running"
-		jRunning := strings.ToLower(execs[j].Status) == "running"
-		if iRunning != jRunning {
-			return iRunning
-		}
-		return execs[i].StartedAt > execs[j].StartedAt
-	})
-
-	fmt.Fprintf(os.Stdout, "%s  %s  %s  %s  %s\n",
-		padRight(ui.Bold(color, "RUN"), 38),
-		padRight(ui.Bold(color, "STATE"), 10),
-		padRight(ui.Bold(color, "PLAN"), 22),
-		padRight(ui.Bold(color, "RESULT"), 20),
-		ui.Bold(color, "AGE"))
-
-	for _, exec := range execs {
-		icon := styleStatus(exec.Status, color)
-		result := formatExecutionCounts(executionCounts{
-			total:     exec.JobTotal,
-			completed: exec.JobDone,
-			failed:    exec.JobFailed,
-		})
-		fmt.Fprintf(os.Stdout, "%s %-37s %-10s %-22s %-20s %s\n",
-			icon,
-			exec.ID,
-			statusLabel(exec.Status),
-			trimDisplay(exec.PlanName, 22),
-			trimDisplay(result, 20),
-			formatAge(exec.StartedAt),
-		)
-	}
-
-	return nil
-}
-
 type jobView struct {
 	id     string
 	comp   string
@@ -342,7 +244,7 @@ type jobView struct {
 	steps  map[string]string
 }
 
-func collectJobViews(st *state.ExecState) []jobView {
+func collectJobViews(st *execmodel.ExecState) []jobView {
 	if st == nil {
 		return nil
 	}
@@ -384,16 +286,7 @@ func collectJobViews(st *state.ExecState) []jobView {
 	return jobs
 }
 
-func showExecution(store *state.Store, execID string, color bool) error {
-	src := bridge.FromStore(store)
-	meta, st, _ := src.LoadRun(context.Background(), execID)
-	if statusJSON {
-		return renderExecutionJSON(execID, meta, st)
-	}
-	return renderExecution(execID, meta, st, color)
-}
-
-func renderExecution(execID string, meta *state.ExecMetadata, st *state.ExecState, color bool) error {
+func renderExecution(execID string, meta *execmodel.ExecMetadata, st *execmodel.ExecState, color bool) error {
 	// Cockpit bridge: unified renderer shared with TUI.
 	if _, err := cockpitRenderExecution(execID, meta, st); err == nil {
 		return nil
@@ -402,7 +295,7 @@ func renderExecution(execID string, meta *state.ExecMetadata, st *state.ExecStat
 	return renderExecutionLegacy(execID, meta, st, color)
 }
 
-func renderExecutionLegacy(execID string, meta *state.ExecMetadata, st *state.ExecState, color bool) error {
+func renderExecutionLegacy(execID string, meta *execmodel.ExecMetadata, st *execmodel.ExecState, color bool) error {
 	counts := executionCountsFromState(meta, st)
 
 	status := "unknown"
@@ -751,8 +644,8 @@ func splitJobID(id string) (component, env, name string) {
 	return "", "", id
 }
 
-func executionCountsFromState(meta *state.ExecMetadata, st *state.ExecState) executionCounts {
-	if counts := state.SummarizeExecutionState(st); counts.Total > 0 {
+func executionCountsFromState(meta *execmodel.ExecMetadata, st *execmodel.ExecState) executionCounts {
+	if counts := execmodel.SummarizeExecutionState(st); counts.Total > 0 {
 		return executionCounts{
 			total:     counts.Total,
 			completed: counts.Completed,

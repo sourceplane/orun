@@ -244,30 +244,9 @@ func TestStateE2E(t *testing.T) {
 		}
 	})
 
-	// ---- Steps 10–13: read-side CLI surface ----------------------------
-	// Step 10: `orun status` — we exercise the underlying read resolver
-	// rather than the full renderer (which writes Bubble Tea progress to
-	// stdout); the resolver is the only piece the state redesign owns.
-	t.Run("step10_status_resolves_latest_execution", func(t *testing.T) {
-		rxRead, err := resolveExecutionForRead(ctx, "", "")
-		if err != nil {
-			t.Fatalf("resolveExecutionForRead(latest): %v", err)
-		}
-		if rxRead.LegacyExecID != "exec-e2e-001" {
-			t.Fatalf("LegacyExecID = %q; want exec-e2e-001", rxRead.LegacyExecID)
-		}
-	})
-
-	// Step 11: `orun logs` — same resolver. We do not invoke the full
-	// renderer because it depends on bridge mirror state that the
-	// dry-run path intentionally skips; the spec only requires "does
-	// not error" at this step.
-	t.Run("step11_logs_resolves_without_error", func(t *testing.T) {
-		if _, err := resolveExecutionForRead(ctx, "", ""); err != nil {
-			t.Fatalf("logs resolver: %v", err)
-		}
-	})
-
+	// ---- Steps 12–13: read-side CLI surface ----------------------------
+	// (Steps 10–11, the legacy execution-read resolver, were removed at the
+	// M12 cutover: execution reads now go through the object graph.)
 	// Step 12: `orun describe revision latest` — the literal "latest"
 	// must normalize to "" and surface the revision key + trigger field.
 	t.Run("step12_describe_revision_latest", func(t *testing.T) {
