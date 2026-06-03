@@ -225,7 +225,6 @@ func init() {
 	registerIntentCommand(rootCmd)
 	registerGithubCommand(rootCmd)
 	registerTuiCommand(rootCmd)
-	registerStateCommand(rootCmd)
 	registerCatalogCommand(rootCmd)
 	registerObjectsCommand(rootCmd)
 }

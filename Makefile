@@ -185,10 +185,6 @@ test-object-model:
 	@COVER=$$(go test -count=1 -race -cover ./internal/objread | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
 	  echo "   measured: $$COVER%"; \
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 85.0) { printf "❌ objread coverage %.1f%% below 85%% threshold\n", c+0; exit 1 } }'
-	@echo "🧪 object-model: objexec bridge (>= 85%)"
-	@COVER=$$(go test -count=1 -race -cover ./internal/objexec | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
-	  echo "   measured: $$COVER%"; \
-	  awk -v c=$$COVER 'BEGIN { if (c+0 < 85.0) { printf "❌ objexec coverage %.1f%% below 85%% threshold\n", c+0; exit 1 } }'
 	@echo "🧪 object-model: objindex (>= 88%)"
 	@COVER=$$(go test -count=1 -race -cover ./internal/objindex | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
 	  echo "   measured: $$COVER%"; \
@@ -197,10 +193,6 @@ test-object-model:
 	@COVER=$$(go test -count=1 -race -cover ./internal/objgc | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
 	  echo "   measured: $$COVER%"; \
 	  awk -v c=$$COVER 'BEGIN { if (c+0 < 85.0) { printf "❌ objgc coverage %.1f%% below 85%% threshold\n", c+0; exit 1 } }'
-	@echo "🧪 object-model: objmigrate bridge (>= 85%)"
-	@COVER=$$(go test -count=1 -race -cover ./internal/objmigrate | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
-	  echo "   measured: $$COVER%"; \
-	  awk -v c=$$COVER 'BEGIN { if (c+0 < 85.0) { printf "❌ objmigrate coverage %.1f%% below 85%% threshold\n", c+0; exit 1 } }'
 	@echo "🧪 object-model: objremote (>= 85%)"
 	@COVER=$$(go test -count=1 -race -cover ./internal/objremote | awk '/coverage:/ {gsub("%","",$$5); print $$5}'); \
 	  echo "   measured: $$COVER%"; \
