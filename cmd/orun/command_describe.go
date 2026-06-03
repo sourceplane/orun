@@ -7,7 +7,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/objview"
 	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statestore"
@@ -125,8 +127,20 @@ func registerDescribeCommand(root *cobra.Command) {
 }
 
 func describeRun(ref string) error {
-	store := state.NewStore(storeDir())
 	color := ui.ColorEnabledForWriter(os.Stdout)
+
+	// M12 T3: read the execution from the object graph when active.
+	if reader, ok := openObjectReader(); ok {
+		r := ref
+		if r == "" {
+			r = "executions/latest"
+		}
+		if v, err := reader.Get(context.Background(), r); err == nil {
+			return renderDescribeRun(v.ExecutionID, objview.ToMeta(v), objview.ToState(v), nil, color)
+		}
+	}
+
+	store := state.NewStore(storeDir())
 
 	// M5.c: route through the seven-branch resolver. On miss
 	// (e.g. a workspace that hasn't materialized any revisions yet)
@@ -147,6 +161,12 @@ func describeRun(ref string) error {
 
 	meta, _ := store.LoadMetadata(execID)
 	st, _ := store.LoadState(execID)
+	return renderDescribeRun(execID, meta, st, rx, color)
+}
+
+// renderDescribeRun prints the execution detail block, shared by the
+// object-model and legacy paths.
+func renderDescribeRun(execID string, meta *execmodel.ExecMetadata, st *execmodel.ExecState, rx *resolvedExec, color bool) error {
 
 	fmt.Fprintf(os.Stdout, "\n%s\n", ui.Bold(color, "Execution: "+execID))
 	fmt.Fprintln(os.Stdout, strings.Repeat("─", 60))
@@ -199,17 +219,20 @@ func describeRun(ref string) error {
 }
 
 func describePlan(ref string) error {
-	store := state.NewStore(storeDir())
 	color := ui.ColorEnabledForWriter(os.Stdout)
 
-	path, err := store.ResolvePlanRef(ref)
-	if err != nil {
-		return err
-	}
-
-	plan, err := loadPlan(path)
-	if err != nil {
-		return err
+	// M12 T3: resolve the plan from the object-model revision graph when active.
+	plan, ok := objResolvePlan(ref)
+	if !ok {
+		store := state.NewStore(storeDir())
+		path, err := store.ResolvePlanRef(ref)
+		if err != nil {
+			return err
+		}
+		plan, err = loadPlan(path)
+		if err != nil {
+			return err
+		}
 	}
 
 	if getOutputFormat == "json" {
@@ -218,7 +241,7 @@ func describePlan(ref string) error {
 		return nil
 	}
 
-	planID := state.PlanChecksumShort(plan)
+	planID := execmodel.PlanChecksumShort(plan)
 	fmt.Fprintf(os.Stdout, "\n%s\n", ui.Bold(color, "Plan: "+plan.Metadata.Name))
 	fmt.Fprintln(os.Stdout, strings.Repeat("─", 60))
 	fmt.Fprintf(os.Stdout, "Plan ID:      %s\n", planID)
@@ -248,18 +271,20 @@ func describePlan(ref string) error {
 }
 
 func describeJob(jobRef string) error {
-	store := state.NewStore(storeDir())
 	color := ui.ColorEnabledForWriter(os.Stdout)
 
-	// Load latest plan to find job details
-	path, err := store.ResolvePlanRef("latest")
-	if err != nil {
-		return fmt.Errorf("no plan found: %w", err)
-	}
-
-	plan, err := loadPlan(path)
-	if err != nil {
-		return err
+	// Load latest plan to find job details (object model first).
+	plan, ok := objResolvePlan("latest")
+	if !ok {
+		store := state.NewStore(storeDir())
+		path, err := store.ResolvePlanRef("latest")
+		if err != nil {
+			return fmt.Errorf("no plan found: %w", err)
+		}
+		plan, err = loadPlan(path)
+		if err != nil {
+			return err
+		}
 	}
 
 	var job *PlanJobRef
@@ -308,23 +333,34 @@ func describeJob(jobRef string) error {
 		}
 	}
 
-	// Show state from latest execution if available
-	execID, resolveErr := store.ResolveExecID("latest")
-	if resolveErr == nil {
-		st, _ := store.LoadState(execID)
-		if st != nil {
-			if js, ok := st.Jobs[job.Job.ID]; ok && js != nil {
-				fmt.Fprintf(os.Stdout, "\n%s (from execution %s)\n", ui.Bold(color, "State"), execID)
-				fmt.Fprintf(os.Stdout, "  Status:   %s %s\n", styleStatus(js.Status, color), js.Status)
-				if js.StartedAt != "" {
-					fmt.Fprintf(os.Stdout, "  Started:  %s\n", js.StartedAt)
-				}
-				if js.FinishedAt != "" {
-					fmt.Fprintf(os.Stdout, "  Finished: %s\n", js.FinishedAt)
-				}
-				if js.LastError != "" {
-					fmt.Fprintf(os.Stdout, "  Error:    %s\n", ui.Red(color, js.LastError))
-				}
+	// Show state from latest execution if available (object model first).
+	var execID string
+	var st *execmodel.ExecState
+	if reader, ok := openObjectReader(); ok {
+		if v, err := reader.Get(context.Background(), "executions/latest"); err == nil {
+			execID = v.ExecutionID
+			st = objview.ToState(v)
+		}
+	}
+	if st == nil {
+		store := state.NewStore(storeDir())
+		if id, resolveErr := store.ResolveExecID("latest"); resolveErr == nil {
+			execID = id
+			st, _ = store.LoadState(id)
+		}
+	}
+	if st != nil {
+		if js, ok := st.Jobs[job.Job.ID]; ok && js != nil {
+			fmt.Fprintf(os.Stdout, "\n%s (from execution %s)\n", ui.Bold(color, "State"), execID)
+			fmt.Fprintf(os.Stdout, "  Status:   %s %s\n", styleStatus(js.Status, color), js.Status)
+			if js.StartedAt != "" {
+				fmt.Fprintf(os.Stdout, "  Started:  %s\n", js.StartedAt)
+			}
+			if js.FinishedAt != "" {
+				fmt.Fprintf(os.Stdout, "  Finished: %s\n", js.FinishedAt)
+			}
+			if js.LastError != "" {
+				fmt.Fprintf(os.Stdout, "  Error:    %s\n", ui.Red(color, js.LastError))
 			}
 		}
 	}
