@@ -42,15 +42,19 @@ Also landed since (each a merged, green PR):
 | **run/plan path** | `orun run` + the plan path read/write the object model with no legacy file store; the legacy backend (`internal/state`) is deleted from the runner, run path, and read commands. |
 | **TUI repoint (U1–U4)** | The interactive TUI + cockpit read/write the object graph: history (`objread.List` + `PlanSummary`), `--watch`, and log tail (live working-tree tail + sealed blobs); a TUI run seals a native `ExecutionRun` via the shared `internal/objrun` session glue (same path as `orun run`). Deleted `statebackend/file.go` + the flock helpers and cockpit `bridge.FromStore`. |
 
+| **bridges retired** | Deleted the legacy migration paths: `orun state migrate` + `internal/objmigrate` (legacy `.orun/` ingest) and `internal/objexec` (legacy `ExecState`→seal bridge), and the `orun objects migrate` subcommand. Non-test `internal/state` importers: 5 → **1**. |
+
 Remaining for full cutover (legacy deletion):
 
-- **bridges:** repoint / retire the **5** remaining non-test `internal/state`
-  importers — the migration + artifact-coordination bridges
-  (`internal/objmigrate`, `internal/objexec`, `internal/runbundle/hydrate`,
-  `cmd/orun/command_objects`, `cmd/orun/command_state_migrate`).
-- **T6:** delete `internal/state` (file store), `internal/executionstate/bridge.go`,
-  and the transitional bridges; add the no-`internal/state`-import grep gate;
-  remove the coexistence flags.
+- **hydrate refactor (the last importer):** `internal/runbundle/hydrate.go`
+  (`orun github pull`) is the sole remaining non-test `internal/state` importer.
+  It still rebuilds the legacy `.orun/executions/` store, which the object-model
+  read commands no longer surface, so it must be repointed to seal pulled runs
+  into the object graph. Deferred; see `M12-hydrate-refactor.md`.
+- **T6:** once hydrate is repointed, delete `internal/state` (file store) and
+  `internal/executionstate/bridge.go` (if unused), repoint the remaining test
+  importers (`state.*` → `execmodel.*`, aliases), add the no-`internal/state`-import
+  grep gate, and remove the coexistence flags.
 - **T7:** live `orun run` → crash-mid-run → recover → seal e2e + the disk-win
   assertion under the native writer.
 - **resume follow-up:** reimplement cross-run skip-completed job resume on the
@@ -58,9 +62,9 @@ Remaining for full cutover (legacy deletion):
   in-run dependency ordering is preserved).
 
 The runner, plan path, read commands, TUI, and cockpit are all off the legacy
-store; the only non-test importers left are the **5 bridges** above.
+store; the only non-test importer left is **`runbundle/hydrate.go`**.
 `internal/execmodel` is the legacy-store-free home for the in-memory execution
-types those consumers keep using.
+types the remaining (test) consumers keep using.
 
 ## What was implemented
 
@@ -152,7 +156,7 @@ go test ./...             all packages ok, 0 failures (incl. cmd/orun, legacy su
 make test-object-model    all object-model packages 85–100% + e2e — green
 make verify-generated     OK
 go test -race (obj pkgs)  clean
-CLI smoke (real binary)   objects fsck/log/migrate/gc all run
+CLI smoke (real binary)   objects fsck/log/gc/push/pull all run
 ```
 
 ## The remaining gap — finishing M12
@@ -160,14 +164,16 @@ CLI smoke (real binary)   objects fsck/log/migrate/gc all run
 The native runner is the default: `orun run` writes the working tree live and
 seals it **natively**, and the runner, plan path, read commands, TUI, and
 cockpit all read/write the object graph with no legacy file store. The legacy
-`objexec` read survives only on the remote/dry-run fall-through and inside the
-migration bridge.
+migration bridges (`orun state migrate`, `internal/objmigrate`,
+`internal/objexec`) have been deleted.
 
-What's left to delete `internal/state` is the **bridge cluster**: the 5
-remaining non-test importers are the migration + artifact-coordination bridges
-(`internal/objmigrate`, `internal/objexec`, `internal/runbundle/hydrate`,
-`cmd/orun/command_objects`, `cmd/orun/command_state_migrate`). Once those are
-repointed/retired, delete the legacy module + `internal/executionstate/bridge.go`,
-add the no-`internal/state`-import grep gate, remove the coexistence flags (T6),
-and add the live crash-recovery e2e (T7). `internal/execmodel` already provides
-the legacy-store-free home for the in-memory execution types they keep using.
+What's left to delete `internal/state` is a **single** non-test importer:
+`internal/runbundle/hydrate.go` (`orun github pull`), which still rebuilds the
+legacy `.orun/executions/` store the object-model readers no longer surface. It
+must be repointed to seal pulled runs into the object graph — see
+`M12-hydrate-refactor.md`. Once that lands, delete the legacy module +
+`internal/executionstate/bridge.go` (if unused), repoint the remaining test
+importers (`state.*` → `execmodel.*` aliases), add the no-`internal/state`-import
+grep gate, remove the coexistence flags (T6), and add the live crash-recovery
+e2e (T7). `internal/execmodel` already provides the legacy-store-free home for
+the in-memory execution types they keep using.
