@@ -1,8 +1,6 @@
 package state
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,11 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
 )
 
 const (
-	OrunDir     = ".orun"
+	OrunDir      = ".orun"
 	PlansDir     = "plans"
 	ExecDir      = "executions"
 	LogsDir      = "logs"
@@ -25,43 +24,28 @@ const (
 	MetadataName = "metadata.json"
 )
 
-type ExecState struct {
-	ExecID       string               `json:"execId"`
-	PlanChecksum string               `json:"planChecksum"`
-	Jobs         map[string]*JobState `json:"jobs"`
-}
+// Execution value types now live in internal/execmodel; these aliases keep the
+// historical state.* names working while callers migrate during the
+// object-model cutover.
+type (
+	ExecState       = execmodel.ExecState
+	JobState        = execmodel.JobState
+	ExecutionLink   = execmodel.ExecutionLink
+	ExecMetadata    = execmodel.ExecMetadata
+	PlanEntry       = execmodel.PlanEntry
+	ExecEntry       = execmodel.ExecEntry
+	ExecutionCounts = execmodel.ExecutionCounts
+)
 
-type JobState struct {
-	Status      string            `json:"status"`
-	StartedAt   string            `json:"startedAt,omitempty"`
-	FinishedAt  string            `json:"finishedAt,omitempty"`
-	HeartbeatAt string            `json:"heartbeatAt,omitempty"`
-	Steps       map[string]string `json:"steps"`
-	LastError   string            `json:"lastError,omitempty"`
-}
+// Pure helpers are forwarded to internal/execmodel.
+var (
+	GenerateExecID          = execmodel.GenerateExecID
+	SummarizeExecutionState = execmodel.SummarizeExecutionState
+	LoadPlanFile            = execmodel.LoadPlanFile
+)
 
-type ExecutionLink struct {
-	Label  string `json:"label"`
-	URL    string `json:"url"`
-	JobID  string `json:"jobId,omitempty"`
-	StepID string `json:"stepId,omitempty"`
-}
-
-type ExecMetadata struct {
-	ExecID     string          `json:"execId"`
-	PlanID     string          `json:"planId"`
-	PlanName   string          `json:"planName"`
-	StartedAt  string          `json:"startedAt"`
-	FinishedAt string          `json:"finishedAt,omitempty"`
-	Status     string          `json:"status"`
-	Trigger    string          `json:"trigger"`
-	User       string          `json:"user"`
-	DryRun     bool            `json:"dryRun"`
-	JobTotal   int             `json:"jobTotal"`
-	JobDone    int             `json:"jobDone"`
-	JobFailed  int             `json:"jobFailed"`
-	Links      []ExecutionLink `json:"links,omitempty"`
-}
+// PlanChecksumShort returns the short form of a plan's checksum.
+func PlanChecksumShort(plan *model.Plan) string { return execmodel.PlanChecksumShort(plan) }
 
 type Store struct {
 	BaseDir string
@@ -195,35 +179,10 @@ func (s *Store) ListPlans() ([]PlanEntry, error) {
 	return plans, nil
 }
 
-type PlanEntry struct {
-	Name      string
-	Path      string
-	Checksum  string
-	Jobs      int
-	CreatedAt time.Time
-}
-
 // --- Execution Store ---
 
 func (s *Store) ExecDir() string {
 	return filepath.Join(s.BaseDir, ExecDir)
-}
-
-func GenerateExecID(planName string) string {
-	date := time.Now().Format("20060102")
-	randBytes := make([]byte, 3)
-	rand.Read(randBytes)
-	suffix := hex.EncodeToString(randBytes)
-
-	name := strings.ReplaceAll(planName, " ", "-")
-	name = strings.ToLower(name)
-	if name == "" {
-		name = "run"
-	}
-	if len(name) > 30 {
-		name = name[:30]
-	}
-	return fmt.Sprintf("%s-%s-%s", name, date, suffix)
 }
 
 func (s *Store) CreateExecution(execID string, plan *model.Plan) (string, error) {
@@ -426,50 +385,6 @@ func (s *Store) ResolveExecID(ref string) (string, error) {
 	return "", fmt.Errorf("execution not found: %s", ref)
 }
 
-type ExecEntry struct {
-	ID         string
-	PlanName   string
-	Status     string
-	StartedAt  string
-	FinishedAt string
-	JobTotal   int
-	JobDone    int
-	JobFailed  int
-}
-
-type ExecutionCounts struct {
-	Total     int
-	Completed int
-	Failed    int
-	Running   int
-	Pending   int
-}
-
-func SummarizeExecutionState(st *ExecState) ExecutionCounts {
-	if st == nil {
-		return ExecutionCounts{}
-	}
-
-	counts := ExecutionCounts{}
-	for _, job := range st.Jobs {
-		if job == nil {
-			continue
-		}
-		counts.Total++
-		switch strings.ToLower(strings.TrimSpace(job.Status)) {
-		case "completed":
-			counts.Completed++
-		case "failed":
-			counts.Failed++
-		case "running":
-			counts.Running++
-		default:
-			counts.Pending++
-		}
-	}
-	return counts
-}
-
 // --- GC ---
 
 func (s *Store) GC(maxCount int, maxAgeDays int, dryRun bool) ([]string, error) {
@@ -568,20 +483,7 @@ func (s *Store) MigrateLegacyState(workDir string) (bool, error) {
 
 // --- Helpers ---
 
-func planChecksumShort(plan *model.Plan) string {
-	if plan == nil || plan.Metadata.Checksum == "" {
-		return ""
-	}
-	cs := strings.TrimPrefix(plan.Metadata.Checksum, "sha256-")
-	if len(cs) > 12 {
-		return cs[:12]
-	}
-	return cs
-}
-
-func PlanChecksumShort(plan *model.Plan) string {
-	return planChecksumShort(plan)
-}
+func planChecksumShort(plan *model.Plan) string { return execmodel.PlanChecksumShort(plan) }
 
 func sanitizePathSegment(s string) string {
 	return strings.NewReplacer("/", "_", "\\", "_", ":", "_").Replace(s)
@@ -607,16 +509,4 @@ func looksLikeChecksum(name string) bool {
 		}
 	}
 	return true
-}
-
-func LoadPlanFile(path string) (*model.Plan, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var plan model.Plan
-	if err := json.Unmarshal(data, &plan); err != nil {
-		return nil, err
-	}
-	return &plan, nil
 }
