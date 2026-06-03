@@ -22,24 +22,25 @@ import (
 const revByHashPrefix = "revisions/by-hash/"
 
 // openObjectStores opens the object + ref stores when the object model is active
-// AND present on disk. ok=false ⇒ use the legacy store.
-func openObjectStores() (*objectstore.LocalStore, *refstore.LocalRefStore, bool) {
+// AND present on disk, returning the object-model root. ok=false ⇒ use the
+// legacy store.
+func openObjectStores() (store *objectstore.LocalStore, refs *refstore.LocalRefStore, root string, ok bool) {
 	if !objectModelActive() {
-		return nil, nil, false
+		return nil, nil, "", false
 	}
 	abs, err := filepath.Abs(filepath.Join(storeDir(), ".orun"))
 	if err != nil {
-		return nil, nil, false
+		return nil, nil, "", false
 	}
-	root := objectModelRoot(abs)
+	root = objectModelRoot(abs)
 	if _, err := os.Stat(filepath.Join(root, "objects")); err != nil {
-		return nil, nil, false
+		return nil, nil, "", false
 	}
-	store, refs, _, err := openObjectModel()
+	s, r, rt, err := openObjectModel()
 	if err != nil {
-		return nil, nil, false
+		return nil, nil, "", false
 	}
-	return store, refs, true
+	return s, r, rt, true
 }
 
 // objResolveRevisionRef resolves a plan ref (latest/""/<hash>/<hash-prefix>) to a
@@ -98,7 +99,7 @@ func objPlanFromRevision(store *objectstore.LocalStore, revID objectstore.Object
 
 // objResolvePlan resolves a plan ref to the compiled plan from the object model.
 func objResolvePlan(ref string) (*model.Plan, bool) {
-	store, refs, ok := openObjectStores()
+	store, refs, _, ok := openObjectStores()
 	if !ok {
 		return nil, false
 	}
@@ -112,7 +113,7 @@ func objResolvePlan(ref string) (*model.Plan, bool) {
 // objListPlanRows lists the revision-backed plans as legacy PlanEntry rows
 // (newest-first), for `orun get plans`. ok=false ⇒ nothing in the object model.
 func objListPlanRows() ([]execmodel.PlanEntry, bool) {
-	store, refs, ok := openObjectStores()
+	store, refs, _, ok := openObjectStores()
 	if !ok {
 		return nil, false
 	}
