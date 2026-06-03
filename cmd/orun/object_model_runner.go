@@ -123,7 +123,7 @@ func beginObjectModelRun(orunDir string, plan *model.Plan, execID string) *objec
 // state into the working tree (and bumps the heartbeat), and each step log is
 // streamed as a content blob. The chain preserves any previously-installed
 // callbacks (local/remote/revision hooks).
-func installObjectRunnerHooks(r *runner.Runner, s *objectRunSession, store *state.Store, execID string) {
+func installObjectRunnerHooks(r *runner.Runner, s *objectRunSession) {
 	if s == nil {
 		return
 	}
@@ -135,7 +135,9 @@ func installObjectRunnerHooks(r *runner.Runner, s *objectRunSession, store *stat
 		if prev != nil {
 			prev()
 		}
-		if st, err := store.LoadState(execID); err == nil && st != nil {
+		// Project the runner's authoritative in-memory state directly — the
+		// object-model path does not read the legacy on-disk state.json.
+		if st := r.SnapshotState(); st != nil {
 			_ = s.wt.Project(projectFromExecState(st))
 		}
 	}
@@ -151,13 +153,14 @@ func installObjectRunnerHooks(r *runner.Runner, s *objectRunSession, store *stat
 }
 
 // finishObjectModelRun applies a final projection (catching the post-shutdown
-// state) and seals the working tree at the run's terminal status.
-func finishObjectModelRun(s *objectRunSession, store *state.Store, execID string, runErr error) {
+// state) and seals the working tree at the run's terminal status. It reads the
+// runner's in-memory state, not the legacy store.
+func finishObjectModelRun(r *runner.Runner, s *objectRunSession, runErr error) {
 	if s == nil {
 		return
 	}
 	ctx := context.Background()
-	st, _ := store.LoadState(execID)
+	st := r.SnapshotState()
 	if st != nil {
 		_ = s.wt.Project(projectFromExecState(st))
 	}

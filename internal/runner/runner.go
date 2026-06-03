@@ -72,30 +72,35 @@ type Runner struct {
 	ExecID             string
 	// PlanID is the plan checksum short-form, injected as ORUN_PLAN_ID into
 	// every step environment. Also used to build ORUN_JOB_RUN_ID.
-	PlanID             string
-	Concurrency        int
-	FilterComponents   []string
-	FilterEnv          string
-	Isolation          IsolationMode
-	KeepWorkspaces     bool
+	PlanID           string
+	Concurrency      int
+	FilterComponents []string
+	FilterEnv        string
+	Isolation        IsolationMode
+	KeepWorkspaces   bool
 	// SkipLocalDepsForJob disables the local dependency-completion check when
 	// running a single --job in remote mode. The remote backend's claim API
 	// already enforces dependency ordering.
 	SkipLocalDepsForJob bool
 	// Hooks wires external lifecycle callbacks (remote state, log upload, etc.).
-	Hooks              *RunnerHooks
-	printMu            sync.Mutex
-	stateMu            sync.Mutex
+	Hooks   *RunnerHooks
+	printMu sync.Mutex
+	stateMu sync.Mutex
+
+	// liveState points at the in-memory ExecState the run mutates, so observers
+	// (the object-model working tree) can snapshot live job/step progress without
+	// reading the legacy on-disk state.json. Set at the start of Run.
+	liveState *state.ExecState
 
 	live          *ui.LiveRegion
 	gha           *ui.GHARenderer
-	groupMu              sync.Mutex
-	currentGroup         string
-	finishedAny          bool
-	groupMultiEnv        bool
+	groupMu       sync.Mutex
+	currentGroup  string
+	finishedAny   bool
+	groupMultiEnv bool
 
-	componentJobTotal  map[string]int
-	componentFinished  map[string][]finishedJobEntry
+	componentJobTotal map[string]int
+	componentFinished map[string][]finishedJobEntry
 
 	ComponentConcurrency int
 }
@@ -231,22 +236,22 @@ func NewRunner(
 	filterEnv string,
 ) *Runner {
 	return &Runner{
-		WorkDir:            workDir,
-		UseWorkDirOverride: useWorkDirOverride,
-		Stdout:             stdout,
-		Stderr:             stderr,
-		DryRun:             dryRun,
-		JobID:              jobID,
-		Retry:              retry,
-		Verbose:            verbose,
-		Color:              ui.ColorEnabledForWriter(stdout),
-		Executor:           exec,
-		Runtime:            runtime,
-		Store:              store,
-		ExecID:             execID,
-		Concurrency:        concurrency,
-		FilterComponents:   filterComponents,
-		FilterEnv:          filterEnv,
+		WorkDir:              workDir,
+		UseWorkDirOverride:   useWorkDirOverride,
+		Stdout:               stdout,
+		Stderr:               stderr,
+		DryRun:               dryRun,
+		JobID:                jobID,
+		Retry:                retry,
+		Verbose:              verbose,
+		Color:                ui.ColorEnabledForWriter(stdout),
+		Executor:             exec,
+		Runtime:              runtime,
+		Store:                store,
+		ExecID:               execID,
+		Concurrency:          concurrency,
+		FilterComponents:     filterComponents,
+		FilterEnv:            filterEnv,
 		ComponentConcurrency: 1,
 	}
 }
@@ -319,6 +324,11 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	if r.JobID != "" && r.Retry {
 		execState.Jobs[r.JobID] = nil
 	}
+
+	// Expose the live state to observers (object-model working tree).
+	r.stateMu.Lock()
+	r.liveState = execState
+	r.stateMu.Unlock()
 
 	orderedJobs, err := topologicalOrder(plan.Jobs)
 	if err != nil {
@@ -961,6 +971,39 @@ func (r *Runner) updateState(persist bool, execState *state.ExecState, update fu
 
 func (r *Runner) persistState(persist bool, execState *state.ExecState) {
 	r.updateState(persist, execState, nil)
+}
+
+// SnapshotState returns a deep copy of the runner's current in-memory ExecState,
+// taken under the state lock. It lets observers (the object-model working tree)
+// project live job/step progress without depending on the legacy on-disk
+// state.json — the seam that lets the object-model run path stand on its own.
+// Returns nil before Run has initialized state.
+func (r *Runner) SnapshotState() *state.ExecState {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	if r.liveState == nil {
+		return nil
+	}
+	out := &state.ExecState{
+		ExecID:       r.liveState.ExecID,
+		PlanChecksum: r.liveState.PlanChecksum,
+		Jobs:         make(map[string]*state.JobState, len(r.liveState.Jobs)),
+	}
+	for id, js := range r.liveState.Jobs {
+		if js == nil {
+			out.Jobs[id] = nil
+			continue
+		}
+		cp := *js
+		if js.Steps != nil {
+			cp.Steps = make(map[string]string, len(js.Steps))
+			for k, v := range js.Steps {
+				cp.Steps[k] = v
+			}
+		}
+		out.Jobs[id] = &cp
+	}
+	return out
 }
 
 func (r *Runner) writeMetadata(plan *model.Plan, execState *state.ExecState, status string, links []state.ExecutionLink) {

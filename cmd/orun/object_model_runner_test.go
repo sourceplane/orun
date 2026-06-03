@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/runner"
+	"github.com/sourceplane/orun/internal/runworktree"
 	"github.com/sourceplane/orun/internal/state"
 )
 
@@ -27,7 +29,7 @@ func TestObjectModelRunnerLivePathSeals(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	execID := "exec-live-1"
-	ls, plan := legacyStoreWithExecution(t, execID)
+	_, plan := legacyStoreWithExecution(t, execID)
 	orunDir := filepath.Join(t.TempDir(), ".orun")
 
 	sess := beginObjectModelRun(orunDir, plan, execID)
@@ -44,16 +46,23 @@ func TestObjectModelRunnerLivePathSeals(t *testing.T) {
 		t.Fatalf("live ref missing: %v", err)
 	}
 
-	// Drive a state tick + a step log through the runner hooks, then finish.
+	// Install the hooks on a runner and drive a step log through them. With a
+	// bare runner (no live state) AfterStateUpdate is a safe no-op, so drive the
+	// job/step state into the working tree directly to simulate progress.
 	r := &runner.Runner{}
-	installObjectRunnerHooks(r, sess, ls, execID)
+	installObjectRunnerHooks(r, sess)
 	if r.Hooks == nil || r.Hooks.AfterStateUpdate == nil || r.Hooks.AfterStepLog == nil {
 		t.Fatalf("hooks not installed")
 	}
-	r.Hooks.AfterStateUpdate()
+	r.Hooks.AfterStateUpdate() // no-op (no live state) — must not panic
+	if err := sess.wt.Project([]runworktree.ProjectedJob{
+		{JobID: "api@deploy", Status: nodes.StatusSucceeded, Steps: []runworktree.ProjectedStep{{StepID: "build", Status: nodes.StatusSucceeded}}},
+	}); err != nil {
+		t.Fatalf("project: %v", err)
+	}
 	r.Hooks.AfterStepLog("api@deploy", "build", "build output\n")
 
-	finishObjectModelRun(sess, ls, execID, nil)
+	finishObjectModelRun(r, sess, nil)
 
 	// Sealed: objects + executions/latest written; working tree + live handle gone.
 	if n := countObjectFiles(t, filepath.Join(root, "objects")); n == 0 {
