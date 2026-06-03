@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/executionstate"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/revision"
@@ -125,7 +126,7 @@ func TestSetupAndFinalizeRevisionExecution_HappyPath(t *testing.T) {
 
 	// Pre-stamp plan.Metadata.Revision via synthesize so setup hits the
 	// "resolver miss → fall through to synthesize" path deterministically.
-	rx, err := setupRevisionExecution(context.Background(), store, plan, nil, "exec-test-001")
+	rx, err := setupRevisionExecution(context.Background(), plan, nil, "exec-test-001")
 	if err != nil {
 		t.Fatalf("setupRevisionExecution: %v", err)
 	}
@@ -162,7 +163,7 @@ func TestSetupAndFinalizeRevisionExecution_HappyPath(t *testing.T) {
 		t.Fatalf("SaveState: %v", err)
 	}
 
-	if _, err := finalizeRevisionExecution(context.Background(), rx, store, "exec-test-001", nil); err != nil {
+	if _, err := finalizeRevisionExecution(context.Background(), rx, execmodel.ExecutionCounts{Total: 1, Completed: 1}, nil); err != nil {
 		t.Fatalf("finalizeRevisionExecution: %v", err)
 	}
 
@@ -183,14 +184,13 @@ func TestSetupAndFinalizeRevisionExecution_HappyPath(t *testing.T) {
 }
 
 func TestSetupRevisionExecution_PreservesGitHubActionsExecID(t *testing.T) {
-	dir := withTempIntentRoot(t)
+	_ = withTempIntentRoot(t)
 	resetRunFlags(t)
 
-	store := state.NewStore(dir)
 	plan := minimalPlan(t)
 	ghaExecID := "gh-123456789-2-abcdef0"
 
-	rx, err := setupRevisionExecution(context.Background(), store, plan, nil, ghaExecID)
+	rx, err := setupRevisionExecution(context.Background(), plan, nil, ghaExecID)
 	if err != nil {
 		t.Fatalf("setupRevisionExecution: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestSetupRevisionExecution_FailedRunMarksFailed(t *testing.T) {
 	store := state.NewStore(dir)
 	plan := minimalPlan(t)
 
-	rx, err := setupRevisionExecution(context.Background(), store, plan, nil, "exec-fail-001")
+	rx, err := setupRevisionExecution(context.Background(), plan, nil, "exec-fail-001")
 	if err != nil {
 		t.Fatalf("setupRevisionExecution: %v", err)
 	}
@@ -222,8 +222,7 @@ func TestSetupRevisionExecution_FailedRunMarksFailed(t *testing.T) {
 	// Pass a non-nil runErr to finalize → status MUST be failed even
 	// if the legacy ExecutionCounts say zero failures (the runner can
 	// fail to start before persisting any per-job status).
-	if _, err := finalizeRevisionExecution(context.Background(), rx, store, "exec-fail-001",
-		errFakeRunner); err != nil {
+	if _, err := finalizeRevisionExecution(context.Background(), rx, execmodel.ExecutionCounts{}, errFakeRunner); err != nil {
 		t.Fatalf("finalizeRevisionExecution: %v", err)
 	}
 
@@ -265,8 +264,7 @@ func TestSetupRevisionExecution_RevisionFlagShortCircuit(t *testing.T) {
 	runRevision = revKey
 	runExecID = "exec-rev-flag"
 
-	store := state.NewStore(dir)
-	rx, err := setupRevisionExecution(context.Background(), store, plan2, nil, "exec-rev-flag")
+	rx, err := setupRevisionExecution(context.Background(), plan2, nil, "exec-rev-flag")
 	if err != nil {
 		t.Fatalf("setupRevisionExecution(--revision %s): %v", revKey, err)
 	}
@@ -290,7 +288,7 @@ func TestResolveAndLoadPlan_RevisionPrefixUsesGlobalIndex(t *testing.T) {
 	}
 
 	runPlanRef = revKey[:len("rev-manual-")+4]
-	got, err := resolveAndLoadPlan(state.NewStore(dir))
+	got, err := resolveAndLoadPlan()
 	if err != nil {
 		t.Fatalf("resolveAndLoadPlan(%q): %v", runPlanRef, err)
 	}
@@ -305,7 +303,7 @@ func TestResolveAndLoadPlan_RevisionPrefixUsesGlobalIndex(t *testing.T) {
 func TestSetupRevisionExecution_NilPlanRejected(t *testing.T) {
 	withTempIntentRoot(t)
 	resetRunFlags(t)
-	if _, err := setupRevisionExecution(context.Background(), state.NewStore("."), nil, nil, "x"); err == nil {
+	if _, err := setupRevisionExecution(context.Background(), nil, nil, "x"); err == nil {
 		t.Fatal("expected error for nil plan")
 	}
 }
@@ -313,7 +311,7 @@ func TestSetupRevisionExecution_NilPlanRejected(t *testing.T) {
 func TestSetupRevisionExecution_EmptyExecIDRejected(t *testing.T) {
 	withTempIntentRoot(t)
 	resetRunFlags(t)
-	if _, err := setupRevisionExecution(context.Background(), state.NewStore("."), minimalPlan(t), nil, ""); err == nil {
+	if _, err := setupRevisionExecution(context.Background(), minimalPlan(t), nil, ""); err == nil {
 		t.Fatal("expected error for empty legacyExecID")
 	}
 }
@@ -322,7 +320,7 @@ func TestSetupRevisionExecution_EmptyExecIDRejected(t *testing.T) {
 // caller installs setupRevisionExecution best-effort and may have a nil
 // rx if the local store was unwritable. Finalize must not crash.
 func TestFinalizeRevisionExecution_NilRxIsNoOp(t *testing.T) {
-	if _, err := finalizeRevisionExecution(context.Background(), nil, nil, "", nil); err != nil {
+	if _, err := finalizeRevisionExecution(context.Background(), nil, execmodel.ExecutionCounts{}, nil); err != nil {
 		t.Fatalf("finalizeRevisionExecution(nil) = %v; want nil", err)
 	}
 }
@@ -331,13 +329,12 @@ func TestFinalizeRevisionExecution_NilRxIsNoOp(t *testing.T) {
 // is an absolute path (not relative to cwd) so the Bridge can resolve
 // LegacyRoot independently of the runner's working directory.
 func TestSetupRevisionExecution_StoreRootIsAbsolute(t *testing.T) {
-	dir := withTempIntentRoot(t)
+	_ = withTempIntentRoot(t)
 	resetRunFlags(t)
 	runExecID = "exec-abs-001"
 
-	store := state.NewStore(dir)
 	plan := minimalPlan(t)
-	rx, err := setupRevisionExecution(context.Background(), store, plan, nil, "exec-abs-001")
+	rx, err := setupRevisionExecution(context.Background(), plan, nil, "exec-abs-001")
 	if err != nil {
 		t.Fatalf("setupRevisionExecution: %v", err)
 	}

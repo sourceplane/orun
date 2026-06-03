@@ -8,7 +8,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/ui"
 )
 
@@ -22,15 +21,15 @@ const backgroundChildEnv = "ORUN_BACKGROUND_CHILD"
 //
 // The caller is responsible for resolving the exec ID before calling this so
 // the user knows which run to track via `orun status --exec-id <id>`.
-func startBackgroundRun(execID string, store *state.Store, color bool) error {
+func startBackgroundRun(execID string, color bool) error {
 	if execID == "" {
 		return fmt.Errorf("background mode requires a resolved exec id")
 	}
 
-	// Ensure the execution directory exists so we can write the run log.
-	execDir := store.ExecPath(execID)
+	// Ensure a directory exists for the detached run's log + pid.
+	execDir := filepath.Join(storeDir(), ".orun", "background", execID)
 	if err := os.MkdirAll(execDir, 0o755); err != nil {
-		return fmt.Errorf("create execution directory: %w", err)
+		return fmt.Errorf("create background run directory: %w", err)
 	}
 
 	logPath := filepath.Join(execDir, "run.log")

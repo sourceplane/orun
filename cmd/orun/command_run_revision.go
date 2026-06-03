@@ -35,11 +35,11 @@ import (
 	"strings"
 
 	"github.com/sourceplane/orun/internal/catalogstore"
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/executionstate"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/runner"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/triggerctx"
 	"github.com/sourceplane/orun/internal/ui"
@@ -83,7 +83,6 @@ type revisionExecution struct {
 // those bytes into the new layout.
 func setupRevisionExecution(
 	ctx context.Context,
-	store *state.Store,
 	plan *model.Plan,
 	loadedIntent *model.Intent,
 	legacyExecID string,
@@ -197,7 +196,7 @@ func setupRevisionExecution(
 	// per design.md §11.
 	bridge := &executionstate.Bridge{
 		Store:         stateStore,
-		LegacyRoot:    store.ExecDir(),
+		LegacyRoot:    filepath.Join(absStoreRoot, "executions"),
 		MirrorMode:    executionstate.MirrorModeAuto,
 		CatalogParent: catParent,
 	}
@@ -329,26 +328,18 @@ func installRevisionHooks(r *runner.Runner, rx *revisionExecution, legacyExecID 
 func finalizeRevisionExecution(
 	ctx context.Context,
 	rx *revisionExecution,
-	store *state.Store,
-	legacyExecID string,
+	counts execmodel.ExecutionCounts,
 	runErr error,
 ) (string, error) {
 	if rx == nil {
 		return executionstate.StatusCompleted, nil
 	}
-	// Force one last mirror pass so the post-run state.json is promoted
-	// into the new layout. Non-precondition failures are best-effort.
-	if rx.bridge != nil {
-		_ = rx.bridge.MirrorRunnerOutput(ctx, rx.execKey, rx.revKey, legacyExecID)
-	}
 
-	// Project legacy state into ExecSummary. A missing/unloadable
-	// state file means the runner never persisted (e.g. dry-run or a
-	// crash before the first AfterStepLog). In that case we fall back
-	// to "all pending" so MarkTerminal can still land the status flip.
+	// Project the runner's tally into ExecSummary. Empty counts (e.g. a
+	// crash before any job ran) fall back to "all pending" so MarkTerminal
+	// can still land the status flip.
 	summary := executionstate.ExecSummary{Total: rx.exec.Summary.Total, Pending: rx.exec.Summary.Total}
-	if execState, err := store.LoadState(legacyExecID); err == nil && execState != nil {
-		counts := state.SummarizeExecutionState(execState)
+	if counts.Total > 0 {
 		summary = executionstate.ExecSummary{
 			Total:     counts.Total,
 			Completed: counts.Completed,
