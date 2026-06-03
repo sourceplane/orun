@@ -7,7 +7,6 @@ import (
 
 	"github.com/sourceplane/orun/internal/executor"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 )
 
 type okExecutor struct{}
@@ -29,9 +28,8 @@ func TestAfterStateUpdateHookCanSnapshot(t *testing.T) {
 		{ID: "b@deploy", Name: "b", Component: "b", Steps: []model.PlanStep{{ID: "build", Name: "build"}}},
 	}}
 
-	st := state.NewStore(t.TempDir())
 	r := NewRunner(t.TempDir(), false, io.Discard, io.Discard, false, "", false, false,
-		okExecutor{}, executor.RuntimeContext{}, st, "exec_deadlock", 2, nil, "")
+		okExecutor{}, executor.RuntimeContext{}, "exec_deadlock", 2, nil, "")
 
 	hookCalls := 0
 	r.Hooks = &RunnerHooks{

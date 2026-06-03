@@ -104,9 +104,8 @@ func TestCatalogRunC7_E2EPlanRunHistory(t *testing.T) {
 		!strings.Contains(string(execRaw), `"catalogSnapshotKey": "`+revIdx.CatalogSnapshotKey+`"`) {
 		t.Fatalf("catalog execution missing expected lineage:\n%s", execRaw)
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".orun", "executions", ghaExecID, "state.json")); err != nil {
-		t.Fatalf("legacy execution mirror missing: %v", err)
-	}
+	// (The legacy .orun/executions/<id>/state.json mirror was removed at the
+	// M12 cutover; the runner no longer writes legacy execution state.)
 
 	catalogJSONFlag = true
 	historyOut := captureStdout(t, func() error {

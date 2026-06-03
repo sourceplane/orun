@@ -2,8 +2,6 @@ package services
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -176,24 +174,9 @@ loop:
 		t.Fatal("events should carry a non-empty ExecID")
 	}
 
-	// The step log must be on disk so TailLogs can replay it.
-	resolved, err := store.ResolveExecID(execID)
-	if err != nil {
-		t.Fatalf("ResolveExecID(%q): %v", execID, err)
-	}
-	logDir := store.LogDir(resolved, "demo.build")
-	entries, err := os.ReadDir(logDir)
-	if err != nil {
-		t.Fatalf("read log dir %s: %v", logDir, err)
-	}
-	if len(entries) == 0 {
-		t.Fatalf("expected at least one step log file in %s", logDir)
-	}
-	data, err := os.ReadFile(filepath.Join(logDir, entries[0].Name()))
-	if err != nil {
-		t.Fatalf("read step log: %v", err)
-	}
-	if !strings.Contains(string(data), "hello-from-real-run") {
-		t.Fatalf("step log missing command output; got: %q", string(data))
-	}
+	// (The runner no longer persists legacy .orun/executions log files — the
+	// M12 cutover removed legacy execution state. The streamed step output is
+	// asserted above via the run events; wiring the TUI run service to persist
+	// step logs into the object-model working tree is a tracked follow-up.)
+	_ = store
 }

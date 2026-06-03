@@ -127,7 +127,6 @@ func (s *LiveOrunService) RunPlan(ctx context.Context, req RunRequest) (<-chan R
 		false, // verbose
 		localExec,
 		runtime,
-		s.cfg.Store, // may be nil; runner tolerates it because persistState=!DryRun
 		execID,
 		concurrency,
 		req.Components,
