@@ -27,8 +27,18 @@ type HydrateResult struct {
 }
 
 // Hydrate reconstructs .orun/executions/{exec-id}/ from a plan shard and
-// job shards. Uses existing state.Store types for compatibility with
-// orun status, orun logs, and other commands.
+// job shards, writing the legacy internal/state file store.
+//
+// DEFERRED REFACTOR (M12 cutover): this is the last remaining importer of the
+// legacy internal/state file store, which blocks deleting that package. It
+// still rebuilds .orun/executions/<id>/{metadata,state}.json, but the read
+// commands (orun status/logs) now read the content-addressed object graph, so a
+// hydrated legacy store is no longer surfaced — i.e. `orun github pull` is
+// effectively broken post-cutover. The fix is to seal the synthesized execution
+// into the object model (resolve a revision from the bundle's plan, attach step
+// logs, seal via execseal) instead of writing the legacy store. Tracked as a
+// follow-up; until then this is left intact so the build/feature surface is
+// unchanged and internal/state survives for this one consumer.
 func Hydrate(ctx context.Context, planShard *PlanShard, jobShards []*JobShard, opts HydrateOptions, orunDir string) (*HydrateResult, error) {
 	if planShard == nil {
 		return nil, fmt.Errorf("plan shard is required")
