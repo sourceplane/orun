@@ -299,6 +299,19 @@ func runPlan() error {
 		}
 	}
 
+	// Cross-run resume (local, full-plan runs): skip jobs that already succeeded
+	// in a prior run of this --exec-id, read from the object graph. Computed
+	// before the live working tree for this run is opened so the prior sealed
+	// execution under the same id is not shadowed by this run's in-flight tree.
+	if !runDryRun && !remoteActive && r.JobID == "" {
+		if resume := resumeJobsFromPriorRun(execID); len(resume) > 0 {
+			r.ResumeJobs = resume
+			color := ui.ColorEnabledForWriter(os.Stderr)
+			fmt.Fprintf(os.Stderr, "%s resume: %d job(s) already succeeded — skipping\n",
+				ui.Yellow(color, "↻"), len(resume))
+		}
+	}
+
 	// Revision-first execution (catalog history): resolve the PlanRevision and
 	// record the ExecutionRun under it for `orun catalog history`. Skipped for
 	// --dry-run and remote runs.
