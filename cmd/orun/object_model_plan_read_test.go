@@ -40,7 +40,6 @@ func seedObjectRevision(t *testing.T, checksum string, plan *model.Plan) {
 }
 
 func TestObjResolvePlanAndList(t *testing.T) {
-	t.Setenv("ORUN_OBJECT_RUNNER", "1")
 	t.Chdir(t.TempDir())
 
 	plan := &model.Plan{Jobs: []model.PlanJob{{ID: "a@deploy"}, {ID: "b@deploy"}}}
@@ -71,7 +70,6 @@ func TestObjResolvePlanAndList(t *testing.T) {
 }
 
 func TestObjResolvePlanOffWhenAbsent(t *testing.T) {
-	t.Setenv("ORUN_OBJECT_RUNNER", "1")
 	t.Chdir(t.TempDir()) // no object model
 	if _, ok := objResolvePlan("latest"); ok {
 		t.Fatalf("should not resolve with no object model")

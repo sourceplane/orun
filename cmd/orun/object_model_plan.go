@@ -17,30 +17,14 @@ import (
 	"github.com/sourceplane/orun/internal/triggerctx"
 )
 
-// object_model_plan.go is the M5b hook that additionally writes the
-// content-addressed object graph (specs/orun-object-model) on `orun plan` when
-// ORUN_OBJECT_MODEL is set. It is strictly additive and best-effort: with the
-// flag unset the legacy plan path is byte-identical, and any failure with the
-// flag set is reported as a warning rather than failing the command.
+// object_model_plan.go writes the content-addressed object graph
+// (specs/orun-object-model) on every `orun plan`. It is best-effort: any failure
+// is reported as a warning rather than failing the command.
 //
-// During this flag-gated coexistence the object graph lives under an isolated
-// root (<.orun>/objectmodel/) so its refs/ tree never collides with the legacy
-// .orun/refs tree. The M12 cutover relocates it to the .orun/ root and makes it
-// canonical.
+// The object graph lives under <.orun>/objectmodel/ so its refs/ tree never
+// collides with the catalog/revision refs under .orun/refs.
 
-// objectModelEnabled reports whether the experimental object-model write is on.
-func objectModelEnabled() bool { return flagDefaultOn("ORUN_OBJECT_MODEL") }
-
-func flagDefaultOn(name string) bool {
-	switch os.Getenv(name) {
-	case "0", "false", "off", "no":
-		return false
-	default:
-		return true
-	}
-}
-
-// objectModelRoot returns the isolated object-graph root under the .orun dir.
+// objectModelRoot returns the object-graph root under the .orun dir.
 func objectModelRoot(orunDir string) string { return filepath.Join(orunDir, "objectmodel") }
 
 // writeObjectModelPlan writes source → (catalog) → revision → trigger to the
@@ -48,9 +32,6 @@ func objectModelRoot(orunDir string) string { return filepath.Join(orunDir, "obj
 // workspace's .orun directory. catRes carries the already-resolved catalog view
 // so no re-resolution happens.
 func writeObjectModelPlan(orunDir string, plan *model.Plan, planBytes []byte, planHash, revHumanKey string, trig triggerctx.TriggerOccurrence, catRes planCatalogResolution) {
-	if !objectModelEnabled() {
-		return
-	}
 	ctx := context.Background()
 	root := objectModelRoot(orunDir)
 

@@ -3,8 +3,8 @@
 // half of the runner's working-tree/seal model: given an in-memory description
 // of a terminal run — its jobs, attempts, steps, logs, events, and artifacts —
 // it assembles the immutable ExecutionRun tree under its revision and publishes
-// refs/executions/latest. The runner's live working-tree writes and the wiring
-// behind ORUN_OBJECT_RUNNER land in the follow-up; this package is the
+// refs/executions/latest. The runner's live working-tree writes (internal/objrun
+// + internal/runworktree) drive this on terminal; this package is the
 // self-contained, deterministic seal operation.
 package execseal
 
