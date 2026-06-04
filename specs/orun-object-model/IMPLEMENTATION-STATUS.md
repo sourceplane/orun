@@ -20,6 +20,7 @@ gated).
 | Test status | full module suite green; object-model gate green; `-race` clean; `verify-generated` clean |
 | Flags | none — object model is unconditional (coexistence flags removed at the M12 cutover) |
 | Layout | object graph under `.orun/objectmodel/`; legacy `.orun/state` deleted |
+| Optional follow-ups | none required; deferred candidates tracked in `FOLLOW-UPS.md` |
 
 ## M12 cutover — complete
 
