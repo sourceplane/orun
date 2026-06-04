@@ -2,7 +2,6 @@ package runner
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -45,12 +44,9 @@ type RunnerHooks struct {
 	// is treated as already complete and execution is skipped. An error cancels
 	// the run.
 	BeforeJob func(jobID string) (skipExec bool, err error)
-	// AfterStateUpdate is called after the runner persists ExecState to
-	// the on-disk store via SaveState. M5.b CLI rewire uses this to
-	// drive the executionstate Bridge mirror per cli-surface.md §2.2
-	// ("on each runner tick: bridge mirrors legacy
-	// .orun/executions/<legacyExecID> into the new layout"); the
-	// object-model working tree uses it to project live state. The hook
+	// AfterStateUpdate is called after the runner updates its in-memory
+	// ExecState on a job/step tick. The object-model working tree uses it to
+	// project live state into the content-addressed graph (objrun). The hook
 	// runs synchronously but OUTSIDE r.stateMu (so it may call back into
 	// the runner, e.g. SnapshotState); implementations MUST be fast and
 	// non-blocking.
@@ -1180,59 +1176,6 @@ func normalizeStepPhase(phase string) string {
 
 func (r *Runner) resolveStateFile(plan *model.Plan) string {
 	return filepath.Join(r.WorkDir, ".orun-state.json")
-}
-
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
-}
-
-func (r *Runner) loadState(statePath string) (*execmodel.ExecState, error) {
-	data, err := os.ReadFile(statePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &execmodel.ExecState{Jobs: map[string]*execmodel.JobState{}}, nil
-		}
-		return nil, fmt.Errorf("failed to read state file %s: %w", statePath, err)
-	}
-
-	var st execmodel.ExecState
-	if err := json.Unmarshal(data, &st); err != nil {
-		return nil, fmt.Errorf("failed to parse state file %s: %w", statePath, err)
-	}
-	if st.Jobs == nil {
-		st.Jobs = map[string]*execmodel.JobState{}
-	}
-
-	return &st, nil
-}
-
-func (r *Runner) saveState(statePath string, st *execmodel.ExecState) error {
-	if st == nil {
-		return fmt.Errorf("state cannot be nil")
-	}
-
-	dir := filepath.Dir(statePath)
-	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create state directory: %w", err)
-		}
-	}
-
-	payload, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to serialize state: %w", err)
-	}
-
-	tmp := statePath + ".tmp"
-	if err := os.WriteFile(tmp, payload, 0644); err != nil {
-		return fmt.Errorf("failed to write temp state file: %w", err)
-	}
-	if err := os.Rename(tmp, statePath); err != nil {
-		return fmt.Errorf("failed to atomically replace state file: %w", err)
-	}
-
-	return nil
 }
 
 func ensureJobState(execState *execmodel.ExecState, job model.PlanJob) *execmodel.JobState {
