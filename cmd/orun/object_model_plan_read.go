@@ -21,13 +21,10 @@ import (
 
 const revByHashPrefix = "revisions/by-hash/"
 
-// openObjectStores opens the object + ref stores when the object model is active
-// AND present on disk, returning the object-model root. ok=false ⇒ use the
-// legacy store.
+// openObjectStores opens the object + ref stores when the object graph is
+// present on disk, returning the object-model root. ok=false ⇒ this workspace
+// has no object graph yet.
 func openObjectStores() (store *objectstore.LocalStore, refs *refstore.LocalRefStore, root string, ok bool) {
-	if !objectModelActive() {
-		return nil, nil, "", false
-	}
 	abs, err := filepath.Abs(filepath.Join(storeDir(), ".orun"))
 	if err != nil {
 		return nil, nil, "", false

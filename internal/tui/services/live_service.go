@@ -3,11 +3,15 @@ package services
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 
 	"github.com/sourceplane/orun/internal/cockpit/bridge"
 	"github.com/sourceplane/orun/internal/cockpit/viewmodel"
 	"github.com/sourceplane/orun/internal/cockpit/watch"
-	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/objectstore"
+	"github.com/sourceplane/orun/internal/objectstore/refstore"
+	"github.com/sourceplane/orun/internal/objread"
 	"github.com/sourceplane/orun/internal/statebackend"
 )
 
@@ -16,9 +20,14 @@ type LiveServiceConfig struct {
 	IntentFile string
 	IntentRoot string
 	ConfigDir  string
-	Store      *state.Store
-	Backend    statebackend.Backend
-	Version    string
+	// ObjectModelRoot is the absolute .orun directory whose object graph the
+	// TUI reads and writes (executions, history, logs). The content-addressed
+	// model is the canonical local source; the legacy file store is gone.
+	ObjectModelRoot string
+	// Backend is the remote state backend, set only under --remote-state. When
+	// nil, the local object graph at ObjectModelRoot is the source.
+	Backend statebackend.Backend
+	Version string
 }
 
 // LiveOrunService is the concrete OrunService implementation that calls
@@ -68,10 +77,35 @@ func (s *LiveOrunService) source() bridge.Source {
 	if s.cfg.Backend != nil {
 		return bridge.FromBackend(s.cfg.Backend)
 	}
-	if s.cfg.Store != nil {
-		return bridge.FromStore(s.cfg.Store)
+	if r, ok := s.objReader(); ok {
+		return bridge.FromObjectReader(r)
 	}
 	return nil
+}
+
+// objReader opens an object-model reader over the workspace's .orun graph. It
+// returns ok=false when no ObjectModelRoot is configured or the workspace has
+// no object graph on disk yet (an empty workspace), mirroring cmd/orun's
+// openObjectReader. The remote (Backend) path bypasses this entirely.
+func (s *LiveOrunService) objReader() (*objread.Reader, bool) {
+	if s.cfg.ObjectModelRoot == "" {
+		return nil, false
+	}
+	root := filepath.Join(s.cfg.ObjectModelRoot, "objectmodel")
+	// Only adopt the object model if it actually has content; opening an empty
+	// store would otherwise hide an absent-history workspace behind errors.
+	if _, err := os.Stat(filepath.Join(root, "objects")); err != nil {
+		return nil, false
+	}
+	store, err := objectstore.NewLocalStore(objectstore.LocalConfig{Root: root})
+	if err != nil {
+		return nil, false
+	}
+	refs, err := refstore.NewLocalRefStore(refstore.LocalConfig{Root: root, Writer: "tui"})
+	if err != nil {
+		return nil, false
+	}
+	return objread.New(store, refs, root), true
 }
 
 // WatchRunView subscribes to live cockpit updates for execID. Both the

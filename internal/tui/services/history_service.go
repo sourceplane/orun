@@ -5,16 +5,17 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/objview"
 )
 
 // ListRuns returns recent execution summaries, ordered newest-first.
 //
-// For the local backend, it reads the on-disk .orun/executions/ tree via
-// state.Store. Remote-backend retrieval is deferred to a later phase
-// alongside the rest of the remote-state implementation; callers that
-// pass req.RemoteState today receive a not-implemented error so we do not
-// fake remote behavior in the read-only Phase 1 surface.
+// For the local path it reads the content-addressed object graph (sealed
+// executions + in-flight working trees) via objread. Remote-backend retrieval
+// is deferred to a later phase alongside the rest of the remote-state
+// implementation; callers that pass req.RemoteState today receive a
+// not-implemented error so we do not fake remote behavior here. An empty
+// workspace (no object graph yet) yields an empty list rather than an error.
 func (s *LiveOrunService) ListRuns(ctx context.Context, req ListRunsRequest) ([]RunSummary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -22,18 +23,19 @@ func (s *LiveOrunService) ListRuns(ctx context.Context, req ListRunsRequest) ([]
 	if req.RemoteState {
 		return nil, errors.New("ListRuns: remote-state backend not yet implemented (Phase 3)")
 	}
-	if s.cfg.Store == nil {
-		return nil, errors.New("ListRuns: no state store configured")
+	reader, ok := s.objReader()
+	if !ok {
+		return nil, nil
 	}
 
-	entries, err := s.cfg.Store.ListExecutions()
+	views, err := reader.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	limit := req.Limit
-	if limit <= 0 || limit > len(entries) {
-		limit = len(entries)
+	if limit <= 0 || limit > len(views) {
+		limit = len(views)
 	}
 
 	runs := make([]RunSummary, 0, limit)
@@ -41,95 +43,48 @@ func (s *LiveOrunService) ListRuns(ctx context.Context, req ListRunsRequest) ([]
 		if err := ctx.Err(); err != nil {
 			return runs, err
 		}
-		e := entries[i]
-		started := parseTimestamp(e.StartedAt)
-		finished := parseTimestampPtr(e.FinishedAt)
+		v := views[i]
+
+		var finished *time.Time
+		if v.FinishedAt != nil {
+			ft := *v.FinishedAt
+			finished = &ft
+		}
 		var duration time.Duration
-		if finished != nil && !started.IsZero() {
-			duration = finished.Sub(started)
+		if finished != nil && !v.StartedAt.IsZero() {
+			duration = finished.Sub(v.StartedAt)
 		}
 
-		// Pull metadata for fields not on ExecEntry (planID, trigger,
-		// dry-run flag).
-		meta, _ := s.cfg.Store.LoadMetadata(e.ID)
-		var (
-			planID  string
-			trigger string
-			dryRun  bool
-		)
-		if meta != nil {
-			planID = meta.PlanID
-			trigger = meta.Trigger
-			dryRun = meta.DryRun
-		}
+		// Plan name + components come from the revision's compiled plan
+		// (best-effort; both empty when the plan is unreadable).
+		planName, components := reader.PlanSummary(ctx, v)
 
 		runs = append(runs, RunSummary{
-			ExecID:     e.ID,
-			PlanID:     planID,
-			PlanName:   e.PlanName,
-			Status:     e.Status,
-			JobTotal:   e.JobTotal,
-			JobDone:    e.JobDone,
-			JobFailed:  e.JobFailed,
-			StartedAt:  started,
+			ExecID:     v.ExecutionID,
+			PlanID:     shortObjectID(v.RevisionID),
+			PlanName:   planName,
+			Status:     objview.NodeStatusToLegacy(v.Status),
+			JobTotal:   v.Summary.JobsTotal,
+			JobDone:    v.Summary.JobsSucceeded,
+			JobFailed:  v.Summary.JobsFailed,
+			StartedAt:  v.StartedAt,
 			FinishedAt: finished,
 			Duration:   duration,
-			Trigger:    trigger,
-			DryRun:     dryRun,
-			Components: resolveRunComponents(s, planID),
+			Trigger:    "", // decode the trigger object later (non-fatal)
+			DryRun:     v.DryRun,
+			Components: components,
 		})
 	}
 
 	return runs, nil
 }
 
-func parseTimestamp(s string) time.Time {
-	if s == "" {
-		return time.Time{}
+// shortObjectID truncates a content-hash object id for compact display in the
+// History view's plan column.
+func shortObjectID(id string) string {
+	const n = 14
+	if len(id) <= n {
+		return id
 	}
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t
-		}
-	}
-	return time.Time{}
-}
-
-func parseTimestampPtr(s string) *time.Time {
-	t := parseTimestamp(s)
-	if t.IsZero() {
-		return nil
-	}
-	return &t
-}
-
-// resolveRunComponents looks up the saved plan for an exec and returns the
-// unique component names referenced by its jobs. Returns nil on any error
-// (missing plan file, parse failure, no store) — callers must tolerate an
-// empty slice and fall back to substring matching on PlanName.
-func resolveRunComponents(s *LiveOrunService, planID string) []string {
-	if s == nil || s.cfg.Store == nil || planID == "" {
-		return nil
-	}
-	path, err := s.cfg.Store.ResolvePlanRef(planID)
-	if err != nil {
-		return nil
-	}
-	plan, err := state.LoadPlanFile(path)
-	if err != nil || plan == nil {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(plan.Jobs))
-	out := make([]string, 0, len(plan.Jobs))
-	for _, j := range plan.Jobs {
-		if j.Component == "" {
-			continue
-		}
-		if _, ok := seen[j.Component]; ok {
-			continue
-		}
-		seen[j.Component] = struct{}{}
-		out = append(out, j.Component)
-	}
-	return out
+	return id[:n] + "…"
 }

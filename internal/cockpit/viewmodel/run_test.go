@@ -4,11 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/execmodel"
 )
 
 func TestBuildRunViewBasic(t *testing.T) {
-	meta := &state.ExecMetadata{
+	meta := &execmodel.ExecMetadata{
 		ExecID:    "run-1",
 		PlanID:    "a1b2c3",
 		PlanName:  "release",
@@ -16,13 +16,13 @@ func TestBuildRunViewBasic(t *testing.T) {
 		Trigger:   "manual",
 		StartedAt: "2026-05-29T10:00:00Z",
 	}
-	st := &state.ExecState{
+	st := &execmodel.ExecState{
 		ExecID: "run-1",
-		Jobs: map[string]*state.JobState{
-			"api.stage.deploy":    {Status: "running", StartedAt: "2026-05-29T10:00:10Z"},
-			"api.stage.verify":    {Status: "pending"},
-			"web.prod.deploy":     {Status: "completed", StartedAt: "2026-05-29T10:00:05Z", FinishedAt: "2026-05-29T10:00:15Z"},
-			"db.prod.migrate":     {Status: "failed", LastError: "boom"},
+		Jobs: map[string]*execmodel.JobState{
+			"api.stage.deploy": {Status: "running", StartedAt: "2026-05-29T10:00:10Z"},
+			"api.stage.verify": {Status: "pending"},
+			"web.prod.deploy":  {Status: "completed", StartedAt: "2026-05-29T10:00:05Z", FinishedAt: "2026-05-29T10:00:15Z"},
+			"db.prod.migrate":  {Status: "failed", LastError: "boom"},
 		},
 	}
 	v := BuildRunView("run-1", meta, st)
@@ -50,7 +50,7 @@ func TestBuildRunViewBasic(t *testing.T) {
 }
 
 func TestBuildRunViewEmptyState(t *testing.T) {
-	meta := &state.ExecMetadata{Status: "pending", JobTotal: 3, JobDone: 0, JobFailed: 0}
+	meta := &execmodel.ExecMetadata{Status: "pending", JobTotal: 3, JobDone: 0, JobFailed: 0}
 	v := BuildRunView("x", meta, nil)
 	if v.Counts.Total != 3 {
 		t.Fatalf("expected fallback to metadata totals, got %+v", v.Counts)
@@ -61,7 +61,7 @@ func TestBuildRunViewEmptyState(t *testing.T) {
 }
 
 func TestBuildRunListViewSortsRunningFirst(t *testing.T) {
-	entries := []state.ExecEntry{
+	entries := []execmodel.ExecEntry{
 		{ID: "a", Status: "completed", StartedAt: "2026-05-29T09:00:00Z"},
 		{ID: "b", Status: "running", StartedAt: "2026-05-29T08:00:00Z"},
 		{ID: "c", Status: "failed", StartedAt: "2026-05-29T10:00:00Z"},

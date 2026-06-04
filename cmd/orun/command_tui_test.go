@@ -5,8 +5,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/sourceplane/orun/internal/state"
 )
 
 func TestTuiCommand_RegisteredOnRoot(t *testing.T) {
@@ -79,13 +77,13 @@ func TestResolveTUIBackend_LocalDefault(t *testing.T) {
 	tuiRemoteState = false
 	tuiBackendURL = ""
 
-	store := state.NewStore(t.TempDir())
-	b, cleanup, err := resolveTUIBackend(store)
+	// The local TUI reads the object graph directly: no state backend.
+	b, cleanup, err := resolveTUIBackend()
 	if err != nil {
 		t.Fatalf("local backend: %v", err)
 	}
-	if b == nil {
-		t.Fatal("expected non-nil local backend")
+	if b != nil {
+		t.Fatal("expected nil backend for the local object-graph path")
 	}
 	if cleanup == nil {
 		t.Fatal("expected non-nil cleanup")
@@ -106,8 +104,7 @@ func TestResolveTUIBackend_RemoteWithoutURL_Fails(t *testing.T) {
 	tuiBackendURL = ""
 	os.Unsetenv(backendURLEnvVar)
 
-	store := state.NewStore(t.TempDir())
-	_, _, err := resolveTUIBackend(store)
+	_, _, err := resolveTUIBackend()
 	if err == nil {
 		t.Fatal("expected error when --remote-state is set without backend URL")
 	}

@@ -30,10 +30,7 @@ package main
 // every read. The renderer surface itself is covered by command_get_test.go
 // and command_describe_test.go.
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -41,7 +38,6 @@ import (
 	"testing"
 
 	"github.com/sourceplane/orun/internal/execmodel"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statestore"
 )
 
@@ -72,20 +68,6 @@ func (f *stateE2EFixture) readJSON(t *testing.T, rel string, out any) {
 	}
 }
 
-// fileChecksum returns the sha256 hex of a file's bytes. Step 15 uses
-// this to assert idempotence: a second `state migrate --no-dry-run`
-// against the same workspace must not rewrite any of the four canonical
-// revision documents (plan/revision/trigger/manifest).
-func fileChecksum(t *testing.T, path string) string {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
-}
-
 // (captureStdout is shared with command_read_revision_test.go.)
 
 func TestStateE2E(t *testing.T) {
@@ -101,7 +83,6 @@ func TestStateE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStore: %v", err)
 	}
-	legacyStore := state.NewStore(dir)
 	plan := minimalPlan(t)
 
 	f := &stateE2EFixture{dir: dir, store: store}
@@ -186,19 +167,8 @@ func TestStateE2E(t *testing.T) {
 			t.Fatal("setupRevisionExecution returned empty execKey")
 		}
 		f.execKey = rx.execKey
-		// Drive a fake terminal state through the legacy store so
-		// finalize projects ExecSummary correctly.
-		if _, err := legacyStore.CreateExecution("exec-e2e-001", plan); err != nil {
-			t.Fatalf("CreateExecution(legacy): %v", err)
-		}
-		es, err := legacyStore.LoadState("exec-e2e-001")
-		if err != nil {
-			t.Fatalf("LoadState: %v", err)
-		}
-		es.Jobs["job-1"] = &state.JobState{Status: "completed"}
-		if err := legacyStore.SaveState("exec-e2e-001", es); err != nil {
-			t.Fatalf("SaveState: %v", err)
-		}
+		// finalize projects the ExecutionCounts it is handed into the
+		// execution's ExecSummary (passed directly, not read from a store).
 		if _, err := finalizeRevisionExecution(ctx, rx, execmodel.ExecutionCounts{Total: 1, Completed: 1}, nil); err != nil {
 			t.Fatalf("finalizeRevisionExecution: %v", err)
 		}
@@ -282,56 +252,9 @@ func TestStateE2E(t *testing.T) {
 		}
 	})
 
-	// ---- Steps 14–15: state migrate idempotence ------------------------
-	// Step 14: `orun state migrate --dry-run` must exit 0 and emit a
-	// summary header without writing any new revisions (we already have
-	// one, but the migrate happy path tolerates that and reports the
-	// existing-revision case).
-	t.Run("step14_state_migrate_dry_run", func(t *testing.T) {
-		var buf bytes.Buffer
-		if err := runStateMigrate(ctx, &buf, true); err != nil {
-			t.Fatalf("runStateMigrate(dryRun=true): %v\n%s", err, buf.String())
-		}
-		out := buf.String()
-		if !strings.Contains(out, "Summary (dry run):") {
-			t.Fatalf("dry-run output missing summary header:\n%s", out)
-		}
-	})
-
-	// Step 15: `orun state migrate` (non-dry-run) ⇒ run twice; the four
-	// canonical revision documents must have identical bytes after the
-	// second run. We snapshot checksums between runs and assert.
-	t.Run("step15_state_migrate_idempotent", func(t *testing.T) {
-		canonical := []string{
-			"revisions/" + f.revKey + "/plan.json",
-			"revisions/" + f.revKey + "/trigger.json",
-			"revisions/" + f.revKey + "/revision.json",
-			"revisions/" + f.revKey + "/manifest.json",
-		}
-		snap := func() map[string]string {
-			out := make(map[string]string, len(canonical))
-			for _, rel := range canonical {
-				out[rel] = fileChecksum(t, filepath.Join(dir, ".orun", filepath.FromSlash(rel)))
-			}
-			return out
-		}
-
-		var buf1 bytes.Buffer
-		if err := runStateMigrate(ctx, &buf1, false); err != nil {
-			t.Fatalf("runStateMigrate(first): %v\n%s", err, buf1.String())
-		}
-		before := snap()
-
-		var buf2 bytes.Buffer
-		if err := runStateMigrate(ctx, &buf2, false); err != nil {
-			t.Fatalf("runStateMigrate(second): %v\n%s", err, buf2.String())
-		}
-		after := snap()
-
-		for rel, want := range before {
-			if got := after[rel]; got != want {
-				t.Fatalf("migrate non-idempotent for %s:\n  before=%s\n  after =%s", rel, want, got)
-			}
-		}
-	})
+	// Steps 14–15 (`orun state migrate` idempotence) were removed with the
+	// legacy state-migrate command at the M12 cutover: there is no legacy
+	// .orun/ file store left to ingest. The revision documents this walk
+	// builds (steps 1–13 above) are the migration target, and their
+	// determinism is already asserted where they are written.
 }

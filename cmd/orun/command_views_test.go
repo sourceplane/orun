@@ -3,18 +3,18 @@ package main
 import (
 	"testing"
 
-	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/execmodel"
 )
 
 func TestExecutionCountsFromStatePrefersStateValues(t *testing.T) {
 	t.Parallel()
 
-	counts := executionCountsFromState(&state.ExecMetadata{
+	counts := executionCountsFromState(&execmodel.ExecMetadata{
 		JobTotal:  9,
 		JobDone:   0,
 		JobFailed: 0,
-	}, &state.ExecState{
-		Jobs: map[string]*state.JobState{
+	}, &execmodel.ExecState{
+		Jobs: map[string]*execmodel.JobState{
 			"web-build": {Status: "completed"},
 			"web-lint":  {Status: "completed"},
 			"api-test":  {Status: "failed"},

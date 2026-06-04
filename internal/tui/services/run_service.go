@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"time"
 
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/executor"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/objrun"
 	"github.com/sourceplane/orun/internal/runner"
 )
 
@@ -171,6 +173,19 @@ func (s *LiveOrunService) RunPlan(ctx context.Context, req RunRequest) (<-chan R
 		},
 	}
 
+	// Native object-model run session: a real (non-dry) run opens a live working
+	// tree and seals a native ExecutionRun on terminal — the same path `orun run`
+	// takes — so the run is then readable via ListRuns / TailLogs. Best-effort:
+	// failure to open never blocks the run. Dry runs persist nothing.
+	var sess *objrun.Session
+	if !req.DryRun && s.cfg.ObjectModelRoot != "" {
+		root := filepath.Join(s.cfg.ObjectModelRoot, "objectmodel")
+		if opened, oerr := objrun.Begin(context.Background(), root, req.Plan, execID); oerr == nil {
+			sess = opened
+		}
+	}
+	sess.InstallHooks(r) // nil-safe
+
 	// If the context cancels before/during the run, abort the runner. We
 	// can't cancel the runner mid-step from outside (no Run(ctx) yet), but
 	// the send() helper makes hooks non-blocking so the goroutine can drain
@@ -180,8 +195,10 @@ func (s *LiveOrunService) RunPlan(ctx context.Context, req RunRequest) (<-chan R
 		defer close(ch)
 
 		// Pre-cancel guard: emit a single done event so the channel never
-		// silently produces no rows.
+		// silently produces no rows. Still seal the (empty) session so the live
+		// working tree is not orphaned.
 		if err := ctx.Err(); err != nil {
+			_, _ = sess.Finish(context.Background(), r, err)
 			ch <- RunEvent{
 				Kind:      RunEventRunDone,
 				ExecID:    execID,
@@ -193,6 +210,10 @@ func (s *LiveOrunService) RunPlan(ctx context.Context, req RunRequest) (<-chan R
 		}
 
 		runErr := r.Run(req.Plan)
+
+		// Seal the run into the object graph from the runner's terminal state
+		// (nil-safe for dry runs / failed-to-open sessions).
+		_, _ = sess.Finish(context.Background(), r, runErr)
 
 		done := RunEvent{
 			Kind:      RunEventRunDone,

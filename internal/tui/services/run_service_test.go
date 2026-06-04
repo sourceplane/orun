@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 )
 
 func TestValidateRunRequest_RejectsNilPlan(t *testing.T) {
@@ -46,14 +45,14 @@ func TestValidateRunRequest_HappyPath(t *testing.T) {
 func TestLiveOrunService_RunPlan_RejectsCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	svc := NewLiveOrunService(LiveServiceConfig{Store: state.NewStore(t.TempDir())})
+	svc := NewLiveOrunService(LiveServiceConfig{ObjectModelRoot: orunDir(t.TempDir())})
 	if _, err := svc.RunPlan(ctx, RunRequest{Plan: &model.Plan{}, DryRun: true}); err == nil {
 		t.Fatal("expected ctx.Err()")
 	}
 }
 
 func TestLiveOrunService_RunPlan_FailsClosedOnRemoteState(t *testing.T) {
-	svc := NewLiveOrunService(LiveServiceConfig{Store: state.NewStore(t.TempDir())})
+	svc := NewLiveOrunService(LiveServiceConfig{ObjectModelRoot: orunDir(t.TempDir())})
 	_, err := svc.RunPlan(context.Background(), RunRequest{
 		Plan:        &model.Plan{},
 		DryRun:      true,
@@ -66,8 +65,8 @@ func TestLiveOrunService_RunPlan_FailsClosedOnRemoteState(t *testing.T) {
 
 func TestLiveOrunService_RunPlan_EmptyPlanEmitsRunDone(t *testing.T) {
 	svc := NewLiveOrunService(LiveServiceConfig{
-		IntentRoot: t.TempDir(),
-		Store:      state.NewStore(t.TempDir()),
+		IntentRoot:      t.TempDir(),
+		ObjectModelRoot: orunDir(t.TempDir()),
 	})
 	plan := &model.Plan{
 		Metadata: model.PlanMetadata{Name: "empty"},
@@ -107,11 +106,12 @@ loop:
 // TestLiveOrunService_RunPlan_RealRunStreamsAndPersistsLogs is the
 // regression guard for the cockpit's core defect: a real (non-dry) run
 // from the TUI must actually execute, emit per-job events stamped with the
-// execution ID, and persist per-step logs that the log tail can replay.
+// execution ID, and seal a native ExecutionRun whose per-step logs the log
+// tail can replay from the object graph.
 func TestLiveOrunService_RunPlan_RealRunStreamsAndPersistsLogs(t *testing.T) {
 	workDir := t.TempDir()
-	store := state.NewStore(t.TempDir())
-	svc := NewLiveOrunService(LiveServiceConfig{IntentRoot: workDir, Store: store})
+	omDir := t.TempDir()
+	svc := NewLiveOrunService(LiveServiceConfig{IntentRoot: workDir, ObjectModelRoot: orunDir(omDir)})
 
 	plan := &model.Plan{
 		Metadata: model.PlanMetadata{Name: "realrun"},
@@ -174,9 +174,33 @@ loop:
 		t.Fatal("events should carry a non-empty ExecID")
 	}
 
-	// (The runner no longer persists legacy .orun/executions log files — the
-	// M12 cutover removed legacy execution state. The streamed step output is
-	// asserted above via the run events; wiring the TUI run service to persist
-	// step logs into the object-model working tree is a tracked follow-up.)
-	_ = store
+	// The run sealed a native ExecutionRun: it must surface in history and its
+	// per-step log must be replayable from the object graph (the deferred
+	// "TUI object-model log persistence" item, now closed).
+	runs, err := svc.ListRuns(context.Background(), ListRunsRequest{})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	var found bool
+	for _, r := range runs {
+		if r.ExecID == execID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("sealed run %s not in history %+v", execID, runs)
+	}
+
+	ch2, err := svc.TailLogs(context.Background(), LogRequest{ExecID: execID, JobID: "demo.build"})
+	if err != nil {
+		t.Fatalf("TailLogs: %v", err)
+	}
+	var logBody string
+	for ev := range ch2 {
+		logBody += ev.Line + "\n"
+	}
+	if !strings.Contains(logBody, "hello-from-real-run") {
+		t.Fatalf("sealed step log missing expected output; got %q", logBody)
+	}
 }

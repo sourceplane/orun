@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 )
 
 func TestReadShardManifest_ValidPlanShard(t *testing.T) {
@@ -141,7 +141,7 @@ func TestReadPlanShard_WrongRoleShard(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 
-	js := &state.JobState{Status: "completed", Steps: map[string]string{}}
+	js := &execmodel.JobState{Status: "completed", Steps: map[string]string{}}
 	shard, err := WriteJobShard(ctx, WriteJobShardOptions{
 		ExecID:    "gh-1-1-test",
 		PlanID:    "abc123",
@@ -165,7 +165,7 @@ func TestReadJobShard_Valid(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 
-	js := &state.JobState{
+	js := &execmodel.JobState{
 		Status:     "completed",
 		StartedAt:  "2026-05-23T12:00:00Z",
 		FinishedAt: "2026-05-23T12:05:00Z",

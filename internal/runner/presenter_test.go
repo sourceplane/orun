@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/ui"
 )
 
@@ -90,8 +90,8 @@ func TestNewRunSummaryDedupesLinks(t *testing.T) {
 	t.Parallel()
 
 	summary := newRunSummary()
-	summary.addLinks([]state.ExecutionLink{{Label: "Preview URL", URL: "https://preview.example.dev"}})
-	summary.addLinks([]state.ExecutionLink{{Label: "Preview URL", URL: "https://preview.example.dev"}})
+	summary.addLinks([]execmodel.ExecutionLink{{Label: "Preview URL", URL: "https://preview.example.dev"}})
+	summary.addLinks([]execmodel.ExecutionLink{{Label: "Preview URL", URL: "https://preview.example.dev"}})
 
 	snap := summary.snapshot()
 	if len(snap.links) != 1 {
@@ -115,7 +115,7 @@ func TestGHAJobHeaderMatrixModeDefaultsDepToCompleted(t *testing.T) {
 		Steps:     []model.PlanStep{{}},
 	}
 	// Remote state has not propagated the dep's completed status yet.
-	execState := &state.ExecState{Jobs: map[string]*state.JobState{}}
+	execState := &execmodel.ExecState{Jobs: map[string]*execmodel.JobState{}}
 
 	r.ghaPrintJobHeader(job, execState)
 	r.gha.FlushJob(job.ID)
@@ -195,8 +195,8 @@ func TestGHAJobHeaderShowsDependencyStatus(t *testing.T) {
 		DependsOn: []string{"network@production.apply", "iam@production.apply"},
 		Steps:     []model.PlanStep{{}, {}},
 	}
-	execState := &state.ExecState{
-		Jobs: map[string]*state.JobState{
+	execState := &execmodel.ExecState{
+		Jobs: map[string]*execmodel.JobState{
 			"network@production.apply": {Status: "completed"},
 			"iam@production.apply":     {Status: "completed"},
 		},
@@ -232,8 +232,8 @@ func TestGHAJobHeaderShowsFailedDependency(t *testing.T) {
 		DependsOn: []string{"network@production.apply", "iam@production.apply"},
 		Steps:     []model.PlanStep{{}},
 	}
-	execState := &state.ExecState{
-		Jobs: map[string]*state.JobState{
+	execState := &execmodel.ExecState{
+		Jobs: map[string]*execmodel.JobState{
 			"network@production.apply": {Status: "completed"},
 			"iam@production.apply":     {Status: "failed"},
 		},
@@ -263,7 +263,7 @@ func TestGHAJobHeaderNoDepsSection(t *testing.T) {
 		Steps: []model.PlanStep{{}},
 	}
 
-	r.ghaPrintJobHeader(job, &state.ExecState{Jobs: map[string]*state.JobState{}})
+	r.ghaPrintJobHeader(job, &execmodel.ExecState{Jobs: map[string]*execmodel.JobState{}})
 	r.gha.FlushJob(job.ID)
 	out := sink.String()
 
@@ -277,10 +277,10 @@ func TestJobReportObserveStepDone(t *testing.T) {
 
 	jr := newJobReport(model.PlanJob{Steps: []model.PlanStep{{}, {}, {}, {}}}, false)
 
-	jr.observeStepDone("init", true, false, 100*1e6)    // 100ms success
-	jr.observeStepDone("build", true, false, 500*1e6)   // 500ms success (slowest)
-	jr.observeStepDone("test", false, false, 200*1e6)   // 200ms failure
-	jr.observeStepDone("publish", true, true, 0)        // skipped
+	jr.observeStepDone("init", true, false, 100*1e6)  // 100ms success
+	jr.observeStepDone("build", true, false, 500*1e6) // 500ms success (slowest)
+	jr.observeStepDone("test", false, false, 200*1e6) // 200ms failure
+	jr.observeStepDone("publish", true, true, 0)      // skipped
 
 	if jr.stepPassed != 2 {
 		t.Fatalf("stepPassed = %d, want 2", jr.stepPassed)

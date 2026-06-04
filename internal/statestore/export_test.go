@@ -44,3 +44,27 @@ func SetCloseFnForTest(fn func(f *os.File) error) func() {
 	closeFn = fn
 	return func() { closeFn = prev }
 }
+
+// SetReadDirFnForTest replaces Delete's directory-read primitive. Returns a
+// restore function.
+func SetReadDirFnForTest(fn func(string) ([]os.DirEntry, error)) func() {
+	prev := readDirFn
+	readDirFn = fn
+	return func() { readDirFn = prev }
+}
+
+// SetRemoveFnForTest replaces Delete's unlink primitive. Returns a restore
+// function.
+func SetRemoveFnForTest(fn func(string) error) func() {
+	prev := removeFn
+	removeFn = fn
+	return func() { removeFn = prev }
+}
+
+// SetStatFnForTest replaces Read's post-read stat primitive. Returns a restore
+// function.
+func SetStatFnForTest(fn func(string) (os.FileInfo, error)) func() {
+	prev := statFn
+	statFn = fn
+	return func() { statFn = prev }
+}

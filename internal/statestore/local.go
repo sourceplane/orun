@@ -134,7 +134,7 @@ func (s *LocalStore) Read(ctx context.Context, p string) ([]byte, ObjectMeta, er
 		}
 		return nil, ObjectMeta{}, fmt.Errorf("statestore: read %s: %w", p, err)
 	}
-	info, err := os.Stat(abs)
+	info, err := statFn(abs)
 	if err != nil {
 		return nil, ObjectMeta{}, fmt.Errorf("statestore: stat %s: %w", p, err)
 	}
@@ -389,7 +389,7 @@ func (s *LocalStore) Delete(ctx context.Context, p string) error {
 		return fmt.Errorf("statestore: stat %s: %w", p, err)
 	}
 	if info.IsDir() {
-		entries, derr := os.ReadDir(abs)
+		entries, derr := readDirFn(abs)
 		if derr != nil {
 			return fmt.Errorf("statestore: readdir %s: %w", p, derr)
 		}
@@ -400,7 +400,7 @@ func (s *LocalStore) Delete(ctx context.Context, p string) error {
 		// owned by callers; refuse the delete to avoid surprising removals.
 		return fmt.Errorf("%w: %s is a directory; recursive deletion is not supported", ErrInvalid, p)
 	}
-	if err := os.Remove(abs); err != nil {
+	if err := removeFn(abs); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
@@ -427,6 +427,16 @@ var (
 	writeFn = func(f *os.File, data []byte) (int, error) { return f.Write(data) }
 	syncFn  = func(f *os.File) error { return f.Sync() }
 	closeFn = func(f *os.File) error { return f.Close() }
+)
+
+// readDirFn / removeFn are the directory-read and unlink primitives used by
+// Delete, indirected for fault injection (matching the write-path seams above)
+// so the readdir-error and remove-error branches are testable without staging a
+// real filesystem fault.
+var (
+	readDirFn = os.ReadDir
+	removeFn  = os.Remove
+	statFn    = os.Stat
 )
 
 // writeAtomic writes data to dst via a tempfile inside dir, fsync, rename.

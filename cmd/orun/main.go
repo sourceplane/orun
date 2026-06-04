@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -20,6 +17,7 @@ import (
 	"github.com/sourceplane/orun/internal/loader"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/normalize"
+	"github.com/sourceplane/orun/internal/objrun"
 	"github.com/sourceplane/orun/internal/planner"
 	"github.com/sourceplane/orun/internal/preset"
 	"github.com/sourceplane/orun/internal/render"
@@ -130,6 +128,16 @@ func generatePlan() error {
 
 		triggerActiveEnvs, triggerResolution, err = trigger.ResolveActiveEnvironments(intent, triggerCtx, environment)
 		if err != nil {
+			// A CI event that maps to no configured trigger binding (e.g. a
+			// pull request whose base branch is not bound) is not a failure:
+			// there is simply nothing to plan. Emit an empty matrix so the
+			// workflow's matrix guard skips the execute job, and exit cleanly
+			// rather than failing the pipeline.
+			if triggerCtx.Mode == "event-file" && errors.Is(err, trigger.ErrNoTriggerMatch) {
+				fmt.Fprintf(os.Stderr, "○ %v — nothing to plan\n", err)
+				writeEmptyGithubMatrix()
+				return nil
+			}
 			return err
 		}
 
@@ -491,9 +499,8 @@ func generatePlan() error {
 		}
 	}
 
-	// Additionally write the content-addressed object graph when the
-	// ORUN_OBJECT_MODEL flag is set (M5b). Best-effort and isolated under
-	// .orun/objectmodel/; a no-op when the flag is unset.
+	// Additionally write the content-addressed object graph. Best-effort and
+	// isolated under .orun/objectmodel/.
 	writeObjectModelPlan(absStoreRoot, plan, planBytes, planHash, rev.RevisionKey, trig, catRes)
 
 	// On-success M5.a summary block (cli-surface.md §1.1). Printed before the
@@ -700,34 +707,49 @@ func generatePlan() error {
 	return nil
 }
 
+// writeEmptyGithubMatrix writes an empty job matrix to $GITHUB_OUTPUT when
+// --github-output is set, so a no-op plan (no trigger matched) still produces a
+// well-formed `matrix` output. The workflow's execute job guards on
+// matrix != '{"include":[]}', so an empty matrix cleanly skips downstream jobs.
+func writeEmptyGithubMatrix() {
+	if !githubOutput {
+		return
+	}
+	outputPath := os.Getenv("GITHUB_OUTPUT")
+	if outputPath == "" {
+		return
+	}
+	lines := []string{
+		"matrix<<EOF\n{\"include\":[]}\nEOF",
+		"plan_id=",
+		"exec_id=",
+	}
+	f, err := os.OpenFile(outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ warning: failed to open %s: %v\n", outputPath, err)
+		return
+	}
+	defer f.Close()
+	if _, err := f.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ warning: failed to write %s: %v\n", outputPath, err)
+	}
+}
+
 // computePlanHashForRevision returns the canonical "sha256:<hex>" digest of
 // the plan's content with self-referential metadata (checksum, revision)
 // cleared. This matches data-model.md §3.1: the plan hash is stable across
 // re-runs of the same intent on the same SHA, irrespective of which alias
-// it was previously persisted under.
+// it was previously persisted under. It delegates to objrun so the run path
+// (CLI and TUI) and `orun plan` share one dedup-key implementation.
 func computePlanHashForRevision(plan *model.Plan) (string, error) {
-	if plan == nil {
-		return "", fmt.Errorf("plan is nil")
-	}
-	clone := *plan
-	clone.Metadata.Checksum = ""
-	clone.Metadata.Revision = nil
-	payload, err := json.Marshal(&clone)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(payload)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	return objrun.PlanHash(plan)
 }
 
 // canonicalPlanJSON marshals plan as deterministic indented JSON suitable
 // for persistence as canonical plan.json (and for byte-identical compat
 // aliases under .orun/plans/).
 func canonicalPlanJSON(plan *model.Plan) ([]byte, error) {
-	if plan == nil {
-		return nil, fmt.Errorf("plan is nil")
-	}
-	return json.MarshalIndent(plan, "", "  ")
+	return objrun.CanonicalPlanJSON(plan)
 }
 
 func validateFiles() error {

@@ -62,16 +62,11 @@ func (s *LiveOrunService) LoadWorkspace(ctx context.Context, req WorkspaceReques
 	envNames := environmentNames(intent)
 	components := componentSummaries(intent, normalised)
 
-	plans, _ := s.cfg.Store.ListPlans()
-	planSummaries := make([]PlanSummary, 0, len(plans))
-	for _, p := range plans {
-		planSummaries = append(planSummaries, PlanSummary{
-			Name:        p.Name,
-			Checksum:    p.Checksum,
-			JobCount:    p.Jobs,
-			GeneratedAt: p.CreatedAt,
-		})
-	}
+	// The saved-plan listing used the legacy plan store, which is gone. In the
+	// object model a plan is materialized as a revision when it is run; a
+	// standalone "saved named plans" listing over the revision graph is a
+	// tracked follow-up, so the Browse view's plans section is empty for now.
+	var planSummaries []PlanSummary
 
 	return &WorkspaceSnapshot{
 		IntentRoot:   intentRoot,

@@ -7,16 +7,16 @@ import (
 	"time"
 
 	"github.com/sourceplane/orun/internal/cockpit/viewmodel"
-	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/execmodel"
 )
 
 type fakeSource struct {
-	calls   int
+	calls    int
 	statuses []string
-	err     error
+	err      error
 }
 
-func (f *fakeSource) LoadRun(_ context.Context, _ string) (*state.ExecMetadata, *state.ExecState, error) {
+func (f *fakeSource) LoadRun(_ context.Context, _ string) (*execmodel.ExecMetadata, *execmodel.ExecState, error) {
 	if f.err != nil {
 		return nil, nil, f.err
 	}
@@ -25,10 +25,10 @@ func (f *fakeSource) LoadRun(_ context.Context, _ string) (*state.ExecMetadata, 
 		status = f.statuses[f.calls]
 	}
 	f.calls++
-	return &state.ExecMetadata{ExecID: "x", PlanName: "p", Status: status}, &state.ExecState{}, nil
+	return &execmodel.ExecMetadata{ExecID: "x", PlanName: "p", Status: status}, &execmodel.ExecState{}, nil
 }
 
-func (f *fakeSource) ListRuns(_ context.Context) ([]state.ExecEntry, error) {
+func (f *fakeSource) ListRuns(_ context.Context) ([]execmodel.ExecEntry, error) {
 	return nil, nil
 }
 

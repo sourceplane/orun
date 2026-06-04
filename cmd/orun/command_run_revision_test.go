@@ -26,7 +26,6 @@ import (
 	"github.com/sourceplane/orun/internal/executionstate"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/revision"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statestore"
 )
 
@@ -121,7 +120,6 @@ func TestSetupAndFinalizeRevisionExecution_HappyPath(t *testing.T) {
 	resetRunFlags(t)
 	runExecID = "exec-test-001"
 
-	store := state.NewStore(dir)
 	plan := minimalPlan(t)
 
 	// Pre-stamp plan.Metadata.Revision via synthesize so setup hits the
@@ -149,20 +147,9 @@ func TestSetupAndFinalizeRevisionExecution_HappyPath(t *testing.T) {
 		t.Fatalf("exec.OriginalKey = %q; want exec-test-001 (--exec-id plumbed via OriginalKey)", rx.exec.OriginalKey)
 	}
 
-	// Drive a fake terminal state through the legacy store so finalize
-	// projects ExecutionCounts → ExecSummary correctly.
-	if _, err := store.CreateExecution("exec-test-001", plan); err != nil {
-		t.Fatalf("CreateExecution(legacy): %v", err)
-	}
-	es, err := store.LoadState("exec-test-001")
-	if err != nil {
-		t.Fatalf("LoadState: %v", err)
-	}
-	es.Jobs["job-1"] = &state.JobState{Status: "completed"}
-	if err := store.SaveState("exec-test-001", es); err != nil {
-		t.Fatalf("SaveState: %v", err)
-	}
-
+	// finalize projects the ExecutionCounts it is handed into the execution's
+	// ExecSummary; the per-job outcome is passed directly, not read back from
+	// any store.
 	if _, err := finalizeRevisionExecution(context.Background(), rx, execmodel.ExecutionCounts{Total: 1, Completed: 1}, nil); err != nil {
 		t.Fatalf("finalizeRevisionExecution: %v", err)
 	}
@@ -207,16 +194,11 @@ func TestSetupRevisionExecution_FailedRunMarksFailed(t *testing.T) {
 	resetRunFlags(t)
 	runExecID = "exec-fail-001"
 
-	store := state.NewStore(dir)
 	plan := minimalPlan(t)
 
 	rx, err := setupRevisionExecution(context.Background(), plan, nil, "exec-fail-001")
 	if err != nil {
 		t.Fatalf("setupRevisionExecution: %v", err)
-	}
-
-	if _, err := store.CreateExecution("exec-fail-001", plan); err != nil {
-		t.Fatalf("CreateExecution(legacy): %v", err)
 	}
 
 	// Pass a non-nil runErr to finalize → status MUST be failed even

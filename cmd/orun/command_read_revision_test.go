@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/sourceplane/orun/internal/revision"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/triggerctx"
 )
@@ -177,11 +176,15 @@ func TestGetPlans_NoRevisions_Empty(t *testing.T) {
 
 func TestGetPlans_MixedWorkspace_PrefersRevisionFirst(t *testing.T) {
 	dir := withTempIntentRoot(t)
-	// Seed both legacy plans and a revision row.
-	store := state.NewStore(dir)
-	plan := minimalPlan(t)
-	if err := store.SavePlan(plan, "latest"); err != nil {
-		t.Fatalf("SavePlan: %v", err)
+	// A stray legacy plans file on disk must not disrupt the revision-first
+	// table: the legacy .orun/plans/ store is no longer read post-cutover, so
+	// `get plans` resolves entirely from revisions/.
+	plansDir := filepath.Join(dir, ".orun", "plans")
+	if err := os.MkdirAll(plansDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plansDir, "latest.json"), []byte(`{"metadata":{"name":"legacy"}}`), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	revKey := seedRevisionFirstWorkspace(t, dir)
 
