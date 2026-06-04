@@ -5,24 +5,27 @@ as implemented. This is the as-built record; the design docs describe the intent
 
 ## Summary
 
-Milestones **M0–M11 + M13 are implemented, merged, and tested end-to-end**, and
-**M12 (the native runner rewrite + legacy cutover) is in progress** — the runner
-now **writes and reads** the content-addressed graph natively behind the flag.
-The object model runs **additively behind two feature flags** — with the flags
-unset, `orun` behavior is byte-identical to before.
+**Milestones M0–M13 are implemented, merged, and tested end-to-end** — the
+content-addressed object model is the **sole** execution representation. M12 (the
+native runner rewrite + legacy cutover) is complete: `orun run` writes the
+working tree live and seals natively; plan/read/run, the TUI, the cockpit, and
+`orun github pull` all use the object graph; the legacy `internal/state` file
+store is **deleted**; and the `ORUN_OBJECT_MODEL` / `ORUN_OBJECT_RUNNER`
+coexistence flags are **removed** (the object model is unconditional, no longer
+gated).
 
 | Field | Value |
 |-------|-------|
-| Milestones done | M0–M11, M13 |
-| Milestone in progress | **M12** — native runner rewrite + legacy delete (see §"M12 cutover") |
+| Milestones done | **M0–M13 (complete)** |
 | Test status | full module suite green; object-model gate green; `-race` clean; `verify-generated` clean |
-| Flags | `ORUN_OBJECT_MODEL=1` (plan writes), `ORUN_OBJECT_RUNNER=1` (run + seal) — default off |
-| Isolation | object graph lives under `.orun/objectmodel/`; legacy `.orun/` untouched |
+| Flags | none — object model is unconditional (coexistence flags removed at the M12 cutover) |
+| Layout | object graph under `.orun/objectmodel/`; legacy `.orun/state` deleted |
 
-## M12 cutover — in progress
+## M12 cutover — complete
 
-The native-runner rewrite is being landed in the staged, flag-gated order from
-`M12-native-runner-rewrite.md`. Done so far (each a merged, green PR):
+The native-runner rewrite landed in the staged, flag-gated order from
+`M12-native-runner-rewrite.md`, finishing with the legacy deletion, flag removal,
+crash-recovery e2e (T7), and cross-run resume. Each step was a merged, green PR:
 
 | Step | What landed |
 |------|-------------|
