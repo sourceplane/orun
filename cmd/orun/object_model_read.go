@@ -8,10 +8,51 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/objread"
 	"github.com/sourceplane/orun/internal/objview"
 	"github.com/sourceplane/orun/internal/ui"
 )
+
+// resumeJobsFromPriorRun reads the prior execution recorded under execID in the
+// object graph and returns the jobs that already succeeded, as runner JobStates
+// (status "completed", with their step statuses), so a re-run with the same
+// --exec-id skips them. Returns nil when there is no object graph, no prior run
+// for the id, or nothing already succeeded.
+//
+// It must be called BEFORE the live working tree for this run is opened — Get on
+// a bare id prefers an in-flight tree, so opening this run's tree first would
+// shadow the prior sealed execution.
+func resumeJobsFromPriorRun(execID string) map[string]*execmodel.JobState {
+	if execID == "" {
+		return nil
+	}
+	reader, ok := openObjectReader()
+	if !ok {
+		return nil
+	}
+	v, err := reader.Get(context.Background(), execID)
+	if err != nil {
+		return nil
+	}
+	out := map[string]*execmodel.JobState{}
+	for _, j := range v.Jobs {
+		if objview.NodeStatusToLegacy(j.Status) != "completed" {
+			continue
+		}
+		js := &execmodel.JobState{Status: "completed", Steps: map[string]string{}}
+		if n := len(j.Attempts); n > 0 {
+			for _, s := range j.Attempts[n-1].Steps {
+				js.Steps[s.StepID] = objview.NodeStatusToLegacy(s.Status)
+			}
+		}
+		out[j.JobID] = js
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
 
 // object_model_read.go points the read commands at the content-addressed object
 // graph. It adapts objread's presentation-neutral views into the execmodel value

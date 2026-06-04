@@ -75,13 +75,16 @@ Remaining for full cutover (legacy deletion):
   crashed working tree is sealed as failed from its on-disk snapshot — the disk
   gate: the persisted jobs/steps + the pre-crash step log survive into the seal —
   and the recovered execution is surfaced by the read path (`objread`).
-- **resume follow-up (remaining):** reimplement cross-run skip-completed job
-  resume on the object model (the legacy file backend's resume was dropped at the
-  cutover; in-run dependency ordering is preserved).
+- **resume — DONE:** cross-run skip-completed job resume is reimplemented on the
+  object model. `resumeJobsFromPriorRun` (cmd/orun) reads the prior execution for
+  the re-run's `--exec-id` from the object graph and seeds the runner's
+  `ResumeJobs`; the runner skips those jobs (counting them as cached) and
+  re-executes only the ones that did not succeed. In-run dependency ordering is
+  unchanged.
 
-The runner, plan path, read commands, TUI, cockpit, and `orun github pull` are
-all off the legacy store, which is **deleted**; the object model is the
-unconditional execution representation. `internal/execmodel` is the
+M12 is complete: the runner, plan path, read commands, TUI, cockpit, and `orun
+github pull` are all off the legacy store, which is **deleted**; the object model
+is the unconditional execution representation. `internal/execmodel` is the
 legacy-store-free home for the in-memory execution types the remaining (test)
 consumers keep using.
 
@@ -178,22 +181,19 @@ go test -race (obj pkgs)  clean
 CLI smoke (real binary)   objects fsck/log/gc/push/pull all run
 ```
 
-## The remaining gap — finishing M12
+## M12 — complete
 
-The native runner is the default: `orun run` writes the working tree live and
+The native runner is the only runner: `orun run` writes the working tree live and
 seals it **natively**, and the runner, plan path, read commands, TUI, and
 cockpit all read/write the object graph with no legacy file store. The legacy
 migration bridges (`orun state migrate`, `internal/objmigrate`,
-`internal/objexec`) have been deleted.
+`internal/objexec`) and the `executionstate` runner-output mirror bridge have
+been deleted.
 
 `orun github pull` seals pulled runs into the object graph too
-(`runbundle.Hydrate` → `objrun.Seal`), and **`internal/state` has now been
-deleted** — its 14 test importers were repointed to `internal/execmodel` (or had
-vestigial file-`Store` fixtures dropped), and the object-model gate bans the
-import repo-wide. `internal/executionstate/bridge.go` is kept (still used by the
-legacy runner mirror; it has no `internal/state` dependency).
-
-What remains: remove the `ORUN_OBJECT_MODEL` / `ORUN_OBJECT_RUNNER` coexistence
-flags so the native runner is the sole path (retiring the legacy runner + the
-mirror bridge) — a runtime-behavior change, hence its own PR — and T7, the live
-`orun run` → crash-mid-run → recover → seal e2e.
+(`runbundle.Hydrate` → `objrun.Seal`); **`internal/state` is deleted** and the
+object-model gate bans the import repo-wide; the `ORUN_OBJECT_MODEL` /
+`ORUN_OBJECT_RUNNER` coexistence flags are **removed** (the object model is
+unconditional); the live crash → recover → seal walk is covered end-to-end (T7);
+and cross-run skip-completed **resume** is reimplemented on the object graph.
+Nothing in M12 remains open.

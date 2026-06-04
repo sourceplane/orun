@@ -79,7 +79,14 @@ type Runner struct {
 	// already enforces dependency ordering.
 	SkipLocalDepsForJob bool
 	// Hooks wires external lifecycle callbacks (remote state, log upload, etc.).
-	Hooks   *RunnerHooks
+	Hooks *RunnerHooks
+
+	// ResumeJobs seeds the run with jobs that already succeeded in a prior run
+	// of the same execution (read from the object graph). Seeded jobs are
+	// skipped — the run re-executes only the jobs that did not succeed, and
+	// counts the seeded ones as "cached". nil disables cross-run resume.
+	ResumeJobs map[string]*execmodel.JobState
+
 	printMu sync.Mutex
 	stateMu sync.Mutex
 
@@ -296,6 +303,15 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		ExecID:       r.ExecID,
 		PlanChecksum: plan.Metadata.Checksum,
 		Jobs:         map[string]*execmodel.JobState{},
+	}
+
+	// Cross-run resume: seed jobs that already succeeded in a prior run so the
+	// execution loop skips them (the existing "completed" → resumed path). Done
+	// before the retry override below so an explicit --job retry still re-runs.
+	for jobID, js := range r.ResumeJobs {
+		if js != nil {
+			execState.Jobs[jobID] = js
+		}
 	}
 
 	if r.JobID != "" && r.Retry {
