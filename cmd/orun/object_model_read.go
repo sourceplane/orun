@@ -13,32 +13,24 @@ import (
 	"github.com/sourceplane/orun/internal/ui"
 )
 
-// object_model_read.go repoints the read commands at the content-addressed
-// object graph when the object model is active (M12 T3, rows 16-18). It adapts
-// objread's presentation-neutral views into the execmodel value types the
-// existing renderers already consume, so the data *source* swaps behind the flag
-// while the rendering is unchanged. When the object model is absent or has no
-// matching execution, callers fall back to the legacy store — so flag-off
-// behavior is byte-identical and coexistence is preserved until the T5 cutover.
-
-// objectModelActive reports whether either object-model flag is set.
-func objectModelActive() bool { return objectRunnerEnabled() || objectModelEnabled() }
+// object_model_read.go points the read commands at the content-addressed object
+// graph. It adapts objread's presentation-neutral views into the execmodel value
+// types the existing renderers already consume, so the data *source* is the
+// object graph while the rendering is unchanged. When the object model is absent
+// (a workspace that has not run anything yet) or has no matching execution,
+// callers render the empty view.
 
 // openObjectReader returns an objread.Reader over .orun/objectmodel when the
-// object model is active AND already present on disk. ok=false means the caller
-// should use the legacy store (object model off, or this workspace has no object
-// graph yet).
+// object graph is present on disk. ok=false means this workspace has no object
+// graph yet (nothing has been run), so the caller renders the empty view.
 func openObjectReader() (*objread.Reader, bool) {
-	if !objectModelActive() {
-		return nil, false
-	}
 	abs, err := filepath.Abs(filepath.Join(storeDir(), ".orun"))
 	if err != nil {
 		return nil, false
 	}
 	root := objectModelRoot(abs)
 	// Only adopt the object model if it actually has content; openObjectModel
-	// would otherwise create an empty store and hide legacy runs.
+	// would otherwise create an empty store and render nothing.
 	if _, err := os.Stat(filepath.Join(root, "objects")); err != nil {
 		return nil, false
 	}

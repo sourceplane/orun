@@ -11,18 +11,16 @@ import (
 )
 
 // object_model_runner.go wires `orun run` to the shared object-model session
-// glue (internal/objrun): when ORUN_OBJECT_RUNNER is enabled the runner writes
-// the content-addressed execution natively via a live working tree and seals it
-// on terminal. These are thin cmd-side adapters over objrun that add the flag
-// gate, the warning surface, and the sealed-run summary line; the actual session
-// logic lives in objrun so `orun run` and the TUI run path share one
-// implementation.
+// glue (internal/objrun): the runner writes the content-addressed execution
+// natively via a live working tree and seals it on terminal. These are thin
+// cmd-side adapters over objrun that add the warning surface and the sealed-run
+// summary line; the actual session logic lives in objrun so `orun run` and the
+// TUI run path share one implementation.
 
-// beginObjectModelRun opens a live object-model session for a run, honoring the
-// ORUN_OBJECT_RUNNER flag. Best-effort: returns nil on any failure (the run
-// proceeds unaffected).
+// beginObjectModelRun opens a live object-model session for a run. Best-effort:
+// returns nil on any failure (the run proceeds unaffected).
 func beginObjectModelRun(orunDir string, plan *model.Plan, execID string) *objrun.Session {
-	if !objectRunnerEnabled() || plan == nil || execID == "" {
+	if plan == nil || execID == "" {
 		return nil
 	}
 	sess, err := objrun.Begin(context.Background(), objectModelRoot(orunDir), plan, execID)

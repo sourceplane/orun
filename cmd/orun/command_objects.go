@@ -17,11 +17,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// command_objects.go is the M6 porcelain for the content-addressed object graph
-// written under .orun/objectmodel/ (the ORUN_OBJECT_MODEL experiment). The
-// commands are hidden until the object model becomes the default at the M12
-// cutover. Each command's core is a `runObjects*` function that takes an already
-// opened store/refs so it is unit-testable without CLI plumbing.
+// command_objects.go is the porcelain for the content-addressed object graph
+// written under .orun/objectmodel/. Each command's core is a `runObjects*`
+// function that takes an already opened store/refs so it is unit-testable
+// without CLI plumbing.
 
 func registerObjectsCommand(root *cobra.Command) {
 	objectsCmd := &cobra.Command{

@@ -499,9 +499,8 @@ func generatePlan() error {
 		}
 	}
 
-	// Additionally write the content-addressed object graph when the
-	// ORUN_OBJECT_MODEL flag is set (M5b). Best-effort and isolated under
-	// .orun/objectmodel/; a no-op when the flag is unset.
+	// Additionally write the content-addressed object graph. Best-effort and
+	// isolated under .orun/objectmodel/.
 	writeObjectModelPlan(absStoreRoot, plan, planBytes, planHash, rev.RevisionKey, trig, catRes)
 
 	// On-success M5.a summary block (cli-surface.md §1.1). Printed before the
