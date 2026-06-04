@@ -12,13 +12,14 @@ package main
 //      internal/executionstate.CreateExecution, which writes execution.json,
 //      snapshot.latest.json, indexes/executions/<execKey>.json, and
 //      refs/latest-execution.json;
-//   3. mirrors the legacy runner-on-disk state.json + metadata.json into
-//      the new layout via internal/executionstate.Bridge on every runner
-//      tick (the runner's AfterStateUpdate hook drives the mirror);
-//   4. marks the execution terminal via MarkTerminal once the runner
+//   3. marks the execution terminal via MarkTerminal once the runner
 //      returns, refreshing refs/latest-execution.json + manifest summary;
-//   5. prints a Revision/Trigger/Execution terminal summary that mirrors
+//   4. prints a Revision/Trigger/Execution terminal summary that mirrors
 //      the M5.a `orun plan` summary block.
+//
+// The live run itself is recorded into the content-addressed object graph by
+// the object runner (internal/objrun), not by this path; the executionstate
+// writes above back the remote-state layout and `orun catalog history`.
 //
 // `--revision <key>` short-circuits the resolution chain by passing the
 // flag value directly to ResolveRevision (which dispatches branch 3 on a
@@ -39,7 +40,6 @@ import (
 	"github.com/sourceplane/orun/internal/executionstate"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/revision"
-	"github.com/sourceplane/orun/internal/runner"
 	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/triggerctx"
 	"github.com/sourceplane/orun/internal/ui"
@@ -51,12 +51,10 @@ import (
 var runRevision string
 
 // revisionExecution is the bundle returned by setupRevisionExecution. It
-// captures the resolved revision, the persisted ExecutionRun, and an
-// already-configured Bridge so the caller can wire it into the runner with
-// no further plumbing.
+// captures the resolved revision and the persisted ExecutionRun so the caller
+// can finalize the execution and print the run summary.
 type revisionExecution struct {
 	cfg           executionstate.Config
-	bridge        *executionstate.Bridge
 	revKey        string
 	execKey       string
 	exec          executionstate.ExecutionRun
@@ -67,20 +65,15 @@ type revisionExecution struct {
 }
 
 // setupRevisionExecution is the M5.b entry point. It opens the StateStore
-// rooted at .orun/, resolves the PlanRevision, persists the ExecutionRun,
-// and constructs the Bridge that mirrors runner output on every tick.
+// rooted at .orun/, resolves the PlanRevision, and persists the ExecutionRun.
 //
-// On success the returned *revisionExecution carries everything the caller
-// needs to (a) mirror state.json/metadata.json per runner tick, (b) flip
-// the execution to a terminal status when the runner returns, and (c)
-// print a summary block consistent with the M5.a `orun plan` output.
+// On success the returned *revisionExecution carries what the caller needs to
+// (a) flip the execution to a terminal status when the runner returns, and
+// (b) print a summary block consistent with the M5.a `orun plan` output.
 //
 // The function is best-effort: if the local store cannot be opened or the
 // revision cannot be resolved, it returns a non-nil error and the caller
-// is expected to keep running on the legacy path. The runner is *not*
-// short-circuited — the legacy `.orun/executions/<execID>/` write path is
-// still authoritative for in-flight progress; the bridge merely promotes
-// those bytes into the new layout.
+// proceeds without the revision-layout bookkeeping.
 func setupRevisionExecution(
 	ctx context.Context,
 	plan *model.Plan,
@@ -188,19 +181,6 @@ func setupRevisionExecution(
 		return nil, fmt.Errorf("create execution under %s: %w", revKey, err)
 	}
 
-	// Step 4 — Bridge. LegacyRoot is the runner's `.orun/executions`
-	// directory; the runner writes <legacyExecID>/state.json there per
-	// state.Store.SaveState, and the bridge promotes those bytes into
-	// revisions/<revKey>/executions/<execKey>/{state,metadata}.json on
-	// every tick. MirrorModeAuto = hardlink with copy fallback on EXDEV
-	// per design.md §11.
-	bridge := &executionstate.Bridge{
-		Store:         stateStore,
-		LegacyRoot:    filepath.Join(absStoreRoot, "executions"),
-		MirrorMode:    executionstate.MirrorModeAuto,
-		CatalogParent: catParent,
-	}
-
 	canonicalPlan := filepath.Join(absStoreRoot, "revisions", revKey, "plan.json")
 	if catParent.Active() {
 		if catalogRevDir, err := catalogstore.CatalogRevisionDir(catParent.SourceKey, catParent.CatalogKey, revKey); err == nil {
@@ -210,7 +190,6 @@ func setupRevisionExecution(
 
 	return &revisionExecution{
 		cfg:           cfg,
-		bridge:        bridge,
 		revKey:        revKey,
 		execKey:       exec.ExecutionKey,
 		exec:          exec,
@@ -278,40 +257,6 @@ func synthesizeRevisionForRun(
 		return "", fmt.Errorf("write synthesized manifest: %w", err)
 	}
 	return rev.RevisionKey, nil
-}
-
-// installRevisionHooks chains the bridge mirror onto an already-configured
-// RunnerHooks. The chain preserves any previously-installed AfterStateUpdate
-// callback (none of the existing local/remote hook installers set one, but
-// the chain defends against future drift) so the bridge runs without
-// stepping on the runner's own state-machine plumbing.
-func installRevisionHooks(r *runner.Runner, rx *revisionExecution, legacyExecID string) {
-	if rx == nil || rx.bridge == nil {
-		return
-	}
-	if r.Hooks == nil {
-		r.Hooks = &runner.RunnerHooks{}
-	}
-	prev := r.Hooks.AfterStateUpdate
-	r.Hooks.AfterStateUpdate = func() {
-		if prev != nil {
-			prev()
-		}
-		// MirrorRunnerOutput swallows non-precondition errors and
-		// emits bridge-mirror-failed events on any I/O fault — see
-		// internal/executionstate/bridge.go. We discard the return
-		// value here because the runner must keep advancing even
-		// when the mirror is offline (compat §4 keeps `.orun/executions/`
-		// authoritative for the legacy fallback resolver).
-		_ = rx.bridge.MirrorRunnerOutput(context.Background(), rx.execKey, rx.revKey, legacyExecID)
-	}
-	prevLog := r.Hooks.AfterStepLog
-	r.Hooks.AfterStepLog = func(jobID, stepID, output string) {
-		if prevLog != nil {
-			prevLog(jobID, stepID, output)
-		}
-		_ = rx.bridge.MirrorRunnerLog(context.Background(), rx.execKey, rx.revKey, legacyExecID, jobID, stepID)
-	}
 }
 
 // finalizeRevisionExecution flips the execution to a terminal status once

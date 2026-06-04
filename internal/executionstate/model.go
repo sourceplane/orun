@@ -18,12 +18,10 @@
 //     branch ladder from cli-surface.md §1.4 and compat §3, plus the
 //     legacy `.orun/executions/<legacyExecID>/` fallback from compat §4.
 //
-// Out of scope until M4 PR-B and later milestones:
-//
-//   - bridge.go — Bridge{Store, LegacyRoot, MirrorMode}. Hardlink with
-//     copy fallback. Future work; tracked by the orchestrator's PR-B task.
-//   - internal/runner integration. M4 only stands up the package; CLI
-//     rewire is M5.
+// The legacy runner-output mirror (bridge.go) was retired at the M12 cutover:
+// the runner no longer writes a legacy `.orun/executions/<id>/` file store, so
+// there is nothing to mirror. The live run is recorded into the object graph by
+// internal/objrun instead.
 //
 // Dependencies are kept minimal to satisfy the M4 leaf-clean constraint:
 // only internal/statestore, internal/triggerctx, internal/revision, the
