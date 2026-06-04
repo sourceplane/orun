@@ -1,12 +1,19 @@
 package trigger
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/sourceplane/orun/internal/model"
 )
+
+// ErrNoTriggerMatch reports that a CI event matched no trigger binding in the
+// intent. For a `--from-ci` plan this is not a hard failure — the event simply
+// maps to no configured automation (e.g. a pull request whose base branch is
+// not bound), so the caller can treat it as "nothing to plan".
+var ErrNoTriggerMatch = errors.New("no trigger binding matched")
 
 // ResolveActiveEnvironments determines which environments are activated
 // by the trigger context, respecting explicit --env filtering.
@@ -88,7 +95,7 @@ func resolveEventFile(intent *model.Intent, event *model.NormalizedEvent, explic
 	sort.Strings(matchedNames)
 
 	if len(matchedNames) == 0 {
-		return nil, nil, fmt.Errorf("no trigger binding matched %s event %s action %s", event.Provider, event.Event, event.Action)
+		return nil, nil, fmt.Errorf("%w: %s event %s action %s", ErrNoTriggerMatch, event.Provider, event.Event, event.Action)
 	}
 
 	// Check for conflicting plan scopes
