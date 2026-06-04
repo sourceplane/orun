@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sourceplane/orun/internal/model"
 )
 
 // The live-path seal, projection ordering, and plan-hash behavior now live in
@@ -12,7 +14,7 @@ import (
 func TestBeginObjectModelRunDisabledByFlag(t *testing.T) {
 	t.Setenv("ORUN_OBJECT_RUNNER", "0")
 	orunDir := filepath.Join(t.TempDir(), ".orun")
-	_, plan := legacyStoreWithExecution(t, "exec-off")
+	plan := &model.Plan{Metadata: model.PlanMetadata{Name: "demo"}}
 	if s := beginObjectModelRun(orunDir, plan, "exec-off"); s != nil {
 		t.Fatalf("begin returned a session with flag explicitly disabled")
 	}

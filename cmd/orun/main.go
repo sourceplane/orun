@@ -128,6 +128,16 @@ func generatePlan() error {
 
 		triggerActiveEnvs, triggerResolution, err = trigger.ResolveActiveEnvironments(intent, triggerCtx, environment)
 		if err != nil {
+			// A CI event that maps to no configured trigger binding (e.g. a
+			// pull request whose base branch is not bound) is not a failure:
+			// there is simply nothing to plan. Emit an empty matrix so the
+			// workflow's matrix guard skips the execute job, and exit cleanly
+			// rather than failing the pipeline.
+			if triggerCtx.Mode == "event-file" && errors.Is(err, trigger.ErrNoTriggerMatch) {
+				fmt.Fprintf(os.Stderr, "○ %v — nothing to plan\n", err)
+				writeEmptyGithubMatrix()
+				return nil
+			}
 			return err
 		}
 
@@ -696,6 +706,34 @@ func generatePlan() error {
 	}
 
 	return nil
+}
+
+// writeEmptyGithubMatrix writes an empty job matrix to $GITHUB_OUTPUT when
+// --github-output is set, so a no-op plan (no trigger matched) still produces a
+// well-formed `matrix` output. The workflow's execute job guards on
+// matrix != '{"include":[]}', so an empty matrix cleanly skips downstream jobs.
+func writeEmptyGithubMatrix() {
+	if !githubOutput {
+		return
+	}
+	outputPath := os.Getenv("GITHUB_OUTPUT")
+	if outputPath == "" {
+		return
+	}
+	lines := []string{
+		"matrix<<EOF\n{\"include\":[]}\nEOF",
+		"plan_id=",
+		"exec_id=",
+	}
+	f, err := os.OpenFile(outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ warning: failed to open %s: %v\n", outputPath, err)
+		return
+	}
+	defer f.Close()
+	if _, err := f.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ warning: failed to write %s: %v\n", outputPath, err)
+	}
 }
 
 // computePlanHashForRevision returns the canonical "sha256:<hex>" digest of

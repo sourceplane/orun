@@ -38,7 +38,6 @@ import (
 	"testing"
 
 	"github.com/sourceplane/orun/internal/execmodel"
-	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/statestore"
 )
 
@@ -84,7 +83,6 @@ func TestStateE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStore: %v", err)
 	}
-	legacyStore := state.NewStore(dir)
 	plan := minimalPlan(t)
 
 	f := &stateE2EFixture{dir: dir, store: store}
@@ -169,19 +167,8 @@ func TestStateE2E(t *testing.T) {
 			t.Fatal("setupRevisionExecution returned empty execKey")
 		}
 		f.execKey = rx.execKey
-		// Drive a fake terminal state through the legacy store so
-		// finalize projects ExecSummary correctly.
-		if _, err := legacyStore.CreateExecution("exec-e2e-001", plan); err != nil {
-			t.Fatalf("CreateExecution(legacy): %v", err)
-		}
-		es, err := legacyStore.LoadState("exec-e2e-001")
-		if err != nil {
-			t.Fatalf("LoadState: %v", err)
-		}
-		es.Jobs["job-1"] = &state.JobState{Status: "completed"}
-		if err := legacyStore.SaveState("exec-e2e-001", es); err != nil {
-			t.Fatalf("SaveState: %v", err)
-		}
+		// finalize projects the ExecutionCounts it is handed into the
+		// execution's ExecSummary (passed directly, not read from a store).
 		if _, err := finalizeRevisionExecution(ctx, rx, execmodel.ExecutionCounts{Total: 1, Completed: 1}, nil); err != nil {
 			t.Fatalf("finalizeRevisionExecution: %v", err)
 		}

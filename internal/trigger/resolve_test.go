@@ -1,6 +1,7 @@
 package trigger
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/sourceplane/orun/internal/model"
@@ -180,6 +181,26 @@ func TestResolveActiveEnvironments_EventFile_PullRequest(t *testing.T) {
 	}
 	if resolution.Head != "head222" {
 		t.Errorf("expected head=head222, got %q", resolution.Head)
+	}
+}
+
+func TestResolveActiveEnvironments_EventFile_NoMatchReturnsSentinel(t *testing.T) {
+	intent := testIntent()
+	// A pull request whose base branch is not bound (the intent binds base=main)
+	// matches no trigger binding — the resolver must surface ErrNoTriggerMatch so
+	// the `--from-ci` plan can treat it as "nothing to plan" rather than failing.
+	event := &model.NormalizedEvent{
+		Provider:   "github",
+		Event:      "pull_request",
+		Action:     "synchronize",
+		BaseBranch: "some-feature-branch",
+		Branch:     "feature/x",
+	}
+	ctx := model.TriggerContext{Mode: "event-file", Event: event}
+
+	_, _, err := ResolveActiveEnvironments(intent, ctx, "")
+	if !errors.Is(err, ErrNoTriggerMatch) {
+		t.Fatalf("err = %v; want ErrNoTriggerMatch", err)
 	}
 }
 
