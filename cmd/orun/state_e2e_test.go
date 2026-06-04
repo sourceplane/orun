@@ -23,7 +23,6 @@ package main
 //                                  + refs/latest-execution.json
 //   * finalizeRevisionExecution → flips status to completed + summary counts
 //   * describeRevision / loadRevisionPlanRows → read-side surface
-//   * runStateMigrate           → migration idempotence
 //
 // That is the same surface test-plan.md §4 asks us to assert on, just
 // without paying the cost of a real renderer + os.Stdout capture for
