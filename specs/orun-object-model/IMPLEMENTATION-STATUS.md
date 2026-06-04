@@ -59,21 +59,31 @@ Remaining for full cutover (legacy deletion):
   `internal/executionstate/bridge.go` is **kept** — it is still used in
   production (`command_run_revision.go` mirrors legacy runner output into the new
   layout) and does not import `internal/state`.
-- **flag removal (remaining):** remove the `ORUN_OBJECT_MODEL` /
-  `ORUN_OBJECT_RUNNER` coexistence flags so the native path is the only one.
-  This is a runtime-behavior change (it retires the legacy runner + the
-  executionstate mirror bridge), so it is a separate PR from the dead-code
-  deletion above.
-- **T7:** live `orun run` → crash-mid-run → recover → seal e2e + the disk-win
-  assertion under the native writer.
-- **resume follow-up:** reimplement cross-run skip-completed job resume on the
-  object model (the legacy file backend's resume was dropped at the cutover;
-  in-run dependency ordering is preserved).
+- **bridge retired — DONE:** `internal/executionstate/bridge.go` (the legacy
+  runner-output mirror) was deleted along with its dead wiring and the runner's
+  unreachable `loadState`/`saveState`. It mirrored the legacy `.orun/executions/`
+  store, which no longer exists post-T6, and was already inert
+  (`installRevisionHooks` had zero call sites).
+- **flag removal — DONE:** the `ORUN_OBJECT_MODEL` / `ORUN_OBJECT_RUNNER`
+  coexistence flags are gone. `orun plan`/`run` write the object model
+  unconditionally (local, non-dry-run); the read commands read it whenever it is
+  present on disk. The remote-state path is unchanged (still guarded by
+  `!remoteActive`). `flagDefaultOn`/`objectRunnerEnabled`/`objectModelEnabled`/
+  `objectModelActive` and `object_model_run.go` were removed.
+- **T7 — DONE:** `internal/objmodele2e` carries a live `orun run` →
+  crash-mid-run → recover → seal walk (`TestObjectModelCrashRecoveryE2E`): a
+  crashed working tree is sealed as failed from its on-disk snapshot — the disk
+  gate: the persisted jobs/steps + the pre-crash step log survive into the seal —
+  and the recovered execution is surfaced by the read path (`objread`).
+- **resume follow-up (remaining):** reimplement cross-run skip-completed job
+  resume on the object model (the legacy file backend's resume was dropped at the
+  cutover; in-run dependency ordering is preserved).
 
-The runner, plan path, read commands, TUI, and cockpit are all off the legacy
-store; the only non-test importer left is **`runbundle/hydrate.go`**.
-`internal/execmodel` is the legacy-store-free home for the in-memory execution
-types the remaining (test) consumers keep using.
+The runner, plan path, read commands, TUI, cockpit, and `orun github pull` are
+all off the legacy store, which is **deleted**; the object model is the
+unconditional execution representation. `internal/execmodel` is the
+legacy-store-free home for the in-memory execution types the remaining (test)
+consumers keep using.
 
 ## What was implemented
 
