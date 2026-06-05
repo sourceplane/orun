@@ -464,4 +464,36 @@ func validYAML(name string) string {
 	return "apiVersion: orun.io/v1alpha1\nkind: Component\nmetadata:\n  name: " + name + "\nspec:\n  type: worker\n  lifecycle: production\n  owner: team/x\n"
 }
 
+func TestResolve_CarriesChangeWatches(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root+"/intent.yaml", "catalog:\n  namespace: ns\n")
+	mustWrite(t, root+"/apps/a/component.yaml",
+		"apiVersion: orun.io/v1alpha1\nkind: Component\nmetadata:\n  name: a\nspec:\n  type: worker\n  change:\n    watches: [env, groups]\n")
+	mustWrite(t, root+"/apps/b/component.yaml", validYAML("b")) // no watches
+
+	rc, _, err := Resolve(context.Background(), Options{WorkspaceRoot: root, Repo: "r"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	var a, b *catalogmodel.ComponentManifest
+	for _, m := range rc.Manifests {
+		switch m.Identity.Name {
+		case "a":
+			a = m
+		case "b":
+			b = m
+		}
+	}
+	if a == nil || a.Spec.Change == nil {
+		t.Fatalf("component a missing resolved change block: %+v", a)
+	}
+	if len(a.Spec.Change.Watches) != 2 || a.Spec.Change.Watches[0] != "env" || a.Spec.Change.Watches[1] != "groups" {
+		t.Errorf("a watches = %v, want [env groups]", a.Spec.Change.Watches)
+	}
+	// A watch-less component keeps Change nil so its manifest hash is unchanged.
+	if b == nil || b.Spec.Change != nil {
+		t.Errorf("component b should have nil Change, got %+v", b.Spec.Change)
+	}
+}
+
 func errInternalSentinel() error { return errors.New("sentinel") }

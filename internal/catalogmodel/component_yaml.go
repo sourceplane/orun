@@ -86,6 +86,14 @@ type ComponentYAMLSpec struct {
 	Parameters   map[string]any                      `json:"parameters,omitempty"`
 	Labels       map[string]string                   `json:"labels,omitempty"`
 	Env          map[string]string                   `json:"env,omitempty"`
+	Change       *ComponentYAMLChange                `json:"change,omitempty"`
+}
+
+// ComponentYAMLChange declares which intent change signals affect this
+// component — the change-detection "watch" inputs (the catalog-canonical home,
+// orun-catalog-state). Optional; omitted when no signals are watched.
+type ComponentYAMLChange struct {
+	Watches []string `json:"watches,omitempty"`
 }
 
 // ComponentYAMLDependency is one entry in the authored `dependsOn` list. Only
