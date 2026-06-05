@@ -118,7 +118,7 @@ func sampleView() *catalogresolve.CatalogView {
 
 func TestBuildCatalogNodes(t *testing.T) {
 	t.Parallel()
-	cat, manifests, graphs := BuildCatalogNodes(sampleView(), 2)
+	cat, manifests, graphs, ownership := BuildCatalogNodes(sampleView(), 2)
 	if cat.Kind != nodes.KindCatalogSnapshot || cat.ResolverVersion != 2 || cat.HumanKey != "cat-x" {
 		t.Fatalf("catalog = %+v", cat)
 	}
@@ -134,10 +134,24 @@ func TestBuildCatalogNodes(t *testing.T) {
 	if len(graphs[0].Edges) != 1 || graphs[0].Edges[0].Type != "depends-on" {
 		t.Fatalf("graph edges = %+v", graphs[0].Edges)
 	}
+	// Ownership is derived: the fixed rule lists are populated even when no
+	// manifest carries a path (so Components is empty here).
+	if ownership.Kind != nodes.KindImpactOwnership || ownership.SchemaVersion != 1 {
+		t.Fatalf("ownership = %+v", ownership)
+	}
+	if len(ownership.GlobalPaths) == 0 || len(ownership.StructuralFilenames) == 0 || len(ownership.IgnoreDirs) == 0 {
+		t.Fatalf("ownership rule lists not populated: %+v", ownership)
+	}
+	if err := ownership.Validate(); err != nil {
+		t.Fatalf("derived ownership invalid: %v", err)
+	}
 	// nil view is tolerated.
-	c2, m2, g2 := BuildCatalogNodes(nil, 1)
+	c2, m2, g2, o2 := BuildCatalogNodes(nil, 1)
 	if c2.Kind != nodes.KindCatalogSnapshot || m2 != nil || g2 != nil {
 		t.Fatalf("nil view = %+v %v %v", c2, m2, g2)
+	}
+	if o2.Kind != nodes.KindImpactOwnership || len(o2.Components) != 0 {
+		t.Fatalf("nil view ownership = %+v", o2)
 	}
 }
 
@@ -150,11 +164,61 @@ func TestBuildCatalogNodesManyGraphsPositional(t *testing.T) {
 			{}, {}, {}, {}, {}, {}, // 6 graphs: 5 named + 1 overflow
 		},
 	}
-	_, _, graphs := BuildCatalogNodes(view, 1)
+	_, _, graphs, _ := BuildCatalogNodes(view, 1)
 	want := []string{"dependencies", "systems", "apis", "resources", "owners", "graph5"}
 	for i, g := range graphs {
 		if g.EdgeKind != want[i] {
 			t.Fatalf("graph[%d] edgeKind = %q, want %q", i, g.EdgeKind, want[i])
 		}
+	}
+}
+
+func TestBuildOwnershipMapsComponentDirs(t *testing.T) {
+	t.Parallel()
+	view := &catalogresolve.CatalogView{
+		ResolvedCatalog: &catalogresolve.ResolvedCatalog{
+			Manifests: []*catalogmodel.ComponentManifest{
+				{Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", Path: "apps/api/component.yaml"}},
+				{Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/root", Name: "root", Path: "component.yaml"}},
+				{Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/nopath", Name: "nopath"}}, // empty path: skipped
+				nil,
+			},
+			IntentPath: "intent.yaml",
+			Excludes:   []string{"vendor", ".git"}, // unsorted on input
+		},
+		Snapshot: &catalogmodel.CatalogSnapshot{},
+	}
+	o := buildOwnership(view)
+	if o.Components["apps/api"] != "ns/repo/api" {
+		t.Errorf("apps/api → %q", o.Components["apps/api"])
+	}
+	if o.Components["."] != "ns/repo/root" { // root component (path.Dir("component.yaml") == ".")
+		t.Errorf("root component dir = %q", o.Components["."])
+	}
+	if _, ok := o.Components["nopath"]; ok || len(o.Components) != 2 {
+		t.Errorf("pathless manifest must be skipped: %v", o.Components)
+	}
+	// ignoreDirs mirrors the resolve excludes, sorted.
+	if len(o.IgnoreDirs) != 2 || o.IgnoreDirs[0] != ".git" || o.IgnoreDirs[1] != "vendor" {
+		t.Errorf("ignoreDirs = %v, want sorted [.git vendor]", o.IgnoreDirs)
+	}
+	if len(o.GlobalPaths) != 1 || o.GlobalPaths[0] != "intent.yaml" {
+		t.Errorf("globalPaths = %v", o.GlobalPaths)
+	}
+	if err := o.Validate(); err != nil {
+		t.Errorf("derived ownership invalid: %v", err)
+	}
+}
+
+func TestBuildOwnershipDefaultsExcludesWhenNoIntent(t *testing.T) {
+	t.Parallel()
+	// A view with no excludes (e.g. nil ResolvedCatalog) falls back to the
+	// discovery default exclude set.
+	o := buildOwnership(&catalogresolve.CatalogView{})
+	if len(o.IgnoreDirs) == 0 {
+		t.Fatalf("ignoreDirs should fall back to defaults")
+	}
+	if o.GlobalPaths[0] != "intent.yaml" {
+		t.Errorf("globalPaths default = %v", o.GlobalPaths)
 	}
 }

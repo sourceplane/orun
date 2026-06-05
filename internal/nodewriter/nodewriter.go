@@ -120,8 +120,8 @@ func (w *Writer) WriteSource(ctx context.Context, src nodes.SourceSnapshot, sour
 }
 
 // WriteCatalog assembles the catalog (idempotent) and points catalogRefs at it.
-func (w *Writer) WriteCatalog(ctx context.Context, cat nodes.CatalogSnapshot, manifests []nodes.ComponentManifest, graphs []nodes.CatalogGraph, catalogRefs ...string) (objectstore.ObjectID, error) {
-	id, err := nodes.AssembleCatalog(ctx, w.store, cat, manifests, graphs)
+func (w *Writer) WriteCatalog(ctx context.Context, cat nodes.CatalogSnapshot, manifests []nodes.ComponentManifest, graphs []nodes.CatalogGraph, ownership nodes.ImpactOwnership, catalogRefs ...string) (objectstore.ObjectID, error) {
+	id, err := nodes.AssembleCatalog(ctx, w.store, cat, manifests, graphs, ownership)
 	if err != nil {
 		return "", err
 	}
@@ -186,6 +186,7 @@ type CatalogInput struct {
 	Snapshot  nodes.CatalogSnapshot
 	Manifests []nodes.ComponentManifest
 	Graphs    []nodes.CatalogGraph
+	Ownership nodes.ImpactOwnership
 	Refs      []string
 }
 
@@ -228,7 +229,7 @@ func (w *Writer) Plan(ctx context.Context, in PlanInput) (PlanResult, error) {
 	if in.Catalog != nil {
 		cat := in.Catalog.Snapshot
 		cat.SourceID = string(srcID)
-		catID, err := w.WriteCatalog(ctx, cat, in.Catalog.Manifests, in.Catalog.Graphs, in.Catalog.Refs...)
+		catID, err := w.WriteCatalog(ctx, cat, in.Catalog.Manifests, in.Catalog.Graphs, in.Catalog.Ownership, in.Catalog.Refs...)
 		if err != nil {
 			return res, err
 		}

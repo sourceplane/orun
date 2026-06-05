@@ -7,7 +7,7 @@
 |-----------|--------|----|-------|
 | CS1 — Lossless object-model catalog (`Path`) | **Done** | — | `nodes.ComponentIdentity.Path` added; mapped in `objplan/catalog.go:mapManifest`. One-time catalog-id change (below). |
 | CS2 — `internal/objcatalog` read view | **Done** | — | `Reader.Load → CatalogView` (catalog + components + graph + tolerant `impact/`). Missing `impact/` → `Ownership == nil`. 92.8% coverage. |
-| CS3 — ownership map + fingerprints | Not started | — | |
+| CS3 — ownership map + fingerprints | **In progress** | — | Ownership map landed: `nodes.ImpactOwnership` + validation; `AssembleCatalog` always writes `impact/ownership.json`; derived in `objplan.buildOwnership` from component dirs + discovery excludes (surfaced via `ResolvedCatalog.Excludes`). **Fingerprints (`impact/fingerprints/`) still to do** (CS3's 2nd PR). |
 | CS4 — `internal/affected` engine | Not started | — | |
 | CS5 — migrate `plan/run --changed` | Not started | — | |
 | CS6 — cockpit read seam + drill-down + changed view | Not started | — | |

@@ -62,11 +62,11 @@ func TestAssembleValidationBranches(t *testing.T) {
 		func() error { _, e := AssembleRevision(ctx, mem(), PlanRevision{Scope: RevisionScope{Mode: "weird"}}, plan); return e },
 		func() error {
 			_, e := AssembleCatalog(ctx, mem(), CatalogSnapshot{SourceID: "bad"},
-				[]ComponentManifest{{Identity: ComponentIdentity{ComponentKey: "ns/repo/a", Name: "a"}}}, nil)
+				[]ComponentManifest{{Identity: ComponentIdentity{ComponentKey: "ns/repo/a", Name: "a"}}}, nil, ImpactOwnership{})
 			return e
 		},
 		func() error {
-			_, e := AssembleCatalog(ctx, mem(), CatalogSnapshot{SourceID: goodID("a")}, nil, []CatalogGraph{{EdgeKind: ""}})
+			_, e := AssembleCatalog(ctx, mem(), CatalogSnapshot{SourceID: goodID("a")}, nil, []CatalogGraph{{EdgeKind: ""}}, ImpactOwnership{})
 			return e
 		},
 		func() error { _, e := AssembleExecution(ctx, mem(), mkExec(badStep, StatusSucceeded)); return e },
@@ -140,7 +140,7 @@ func TestAssembleErrorPropagation(t *testing.T) {
 		run("source-blob", func(s store) error { _, e := AssembleSource(ctx, s, src); return e }),
 		run("trigger-blob", func(s store) error { _, e := AssembleTrigger(ctx, s, trg); return e }),
 		run("revision-blob", func(s store) error { _, e := AssembleRevision(ctx, s, rev, plan); return e }),
-		run("catalog-blob", func(s store) error { _, e := AssembleCatalog(ctx, s, cat, manifests, graphs); return e }),
+		run("catalog-blob", func(s store) error { _, e := AssembleCatalog(ctx, s, cat, manifests, graphs, ImpactOwnership{}); return e }),
 		run("execution-blob", func(s store) error { _, e := AssembleExecution(ctx, s, exec); return e }),
 	}
 	// Blob failures (fail from the first PutBlob onward).
@@ -160,7 +160,7 @@ func TestAssembleErrorPropagation(t *testing.T) {
 	if _, e := AssembleRevision(ctx, newFail(2, 0), rev, plan); !errors.Is(e, errBoom) {
 		t.Fatalf("revision second-blob fail = %v", e)
 	}
-	if _, e := AssembleCatalog(ctx, newFail(3, 0), cat, manifests, graphs); !errors.Is(e, errBoom) {
+	if _, e := AssembleCatalog(ctx, newFail(3, 0), cat, manifests, graphs, ImpactOwnership{}); !errors.Is(e, errBoom) {
 		t.Fatalf("catalog cat-blob fail = %v", e)
 	}
 	if _, e := AssembleExecution(ctx, newFail(2, 0), exec); !errors.Is(e, errBoom) {

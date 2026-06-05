@@ -30,6 +30,7 @@ const (
 	KindExecutionEvent        = "ExecutionEvent"
 	KindComponentHistoryIndex = "ComponentHistoryIndex"
 	KindStoreVersion          = "StoreVersion"
+	KindImpactOwnership       = "ImpactOwnership"
 )
 
 // Source scope values (identity-and-keys.md §3).
@@ -82,6 +83,8 @@ const (
 	fileAttempt   = "attempt.json"
 	dirComponents = "components"
 	dirGraph      = "graph"
+	dirImpact     = "impact"
+	fileOwnership = "ownership.json"
 	dirExecutions = "executions"
 	dirJobs       = "jobs"
 	dirAttempts   = "attempts"

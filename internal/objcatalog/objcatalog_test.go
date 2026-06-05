@@ -100,7 +100,7 @@ func seedCatalog(t *testing.T, f fixture) objectstore.ObjectID {
 		SourceID:        "sha256:" + repeat("a", 64),
 		ResolverVersion: 1,
 	}
-	root, err := nodes.AssembleCatalog(ctx, f.store, cat, sampleManifests(), sampleGraphs())
+	root, err := nodes.AssembleCatalog(ctx, f.store, cat, sampleManifests(), sampleGraphs(), nodes.ImpactOwnership{})
 	if err != nil {
 		t.Fatalf("assemble: %v", err)
 	}
@@ -188,9 +188,32 @@ func TestLoad_CurrentRef(t *testing.T) {
 		t.Errorf("edge type = %q", dep.Edges[0].Type)
 	}
 
-	// No impact/ written → Ownership nil, no error (tolerant read).
+	// AssembleCatalog always writes impact/ownership.json (CS3); with an empty
+	// ImpactOwnership the map is present but carries no component entries.
+	if view.Ownership == nil {
+		t.Fatalf("Ownership nil, want the always-written ownership map")
+	}
+	if view.Ownership.SchemaVersion != 1 {
+		t.Errorf("ownership schemaVersion = %d, want 1", view.Ownership.SchemaVersion)
+	}
+	if len(view.Ownership.Components) != 0 {
+		t.Errorf("empty ownership should carry no components: %v", view.Ownership.Components)
+	}
+}
+
+func TestLoad_NoImpactSubtree(t *testing.T) {
+	// A pre-CS3 catalog (no impact/ subtree at all) still loads, with Ownership
+	// left nil — the reader's forward/backward compatibility contract.
+	f := newFixture(t)
+	ctx := context.Background()
+	root := seedCatalogWithExtraSubtree(t, f, dirImpact, "") // "" drops impact/
+
+	view, err := New(f.store, f.refs).Load(ctx, string(root))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
 	if view.Ownership != nil {
-		t.Errorf("Ownership should be nil for a catalog without impact/: %+v", view.Ownership)
+		t.Errorf("Ownership should be nil when impact/ is wholly absent: %+v", view.Ownership)
 	}
 }
 
@@ -437,7 +460,11 @@ func TestLoad_CorruptOwnershipBlob(t *testing.T) {
 	}
 }
 
-// --- manual tree builders for impact/ cases (AssembleCatalog omits impact/) ---
+// --- manual tree builders for impact/ cases ---
+//
+// AssembleCatalog now always writes an impact/ownership.json (CS3), so these
+// helpers REPLACE that auto-written impact/ subtree to exercise specific shapes
+// (custom ownership, fingerprints-only, or none at all).
 
 func seedCatalogWithImpact(t *testing.T, f fixture, ownershipJSON string) objectstore.ObjectID {
 	t.Helper()
@@ -477,8 +504,9 @@ func seedCatalogImpactFingerprintsOnly(t *testing.T, f fixture) objectstore.Obje
 	return seedCatalogWithExtraSubtree(t, f, dirImpact, impactTree)
 }
 
-// seedCatalogWithExtraSubtree rebuilds the AssembleCatalog tree and grafts an
-// extra named subtree (impact/) into the catalog root, then republishes the ref.
+// seedCatalogWithExtraSubtree rebuilds the AssembleCatalog tree and replaces the
+// named subtree (impact/) in the catalog root with sub (a nil sub drops it
+// entirely, modelling a pre-CS3 catalog), then republishes the ref.
 func seedCatalogWithExtraSubtree(t *testing.T, f fixture, name string, sub objectstore.ObjectID) objectstore.ObjectID {
 	t.Helper()
 	ctx := context.Background()
@@ -487,8 +515,17 @@ func seedCatalogWithExtraSubtree(t *testing.T, f fixture, name string, sub objec
 	if err != nil {
 		t.Fatalf("get base tree: %v", err)
 	}
-	entries = append(entries, objectstore.TreeEntry{Name: name, Kind: objectstore.KindTree, ID: sub})
-	root, err := f.store.PutTree(ctx, entries)
+	kept := entries[:0]
+	for _, e := range entries {
+		if e.Name == name {
+			continue // drop the auto-written entry; re-add below if sub is set
+		}
+		kept = append(kept, e)
+	}
+	if sub != "" {
+		kept = append(kept, objectstore.TreeEntry{Name: name, Kind: objectstore.KindTree, ID: sub})
+	}
+	root, err := f.store.PutTree(ctx, kept)
 	if err != nil {
 		t.Fatalf("graft tree: %v", err)
 	}

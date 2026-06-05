@@ -130,9 +130,9 @@ func writeCatalogMemoized(
 		}
 		return "", nil // tolerant: skip the catalog edge
 	}
-	cat, manifests, graphs := BuildCatalogNodes(view, resolverVersion)
+	cat, manifests, graphs, ownership := BuildCatalogNodes(view, resolverVersion)
 	cat.SourceID = string(srcID)
-	catID, err := w.WriteCatalog(ctx, cat, manifests, graphs, catalogRefs...)
+	catID, err := w.WriteCatalog(ctx, cat, manifests, graphs, ownership, catalogRefs...)
 	if err != nil {
 		return "", fmt.Errorf("objplan: write catalog: %w", err)
 	}
