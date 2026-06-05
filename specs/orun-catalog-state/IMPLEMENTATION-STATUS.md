@@ -15,6 +15,19 @@
 | CS8 — parity + determinism gate | Not started | — | |
 | CS9 — `orun catalog refresh` repoint | Not started | — | |
 
+## Catalog unblock (inline components + dir fix)
+
+The object catalog now ingests **inline `intent.yaml` components** alongside
+discovered `component.yaml` files (catalogresolve), so the catalog's component set
+matches the legacy `inline ∪ discovered` set the cockpit and `--changed` operate
+on — removing the divergence that blocked the CS5 `--changed` rewire and the CS6
+cockpit repoint. Discovered components win on a name collision; inline
+`subscribe.environments` accepts both the string and `{name,profile}` map forms
+(a decode failure there would otherwise break the whole intent load). A prior fix
+also corrected the component-dir derivation to use `SourceFile` (real
+`component.yaml` files omit `spec.path`), so the ownership map and fingerprints
+actually populate.
+
 ## CS1 — the one-time catalog-id change
 
 Adding `identity.path` to `nodes.ComponentManifest` (previously dropped on the way
