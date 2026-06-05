@@ -43,6 +43,18 @@
     "spec": {
       "additionalProperties": true,
       "properties": {
+        "change": {
+          "additionalProperties": false,
+          "properties": {
+            "watches": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
         "consumesApis": {
           "items": {
             "type": "string"

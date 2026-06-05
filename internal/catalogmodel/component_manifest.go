@@ -69,6 +69,14 @@ type ComponentSpec struct {
 	Parameters   map[string]string                 `json:"parameters"`
 	Environments map[string]ComponentEnvironment   `json:"environments"`
 	Dependencies ComponentDependencies             `json:"dependencies"`
+	Change       *ComponentChange                  `json:"change,omitempty"`
+}
+
+// ComponentChange carries the resolved change-detection "watch" sections (the
+// intent signals this component reacts to). Optional/pointer so a component
+// without watches leaves the manifest hash unchanged.
+type ComponentChange struct {
+	Watches []string `json:"watches,omitempty"`
 }
 
 // CompositionRef points at the stack-tectonic composition that backs this

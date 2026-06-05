@@ -173,6 +173,25 @@ func TestBuildCatalogNodesManyGraphsPositional(t *testing.T) {
 	}
 }
 
+func TestMapManifest_CarriesChangeWatches(t *testing.T) {
+	t.Parallel()
+	cm := &catalogmodel.ComponentManifest{
+		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", Namespace: "ns", Repo: "repo"},
+		Spec:     catalogmodel.ComponentSpec{Type: "worker", Change: &catalogmodel.ComponentChange{Watches: []string{"env", "groups"}}},
+	}
+	m := mapManifest(cm)
+	// The node manifest spec carries change.watches verbatim — the path the
+	// affected engine reads (spec.change.watches) for intent-impact watch mode.
+	change, ok := m.Spec["change"].(map[string]any)
+	if !ok {
+		t.Fatalf("node spec missing change block: %v", m.Spec)
+	}
+	watches, ok := change["watches"].([]any)
+	if !ok || len(watches) != 2 || watches[0] != "env" || watches[1] != "groups" {
+		t.Fatalf("change.watches = %v", change["watches"])
+	}
+}
+
 func TestBuildOwnershipMapsComponentDirs(t *testing.T) {
 	t.Parallel()
 	view := &catalogresolve.CatalogView{

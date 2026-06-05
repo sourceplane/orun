@@ -57,6 +57,15 @@ func authoredToManifest(am AuthoredManifest, namespace, repo string) *catalogmod
 	}
 	cm.Identity.ComponentKey = catalogmodel.FormatComponentKey(namespace, repo, c.Metadata.Name)
 
+	// Change-detection watches — carry the authored signals into the resolved
+	// manifest (the catalog-canonical home the affected engine reads). Pointer +
+	// omitempty so a watch-less component leaves the manifest hash unchanged.
+	if c.Spec.Change != nil && len(c.Spec.Change.Watches) > 0 {
+		cm.Spec.Change = &catalogmodel.ComponentChange{
+			Watches: append([]string(nil), c.Spec.Change.Watches...),
+		}
+	}
+
 	// Environments — copy authored profile and mark active=true (Phase 2
 	// has no environment-active gating yet; the writer can override).
 	// Both the `environments` map form and the legacy `subscribe`
