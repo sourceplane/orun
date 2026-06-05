@@ -58,6 +58,11 @@ type ComponentIdentity struct {
 	Name         string `json:"name"`
 	Namespace    string `json:"namespace"`
 	Repo         string `json:"repo"`
+	// Path is the workspace-relative component.yaml location (the resolver's
+	// Identity.Path). Required when known; omitted for a synthetic root
+	// component. Adding it changes the manifest blob hash → catalog Merkle id
+	// on the next resolve (content-addressing absorbs the one-time change).
+	Path string `json:"path,omitempty"`
 }
 
 // ComponentManifest is the fully-resolved component definition (a content

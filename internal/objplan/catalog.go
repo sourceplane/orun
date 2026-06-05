@@ -65,6 +65,7 @@ func mapManifest(cm *catalogmodel.ComponentManifest) nodes.ComponentManifest {
 			Name:         cm.Identity.Name,
 			Namespace:    cm.Identity.Namespace,
 			Repo:         cm.Identity.Repo,
+			Path:         cm.Identity.Path,
 		},
 		Metadata:   toMap(cm.Metadata),
 		Spec:       toMap(cm.Spec),
