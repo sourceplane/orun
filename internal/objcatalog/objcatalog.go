@@ -34,12 +34,24 @@ const (
 // CatalogView is one resolved catalog, read back from the object graph. It is
 // presentation-neutral — the catalog analogue of objread.ExecutionView.
 type CatalogView struct {
-	SourceID   string                 // edge: the source it was resolved against (freshness gate)
-	HumanKey   string                 // the catalog snapshot's human key
-	Components []CatalogComponentView // catalog members, sorted by component key
-	Graph      map[string]GraphView   // edgeKind → graph slice (dependencies, systems, …)
-	Ownership  *OwnershipView         // nil when impact/ is absent (older catalogs)
-	ObjectID   objectstore.ObjectID   // the catalog Merkle root this view was read from
+	SourceID     string                     // edge: the source it was resolved against (freshness gate)
+	HumanKey     string                     // the catalog snapshot's human key
+	Components   []CatalogComponentView     // catalog members, sorted by component key
+	Graph        map[string]GraphView       // edgeKind → graph slice (dependencies, systems, …)
+	Ownership    *OwnershipView             // nil when impact/ is absent (older catalogs)
+	Fingerprints map[string]FingerprintView // componentKey → stored input fingerprint; nil when absent
+	ObjectID     objectstore.ObjectID       // the catalog Merkle root this view was read from
+}
+
+// FingerprintView is the read view of one impact/fingerprints/<name>.json blob:
+// a component's stored input fingerprint (data-model.md §2b). The content-aware
+// change source recomputes the current Subtree and compares it to this one.
+type FingerprintView struct {
+	ComponentKey string
+	Dir          string
+	Subtree      string
+	Files        map[string]string
+	GlobalDigest string
 }
 
 // CatalogComponentView mirrors a ComponentManifest, flattened for rendering. The
@@ -109,6 +121,17 @@ type ownershipRecord struct {
 	IgnoreDirs          []string          `json:"ignoreDirs"`
 }
 
+// fingerprintRecord is the on-disk shape of impact/fingerprints/<name>.json.
+type fingerprintRecord struct {
+	Kind          string            `json:"kind"`
+	SchemaVersion int               `json:"schemaVersion"`
+	ComponentKey  string            `json:"componentKey"`
+	Dir           string            `json:"dir"`
+	Subtree       string            `json:"subtree"`
+	Files         map[string]string `json:"files"`
+	GlobalDigest  string            `json:"globalDigest"`
+}
+
 // Reader reconstructs a CatalogView over one object/ref store pair rooted at the
 // object-model root (the directory holding objects/ and refs/).
 type Reader struct {
@@ -161,11 +184,12 @@ func (r *Reader) Load(ctx context.Context, ref string) (CatalogView, error) {
 			}
 			view.Graph = graph
 		case e.Name == dirImpact && e.Kind == objectstore.KindTree:
-			own, oerr := r.readOwnership(ctx, e.ID)
-			if oerr != nil {
-				return CatalogView{}, oerr
+			own, fps, ierr := r.readImpact(ctx, e.ID)
+			if ierr != nil {
+				return CatalogView{}, ierr
 			}
 			view.Ownership = own
+			view.Fingerprints = fps
 		}
 	}
 	if !sawCatalog {
@@ -242,32 +266,71 @@ func (r *Reader) readGraph(ctx context.Context, treeID objectstore.ObjectID) (ma
 	return out, nil
 }
 
-// readOwnership decodes impact/ownership.json if present in the impact/ subtree.
-// A subtree with no ownership.json (e.g. only fingerprints/) yields nil — the
-// same tolerant contract as a wholly absent impact/.
-func (r *Reader) readOwnership(ctx context.Context, treeID objectstore.ObjectID) (*OwnershipView, error) {
+// readImpact decodes the impact/ subtree: ownership.json (→ *OwnershipView, nil
+// when absent) and the fingerprints/ subtree (→ map keyed by componentKey, nil
+// when absent). Both are tolerant — a subtree missing either yields nil for that
+// part, never an error.
+func (r *Reader) readImpact(ctx context.Context, treeID objectstore.ObjectID) (*OwnershipView, map[string]FingerprintView, error) {
+	entries, err := r.store.GetTree(ctx, treeID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var own *OwnershipView
+	var fps map[string]FingerprintView
+	for _, e := range entries {
+		switch {
+		case e.Name == fileOwnership && e.Kind == objectstore.KindBlob:
+			rec, derr := decodeBlob[ownershipRecord](ctx, r.store, e.ID)
+			if derr != nil {
+				return nil, nil, derr
+			}
+			own = &OwnershipView{
+				SchemaVersion:       rec.SchemaVersion,
+				Components:          rec.Components,
+				GlobalPaths:         rec.GlobalPaths,
+				GlobalBlocks:        rec.GlobalBlocks,
+				StructuralFilenames: rec.StructuralFilenames,
+				IgnoreDirs:          rec.IgnoreDirs,
+			}
+		case e.Name == dirFingerprints && e.Kind == objectstore.KindTree:
+			f, ferr := r.readFingerprints(ctx, e.ID)
+			if ferr != nil {
+				return nil, nil, ferr
+			}
+			fps = f
+		}
+	}
+	return own, fps, nil
+}
+
+// readFingerprints decodes every fingerprints/<name>.json blob, keyed by the
+// stored componentKey. An empty subtree yields nil.
+func (r *Reader) readFingerprints(ctx context.Context, treeID objectstore.ObjectID) (map[string]FingerprintView, error) {
 	entries, err := r.store.GetTree(ctx, treeID)
 	if err != nil {
 		return nil, err
 	}
+	out := map[string]FingerprintView{}
 	for _, e := range entries {
-		if e.Name != fileOwnership || e.Kind != objectstore.KindBlob {
+		if e.Kind != objectstore.KindBlob {
 			continue
 		}
-		rec, derr := decodeBlob[ownershipRecord](ctx, r.store, e.ID)
+		rec, derr := decodeBlob[fingerprintRecord](ctx, r.store, e.ID)
 		if derr != nil {
 			return nil, derr
 		}
-		return &OwnershipView{
-			SchemaVersion:       rec.SchemaVersion,
-			Components:          rec.Components,
-			GlobalPaths:         rec.GlobalPaths,
-			GlobalBlocks:        rec.GlobalBlocks,
-			StructuralFilenames: rec.StructuralFilenames,
-			IgnoreDirs:          rec.IgnoreDirs,
-		}, nil
+		out[rec.ComponentKey] = FingerprintView{
+			ComponentKey: rec.ComponentKey,
+			Dir:          rec.Dir,
+			Subtree:      rec.Subtree,
+			Files:        rec.Files,
+			GlobalDigest: rec.GlobalDigest,
+		}
 	}
-	return nil, nil
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 // componentView flattens a manifest into the rendering view, projecting the

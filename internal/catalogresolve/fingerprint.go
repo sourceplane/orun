@@ -50,6 +50,18 @@ func isFingerprintCandidate(name string) bool {
 	return strings.HasSuffix(name, ".tf")
 }
 
+// ComputeGlobalDigest hashes the intent file at intentAbs into the shared global
+// leaf (the catalog-relevant intent digest). Exported so the content-aware change
+// source (internal/affected) computes the *current* digest identically.
+func ComputeGlobalDigest(intentAbs string) string { return computeGlobalDigest(intentAbs) }
+
+// FingerprintForDir recomputes one component's input fingerprint at the current
+// workspace state, identical to the resolve-time computation. Exported so the
+// content-aware change source can compare a fresh Subtree against the stored one.
+func FingerprintForDir(root, dir, componentKey, globalDigest string) ComponentFingerprint {
+	return fingerprintForDir(root, dir, componentKey, globalDigest)
+}
+
 // computeFingerprints derives a fingerprint per manifest. root is the absolute
 // workspace root; globalDigest is the shared intent leaf (computed once). The
 // result is ordered by componentKey for determinism. Best-effort: an unreadable
