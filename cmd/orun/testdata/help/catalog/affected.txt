@@ -1,0 +1,34 @@
+Compute the components affected by a change.
+
+Reads the object-model catalog (its ownership map and dependency graph),
+classifies the change between --base and --head (or an explicit --files list),
+and reports the affected component set with a confidence signal. This is the
+same engine 'orun plan/run --changed' and the cockpit use.
+
+  directlyChanged  components whose own inputs changed
+  dependents       components that transitively depend on a changed one
+  affected         the cockpit "blast radius" (directlyChanged + dependents)
+  selection        the plan/run job set (directlyChanged + include:always deps)
+
+On classification ambiguity the engine over-reports (never under). A component.yaml
+edit lowers confidence and sets needsFullResolve.
+
+Examples:
+  orun catalog affected
+  orun catalog affected --base main --head HEAD
+  orun catalog affected --files apps/api/main.go --json
+
+Usage:
+  orun catalog affected [flags]
+
+Flags:
+      --base string            Base ref for change detection (default: main)
+      --files strings          Comma-separated changed files (bypasses git diff)
+      --head string            Head ref for change detection (default: working tree)
+      --intent-impact string   How global intent changes affect components (all/watch/none) (default "watch")
+      --json                   Emit the CatalogAffectedResult JSON envelope
+
+Global Flags:
+      --all                 Disable CWD-based component scoping; process all components
+  -c, --config-dir string   Config directory for JobRegistry definitions (or set ORUN_CONFIG_DIR; use * or ** for recursive scanning)
+  -i, --intent string       Intent file path (auto-discovered if not set) (default "intent.yaml")

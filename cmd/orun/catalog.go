@@ -129,6 +129,7 @@ Subcommands:
   validate  Re-resolve in strict mode and report validation issues
   diff      Compare two catalog snapshots
   refs      List every catalog ref with its resolved source/catalog keys
+  affected  Compute the components affected by a change (change-detection engine)
 
 Run 'orun catalog <subcommand> --help' for details on each.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -144,6 +145,7 @@ Run 'orun catalog <subcommand> --help' for details on each.`,
 	registerCatalogValidateCommand(catalogCmd)
 	registerCatalogDiffCommand(catalogCmd)
 	registerCatalogRefsCommand(catalogCmd)
+	registerCatalogAffectedCommand(catalogCmd)
 
 	root.AddCommand(catalogCmd)
 }

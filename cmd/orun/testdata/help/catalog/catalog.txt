@@ -13,6 +13,7 @@ Subcommands:
   validate  Re-resolve in strict mode and report validation issues
   diff      Compare two catalog snapshots
   refs      List every catalog ref with its resolved source/catalog keys
+  affected  Compute the components affected by a change (change-detection engine)
 
 Run 'orun catalog <subcommand> --help' for details on each.
 
@@ -21,6 +22,7 @@ Usage:
   orun catalog [command]
 
 Available Commands:
+  affected    Compute the components affected by a change (the change-detection engine)
   describe    Show the full resolved manifest for one component
   diff        Compare two catalog snapshots
   history     Enumerate a component's execution history
