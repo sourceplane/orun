@@ -8,7 +8,7 @@
 | CS1 — Lossless object-model catalog (`Path`) | **Done** | — | `nodes.ComponentIdentity.Path` added; mapped in `objplan/catalog.go:mapManifest`. One-time catalog-id change (below). |
 | CS2 — `internal/objcatalog` read view | **Done** | — | `Reader.Load → CatalogView` (catalog + components + graph + tolerant `impact/`). Missing `impact/` → `Ownership == nil`. 92.8% coverage. |
 | CS3 — ownership map + fingerprints | **Done** | — | Ownership map (`impact/ownership.json`) + the per-component virtual Merkle tree (`impact/fingerprints/<name>.json`). Fingerprints derived in `catalogresolve` over the candidate read-set, content-hashed, deterministic (clean→edit→clean returns the same subtree); folded into the catalog Merkle root. |
-| CS4 — `internal/affected` engine | Not started | — | |
+| CS4 — `internal/affected` engine | **In progress** | — | Engine core landed: `Detector`/`Result`, the ownership→intent→dependency-closure pipeline, `GitChangeSource`, intent classification (none/global/components) + intent-impact (all/watch/none) + structural detection. **Still to do:** `FingerprintChangeSource` (PR2) and the catalog **watch enrichment** so `watch` mode has real data (PR3, per your decision). |
 | CS5 — migrate `plan/run --changed` | Not started | — | |
 | CS6 — cockpit read seam + drill-down + changed view | Not started | — | |
 | CS7 — `orun catalog affected` | Not started | — | |
