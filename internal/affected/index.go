@@ -44,8 +44,10 @@ type catalogIndex struct {
 	nameToKey  map[string]string
 
 	// dependency adjacency: deps[from] = its forward deps; dependents[to] = the
-	// components that depend on it.
+	// components that depend on it. depsAlways is the forward adjacency
+	// restricted to include:always edges — the plan/run selection closure.
 	deps       map[string][]string
+	depsAlways map[string][]string
 	dependents map[string][]string
 	allComps   []string
 }
@@ -59,6 +61,7 @@ func (d *Detector) index() *catalogIndex {
 		ignoreDirs:          map[string]bool{},
 		nameToKey:           map[string]string{},
 		deps:                map[string][]string{},
+		depsAlways:          map[string][]string{},
 		dependents:          map[string][]string{},
 	}
 	if d.catalog == nil {
@@ -105,9 +108,19 @@ func (d *Detector) index() *catalogIndex {
 		for _, e := range g.Edges {
 			idx.deps[e.From] = append(idx.deps[e.From], e.To)
 			idx.dependents[e.To] = append(idx.dependents[e.To], e.From)
+			if e.Include == "always" {
+				idx.depsAlways[e.From] = append(idx.depsAlways[e.From], e.To)
+			}
 		}
 	}
 	return idx
+}
+
+// includeAlwaysClosure returns the transitive forward closure of the seed set
+// over include:always edges only — the dependencies a --changed plan must pull
+// in, excluding the seeds themselves, sorted.
+func (idx *catalogIndex) includeAlwaysClosure(seed map[string]bool) []string {
+	return idx.closure(seed, idx.depsAlways)
 }
 
 // classify maps one workspace-relative path to its class (the reference

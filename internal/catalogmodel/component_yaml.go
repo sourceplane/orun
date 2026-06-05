@@ -103,6 +103,10 @@ type ComponentYAMLDependency struct {
 	Component    string `json:"component"`
 	Relationship string `json:"relationship,omitempty"`
 	Optional     bool   `json:"optional,omitempty"`
+	// Include controls change-detection plan selection: "always" pulls this
+	// dependency into a --changed plan when the dependent is selected;
+	// "if-selected" (the omitted default) does not. (orun-catalog-state CS5.)
+	Include string `json:"include,omitempty"`
 }
 
 // ComponentYAMLEnvironment is one entry in the authored `environments` map.

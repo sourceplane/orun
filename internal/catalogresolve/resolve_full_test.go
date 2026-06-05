@@ -464,6 +464,47 @@ func validYAML(name string) string {
 	return "apiVersion: orun.io/v1alpha1\nkind: Component\nmetadata:\n  name: " + name + "\nspec:\n  type: worker\n  lifecycle: production\n  owner: team/x\n"
 }
 
+func TestIncludeAlwaysOnly(t *testing.T) {
+	for in, want := range map[string]string{
+		"always": "always", "Always": "always", " always ": "always",
+		"if-selected": "", "": "", "bogus": "",
+	} {
+		if got := includeAlwaysOnly(in); got != want {
+			t.Errorf("includeAlwaysOnly(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestBuildCatalog_CarriesIncludeOnEdges(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root+"/intent.yaml", "catalog:\n  namespace: ns\n")
+	mustWrite(t, root+"/apps/a/component.yaml",
+		"apiVersion: orun.io/v1alpha1\nkind: Component\nmetadata:\n  name: a\nspec:\n  type: worker\n  dependsOn:\n    - component: b\n      include: always\n    - component: c\n")
+	mustWrite(t, root+"/apps/b/component.yaml", validYAML("b"))
+	mustWrite(t, root+"/apps/c/component.yaml", validYAML("c"))
+
+	view, _, err := BuildCatalog(context.Background(), Options{WorkspaceRoot: root, Repo: "r"}, goldenInputs())
+	if err != nil {
+		t.Fatalf("BuildCatalog: %v", err)
+	}
+	dep := view.Graphs[0] // graphKinds order: dependencies first
+	var toB, toC *catalogmodel.GraphEdge
+	for i := range dep.Edges {
+		switch dep.Edges[i].To {
+		case "ns/r/b":
+			toB = &dep.Edges[i]
+		case "ns/r/c":
+			toC = &dep.Edges[i]
+		}
+	}
+	if toB == nil || toB.Include != "always" {
+		t.Errorf("a→b edge include = %+v, want always", toB)
+	}
+	if toC == nil || toC.Include != "" {
+		t.Errorf("a→c edge include = %+v, want empty (if-selected default)", toC)
+	}
+}
+
 func TestResolve_CarriesChangeWatches(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root+"/intent.yaml", "catalog:\n  namespace: ns\n")

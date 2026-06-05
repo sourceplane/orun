@@ -169,7 +169,7 @@ func mapGraph(g *catalogmodel.CatalogGraph, edgeKind string) nodes.CatalogGraph 
 		out.Nodes = append(out.Nodes, nodes.GraphNode{Key: n.Key, Kind: n.Kind, Name: n.Name})
 	}
 	for _, e := range g.Edges {
-		out.Edges = append(out.Edges, nodes.GraphEdge{From: e.From, To: e.To, Type: e.Type})
+		out.Edges = append(out.Edges, nodes.GraphEdge{From: e.From, To: e.To, Type: e.Type, Include: e.Include})
 	}
 	return out
 }

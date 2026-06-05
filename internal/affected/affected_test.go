@@ -198,6 +198,30 @@ func TestDetect_IntentFormattingOnlyIsNone(t *testing.T) {
 	eq(t, r.DirectlyChanged, nil, "DirectlyChanged")
 }
 
+func TestDetect_SelectionFollowsIncludeAlwaysOnly(t *testing.T) {
+	// api --include:always--> shared ; api --if-selected--> lib
+	// A change to api selects api + shared (always) but NOT lib.
+	cat := &objcatalog.CatalogView{
+		Components: []objcatalog.CatalogComponentView{
+			{ComponentKey: "ns/repo/api", Name: "api"},
+			{ComponentKey: "ns/repo/shared", Name: "shared"},
+			{ComponentKey: "ns/repo/lib", Name: "lib"},
+		},
+		Graph: map[string]objcatalog.GraphView{"dependencies": {Edges: []objcatalog.GraphEdgeView{
+			{From: "ns/repo/api", To: "ns/repo/shared", Type: "depends_on", Include: "always"},
+			{From: "ns/repo/api", To: "ns/repo/lib", Type: "depends_on"}, // if-selected (empty)
+		}}},
+		Ownership: &objcatalog.OwnershipView{SchemaVersion: 1,
+			Components: map[string]string{"apps/api": "ns/repo/api"}},
+	}
+	r := detect(t, cat, IntentImpactWatch, fakeSource{files: []string{"apps/api/x.go"}})
+	eq(t, r.DirectlyChanged, []string{"ns/repo/api"}, "DirectlyChanged")
+	// Selection pulls in the include:always dep (shared) but not the if-selected one (lib).
+	eq(t, r.Selection, []string{"ns/repo/api", "ns/repo/shared"}, "Selection")
+	// Dependencies (the full forward closure, for display) still includes both.
+	eq(t, r.Dependencies, []string{"ns/repo/lib", "ns/repo/shared"}, "Dependencies")
+}
+
 func TestDetect_SourceError(t *testing.T) {
 	_, err := NewDetector(sampleCatalog(), IntentImpactWatch).Detect(context.Background(),
 		fakeSource{err: context.Canceled})

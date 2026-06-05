@@ -108,6 +108,9 @@ type ComponentDependency struct {
 	Name         string `json:"name"`
 	Relationship string `json:"relationship"`
 	Optional     bool   `json:"optional"`
+	// Include is the resolved change-detection plan-selection mode ("always" or
+	// the omitted "if-selected" default). (orun-catalog-state CS5.)
+	Include string `json:"include,omitempty"`
 }
 
 // APIDependencies splits the API edges into provided and consumed.

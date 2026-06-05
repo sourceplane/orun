@@ -34,6 +34,10 @@ type GraphEdge struct {
 	To       string `json:"to"`
 	Type     string `json:"type"`
 	Optional bool   `json:"optional"`
+	// Include carries the change-detection plan-selection mode on dependency
+	// edges: "always" when the edge pulls its target into a --changed plan;
+	// omitted otherwise (the "if-selected" default). (orun-catalog-state CS5.)
+	Include string `json:"include,omitempty"`
 }
 
 // Graph kind names per data-model.md §4 (separate file per relationship).

@@ -90,9 +90,10 @@ type GraphNodeView struct {
 }
 
 type GraphEdgeView struct {
-	From string
-	To   string
-	Type string
+	From    string
+	To      string
+	Type    string
+	Include string // change-detection plan-selection mode ("always"; empty = if-selected)
 }
 
 // OwnershipView is the read view of impact/ownership.json (the ownership map the
@@ -259,7 +260,7 @@ func (r *Reader) readGraph(ctx context.Context, treeID objectstore.ObjectID) (ma
 			gv.Nodes = append(gv.Nodes, GraphNodeView{Key: n.Key, Kind: n.Kind, Name: n.Name})
 		}
 		for _, ed := range g.Edges {
-			gv.Edges = append(gv.Edges, GraphEdgeView{From: ed.From, To: ed.To, Type: ed.Type})
+			gv.Edges = append(gv.Edges, GraphEdgeView{From: ed.From, To: ed.To, Type: ed.Type, Include: ed.Include})
 		}
 		out[g.EdgeKind] = gv
 	}

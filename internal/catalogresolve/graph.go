@@ -63,7 +63,7 @@ func buildGraphs(manifests []*catalogmodel.ComponentManifest, sourceSnapshotKey,
 			// we still add it as a node and edge so the graph is complete.
 			depNodes[d.Key] = catalogmodel.GraphNode{Key: d.Key, Kind: graphKindComponent, Name: d.Name}
 			deps.Edges = append(deps.Edges, catalogmodel.GraphEdge{
-				From: ckey, To: d.Key, Type: d.Relationship, Optional: d.Optional,
+				From: ckey, To: d.Key, Type: d.Relationship, Optional: d.Optional, Include: d.Include,
 			})
 		}
 
