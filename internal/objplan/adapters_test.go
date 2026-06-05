@@ -197,8 +197,8 @@ func TestBuildOwnershipMapsComponentDirs(t *testing.T) {
 	view := &catalogresolve.CatalogView{
 		ResolvedCatalog: &catalogresolve.ResolvedCatalog{
 			Manifests: []*catalogmodel.ComponentManifest{
-				{Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", Path: "apps/api/component.yaml"}},
-				{Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/root", Name: "root", Path: "component.yaml"}},
+				{Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", SourceFile: "apps/api/component.yaml"}},
+				{Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/root", Name: "root", SourceFile: "component.yaml"}},
 				{Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/nopath", Name: "nopath"}}, // empty path: skipped
 				nil,
 			},

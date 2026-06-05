@@ -126,10 +126,12 @@ func buildOwnership(view *catalogresolve.CatalogView) nodes.ImpactOwnership {
 	components := map[string]string{}
 	if view != nil && view.ResolvedCatalog != nil {
 		for _, cm := range view.Manifests {
-			if cm == nil || cm.Identity.Path == "" {
-				continue // synthetic root / unknown path: no ownership entry
+			if cm == nil || cm.Identity.SourceFile == "" {
+				continue // synthetic root / no authoring file: no ownership entry
 			}
-			dir := path.Dir(cm.Identity.Path)
+			// The component dir is the dirname of its component.yaml location
+			// (SourceFile); spec.path is authored-optional and usually absent.
+			dir := path.Dir(cm.Identity.SourceFile)
 			components[dir] = cm.Identity.ComponentKey
 		}
 	}
@@ -151,7 +153,10 @@ func mapManifest(cm *catalogmodel.ComponentManifest) nodes.ComponentManifest {
 			Name:         cm.Identity.Name,
 			Namespace:    cm.Identity.Namespace,
 			Repo:         cm.Identity.Repo,
-			Path:         cm.Identity.Path,
+			// Node path is the component.yaml *location* (data-model §4) — the
+			// resolver's SourceFile, not the authored-optional spec.path. Its
+			// dirname is the component dir for ownership/fingerprints.
+			Path: cm.Identity.SourceFile,
 		},
 		Metadata:   toMap(cm.Metadata),
 		Spec:       toMap(cm.Spec),
