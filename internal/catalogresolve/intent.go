@@ -16,6 +16,10 @@ import (
 // side (see intentDefaults below).
 type intentFile struct {
 	Catalog *intentCatalogBlock `yaml:"catalog"`
+	// Components are the inline component declarations. The catalog ingests
+	// these alongside discovered component.yaml files so the component set
+	// matches the legacy inline∪discovered set (orun-catalog-state CS5/CS6).
+	Components []inlineComponent `yaml:"components"`
 }
 
 type intentCatalogBlock struct {

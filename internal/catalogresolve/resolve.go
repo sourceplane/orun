@@ -88,6 +88,19 @@ func DiscoverAndLoad(ctx context.Context, opts Options) (DiscoveryResult, error)
 		manifests = append(manifests, am)
 	}
 
+	// Ingest inline intent.yaml components (those not already discovered as a
+	// component.yaml file), so the catalog's component set matches the legacy
+	// inline∪discovered set the cockpit and --changed operate on.
+	if intent != nil && len(intent.Components) > 0 {
+		discoveredNames := make(map[string]bool, len(manifests))
+		for _, m := range manifests {
+			discoveredNames[m.Component.Metadata.Name] = true
+		}
+		for _, am := range inlineManifests(intent, discoveredNames) {
+			manifests = append(manifests, inherit(am, defaults, intentOK))
+		}
+	}
+
 	return DiscoveryResult{
 		Manifests:  manifests,
 		IntentPath: intentOK,
