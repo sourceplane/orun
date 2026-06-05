@@ -137,7 +137,7 @@ func TestAssembleCatalogTreeAndNoSelfID(t *testing.T) {
 		{Identity: ComponentIdentity{ComponentKey: "ns/repo/worker", Name: "worker", Namespace: "ns", Repo: "repo"}},
 	}
 	graphs := []CatalogGraph{{EdgeKind: "dependencies", Nodes: []GraphNode{{Key: "ns/repo/api-edge", Kind: "Component", Name: "api-edge"}}}}
-	catID, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 1}, manifests, graphs)
+	catID, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 1}, manifests, graphs, ImpactOwnership{})
 	if err != nil {
 		t.Fatalf("AssembleCatalog: %v", err)
 	}
@@ -163,6 +163,51 @@ func TestAssembleCatalogTreeAndNoSelfID(t *testing.T) {
 	}
 }
 
+func TestAssembleCatalogWritesImpact(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := mem()
+	manifests := []ComponentManifest{
+		{Identity: ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", Namespace: "ns", Repo: "repo", Path: "apps/api/component.yaml"}},
+	}
+	own := ImpactOwnership{
+		Components:          map[string]string{"apps/api": "ns/repo/api"},
+		GlobalPaths:         []string{"intent.yaml"},
+		StructuralFilenames: []string{"component.yaml"},
+		IgnoreDirs:          []string{".git"},
+	}
+	catID, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 1}, manifests, nil, own)
+	if err != nil {
+		t.Fatalf("AssembleCatalog: %v", err)
+	}
+	// impact/ is present and a tree.
+	impactTree, impactKind := findEntry(t, s, catID, dirImpact)
+	if impactKind != objectstore.KindTree {
+		t.Fatalf("impact/ not a tree: %s", impactKind)
+	}
+	// impact/ownership.json decodes with the defaulted Kind/SchemaVersion.
+	ownBlob, _ := findEntry(t, s, impactTree, fileOwnership)
+	decoded, err := Decode[ImpactOwnership]([]byte(blobBody(t, s, ownBlob)))
+	if err != nil {
+		t.Fatalf("decode ownership: %v", err)
+	}
+	if decoded.Kind != KindImpactOwnership || decoded.SchemaVersion != 1 {
+		t.Fatalf("ownership defaults not applied: %+v", decoded)
+	}
+	if decoded.Components["apps/api"] != "ns/repo/api" {
+		t.Fatalf("ownership components = %v", decoded.Components)
+	}
+}
+
+func TestAssembleCatalogRejectsBadOwnership(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	bad := ImpactOwnership{Components: map[string]string{"bad/dir/": "ns/repo/api"}}
+	if _, err := AssembleCatalog(ctx, mem(), CatalogSnapshot{SourceID: goodID("a")}, nil, nil, bad); err == nil {
+		t.Fatalf("AssembleCatalog accepted invalid ownership dir")
+	}
+}
+
 func TestAssembleCatalogOrderIndependent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -172,11 +217,11 @@ func TestAssembleCatalogOrderIndependent(t *testing.T) {
 	}
 	rev := []ComponentManifest{m[1], m[0]}
 	cat := CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 1}
-	id1, err := AssembleCatalog(ctx, mem(), cat, m, nil)
+	id1, err := AssembleCatalog(ctx, mem(), cat, m, nil, ImpactOwnership{})
 	if err != nil {
 		t.Fatalf("id1: %v", err)
 	}
-	id2, err := AssembleCatalog(ctx, mem(), cat, rev, nil)
+	id2, err := AssembleCatalog(ctx, mem(), cat, rev, nil, ImpactOwnership{})
 	if err != nil {
 		t.Fatalf("id2: %v", err)
 	}
@@ -277,7 +322,7 @@ func TestAssembleValidationErrorsPropagate(t *testing.T) {
 		t.Fatalf("AssembleSource accepted bad scope")
 	}
 	if _, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a")},
-		[]ComponentManifest{{Identity: ComponentIdentity{ComponentKey: "bad", Name: "bad"}}}, nil); err == nil {
+		[]ComponentManifest{{Identity: ComponentIdentity{ComponentKey: "bad", Name: "bad"}}}, nil, ImpactOwnership{}); err == nil {
 		t.Fatalf("AssembleCatalog accepted bad manifest")
 	}
 }

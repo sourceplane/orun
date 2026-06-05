@@ -96,6 +96,11 @@ type ResolvedCatalog struct {
 	// Repo is the effective repo segment used for componentKey
 	// construction.
 	Repo string
+
+	// Excludes is the sorted, de-duplicated directory-basename prune set
+	// discovery used (defaults ∪ intent catalog.discovery.exclude). The
+	// change-detection ownership map mirrors it as ignoreDirs.
+	Excludes []string
 }
 
 // Options configures DiscoverAndLoad and Resolve. Exactly one of

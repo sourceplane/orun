@@ -92,12 +92,18 @@ func Resolve(ctx context.Context, opts Options) (*ResolvedCatalog, []ValidationI
 		return manifests[a].Identity.ComponentKey < manifests[b].Identity.ComponentKey
 	})
 
+	var intentExcludes []string
+	if intent != nil && intent.Catalog != nil && intent.Catalog.Discovery != nil {
+		intentExcludes = intent.Catalog.Discovery.Exclude
+	}
+
 	rc := &ResolvedCatalog{
 		Manifests:  manifests,
 		Issues:     issues,
 		IntentPath: dr.IntentPath,
 		Namespace:  namespace,
 		Repo:       repo,
+		Excludes:   EffectiveExcludes(intentExcludes),
 	}
 
 	if firstErr := firstError(issues); firstErr != nil {

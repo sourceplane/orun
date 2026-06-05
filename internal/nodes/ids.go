@@ -27,8 +27,8 @@ func SourceID(algo objectstore.Algo, src SourceSnapshot) (ObjectID, error) {
 }
 
 // CatalogID returns the content id AssembleCatalog would produce.
-func CatalogID(algo objectstore.Algo, cat CatalogSnapshot, manifests []ComponentManifest, graphs []CatalogGraph) (ObjectID, error) {
-	return AssembleCatalog(context.Background(), hashStore{algo}, cat, manifests, graphs)
+func CatalogID(algo objectstore.Algo, cat CatalogSnapshot, manifests []ComponentManifest, graphs []CatalogGraph, ownership ImpactOwnership) (ObjectID, error) {
+	return AssembleCatalog(context.Background(), hashStore{algo}, cat, manifests, graphs, ownership)
 }
 
 // RevisionID returns the content id AssembleRevision would produce for

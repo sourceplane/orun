@@ -104,13 +104,14 @@ func AssembleRevision(ctx context.Context, s store, rev PlanRevision, planBytes 
 	})
 }
 
-// AssembleCatalog writes the component manifests, graph slices, and catalog
-// record, then the catalog tree (catalog.json + components/ + graph/), and
-// returns the catalog id (Merkle root). components/ and graph/ are always
-// present (possibly empty) so the catalog tree shape is uniform and the id is
-// deterministic. The catalog record's Components/GraphIDs/ComponentCount are
-// populated here from the written children.
-func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifests []ComponentManifest, graphs []CatalogGraph) (ObjectID, error) {
+// AssembleCatalog writes the component manifests, graph slices, catalog record,
+// and the change-detection ownership map, then the catalog tree (catalog.json +
+// components/ + graph/ + impact/) and returns the catalog id (Merkle root).
+// components/, graph/, and impact/ are always present (possibly empty) so the
+// catalog tree shape is uniform and the id is deterministic. The catalog
+// record's Components/GraphIDs/ComponentCount are populated here from the
+// written children.
+func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifests []ComponentManifest, graphs []CatalogGraph, ownership ImpactOwnership) (ObjectID, error) {
 	cat.Kind = KindCatalogSnapshot
 
 	compEntries := make([]objectstore.TreeEntry, 0, len(manifests))
@@ -180,10 +181,40 @@ func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifest
 	if err != nil {
 		return "", err
 	}
+	impactTreeID, err := assembleImpact(ctx, s, ownership)
+	if err != nil {
+		return "", err
+	}
 	return s.PutTree(ctx, []objectstore.TreeEntry{
 		blobEntry(fileCatalog, catBlobID),
 		treeEntry(dirComponents, compTreeID),
 		treeEntry(dirGraph, graphTreeID),
+		treeEntry(dirImpact, impactTreeID),
+	})
+}
+
+// assembleImpact writes the impact/ subtree (currently ownership.json; CS3's
+// fingerprints PR adds fingerprints/). The ownership map is always written so
+// the catalog tree shape stays uniform; Kind/SchemaVersion are defaulted here so
+// callers need only supply the derived data.
+func assembleImpact(ctx context.Context, s store, ownership ImpactOwnership) (ObjectID, error) {
+	ownership.Kind = KindImpactOwnership
+	if ownership.SchemaVersion == 0 {
+		ownership.SchemaVersion = 1
+	}
+	if err := ownership.Validate(); err != nil {
+		return "", err
+	}
+	ob, err := Encode(ownership)
+	if err != nil {
+		return "", err
+	}
+	oid, err := s.PutBlob(ctx, ob)
+	if err != nil {
+		return "", err
+	}
+	return s.PutTree(ctx, []objectstore.TreeEntry{
+		blobEntry(fileOwnership, oid),
 	})
 }
 

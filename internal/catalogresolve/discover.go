@@ -19,6 +19,26 @@ var defaultExcludes = []string{
 	"vendor",
 }
 
+// DefaultExcludes returns a copy of the directory-basename skip set discovery
+// applies even when intent.yaml supplies no catalog.discovery.exclude. Exported
+// so change-detection consumers (the ownership map) can mirror the prune set.
+func DefaultExcludes() []string {
+	return append([]string(nil), defaultExcludes...)
+}
+
+// EffectiveExcludes returns the sorted, de-duplicated directory-basename prune
+// set discovery used for a resolve: the defaults merged with the intent's
+// catalog.discovery.exclude (basename entries only, matching the walk).
+func EffectiveExcludes(intentExcludes []string) []string {
+	set := buildExcludeSet(intentExcludes)
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // discover walks workspaceRoot and returns the workspace-relative,
 // slash-separated paths of every authored component manifest. Both
 // component.yaml and component.yml are accepted; a directory containing

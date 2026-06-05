@@ -84,6 +84,49 @@ func (g CatalogGraph) Validate() error {
 	return nil
 }
 
+// Validate checks an ImpactOwnership (data-model.md §5). The component map keys
+// must be clean workspace-relative directories and the values valid component
+// keys; schemaVersion must be present so a cross-version consumer can reject an
+// index it does not understand.
+func (o ImpactOwnership) Validate() error {
+	if o.Kind != KindImpactOwnership {
+		return invalidf("ownership kind %q", o.Kind)
+	}
+	if o.SchemaVersion < 1 {
+		return invalidf("ownership schemaVersion %d", o.SchemaVersion)
+	}
+	for dir, key := range o.Components {
+		if !validOwnershipDir(dir) {
+			return invalidf("ownership component dir %q", dir)
+		}
+		if !componentKeyRe.MatchString(key) {
+			return invalidf("ownership component key %q", key)
+		}
+	}
+	return nil
+}
+
+// validOwnershipDir reports whether dir is a clean workspace-relative path: a
+// non-empty slash-separated path (or "." for the workspace root) with no
+// leading "./", no trailing "/", no empty or "." / ".." segments.
+func validOwnershipDir(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	if dir == "." { // the workspace root (a root-authored component)
+		return true
+	}
+	if strings.HasPrefix(dir, "/") || strings.HasSuffix(dir, "/") || strings.HasPrefix(dir, "./") {
+		return false
+	}
+	for _, seg := range strings.Split(dir, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return false
+		}
+	}
+	return true
+}
+
 // Validate checks a PlanRevision. It enforces the identity-purity rule by
 // construction: the struct carries no trigger/timestamp/executionId field, so
 // an identical plan under different triggers yields identical bytes.

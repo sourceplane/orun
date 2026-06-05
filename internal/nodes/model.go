@@ -77,6 +77,22 @@ type ComponentManifest struct {
 	Provenance map[string]any    `json:"provenance,omitempty"`
 }
 
+// ImpactOwnership is the change-detection ownership map (data-model.md §2). It
+// lives inside the catalog tree at impact/ownership.json and folds into the
+// catalog Merkle root; it is a deterministic function of the resolved catalog +
+// discovery and carries no timestamps. The change-detection engine
+// (internal/affected, CS4) uses it to map a changed workspace path to the
+// component that owns it.
+type ImpactOwnership struct {
+	Kind                string            `json:"kind"`
+	SchemaVersion       int               `json:"schemaVersion"`
+	Components          map[string]string `json:"components"`          // workspace-relative dir → componentKey
+	GlobalPaths         []string          `json:"globalPaths"`         // files whose change is global (e.g. intent.yaml)
+	GlobalBlocks        []string          `json:"globalBlocks"`        // catalog-relevant intent.yaml blocks
+	StructuralFilenames []string          `json:"structuralFilenames"` // basenames whose add/remove/edit is structural
+	IgnoreDirs          []string          `json:"ignoreDirs"`          // directory basenames discovery prunes
+}
+
 // GraphNode / GraphEdge model one edge-kind slice of the catalog graph.
 type GraphNode struct {
 	Key  string `json:"key"`
