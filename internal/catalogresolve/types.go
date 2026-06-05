@@ -101,6 +101,10 @@ type ResolvedCatalog struct {
 	// discovery used (defaults ∪ intent catalog.discovery.exclude). The
 	// change-detection ownership map mirrors it as ignoreDirs.
 	Excludes []string
+
+	// Fingerprints is one input fingerprint per resolved component (the
+	// change-detection virtual Merkle tree leaf-set), ordered by componentKey.
+	Fingerprints []ComponentFingerprint
 }
 
 // Options configures DiscoverAndLoad and Resolve. Exactly one of

@@ -39,7 +39,7 @@ var graphKinds = []string{"dependencies", "systems", "apis", "resources", "owner
 // CatalogGraphs, and the change-detection ImpactOwnership map. resolverVersion
 // stamps the snapshot (it participates in the resolve memo key, not in catalog
 // identity).
-func BuildCatalogNodes(view *catalogresolve.CatalogView, resolverVersion int) (nodes.CatalogSnapshot, []nodes.ComponentManifest, []nodes.CatalogGraph, nodes.ImpactOwnership) {
+func BuildCatalogNodes(view *catalogresolve.CatalogView, resolverVersion int) (nodes.CatalogSnapshot, []nodes.ComponentManifest, []nodes.CatalogGraph, nodes.ImpactOwnership, []nodes.ComponentFingerprint) {
 	cat := nodes.CatalogSnapshot{
 		Kind:            nodes.KindCatalogSnapshot,
 		ResolverVersion: resolverVersion,
@@ -71,7 +71,28 @@ func BuildCatalogNodes(view *catalogresolve.CatalogView, resolverVersion int) (n
 			graphs = append(graphs, mapGraph(g, edgeKind))
 		}
 	}
-	return cat, manifests, graphs, buildOwnership(view)
+	return cat, manifests, graphs, buildOwnership(view), buildFingerprints(view)
+}
+
+// buildFingerprints maps the resolver's neutral fingerprint set onto the node
+// type. Kind/SchemaVersion are defaulted at assembly time.
+func buildFingerprints(view *catalogresolve.CatalogView) []nodes.ComponentFingerprint {
+	if view == nil || view.ResolvedCatalog == nil {
+		return nil
+	}
+	out := make([]nodes.ComponentFingerprint, 0, len(view.Fingerprints))
+	for _, fp := range view.Fingerprints {
+		out = append(out, nodes.ComponentFingerprint{
+			Kind:          nodes.KindComponentFingerprint,
+			SchemaVersion: ownershipSchemaVersion,
+			ComponentKey:  fp.ComponentKey,
+			Dir:           fp.Dir,
+			Subtree:       fp.Subtree,
+			Files:         fp.Files,
+			GlobalDigest:  fp.GlobalDigest,
+		})
+	}
+	return out
 }
 
 // buildOwnership derives the change-detection ownership map from the resolved

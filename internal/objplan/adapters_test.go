@@ -118,7 +118,7 @@ func sampleView() *catalogresolve.CatalogView {
 
 func TestBuildCatalogNodes(t *testing.T) {
 	t.Parallel()
-	cat, manifests, graphs, ownership := BuildCatalogNodes(sampleView(), 2)
+	cat, manifests, graphs, ownership, _ := BuildCatalogNodes(sampleView(), 2)
 	if cat.Kind != nodes.KindCatalogSnapshot || cat.ResolverVersion != 2 || cat.HumanKey != "cat-x" {
 		t.Fatalf("catalog = %+v", cat)
 	}
@@ -146,7 +146,7 @@ func TestBuildCatalogNodes(t *testing.T) {
 		t.Fatalf("derived ownership invalid: %v", err)
 	}
 	// nil view is tolerated.
-	c2, m2, g2, o2 := BuildCatalogNodes(nil, 1)
+	c2, m2, g2, o2, _ := BuildCatalogNodes(nil, 1)
 	if c2.Kind != nodes.KindCatalogSnapshot || m2 != nil || g2 != nil {
 		t.Fatalf("nil view = %+v %v %v", c2, m2, g2)
 	}
@@ -164,7 +164,7 @@ func TestBuildCatalogNodesManyGraphsPositional(t *testing.T) {
 			{}, {}, {}, {}, {}, {}, // 6 graphs: 5 named + 1 overflow
 		},
 	}
-	_, _, graphs, _ := BuildCatalogNodes(view, 1)
+	_, _, graphs, _, _ := BuildCatalogNodes(view, 1)
 	want := []string{"dependencies", "systems", "apis", "resources", "owners", "graph5"}
 	for i, g := range graphs {
 		if g.EdgeKind != want[i] {
@@ -207,6 +207,40 @@ func TestBuildOwnershipMapsComponentDirs(t *testing.T) {
 	}
 	if err := o.Validate(); err != nil {
 		t.Errorf("derived ownership invalid: %v", err)
+	}
+}
+
+func TestBuildFingerprintsMapsNodeType(t *testing.T) {
+	t.Parallel()
+	view := &catalogresolve.CatalogView{
+		ResolvedCatalog: &catalogresolve.ResolvedCatalog{
+			Fingerprints: []catalogresolve.ComponentFingerprint{
+				{ComponentKey: "ns/repo/api", Dir: "apps/api", Subtree: "sha256:s",
+					Files: map[string]string{"apps/api/component.yaml": "sha256:f"}, GlobalDigest: "sha256:g"},
+			},
+		},
+		Snapshot: &catalogmodel.CatalogSnapshot{},
+	}
+	fps := buildFingerprints(view)
+	if len(fps) != 1 {
+		t.Fatalf("got %d fingerprints", len(fps))
+	}
+	fp := fps[0]
+	if fp.Kind != nodes.KindComponentFingerprint || fp.SchemaVersion != 1 {
+		t.Errorf("fingerprint defaults = %+v", fp)
+	}
+	if fp.ComponentKey != "ns/repo/api" || fp.Dir != "apps/api" || fp.Subtree != "sha256:s" {
+		t.Errorf("fingerprint fields = %+v", fp)
+	}
+	if fp.Files["apps/api/component.yaml"] != "sha256:f" || fp.GlobalDigest != "sha256:g" {
+		t.Errorf("fingerprint files/global = %+v", fp)
+	}
+	if err := fp.Validate(); err != nil {
+		t.Errorf("mapped fingerprint invalid: %v", err)
+	}
+	// nil view / nil ResolvedCatalog → no fingerprints, no panic.
+	if buildFingerprints(nil) != nil || buildFingerprints(&catalogresolve.CatalogView{}) != nil {
+		t.Errorf("nil view should yield nil fingerprints")
 	}
 }
 

@@ -93,6 +93,22 @@ type ImpactOwnership struct {
 	IgnoreDirs          []string          `json:"ignoreDirs"`          // directory basenames discovery prunes
 }
 
+// ComponentFingerprint is one component's input fingerprint — the leaf-set of
+// the change-detection virtual Merkle tree (data-model.md §2b). Derived at
+// resolve time, stored at impact/fingerprints/<name>.json, deterministic and
+// timestamp-free so it folds into the catalog Merkle root. The cockpit's
+// content-aware change source compares a recomputed Subtree against the stored
+// one (CS6): a mismatch ⇒ that component changed.
+type ComponentFingerprint struct {
+	Kind          string            `json:"kind"`
+	SchemaVersion int               `json:"schemaVersion"`
+	ComponentKey  string            `json:"componentKey"`
+	Dir           string            `json:"dir"`                    // workspace-relative component dir
+	Subtree       string            `json:"subtree"`                // hash over the input file set (the leaf-set root)
+	Files         map[string]string `json:"files,omitempty"`        // workspace-relative path → content hash
+	GlobalDigest  string            `json:"globalDigest,omitempty"` // hash of the catalog-relevant intent blocks (shared leaf)
+}
+
 // GraphNode / GraphEdge model one edge-kind slice of the catalog graph.
 type GraphNode struct {
 	Key  string `json:"key"`

@@ -26,6 +26,8 @@ func TestValidateAcceptsGoodRecords(t *testing.T) {
 		ImpactOwnership{Kind: KindImpactOwnership, SchemaVersion: 1},
 		ImpactOwnership{Kind: KindImpactOwnership, SchemaVersion: 1,
 			Components: map[string]string{"apps/api": "ns/repo/api", ".": "ns/repo/root"}},
+		ComponentFingerprint{Kind: KindComponentFingerprint, SchemaVersion: 1,
+			ComponentKey: "ns/repo/api", Dir: "apps/api", Subtree: "sha256:abc"},
 	}
 	for i, g := range good {
 		if err := g.Validate(); err != nil {
@@ -70,6 +72,11 @@ func TestValidateRejectsBadRecords(t *testing.T) {
 			Components: map[string]string{"apps/api/": "ns/repo/api"}}, // trailing slash
 		ImpactOwnership{Kind: KindImpactOwnership, SchemaVersion: 1,
 			Components: map[string]string{"apps/api": "bad-key"}}, // bad component key
+		ComponentFingerprint{Kind: "X", SchemaVersion: 1, ComponentKey: "ns/repo/api", Dir: "apps/api", Subtree: "s"},
+		ComponentFingerprint{Kind: KindComponentFingerprint, SchemaVersion: 0, ComponentKey: "ns/repo/api", Dir: "apps/api", Subtree: "s"},
+		ComponentFingerprint{Kind: KindComponentFingerprint, SchemaVersion: 1, ComponentKey: "bad", Dir: "apps/api", Subtree: "s"},
+		ComponentFingerprint{Kind: KindComponentFingerprint, SchemaVersion: 1, ComponentKey: "ns/repo/api", Dir: "bad/", Subtree: "s"},
+		ComponentFingerprint{Kind: KindComponentFingerprint, SchemaVersion: 1, ComponentKey: "ns/repo/api", Dir: "apps/api", Subtree: ""},
 	}
 	for i, b := range bad {
 		if err := b.Validate(); !errors.Is(err, ErrInvalid) {

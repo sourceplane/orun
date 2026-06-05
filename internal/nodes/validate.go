@@ -127,6 +127,27 @@ func validOwnershipDir(dir string) bool {
 	return true
 }
 
+// Validate checks a ComponentFingerprint (data-model.md §2b). The dir must be a
+// clean workspace-relative path, the componentKey valid, and schemaVersion ≥ 1.
+func (f ComponentFingerprint) Validate() error {
+	if f.Kind != KindComponentFingerprint {
+		return invalidf("fingerprint kind %q", f.Kind)
+	}
+	if f.SchemaVersion < 1 {
+		return invalidf("fingerprint schemaVersion %d", f.SchemaVersion)
+	}
+	if !componentKeyRe.MatchString(f.ComponentKey) {
+		return invalidf("fingerprint componentKey %q", f.ComponentKey)
+	}
+	if !validOwnershipDir(f.Dir) {
+		return invalidf("fingerprint dir %q", f.Dir)
+	}
+	if f.Subtree == "" {
+		return invalidf("fingerprint %q: empty subtree", f.ComponentKey)
+	}
+	return nil
+}
+
 // Validate checks a PlanRevision. It enforces the identity-purity rule by
 // construction: the struct carries no trigger/timestamp/executionId field, so
 // an identical plan under different triggers yields identical bytes.

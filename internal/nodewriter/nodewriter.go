@@ -120,8 +120,8 @@ func (w *Writer) WriteSource(ctx context.Context, src nodes.SourceSnapshot, sour
 }
 
 // WriteCatalog assembles the catalog (idempotent) and points catalogRefs at it.
-func (w *Writer) WriteCatalog(ctx context.Context, cat nodes.CatalogSnapshot, manifests []nodes.ComponentManifest, graphs []nodes.CatalogGraph, ownership nodes.ImpactOwnership, catalogRefs ...string) (objectstore.ObjectID, error) {
-	id, err := nodes.AssembleCatalog(ctx, w.store, cat, manifests, graphs, ownership)
+func (w *Writer) WriteCatalog(ctx context.Context, cat nodes.CatalogSnapshot, manifests []nodes.ComponentManifest, graphs []nodes.CatalogGraph, ownership nodes.ImpactOwnership, fingerprints []nodes.ComponentFingerprint, catalogRefs ...string) (objectstore.ObjectID, error) {
+	id, err := nodes.AssembleCatalog(ctx, w.store, cat, manifests, graphs, ownership, fingerprints)
 	if err != nil {
 		return "", err
 	}
@@ -183,11 +183,12 @@ func (w *Writer) RecordTrigger(ctx context.Context, trg nodes.TriggerOccurrence,
 
 // CatalogInput carries the optional catalog half of a plan walk.
 type CatalogInput struct {
-	Snapshot  nodes.CatalogSnapshot
-	Manifests []nodes.ComponentManifest
-	Graphs    []nodes.CatalogGraph
-	Ownership nodes.ImpactOwnership
-	Refs      []string
+	Snapshot     nodes.CatalogSnapshot
+	Manifests    []nodes.ComponentManifest
+	Graphs       []nodes.CatalogGraph
+	Ownership    nodes.ImpactOwnership
+	Fingerprints []nodes.ComponentFingerprint
+	Refs         []string
 }
 
 // PlanInput carries the pre-resolved inputs for the plan walk (steps 1–4 of
@@ -229,7 +230,7 @@ func (w *Writer) Plan(ctx context.Context, in PlanInput) (PlanResult, error) {
 	if in.Catalog != nil {
 		cat := in.Catalog.Snapshot
 		cat.SourceID = string(srcID)
-		catID, err := w.WriteCatalog(ctx, cat, in.Catalog.Manifests, in.Catalog.Graphs, in.Catalog.Ownership, in.Catalog.Refs...)
+		catID, err := w.WriteCatalog(ctx, cat, in.Catalog.Manifests, in.Catalog.Graphs, in.Catalog.Ownership, in.Catalog.Fingerprints, in.Catalog.Refs...)
 		if err != nil {
 			return res, err
 		}
