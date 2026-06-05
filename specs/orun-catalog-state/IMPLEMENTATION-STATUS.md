@@ -6,7 +6,7 @@
 | Milestone | Status | PR | Notes |
 |-----------|--------|----|-------|
 | CS1 — Lossless object-model catalog (`Path`) | **Done** | — | `nodes.ComponentIdentity.Path` added; mapped in `objplan/catalog.go:mapManifest`. One-time catalog-id change (below). |
-| CS2 — `internal/objcatalog` read view | Not started | — | |
+| CS2 — `internal/objcatalog` read view | **Done** | — | `Reader.Load → CatalogView` (catalog + components + graph + tolerant `impact/`). Missing `impact/` → `Ownership == nil`. 92.8% coverage. |
 | CS3 — ownership map + fingerprints | Not started | — | |
 | CS4 — `internal/affected` engine | Not started | — | |
 | CS5 — migrate `plan/run --changed` | Not started | — | |
