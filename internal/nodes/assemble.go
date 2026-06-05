@@ -111,7 +111,7 @@ func AssembleRevision(ctx context.Context, s store, rev PlanRevision, planBytes 
 // catalog tree shape is uniform and the id is deterministic. The catalog
 // record's Components/GraphIDs/ComponentCount are populated here from the
 // written children.
-func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifests []ComponentManifest, graphs []CatalogGraph, ownership ImpactOwnership) (ObjectID, error) {
+func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifests []ComponentManifest, graphs []CatalogGraph, ownership ImpactOwnership, fingerprints []ComponentFingerprint) (ObjectID, error) {
 	cat.Kind = KindCatalogSnapshot
 
 	compEntries := make([]objectstore.TreeEntry, 0, len(manifests))
@@ -181,7 +181,7 @@ func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifest
 	if err != nil {
 		return "", err
 	}
-	impactTreeID, err := assembleImpact(ctx, s, ownership)
+	impactTreeID, err := assembleImpact(ctx, s, ownership, fingerprints)
 	if err != nil {
 		return "", err
 	}
@@ -193,11 +193,11 @@ func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifest
 	})
 }
 
-// assembleImpact writes the impact/ subtree (currently ownership.json; CS3's
-// fingerprints PR adds fingerprints/). The ownership map is always written so
-// the catalog tree shape stays uniform; Kind/SchemaVersion are defaulted here so
+// assembleImpact writes the impact/ subtree: ownership.json plus the
+// fingerprints/ subtree (one blob per component). Both are always written so the
+// catalog tree shape stays uniform; Kind/SchemaVersion are defaulted here so
 // callers need only supply the derived data.
-func assembleImpact(ctx context.Context, s store, ownership ImpactOwnership) (ObjectID, error) {
+func assembleImpact(ctx context.Context, s store, ownership ImpactOwnership, fingerprints []ComponentFingerprint) (ObjectID, error) {
 	ownership.Kind = KindImpactOwnership
 	if ownership.SchemaVersion == 0 {
 		ownership.SchemaVersion = 1
@@ -213,9 +213,47 @@ func assembleImpact(ctx context.Context, s store, ownership ImpactOwnership) (Ob
 	if err != nil {
 		return "", err
 	}
+
+	fpTreeID, err := assembleFingerprints(ctx, s, fingerprints)
+	if err != nil {
+		return "", err
+	}
 	return s.PutTree(ctx, []objectstore.TreeEntry{
 		blobEntry(fileOwnership, oid),
+		treeEntry(dirFingerprints, fpTreeID),
 	})
+}
+
+// assembleFingerprints writes one blob per component fingerprint into the
+// fingerprints/ subtree (always present, possibly empty). Kind/SchemaVersion are
+// defaulted so callers supply only the derived data.
+func assembleFingerprints(ctx context.Context, s store, fingerprints []ComponentFingerprint) (ObjectID, error) {
+	entries := make([]objectstore.TreeEntry, 0, len(fingerprints))
+	for _, fp := range fingerprints {
+		fp.Kind = KindComponentFingerprint
+		if fp.SchemaVersion == 0 {
+			fp.SchemaVersion = 1
+		}
+		if err := fp.Validate(); err != nil {
+			return "", err
+		}
+		fb, err := Encode(fp)
+		if err != nil {
+			return "", err
+		}
+		fid, err := s.PutBlob(ctx, fb)
+		if err != nil {
+			return "", err
+		}
+		// Name by component name (the last componentKey segment), matching the
+		// components/<name>.json convention and the data-model §2b filename.
+		name := fp.ComponentKey
+		if i := strings.LastIndexByte(name, '/'); i >= 0 {
+			name = name[i+1:]
+		}
+		entries = append(entries, blobEntry(sanitizeSegment(name)+".json", fid))
+	}
+	return s.PutTree(ctx, entries)
 }
 
 // NamedBlob is a name→bytes pair for events and artifacts; Name must be in the

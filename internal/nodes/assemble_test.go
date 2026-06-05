@@ -137,7 +137,7 @@ func TestAssembleCatalogTreeAndNoSelfID(t *testing.T) {
 		{Identity: ComponentIdentity{ComponentKey: "ns/repo/worker", Name: "worker", Namespace: "ns", Repo: "repo"}},
 	}
 	graphs := []CatalogGraph{{EdgeKind: "dependencies", Nodes: []GraphNode{{Key: "ns/repo/api-edge", Kind: "Component", Name: "api-edge"}}}}
-	catID, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 1}, manifests, graphs, ImpactOwnership{})
+	catID, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 1}, manifests, graphs, ImpactOwnership{}, nil)
 	if err != nil {
 		t.Fatalf("AssembleCatalog: %v", err)
 	}
@@ -176,7 +176,10 @@ func TestAssembleCatalogWritesImpact(t *testing.T) {
 		StructuralFilenames: []string{"component.yaml"},
 		IgnoreDirs:          []string{".git"},
 	}
-	catID, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 1}, manifests, nil, own)
+	fps := []ComponentFingerprint{
+		{ComponentKey: "ns/repo/api", Dir: "apps/api", Subtree: "sha256:fp", GlobalDigest: "sha256:g"},
+	}
+	catID, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 1}, manifests, nil, own, fps)
 	if err != nil {
 		t.Fatalf("AssembleCatalog: %v", err)
 	}
@@ -197,13 +200,35 @@ func TestAssembleCatalogWritesImpact(t *testing.T) {
 	if decoded.Components["apps/api"] != "ns/repo/api" {
 		t.Fatalf("ownership components = %v", decoded.Components)
 	}
+	// impact/fingerprints/<name>.json decodes with the defaulted Kind/SchemaVersion.
+	fpTree, fpKind := findEntry(t, s, impactTree, dirFingerprints)
+	if fpKind != objectstore.KindTree {
+		t.Fatalf("fingerprints/ not a tree: %s", fpKind)
+	}
+	fpBlob, _ := findEntry(t, s, fpTree, "api.json")
+	fp, err := Decode[ComponentFingerprint]([]byte(blobBody(t, s, fpBlob)))
+	if err != nil {
+		t.Fatalf("decode fingerprint: %v", err)
+	}
+	if fp.Kind != KindComponentFingerprint || fp.SchemaVersion != 1 || fp.Subtree != "sha256:fp" {
+		t.Fatalf("fingerprint defaults/content wrong: %+v", fp)
+	}
+}
+
+func TestAssembleCatalogRejectsBadFingerprint(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	bad := []ComponentFingerprint{{ComponentKey: "ns/repo/api", Dir: "apps/api"}} // empty subtree
+	if _, err := AssembleCatalog(ctx, mem(), CatalogSnapshot{SourceID: goodID("a")}, nil, nil, ImpactOwnership{}, bad); err == nil {
+		t.Fatalf("AssembleCatalog accepted invalid fingerprint")
+	}
 }
 
 func TestAssembleCatalogRejectsBadOwnership(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	bad := ImpactOwnership{Components: map[string]string{"bad/dir/": "ns/repo/api"}}
-	if _, err := AssembleCatalog(ctx, mem(), CatalogSnapshot{SourceID: goodID("a")}, nil, nil, bad); err == nil {
+	if _, err := AssembleCatalog(ctx, mem(), CatalogSnapshot{SourceID: goodID("a")}, nil, nil, bad, nil); err == nil {
 		t.Fatalf("AssembleCatalog accepted invalid ownership dir")
 	}
 }
@@ -217,11 +242,11 @@ func TestAssembleCatalogOrderIndependent(t *testing.T) {
 	}
 	rev := []ComponentManifest{m[1], m[0]}
 	cat := CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 1}
-	id1, err := AssembleCatalog(ctx, mem(), cat, m, nil, ImpactOwnership{})
+	id1, err := AssembleCatalog(ctx, mem(), cat, m, nil, ImpactOwnership{}, nil)
 	if err != nil {
 		t.Fatalf("id1: %v", err)
 	}
-	id2, err := AssembleCatalog(ctx, mem(), cat, rev, nil, ImpactOwnership{})
+	id2, err := AssembleCatalog(ctx, mem(), cat, rev, nil, ImpactOwnership{}, nil)
 	if err != nil {
 		t.Fatalf("id2: %v", err)
 	}
@@ -322,7 +347,7 @@ func TestAssembleValidationErrorsPropagate(t *testing.T) {
 		t.Fatalf("AssembleSource accepted bad scope")
 	}
 	if _, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a")},
-		[]ComponentManifest{{Identity: ComponentIdentity{ComponentKey: "bad", Name: "bad"}}}, nil, ImpactOwnership{}); err == nil {
+		[]ComponentManifest{{Identity: ComponentIdentity{ComponentKey: "bad", Name: "bad"}}}, nil, ImpactOwnership{}, nil); err == nil {
 		t.Fatalf("AssembleCatalog accepted bad manifest")
 	}
 }

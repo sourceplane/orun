@@ -153,7 +153,7 @@ func TestWriteSourceAndCatalogErrorPropagation(t *testing.T) {
 	if _, err := w.WriteSource(ctx, nodes.SourceSnapshot{Scope: nodes.ScopeMain}); !errors.Is(err, errBoom) {
 		t.Fatalf("WriteSource = %v, want errBoom", err)
 	}
-	if _, err := w.WriteCatalog(ctx, nodes.CatalogSnapshot{SourceID: string(target)}, nil, nil, nodes.ImpactOwnership{}); !errors.Is(err, errBoom) {
+	if _, err := w.WriteCatalog(ctx, nodes.CatalogSnapshot{SourceID: string(target)}, nil, nil, nodes.ImpactOwnership{}, nil); !errors.Is(err, errBoom) {
 		t.Fatalf("WriteCatalog = %v, want errBoom", err)
 	}
 }

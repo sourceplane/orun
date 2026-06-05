@@ -2,6 +2,7 @@ package catalogresolve
 
 import (
 	"context"
+	"path/filepath"
 	"sort"
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
@@ -97,13 +98,20 @@ func Resolve(ctx context.Context, opts Options) (*ResolvedCatalog, []ValidationI
 		intentExcludes = intent.Catalog.Discovery.Exclude
 	}
 
+	intentAbs := opts.IntentPath
+	if intentAbs == "" {
+		intentAbs = filepath.Join(opts.WorkspaceRoot, "intent.yaml")
+	}
+	globalDigest := computeGlobalDigest(intentAbs)
+
 	rc := &ResolvedCatalog{
-		Manifests:  manifests,
-		Issues:     issues,
-		IntentPath: dr.IntentPath,
-		Namespace:  namespace,
-		Repo:       repo,
-		Excludes:   EffectiveExcludes(intentExcludes),
+		Manifests:    manifests,
+		Issues:       issues,
+		IntentPath:   dr.IntentPath,
+		Namespace:    namespace,
+		Repo:         repo,
+		Excludes:     EffectiveExcludes(intentExcludes),
+		Fingerprints: computeFingerprints(opts.WorkspaceRoot, manifests, globalDigest),
 	}
 
 	if firstErr := firstError(issues); firstErr != nil {

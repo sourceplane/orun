@@ -31,6 +31,7 @@ const (
 	KindComponentHistoryIndex = "ComponentHistoryIndex"
 	KindStoreVersion          = "StoreVersion"
 	KindImpactOwnership       = "ImpactOwnership"
+	KindComponentFingerprint  = "ComponentFingerprint"
 )
 
 // Source scope values (identity-and-keys.md §3).
@@ -83,8 +84,9 @@ const (
 	fileAttempt   = "attempt.json"
 	dirComponents = "components"
 	dirGraph      = "graph"
-	dirImpact     = "impact"
-	fileOwnership = "ownership.json"
+	dirImpact       = "impact"
+	fileOwnership   = "ownership.json"
+	dirFingerprints = "fingerprints"
 	dirExecutions = "executions"
 	dirJobs       = "jobs"
 	dirAttempts   = "attempts"

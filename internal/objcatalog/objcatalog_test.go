@@ -100,7 +100,7 @@ func seedCatalog(t *testing.T, f fixture) objectstore.ObjectID {
 		SourceID:        "sha256:" + repeat("a", 64),
 		ResolverVersion: 1,
 	}
-	root, err := nodes.AssembleCatalog(ctx, f.store, cat, sampleManifests(), sampleGraphs(), nodes.ImpactOwnership{})
+	root, err := nodes.AssembleCatalog(ctx, f.store, cat, sampleManifests(), sampleGraphs(), nodes.ImpactOwnership{}, nil)
 	if err != nil {
 		t.Fatalf("assemble: %v", err)
 	}
