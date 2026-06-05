@@ -70,10 +70,12 @@ func FingerprintForDir(root, dir, componentKey, globalDigest string) ComponentFi
 func computeFingerprints(root string, manifests []*catalogmodel.ComponentManifest, globalDigest string) []ComponentFingerprint {
 	out := make([]ComponentFingerprint, 0, len(manifests))
 	for _, cm := range manifests {
-		if cm == nil || cm.Identity.Path == "" {
+		if cm == nil || cm.Identity.SourceFile == "" {
 			continue
 		}
-		dir := path.Dir(cm.Identity.Path)
+		// Component dir = dirname of the component.yaml location (SourceFile);
+		// spec.path is authored-optional and usually absent.
+		dir := path.Dir(cm.Identity.SourceFile)
 		out = append(out, fingerprintForDir(root, dir, cm.Identity.ComponentKey, globalDigest))
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].ComponentKey < out[j].ComponentKey })

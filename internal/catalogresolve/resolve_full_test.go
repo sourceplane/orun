@@ -505,6 +505,40 @@ func TestBuildCatalog_CarriesIncludeOnEdges(t *testing.T) {
 	}
 }
 
+func TestResolve_FingerprintsUseSourceFileDir(t *testing.T) {
+	// Real component.yaml files omit spec.path; the fingerprint dir must come
+	// from the discovered file location (SourceFile), not the empty spec.path —
+	// otherwise change detection sees no components (the CS5/CS6 unblock fix).
+	root := t.TempDir()
+	mustWrite(t, root+"/intent.yaml", "catalog:\n  namespace: ns\n")
+	mustWrite(t, root+"/apps/api/component.yaml", validYAML("api"))    // no spec.path
+	mustWrite(t, root+"/libs/shared/component.yaml", validYAML("shared"))
+
+	rc, _, err := Resolve(context.Background(), Options{WorkspaceRoot: root, Repo: "r"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(rc.Fingerprints) != 2 {
+		t.Fatalf("got %d fingerprints, want 2 (empty ⇒ the dir bug regressed)", len(rc.Fingerprints))
+	}
+	dirs := map[string]bool{}
+	for _, fp := range rc.Fingerprints {
+		dirs[fp.Dir] = true
+		if fp.Subtree == "" {
+			t.Errorf("fingerprint %s has empty subtree", fp.ComponentKey)
+		}
+	}
+	if !dirs["apps/api"] || !dirs["libs/shared"] {
+		t.Errorf("fingerprint dirs = %v, want apps/api + libs/shared", dirs)
+	}
+	// The resolved manifest carries the file location as SourceFile.
+	for _, m := range rc.Manifests {
+		if m.Identity.Name == "api" && m.Identity.SourceFile != "apps/api/component.yaml" {
+			t.Errorf("api SourceFile = %q", m.Identity.SourceFile)
+		}
+	}
+}
+
 func TestResolve_CarriesChangeWatches(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root+"/intent.yaml", "catalog:\n  namespace: ns\n")

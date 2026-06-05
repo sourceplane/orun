@@ -21,7 +21,7 @@ func writeFile(t *testing.T, root, rel, body string) {
 
 func manifest(key, name, path string) *catalogmodel.ComponentManifest {
 	return &catalogmodel.ComponentManifest{
-		Identity: catalogmodel.ComponentIdentity{ComponentKey: key, Name: name, Path: path},
+		Identity: catalogmodel.ComponentIdentity{ComponentKey: key, Name: name, SourceFile: path},
 	}
 }
 
