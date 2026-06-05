@@ -9,7 +9,7 @@
 | CS2 — `internal/objcatalog` read view | **Done** | — | `Reader.Load → CatalogView` (catalog + components + graph + tolerant `impact/`). Missing `impact/` → `Ownership == nil`. 92.8% coverage. |
 | CS3 — ownership map + fingerprints | **Done** | — | Ownership map (`impact/ownership.json`) + the per-component virtual Merkle tree (`impact/fingerprints/<name>.json`). Fingerprints derived in `catalogresolve` over the candidate read-set, content-hashed, deterministic (clean→edit→clean returns the same subtree); folded into the catalog Merkle root. |
 | CS4 — `internal/affected` engine | **Done** | — | Engine core + `GitChangeSource` (#251); `FingerprintChangeSource` (#252); catalog **watch-enrichment** — `spec.change.watches` is now a component.yaml field carried into the resolved manifest → node spec, so the engine's `watch` intent-impact reads real per-component data (optional/pointer ⇒ no hash churn for watch-less components). |
-| CS5 — migrate `plan/run --changed` | Not started | — | |
+| CS5 — migrate `plan/run --changed` | **In progress** | — | PR1 (substrate): dependency-edge `include` mode carried through the catalog (component.yaml → manifest → graph edge → node → objcatalog), and the engine now computes `Result.Selection` = DirectlyChanged ∪ **include:always** forward closure — the parity-correct plan/run job set (vs `Affected` = cockpit blast radius). **PR2 (next):** wire `plan/run --changed` onto the engine + the parity gate, then remove the old `collectChangedComponents` path. |
 | CS6 — cockpit read seam + drill-down + changed view | Not started | — | |
 | CS7 — `orun catalog affected` | Not started | — | |
 | CS8 — parity + determinism gate | Not started | — | |

@@ -68,6 +68,9 @@
               "component": {
                 "type": "string"
               },
+              "include": {
+                "type": "string"
+              },
               "optional": {
                 "type": "boolean"
               },

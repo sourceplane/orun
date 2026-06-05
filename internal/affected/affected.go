@@ -75,9 +75,10 @@ type ExplainEntry struct {
 // Result is the single shape every surface consumes.
 type Result struct {
 	DirectlyChanged  []string // components whose own inputs changed
-	Dependencies     []string // forward deps of DirectlyChanged
+	Dependencies     []string // forward deps of DirectlyChanged (full closure)
 	Dependents       []string // transitive reverse deps of DirectlyChanged
-	Affected         []string // the union surfaces act on (= DirectlyChanged ∪ Dependents)
+	Affected         []string // the cockpit's blast radius (= DirectlyChanged ∪ Dependents)
+	Selection        []string // the plan/run job set (= DirectlyChanged ∪ include:always forward closure)
 	IntentMode       IntentMode
 	Confidence       Confidence
 	NeedsFullResolve bool // structural/global uncertainty (CD-2)
@@ -159,7 +160,7 @@ func (d *Detector) Detect(ctx context.Context, src ChangeSource) (Result, error)
 	res.Dependencies = idx.forwardClosure(directly)
 	res.Dependents = idx.reverseClosure(directly)
 
-	// 4. Affected = DirectlyChanged ∪ Dependents (§6).
+	// 4. Affected = DirectlyChanged ∪ Dependents (the cockpit's blast radius, §6).
 	affected := map[string]bool{}
 	for k := range directly {
 		affected[k] = true
@@ -168,6 +169,19 @@ func (d *Detector) Detect(ctx context.Context, src ChangeSource) (Result, error)
 		affected[k] = true
 	}
 	res.Affected = sortedKeys(affected)
+
+	// 5. Selection = DirectlyChanged ∪ include:always forward closure — the job
+	// set plan/run act on (parity with the existing --changed plan, which pulls
+	// in include:always dependencies of the changed components).
+	selection := map[string]bool{}
+	for k := range directly {
+		selection[k] = true
+	}
+	for _, k := range idx.includeAlwaysClosure(directly) {
+		selection[k] = true
+	}
+	res.Selection = sortedKeys(selection)
+
 	res.Explain = explain
 	return res, nil
 }

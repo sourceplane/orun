@@ -7,6 +7,17 @@ import (
 	"github.com/sourceplane/orun/internal/catalogmodel"
 )
 
+// includeAlwaysOnly normalizes an authored dependency include mode to the only
+// value the catalog needs to carry: "always". The "if-selected" default (and any
+// empty/unknown value) folds to "" so non-always edges add nothing to the graph
+// blob — keeping existing catalog ids and goldens unchanged.
+func includeAlwaysOnly(include string) string {
+	if strings.EqualFold(strings.TrimSpace(include), "always") {
+		return "always"
+	}
+	return ""
+}
+
 // resolveDependencies runs stage 8 of the resolver
 // (resolution-pipeline.md §5). It rewrites every `spec.dependsOn[*]`
 // reference into a fully-qualified component key when the target is
@@ -57,6 +68,7 @@ func resolveDependencies(authored []AuthoredManifest, manifests []*catalogmodel.
 				Name:         lastSegment(resolved),
 				Relationship: rel,
 				Optional:     d.Optional,
+				Include:      includeAlwaysOnly(d.Include),
 			}
 			if !ok {
 				dep.Key = d.Component
