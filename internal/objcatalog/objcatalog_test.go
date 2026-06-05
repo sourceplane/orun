@@ -266,6 +266,34 @@ func TestLoad_WithImpactOwnership(t *testing.T) {
 	}
 }
 
+func TestLoad_ReadsFingerprints(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	own, _ := f.store.PutBlob(ctx, []byte(`{"kind":"ImpactOwnership","schemaVersion":1}`))
+	fpBlob, _ := f.store.PutBlob(ctx, []byte(`{"kind":"ComponentFingerprint","schemaVersion":1,"componentKey":"sourceplane/orun/api-edge","dir":"apps/api-edge","subtree":"sha256:abc","globalDigest":"sha256:gd","files":{"apps/api-edge/component.yaml":"sha256:f"}}`))
+	fpTree, _ := f.store.PutTree(ctx, []objectstore.TreeEntry{{Name: "api-edge.json", Kind: objectstore.KindBlob, ID: fpBlob}})
+	impact, _ := f.store.PutTree(ctx, []objectstore.TreeEntry{
+		{Name: fileOwnership, Kind: objectstore.KindBlob, ID: own},
+		{Name: dirFingerprints, Kind: objectstore.KindTree, ID: fpTree},
+	})
+	root := seedCatalogWithExtraSubtree(t, f, dirImpact, impact)
+
+	view, err := New(f.store, f.refs).Load(ctx, string(root))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	fp, ok := view.Fingerprints["sourceplane/orun/api-edge"]
+	if !ok {
+		t.Fatalf("fingerprint not read; have %v", view.Fingerprints)
+	}
+	if fp.Subtree != "sha256:abc" || fp.Dir != "apps/api-edge" || fp.GlobalDigest != "sha256:gd" {
+		t.Errorf("fingerprint = %+v", fp)
+	}
+	if fp.Files["apps/api-edge/component.yaml"] != "sha256:f" {
+		t.Errorf("fingerprint files = %v", fp.Files)
+	}
+}
+
 func TestLoad_ImpactWithoutOwnership(t *testing.T) {
 	// An impact/ subtree that holds only fingerprints/ (no ownership.json) must
 	// still yield Ownership == nil, not an error.
