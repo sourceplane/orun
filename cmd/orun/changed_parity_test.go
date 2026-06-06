@@ -85,8 +85,12 @@ components:
 // legacySelection runs the production --changed selection: collect changed
 // components from the changed-files set, then grow by the include:always
 // forward closure.
-func legacySelection(t *testing.T, root string, files []string) map[string]bool {
+func legacySelection(t *testing.T, root string, files []string, impact string) map[string]bool {
 	t.Helper()
+	// collectChangedComponents reads the global intentImpact; set it for the call.
+	prev := intentImpact
+	intentImpact = impact
+	defer func() { intentImpact = prev }()
 	// The legacy path works in the git-diff frame (CWD-relative). Tests chdir
 	// into the workspace (see TestChangedSelectionParity) so "intent.yaml" and
 	// the changed files share that frame.
@@ -114,7 +118,7 @@ func legacySelection(t *testing.T, root string, files []string) map[string]bool 
 // engineSelection resolves the workspace into the object catalog and runs the
 // affected engine, returning the Selection as component *names* (mapped from the
 // engine's component keys via the catalog).
-func engineSelection(t *testing.T, root string, files []string) map[string]bool {
+func engineSelection(t *testing.T, root string, files []string, impact string) map[string]bool {
 	t.Helper()
 	ctx := context.Background()
 
@@ -160,7 +164,7 @@ func engineSelection(t *testing.T, root string, files []string) map[string]bool 
 	if err != nil {
 		t.Fatalf("load catalog: %v", err)
 	}
-	res, err := affected.NewDetector(&ocView, affected.IntentImpactWatch).
+	res, err := affected.NewDetector(&ocView, affected.IntentImpact(impact)).
 		Detect(ctx, affected.GitChangeSource{Options: git.ChangeOptions{Files: files}, IntentPath: "intent.yaml"})
 	if err != nil {
 		t.Fatalf("detect: %v", err)
@@ -194,25 +198,44 @@ func TestChangedSelectionParity(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(prevWD) })
 
 	cases := []struct {
-		name  string
-		files []string
-		want  []string
+		name   string
+		files  []string
+		impact string // intentImpact mode; "" ⇒ watch
+		want   []string
 	}{
+		// --- component-input changes (impact irrelevant; default watch) ---
 		// shared has no deps → selection is just shared (api is a *dependent*,
 		// in the blast radius but not the job set).
-		{"shared-input", []string{"libs/shared/main.go"}, []string{"shared"}},
+		{"shared-input", []string{"libs/shared/main.go"}, "", []string{"shared"}},
 		// api depends_on shared with include:always → shared is pulled in.
-		{"api-input", []string{"apps/api/main.go"}, []string{"api", "shared"}},
+		{"api-input", []string{"apps/api/main.go"}, "", []string{"api", "shared"}},
 		// web depends_on api with include:if-selected → api is NOT pulled.
-		{"web-input", []string{"apps/web/main.go"}, []string{"web"}},
+		{"web-input", []string{"apps/web/main.go"}, "", []string{"web"}},
 		// Two components changed at once.
-		{"web+shared", []string{"apps/web/main.go", "libs/shared/main.go"}, []string{"shared", "web"}},
-		{"no-change", []string{"README.md"}, nil},
+		{"web+shared", []string{"apps/web/main.go", "libs/shared/main.go"}, "", []string{"shared", "web"}},
+		{"no-change", []string{"README.md"}, "", nil},
+
+		// --- intent.yaml changes (the previously-uncovered path) ---
+		// In --files mode the diff is undiffable ⇒ both treat it as a global
+		// intent change. Under watch, no component watches a (nil) section ⇒ none.
+		{"intent-watch", []string{"intent.yaml"}, "watch", nil},
+		// Under intent-impact=all, a global intent change selects everything.
+		{"intent-all", []string{"intent.yaml"}, "all", []string{"api", "shared", "web"}},
+		// Under intent-impact=none, a global intent change selects nothing extra.
+		{"intent-none", []string{"intent.yaml"}, "none", nil},
+		// Intent change + a component input, impact=all ⇒ still everything.
+		{"intent-all+api", []string{"intent.yaml", "apps/api/main.go"}, "all", []string{"api", "shared", "web"}},
+		// Intent change + a component input, impact=none ⇒ just the input's closure.
+		{"intent-none+api", []string{"intent.yaml", "apps/api/main.go"}, "none", []string{"api", "shared"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			legacy := legacySelection(t, root, tc.files)
-			engine := engineSelection(t, root, tc.files)
+			impact := tc.impact
+			if impact == "" {
+				impact = "watch"
+			}
+			legacy := legacySelection(t, root, tc.files, impact)
+			engine := engineSelection(t, root, tc.files, impact)
 			if !equalStringSets(legacy, engine) {
 				t.Fatalf("parity mismatch\n legacy: %v\n engine: %v", sortedSet(legacy), sortedSet(engine))
 			}
