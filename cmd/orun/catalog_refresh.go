@@ -58,6 +58,9 @@ type catalogRefreshData struct {
 	// not-configured warning deterministically without changing the
 	// existing fields above.
 	Sync *catalogSyncResult `json:"sync,omitempty"`
+	// ObjectModel is present when the object-model catalog write succeeded
+	// (orun-catalog-state §2). Optional; existing keys stay byte-stable.
+	ObjectModel *objectModelRefresh `json:"objectModel,omitempty"`
 }
 
 // catalogSyncResult is the stable --json shape of the --sync outcome. In
@@ -287,7 +290,18 @@ func finishCatalogRefresh(ctx context.Context, data catalogRefreshData, src cata
 		}
 		data.Sync = sync
 	}
-	return emitRefreshResult(data)
+
+	// Object-model catalog write (orun-catalog-state §2): populate the cockpit's
+	// source + the change-detection impact index, reusing the same resolved
+	// view. Best-effort — a failure is a warning, never a non-zero exit.
+	var warnings []string
+	if om, err := writeObjectModelRefresh(ctx, view, ws, data.SourceSnapshotKey); err != nil {
+		warnings = append(warnings, fmt.Sprintf("object-model catalog write failed: %v", err))
+	} else {
+		data.ObjectModel = &om
+	}
+
+	return emitRefreshResult(data, warnings)
 }
 
 // runCatalogSync assembles the SyncPayload from the freshly resolved snapshot
@@ -396,9 +410,11 @@ func persistRefsOnly(ctx context.Context, store catalogstore.Store, src catalogm
 }
 
 // emitRefreshResult renders either the JSON envelope or the §2 text form.
-func emitRefreshResult(d catalogRefreshData) error {
+// warnings carries any best-effort failures (e.g. the object-model write) that
+// must surface without changing the exit code.
+func emitRefreshResult(d catalogRefreshData, warnings []string) error {
 	if catalogJSONFlag {
-		return writeCatalogEnvelope(kindCatalogRefreshResult, d, nil)
+		return writeCatalogEnvelope(kindCatalogRefreshResult, d, warnings)
 	}
 
 	color := ui.ColorEnabledForWriter(os.Stdout)
@@ -414,6 +430,7 @@ func emitRefreshResult(d catalogRefreshData) error {
 		fmt.Fprintf(os.Stdout, "Source:   %s\n", d.SourceSnapshotKey)
 		fmt.Fprintf(os.Stdout, "Catalog:  %s\n", d.CatalogSnapshotKey)
 		renderSyncNotice(d.Sync)
+		renderRefreshWarnings(warnings)
 		return nil
 	}
 
@@ -434,7 +451,16 @@ func emitRefreshResult(d catalogRefreshData) error {
 	fmt.Fprintf(os.Stdout, "Resources:  %d\n", d.Resources)
 	fmt.Fprintf(os.Stdout, "Path:       %s\n", d.Path)
 	renderSyncNotice(d.Sync)
+	renderRefreshWarnings(warnings)
 	return nil
+}
+
+// renderRefreshWarnings prints best-effort failures (text mode) under the
+// summary. No-op when there are none.
+func renderRefreshWarnings(warnings []string) {
+	for _, w := range warnings {
+		fmt.Fprintf(os.Stdout, "  ⚠  %s\n", w)
+	}
 }
 
 // renderSyncNotice prints the --sync outcome under the refresh summary (text
