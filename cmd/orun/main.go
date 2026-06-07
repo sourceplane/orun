@@ -250,15 +250,22 @@ func generatePlan() error {
 			return err
 		}
 
-		changedSet, err := changedFilesSet(changeOptions)
-		if err != nil {
-			return fmt.Errorf("failed to detect changed files: %w", err)
+		// Primary path: the unified engine over the full object-model catalog
+		// (catalog-state CS5). It refreshes-if-needed, then selects. On any
+		// failure (no object store, non-git workspace, resolve error) fall back
+		// to the legacy file-walking selector so --changed never hard-fails.
+		includedComps, eerr := engineChangedSelection(context.Background(), changeOptions)
+		if eerr != nil {
+			if debugMode {
+				fmt.Printf("□ changed: engine unavailable (%v); using legacy selector\n", eerr)
+			}
+			changedSet, serr := changedFilesSet(changeOptions)
+			if serr != nil {
+				return fmt.Errorf("failed to detect changed files: %w", serr)
+			}
+			changedComps := collectChangedComponents(normalized, instances, changedSet, intentFile, changeOptions)
+			includedComps = expand.NewDependencyResolver(normalized).ResolveComponentSet(changedComps)
 		}
-		changedComps := collectChangedComponents(normalized, instances, changedSet, intentFile, changeOptions)
-
-		// Use dependency resolver to include all required dependencies
-		resolver := expand.NewDependencyResolver(normalized)
-		includedComps := resolver.ResolveComponentSet(changedComps)
 
 		// Filter instances to include changed components and their dependencies
 		for envName := range instances {
