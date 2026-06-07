@@ -1,180 +1,152 @@
-# Design — env scoping
+# Design — environment selection & in-plan promotion (the "Z" model)
 
-> **Status: the core model is LOCKED.** The single-environment invariant, the
-> resolution order, the `intent.defaultEnvironment` placement, and the built-in
-> `local` environment are **decided** (see §3, *Decisions — locked*). The
-> remaining run-path mechanics — multi-env CI fan-out, promotion rework, `local`
-> state isolation, auto-subscribe, and the "am-I-local" contract — are captured as
-> **open gaps** in §5 and must be finalized before implementation. `local`-env
-> **safety enforcement is intentionally deferred** (§6, decision B).
+> **Status: design converged.** Non-breaking except one intentional,
+> deprecation-windowed change: `orun run` becomes **fail-closed**. What began as a
+> breaking "single environment everywhere" epic converged — through the
+> alternatives recorded in §8 — onto a small feature: **selection is a *plan-time*
+> concern, the plan is executed faithfully, and the only new safety rule is that a
+> mutating `run` must name what it touches.**
 
-## 1. Current model (as-built — what we change)
+## 1. Principle
 
-- `intent.environments` is a `map[string]Environment`. There is **no
-  `defaultEnvironment`** concept anywhere (`internal/model/intent.go`).
-- The expander produces a `ComponentInstance` for **each environment × component
-  pair** (`internal/expand/expander.go`).
-- `--env` (`-e`) is a **filter** that accepts a **comma-separated** list
-  (`cmd/orun/command_plan.go`, parsed via `parseCommaSeparated`).
-- Therefore today: **no `--env` → all environments**; **`--env a,b` → multiple**.
-- Trigger resolution (`trigger.ResolveActiveEnvironments`) returns `[]string` and
-  can activate multiple environments; the resolved list is recorded at
-  `Plan.Metadata.Trigger.ActiveEnvironments []string` (`internal/model/plan.go`,
-  on `PlanTrigger` — **not** a top-level `Plan` field); `PlanJob.Environment` is
-  already scalar. Promotion (`EnvironmentPromotion` /
-  `internal/planner/promotion.go`) models env→env ordering, either as cross-env
-  DAG edges within one multi-env plan (`Satisfy: "same-plan"`) or as cross-plan
-  gates (`Satisfy: "previous-success"`).
-- There is **no built-in/implicit environment** and **no TTY/CI detection**
-  (`go-isatty` is only an indirect dependency; `IsTerminal` in the code refers to
-  job *status*, not the terminal).
+orun's plan is already a **contextual artifact** — compiled for a specific trigger
+and change-set (`TriggerOccurrence.PlanScope{mode, activationMode,
+activeEnvironments, changedComponents}`, `RevSummary{scope, activeEnvironments,
+changedComponents}`, `--changed`). So **selection belongs at plan time**, and
+`run` **faithfully executes the plan it is given**. The plan you review is exactly
+what runs.
 
-## 2. Target model (LOCKED)
+Safety comes not from a magic default environment but from **fail-closed
+execution**: the absence of an explicit selection yields *no mutation*, never the
+largest blast radius. Default blast radius of a bare mutating `run` is **zero**.
 
-### 2.1 Single-environment invariant
+## 2. The model
 
-- Every plan / run is scoped to **exactly one** environment. No all-env, no
-  multi-env plan.
-- A workspace with exactly one declared environment is treated **identically** to
-  a multi-env workspace — there is **no sole-env special case** (ENV-2).
+### 2.1 Plan — selection happens here; defaults to all
 
-### 2.2 Resolution order (LOCKED)
+- `orun plan` compiles a plan scoped by the selection flags + trigger + `--changed`.
+- Selection flags: **`--env <list>`** (comma-separated; already supported),
+  **`--component <list>`** (new), and explicit **`--all`** (new).
+- **No selection → all environments** (a full plan). `plan` is read-only, so an
+  all-envs default is safe and convenient for review/CI. `--all` is the explicit,
+  self-documenting synonym.
+- The plan is faithful and self-contained (see §3 pruning).
 
-Exactly one environment is resolved, in this order:
+### 2.2 Run — faithful execution, fail-closed
 
-1. **Explicit.** A trigger-bound environment is **authoritative**; an `--env <one>`
-   / TUI selection presented alongside a trigger must **match** the
-   trigger-resolved env (mismatch → **error**, never silent redirect). For
-   non-triggered runs, `--env`/TUI selection *is* the explicit choice.
-2. **`intent.defaultEnvironment`.** Optional top-level scalar; validated to name a
-   real environment.
-3. **Built-in `local` environment.** Terminal fallback, **interactive/local
-   invocations only**.
-4. **Error.** In CI / non-interactive contexts, when none of the above resolved.
+- `orun run <plan>` executes a **pre-compiled** plan as-is; its scope was the
+  conscious choice made at plan time.
+- The **convenience plan-and-run path** (an `orun run` that compiles implicitly)
+  is **fail-closed**: with no explicit selection it **errors** —
+  `specify --env, --component, or --all`.
+- Running a **full (all-env) plan that mutates** requires explicit **`--all`** (the
+  conscious acknowledgement); an interactive terminal MAY additionally prompt.
+- Net: a bare mutating `run` does **nothing** until you say what to touch.
 
-`--env` accepts a **single** value; `a,b` → error (after a deprecation window).
-Absence → the order above, **never** all-env.
+### 2.3 No built-in `local` environment
 
-> Single-env ≠ all-components. After the one environment is chosen, per-component
-> activation (`Subscribe` / `ComponentEnvironment.Active`, the expander's
-> `getApplicableComponents`) still decides which components run in it. That filter
-> is **orthogonal and unchanged**.
+A local sandbox is just a normally-declared environment (`--env dev`). No reserved
+name, no auto-subscribe, no per-developer state machinery. Rationale in §8: the
+`local` env was a solution to a *default-safety* problem that fail-closed `run`
+solves more simply and more safely (it depends on nothing being correctly
+sandboxed).
 
-### 2.3 The built-in `local` environment (LOCKED concept)
+## 3. Selection semantics
 
-- **Always present** without declaration; the name `local` is **reserved**.
-- **Auto-subscribed** by every component (auto-subscribe mechanics + opt-out are
-  open — G-new-4).
-- Uses each component's composition **`DefaultProfile`** for profile resolution.
-  **orun enforces no safety** here — a safe local profile is the **composition
-  author's duty** (decision B; see §6).
-- **Excluded** from promotion graphs and from activation/trigger matrices: it is a
-  sink, never a promotion *source*, and only local/interactive runs target it.
-- **Purpose:** a zero-config terminal fallback (interactive runs never dead-end) +
-  a clean iteration context kept separate from declared deployment targets (its
-  own params/state, no promotion/activation baggage).
-- **Not a safety guarantee.** Given B, `local` is only as safe as
-  *(composition `DefaultProfile`) × (what `local` is configured to target)* — see
-  §6 and G-new-6.
+- **Composition.** Envs = (trigger-activated envs) ∩ (`--env` / `--all`);
+  components = (`--component` / `--changed` / all). The narrowest explicit signal
+  wins; an `--env` outside the trigger's activated set is an **error** (consistent
+  with today's trigger ∩ explicit behavior).
+- **Component selection is exact** — selecting a component runs that component, not
+  its dependency closure; dangling dependency edges are pruned (below). (A
+  `--with-deps` closure mode is a possible future affordance, not v1.)
+- **Dangling-edge pruning.** When a scoped plan contains an edge — a promotion
+  `dependsOn` to another env, or a component `dependsOn` to another component —
+  whose **endpoint is not in the expanded plan**, that edge is **dropped with a
+  warning**, so the scoped plan is self-contained and faithfully describes what
+  `run` will do. Pruning applies **uniformly** to any dangling edge. Dropped edges
+  are listed at plan time and in `--json`.
 
-## 3. Decisions — locked
+## 4. Promotion — in-plan ordering (Option B)
 
-| # | Decision | Note |
-|---|----------|------|
-| **ENV-1** | One environment per plan/run; no all-env / multi-env plan | breaking run-path change |
-| **ENV-2** | No sole-env special case — one declared env resolves like many | retires the old G-5 fallback branch |
-| **ENV-3** | Resolution order: explicit → `defaultEnvironment` → `local` (interactive) → error (CI) | §2.2 |
-| **ENV-4** | `intent.defaultEnvironment` is an **optional** top-level scalar, validated to name a real env | **not mandatory** (resolves G-9) |
-| **ENV-5** | Trigger-bound env is **authoritative**; a conflicting `--env` is an error | precedence among explicit sources |
-| **ENV-6** | Built-in `local` env: reserved name, auto-subscribed, interactive-only fallback, excluded from promotion + activation | §2.3 |
-| **ENV-7** | `local` uses composition `DefaultProfile`; **safety enforcement deferred** — author's duty (option B) | §6 |
+- An environment's `promotion.dependsOn` produces **ordering edges inside the
+  plan** among the envs the plan contains: a dependent env's jobs run after its
+  prerequisite env's, and a **failed prerequisite blocks its dependents** in the
+  same run. This is the existing `internal/planner/promotion.go` same-plan
+  behavior, now the **single** promotion mechanism.
+- Promotion gating is therefore **within one `orun run`** of a plan that contains
+  both envs. Cross-invocation / cross-pipeline gating is deferred (§9, Option C).
 
-## 4. Enforcement surfaces (everything that must change)
+## 5. Decisions (converged)
+
+| # | Decision |
+|---|----------|
+| **Z-1** | Selection is a **plan-time** concern; `run` executes the plan faithfully. |
+| **Z-2** | `plan` defaults to **all** environments (read-only; safe). |
+| **Z-3** | `run` is **fail-closed**: a mutating run with no explicit selection errors; an all-env mutating run requires `--all`. |
+| **Z-4** | Selection flags: `--env <list>` + `--component <list>` + explicit `--all`; trigger + `--changed` also shape the plan. |
+| **Z-5** | Promotion = **in-plan `dependsOn` ordering** (Option B); failed prerequisite blocks dependents. |
+| **Z-6** | Scoped plans **prune dangling edges with a warning** (faithful, self-contained). |
+| **Z-7** | **No built-in `local` env**; a sandbox is a normally-declared environment. |
+
+## 6. Enforcement surfaces (what changes)
 
 | Surface | Change |
 |---------|--------|
-| `intent.yaml` schema + validation (`internal/model/intent.go`, `assets/config/schemas/intent.schema.yaml`) | add optional top-level `defaultEnvironment`; validate it names a real env |
-| `--env` flag (`plan`/`run`) | single value only; `a,b` → error; absence → resolution order (§2.2), not all-env |
-| environment resolver (`trigger.ResolveActiveEnvironments`, `cmd/orun/main.go`) | resolve to **exactly one** env per §2.2; add the built-in `local` env + the interactive-vs-CI fork; drop the no-`--env`=all-env default |
-| `internal/expand` expander | scope expansion to the one resolved env; auto-subscribe components to `local` (G-new-4) |
-| `Plan.Metadata.Trigger.ActiveEnvironments` (`internal/model/plan.go`) | constrain to **length 1** (or replace with a scalar). `PlanJob.Environment` already scalar — no change |
-| promotion (`EnvironmentPromotion`, `internal/planner/promotion.go`) | promotion becomes a gated run *in the target env* across **separate** single-env plans; the `Satisfy: "same-plan"` cross-env-DAG path is removed (G-old-1) |
-| triggers | a single event that today activates N envs becomes **N single-env runs**; ownership/ordering open (G-old-2) |
-| CI workflows / docs | multi-env pipelines become N single-env invocations |
+| `--env` flag (`cmd/orun/command_plan.go`) | keep comma-list; document; (optional) also accept repeated `--env`. |
+| `--all` flag | **NEW** explicit "all environments" on `plan`/`run`. |
+| `--component` flag | **NEW** plan-time component filter (alongside `--changed`). |
+| `cmd/orun` run path (`main.go`, `objrun`) | make the implicit plan-and-run **fail-closed**; require selection / `--all` for mutating all-env runs. |
+| `internal/expand` + planner | prune dangling edges (endpoint not in expanded set) with a warning; surface dropped edges in plan output + `--json`. |
+| `internal/planner/promotion.go` | keep same-plan ordering as the single promotion mechanism; the cross-plan `Satisfy` modes go inert/removed for now (§9). |
+| docs / CI | document `--all` as the CI path; `run` examples become explicit. |
 
-## 5. Open gaps (remaining — finalize before implementation)
+## 7. Gaps & recommendations
 
-Ranked by leverage; the top three constrain the rest.
-
-| # | Gap | Why it matters |
+| # | Gap | Recommendation |
 |---|-----|----------------|
-| **G-old-1** | **Promotion `same-plan` removal.** Single-env makes cross-env DAG edges in one plan impossible. Define how a gate reads prior-env success **across separate plans/state**, and how existing `Satisfy: "same-plan"` configs migrate. | Largest structural change; constrains G-old-2 and G-new-5 |
-| **G-old-2** | **Trigger fan-out ownership.** Who runs the N single-env plans (CI vs an `orun … each-of` mode), how per-plan trigger provenance is recorded, and how ordering is enforced when promotion gates exist. | The multi-env story's mechanics |
-| **G-new-5** | **`local` state isolation.** No per-env state keying exists today → a `local` run could clobber/pollute shared real-env state and **promotion evidence** (`PromotionMatch.Revision`). `local` must use isolated, ideally ephemeral/per-developer state, and never emit gate-satisfying evidence. Now also a *safety* mechanism, given B. | Confirm against `orun-state-redesign` |
-| **G-new-4** | **Auto-subscribe to `local`.** Today `Subscribe` is explicit. Define the implicit "active in `local`" rule, the opt-out (`subscribe: { local: false }`? a label?), components whose composition cannot run locally, and the interaction with `selectors`. | Resolver behavior |
-| **G-new-6** | **`local` env config / target.** `parameterDefaults`, backend, `dependencyMode` (propose `advisory`/`disabled`), and whether a user may augment it via an optional `environments.local` block. Reserved-name collision rule if a user already declared `local`. | Determines what `local` actually targets — and, under B, its de-facto safety |
-| **G-new-3** | **"Am I local?" contract.** No TTY/CI signal exists. Define the interactive-vs-CI fork explicitly (e.g. `--ci` / `ORUN_CI` + trigger-mode), not fragile TTY-sniffing. | Drives step 3→4 of the resolution order |
-| **G-doc** | **Missing spec docs.** `data-model.md`, `cli-surface.md`, `implementation-plan.md`, `test-plan.md`, `compatibility-and-migration.md` (incl. the concrete deprecation-window length/mechanism). | Promotion epic → ready |
+| **G1** | **Run fail-closed vs. pre-compiled plan** — exact rule for when `run` errors vs. executes. | Spec the decision tree: bare implicit run + no selection → error; pre-scoped plan → run; full mutating plan → require `--all`. |
+| **G2** | **Cross-invocation promotion ordering** — Option B only orders within one `orun run`; split-across-pipelines isn't gated. | Document "one plan / one run for envs you want ordered" as the supported path; the source-status gate (Option C) is the future upgrade (§9). |
+| **G3** | **Pruning is convention, not enforcement** — a scoped plan drops promotion gate edges with only a warning → unguarded if scoped plans are used in automation. | `--all` is the documented CI path (never prunes). Later: escalate a pruned *promotion* edge to an **error in CI** / require explicit `--prune-deps`. Warning now. |
+| **G4** | **Pruning semantics** — what exactly is "dangling," and does it cover component edges too. | Uniform: any edge whose endpoint isn't in the expanded plan; list dropped edges at plan time + `--json`. |
+| **G5** | **Selector composition / precedence** — how trigger + `--env` + `--component` + `--changed` + `--all` combine. | Define: envs = trigger ∩ (`--env`/`--all`), components = `--component`/`--changed`/all; `--env` outside trigger envs errors. |
+| **G6** | **`--component` semantics** — new flag; closure vs. exact. | Exact selection + dangling-edge pruning (consistent with `--env`). `--with-deps` closure is a possible later affordance. |
+| **G7** | **Bare-`run` migration** — behavior changes from "run all" to "error." | One-release **deprecation window**: warn ("future: `run` will require `--env`/`--component`/`--all`") then error. |
+| **G8** | **`--all` run confirmation UX** — interactive prompt vs. CI explicit. | In CI / non-interactive, `--all` is the explicit ack; in an interactive terminal, prompt unless `--yes`. |
+| **G9** | **Idempotent cross-run skip** — resume already skips completed jobs *within* a plan; skip across re-runs of the same plan is not in scope. | Future; reuse the revision-dedup + resume substrate (`objrun.go`, runner resume) when needed. |
 
-## 6. Deferred — `local`-environment safety enforcement
+## 8. Why Z — alternatives considered (rationale preserved)
 
-> **Decision (locked): option B** — `local` reuses each composition's
-> `DefaultProfile`; **orun enforces no safety**. A safe local profile is the
-> composition author's responsibility. The options below are recorded verbatim so
-> the decision can be revisited without re-deriving them.
+Recorded so the path isn't re-litigated:
 
-**Key finding (why this needed a decision).** orun has **no machine-checkable
-notion of "safe / non-mutating"** today. An `ExecutionProfile` is
-`{Description, Policies, Jobs}` (`internal/model/composition.go`); `ProfilePolicies`
-is `{RequireCleanGitTree, RequirePinnedTerraformVersion, RequireApproval}` —
-**requirements/gates, not effects**. A profile is "safe" only *emergently*, by
-which steps it enables. orun cannot currently tell whether a profile mutates.
+- **Single-environment-everywhere epic** (one env per plan, mandatory
+  `defaultEnvironment`, breaking) — over-engineered; broke the useful multi-env
+  plan and forced N invocations.
+- **Source-status-as-truth + idempotent skip + env-as-filter multi-env** — powerful
+  but concentrated risk in a job-fingerprint key (cross-env vs same-env reads); too
+  much machinery for the need.
+- **Always-full plan, select-at-run** — architecturally clean but **opposite to
+  orun's plan-execute philosophy**: the plan must stay a contextual,
+  trigger/changed-shaped artifact, and `run` must faithfully execute it. Rejected.
+- **Default `local` env + explicit `--all`** vs **all-by-default** — `local` is a
+  *safe default* mechanism, but its safety depends on `local` actually being a
+  sandbox (deferred to composition authors), i.e. *fail-to-sandbox*. **Z is
+  fail-to-nothing**: equally scalable (flat, zero default blast radius), strictly
+  safer (depends on nothing being sandboxed), and simpler (no `local` machinery).
 
-**Options considered:**
+## 9. Deferred / future
 
-| # | Mechanism | Maps to | Pros | Cons |
-|---|-----------|---------|------|------|
-| **A** | Named-profile convention — `local` resolves to a conventionally-named (`local`/`plan-only`) profile per composition | resolution rule over `ResolveProfileRef` | author-accurate per tech | new contract every composition must honor; needs a missing-profile fallback; can't add to 3rd-party compositions |
-| **B** ✅ | Reuse `composition.DefaultProfile`, no enforcement | existing fallback — **no change** | trivial; zero new contract | **no safety guarantee**; if default mutates, `local` mutates |
-| **C** | Declarative effect marker — add `effect: read-only \| mutating` to `ProfilePolicies`; `local` requires a profile marked safe; validate at resolve | new `ProfilePolicies` field | machine-checkable, auditable, **reusable** (CI "no-apply" gates, cockpit badge) | new schema field; only meaningful once compositions annotate; author's *claim*, not verified; retrofit cost |
-| **D** | orun forces dry-run — inject a no-op overlay regardless of profile | synthesized `ProfileStepPatch` / capability filter | safe even if author did nothing | **brittle/dangerous** — generic mutation-neutralization across tf/helm/pulumi/shell isn't achievable; a shell `aws s3 rm` slips through → *false* safety. **Avoid** |
-| **E** | Capability gating — tag mutating steps (`cloud-write`/`apply`) via the existing `Capabilities`/`IncludeCapabilities`; `local` runs with mutating caps excluded | existing capability mechanism | granular (a profile's read-only steps can still run); declarative | needs a reserved capability taxonomy + tagging discipline; untagged-step default (allow=unsafe / deny=breaks) is its own call |
+- **Option C — cross-invocation source-status promotion gate.** Component-level,
+  keyed by source head: a dependent env's run reads prior executions (under the
+  same revision/source head) to confirm the prerequisite env completed. Pulls in
+  when split-across-pipelines promotion is needed (G2).
+- **Idempotent cross-run job skip** (G9).
+- **Pruning hardening** — pruned promotion edges → error in CI (G3).
 
-**Why B is acceptable now.** It is consistent with orun staying unopinionated and
-delegating tech-specifics to compositions. It deletes an entire mechanism (no new
-schema, no validation, no skip/error fallback).
+## 10. Migration
 
-**Consequence of B (recorded honestly).** `local` is **not** safe-by-default.
-Safety = *(composition `DefaultProfile`) × (what `local` is configured to target,
-G-new-6)*. If the built-in `local` env ships with no `parameterDefaults`/backend,
-mutating profiles will simply fail to find a real target — *de facto*, not
-designed, safety. Whether "targets nothing real unless configured" is the intended
-posture is part of G-new-6.
-
-**Revisit when** a guaranteed-safe local sandbox becomes a hard requirement (a
-shared/managed `local`, or untrusted/3rd-party compositions). Most likely upgrade
-path: **C** (declarative `effect`) as the source of truth + **A** (a
-conventionally-named local profile) as the selector, with **skip-or-error** (not
-silent default) when no safe profile exists. **Do not** adopt **D**.
-
-## 7. Migration / deprecation (to finalize — G-doc)
-
-- Removing the no-`--env`=all-env default and `--env a,b` is **breaking**. Needs a
-  deprecation window (warn → error) with a clear upgrade note: set
-  `defaultEnvironment` (optional) and split multi-env pipelines into N single-env
-  runs.
-- Removing `Satisfy: "same-plan"` promotion is breaking for any intent using it
-  (G-old-1 defines the replacement + migration).
-- Existing `intent.yaml` files need no change for **interactive** use (they fall to
-  `local`); **CI** invocations must specify `--env` or set `defaultEnvironment`.
-- Concrete window length + the warn/error mechanism are specified in
-  `compatibility-and-migration.md` (not yet written).
-
-## 8. What ships before this epic (in `orun-catalog-state`)
-
-The cockpit gets an **env selector** (key `e`) over the **existing** env model and
-runs **component-scoped for one selected env** via the current run path — no schema
-change, no removal of the all-env path (`orun-catalog-state/environments.md`,
-CS6). This epic supersedes that with the finalized semantics above when it is
-promoted; the cockpit's selection then feeds the §2.2 resolution order (as the
-explicit/TUI tier) with no UI change.
+- `plan --env` / `--changed` / no-flag: **unchanged** (non-breaking).
+- `--all`, `--component`: **additive**.
+- **`orun run` fail-closed: the one break.** A bare `orun run` that previously ran
+  all environments now errors. Ship a one-release deprecation window (warn → error)
+  with a clear note: name the target (`--env`/`--component`) or `--all`.
