@@ -39,6 +39,44 @@ type Input struct {
 	Trigger          nodes.TriggerOccurrence
 }
 
+// RefreshResult carries the ids written by RefreshCatalog.
+type RefreshResult struct {
+	SourceID  objectstore.ObjectID
+	CatalogID objectstore.ObjectID
+}
+
+// RefreshCatalog writes source → (catalog, memoized) to the object graph and
+// moves the catalogs/* refs (incl. catalogs/current) — the explicit-refresh
+// seam used by `orun catalog refresh` and the universal refresh hook. Unlike
+// Plan it writes no revision/trigger: a refresh records the current full
+// catalog, not a plan. Catalog resolution is memoized by (sourceId,
+// resolverVersion) exactly as in Plan, so a re-refresh on an unchanged source
+// only moves refs.
+func RefreshCatalog(ctx context.Context, w *nodewriter.Writer, store objectstore.ObjectStore, memo *ResolveMemo, in Input, opts Options) (RefreshResult, error) {
+	var res RefreshResult
+	rv := opts.ResolverVersion
+	if rv == 0 {
+		rv = 1
+	}
+
+	src := BuildSourceNode(in.Workspace, in.SourceHumanKey)
+	srcID, err := w.WriteSource(ctx, src, SourceRefs(src)...)
+	if err != nil {
+		return res, fmt.Errorf("objplan: write source: %w", err)
+	}
+	res.SourceID = srcID
+
+	if opts.NoCatalog || in.Resolve == nil {
+		return res, nil
+	}
+	catID, err := writeCatalogMemoized(ctx, w, store, memo, src, srcID, rv, in.Resolve, opts.Strict)
+	if err != nil {
+		return res, err
+	}
+	res.CatalogID = catID
+	return res, nil
+}
+
 // Plan runs source → (catalog, memoized) → revision → trigger and returns the
 // resulting ids. Catalog resolution is memoized by (sourceId, resolverVersion):
 // on a hit whose object is still present, the cached catalog id is reused (no
