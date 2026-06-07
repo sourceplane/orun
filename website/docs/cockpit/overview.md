@@ -126,9 +126,9 @@ orun          # bare invocation opens the cockpit on an interactive terminal
 ```
 
 A three-pane Bubble Tea shell: sidebar (modes), main pane (active view), inspector
-(field list for the selection). Modes are `Browse`, `Plan Studio`, `Activity`, `Logs`,
-`History`. See [cockpit architecture](/cockpit/architecture) for the full mode and
-drilldown machine.
+(field list for the selection). Modes are `Browse`, `Component`, `Plan Studio`,
+`Activity`, `Logs`, `History`. See [cockpit architecture](/cockpit/architecture)
+for the full mode and drilldown machine.
 
 The cockpit is the **default command** — a bare `orun` opens it on an interactive
 terminal, and falls back to printing help in non-interactive shells or when
@@ -137,6 +137,43 @@ terminal, and falls back to printing help in non-interactive shells or when
 runner as `orun run`, persists state and per-step logs to `.orun/`, and streams
 those logs into the Activity and Logs surfaces live. See the
 [TUI reference](/cli/orun-tui) for the run and live-log workflow.
+
+## The component catalog view
+
+Browse renders the workspace's component list from the **object-model catalog**
+(the same one [`orun catalog`](/cli/orun-catalog) reads), and stays current on its
+own:
+
+- **Live, keystroke-free refresh.** The cockpit re-reads the catalog on a short
+  interval, so a component you edit on disk — or a catalog written by an external
+  `orun plan`/`run` or the universal refresh hook — appears within a few seconds
+  without a reload. `ctrl+r` still forces an immediate refresh.
+- **Changed / affected overlay.** Each row is badged by the change-detection
+  engine: a filled dot for a **directly changed** component, a hollow dot for one
+  **affected** through a dependency. Press `c` to filter to only the changed and
+  affected rows — the cockpit view of `orun catalog affected`.
+- **Freshness gate.** When the catalog is fresh for a clean tree, the list is
+  served straight from the catalog; a dirty tree falls back to the live intent
+  loader so uncommitted edits show immediately. Either way the row data
+  (`name/type/domain/path/envs/profile/dependsOn/watches`) is identical.
+
+### Drill down: catalog → component → job → logs
+
+Press `⏎` on a component to open its **Component page** — the resolved detail
+(path, envs, profile, dependencies, `change.watches`, change badge) plus a
+**Recent executions** section (the runs that touched this component). Drill into an
+execution to reach the run → job → logs view. This mirrors the object graph: every
+level reads from the state store.
+
+### Environment selector and component-scoped run
+
+The cockpit holds one **selected environment** (shown in the header), cycled with
+`e` and remembered between sessions. From a component page, `r` launches a
+**component-scoped run for the selected environment** — only when the component is
+active in it — through the same `orun run` path (it confirms, then executes and
+persists state + logs). `g` opens Plan Studio to compose instead. This uses the
+existing environment model; it does not change how `orun plan`/`run` resolve
+environments elsewhere.
 
 ## State, on disk
 

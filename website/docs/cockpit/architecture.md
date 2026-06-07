@@ -33,7 +33,8 @@ Each pane is its own Bubble Tea sub-model, owned by the root model:
 
 | Sub-model | Pane |
 | --- | --- |
-| `BrowseModel` | Main, Browse mode |
+| `BrowseModel` | Main, Browse mode (catalog component list + changed/affected overlay) |
+| `ComponentPageModel` | Main, Component mode (component detail + recent executions) |
 | `PlanStudioModel` | Main, Plan Studio mode |
 | `ActivityModel` | Main, Activity mode |
 | `LogExplorerModel` | Main, Logs mode |
@@ -41,6 +42,8 @@ Each pane is its own Bubble Tea sub-model, owned by the root model:
 | `InspectorModel` | Right-hand inspector pane |
 
 Sub-models receive only the messages and the slice of screen real estate the root model gives them. They don't reach into each other.
+
+Browse and Component read through the catalog read seam (`internal/cockpit/catalogread` → `internal/cockpit/viewmodel`), which composes the object-model catalog with the `internal/affected` change-detection engine for the changed/affected overlay. The component drill-down (`⏎`) hands off to the Activity run → job → logs drilldown for a chosen execution. A live-view ticker re-reads the catalog off the UI thread so external writes appear without a keystroke.
 
 ## Mode machine
 

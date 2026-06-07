@@ -92,27 +92,27 @@ orun plan --changed --intent-impact=none
 
 ## Debugging with `--explain`
 
-Use `--explain` to see exactly which watches matched:
+Use `orun catalog affected` to see exactly which components a change selected — the watch-matched components show up in `directlyChanged`:
 
 ```bash
-orun plan --changed --explain
+orun catalog affected --json
 ```
 
-Output:
+```json
+{
+  "directlyChanged": ["api-platform", "network-foundation"],
+  "dependents": [],
+  "affected": ["api-platform", "network-foundation"],
+  "selection": ["api-platform", "network-foundation"],
+  "intentMode": "global",
+  "confidence": "high"
+}
+```
 
-```
-explain: intent.yaml semantic diff
-  intent changed: yes
-  diff mode: global
-  changed sections: environments, groups
-  intent-impact: watch
-  matched watches:
-    - api-platform (watches: environments, groups)
-    - network-foundation (watches: environments)
-  unmatched:
-    - docs-site (no matching watches)
-    - worker (no matching watches)
-```
+Here a global `intent.yaml` change matched the `environments`/`groups` watches on
+`api-platform` and `network-foundation`, while `docs-site` and `worker` (no
+matching watches) were left out. `--intent-impact=all` would select every
+component; `none` would select none from the intent change.
 
 ## Migration from pre-v2.3
 

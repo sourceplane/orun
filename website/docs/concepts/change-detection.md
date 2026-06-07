@@ -4,6 +4,8 @@ title: Change detection
 
 `orun` can narrow inspection, planning, and execution to changed files or changed components. That is useful in pull requests, preview environments, and incremental review workflows.
 
+Change detection is computed by a single engine over the **object-model catalog** — the same engine behind [`orun catalog affected`](../cli/orun-catalog.md) and the cockpit's changed/affected overlay. It classifies a change using the catalog's ownership map and dependency graph, and **over-reports rather than under-reports** on ambiguity, so a missed change never silently drops out of a plan. To inspect the engine's classification directly (the directly-changed, dependents, affected, and selection sets, with a confidence signal), use `orun catalog affected --json`.
+
 ## Commands that support change detection
 
 - `orun plan`
@@ -116,20 +118,24 @@ When `intent.yaml` itself is in the changed file set, `orun` performs a **semant
 
 By default, a global intent section change does **not** mark any component as changed unless that component explicitly opts in with [`spec.change.watches`](./change-watches.md). Use `--intent-impact=all` for pre-v2.3 behavior where all components are marked.
 
-The `--explain` flag shows the intent semantic diff reasoning:
+If the base or head intent cannot be parsed (e.g. the file is new), the engine escalates to a global intent change (over-reporting) rather than risk missing an affected component.
+
+To inspect *which* components a change selected and *why*, query the engine directly:
 
 ```bash
-orun plan --changed --explain
-# explain: intent.yaml semantic diff
-#   intent changed: yes
-#   diff mode: global
-#   changed sections: environments
-#   intent-impact: watch
-#   matched watches:
-#     - api-platform (watches: environments, groups)
+orun catalog affected --json
+# {
+#   "directlyChanged": ["api-platform"],
+#   "dependents": ["web-gateway"],
+#   "affected": ["api-platform", "web-gateway"],
+#   "selection": ["api-platform"],
+#   "intentMode": "components",
+#   "confidence": "high",
+#   "needsFullResolve": false
+# }
 ```
 
-If the base or head intent cannot be parsed (e.g. the file is new), `orun` falls back to marking all components changed and surfaces a warning in `--explain` output.
+`--explain` on `plan`/`run` covers **ref resolution** (which base/head were used); the per-component classification and its provenance live in `orun catalog affected`.
 
 ## Trigger-driven change detection
 

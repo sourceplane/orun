@@ -64,6 +64,21 @@ The compatibility mirror is enabled by default so existing tooling that
 reads `.orun/plans/` and `.orun/executions/` continues to work. Disable it
 with `--state-compat-writes=false` once you have migrated.
 
+## The component catalog
+
+Alongside the run state above, orun maintains a content-addressed **object-model
+catalog** under `.orun/objectmodel/`: the resolved component set, its dependency
+graphs, and an `impact/` index (an ownership map plus per-component fingerprints).
+The `catalogs/current` ref points at the latest snapshot.
+
+This catalog is the read model for **change detection** (`orun plan/run --changed`,
+[`orun catalog affected`](../cli/orun-catalog.md)) and the cockpit's component view.
+It is content-addressed, so re-resolving an unchanged workspace is a cheap ref move
+rather than a rewrite. `orun catalog refresh` writes it explicitly; `orun plan` and
+a universal pre-run refresh hook keep `catalogs/current` fresh transparently, so the
+catalog is usually current without a manual step. See [`orun catalog`](../cli/orun-catalog.md)
+for the full command group.
+
 ## TriggerOccurrence
 
 Captures the **why** of a plan. Every plan resolves one of:
