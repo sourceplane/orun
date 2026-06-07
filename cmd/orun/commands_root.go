@@ -107,6 +107,11 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
+		// Universal refresh hook (§0): keep catalogs/current fresh as a
+		// side effect of using orun. Best-effort and non-fatal — never blocks
+		// or fails the command's primary work.
+		maybeAutoRefresh(cmd)
+
 		return nil
 	},
 }
