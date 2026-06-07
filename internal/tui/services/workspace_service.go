@@ -70,6 +70,10 @@ func (s *LiveOrunService) LoadWorkspace(ctx context.Context, req WorkspaceReques
 		if catComps, ok := s.freshCatalogComponents(ctx, workspaceRoot); ok {
 			components = catComps
 		}
+		// Q2 overlay (consumers.md §2): annotate whichever list we render with
+		// the changed/affected badge. Computed independently of the freshness
+		// gate so a dirty tree's edits still surface on the live-loader list.
+		applyChangeOverlay(components, s.catalogChangeOverlay(ctx, workspaceRoot))
 	}
 
 	// The saved-plan listing used the legacy plan store, which is gone. In the

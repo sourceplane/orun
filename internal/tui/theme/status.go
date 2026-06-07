@@ -20,7 +20,14 @@ func StatusGlyph(status string) string {
 	}
 }
 
-// ChangedDot is the small accent dot indicating ComponentSummary.Changed.
+// ChangedDot is the small accent dot indicating a directly-changed component
+// (the Q2 overlay's "changed" class).
 func ChangedDot() string {
 	return StyleChangedDot.Render("●")
+}
+
+// AffectedDot is the hollow dot indicating a component affected transitively
+// via a dependency (the Q2 overlay's "affected" class).
+func AffectedDot() string {
+	return StyleChangedDot.Render("◌")
 }

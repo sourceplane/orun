@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/sourceplane/orun/internal/cockpit/catalogread"
 	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/objcatalog"
 	"github.com/sourceplane/orun/internal/objectstore"
@@ -57,6 +58,69 @@ func (s *LiveOrunService) freshCatalogComponents(ctx context.Context, workspaceR
 		return nil, false
 	}
 	return catalogComponentSummaries(cat.Components), true
+}
+
+// catalogChangeOverlay computes the Q2 changed/affected overlay (consumers.md
+// §2, environments.md §3) by running the change-detection engine over the
+// object-model catalog against the current working tree, returning a
+// component-name → kind map ("changed" for a directly-changed component,
+// "affected" for one impacted via a dependency). It composes the read seam
+// (internal/cockpit/catalogread → internal/affected), so the cockpit never
+// touches the engine directly.
+//
+// Unlike freshCatalogComponents, the overlay is computed regardless of tree
+// cleanliness: a clean tree simply yields an empty map (nothing changed), while
+// a dirty tree surfaces the in-flight edits the catalog was last resolved
+// against. Best-effort: an absent/unreadable store or a detection error returns
+// a nil map so the component list renders with no badges rather than failing.
+func (s *LiveOrunService) catalogChangeOverlay(ctx context.Context, workspaceRoot string) map[string]string {
+	if s.cfg.ObjectModelRoot == "" {
+		return nil
+	}
+	root := filepath.Join(s.cfg.ObjectModelRoot, "objectmodel")
+	if _, err := os.Stat(filepath.Join(root, "objects")); err != nil {
+		return nil
+	}
+	store, err := objectstore.NewLocalStore(objectstore.LocalConfig{Root: root})
+	if err != nil {
+		return nil
+	}
+	refs, err := refstore.NewLocalRefStore(refstore.LocalConfig{Root: root, Writer: "tui"})
+	if err != nil {
+		return nil
+	}
+
+	view, err := catalogread.New(store, refs, workspaceRoot).CatalogView(ctx, true)
+	if err != nil || !view.Overlay {
+		return nil
+	}
+	out := make(map[string]string)
+	for _, row := range view.Components {
+		switch {
+		case row.DirectlyChanged:
+			out[row.Name] = "changed"
+		case row.Dependent:
+			out[row.Name] = "affected"
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// applyChangeOverlay annotates a component list with an overlay map (by name),
+// setting Changed + ChangeKind. A nil overlay leaves the list untouched.
+func applyChangeOverlay(comps []ComponentSummary, overlay map[string]string) {
+	if overlay == nil {
+		return
+	}
+	for i := range comps {
+		if kind, ok := overlay[comps[i].Name]; ok {
+			comps[i].Changed = true
+			comps[i].ChangeKind = kind
+		}
+	}
 }
 
 // catalogFresh reports whether catalogSourceID equals the content id of the

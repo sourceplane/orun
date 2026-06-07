@@ -23,6 +23,9 @@ type BrowseModel struct {
 	Width     int
 	Height    int
 	Filter    string
+	// ChangedOnly is the Q2 show-only-changed filter (toggled with `c`): when
+	// set, only components in the changed/affected overlay are listed.
+	ChangedOnly bool
 }
 
 func NewBrowseModel() BrowseModel { return BrowseModel{} }
@@ -32,6 +35,14 @@ func (m BrowseModel) Init() tea.Cmd { return nil }
 // SetFilter sets the case-insensitive substring filter for component rows.
 func (m BrowseModel) SetFilter(f string) BrowseModel {
 	m.Filter = f
+	m.Cursor = 0
+	return m
+}
+
+// ToggleChangedOnly flips the show-only-changed overlay filter, resetting the
+// cursor so it never points past the (now shorter) list.
+func (m BrowseModel) ToggleChangedOnly() BrowseModel {
+	m.ChangedOnly = !m.ChangedOnly
 	m.Cursor = 0
 	return m
 }
@@ -53,17 +64,22 @@ func (m BrowseModel) filtered() []services.ComponentSummary {
 	if m.Workspace == nil {
 		return nil
 	}
-	if m.Filter == "" {
+	if m.Filter == "" && !m.ChangedOnly {
 		return m.Workspace.Components
 	}
 	f := strings.ToLower(m.Filter)
 	out := make([]services.ComponentSummary, 0, len(m.Workspace.Components))
 	for _, c := range m.Workspace.Components {
-		if strings.Contains(strings.ToLower(c.Name), f) ||
-			strings.Contains(strings.ToLower(c.Type), f) ||
-			strings.Contains(strings.ToLower(c.Domain), f) {
-			out = append(out, c)
+		if m.ChangedOnly && !c.Changed {
+			continue
 		}
+		if f != "" &&
+			!strings.Contains(strings.ToLower(c.Name), f) &&
+			!strings.Contains(strings.ToLower(c.Type), f) &&
+			!strings.Contains(strings.ToLower(c.Domain), f) {
+			continue
+		}
+		out = append(out, c)
 	}
 	return out
 }
@@ -87,7 +103,14 @@ func (m BrowseModel) Update(msg tea.Msg) (BrowseModel, tea.Cmd) {
 			if len(rows) > 0 {
 				m.Cursor = len(rows) - 1
 			}
+		case "c":
+			m = m.ToggleChangedOnly()
 		case "enter":
+			if sel := m.Selected(); sel != nil {
+				name := sel.Name
+				return m, func() tea.Msg { return ComponentOpenMsg{Name: name} }
+			}
+		case "g":
 			if sel := m.Selected(); sel != nil {
 				name := sel.Name
 				return m, func() tea.Msg { return ComponentEnterMsg{Name: name} }
@@ -97,9 +120,16 @@ func (m BrowseModel) Update(msg tea.Msg) (BrowseModel, tea.Cmd) {
 	return m, nil
 }
 
-// ComponentEnterMsg signals the user pressed `enter` on a component row in
-// the Browse view. The root model handles this by opening Component Studio
-// scoped to the named component and kicking off an auto-generate.
+// ComponentOpenMsg signals the user pressed `enter` on a component row to drill
+// into its detail page (the catalog→component→job→logs drill-down, consumers.md
+// §3). The root model opens the Component page scoped to the named component.
+type ComponentOpenMsg struct {
+	Name string
+}
+
+// ComponentEnterMsg signals the user pressed `g` on a component row to compose
+// a plan for it. The root model handles this by opening Component Studio scoped
+// to the named component and kicking off an auto-generate.
 type ComponentEnterMsg struct {
 	Name string
 }
@@ -130,6 +160,9 @@ func (m BrowseModel) View() string {
 	if changed > 0 {
 		headerL += "  " + theme.StyleChangedDot.Render(fmt.Sprintf("● %d changed", changed))
 	}
+	if m.ChangedOnly {
+		headerL += "  " + theme.StyleChipAccent.Render("changed-only")
+	}
 	if m.Filter != "" {
 		headerL += "  " + theme.StyleDim.Render(fmt.Sprintf("(filter: %s)", m.Filter))
 	}
@@ -140,7 +173,10 @@ func (m BrowseModel) View() string {
 
 	if len(rows) == 0 {
 		hint := "No components yet — try `orun init` or generate a plan."
-		if m.Filter != "" {
+		switch {
+		case m.ChangedOnly:
+			hint = "No changed components — press c to show all."
+		case m.Filter != "":
 			hint = fmt.Sprintf("No components match %q.", m.Filter)
 		}
 		b.WriteString(centerCard(width, m.Height-4, hint))
@@ -159,8 +195,15 @@ func (m BrowseModel) View() string {
 	for i, c := range rows {
 		glyph := theme.StatusGlyph(c.LastRunStatus)
 		changedMark := "   "
-		if c.Changed {
+		switch c.ChangeKind {
+		case "changed":
 			changedMark = " " + theme.ChangedDot() + " "
+		case "affected":
+			changedMark = " " + theme.AffectedDot() + " "
+		default:
+			if c.Changed {
+				changedMark = " " + theme.ChangedDot() + " "
+			}
 		}
 		nameStyled := c.Name
 		if i == m.Cursor {
@@ -185,7 +228,7 @@ func (m BrowseModel) View() string {
 
 	b.WriteString("\n")
 	b.WriteString(theme.StyleDim.Render(
-		"enter open · g generate plan · d dry-run · / search · : commands"))
+		"enter open · g compose · e env · c changed-only · / search · : commands"))
 	return b.String()
 }
 

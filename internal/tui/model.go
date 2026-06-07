@@ -32,6 +32,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -57,6 +58,7 @@ const (
 	ModeLogExplorer
 	ModeHistory
 	ModeActivity
+	ModeComponent
 )
 
 // ModeComponentStudio is an alias for the inline Compose surface that
@@ -78,13 +80,15 @@ func (m Mode) String() string {
 		return "history"
 	case ModeActivity:
 		return "activity"
+	case ModeComponent:
+		return "component"
 	}
 	return "unknown"
 }
 
 func (m Mode) sidebarKey() string {
 	switch m {
-	case ModeBrowse, ModePlanStudio:
+	case ModeBrowse, ModePlanStudio, ModeComponent:
 		return "browse"
 	}
 	return "activity"
@@ -117,14 +121,26 @@ type Model struct {
 	prefs Prefs
 
 	// Children views
-	navigator  views.NavigatorModel
-	browse     views.BrowseModel
-	history    views.HistoryModel
-	planStudio views.PlanStudioModel
-	runView    views.RunViewModel
-	logView    views.LogExplorerModel
-	activity   views.ActivityModel
-	inspector  views.InspectorModel
+	navigator     views.NavigatorModel
+	browse        views.BrowseModel
+	history       views.HistoryModel
+	planStudio    views.PlanStudioModel
+	runView       views.RunViewModel
+	logView       views.LogExplorerModel
+	activity      views.ActivityModel
+	componentPage views.ComponentPageModel
+	inspector     views.InspectorModel
+
+	// selectedEnv is the cockpit's currently selected environment
+	// (environments.md §1) — used for the component-scoped run action and shown
+	// in the header. Cycled with `e`; defaulted to the first env or the
+	// last-used value from prefs. Empty when the workspace declares no envs.
+	selectedEnv string
+
+	// runAfterGenerate is set when a component-scoped run was requested: the
+	// next successful plan generation pops the confirm modal instead of just
+	// reporting "plan ready".
+	runAfterGenerate bool
 
 	// Plan cached on dispatch so Activity can render a DAG for the
 	// currently in-flight run. Nil between runs.
@@ -203,6 +219,7 @@ func NewModel(svc services.OrunService) Model {
 		runView:          views.NewRunViewModel(),
 		logView:          views.NewLogExplorerModel(),
 		activity:         views.NewActivityModel(),
+		componentPage:    views.NewComponentPageModel(),
 		inspector:        views.NewInspectorModel(),
 		commandPalette:   views.NewCommandPaletteModel(),
 		loading:          true,
@@ -210,6 +227,7 @@ func NewModel(svc services.OrunService) Model {
 		search:           ti,
 		keys:             DefaultGlobalKeyMap(),
 		prefs:            prefs,
+		selectedEnv:      prefs.SelectedEnv,
 		sidebarCollapsed: prefs.SidebarCollapsed,
 		showInspector:    prefs.InspectorVisible,
 		showBottom:       prefs.BottomPanelVisible,
@@ -268,6 +286,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastErr = nil
 		m.workspace = msg.Snapshot
 		m.browse.Workspace = msg.Snapshot
+		m.ensureSelectedEnv()
 		if msg.Snapshot != nil && msg.Snapshot.IntentFile != "" {
 			m.planStudio = m.planStudio.SetRequest(services.PlanRequest{
 				IntentFile: msg.Snapshot.IntentFile,
@@ -279,6 +298,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				[]string{"manual", "ci", "schedule", "promote"},
 			)
 		}
+		m.syncComponentPage()
 		m.refreshInspectorSelection()
 		return m, listRunsCmd(m.svc)
 
@@ -296,6 +316,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.workspace = msg.Snapshot
 		m.browse.Workspace = msg.Snapshot
+		m.ensureSelectedEnv()
+		m.syncComponentPage()
 		m.refreshInspectorSelection()
 		return m, nil
 
@@ -303,16 +325,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err == nil {
 			m.history.Runs = msg.Runs
 			m.refreshActivityRuns()
+			m.syncComponentPage()
 		}
 		return m, nil
 
 	case services.PlanGeneratedMsg:
 		m.planStudio, _ = m.planStudio.Update(msg)
 		if msg.Err != nil {
+			m.runAfterGenerate = false
 			m.lastErr = msg.Err
 			return m, m.setToast("plan error: " + msg.Err.Error())
 		}
 		m.lastErr = nil
+		// Component-scoped run: a real run was requested, so confirm + dispatch
+		// instead of just reporting the compiled plan.
+		if m.runAfterGenerate {
+			m.runAfterGenerate = false
+			if msg.Result != nil && msg.Result.Plan != nil {
+				m.pendingRun = &PendingRun{
+					Plan:     msg.Result.Plan,
+					Env:      m.selectedEnv,
+					Checksum: msg.Result.Checksum,
+					Jobs:     msg.Result.JobCount,
+				}
+				m.showConfirm = true
+				return m, nil
+			}
+		}
 		m.refreshInspectorSelection()
 		return m, m.setToast(fmt.Sprintf("plan ready · %d jobs", msg.Result.JobCount))
 
@@ -324,6 +363,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		req.NamedPlan = msg.Name
 		m.planStudio = m.planStudio.MarkGenerating()
 		return m, views.GeneratePlanCmd(m.svc, req)
+
+	case views.ComponentOpenMsg:
+		// Drill into the component page (catalog→component→job→logs, §3).
+		m = m.switchMode(ModeComponent)
+		m.componentPage = m.componentPage.SetComponent(
+			m.componentByName(msg.Name), m.history.Runs)
+		m.componentPage.Env = m.selectedEnv
+		m.refreshInspectorSelection()
+		return m, nil
+
+	case views.ComponentJobOpenMsg:
+		// Hand off to the Activity run→job→logs drilldown for this execution.
+		m.refreshActivityRuns()
+		act, ok := m.activity.FocusRun(msg.ExecID)
+		if !ok {
+			return m, m.setToast("run not found in history yet")
+		}
+		m.activity = act
+		m = m.switchMode(ModeActivity)
+		return m, nil
+
+	case views.ComponentRunRequestedMsg:
+		// Component-scoped run for the selected env (environments.md §1). Only
+		// offered for a component active in the env; generation is async, so we
+		// flag runAfterGenerate and pop the confirm modal on PlanGeneratedMsg.
+		comp := m.componentByName(msg.Name)
+		if m.selectedEnv == "" {
+			return m, m.setToast("no environment selected — press e to pick one")
+		}
+		if comp == nil || !envContains(comp.Envs, m.selectedEnv) {
+			return m, m.setToast(fmt.Sprintf("%s is not active in %s", msg.Name, m.selectedEnv))
+		}
+		req := services.PlanRequest{
+			Components:  []string{msg.Name},
+			Environment: m.selectedEnv,
+		}
+		if m.workspace != nil {
+			req.IntentFile = m.workspace.IntentFile
+		}
+		m.runAfterGenerate = true
+		return m, tea.Batch(
+			views.GeneratePlanCmd(m.svc, req),
+			m.setToast(fmt.Sprintf("compiling %s · %s…", msg.Name, m.selectedEnv)),
+		)
 
 	case views.ComponentEnterMsg:
 		m.studioComponent = msg.Name
@@ -665,6 +748,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.switchMode(ModeLogExplorer), nil
 	case key.Matches(msg, m.keys.GoHistory):
 		return m.switchMode(ModeHistory), nil
+	case msg.String() == "e" && (m.activeMode == ModeBrowse || m.activeMode == ModeComponent):
+		// Cycle the selected environment (environments.md §1). Scoped to the
+		// catalog/component surfaces; Plan Studio keeps its own `e` via forwardKey.
+		m.cycleEnv()
+		return m, nil
 	}
 
 	// Forward to active view.
@@ -719,6 +807,10 @@ func (m Model) forwardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var c tea.Cmd
 		m.activity, c = m.activity.Update(msg)
 		m.refreshInspectorSelection()
+		return m, c
+	case ModeComponent:
+		var c tea.Cmd
+		m.componentPage, c = m.componentPage.Update(msg)
 		return m, c
 	}
 	return m, nil
@@ -782,11 +874,106 @@ func (m *Model) applySearch(q string) {
 	}
 }
 
+// ensureSelectedEnv settles the selected environment after a workspace load:
+// it keeps a still-valid current/pref value, otherwise falls back to the first
+// (sorted) environment. A workspace with no environments leaves it empty.
+func (m *Model) ensureSelectedEnv() {
+	if m.workspace == nil {
+		return
+	}
+	envs := append([]string(nil), m.workspace.Environments...)
+	sort.Strings(envs)
+	if envContains(envs, m.selectedEnv) {
+		return
+	}
+	if envContains(envs, m.prefs.SelectedEnv) {
+		m.selectedEnv = m.prefs.SelectedEnv
+		return
+	}
+	if len(envs) > 0 {
+		m.selectedEnv = envs[0]
+	} else {
+		m.selectedEnv = ""
+	}
+}
+
+// cycleEnv advances the selected environment to the next one (sorted, wrapping)
+// and persists the choice. No-op when the workspace declares fewer than two.
+func (m *Model) cycleEnv() {
+	if m.workspace == nil {
+		return
+	}
+	envs := append([]string(nil), m.workspace.Environments...)
+	sort.Strings(envs)
+	if len(envs) < 2 {
+		return
+	}
+	idx := 0
+	for i, e := range envs {
+		if e == m.selectedEnv {
+			idx = i
+			break
+		}
+	}
+	m.selectedEnv = envs[(idx+1)%len(envs)]
+	m.componentPage.Env = m.selectedEnv
+	m.prefs.SelectedEnv = m.selectedEnv
+	SavePrefs(m.prefs)
+}
+
+// componentByName returns the workspace component summary with the given name,
+// or nil. Used to seed the component page and validate run requests.
+func (m *Model) componentByName(name string) *services.ComponentSummary {
+	if m.workspace == nil {
+		return nil
+	}
+	for i := range m.workspace.Components {
+		if m.workspace.Components[i].Name == name {
+			c := m.workspace.Components[i]
+			return &c
+		}
+	}
+	return nil
+}
+
+// syncComponentPage refreshes the component page's component summary + execution
+// list from the latest workspace/history so the live ticker and run history land
+// without leaving the page. No-op unless a component is open.
+func (m *Model) syncComponentPage() {
+	if m.componentPage.Component == nil {
+		return
+	}
+	updated := m.componentByName(m.componentPage.Component.Name)
+	if updated == nil {
+		updated = m.componentPage.Component
+	}
+	m.componentPage = m.componentPage.SetComponent(updated, m.history.Runs)
+	m.componentPage.Env = m.selectedEnv
+}
+
+// envContains reports whether envs holds the (non-empty) name.
+func envContains(envs []string, name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, e := range envs {
+		if e == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) refreshInspectorSelection() {
 	switch m.activeMode {
 	case ModeBrowse:
 		if sel := m.browse.Selected(); sel != nil {
 			m.inspector = m.inspector.SetDescription(componentDesc(sel, m.history.Runs))
+		}
+	case ModeComponent:
+		if m.componentPage.Component != nil {
+			m.inspector = m.inspector.SetDescription(
+				componentDesc(m.componentPage.Component, m.history.Runs))
 		}
 	case ModeHistory:
 		if sel := m.history.Selected(); sel != nil {
@@ -1065,6 +1252,7 @@ func (m *Model) propagateSize() {
 	// don't overflow and force lipgloss to wrap every line.
 	m.activity = m.activity.SetSize(w-2, h)
 	m.planStudio = m.planStudio.SetSize(w-2, h)
+	m.componentPage = m.componentPage.SetSize(w-2, h)
 	m.browse.Width = w
 	m.browse.Height = h
 	m.history.Width = w
@@ -1232,7 +1420,9 @@ func (m Model) renderHeader() string {
 		}
 	}
 	env := "all"
-	if m.planStudio.Request.Environment != "" {
+	if m.selectedEnv != "" {
+		env = m.selectedEnv
+	} else if m.planStudio.Request.Environment != "" {
 		env = m.planStudio.Request.Environment
 	}
 	runStat := "idle"
@@ -1264,6 +1454,12 @@ func (m Model) renderHeader() string {
 			)
 		}
 	}
+	if m.activeMode == ModeComponent && m.componentPage.Component != nil {
+		crumbs = append(crumbs,
+			theme.StyleDim.Render("›"),
+			theme.StyleValue.Render(m.componentPage.Component.Name),
+		)
+	}
 	return theme.StyleHeader.Render(strings.Join(crumbs, " "))
 }
 
@@ -1292,6 +1488,8 @@ func (m Model) renderStage() string {
 		body = m.history.View()
 	case ModeActivity:
 		body = m.activity.View()
+	case ModeComponent:
+		body = m.componentPage.View()
 	}
 	if m.searchActive {
 		body = m.search.View() + "\n\n" + body
@@ -1341,7 +1539,22 @@ func (m Model) contextualKeys() []key.Binding {
 			key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "list ⇄ graph")),
 			m.keys.ToggleBottom,
 		)
-	case ModeBrowse, ModeHistory:
+	case ModeBrowse:
+		out = append(out,
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "open")),
+			key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "env")),
+			key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "changed-only")),
+			m.keys.Search,
+		)
+	case ModeComponent:
+		out = append(out,
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "open run")),
+			key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "run")),
+			key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "env")),
+			key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "compose")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
+		)
+	case ModeHistory:
 		out = append(out, m.keys.Search)
 	}
 	out = append(out, m.keys.Palette, m.keys.ToggleInspector, m.keys.ToggleSidebar, m.keys.Help, m.keys.Quit)
@@ -1409,7 +1622,8 @@ func (m Model) renderHelpModal() string {
 		{"Global", "tab components ⇄ activity", "i toggle inspector",
 			"⌃b toggle sidebar", "⌃r reload", ": commands", "/ search", "? help", "q quit"},
 		{"Navigation", "1 components", "2 activity", "esc back", "⌃o back", "⌃i forward"},
-		{"Components", "enter compose · component", "/ filter", "i inspector"},
+		{"Components", "enter open component", "g compose", "e cycle env", "c changed-only", "/ filter"},
+		{"Component", "enter open run", "r run (selected env)", "g compose", "esc back"},
 		{"Compose", "g generate", "d dry-run", "R real run", "s save", "e/t/C cycle"},
 		{"Activity", "tab cycle pane", "↑/↓ move", "enter tail logs", "r runs · l logs"},
 	}
