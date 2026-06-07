@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/sourceplane/orun/internal/cockpit/catalogread"
 	"github.com/sourceplane/orun/internal/nodes"
@@ -145,20 +146,67 @@ func catalogFresh(ctx context.Context, store *objectstore.LocalStore, catalogSou
 
 // catalogComponentSummaries maps the object-model catalog's components into the
 // cockpit's ComponentSummary. Envs are the sorted environment-binding names;
-// Profile is the first non-empty binding profile in name order.
+// Profile is the first non-empty binding profile in name order. DependsOn is
+// mapped from dependency keys back to component *names* so the graph-path
+// summary matches the intent-path summary field-for-field (the CS8 catalog
+// parity guard, CG-1).
 func catalogComponentSummaries(comps []objcatalog.CatalogComponentView) []ComponentSummary {
+	keyToName := make(map[string]string, len(comps))
+	for _, c := range comps {
+		keyToName[c.ComponentKey] = c.Name
+	}
 	out := make([]ComponentSummary, 0, len(comps))
 	for _, c := range comps {
 		out = append(out, ComponentSummary{
 			Name:      c.Name,
 			Type:      c.Type,
 			Domain:    c.Domain,
-			Path:      c.Path,
+			Path:      componentDir(c.Path),
 			Envs:      sortedEnvNames(c.Environments),
 			Profile:   firstProfile(c.Environments),
-			DependsOn: append([]string(nil), c.DependsOn...),
+			DependsOn: dependencyNames(c.DependsOn, keyToName),
 			Watches:   specWatches(c.Spec),
 		})
+	}
+	return out
+}
+
+// componentDir reduces a catalog manifest's identity.path (the component.yaml
+// location, data-model.md §4) to the component directory the intent-path summary
+// uses (loader.defaultComponentPath), so the cockpit shows the same Path string
+// whether it served from the catalog or the live loader. A root-level
+// component.yaml maps to "./"; an empty path (a path-less inline component)
+// stays empty.
+func componentDir(p string) string {
+	for _, suf := range []string{"/component.yaml", "/component.yml"} {
+		if strings.HasSuffix(p, suf) {
+			return strings.TrimSuffix(p, suf)
+		}
+	}
+	if p == "component.yaml" || p == "component.yml" {
+		return "./"
+	}
+	return p
+}
+
+// dependencyNames maps dependency component keys to component names using the
+// catalog's own key→name map, falling back to the key's last "/"-segment for a
+// dependency outside the loaded component set. Returns nil for no dependencies.
+func dependencyNames(keys []string, keyToName map[string]string) []string {
+	if len(keys) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if name := keyToName[k]; name != "" {
+			out = append(out, name)
+			continue
+		}
+		if i := strings.LastIndex(k, "/"); i >= 0 && i < len(k)-1 {
+			out = append(out, k[i+1:])
+		} else {
+			out = append(out, k)
+		}
 	}
 	return out
 }

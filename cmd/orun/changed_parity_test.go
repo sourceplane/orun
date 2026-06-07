@@ -1,11 +1,12 @@
 package main
 
-// changed_parity_test.go is the CS5 parity gate: it proves the internal/affected
-// engine selects exactly the same component set as the legacy --changed path
-// (collectChangedComponents → ResolveComponentSet) over the same workspace and
-// the same changed-files input. This must stay green before the live --changed
-// path is switched onto the engine (specs/orun-catalog-state/implementation-plan.md
-// CS5/CS8).
+// changed_parity_test.go is the CS5/CS8 selection-parity gate (test-plan.md §2,
+// PG-1/PG-2): it proves the internal/affected engine selects exactly the same
+// component set as the legacy --changed path (collectChangedComponents →
+// ResolveComponentSet) over the same workspace and the same changed-files input,
+// across include modes, multi-change, intent-impact watch/all/none, and nested
+// component dirs. This must stay green before the legacy --changed path is
+// removed (CS5 PR2).
 
 import (
 	"context"
@@ -211,6 +212,9 @@ func TestChangedSelectionParity(t *testing.T) {
 		{"api-input", []string{"apps/api/main.go"}, "", []string{"api", "shared"}},
 		// web depends_on api with include:if-selected → api is NOT pulled.
 		{"web-input", []string{"apps/web/main.go"}, "", []string{"web"}},
+		// A deeply-nested file under a component dir maps to its owner by
+		// longest-prefix on both paths (PG-2 nested dirs).
+		{"web-nested", []string{"apps/web/src/components/card.tsx"}, "", []string{"web"}},
 		// Two components changed at once.
 		{"web+shared", []string{"apps/web/main.go", "libs/shared/main.go"}, "", []string{"shared", "web"}},
 		{"no-change", []string{"README.md"}, "", nil},

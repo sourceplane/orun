@@ -41,6 +41,10 @@ func TestCatalogComponentSummaries_Mapping(t *testing.T) {
 	if c.Name != "api" || c.Type != "worker" || c.Domain != "edge" {
 		t.Errorf("scalar mapping wrong: %+v", c)
 	}
+	// Path is reduced to the component directory (matches the intent-path summary).
+	if c.Path != "apps/api" {
+		t.Errorf("Path = %q, want apps/api", c.Path)
+	}
 	// Envs sorted by name; Profile = first non-empty in name order (dev=small).
 	if len(c.Envs) != 2 || c.Envs[0] != "dev" || c.Envs[1] != "prod" {
 		t.Errorf("Envs = %v, want [dev prod]", c.Envs)
@@ -48,8 +52,11 @@ func TestCatalogComponentSummaries_Mapping(t *testing.T) {
 	if c.Profile != "small" {
 		t.Errorf("Profile = %q, want small", c.Profile)
 	}
-	if len(c.DependsOn) != 1 || c.DependsOn[0] != "ns/repo/shared" {
-		t.Errorf("DependsOn = %v", c.DependsOn)
+	// DependsOn is mapped from the dependency key back to the component name; the
+	// referenced "shared" component is not in this single-component input, so the
+	// fallback derives the name from the key's last segment.
+	if len(c.DependsOn) != 1 || c.DependsOn[0] != "shared" {
+		t.Errorf("DependsOn = %v, want [shared]", c.DependsOn)
 	}
 	if len(c.Watches) != 2 || c.Watches[0] != "environments" || c.Watches[1] != "secrets" {
 		t.Errorf("Watches = %v, want [environments secrets]", c.Watches)
