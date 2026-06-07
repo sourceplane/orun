@@ -120,6 +120,7 @@ func componentSummaries(intent *model.Intent, normalised *model.NormalizedIntent
 			Envs:      envs,
 			Profile:   profile,
 			DependsOn: depends,
+			Watches:   append([]string(nil), comp.Change.Watches...),
 		})
 	}
 	_ = normalised // reserved for richer per-env profile/changed information

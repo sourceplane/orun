@@ -817,6 +817,7 @@ func componentDesc(c *services.ComponentSummary, runs []services.RunSummary) *se
 		{Label: "envs", Value: strings.Join(c.Envs, ",")},
 		{Label: "profile", Value: c.Profile},
 		{Label: "depends-on", Value: strings.Join(c.DependsOn, ",")},
+		{Label: "watches", Value: strings.Join(c.Watches, ",")},
 		{Label: "last run", Value: c.LastRunStatus},
 	}
 	if len(recent) > 0 {

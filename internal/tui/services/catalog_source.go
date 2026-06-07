@@ -93,6 +93,7 @@ func catalogComponentSummaries(comps []objcatalog.CatalogComponentView) []Compon
 			Envs:      sortedEnvNames(c.Environments),
 			Profile:   firstProfile(c.Environments),
 			DependsOn: append([]string(nil), c.DependsOn...),
+			Watches:   specWatches(c.Spec),
 		})
 	}
 	return out
@@ -117,4 +118,26 @@ func firstProfile(envs map[string]objcatalog.EnvView) string {
 		}
 	}
 	return ""
+}
+
+// specWatches reads spec.change.watches from the verbatim manifest spec.
+func specWatches(spec map[string]any) []string {
+	change, ok := spec["change"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := change["watches"].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, w := range raw {
+		if s, ok := w.(string); ok {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

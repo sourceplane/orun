@@ -27,6 +27,9 @@ func TestCatalogComponentSummaries_Mapping(t *testing.T) {
 			"dev":  {Profile: "small", Active: true},
 		},
 		DependsOn: []string{"ns/repo/shared"},
+		Spec: map[string]any{
+			"change": map[string]any{"watches": []any{"environments", "secrets"}},
+		},
 	}}
 
 	got := catalogComponentSummaries(comps)
@@ -46,6 +49,25 @@ func TestCatalogComponentSummaries_Mapping(t *testing.T) {
 	}
 	if len(c.DependsOn) != 1 || c.DependsOn[0] != "ns/repo/shared" {
 		t.Errorf("DependsOn = %v", c.DependsOn)
+	}
+	if len(c.Watches) != 2 || c.Watches[0] != "environments" || c.Watches[1] != "secrets" {
+		t.Errorf("Watches = %v, want [environments secrets]", c.Watches)
+	}
+}
+
+func TestSpecWatches(t *testing.T) {
+	if got := specWatches(nil); got != nil {
+		t.Errorf("nil spec → %v, want nil", got)
+	}
+	if got := specWatches(map[string]any{"change": map[string]any{}}); got != nil {
+		t.Errorf("change without watches → %v, want nil", got)
+	}
+	got := specWatches(map[string]any{
+		"change": map[string]any{"watches": []any{"environments", 7, "secrets"}},
+	})
+	// Non-string entries are dropped.
+	if len(got) != 2 || got[0] != "environments" || got[1] != "secrets" {
+		t.Errorf("watches = %v, want [environments secrets]", got)
 	}
 }
 

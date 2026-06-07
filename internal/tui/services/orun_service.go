@@ -123,6 +123,7 @@ type ComponentSummary struct {
 	Envs          []string // subscribed environments
 	Profile       string   // default profile
 	DependsOn     []string
+	Watches       []string // spec.change.watches — the intent sections this component tracks
 	Changed       bool
 	LastRunStatus string // "success" | "failed" | "running" | ""
 }
