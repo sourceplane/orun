@@ -1,12 +1,12 @@
 package main
 
-// changed_parity_test.go is the CS5/CS8 selection-parity gate (test-plan.md §2,
-// PG-1/PG-2): it proves the internal/affected engine selects exactly the same
-// component set as the legacy --changed path (collectChangedComponents →
-// ResolveComponentSet) over the same workspace and the same changed-files input,
-// across include modes, multi-change, intent-impact watch/all/none, and nested
-// component dirs. This must stay green before the legacy --changed path is
-// removed (CS5 PR2).
+// changed_parity_test.go is the CS5/CS8 selection gate (test-plan.md §2,
+// PG-1/PG-2). It originally compared the internal/affected engine against the
+// legacy collectChangedComponents → ResolveComponentSet path; once CS8 locked
+// parity, the legacy selector was retired (CS5 PR2) and the captured selections
+// became the goldens here. It proves the engine selects the expected component
+// set across include modes, multi-change, intent-impact watch/all/none, and
+// nested component dirs.
 
 import (
 	"context"
@@ -18,11 +18,8 @@ import (
 	"github.com/sourceplane/orun/internal/affected"
 	"github.com/sourceplane/orun/internal/catalogresolve"
 	"github.com/sourceplane/orun/internal/clock"
-	"github.com/sourceplane/orun/internal/expand"
 	"github.com/sourceplane/orun/internal/git"
-	"github.com/sourceplane/orun/internal/loader"
 	"github.com/sourceplane/orun/internal/nodes"
-	"github.com/sourceplane/orun/internal/normalize"
 	"github.com/sourceplane/orun/internal/objcatalog"
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
@@ -35,8 +32,8 @@ import (
 //	api  --depends_on(include: always)-->      shared
 //	web  --depends_on(include: if-selected)--> api
 //
-// Both the legacy normalize path and the object catalog ingest inline
-// components, so the two paths see an identical component set.
+// The object catalog ingests these inline components, so the engine sees the
+// full component set the goldens are expressed over.
 func parityWorkspace(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -81,39 +78,6 @@ components:
 	write("apps/api/main.go", "package api\n")
 	write("apps/web/main.go", "package web\n")
 	return root
-}
-
-// legacySelection runs the production --changed selection: collect changed
-// components from the changed-files set, then grow by the include:always
-// forward closure.
-func legacySelection(t *testing.T, root string, files []string, impact string) map[string]bool {
-	t.Helper()
-	// collectChangedComponents reads the global intentImpact; set it for the call.
-	prev := intentImpact
-	intentImpact = impact
-	defer func() { intentImpact = prev }()
-	// The legacy path works in the git-diff frame (CWD-relative). Tests chdir
-	// into the workspace (see TestChangedSelectionParity) so "intent.yaml" and
-	// the changed files share that frame.
-	intentFile := "intent.yaml"
-	intent, _, err := loader.LoadResolvedIntent(intentFile)
-	if err != nil {
-		t.Fatalf("load intent: %v", err)
-	}
-	normalized, err := normalize.NormalizeIntent(intent)
-	if err != nil {
-		t.Fatalf("normalize: %v", err)
-	}
-	instances, err := expand.NewExpander(normalized).Expand()
-	if err != nil {
-		t.Fatalf("expand: %v", err)
-	}
-	changedSet := make(map[string]struct{}, len(files))
-	for _, f := range files {
-		changedSet[f] = struct{}{}
-	}
-	changed := collectChangedComponents(normalized, instances, changedSet, intentFile, git.ChangeOptions{Files: files})
-	return expand.NewDependencyResolver(normalized).ResolveComponentSet(changed)
 }
 
 // engineSelection resolves the workspace into the object catalog and runs the
@@ -186,17 +150,6 @@ func engineSelection(t *testing.T, root string, files []string, impact string) m
 
 func TestChangedSelectionParity(t *testing.T) {
 	root := parityWorkspace(t)
-	// Run in the workspace frame so the legacy path's CWD-relative file matching
-	// and the engine's workspace-relative ownership map share one coordinate
-	// system. Sequential (no t.Parallel), restored on cleanup.
-	prevWD, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(prevWD) })
 
 	cases := []struct {
 		name   string
@@ -238,13 +191,9 @@ func TestChangedSelectionParity(t *testing.T) {
 			if impact == "" {
 				impact = "watch"
 			}
-			legacy := legacySelection(t, root, tc.files, impact)
 			engine := engineSelection(t, root, tc.files, impact)
-			if !equalStringSets(legacy, engine) {
-				t.Fatalf("parity mismatch\n legacy: %v\n engine: %v", sortedSet(legacy), sortedSet(engine))
-			}
-			if !equalStringSets(legacy, sliceToSet(tc.want)) {
-				t.Fatalf("legacy selection = %v, want %v", sortedSet(legacy), tc.want)
+			if !equalStringSets(engine, sliceToSet(tc.want)) {
+				t.Fatalf("engine selection = %v, want %v", sortedSet(engine), tc.want)
 			}
 		})
 	}
