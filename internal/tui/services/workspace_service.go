@@ -62,6 +62,16 @@ func (s *LiveOrunService) LoadWorkspace(ctx context.Context, req WorkspaceReques
 	envNames := environmentNames(intent)
 	components := componentSummaries(intent, normalised)
 
+	// Read-side freshness gate (design.md §3.1): when the object-model catalog
+	// at catalogs/current is fresh for this workspace, serve the component list
+	// from the state store; otherwise keep the live intent-loader list above so
+	// uncommitted edits show immediately.
+	if workspaceRoot, aerr := filepath.Abs(intentRoot); aerr == nil {
+		if catComps, ok := s.freshCatalogComponents(ctx, workspaceRoot); ok {
+			components = catComps
+		}
+	}
+
 	// The saved-plan listing used the legacy plan store, which is gone. In the
 	// object model a plan is materialized as a revision when it is run; a
 	// standalone "saved named plans" listing over the revision graph is a
@@ -110,6 +120,7 @@ func componentSummaries(intent *model.Intent, normalised *model.NormalizedIntent
 			Envs:      envs,
 			Profile:   profile,
 			DependsOn: depends,
+			Watches:   append([]string(nil), comp.Change.Watches...),
 		})
 	}
 	_ = normalised // reserved for richer per-env profile/changed information

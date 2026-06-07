@@ -15,15 +15,10 @@ package main
 
 import (
 	"context"
-	"time"
 
 	"github.com/sourceplane/orun/internal/affected"
-	"github.com/sourceplane/orun/internal/catalogresolve"
 	"github.com/sourceplane/orun/internal/git"
-	"github.com/sourceplane/orun/internal/nodewriter"
 	"github.com/sourceplane/orun/internal/objcatalog"
-	"github.com/sourceplane/orun/internal/objplan"
-	"github.com/sourceplane/orun/internal/sourcectx"
 )
 
 // engineChangedSelection refreshes-if-needed and returns the --changed selection
@@ -34,44 +29,16 @@ func engineChangedSelection(ctx context.Context, changeOptions git.ChangeOptions
 		ctx = context.Background()
 	}
 
-	workspaceRoot, err := catalogWorkspaceRoot()
+	// Refresh-if-needed via the shared seam: RefreshCatalog only re-resolves on
+	// a memo miss (source changed); otherwise it just moves catalogs/current. So
+	// a clean re-run is cheap, while a changed source repopulates the full
+	// catalog before we read.
+	rc, err := refreshObjectCatalog(ctx)
 	if err != nil {
 		return nil, err
 	}
-	ws, err := sourcectx.ResolveSourceSnapshot(ctx, sourcectx.ResolveOptions{WorkspacePath: workspaceRoot})
-	if err != nil {
-		return nil, err
-	}
 
-	createdAt := time.Now().UTC().Format(time.RFC3339)
-	srcKey := sourcectx.BuildSourceSnapshotKey(ws)
-	inputHash := buildCatalogInputHash(ws)
-	shortRepo := shortRepoName(ws.Repo, workspaceRoot)
-	inputs := resolverInputsFromState(ws, srcKey, inputHash, repoForInputs(ws.Repo, workspaceRoot), createdAt)
-
-	store, refs, root, err := openObjectModel()
-	if err != nil {
-		return nil, err
-	}
-	w := nodewriter.New(store, refs)
-	memo := objplan.NewResolveMemo(root)
-
-	// Refresh-if-needed: RefreshCatalog only re-resolves on a memo miss (source
-	// changed); otherwise it just moves catalogs/current. So a clean re-run is
-	// cheap, while a changed source repopulates the full catalog before we read.
-	resolve := func() (*catalogresolve.CatalogView, error) {
-		view, _, berr := catalogresolve.BuildCatalog(ctx, catalogresolve.Options{WorkspaceRoot: workspaceRoot, Repo: shortRepo}, inputs)
-		return view, berr
-	}
-	if _, err := objplan.RefreshCatalog(ctx, w, store, memo, objplan.Input{
-		Workspace:      ws,
-		SourceHumanKey: srcKey,
-		Resolve:        resolve,
-	}, objplan.Options{}); err != nil {
-		return nil, err
-	}
-
-	view, err := objcatalog.New(store, refs).Load(ctx, "catalogs/current")
+	view, err := objcatalog.New(rc.store, rc.refs).Load(ctx, "catalogs/current")
 	if err != nil {
 		return nil, err
 	}

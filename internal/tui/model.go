@@ -223,9 +223,10 @@ func (m Model) ActivePanel() Panel                     { return m.activePanel }
 func (m Model) Workspace() *services.WorkspaceSnapshot { return m.workspace }
 func (m Model) LastError() error                       { return m.lastErr }
 
-// Init kicks off workspace loading and starts the spinner.
+// Init kicks off workspace loading, starts the spinner, and arms the live-view
+// refresh ticker so the cockpit reflects external writes without a keystroke.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadWorkspaceCmd(m.svc), m.spinner.Tick)
+	return tea.Batch(loadWorkspaceCmd(m.svc), m.spinner.Tick, catalogRefreshTickCmd())
 }
 
 func loadWorkspaceCmd(svc services.OrunService) tea.Cmd {
@@ -280,6 +281,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.refreshInspectorSelection()
 		return m, listRunsCmd(m.svc)
+
+	case catalogRefreshTickMsg:
+		// Live view (D-9): silently reload the workspace and re-arm the tick.
+		// The reload runs off the UI thread; the result lands as
+		// workspaceRefreshedMsg.
+		return m, tea.Batch(backgroundReloadCmd(m.svc), catalogRefreshTickCmd())
+
+	case workspaceRefreshedMsg:
+		// Best-effort: a failed background refresh keeps the current snapshot
+		// (the live view never replaces good data with a transient error).
+		if msg.Err != nil || msg.Snapshot == nil {
+			return m, nil
+		}
+		m.workspace = msg.Snapshot
+		m.browse.Workspace = msg.Snapshot
+		m.refreshInspectorSelection()
+		return m, nil
 
 	case services.RunsListedMsg:
 		if msg.Err == nil {
@@ -799,6 +817,7 @@ func componentDesc(c *services.ComponentSummary, runs []services.RunSummary) *se
 		{Label: "envs", Value: strings.Join(c.Envs, ",")},
 		{Label: "profile", Value: c.Profile},
 		{Label: "depends-on", Value: strings.Join(c.DependsOn, ",")},
+		{Label: "watches", Value: strings.Join(c.Watches, ",")},
 		{Label: "last run", Value: c.LastRunStatus},
 	}
 	if len(recent) > 0 {
@@ -1526,6 +1545,36 @@ type ToastTickMsg struct{}
 
 func toastTickCmd() tea.Cmd {
 	return tea.Tick(time.Second, func(time.Time) tea.Msg { return ToastTickMsg{} })
+}
+
+// refreshInterval is the cockpit's live-view poll cadence (design.md §3.4
+// trigger 2 / cli-surface.md §1, D-9). The catalog ticker re-runs the workspace
+// load every interval so local edits and other processes' writes (an external
+// `orun plan`/`run`, the universal refresh hook) appear without a keystroke.
+const refreshInterval = 3 * time.Second
+
+// catalogRefreshTickMsg fires on the live-view interval.
+type catalogRefreshTickMsg struct{}
+
+func catalogRefreshTickCmd() tea.Cmd {
+	return tea.Tick(refreshInterval, func(time.Time) tea.Msg { return catalogRefreshTickMsg{} })
+}
+
+// workspaceRefreshedMsg carries the result of a silent live-view reload (the
+// interval ticker), distinct from WorkspaceLoadedMsg so it never toggles the
+// loading spinner and is applied best-effort: a failed background refresh keeps
+// the current snapshot rather than surfacing a blocking error.
+type workspaceRefreshedMsg struct {
+	Snapshot *services.WorkspaceSnapshot
+	Err      error
+}
+
+// backgroundReloadCmd reloads the workspace silently for the live ticker.
+func backgroundReloadCmd(svc services.OrunService) tea.Cmd {
+	return func() tea.Msg {
+		snap, err := svc.LoadWorkspace(context.Background(), services.WorkspaceRequest{})
+		return workspaceRefreshedMsg{Snapshot: snap, Err: err}
+	}
 }
 
 // setToast records a toast message + timestamp and returns a tick cmd that
