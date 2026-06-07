@@ -187,6 +187,18 @@ orun status
 orun logs --failed
 ```
 
+### `orun catalog`
+
+```sh
+orun catalog refresh                       # resolve + persist the component catalog
+orun catalog affected --base main --json   # which components a change touches
+```
+
+Resolves and inspects the content-addressed component catalog that powers change
+detection (`--changed`) and the cockpit. `orun catalog affected` reports the
+directly-changed, dependent, affected, and selected component sets — the same
+engine `orun plan/run --changed` use.
+
 ### Flags
 
 | Flag | Short | Description |
