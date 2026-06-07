@@ -250,21 +250,14 @@ func generatePlan() error {
 			return err
 		}
 
-		// Primary path: the unified engine over the full object-model catalog
-		// (catalog-state CS5). It refreshes-if-needed, then selects. On any
-		// failure (no object store, non-git workspace, resolve error) fall back
-		// to the legacy file-walking selector so --changed never hard-fails.
+		// The unified change-detection engine over the full object-model catalog
+		// is the single --changed selection path (catalog-state CS5). It
+		// refreshes-if-needed, then selects DirectlyChanged ∪ the include:always
+		// forward closure — the selection the CS8 parity gate locks against the
+		// retired legacy selector.
 		includedComps, eerr := engineChangedSelection(context.Background(), changeOptions)
 		if eerr != nil {
-			if debugMode {
-				fmt.Printf("□ changed: engine unavailable (%v); using legacy selector\n", eerr)
-			}
-			changedSet, serr := changedFilesSet(changeOptions)
-			if serr != nil {
-				return fmt.Errorf("failed to detect changed files: %w", serr)
-			}
-			changedComps := collectChangedComponents(normalized, instances, changedSet, intentFile, changeOptions)
-			includedComps = expand.NewDependencyResolver(normalized).ResolveComponentSet(changedComps)
+			return fmt.Errorf("failed to compute changed components: %w", eerr)
 		}
 
 		// Filter instances to include changed components and their dependencies
@@ -932,18 +925,17 @@ func listComponents(args []string) error {
 
 	var changedComps map[string]bool
 	if changedOnly {
-		changedComps = make(map[string]bool)
-
 		changeOptions, err := buildChangeOptions()
 		if err != nil {
 			return err
 		}
 
-		changedSet, err := changedFilesSet(changeOptions)
+		// Same engine path as plan/run --changed (catalog-state CS5): the object
+		// catalog is the single source of the changed-component selection.
+		changedComps, err = engineChangedSelection(context.Background(), changeOptions)
 		if err != nil {
-			return fmt.Errorf("failed to detect changed files: %w", err)
+			return fmt.Errorf("failed to compute changed components: %w", err)
 		}
-		changedComps = collectChangedComponents(normalized, instancesFromMergedComponents(components), changedSet, intentFile, changeOptions)
 
 		if len(changedComps) == 0 {
 			color := ui.ColorEnabledForWriter(os.Stdout)
@@ -1128,24 +1120,6 @@ func loadResolvedIntentFile(path string) (*model.Intent, *model.ComponentTree, e
 	return intent, tree, nil
 }
 
-func changedFilesSet(options git.ChangeOptions) (map[string]struct{}, error) {
-	detector := git.NewChangeDetectorWithOptions(options)
-	files, err := detector.GetChangedFiles()
-	if err != nil {
-		return nil, err
-	}
-
-	result := make(map[string]struct{}, len(files))
-	for _, file := range files {
-		if file == "" {
-			continue
-		}
-		result[file] = struct{}{}
-	}
-
-	return result, nil
-}
-
 func buildChangeOptions() (git.ChangeOptions, error) {
 	base := strings.TrimSpace(baseBranch)
 	head := strings.TrimSpace(headRef)
@@ -1214,282 +1188,6 @@ func valueOrNotSet(s string) string {
 		return "(not set)"
 	}
 	return s
-}
-
-func semanticIntentDiff(options git.ChangeOptions, intentPath string) git.IntentDiffResult {
-	normalizedPath := strings.TrimPrefix(normalizeFilePath(intentPath), "./")
-	if normalizedPath == "" {
-		normalizedPath = "intent.yaml"
-	}
-
-	base := options.Base
-	head := options.Head
-	if base == "" {
-		base = "main"
-	}
-	if head == "" {
-		head = "HEAD"
-	}
-
-	// When --files is provided, we cannot retrieve git content for semantic diff
-	if len(options.Files) > 0 {
-		return git.IntentDiffResult{
-			Mode:   git.IntentDiffGlobal,
-			Reason: "cannot perform semantic diff with --files (no git refs available)",
-		}
-	}
-
-	baseYAML, err := git.GetFileAtRef(base, normalizedPath)
-	if err != nil {
-		return git.IntentDiffResult{
-			Mode:   git.IntentDiffGlobal,
-			Reason: fmt.Sprintf("cannot read base intent at %s:%s: %v", base, normalizedPath, err),
-		}
-	}
-
-	headYAML, err := git.GetFileAtRef(head, normalizedPath)
-	if err != nil {
-		return git.IntentDiffResult{
-			Mode:   git.IntentDiffGlobal,
-			Reason: fmt.Sprintf("cannot read head intent at %s:%s: %v", head, normalizedPath, err),
-		}
-	}
-
-	return git.DiffIntent(baseYAML, headYAML)
-}
-
-func printIntentDiffExplanation(result git.IntentDiffResult, normalized *model.NormalizedIntent) {
-	color := ui.ColorEnabledForWriter(os.Stderr)
-	fmt.Fprintf(os.Stderr, "\n%s intent.yaml semantic diff\n", ui.Bold(color, "explain:"))
-	fmt.Fprintf(os.Stderr, "  intent changed: yes\n")
-	fmt.Fprintf(os.Stderr, "  diff mode: %s\n", result.Mode)
-	fmt.Fprintf(os.Stderr, "  reason: %s\n", result.Reason)
-	if len(result.ChangedSections) > 0 {
-		fmt.Fprintf(os.Stderr, "  changed sections: %s\n", strings.Join(result.ChangedSections, ", "))
-	}
-	if result.Mode == git.IntentDiffGlobal {
-		fmt.Fprintf(os.Stderr, "  intent-impact: %s\n", intentImpact)
-		if intentImpact == "watch" && normalized != nil {
-			var matched, unmatched []string
-			for _, comp := range normalized.Components {
-				if watchesIntersect(comp.Change.Watches, result.ChangedSections) {
-					matched = append(matched, comp.Name)
-				} else {
-					unmatched = append(unmatched, comp.Name)
-				}
-			}
-			if len(matched) > 0 {
-				fmt.Fprintf(os.Stderr, "  matched watches:\n")
-				for _, name := range matched {
-					comp := normalized.Components[name]
-					fmt.Fprintf(os.Stderr, "    - %s (watches: %s)\n", name, strings.Join(comp.Change.Watches, ", "))
-				}
-			}
-			if len(unmatched) > 0 {
-				fmt.Fprintf(os.Stderr, "  unmatched:\n")
-				for _, name := range unmatched {
-					fmt.Fprintf(os.Stderr, "    - %s (no matching watches)\n", name)
-				}
-			}
-		}
-	}
-	if len(result.Added) > 0 {
-		fmt.Fprintf(os.Stderr, "  added: %s\n", strings.Join(result.Added, ", "))
-	}
-	if len(result.Modified) > 0 {
-		fmt.Fprintf(os.Stderr, "  modified: %s\n", strings.Join(result.Modified, ", "))
-	}
-	if len(result.Removed) > 0 {
-		fmt.Fprintf(os.Stderr, "  removed: %s\n", strings.Join(result.Removed, ", "))
-	}
-	fmt.Fprintln(os.Stderr)
-}
-
-func watchesIntersect(watches, sections []string) bool {
-	for _, w := range watches {
-		for _, s := range sections {
-			if w == s {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func isPathChanged(changedFiles map[string]struct{}, path string) bool {
-	if path == "" || path == "./" {
-		return len(changedFiles) > 0
-	}
-
-	path = strings.TrimPrefix(path, "./")
-	path = strings.TrimSuffix(path, "/")
-	prefix := path + "/"
-	for file := range changedFiles {
-		normalizedFile := strings.TrimPrefix(file, "./")
-		if normalizedFile == path || strings.HasPrefix(normalizedFile, prefix) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func collectChangedComponents(
-	normalized *model.NormalizedIntent,
-	instances map[string][]*model.ComponentInstance,
-	changedFiles map[string]struct{},
-	intentPath string,
-	changeOptions git.ChangeOptions,
-) map[string]bool {
-	changedComponents := make(map[string]bool)
-	if normalized == nil {
-		return changedComponents
-	}
-
-	if isIntentPathChanged(changedFiles, intentPath) {
-		diffResult := semanticIntentDiff(changeOptions, intentPath)
-		if explainChanged {
-			printIntentDiffExplanation(diffResult, normalized)
-		}
-		switch diffResult.Mode {
-		case git.IntentDiffGlobal:
-			if intentImpact == "all" {
-				for _, comp := range normalized.Components {
-					changedComponents[comp.Name] = true
-				}
-				return changedComponents
-			}
-			if intentImpact != "none" {
-				for _, comp := range normalized.Components {
-					if watchesIntersect(comp.Change.Watches, diffResult.ChangedSections) {
-						changedComponents[comp.Name] = true
-					}
-				}
-			}
-		case git.IntentDiffComponents:
-			for _, name := range diffResult.Added {
-				changedComponents[name] = true
-			}
-			for _, name := range diffResult.Modified {
-				changedComponents[name] = true
-			}
-			for _, name := range diffResult.Removed {
-				changedComponents[name] = true
-			}
-		case git.IntentDiffNone:
-			// formatting/comment-only change — no components from intent
-		}
-	}
-
-	intentDir := filepathDir(intentPath)
-	// When intentPath is absolute (e.g. from auto-discovery), convert intentDir
-	// to a CWD-relative path so it matches git diff output which is always relative.
-	if filepath.IsAbs(intentDir) {
-		if cwd, err := os.Getwd(); err == nil {
-			if rel, err := filepath.Rel(cwd, intentDir); err == nil {
-				intentDir = filepath.ToSlash(rel)
-			}
-		}
-	}
-
-	for _, comp := range normalized.Components {
-		if isFileChanged(changedFiles, joinPath(intentDir, comp.SourcePath)) {
-			changedComponents[comp.Name] = true
-			continue
-		}
-
-		for _, envInstances := range instances {
-			for _, inst := range envInstances {
-				instPath := joinPath(intentDir, inst.Path)
-				if inst.ComponentName == comp.Name && inst.Path != "" && inst.Path != "./" && isPathChanged(changedFiles, instPath) {
-					changedComponents[comp.Name] = true
-					break
-				}
-			}
-			if changedComponents[comp.Name] {
-				break
-			}
-		}
-	}
-
-	return changedComponents
-}
-
-func instancesFromMergedComponents(components []*expand.ComponentMerged) map[string][]*model.ComponentInstance {
-	instances := make(map[string][]*model.ComponentInstance)
-	for _, comp := range components {
-		for _, inst := range comp.Instances {
-			instances[inst.Environment] = append(instances[inst.Environment], inst)
-		}
-	}
-	return instances
-}
-
-func isIntentPathChanged(changedFiles map[string]struct{}, intentPath string) bool {
-	if isFileChanged(changedFiles, intentPath) {
-		return true
-	}
-
-	normalizedIntent := strings.TrimPrefix(normalizeFilePath(intentPath), "./")
-	if normalizedIntent == "" {
-		return false
-	}
-
-	base := filepathBase(normalizedIntent)
-	for file := range changedFiles {
-		normalizedFile := strings.TrimPrefix(normalizeFilePath(file), "./")
-		if normalizedFile == base || strings.HasSuffix(normalizedFile, "/"+base) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func isFileChanged(changedFiles map[string]struct{}, targetPath string) bool {
-	if targetPath == "" {
-		return false
-	}
-
-	normalizedTarget := strings.TrimPrefix(normalizeFilePath(targetPath), "./")
-	for file := range changedFiles {
-		normalizedFile := strings.TrimPrefix(normalizeFilePath(file), "./")
-		if normalizedFile == normalizedTarget {
-			return true
-		}
-	}
-
-	return false
-}
-
-func filepathBase(path string) string {
-	parts := strings.Split(normalizeFilePath(path), "/")
-	if len(parts) == 0 {
-		return path
-	}
-	return parts[len(parts)-1]
-}
-
-func filepathDir(path string) string {
-	parts := strings.Split(normalizeFilePath(path), "/")
-	if len(parts) <= 1 {
-		return "."
-	}
-	return strings.Join(parts[:len(parts)-1], "/")
-}
-
-func joinPath(dir, path string) string {
-	if dir == "" || dir == "." {
-		return path
-	}
-	if path == "" {
-		return dir
-	}
-	return dir + "/" + path
-}
-
-func normalizeFilePath(path string) string {
-	return strings.TrimSuffix(strings.ReplaceAll(path, "\\", "/"), "/")
 }
 
 func parseCommaSeparated(s string) []string {

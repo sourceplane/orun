@@ -7,11 +7,12 @@ package main
 // selecting the --changed subset is a plan/run-time duty. This helper refreshes
 // the catalog if the source changed (cheap memo hit otherwise), loads the full
 // catalog, runs the engine, and returns the selected component *names* — the
-// same Selection (DirectlyChanged ∪ include:always closure) the parity gate
-// proves equals the legacy collectChangedComponents → ResolveComponentSet.
+// same Selection (DirectlyChanged ∪ include:always closure) the golden parity
+// gate (changed_parity_test.go) locks.
 //
-// It is best-effort at the call site: a failure here (no object store, non-git
-// workspace, resolve error) lets the caller fall back to the legacy selector.
+// This is the single --changed selection path: the legacy file-walking selector
+// was retired in CS5 once the CS8 parity + determinism gate went green, so an
+// error here surfaces to the caller rather than silently diverging.
 
 import (
 	"context"
