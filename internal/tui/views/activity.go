@@ -141,6 +141,23 @@ func (m ActivityModel) SetRuns(live *ActivityRun, history []services.RunSummary)
 	return m
 }
 
+// FocusRun positions the drilldown on the run with the given exec id and opens
+// it at LevelRun (the job list), returning ok=false when no such run is loaded.
+// Used by the component page to hand off into the run→job→logs drilldown for a
+// specific execution (consumers.md §3). Resets the inner cursors.
+func (m ActivityModel) FocusRun(execID string) (ActivityModel, bool) {
+	for i, r := range m.Runs {
+		if r.ExecID == execID {
+			m.Cursor = i
+			m.jobCursor = 0
+			m.stepCursor = 0
+			m.Level = LevelRun
+			return m, true
+		}
+	}
+	return m, false
+}
+
 // UpdateLiveStatuses refreshes the live run's per-job status map.
 func (m ActivityModel) UpdateLiveStatuses(execID string, statuses map[string]string, done bool) ActivityModel {
 	for i, r := range m.Runs {

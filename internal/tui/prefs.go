@@ -8,10 +8,14 @@ import (
 
 // Prefs is the user-tweakable cockpit preferences persisted between sessions.
 type Prefs struct {
-	SidebarCollapsed    bool                      `json:"sidebarCollapsed"`
-	InspectorVisible    bool                      `json:"inspectorVisible"`
-	BottomPanelVisible  bool                      `json:"bottomPanelVisible,omitempty"`
-	PerComponent        map[string]ComponentPrefs `json:"perComponent,omitempty"`
+	SidebarCollapsed   bool `json:"sidebarCollapsed"`
+	InspectorVisible   bool `json:"inspectorVisible"`
+	BottomPanelVisible bool `json:"bottomPanelVisible,omitempty"`
+	// SelectedEnv is the cockpit's last-used environment (environments.md §1):
+	// re-applied on open as the default selected env when it still names a real
+	// environment in the workspace.
+	SelectedEnv  string                    `json:"selectedEnv,omitempty"`
+	PerComponent map[string]ComponentPrefs `json:"perComponent,omitempty"`
 }
 
 // ComponentPrefs is the per-component sticky state for Component Studio: the

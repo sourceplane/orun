@@ -116,15 +116,19 @@ type WorkspaceSnapshot struct {
 
 // ComponentSummary is the row-level view of a component for the Browse view.
 type ComponentSummary struct {
-	Name          string
-	Type          string
-	Domain        string
-	Path          string
-	Envs          []string // subscribed environments
-	Profile       string   // default profile
-	DependsOn     []string
-	Watches       []string // spec.change.watches — the intent sections this component tracks
-	Changed       bool
+	Name      string
+	Type      string
+	Domain    string
+	Path      string
+	Envs      []string // subscribed environments
+	Profile   string   // default profile
+	DependsOn []string
+	Watches   []string // spec.change.watches — the intent sections this component tracks
+	Changed   bool
+	// ChangeKind is the Q2 affected-overlay classification for this component:
+	// "changed" (its own inputs changed), "affected" (a transitive dependency
+	// changed), or "" (unaffected). Changed == (ChangeKind != "").
+	ChangeKind    string
 	LastRunStatus string // "success" | "failed" | "running" | ""
 }
 
