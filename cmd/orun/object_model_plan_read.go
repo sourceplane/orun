@@ -7,12 +7,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
+	"github.com/sourceplane/orun/internal/objread"
 )
 
 // object_model_plan_read.go resolves and lists plans from the content-addressed
@@ -242,6 +244,83 @@ func objListPlanRows() ([]execmodel.PlanEntry, bool) {
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].CreatedAt.After(rows[j].CreatedAt) })
 	return rows, true
+}
+
+// objListRevisionRows lists the object-model revisions as the rich `orun get
+// plans` rows (revision key, trigger, plan hash, job count, latest execution),
+// newest-first. ok=false ⇒ no object graph / no revisions. The trigger and the
+// latest-execution columns are reconstructed from the graph (the producing
+// TriggerOccurrence and an executions scan keyed by revision).
+func objListRevisionRows() ([]revisionPlanRow, bool) {
+	store, refs, root, ok := openObjectStores()
+	if !ok {
+		return nil, false
+	}
+	ctx := context.Background()
+	names, err := refs.List(ctx, revByHashPrefix)
+	if err != nil || len(names) == 0 {
+		return nil, false
+	}
+	latestExec := objLatestExecByRevision(store, refs, root)
+
+	type timedRow struct {
+		row revisionPlanRow
+		at  time.Time
+	}
+	timed := make([]timedRow, 0, len(names))
+	for _, name := range names {
+		r, rerr := refs.Read(ctx, name)
+		if rerr != nil {
+			continue
+		}
+		revID := objectstore.ObjectID(r.Target)
+		rev, mok := objRevisionMeta(store, revID)
+		if !mok {
+			continue
+		}
+		row := revisionPlanRow{
+			RevisionKey: rev.HumanKey,
+			PlanHash:    shortHash(rev.PlanHash),
+			JobCount:    rev.JobCount,
+		}
+		if row.RevisionKey == "" {
+			row.RevisionKey = string(revID)
+		}
+		if trg, tok := objTriggerForRevision(store, refs, revID); tok {
+			row.TriggerName = trg.TriggerName
+		}
+		if ev, eok := latestExec[string(revID)]; eok {
+			row.LatestExec = ev.ExecutionKey
+			row.LatestStatus = ev.Status
+		}
+		timed = append(timed, timedRow{row: row, at: r.UpdatedAt})
+	}
+	if len(timed) == 0 {
+		return nil, false
+	}
+	sort.SliceStable(timed, func(i, j int) bool { return timed[i].at.After(timed[j].at) })
+	rows := make([]revisionPlanRow, 0, len(timed))
+	for _, x := range timed {
+		rows = append(rows, x.row)
+	}
+	return rows, true
+}
+
+// objLatestExecByRevision indexes the newest sealed/live execution per revision
+// id from a single executions scan, so `get plans` can show each revision's
+// latest run without an O(revisions) walk.
+func objLatestExecByRevision(store *objectstore.LocalStore, refs *refstore.LocalRefStore, root string) map[string]objread.ExecutionView {
+	views, err := objread.New(store, refs, root).List(context.Background())
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]objread.ExecutionView, len(views))
+	for _, v := range views {
+		if cur, ok := out[v.RevisionID]; !ok || v.StartedAt.After(cur.StartedAt) {
+			out[v.RevisionID] = v
+		}
+	}
+	return out
 }
 
 // sanitizeRevSeg folds a checksum/ref into the ref-path alphabet (matches the

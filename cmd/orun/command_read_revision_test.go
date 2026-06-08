@@ -30,14 +30,17 @@ import (
 	"time"
 
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/revision"
+	"github.com/sourceplane/orun/internal/runworktree"
 	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/triggerctx"
 )
 
-// seedObjectModelRevision writes one revision + trigger to the object graph
-// under dir/.orun via the production plan writer, returning the plan checksum
-// (the resolvable describe ref) and the revision human key (the rendered key).
+// seedObjectModelRevision writes one 5-job revision + trigger to the object
+// graph under dir/.orun via the production plan writer, returning the plan
+// checksum (the resolvable describe/get ref) and the revision human key (the
+// rendered key).
 func seedObjectModelRevision(t *testing.T, dir string) (checksum, humanKey string) {
 	t.Helper()
 	checksum = "feedface00112233445566778899aabb"
@@ -50,9 +53,42 @@ func seedObjectModelRevision(t *testing.T, dir string) (checksum, humanKey strin
 	}
 	plan := &model.Plan{}
 	plan.Metadata.Name = "test-plan"
+	plan.Jobs = make([]model.PlanJob, 5)
 	planBytes := []byte(`{"apiVersion":"orun.io/v1alpha1","kind":"Plan","jobs":[]}`)
 	writeObjectModelPlan(filepath.Join(dir, ".orun"), plan, planBytes, checksum, humanKey, trig, planCatalogResolution{})
 	return checksum, humanKey
+}
+
+// seedObjectModelExecution seals one succeeded execution against the revision
+// resolved from checksum, so `get plans` can surface a latest-execution column.
+func seedObjectModelExecution(t *testing.T, checksum, execKey string) {
+	t.Helper()
+	store, refs, root, ok := openObjectStores()
+	if !ok {
+		t.Fatal("seedObjectModelExecution: no object graph (seed a revision first)")
+	}
+	revID, rok := objResolveRevisionRef(store, refs, checksum)
+	if !rok {
+		t.Fatalf("seedObjectModelExecution: resolve revision %q", checksum)
+	}
+	ctx := context.Background()
+	mgr := runworktree.NewManager(store, refs, root)
+	wt, err := mgr.Open(ctx, runworktree.OpenInput{
+		ExecutionID:  "exec-" + execKey,
+		ExecutionKey: execKey,
+		RevisionID:   revID,
+	})
+	if err != nil {
+		t.Fatalf("open worktree: %v", err)
+	}
+	if err := wt.Project([]runworktree.ProjectedJob{
+		{JobID: "svc@deploy", Status: nodes.StatusSucceeded},
+	}); err != nil {
+		t.Fatalf("project jobs: %v", err)
+	}
+	if _, err := wt.Seal(ctx, nodes.StatusSucceeded, time.Time{}); err != nil {
+		t.Fatalf("seal execution: %v", err)
+	}
 }
 
 // captureStdout runs fn while os.Stdout is piped into a buffer; returns
@@ -123,7 +159,8 @@ func seedRevisionFirstWorkspace(t *testing.T, dir string) string {
 
 func TestGetPlans_RevisionFirstTable_Text(t *testing.T) {
 	dir := withTempIntentRoot(t)
-	revKey := seedRevisionFirstWorkspace(t, dir)
+	checksum, humanKey := seedObjectModelRevision(t, dir)
+	seedObjectModelExecution(t, checksum, "run-001")
 
 	prevFmt := getOutputFormat
 	getOutputFormat = ""
@@ -133,17 +170,18 @@ func TestGetPlans_RevisionFirstTable_Text(t *testing.T) {
 	if !strings.Contains(out, "REVISION") || !strings.Contains(out, "TRIGGER") || !strings.Contains(out, "LATEST EXEC") {
 		t.Fatalf("revision-first header missing in output:\n%s", out)
 	}
-	if !strings.Contains(out, revKey) {
-		t.Fatalf("revKey %q missing in table:\n%s", revKey, out)
+	if !strings.Contains(out, humanKey) {
+		t.Fatalf("revKey %q missing in table:\n%s", humanKey, out)
 	}
-	if !strings.Contains(out, "run-001") || !strings.Contains(out, "completed") {
+	if !strings.Contains(out, "run-001") || !strings.Contains(out, "succeeded") {
 		t.Fatalf("latest exec summary not rendered:\n%s", out)
 	}
 }
 
 func TestGetPlans_RevisionFirstTable_JSON(t *testing.T) {
 	dir := withTempIntentRoot(t)
-	revKey := seedRevisionFirstWorkspace(t, dir)
+	checksum, humanKey := seedObjectModelRevision(t, dir)
+	seedObjectModelExecution(t, checksum, "run-001")
 
 	prevFmt := getOutputFormat
 	getOutputFormat = "json"
@@ -166,13 +204,16 @@ func TestGetPlans_RevisionFirstTable_JSON(t *testing.T) {
 	if len(doc.Revisions) != 1 {
 		t.Fatalf("want 1 revision row, got %d", len(doc.Revisions))
 	}
-	if doc.Revisions[0].RevisionKey != revKey {
-		t.Fatalf("revisionKey = %q want %q", doc.Revisions[0].RevisionKey, revKey)
+	if doc.Revisions[0].RevisionKey != humanKey {
+		t.Fatalf("revisionKey = %q want %q", doc.Revisions[0].RevisionKey, humanKey)
 	}
 	if doc.Revisions[0].Jobs != 5 {
 		t.Errorf("jobs = %d want 5", doc.Revisions[0].Jobs)
 	}
-	if doc.Revisions[0].LatestExec != "run-001" || doc.Revisions[0].LatestStatus != "completed" {
+	if doc.Revisions[0].Trigger != "system.manual" {
+		t.Errorf("trigger = %q want system.manual", doc.Revisions[0].Trigger)
+	}
+	if doc.Revisions[0].LatestExec != "run-001" || doc.Revisions[0].LatestStatus != "succeeded" {
 		t.Errorf("latestExec/status = %q/%q", doc.Revisions[0].LatestExec, doc.Revisions[0].LatestStatus)
 	}
 	if !strings.HasSuffix(out, "\n") {
@@ -197,9 +238,9 @@ func TestGetPlans_NoRevisions_Empty(t *testing.T) {
 
 func TestGetPlans_MixedWorkspace_PrefersRevisionFirst(t *testing.T) {
 	dir := withTempIntentRoot(t)
-	// A stray legacy plans file on disk must not disrupt the revision-first
-	// table: the legacy .orun/plans/ store is no longer read post-cutover, so
-	// `get plans` resolves entirely from revisions/.
+	// A stray legacy plans file on disk must not disrupt the object-model
+	// revision table: the legacy .orun/plans/ store is no longer read, so
+	// `get plans` resolves entirely from the object graph.
 	plansDir := filepath.Join(dir, ".orun", "plans")
 	if err := os.MkdirAll(plansDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -207,15 +248,15 @@ func TestGetPlans_MixedWorkspace_PrefersRevisionFirst(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(plansDir, "latest.json"), []byte(`{"metadata":{"name":"legacy"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	revKey := seedRevisionFirstWorkspace(t, dir)
+	_, humanKey := seedObjectModelRevision(t, dir)
 
 	prevFmt := getOutputFormat
 	getOutputFormat = ""
 	t.Cleanup(func() { getOutputFormat = prevFmt })
 
 	out := captureStdout(t, getPlans)
-	if !strings.Contains(out, "TRIGGER") || !strings.Contains(out, revKey) {
-		t.Fatalf("mixed workspace should prefer revision-first table:\n%s", out)
+	if !strings.Contains(out, "TRIGGER") || !strings.Contains(out, humanKey) {
+		t.Fatalf("mixed workspace should render the object-model revision table:\n%s", out)
 	}
 }
 
