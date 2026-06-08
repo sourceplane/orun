@@ -192,7 +192,23 @@ func (m BrowseModel) View() string {
 	b.WriteString(" " + header)
 	b.WriteString("\n")
 
-	for i, c := range rows {
+	// Viewport: clip rows to the available height and scroll with the cursor so
+	// the list never overflows past the top of the stage. Mirrors activity.go.
+	maxRows := m.Height - 6
+	if maxRows < 3 {
+		maxRows = 3
+	}
+	start := 0
+	if m.Cursor >= maxRows {
+		start = m.Cursor - maxRows + 1
+	}
+	end := start + maxRows
+	if end > len(rows) {
+		end = len(rows)
+	}
+
+	for i := start; i < end; i++ {
+		c := rows[i]
 		glyph := theme.StatusGlyph(c.LastRunStatus)
 		changedMark := "   "
 		switch c.ChangeKind {

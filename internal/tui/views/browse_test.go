@@ -1,9 +1,12 @@
 package views
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/sourceplane/orun/internal/tui/services"
 )
@@ -77,6 +80,45 @@ func TestBrowse_GComposes(t *testing.T) {
 	}
 	if _, ok := cmd().(ComponentEnterMsg); !ok {
 		t.Fatalf("g emitted %T, want ComponentEnterMsg", cmd())
+	}
+}
+
+// TestBrowse_ViewClipsToHeight guards against the catalog overflowing past the
+// top of the stage: with more components than fit, the rendered View must stay
+// within the height budget instead of pushing rows off-screen.
+func TestBrowse_ViewClipsToHeight(t *testing.T) {
+	comps := make([]services.ComponentSummary, 0, 50)
+	for i := 0; i < 50; i++ {
+		comps = append(comps, services.ComponentSummary{Name: fmt.Sprintf("comp-%02d", i)})
+	}
+	m := browseWith(comps...)
+	m.Width = 120
+	m.Height = 20
+
+	out := m.View()
+	if h := lipgloss.Height(out); h > m.Height {
+		t.Fatalf("View rendered %d lines, exceeds height budget %d", h, m.Height)
+	}
+}
+
+// TestBrowse_ViewScrollsToCursor verifies the viewport follows the cursor so the
+// selected row stays visible even when it sits far past the first screenful.
+func TestBrowse_ViewScrollsToCursor(t *testing.T) {
+	comps := make([]services.ComponentSummary, 0, 50)
+	for i := 0; i < 50; i++ {
+		comps = append(comps, services.ComponentSummary{Name: fmt.Sprintf("comp-%02d", i)})
+	}
+	m := browseWith(comps...)
+	m.Width = 120
+	m.Height = 20
+	m.Cursor = 49 // last row
+
+	out := m.View()
+	if !strings.Contains(out, "comp-49") {
+		t.Fatal("View did not scroll to show the cursor row comp-49")
+	}
+	if lipgloss.Height(out) > m.Height {
+		t.Fatalf("View exceeds height budget %d while scrolled", m.Height)
 	}
 }
 
