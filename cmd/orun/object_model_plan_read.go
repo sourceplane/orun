@@ -10,6 +10,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
 )
@@ -68,6 +69,106 @@ func objResolveRevisionRef(store *objectstore.LocalStore, refs *refstore.LocalRe
 		}
 	}
 	return "", false
+}
+
+// objRevisionDetail is an object-model revision plus the newest trigger that
+// produced it, for `orun describe revision|trigger`.
+type objRevisionDetail struct {
+	RevID      objectstore.ObjectID
+	Revision   nodes.PlanRevision
+	Trigger    nodes.TriggerOccurrence
+	HasTrigger bool
+	FromLatest bool // resolved via revisions/latest (ref "" or "latest")
+}
+
+// objResolveRevisionDetail resolves a revision ref (latest/""/<checksum>/<prefix>
+// — the same grammar describePlan accepts) to its PlanRevision record and the
+// newest trigger occurrence pointing at it. ok=false ⇒ no object graph or the
+// ref did not resolve.
+func objResolveRevisionDetail(ref string) (objRevisionDetail, bool) {
+	store, refs, _, ok := openObjectStores()
+	if !ok {
+		return objRevisionDetail{}, false
+	}
+	revID, ok := objResolveRevisionRef(store, refs, ref)
+	if !ok {
+		return objRevisionDetail{}, false
+	}
+	rev, ok := objRevisionMeta(store, revID)
+	if !ok {
+		return objRevisionDetail{}, false
+	}
+	trimmed := strings.TrimSpace(ref)
+	d := objRevisionDetail{
+		RevID:      revID,
+		Revision:   rev,
+		FromLatest: trimmed == "" || trimmed == "latest",
+	}
+	if trg, tok := objTriggerForRevision(store, refs, revID); tok {
+		d.Trigger = trg
+		d.HasTrigger = true
+	}
+	return d, true
+}
+
+// objRevisionMeta reads revision.json (the PlanRevision record) from a revision
+// tree.
+func objRevisionMeta(store *objectstore.LocalStore, revID objectstore.ObjectID) (nodes.PlanRevision, bool) {
+	ctx := context.Background()
+	entries, err := store.GetTree(ctx, revID)
+	if err != nil {
+		return nodes.PlanRevision{}, false
+	}
+	for _, e := range entries {
+		if e.Name != "revision.json" {
+			continue
+		}
+		_, body, gerr := store.Get(ctx, e.ID)
+		if gerr != nil {
+			return nodes.PlanRevision{}, false
+		}
+		rev, derr := nodes.Decode[nodes.PlanRevision](body)
+		if derr != nil {
+			return nodes.PlanRevision{}, false
+		}
+		return rev, true
+	}
+	return nodes.PlanRevision{}, false
+}
+
+// objTriggerForRevision returns the newest trigger occurrence whose RevisionID
+// points at revID, scanning the per-name triggers/<name>/latest refs. A revision
+// reused across triggers (dedup) surfaces its most recent producer.
+func objTriggerForRevision(store *objectstore.LocalStore, refs *refstore.LocalRefStore, revID objectstore.ObjectID) (nodes.TriggerOccurrence, bool) {
+	ctx := context.Background()
+	names, err := refs.List(ctx, "triggers/")
+	if err != nil {
+		return nodes.TriggerOccurrence{}, false
+	}
+	var best nodes.TriggerOccurrence
+	found := false
+	for _, name := range names {
+		r, rerr := refs.Read(ctx, name)
+		if rerr != nil {
+			continue
+		}
+		_, body, gerr := store.Get(ctx, objectstore.ObjectID(r.Target))
+		if gerr != nil {
+			continue
+		}
+		trg, derr := nodes.Decode[nodes.TriggerOccurrence](body)
+		if derr != nil {
+			continue
+		}
+		if trg.RevisionID != string(revID) {
+			continue
+		}
+		if !found || trg.CreatedAt.After(best.CreatedAt) {
+			best = trg
+			found = true
+		}
+	}
+	return best, found
 }
 
 // objPlanFromRevision decodes the compiled plan from a revision tree.
