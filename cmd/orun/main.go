@@ -21,7 +21,7 @@ import (
 	"github.com/sourceplane/orun/internal/planner"
 	"github.com/sourceplane/orun/internal/preset"
 	"github.com/sourceplane/orun/internal/render"
-	"github.com/sourceplane/orun/internal/revision"
+	"github.com/sourceplane/orun/internal/revkey"
 	"github.com/sourceplane/orun/internal/runbundle"
 	"github.com/sourceplane/orun/internal/trigger"
 	"github.com/sourceplane/orun/internal/triggerctx"
@@ -442,7 +442,7 @@ func generatePlan() error {
 	if err != nil {
 		return fmt.Errorf("compute plan hash: %w", err)
 	}
-	revKey, err := revision.RevisionKey(trig, planHash)
+	revKey, err := revkey.RevisionKey(trig, planHash)
 	if err != nil {
 		return fmt.Errorf("derive revision key: %w", err)
 	}
