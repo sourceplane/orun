@@ -10,9 +10,9 @@ package main
 // rendered as a forest rooted at the component nodes with no incoming edges
 // (out direction) so the output is deterministic and acyclic-friendly.
 //
-// Data source: the persisted dependencies graph
-// (sources/<srcKey>/catalogs/<catKey>/graph/dependencies.json) via the
-// catalogstore.ReadCatalogGraph seam.
+// Data source: the dependencies graph of the object-model catalog
+// (catalogs/current → graph/dependencies.json) via the objcatalog read view
+// (loadObjCatalogView), adapted back to catalogmodel for the renderers.
 
 import (
 	"context"
@@ -22,17 +22,14 @@ import (
 	"strings"
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
-	"github.com/sourceplane/orun/internal/catalogstore"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
 
 var catalogTreeDirectionFlag string
 
-// catalogGraphKindDependencies is the bare graph-kind name for the dependency
-// graph. catalogstore.ReadCatalogGraph appends the ".json" suffix itself, so
-// callers pass the bare kind (NOT catalogmodel.GraphFileDependencies, which is
-// the on-disk filename including the extension).
+// catalogGraphKindDependencies is the edge-kind key for the dependency graph
+// slice in the objcatalog CatalogView.Graph map.
 const catalogGraphKindDependencies = "dependencies"
 
 // catalogTreeData is the --json payload — the CatalogGraph nodes/edges of the
@@ -96,26 +93,12 @@ func runCatalogTree(ctx context.Context, root string) error {
 		return exitErr(1, "invalid --direction %q (want out|in|both)", catalogTreeDirectionFlag)
 	}
 
-	sel, err := parseCatalogSelector()
+	view, err := loadObjCatalogView(ctx)
 	if err != nil {
 		return err
 	}
 
-	stateStore, _, err := openLocalStateStore()
-	if err != nil {
-		return exitErr(3, "open state store: %w", err)
-	}
-	store := catalogstore.New(stateStore)
-
-	cat, err := store.ResolveCatalog(ctx, sel)
-	if err != nil {
-		return catalogReadExit(err, "resolve catalog")
-	}
-
-	graph, err := catalogstore.ReadCatalogGraph(ctx, stateStore, cat.SourceSnapshotKey, cat.CatalogSnapshotKey, catalogGraphKindDependencies)
-	if err != nil {
-		return catalogReadExit(err, "read dependency graph")
-	}
+	graph := objGraphToCatalogModel(view.Graph[catalogGraphKindDependencies])
 
 	nodes, edges := filterGraph(graph, root, dir)
 
