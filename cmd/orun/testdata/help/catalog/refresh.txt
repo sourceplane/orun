@@ -26,7 +26,6 @@ Flags:
       --no-infer                  Disable the inference layer (stage 6)
       --source string             Alias for --catalog-source
       --strict                    Alias for --catalog-strict
-      --sync                      Refresh locally, then attempt remote sync (Phase 2: no remote configured — prints the not-configured notice and exits 0)
 
 Global Flags:
       --all                 Disable CWD-based component scoping; process all components
