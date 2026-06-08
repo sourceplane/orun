@@ -4,20 +4,20 @@ package main
 // resolved catalog snapshots (a base and a head) and report the
 // component-level and graph-level differences (cli-surface.md §6).
 //
-// The base/head selectors reuse the shared ref-selector grammar
-// (current|main|latest|branches/<name>|prs/<n>|pr-<n>|cat-<key>) parsed by
-// catalogstore.ParseRefSelector — the same grammar `--source` accepts.
-// Defaults: --base main, --head current (the common "what changed on my
-// branch vs main" question).
+// The base/head selectors reuse the shared object-model catalog ref grammar
+// (current|main|latest|branches/<name>|prs/<n>|<catalog-id>) resolved by
+// objCatalogRef — the same grammar `--source` accepts. Defaults: --base main,
+// --head current (the common "what changed on my branch vs main" question).
 //
-// The command is glue only: it resolves each side to a catalogdiff.Snapshot
-// (enumerated manifests + the five relationship graphs) and hands the pair to
-// the pure internal/catalogdiff engine. All comparison logic — set-vs-list
-// field rules, graph node/edge diffing, deterministic ordering — lives there.
+// The command is glue only: it loads each side as an object-model catalog view,
+// reconstructs a catalogdiff.Snapshot (typed manifests + the relationship
+// graphs) from it, and hands the pair to the pure internal/catalogdiff engine.
+// All comparison logic — set-vs-list field rules, graph node/edge diffing,
+// deterministic ordering — lives there.
 //
 // Exit 0 even when differences exist (a diff is a successful comparison, not a
 // failure). Non-zero only for real errors: exit 1 invalid selector, exit 3
-// StateStore failure, exit 6 a catalog/component that does not resolve.
+// store failure, exit 6 a catalog/component that does not resolve.
 
 import (
 	"context"
@@ -28,8 +28,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/catalogdiff"
 	"github.com/sourceplane/orun/internal/catalogmodel"
-	"github.com/sourceplane/orun/internal/catalogstore"
-	"github.com/sourceplane/orun/internal/statestore"
+	"github.com/sourceplane/orun/internal/objcatalog"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -119,28 +118,30 @@ func runCatalogDiff(ctx context.Context, component string) error {
 		headStr = catalogmodel.RefNameCurrent
 	}
 
-	baseSel, err := catalogstore.ParseRefSelector(baseStr, "")
+	// Resolve both selectors to object-model catalog refs first, so a malformed
+	// --base/--head fails fast with exit 1 before any store work.
+	baseRef, err := objCatalogRef(baseStr, "")
 	if err != nil {
-		return exitErr(1, "invalid --base selector: %w", err)
+		return err
 	}
-	headSel, err := catalogstore.ParseRefSelector(headStr, "")
+	headRef, err := objCatalogRef(headStr, "")
 	if err != nil {
-		return exitErr(1, "invalid --head selector: %w", err)
+		return err
 	}
 
-	stateStore, _, err := openLocalStateStore()
+	store, refs, _, err := openObjectModel()
 	if err != nil {
-		return exitErr(3, "open state store: %w", err)
+		return exitErr(3, "open object model: %w", err)
 	}
-	store := catalogstore.New(stateStore)
+	reader := objcatalog.New(store, refs)
 
-	baseSnap, baseCat, err := loadDiffSnapshot(ctx, store, stateStore, baseSel)
+	baseSnap, baseView, err := loadObjDiffSnapshot(ctx, reader, baseStr, baseRef)
 	if err != nil {
-		return catalogReadExit(err, "resolve base catalog")
+		return err
 	}
-	headSnap, headCat, err := loadDiffSnapshot(ctx, store, stateStore, headSel)
+	headSnap, headView, err := loadObjDiffSnapshot(ctx, reader, headStr, headRef)
 	if err != nil {
-		return catalogReadExit(err, "resolve head catalog")
+		return err
 	}
 
 	result := catalogdiff.Diff(baseSnap, headSnap)
@@ -152,8 +153,8 @@ func runCatalogDiff(ctx context.Context, component string) error {
 	}
 
 	data := catalogDiffData{
-		Base:         endpointFor(baseStr, baseCat),
-		Head:         endpointFor(headStr, headCat),
+		Base:         objEndpointFor(baseStr, baseView),
+		Head:         objEndpointFor(headStr, headView),
 		Component:    component,
 		Changed:      result.Changed,
 		Added:        result.Added,
@@ -167,46 +168,31 @@ func runCatalogDiff(ctx context.Context, component string) error {
 	return renderCatalogDiffText(data)
 }
 
-// loadDiffSnapshot resolves a catalog by selector and assembles the
-// catalogdiff.Snapshot: every component manifest plus the five relationship
-// graphs. An absent graph kind is treated as empty (the diff engine handles
-// absent-vs-empty without spurious changes) rather than a hard error.
-func loadDiffSnapshot(ctx context.Context, store catalogstore.Store, stateStore statestore.StateStore, sel catalogstore.RefSelector) (catalogdiff.Snapshot, catalogmodel.CatalogSnapshot, error) {
-	cat, err := store.ResolveCatalog(ctx, sel)
+// loadObjDiffSnapshot loads one object-model catalog view by ref and assembles
+// the catalogdiff.Snapshot: every component reconstructed as a typed manifest
+// (buildObjManifest) plus the relationship graphs the view carries. The diff
+// engine compares only Spec/Metadata/graph fields — all faithfully recovered —
+// so the object-model Source/Runtime gaps never surface as spurious changes.
+func loadObjDiffSnapshot(ctx context.Context, reader *objcatalog.Reader, selector, ref string) (catalogdiff.Snapshot, objcatalog.CatalogView, error) {
+	view, err := reader.Load(ctx, ref)
 	if err != nil {
-		return catalogdiff.Snapshot{}, catalogmodel.CatalogSnapshot{}, err
-	}
-	manifests, err := catalogstore.EnumerateComponentManifests(ctx, stateStore, cat)
-	if err != nil {
-		return catalogdiff.Snapshot{}, cat, err
-	}
-	graphs, err := loadCatalogGraphs(ctx, stateStore, cat)
-	if err != nil {
-		return catalogdiff.Snapshot{}, cat, err
-	}
-	return catalogdiff.Snapshot{Components: manifests, Graphs: graphs}, cat, nil
-}
-
-// catalogDiffGraphKinds is the closed set of relationship graphs diffed,
-// matching catalogdiff's internal kind list.
-var catalogDiffGraphKinds = []string{"dependencies", "systems", "apis", "resources", "owners"}
-
-// loadCatalogGraphs reads every relationship graph for a catalog. A missing
-// graph (chained statestore.ErrNotFound) is mapped to an absent map entry, not
-// an error; any other read failure is surfaced.
-func loadCatalogGraphs(ctx context.Context, stateStore statestore.StateStore, cat catalogmodel.CatalogSnapshot) (map[string]catalogmodel.CatalogGraph, error) {
-	out := make(map[string]catalogmodel.CatalogGraph, len(catalogDiffGraphKinds))
-	for _, kind := range catalogDiffGraphKinds {
-		g, err := catalogstore.ReadCatalogGraph(ctx, stateStore, cat.SourceSnapshotKey, cat.CatalogSnapshotKey, kind)
-		if err != nil {
-			if errorsIsNotFound(err) {
-				continue
-			}
-			return nil, err
+		if errors.Is(err, objcatalog.ErrNotFound) {
+			return catalogdiff.Snapshot{}, objcatalog.CatalogView{},
+				exitErr(6, "resolve catalog %q: not found (run 'orun catalog refresh' first): %w", selector, err)
 		}
-		out[kind] = g
+		return catalogdiff.Snapshot{}, objcatalog.CatalogView{}, exitErr(3, "resolve catalog %q: %w", selector, err)
 	}
-	return out, nil
+	snap := catalogdiff.Snapshot{
+		Components: make([]catalogmodel.ComponentManifest, 0, len(view.Components)),
+		Graphs:     make(map[string]catalogmodel.CatalogGraph, len(view.Graph)),
+	}
+	for _, c := range view.Components {
+		snap.Components = append(snap.Components, buildObjManifest(view, c))
+	}
+	for kind, gv := range view.Graph {
+		snap.Graphs[kind] = objGraphToCatalogModel(gv)
+	}
+	return snap, view, nil
 }
 
 // diffHasComponent reports whether the named component (bare name or full key)
@@ -223,20 +209,14 @@ func diffHasComponent(base, head catalogdiff.Snapshot, name string) bool {
 	return false
 }
 
-// endpointFor builds the JSON endpoint record from the selector string and the
-// resolved catalog.
-func endpointFor(selector string, cat catalogmodel.CatalogSnapshot) catalogDiffEndpoint {
+// objEndpointFor builds the JSON endpoint record from the selector string and
+// the resolved object-model catalog view.
+func objEndpointFor(selector string, view objcatalog.CatalogView) catalogDiffEndpoint {
 	return catalogDiffEndpoint{
 		Selector:           selector,
-		SourceSnapshotKey:  cat.SourceSnapshotKey,
-		CatalogSnapshotKey: cat.CatalogSnapshotKey,
+		SourceSnapshotKey:  view.SourceID,
+		CatalogSnapshotKey: objCatalogSnapshotKey(view),
 	}
-}
-
-// errorsIsNotFound reports whether err is (or wraps) the statestore not-found
-// sentinel — used to treat an absent graph as empty.
-func errorsIsNotFound(err error) bool {
-	return errors.Is(err, statestore.ErrNotFound)
 }
 
 func renderCatalogDiffText(d catalogDiffData) error {
