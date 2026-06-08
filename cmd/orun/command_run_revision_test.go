@@ -17,6 +17,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,7 @@ import (
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/statestore"
+	"github.com/sourceplane/orun/internal/triggerctx"
 )
 
 // withTempIntentRoot points the global storeDir() helper at a fresh temp
@@ -258,18 +260,29 @@ func TestSetupRevisionExecution_RevisionFlagShortCircuit(t *testing.T) {
 	}
 }
 
-func TestResolveAndLoadPlan_RevisionPrefixUsesGlobalIndex(t *testing.T) {
+func TestResolveAndLoadPlan_RevisionChecksumPrefix(t *testing.T) {
 	dir := withTempIntentRoot(t)
 	resetRunFlags(t)
 
-	stateStore, _ := statestore.NewLocalStore(statestore.LocalConfig{Root: filepath.Join(dir, ".orun")})
+	// Seed the object-model revision graph the way `orun plan` does: a plan
+	// stamped with its revision metadata, published under a by-hash checksum.
+	checksum := "abcdef0123456789abcdef0123456789"
+	humanKey := "rev-manual-abcdef0-pdeadbeef"
 	plan := minimalPlan(t)
-	revKey, err := synthesizeRevisionForRun(context.Background(), stateStore, plan, nil)
+	plan.Metadata.Revision = &model.PlanRevisionMeta{Key: humanKey, PlanHash: checksum}
+	planBytes, err := json.Marshal(plan)
 	if err != nil {
-		t.Fatalf("synthesizeRevisionForRun: %v", err)
+		t.Fatalf("marshal plan: %v", err)
 	}
+	trig := triggerctx.TriggerOccurrence{
+		TriggerName: "system.manual",
+		TriggerKey:  "trg-manual-abc",
+		PlanScope:   triggerctx.PlanScope{Mode: "full"},
+	}
+	writeObjectModelPlan(filepath.Join(dir, ".orun"), plan, planBytes, checksum, humanKey, trig, planCatalogResolution{})
 
-	runPlanRef = revKey[:len("rev-manual-")+4]
+	// Resolve by a checksum prefix — the object-model revision prefix lookup.
+	runPlanRef = checksum[:10]
 	got, err := resolveAndLoadPlan()
 	if err != nil {
 		t.Fatalf("resolveAndLoadPlan(%q): %v", runPlanRef, err)
@@ -277,8 +290,34 @@ func TestResolveAndLoadPlan_RevisionPrefixUsesGlobalIndex(t *testing.T) {
 	if got.Metadata.Name != "test-plan" {
 		t.Fatalf("plan name = %q; want test-plan", got.Metadata.Name)
 	}
-	if runResolvedRevisionArg != revKey {
-		t.Fatalf("runResolvedRevisionArg = %q; want %q", runResolvedRevisionArg, revKey)
+	if runResolvedRevisionArg != humanKey {
+		t.Fatalf("runResolvedRevisionArg = %q; want %q", runResolvedRevisionArg, humanKey)
+	}
+}
+
+func TestResolveAndLoadPlan_RevisionHumanKey(t *testing.T) {
+	dir := withTempIntentRoot(t)
+	resetRunFlags(t)
+
+	checksum := "0011223344556677001122334455667700112233"
+	humanKey := "rev-manual-0011223-pcafebabe"
+	plan := minimalPlan(t)
+	plan.Metadata.Revision = &model.PlanRevisionMeta{Key: humanKey, PlanHash: checksum}
+	planBytes, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal plan: %v", err)
+	}
+	trig := triggerctx.TriggerOccurrence{TriggerName: "system.manual", TriggerKey: "trg-manual-x", PlanScope: triggerctx.PlanScope{Mode: "full"}}
+	writeObjectModelPlan(filepath.Join(dir, ".orun"), plan, planBytes, checksum, humanKey, trig, planCatalogResolution{})
+
+	// `orun run rev-<key>` resolves by the revision's human key off the record.
+	runPlanRef = humanKey
+	got, err := resolveAndLoadPlan()
+	if err != nil {
+		t.Fatalf("resolveAndLoadPlan(%q): %v", runPlanRef, err)
+	}
+	if got.Metadata.Name != "test-plan" {
+		t.Fatalf("plan name = %q; want test-plan", got.Metadata.Name)
 	}
 }
 

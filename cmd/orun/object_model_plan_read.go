@@ -58,16 +58,29 @@ func objResolveRevisionRef(store *objectstore.LocalStore, refs *refstore.LocalRe
 	if r, err := refs.Read(ctx, revByHashPrefix+sanitizeRevSeg(ref)); err == nil {
 		return objectstore.ObjectID(r.Target), true
 	}
-	// Prefix scan over by-hash refs.
+	// Prefix scan over by-hash refs (a checksum prefix).
 	names, err := refs.List(ctx, revByHashPrefix)
-	if err == nil {
-		for _, name := range names {
-			short := strings.TrimPrefix(name, revByHashPrefix)
-			if strings.HasPrefix(short, sanitizeRevSeg(ref)) {
-				if r, rerr := refs.Read(ctx, name); rerr == nil {
-					return objectstore.ObjectID(r.Target), true
-				}
+	if err != nil {
+		return "", false
+	}
+	for _, name := range names {
+		short := strings.TrimPrefix(name, revByHashPrefix)
+		if strings.HasPrefix(short, sanitizeRevSeg(ref)) {
+			if r, rerr := refs.Read(ctx, name); rerr == nil {
+				return objectstore.ObjectID(r.Target), true
 			}
+		}
+	}
+	// Human-key match (e.g. `orun run rev-<key>`): resolve by the revision's
+	// display key off the revision record.
+	for _, name := range names {
+		r, rerr := refs.Read(ctx, name)
+		if rerr != nil {
+			continue
+		}
+		revID := objectstore.ObjectID(r.Target)
+		if rev, ok := objRevisionMeta(store, revID); ok && rev.HumanKey == ref {
+			return revID, true
 		}
 	}
 	return "", false
