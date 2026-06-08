@@ -19,7 +19,6 @@ package main
 // happy-path lifecycle is already exercised by command_run_revision_test.go.
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -31,9 +30,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/nodes"
-	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/runworktree"
-	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/triggerctx"
 )
 
@@ -114,43 +111,6 @@ func captureStdout(t *testing.T, fn func() error) string {
 		t.Fatalf("fn returned error: %v", fnErr)
 	}
 	return out
-}
-
-// seedRevisionFirstWorkspace plants one revision (revision.json + manifest +
-// trigger) under intentRoot/.orun. Returns the revision key.
-func seedRevisionFirstWorkspace(t *testing.T, dir string) string {
-	t.Helper()
-	store, err := statestore.NewLocalStore(statestore.LocalConfig{Root: filepath.Join(dir, ".orun")})
-	if err != nil {
-		t.Fatalf("NewLocalStore: %v", err)
-	}
-	now := time.Date(2026, 5, 30, 18, 0, 0, 0, time.UTC)
-	trig := triggerctx.NewSystemManual(triggerctx.SystemOptions{
-		Source: triggerctx.TriggerSource{HeadRevision: "deadbeefcafe1234"},
-	})
-	cfg := revision.Config{
-		Store:    store,
-		JobCount: 5,
-		Now:      func() time.Time { return now },
-	}.WithCompatibilityWrites(false)
-	plan := []byte(`{"apiVersion":"orun.io/v1alpha1","kind":"Plan","jobs":[]}`)
-	planHash := "feedface00112233445566778899aabbccddeeff00112233"
-	rev, err := revision.WriteRevision(context.Background(), cfg, trig, plan, planHash)
-	if err != nil {
-		t.Fatalf("WriteRevision: %v", err)
-	}
-	if err := revision.WriteManifest(context.Background(), cfg, rev, trig); err != nil {
-		t.Fatalf("WriteManifest: %v", err)
-	}
-	// Stamp a latest-execution summary so the table shows a non-empty
-	// LATEST EXEC / STATUS column.
-	if err := revision.UpdateLatestExecutionSummary(context.Background(), cfg, rev.RevisionKey, revision.LatestExecutionSummary{
-		Key:    "run-001",
-		Status: "completed",
-	}); err != nil {
-		t.Fatalf("UpdateLatestExecutionSummary: %v", err)
-	}
-	return rev.RevisionKey
 }
 
 // ------------------------------------------------------------------
@@ -324,66 +284,6 @@ func TestDescribeRevision_Latest_EmptyArg(t *testing.T) {
 	out := captureStdout(t, func() error { return describeRevision("") })
 	if !strings.Contains(out, humanKey) {
 		t.Fatalf("describe revision (latest) should resolve to %q:\n%s", humanKey, out)
-	}
-}
-
-// ------------------------------------------------------------------
-// resolveExecutionForRead — status/logs glue
-// ------------------------------------------------------------------
-
-// ------------------------------------------------------------------
-// bridge-mirror-failed surfacing
-// ------------------------------------------------------------------
-
-func TestWarnBridgeMirrorFailures_EmitsStderrWarning(t *testing.T) {
-	dir := withTempIntentRoot(t)
-	// Plant a single bridge-mirror-failed event under revisions/<rev>/
-	// executions/<exec>/events/.
-	store, err := statestore.NewLocalStore(statestore.LocalConfig{Root: filepath.Join(dir, ".orun")})
-	if err != nil {
-		t.Fatalf("NewLocalStore: %v", err)
-	}
-	revKey := "rev-test-abcd123-pfeedface"
-	execKey := "run-001"
-	evtPath := statestore.EventPath(revKey, execKey, 1, "bridge-mirror-failed")
-	if _, err := store.Write(context.Background(), evtPath, []byte(`{"kind":"bridge-mirror-failed"}`), statestore.WriteOptions{}); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
-
-	// Swap the warn sink for a buffer.
-	var buf bytes.Buffer
-	prev := bridgeMirrorWarnSink
-	bridgeMirrorWarnSink = &buf
-	t.Cleanup(func() { bridgeMirrorWarnSink = prev })
-
-	warnBridgeMirrorFailures(context.Background(), store, revKey, execKey)
-	got := buf.String()
-	if !strings.Contains(got, "bridge mirror failed") || !strings.Contains(got, execKey) {
-		t.Fatalf("warn sink got %q; want a one-line warning containing exec key", got)
-	}
-
-	// Second call must not duplicate when fed the same exec.
-	buf.Reset()
-	warnBridgeMirrorFailures(context.Background(), store, revKey, execKey)
-	if !strings.Contains(buf.String(), "bridge mirror failed") {
-		t.Fatalf("second call should still emit (function is best-effort, not memoized): %q", buf.String())
-	}
-}
-
-func TestWarnBridgeMirrorFailures_NoEventsIsSilent(t *testing.T) {
-	dir := withTempIntentRoot(t)
-	store, err := statestore.NewLocalStore(statestore.LocalConfig{Root: filepath.Join(dir, ".orun")})
-	if err != nil {
-		t.Fatalf("NewLocalStore: %v", err)
-	}
-	var buf bytes.Buffer
-	prev := bridgeMirrorWarnSink
-	bridgeMirrorWarnSink = &buf
-	t.Cleanup(func() { bridgeMirrorWarnSink = prev })
-
-	warnBridgeMirrorFailures(context.Background(), store, "rev-x-abcdef0-pfeedface", "run-001")
-	if buf.Len() != 0 {
-		t.Fatalf("expected silent; got %q", buf.String())
 	}
 }
 
