@@ -80,3 +80,9 @@ the production-path indirection for error-wrapping branches.
 efforts' own designs. The command was removed in the object-model cutover; those
 specs are stale with respect to it, but reconciling them belongs to those
 efforts, not this one.
+
+The remaining **legacy catalog/revision store** (`internal/catalogstore` →
+`internal/statestore`, plus `internal/revision` / `internal/executionstate` — the
+Phase‑1/2 stack still dual-written on `orun run` and backing `orun catalog *`) is
+**not** part of this object-model roadmap either. Its retirement is planned
+separately in `specs/orun-legacy-retirement/` (the promoted D‑7 / L‑3 follow-on).
