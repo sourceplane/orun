@@ -3,6 +3,7 @@ package views
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/tui/services"
@@ -68,6 +69,112 @@ func TestActivity_DrillDownAndPop(t *testing.T) {
 	// can route the event up to global navBack.
 	if !m.AtRoot() {
 		t.Fatal("expected AtRoot at LevelIndex")
+	}
+}
+
+// TestActivity_HistoricalRunRequestsDetailOnDrillIn verifies that opening a
+// plan-less historical run emits a load request (so the root model can hydrate
+// it) and that, until hydrated, the job page reports the steps as unavailable.
+func TestActivity_HistoricalRunRequestsDetailOnDrillIn(t *testing.T) {
+	m := NewActivityModel()
+	m = m.SetSize(160, 40)
+	m = m.SetRuns(nil, []services.RunSummary{
+		{ExecID: "exec-h", Status: "completed", Components: []string{"cli"}},
+	})
+
+	// index → run should ask for the run's detail.
+	m, cmd := m.Update(keyMsg("enter"))
+	if m.Level != LevelRun {
+		t.Fatalf("after enter want LevelRun got %v", m.Level)
+	}
+	if cmd == nil {
+		t.Fatal("drilling into a historical run should emit a detail-load cmd")
+	}
+	msg, ok := cmd().(ActivityLoadRunDetailMsg)
+	if !ok {
+		t.Fatalf("expected ActivityLoadRunDetailMsg, got %T", cmd())
+	}
+	if msg.ExecID != "exec-h" {
+		t.Fatalf("load request exec = %q, want exec-h", msg.ExecID)
+	}
+
+	// run → job: with no plan yet, the job page must report unavailability.
+	m, _ = m.Update(keyMsg("enter"))
+	if got := m.renderJobPage(); !strings.Contains(got, "step list unavailable") {
+		t.Fatalf("plan-less job page should show unavailable hint, got:\n%s", got)
+	}
+}
+
+// TestActivity_SetRunDetailEnablesStepDrilldown verifies that once a historical
+// run's plan + statuses are merged in, its steps enumerate and the user can
+// drill all the way into a step (which kicks off log tailing).
+func TestActivity_SetRunDetailEnablesStepDrilldown(t *testing.T) {
+	m := NewActivityModel()
+	m = m.SetSize(160, 40)
+	m = m.SetRuns(nil, []services.RunSummary{
+		{ExecID: "exec-h", Status: "completed", Components: []string{"cli"}},
+	})
+
+	plan := &model.Plan{Jobs: []model.PlanJob{
+		{ID: "j1", Component: "cli", Steps: []model.PlanStep{
+			{ID: "s1", Run: "echo hi"},
+			{ID: "s2", Run: "echo bye"},
+		}},
+	}}
+	stepRecs := map[string]services.StepInfo{
+		services.StepDetailKey("j1", "s1"): {Status: "completed", Duration: 1200 * time.Millisecond},
+		services.StepDetailKey("j1", "s2"): {Status: "failed", Duration: 800 * time.Millisecond},
+	}
+	m = m.SetRunDetail("exec-h", plan, map[string]string{"j1": "completed"}, stepRecs)
+
+	// index → run → job
+	m, _ = m.Update(keyMsg("enter"))
+	m, _ = m.Update(keyMsg("enter"))
+	if m.Level != LevelJob {
+		t.Fatalf("want LevelJob got %v", m.Level)
+	}
+	if id := m.SelectedJobID(); id != "j1" {
+		t.Fatalf("selected job = %q, want j1", id)
+	}
+	if n := len(m.selectedSteps()); n != 2 {
+		t.Fatalf("hydrated run should enumerate 2 steps, got %d", n)
+	}
+	// The step page now renders per-step status + duration.
+	page := m.renderJobPage()
+	for _, want := range []string{"done", "failed", "1.2s"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("step page missing %q:\n%s", want, page)
+		}
+	}
+	// job → step emits a tail-logs request.
+	_, cmd := m.Update(keyMsg("enter"))
+	if cmd == nil {
+		t.Fatal("drilling into a step should emit a tail-logs cmd")
+	}
+	if _, ok := cmd().(ActivityTailLogsMsg); !ok {
+		t.Fatalf("expected ActivityTailLogsMsg, got %T", cmd())
+	}
+	m, _ = m.Update(keyMsg("enter"))
+	if m.Level != LevelStep {
+		t.Fatalf("after enter at job want LevelStep got %v", m.Level)
+	}
+}
+
+// TestActivity_LoadDetailCmdSkipsLiveAndHydrated ensures we don't issue
+// redundant detail loads for live runs (already carry a plan) or runs that have
+// already been hydrated.
+func TestActivity_LoadDetailCmdSkipsLiveAndHydrated(t *testing.T) {
+	plan := &model.Plan{Jobs: []model.PlanJob{{ID: "j1", Component: "cli"}}}
+
+	live := NewActivityModel().SetRuns(&ActivityRun{ExecID: "live", Live: true, Plan: plan}, nil)
+	if cmd := live.LoadDetailCmd(); cmd != nil {
+		t.Fatal("live run should not request detail")
+	}
+
+	hydrated := NewActivityModel().SetRuns(nil, []services.RunSummary{{ExecID: "exec-h"}})
+	hydrated = hydrated.SetRunDetail("exec-h", plan, nil, nil)
+	if cmd := hydrated.LoadDetailCmd(); cmd != nil {
+		t.Fatal("already-hydrated run should not re-request detail")
 	}
 }
 

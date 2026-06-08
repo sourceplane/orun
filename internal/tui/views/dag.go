@@ -240,13 +240,16 @@ func dagStatusIcon(s string) string {
 	return theme.StyleDim.Render("○")
 }
 
-// pulseGlyph returns a 4-frame braille spinner that advances every 180ms
-// of wall clock. The TUI redraws on every spinner.TickMsg from the root
-// model, so this is enough to give live rows a subtle heartbeat without
-// any state plumbing.
+// pulseGlyph returns a braille spinner frame that advances every 120ms of wall
+// clock. Braille glyphs (U+2800 block) are East-Asian-Narrow, so they are
+// always one terminal cell wide — unlike the circle-quadrant glyphs (◐◓◑◒)
+// which are ambiguous-width and render as TWO cells in many terminals. A
+// mis-measured live glyph makes its row one column too wide, wraps in the
+// terminal, and desyncs the renderer's cursor — leaving ghosted rows. Keeping
+// every animated glyph single-width is what keeps the live view stable.
 func pulseGlyph() string {
-	frames := []string{"◐", "◓", "◑", "◒"}
-	idx := (time.Now().UnixMilli() / 180) % int64(len(frames))
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	idx := (time.Now().UnixMilli() / 120) % int64(len(frames))
 	return frames[idx]
 }
 

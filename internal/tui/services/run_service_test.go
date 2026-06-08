@@ -9,6 +9,42 @@ import (
 	"github.com/sourceplane/orun/internal/model"
 )
 
+// TestRunnerNameForPlan is the regression guard for the cockpit run defect: a
+// component whose steps are authored as GitHub Actions (uses:) must run under
+// the github-actions emulator, not the local shell executor (which rejects
+// uses: steps with empty output — failing the run and writing no logs).
+func TestRunnerNameForPlan(t *testing.T) {
+	local := &model.Plan{Jobs: []model.PlanJob{
+		{ID: "j1", Steps: []model.PlanStep{{ID: "s1", Run: "echo hi"}}},
+	}}
+	if got := runnerNameForPlan(local); got != "local" {
+		t.Errorf("run:-only plan = %q, want local", got)
+	}
+
+	gha := &model.Plan{Jobs: []model.PlanJob{
+		{ID: "j1", Steps: []model.PlanStep{
+			{ID: "s1", Run: "echo hi"},
+			{ID: "s2", Use: "actions/setup-node@v4"},
+		}},
+	}}
+	if got := runnerNameForPlan(gha); got != "github-actions" {
+		t.Errorf("plan with a uses: step = %q, want github-actions", got)
+	}
+
+	if got := runnerNameForPlan(nil); got != "local" {
+		t.Errorf("nil plan = %q, want local", got)
+	}
+
+	// The runtime context must match the chosen runner so executor + runtime
+	// stay consistent.
+	if rt := runtimeContextForRunner("github-actions"); rt.Runner != "github-actions" || rt.Environment != "ci" {
+		t.Errorf("github-actions runtime = %+v, want runner=github-actions env=ci", rt)
+	}
+	if rt := runtimeContextForRunner("local"); rt.Runner != "local" || rt.Environment != "local" {
+		t.Errorf("local runtime = %+v, want runner=local env=local", rt)
+	}
+}
+
 func TestValidateRunRequest_RejectsNilPlan(t *testing.T) {
 	err := validateRunRequest(RunRequest{DryRun: true})
 	if err == nil || !strings.Contains(err.Error(), "req.Plan is required") {

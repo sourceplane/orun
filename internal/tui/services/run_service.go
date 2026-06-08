@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sourceplane/orun/internal/execmodel"
@@ -14,6 +15,46 @@ import (
 	"github.com/sourceplane/orun/internal/objrun"
 	"github.com/sourceplane/orun/internal/runner"
 )
+
+// runnerNameForPlan selects the execution backend for a plan, mirroring the
+// CLI's auto-detection (cmd/orun/command_run.go): a plan with any GitHub Actions
+// step (uses:) must run under the github-actions emulator, since the local shell
+// executor rejects those steps. Plain run: plans execute locally.
+func runnerNameForPlan(plan *model.Plan) string {
+	if planUsesGitHubActions(plan) {
+		return "github-actions"
+	}
+	return "local"
+}
+
+// planUsesGitHubActions reports whether any step in the plan is authored as a
+// GitHub Actions step (uses:).
+func planUsesGitHubActions(plan *model.Plan) bool {
+	if plan == nil {
+		return false
+	}
+	for _, job := range plan.Jobs {
+		for _, step := range job.Steps {
+			if strings.TrimSpace(step.Use) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// runtimeContextForRunner returns the RuntimeContext matching the selected
+// runner, mirroring the CLI so the executor and its runtime stay consistent.
+func runtimeContextForRunner(runnerName string) executor.RuntimeContext {
+	switch runnerName {
+	case "github-actions":
+		return executor.RuntimeContext{Runner: "github-actions", Environment: "ci"}
+	case "docker":
+		return executor.RuntimeContext{Runner: "docker", Environment: "container"}
+	default:
+		return executor.RuntimeContext{Runner: "local", Environment: "local"}
+	}
+}
 
 // validateRunRequest is the canonical scope guard for RunPlan. It exposes
 // the validation logic so tests can assert fail-closed behavior without
@@ -93,13 +134,17 @@ func (s *LiveOrunService) RunPlan(ctx context.Context, req RunRequest) (<-chan R
 		concurrency = 1
 	}
 
-	// Local executor only — dry-run never actually runs commands, so the
-	// executor choice mostly governs RuntimeContext.
-	localExec, err := executor.Get("local")
+	// Pick the executor the way the CLI does (command_run.go): steps authored as
+	// GitHub Actions (uses:) can't run under the local shell executor — it
+	// rejects them with an empty output, which makes the run fail AND write no
+	// step logs. Auto-switch to the github-actions emulator when the plan
+	// contains any such step; otherwise run locally.
+	runnerName := runnerNameForPlan(req.Plan)
+	selectedExec, err := executor.Get(runnerName)
 	if err != nil {
-		return nil, fmt.Errorf("RunPlan: resolve local executor: %w", err)
+		return nil, fmt.Errorf("RunPlan: resolve %s executor: %w", runnerName, err)
 	}
-	runtime := executor.RuntimeContext{Runner: "local", Environment: "local"}
+	runtime := runtimeContextForRunner(runnerName)
 
 	ch := make(chan RunEvent, 64)
 
@@ -127,7 +172,7 @@ func (s *LiveOrunService) RunPlan(ctx context.Context, req RunRequest) (<-chan R
 		req.JobID,
 		false, // retry
 		false, // verbose
-		localExec,
+		selectedExec,
 		runtime,
 		execID,
 		concurrency,

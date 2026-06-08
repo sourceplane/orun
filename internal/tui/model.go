@@ -147,6 +147,12 @@ type Model struct {
 	livePlan   *model.Plan
 	liveExecID string
 
+	// runDetails caches lazily-loaded plan + statuses per historical execution
+	// (keyed by exec id) so the Activity drilldown can enumerate steps/logs.
+	// Re-applied after every run-list rebuild so a background live run's refresh
+	// doesn't wipe a historical run the user is currently inspecting.
+	runDetails map[string]services.RunDetail
+
 	// Component Studio context — set when the user presses `enter` on a
 	// component in Browse; cleared when they `esc` back out.
 	studioComponent string
@@ -261,6 +267,19 @@ func listRunsCmd(svc services.OrunService) tea.Cmd {
 	}
 }
 
+func loadRunDetailCmd(svc services.OrunService, execID string) tea.Cmd {
+	return func() tea.Msg {
+		detail, err := svc.GetRunDetail(context.Background(), services.RunDetailRequest{ExecID: execID})
+		return services.RunDetailLoadedMsg{
+			ExecID:   execID,
+			Plan:     detail.Plan,
+			Statuses: detail.Statuses,
+			Steps:    detail.Steps,
+			Err:      err,
+		}
+	}
+}
+
 // Update is the canonical bubbletea reducer.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -307,6 +326,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The reload runs off the UI thread; the result lands as
 		// workspaceRefreshedMsg.
 		return m, tea.Batch(backgroundReloadCmd(m.svc), catalogRefreshTickCmd())
+
+	case liveRefreshTickMsg:
+		// While a run is in flight, re-read its per-job/step state so the
+		// drilldown's status + duration columns advance between job events. The
+		// tick self-stops once the run is no longer live.
+		if m.liveExecID == "" || m.runView.Done() {
+			return m, nil
+		}
+		return m, tea.Batch(loadRunDetailCmd(m.svc, m.liveExecID), liveRefreshTickCmd())
 
 	case workspaceRefreshedMsg:
 		// Best-effort: a failed background refresh keeps the current snapshot
@@ -382,7 +410,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.activity = act
 		m = m.switchMode(ModeActivity)
-		return m, nil
+		// FocusRun jumps straight to LevelRun without going through drillIn, so
+		// kick off the historical-detail load here too.
+		return m, m.activity.LoadDetailCmd()
 
 	case views.ComponentRunRequestedMsg:
 		// Component-scoped run for the selected env (environments.md §1). Only
@@ -526,6 +556,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activity, cmd = m.activity.AttachLogs(ch, msg.JobID, msg.StepID)
 		return m, cmd
 
+	case views.ActivityLoadRunDetailMsg:
+		// A historical run was opened; load its plan + statuses off-thread so
+		// the drilldown can enumerate steps and tail logs.
+		if msg.ExecID == "" {
+			return m, nil
+		}
+		return m, loadRunDetailCmd(m.svc, msg.ExecID)
+
+	case services.RunDetailLoadedMsg:
+		if msg.Err != nil {
+			// Best-effort: leave the run plan-less; the drilldown shows its
+			// "step list unavailable" hint rather than surfacing an error.
+			return m, nil
+		}
+		if m.runDetails == nil {
+			m.runDetails = map[string]services.RunDetail{}
+		}
+		m.runDetails[msg.ExecID] = services.RunDetail{
+			ExecID:   msg.ExecID,
+			Plan:     msg.Plan,
+			Statuses: msg.Statuses,
+			Steps:    msg.Steps,
+		}
+		m.activity = m.activity.SetRunDetail(msg.ExecID, msg.Plan, msg.Statuses, msg.Steps)
+		m.refreshInspectorSelection()
+		return m, nil
+
 	case services.RunEventMsg:
 		// First event of any kind clears the kickoff spinner state.
 		if m.runStarting {
@@ -540,6 +597,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.runView, cmd = m.runView.Update(msg)
 		m.refreshActivityRuns()
 		cmds := []tea.Cmd{cmd}
+		// Refresh the live run's plan + per-job/step records from the working
+		// tree as jobs transition, so the drilldown's step status/duration
+		// columns track progress (the run only emits job-level events, so this
+		// updates at job boundaries).
+		if execID := msg.Event.ExecID; execID != "" {
+			cmds = append(cmds, loadRunDetailCmd(m.svc, execID))
+		}
 		if msg.Event.Kind == services.RunEventRunDone {
 			// The run is finished and all step logs are on disk. Give the
 			// follow poll one more interval to drain the final step, then
@@ -804,9 +868,16 @@ func (m Model) forwardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.logView, c = m.logView.Update(msg)
 		return m, c
 	case ModeActivity:
+		beforeLevel := m.activity.Level
 		var c tea.Cmd
 		m.activity, c = m.activity.Update(msg)
 		m.refreshInspectorSelection()
+		// Drilling between levels swaps the entire stage body; force a full
+		// repaint on the transition so bubbletea's line-diff can't leave an
+		// orphaned row from the previous level on screen.
+		if m.activity.Level != beforeLevel {
+			return m, tea.Batch(c, tea.ClearScreen)
+		}
 		return m, c
 	case ModeComponent:
 		var c tea.Cmd
@@ -1244,20 +1315,23 @@ func (m *Model) applyResponsive() {
 }
 
 func (m *Model) propagateSize() {
-	// Pass sizing to the log explorer so its viewport scales.
 	w, h := m.stageDimensions()
-	m.logView = m.logView.SetSize(w, h)
-	// Stage style adds Padding(0,1) which eats 2 horizontal cols of text
-	// area — pass the inner content size to multi-pane children so they
-	// don't overflow and force lipgloss to wrap every line.
-	m.activity = m.activity.SetSize(w-2, h)
-	m.planStudio = m.planStudio.SetSize(w-2, h)
-	m.componentPage = m.componentPage.SetSize(w-2, h)
-	m.browse.Width = w
+	// Every stage-hosted view renders inside StyleStage, whose RoundedBorder (2
+	// cols) + Padding(0,1) (2 cols) shrink the usable content area to w-2 (lipgloss
+	// Width(n) = content+padding, border outside). Passing the full w makes
+	// lipgloss soft-wrap every over-long line, which inflates the box past its
+	// height and breaks the frame — so hand all children the content width.
+	cw := w - 2
+	m.logView = m.logView.SetSize(cw, h)
+	m.activity = m.activity.SetSize(cw, h)
+	m.planStudio = m.planStudio.SetSize(cw, h)
+	m.componentPage = m.componentPage.SetSize(cw, h)
+	m.browse.Width = cw
 	m.browse.Height = h
-	m.history.Width = w
+	m.history.Width = cw
 	m.history.Height = h
-	m.inspector.Width = m.inspectorWidth()
+	// The inspector box (DoubleBorder + Padding) likewise reserves 2 cols.
+	m.inspector.Width = m.inspectorWidth() - 2
 	m.inspector.Height = h
 	m.search.Width = w - 4
 }
@@ -1267,11 +1341,62 @@ func (m Model) stageDimensions() (int, int) {
 	if w < 20 {
 		w = 20
 	}
-	h := m.height - 5 - m.bottomPanelHeight()
+	// Size the stage from the MEASURED chrome (header/rule/hints/status/bottom
+	// panel), not a fixed guess. The breadcrumb header and a transient toast can
+	// change the chrome's line count mid-run; if the stage height didn't track
+	// that, the frame would oscillate between renders and the alt-screen would
+	// accumulate residue (ghosted rows, duplicated footers). +2 is the stage
+	// box's top/bottom border, so chrome + box = exactly m.height.
+	h := m.height - m.chromeHeight() - 2
 	if h < 6 {
 		h = 6
 	}
 	return w, h
+}
+
+// chromeHeight is the rendered line count of everything around the stage box.
+func (m Model) chromeHeight() int {
+	h := lipgloss.Height(m.renderHeader()) +
+		lipgloss.Height(m.renderRule()) +
+		lipgloss.Height(m.renderHints()) +
+		lipgloss.Height(m.renderStatus())
+	if bp := m.renderBottomPanel(); bp != "" {
+		h += lipgloss.Height(bp)
+	}
+	return h
+}
+
+// fitToScreen forces s to be exactly m.height rows, each at most m.width columns
+// (ANSI-aware). This is the final guarantee against alt-screen residue: every
+// frame the renderer sees has identical dimensions, so rows are always
+// overwritten cleanly regardless of any upstream sizing drift.
+func (m Model) fitToScreen(s string) string {
+	if m.height <= 0 {
+		return s
+	}
+	// Height only, via plain string ops. Do NOT re-render through a lipgloss
+	// style here: reprocessing the whole composed frame can rewrite ANSI runs in
+	// ways that desync bubbletea's line-diff renderer and leave ghosted rows. The
+	// per-box clipBox already bounds line widths.
+	lines := strings.Split(s, "\n")
+	if len(lines) > m.height {
+		lines = lines[:m.height]
+	}
+	for len(lines) < m.height {
+		lines = append(lines, "")
+	}
+	// Clip any over-wide line to the terminal width, per line (the chrome — the
+	// breadcrumb especially — can outgrow the width at deep drill-downs, and a
+	// line that wraps in the terminal desyncs the renderer). Only touch lines
+	// that actually exceed the width so styled content is left untouched.
+	if m.width > 0 {
+		for i, ln := range lines {
+			if lipgloss.Width(ln) > m.width {
+				lines[i] = lipgloss.NewStyle().MaxWidth(m.width).Render(ln)
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // bottomPanelHeight returns the rendered height of the optional bottom
@@ -1361,13 +1486,21 @@ func (m Model) View() string {
 
 	stage := m.renderStage()
 	stageW, stageH := m.stageDimensions()
-	stageBox := theme.StyleStage.Width(stageW).Height(stageH).Render(stage)
+	// Clip each box's content to the stage height before styling. lipgloss
+	// Height() pads short content up but never truncates tall content, so an
+	// over-long inner view (notably the inspector) would otherwise grow its box
+	// past stageH, making the whole frame taller than the terminal — which
+	// scrolls and leaves residue (duplicated footers/status lines). All three
+	// boxes share the same content height so the row is exactly stageH+border.
+	stageBox := theme.StyleStage.Width(stageW).Height(stageH).Render(clipBox(stage, stageW-2, stageH))
 
 	rowParts := []string{}
 	if m.sidebarWidth() > 0 {
 		nav := m.navigator
 		nav.Collapsed = m.sidebarCollapsed
-		navBox := theme.StyleSidebar.Width(m.sidebarWidth()).Height(stageH + 2).Render(nav.View())
+		// Sidebar has Padding(1,1) and no border, so Height(stageH+2) → total
+		// stageH+2, matching the bordered stage/inspector boxes.
+		navBox := theme.StyleSidebar.Width(m.sidebarWidth()).Height(stageH + 2).Render(clipBox(nav.View(), m.sidebarWidth()-2, stageH))
 		rowParts = append(rowParts, navBox)
 	}
 	rowParts = append(rowParts, stageBox)
@@ -1375,7 +1508,7 @@ func (m Model) View() string {
 		insBox := theme.StyleInspector.
 			Width(m.inspectorWidth()).
 			Height(stageH).
-			Render(m.inspector.View())
+			Render(clipBox(m.inspector.View(), m.inspectorWidth()-2, stageH))
 		rowParts = append(rowParts, insBox)
 	}
 	body := lipgloss.JoinHorizontal(lipgloss.Top, rowParts...)
@@ -1390,15 +1523,46 @@ func (m Model) View() string {
 	parts = append(parts, hints, status)
 	frame := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
-	// Overlays — rendered on top of the frame via lipgloss.Place
+	// Overlays — rendered on top of the frame via lipgloss.Place. Precedence
+	// mirrors handleKey: the run-confirm modal grabs input first, so it must
+	// also paint first (otherwise it blocks every key while staying invisible,
+	// which reads as a frozen cockpit after pressing r).
+	if m.showConfirm {
+		return m.fitToScreen(placeOver(frame, m.renderConfirmModal(), m.width, m.height))
+	}
 	if m.showCommandPalette {
 		overlay := m.commandPalette.View()
-		return placeOver(frame, overlay, m.width, m.height)
+		return m.fitToScreen(placeOver(frame, overlay, m.width, m.height))
 	}
 	if m.showHelp {
-		return placeOver(frame, m.renderHelpModal(), m.width, m.height)
+		return m.fitToScreen(placeOver(frame, m.renderHelpModal(), m.width, m.height))
 	}
-	return frame
+	return m.fitToScreen(frame)
+}
+
+// clipLines truncates s to at most n lines, preventing an over-long inner view
+// from growing its box past the allotted height (lipgloss Height only pads up).
+func clipLines(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[:n], "\n")
+}
+
+// clipBox clamps content to a box's inner area: at most h lines, each at most w
+// visible columns. lipgloss MaxWidth is ANSI-aware (it won't split escapes) and
+// applies per line. This guarantees the surrounding styled box can neither
+// soft-wrap an over-long line nor pad past its height — the two ways the frame
+// grew taller than the terminal and corrupted on redraw.
+func clipBox(s string, w, h int) string {
+	if w < 1 {
+		w = 1
+	}
+	return lipgloss.NewStyle().MaxWidth(w).Render(clipLines(s, h))
 }
 
 func placeOver(frame, overlay string, w, h int) string {
@@ -1643,6 +1807,57 @@ func (m Model) renderHelpModal() string {
 	return theme.StyleModalCard.Width(cardW).Render(b.String())
 }
 
+// renderConfirmModal draws the real-run confirmation overlay shown after the
+// user asks to run a component/plan (r). handleKey routes y/n/esc while
+// showConfirm is set and blocks every other key, so this must be painted
+// whenever showConfirm is true.
+func (m Model) renderConfirmModal() string {
+	pr := m.pendingRun
+	var b strings.Builder
+	b.WriteString(theme.StyleModalTitle.Render("Run plan?"))
+	b.WriteString("\n\n")
+	if pr != nil {
+		field := func(label, value string) {
+			if value == "" {
+				return
+			}
+			b.WriteString("  " + theme.StyleLabel.Render(fmt.Sprintf("%-11s", label)) +
+				theme.StyleValue.Render(value) + "\n")
+		}
+		field("components", strings.Join(planComponentNames(pr.Plan), ", "))
+		field("env", pr.Env)
+		field("jobs", fmt.Sprintf("%d", pr.Jobs))
+		field("plan", pr.Checksum)
+		b.WriteString("\n")
+	}
+	b.WriteString("  " + theme.StylePillSuccess.Render(" y ") +
+		theme.StyleDim.Render(" run · ") +
+		theme.StyleValue.Render("n") + theme.StyleDim.Render("/esc cancel"))
+	cardW := clamp(m.width*50/100, 36, 70)
+	return theme.StyleModalCard.Width(cardW).Render(b.String())
+}
+
+// planComponentNames returns the unique component names referenced by a plan's
+// jobs, in plan order — used to summarize what a confirmed run will touch.
+func planComponentNames(p *model.Plan) []string {
+	if p == nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(p.Jobs))
+	out := make([]string, 0, len(p.Jobs))
+	for _, j := range p.Jobs {
+		if j.Component == "" {
+			continue
+		}
+		if _, ok := seen[j.Component]; ok {
+			continue
+		}
+		seen[j.Component] = struct{}{}
+		out = append(out, j.Component)
+	}
+	return out
+}
+
 // refreshActivityRuns rebuilds the Activity pane's run list from the
 // current history slice plus, if a live run is in flight, a synthesized
 // in-flight ActivityRun.
@@ -1686,6 +1901,12 @@ func (m *Model) refreshActivityRuns() {
 		}
 	}
 	m.activity = m.activity.SetRuns(live, m.history.Runs)
+	// Re-apply any lazily-loaded historical detail so a rebuild (e.g. a
+	// background live run's per-event refresh) doesn't wipe the plan/statuses
+	// of a historical run the user is currently drilled into.
+	for execID, d := range m.runDetails {
+		m.activity = m.activity.SetRunDetail(execID, d.Plan, d.Statuses, d.Steps)
+	}
 }
 
 // --- Helpers for tests / legacy --------------------------------------------
@@ -1728,7 +1949,9 @@ func (m Model) dispatchPendingRun() (tea.Model, tea.Cmd) {
 	m = m.switchMode(ModeActivity)
 	m.showConfirm = false
 	m.pendingRun = nil
-	return m, tea.Batch(cmd, m.spinner.Tick)
+	// Kick off the live per-step refresh poll alongside the event stream so the
+	// drilldown's status/duration columns advance between job events.
+	return m, tea.Batch(cmd, m.spinner.Tick, liveRefreshTickCmd())
 }
 
 // stopFollowMsg is dispatched a short interval after a run completes so the
@@ -1772,6 +1995,19 @@ type catalogRefreshTickMsg struct{}
 
 func catalogRefreshTickCmd() tea.Cmd {
 	return tea.Tick(refreshInterval, func(time.Time) tea.Msg { return catalogRefreshTickMsg{} })
+}
+
+// liveStepRefreshInterval is how often the cockpit re-reads an in-flight run's
+// per-job/step state from the working tree so the drilldown's status + duration
+// columns advance in near real time. The run itself only emits job-level events,
+// so this poll fills the gap between job boundaries.
+const liveStepRefreshInterval = 600 * time.Millisecond
+
+// liveRefreshTickMsg drives the live per-step refresh while a run is in flight.
+type liveRefreshTickMsg struct{}
+
+func liveRefreshTickCmd() tea.Cmd {
+	return tea.Tick(liveStepRefreshInterval, func(time.Time) tea.Msg { return liveRefreshTickMsg{} })
 }
 
 // workspaceRefreshedMsg carries the result of a silent live-view reload (the

@@ -84,8 +84,9 @@ type ActivityRun struct {
 	Live      bool
 
 	Plan       *model.Plan
-	Statuses   map[string]string // jobID -> status
-	Components []string          // fallback when Plan is nil
+	Statuses   map[string]string            // jobID -> status
+	StepInfo   map[string]services.StepInfo // "<jobID>\x00<stepID>" -> step record
+	Components []string                     // fallback when Plan is nil
 }
 
 // ActivityModel hosts the drilldown stack.
@@ -156,6 +157,65 @@ func (m ActivityModel) FocusRun(execID string) (ActivityModel, bool) {
 		}
 	}
 	return m, false
+}
+
+// ActivityLoadRunDetailMsg asks the root model to load a historical run's
+// compiled plan + per-job statuses (via GetRunDetail) and feed them back through
+// SetRunDetail. Emitted when drilling into a run that arrived plan-less from the
+// History summary, so its steps can be enumerated and its logs tailed.
+type ActivityLoadRunDetailMsg struct {
+	ExecID string
+}
+
+// loadDetailCmd requests a run's plan + statuses the first time it is opened.
+// No-op for live runs (they already carry m.livePlan), already-hydrated runs,
+// and runs with no exec id.
+func (m ActivityModel) loadDetailCmd(r *ActivityRun) tea.Cmd {
+	if r == nil || r.Live || r.Plan != nil || r.ExecID == "" {
+		return nil
+	}
+	exec := r.ExecID
+	return func() tea.Msg { return ActivityLoadRunDetailMsg{ExecID: exec} }
+}
+
+// LoadDetailCmd returns a command that loads the currently-selected run's
+// detail if needed. Used by callers that position the cursor without going
+// through drillIn (the component page's run hand-off via FocusRun).
+func (m ActivityModel) LoadDetailCmd() tea.Cmd {
+	return m.loadDetailCmd(m.SelectedRun())
+}
+
+// SetRunDetail merges a lazily-loaded plan, per-job statuses, and per-step
+// execution records into the matching run so the drilldown can enumerate its
+// steps, show per-step status/timing, and tail its logs. Idempotent and safe to
+// re-apply after the run list is rebuilt.
+func (m ActivityModel) SetRunDetail(execID string, plan *model.Plan, statuses map[string]string, steps map[string]services.StepInfo) ActivityModel {
+	if execID == "" {
+		return m
+	}
+	for i := range m.Runs {
+		if m.Runs[i].ExecID != execID {
+			continue
+		}
+		if plan != nil {
+			m.Runs[i].Plan = plan
+		}
+		if len(statuses) > 0 {
+			cp := make(map[string]string, len(statuses))
+			for k, v := range statuses {
+				cp[k] = v
+			}
+			m.Runs[i].Statuses = cp
+		}
+		if len(steps) > 0 {
+			cp := make(map[string]services.StepInfo, len(steps))
+			for k, v := range steps {
+				cp[k] = v
+			}
+			m.Runs[i].StepInfo = cp
+		}
+	}
+	return m
 }
 
 // UpdateLiveStatuses refreshes the live run's per-job status map.
@@ -388,12 +448,16 @@ func (m ActivityModel) requestTailForSelection() (ActivityModel, tea.Cmd) {
 func (m ActivityModel) drillIn() (ActivityModel, tea.Cmd) {
 	switch m.Level {
 	case LevelIndex:
-		if m.SelectedRun() == nil {
+		r := m.SelectedRun()
+		if r == nil {
 			return m, nil
 		}
 		m.Level = LevelRun
 		m.jobCursor = 0
-		return m, nil
+		// Historical runs arrive plan-less from the History summary; pull their
+		// plan + statuses now so the job→step→logs drilldown has something to
+		// enumerate.
+		return m, m.loadDetailCmd(r)
 	case LevelRun:
 		if m.SelectedJobNode() == nil {
 			return m, nil
@@ -662,6 +726,19 @@ func stepListSummary(steps []model.PlanStep) string {
 func stepDesc(r *ActivityRun, j *model.PlanJob, s *model.PlanStep, idx int) *services.ResourceDescription {
 	fields := []services.DescField{
 		{Label: "step id", Value: stepDisplayID(*s, idx)},
+	}
+	// Status + timing from the execution record, when available.
+	if r != nil && j != nil && r.StepInfo != nil {
+		if info, ok := r.StepInfo[services.StepDetailKey(j.ID, stepDisplayID(*s, idx))]; ok {
+			_, _, chip := stepStatusChip(info.Status)
+			fields = append(fields, services.DescField{Label: "status", Value: chip})
+			if d := stepDurationText(info); d != "—" {
+				fields = append(fields, services.DescField{Label: "duration", Value: d})
+			}
+			if info.Status == "failed" && info.ExitCode != 0 {
+				fields = append(fields, services.DescField{Label: "exit code", Value: fmt.Sprintf("%d", info.ExitCode)})
+			}
+		}
 	}
 	if s.Phase != "" {
 		fields = append(fields, services.DescField{Label: "phase", Value: s.Phase})
@@ -1025,32 +1102,74 @@ func (m ActivityModel) renderJobPage() string {
 		return b.String()
 	}
 	steps := j.Steps
-	b.WriteString(theme.StyleDim.Render(fmt.Sprintf("%d steps", len(steps))) + "\n\n")
+	jobID := m.SelectedJobID()
+	stepStatus := func(s model.PlanStep, idx int) string {
+		if r.StepInfo == nil {
+			return ""
+		}
+		return r.StepInfo[services.StepDetailKey(jobID, stepDisplayID(s, idx))].Status
+	}
+
+	// Summary line: total + a per-status tally so the eye gets the shape of the
+	// job before scanning rows.
+	b.WriteString(theme.StyleDim.Render(fmt.Sprintf("%d steps", len(steps))) +
+		stepStatusTally(steps, stepStatus) + "\n\n")
 	if len(steps) == 0 {
 		b.WriteString(theme.StyleDim.Render("  (no steps)"))
 		return b.String()
 	}
 
-	nameW := clamp(m.Width*55/100, 20, 70)
-	phaseW := 10
+	// Columns: STATUS · STEP · PHASE · DURATION · COMMAND.
+	statusW := 10
+	nameW := clamp(m.Width*28/100, 16, 44)
+	phaseW := 7
+	durW := 9
+	cmdW := m.Width - statusW - nameW - phaseW - durW - 12
+	if cmdW < 12 {
+		cmdW = 12
+	}
 
-	header := theme.StyleTableHeader.Render(fmt.Sprintf(" %s  %s  %s",
-		pad("STEP", nameW), pad("PHASE", phaseW), "COMMAND"))
+	header := theme.StyleTableHeader.Render(fmt.Sprintf(" %s  %s  %s  %s  %s",
+		pad("STATUS", statusW), pad("STEP", nameW), pad("PHASE", phaseW),
+		fmt.Sprintf("%*s", durW, "DURATION"), "COMMAND"))
 	b.WriteString(" " + header + "\n")
 
-	for i, s := range steps {
+	// Viewport: clip rows to the available height and scroll with the cursor so
+	// long step lists never overflow the stage.
+	maxRows := m.Height - 6
+	if maxRows < 3 {
+		maxRows = 3
+	}
+	start := 0
+	if m.stepCursor >= maxRows {
+		start = m.stepCursor - maxRows + 1
+	}
+	end := start + maxRows
+	if end > len(steps) {
+		end = len(steps)
+	}
+
+	for i := start; i < end; i++ {
+		s := steps[i]
+		info := services.StepInfo{}
+		if r.StepInfo != nil {
+			info = r.StepInfo[services.StepDetailKey(jobID, stepDisplayID(s, i))]
+		}
+		status := stepStatusCell(info.Status, statusW)
 		name := stepDisplayName(s, i)
 		phase := s.Phase
 		if phase == "" {
 			phase = "—"
 		}
+		dur := stepDurationText(info)
 		cmd := s.Run
 		if cmd == "" && s.Use != "" {
 			cmd = "use: " + s.Use
 		}
-		cmd = truncate(strings.ReplaceAll(cmd, "\n", " ↵ "), m.Width-nameW-phaseW-8)
-		line := fmt.Sprintf("   %s  %s  %s",
-			pad(name, nameW), pad(phase, phaseW), cmd)
+		cmd = truncate(strings.ReplaceAll(cmd, "\n", " ↵ "), cmdW)
+		line := fmt.Sprintf(" %s  %s  %s  %s  %s",
+			status, pad(name, nameW), pad(phase, phaseW),
+			fmt.Sprintf("%*s", durW, dur), cmd)
 		if i == m.stepCursor {
 			b.WriteString(theme.StyleCursorBar.Render("▌") +
 				theme.StyleTableRowSelected.Render(line))
@@ -1065,6 +1184,92 @@ func (m ActivityModel) renderJobPage() string {
 	b.WriteString(theme.StyleDim.Render(
 		"↑↓ select · ⏎ tail logs · esc back to run"))
 	return b.String()
+}
+
+// stepStatusCell renders a fixed-width, color-coded status chip (glyph + label)
+// for a step, padded to visible width w. An empty status (no execution record
+// yet) reads as pending.
+func stepStatusCell(status string, w int) string {
+	glyph, label, styled := stepStatusChip(status)
+	return padStyled(styled, glyph+" "+label, w)
+}
+
+// stepStatusChip returns the glyph, plain label, and fully-styled chip for a
+// step status. Vocabulary is the legacy runner set (completed/failed/running/
+// pending) folded from the object model, plus skipped.
+func stepStatusChip(status string) (glyph, label, styled string) {
+	switch status {
+	case "completed", "done", "success", "succeeded":
+		glyph, label = "✓", "done"
+		styled = theme.StylePillSuccess.Render(glyph + " " + label)
+	case "failed", "error":
+		glyph, label = "✗", "failed"
+		styled = theme.StylePillError.Render(glyph + " " + label)
+	case "running":
+		glyph, label = pulseGlyph(), "running"
+		styled = theme.StylePillRunning.Render(glyph + " " + label)
+	case "skipped":
+		glyph, label = "⊘", "skipped"
+		styled = theme.StyleDim.Render(glyph + " " + label)
+	default:
+		glyph, label = "○", "pending"
+		styled = theme.StyleDim.Render(glyph + " " + label)
+	}
+	return glyph, label, styled
+}
+
+// stepDurationText formats a step's duration column. Finished steps show their
+// elapsed time; a running step shows a live marker; everything else is a dash.
+func stepDurationText(info services.StepInfo) string {
+	if info.Duration > 0 {
+		return humanDur(info.Duration)
+	}
+	if info.Status == "running" {
+		return "running…"
+	}
+	return "—"
+}
+
+// stepStatusTally renders the " · 3 done · 1 running" suffix on the step-count
+// line. Empty when no execution records are available (plan-only view).
+func stepStatusTally(steps []model.PlanStep, statusOf func(model.PlanStep, int) string) string {
+	var done, running, failed, pending int
+	any := false
+	for i, s := range steps {
+		switch statusOf(s, i) {
+		case "completed", "done", "success", "succeeded":
+			done++
+			any = true
+		case "running":
+			running++
+			any = true
+		case "failed", "error":
+			failed++
+			any = true
+		case "":
+			pending++
+		default:
+			pending++
+			any = true
+		}
+	}
+	if !any {
+		return ""
+	}
+	out := ""
+	if done > 0 {
+		out += "  " + theme.StylePillSuccess.Render(fmt.Sprintf("%d done", done))
+	}
+	if running > 0 {
+		out += "  " + theme.StylePillRunning.Render(fmt.Sprintf("%d running", running))
+	}
+	if failed > 0 {
+		out += "  " + theme.StylePillError.Render(fmt.Sprintf("%d failed", failed))
+	}
+	if pending > 0 {
+		out += "  " + theme.StyleDim.Render(fmt.Sprintf("%d pending", pending))
+	}
+	return out
 }
 
 // ── LevelStep: logs ───────────────────────────────────────────────────────

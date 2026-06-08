@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
@@ -350,12 +351,66 @@ func (r *Reader) StepLog(ctx context.Context, view ExecutionView, jobID, stepID 
 // (no revision id, missing plan.json, decode failure) yields ("", nil) so
 // callers degrade to substring matching / a blank column rather than failing.
 func (r *Reader) PlanSummary(ctx context.Context, view ExecutionView) (name string, components []string) {
-	if view.RevisionID == "" {
+	body, err := r.planBlob(ctx, view)
+	if err != nil {
 		return "", nil
+	}
+	var p struct {
+		Metadata struct {
+			Name string `json:"name"`
+		} `json:"metadata"`
+		Jobs []struct {
+			Component string `json:"component"`
+		} `json:"jobs"`
+	}
+	if uerr := json.Unmarshal(body, &p); uerr != nil {
+		return "", nil
+	}
+	seen := make(map[string]struct{}, len(p.Jobs))
+	comps := make([]string, 0, len(p.Jobs))
+	for _, j := range p.Jobs {
+		if j.Component == "" {
+			continue
+		}
+		if _, ok := seen[j.Component]; ok {
+			continue
+		}
+		seen[j.Component] = struct{}{}
+		comps = append(comps, j.Component)
+	}
+	if len(comps) == 0 {
+		comps = nil
+	}
+	return p.Metadata.Name, comps
+}
+
+// Plan decodes an execution's full compiled plan (the revision's plan.json)
+// into a model.Plan. It is the full-fidelity sibling of PlanSummary, used by
+// the cockpit's Activity drilldown to enumerate a historical run's jobs and
+// steps. Returns ErrNotFound when there is no revision / plan blob, and a
+// decode error when the blob is present but unreadable.
+func (r *Reader) Plan(ctx context.Context, view ExecutionView) (*model.Plan, error) {
+	body, err := r.planBlob(ctx, view)
+	if err != nil {
+		return nil, err
+	}
+	var p model.Plan
+	if uerr := json.Unmarshal(body, &p); uerr != nil {
+		return nil, fmt.Errorf("objread: decode plan: %w", uerr)
+	}
+	return &p, nil
+}
+
+// planBlob returns the raw plan.json bytes from an execution's revision tree.
+// Shared by PlanSummary and Plan. Returns ErrNotFound when the execution has
+// no revision id or the revision tree carries no plan.json.
+func (r *Reader) planBlob(ctx context.Context, view ExecutionView) ([]byte, error) {
+	if view.RevisionID == "" {
+		return nil, ErrNotFound
 	}
 	entries, err := r.store.GetTree(ctx, objectstore.ObjectID(view.RevisionID))
 	if err != nil {
-		return "", nil
+		return nil, err
 	}
 	for _, e := range entries {
 		if e.Name != filePlan {
@@ -363,37 +418,11 @@ func (r *Reader) PlanSummary(ctx context.Context, view ExecutionView) (name stri
 		}
 		_, body, gerr := r.store.Get(ctx, e.ID)
 		if gerr != nil {
-			return "", nil
+			return nil, gerr
 		}
-		var p struct {
-			Metadata struct {
-				Name string `json:"name"`
-			} `json:"metadata"`
-			Jobs []struct {
-				Component string `json:"component"`
-			} `json:"jobs"`
-		}
-		if uerr := json.Unmarshal(body, &p); uerr != nil {
-			return "", nil
-		}
-		seen := make(map[string]struct{}, len(p.Jobs))
-		comps := make([]string, 0, len(p.Jobs))
-		for _, j := range p.Jobs {
-			if j.Component == "" {
-				continue
-			}
-			if _, ok := seen[j.Component]; ok {
-				continue
-			}
-			seen[j.Component] = struct{}{}
-			comps = append(comps, j.Component)
-		}
-		if len(comps) == 0 {
-			comps = nil
-		}
-		return p.Metadata.Name, comps
+		return body, nil
 	}
-	return "", nil
+	return nil, ErrNotFound
 }
 
 func (r *Reader) subTree(ctx context.Context, root objectstore.ObjectID, name string) ([]objectstore.TreeEntry, error) {
