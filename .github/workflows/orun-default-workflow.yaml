@@ -26,10 +26,10 @@ jobs:
       plan-checksum: ${{ steps.plan.outputs.plan_id }}
       exec-id: ${{ steps.plan.outputs.exec_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - uses: actions/setup-node@v4
@@ -83,10 +83,10 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       ORUN_EXEC_ID: ${{ needs.plan.outputs.exec-id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - uses: actions/setup-node@v4

@@ -50,12 +50,12 @@ jobs:
     name: Harness dry-run guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Run dry-run guard
         run: bash examples/remote-state-matrix/test/dry-run-guard.sh
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -77,11 +77,11 @@ jobs:
       jobs:      ${{ steps.matrix.outputs.jobs }}
       first_job: ${{ steps.matrix.outputs.first_job }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -133,11 +133,11 @@ jobs:
       ORUN_REMOTE_STATE: "true"
       ORUN_EXEC_ID: ${{ needs.plan.outputs.run_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -173,11 +173,11 @@ jobs:
       ORUN_REMOTE_STATE: "true"
       ORUN_EXEC_ID: env-${{ needs.plan.outputs.run_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -209,9 +209,9 @@ jobs:
       ORUN_REMOTE_STATE: "true"
       ORUN_EXEC_ID: ${{ needs.plan.outputs.run_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
