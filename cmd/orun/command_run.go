@@ -325,7 +325,6 @@ func runPlan() error {
 				ui.Yellow(color, "warning:"), rxErr)
 		} else {
 			rx = built
-			emitCatalogExecutionStarted(ctx, rx, plan, rx.cfg.Store)
 		}
 	}
 
@@ -353,8 +352,6 @@ func runPlan() error {
 			color := ui.ColorEnabledForWriter(os.Stderr)
 			fmt.Fprintf(os.Stderr, "%s finalize execution: %v\n",
 				ui.Yellow(color, "warning:"), finErr)
-		} else {
-			emitCatalogExecutionTerminal(context.Background(), rx, plan, rx.cfg.Store, finalStatus)
 		}
 		printRevisionRunSummary(rx, finalStatus)
 	}
