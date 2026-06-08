@@ -330,13 +330,13 @@ func (m LogExplorerModel) View() string {
 	if m.errorsOnly {
 		modePills = "  " + theme.StylePillError.Render("errors only")
 	}
-	header := fmt.Sprintf("%s  %s  %s   %s%s",
+	header := clipWidth(fmt.Sprintf("%s  %s  %s   %s%s",
 		theme.StyleSectionTitle.Render("Logs"),
 		theme.StyleChipAccent.Render(job),
 		theme.StyleDim.Render(step),
 		livePill,
 		modePills,
-	)
+	), width)
 
 	errors := m.renderErrorsCard()
 	body := m.viewport.View()
@@ -376,7 +376,21 @@ func (m LogExplorerModel) renderStatusFooter() string {
 		parts = append(parts, theme.StylePillWarn.Render(fmt.Sprintf("%d warn", warns)))
 	}
 	hints := theme.StyleDim.Render("  f follow · E errors-only · [ ] step · g/G top/bottom · c clear · / filter")
-	return strings.Join(parts, "  ") + hints
+	width := m.Width
+	if width <= 0 {
+		width = 80
+	}
+	return clipWidth(strings.Join(parts, "  ")+hints, width)
+}
+
+// clipWidth truncates a (possibly ANSI-styled) single line to w visible columns
+// without splitting escape sequences — lipgloss MaxWidth is escape-aware, unlike
+// the byte-slicing truncate used for plain text.
+func clipWidth(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	return lipgloss.NewStyle().MaxWidth(w).Render(s)
 }
 
 func (m LogExplorerModel) renderErrorsCard() string {
@@ -401,6 +415,10 @@ func (m LogExplorerModel) renderErrorsCard() string {
 		start = len(errs) - max
 	}
 	tail := errs[start:]
+	width := m.Width
+	if width <= 0 {
+		width = 80
+	}
 	var b strings.Builder
 	b.WriteString(theme.StyleSectionTitle.Render("Errors"))
 	b.WriteString(theme.StyleDim.Render(fmt.Sprintf("  (%d)", len(errs))))
@@ -410,10 +428,10 @@ func (m LogExplorerModel) renderErrorsCard() string {
 		if step == "" {
 			step = "—"
 		}
-		line := e.Line
-		if len(line) > 120 {
-			line = line[:117] + "…"
-		}
+		// Truncate to the card width (indent + step chip + space) so a long
+		// error line can't wrap and break the frame.
+		avail := width - 4 - lipgloss.Width(step) - 1
+		line := truncate(e.Line, avail)
 		b.WriteString("  " + theme.StyleChipDim.Render(step) + " " +
 			theme.StylePillError.Render(line) + "\n")
 	}
@@ -454,6 +472,14 @@ func (m *LogExplorerModel) rebuildViewport() {
 		return
 	}
 	q := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+	// Hard cap every rendered row at the viewport width. The bubbles viewport
+	// does not clip horizontally, so an un-truncated long line (e.g. a full
+	// filesystem path in a log message) soft-wraps in the terminal, throwing off
+	// the renderer's line accounting and corrupting the whole TUI frame.
+	width := m.viewport.Width
+	if width <= 0 {
+		width = 80
+	}
 	var b strings.Builder
 	var lastStep string
 	for _, l := range m.lines {
@@ -464,17 +490,17 @@ func (m *LogExplorerModel) rebuildViewport() {
 			continue
 		}
 		if l.StepID != lastStep && l.StepID != "" {
-			b.WriteString(theme.StyleDim.Render("── step: "+l.StepID+" ──") + "\n")
+			b.WriteString(theme.StyleDim.Render(truncate("── step: "+l.StepID+" ──", width)) + "\n")
 			lastStep = l.StepID
 		}
-		var head strings.Builder
-		head.WriteString(severityGlyph(l.Sev))
-		head.WriteString(" ")
+		head := severityGlyph(l.Sev) + " "
+		headW := 2 // glyph + space (glyph is single-width)
 		if l.TS != "" {
-			head.WriteString(theme.StyleDim.Render(l.TS))
-			head.WriteString(" ")
+			head += theme.StyleDim.Render(l.TS) + " "
+			headW += lipgloss.Width(l.TS) + 1
 		}
-		b.WriteString(head.String() + severityStyle(l.Sev).Render(l.Line) + "\n")
+		body := truncate(l.Line, width-headW)
+		b.WriteString(head + severityStyle(l.Sev).Render(body) + "\n")
 	}
 	m.viewport.SetContent(strings.TrimRight(b.String(), "\n"))
 	if m.follow {

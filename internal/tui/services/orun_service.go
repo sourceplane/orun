@@ -33,6 +33,13 @@ type OrunService interface {
 	// remote backend when RemoteState is set).
 	ListRuns(ctx context.Context, req ListRunsRequest) ([]RunSummary, error)
 
+	// GetRunDetail loads the compiled plan and per-job statuses for a single
+	// execution so the Activity drilldown can enumerate steps and tail logs for
+	// completed/historical runs (whose plan is not carried by ListRuns). It is
+	// best-effort: a run whose plan blob is gone yields a RunDetail with a nil
+	// Plan rather than an error.
+	GetRunDetail(ctx context.Context, req RunDetailRequest) (RunDetail, error)
+
 	// Describe returns structured detail for any resource ref (component,
 	// job, plan, run).
 	Describe(ctx context.Context, ref ResourceRef) (*ResourceDescription, error)
@@ -82,6 +89,38 @@ type ListRunsRequest struct {
 	Limit       int
 	RemoteState bool
 	BackendURL  string
+}
+
+// RunDetailRequest identifies the execution whose plan + statuses to load.
+type RunDetailRequest struct {
+	ExecID      string
+	RemoteState bool
+	BackendURL  string
+}
+
+// RunDetail carries the per-run data the Activity drilldown needs beyond the
+// History summary: the compiled plan (for job/step enumeration), the resolved
+// per-job status map, and per-step execution records (status + timing). Plan is
+// nil when the plan blob is unavailable.
+type RunDetail struct {
+	ExecID   string
+	Plan     *model.Plan
+	Statuses map[string]string   // jobID -> legacy status
+	Steps    map[string]StepInfo // "<jobID>\x00<stepID>" -> execution record
+}
+
+// StepInfo is one step's execution record, projected from the object graph.
+// Duration is zero when the step has not finished (or timing is unavailable).
+type StepInfo struct {
+	Status   string // legacy: completed | failed | running | pending
+	Duration time.Duration
+	ExitCode int
+}
+
+// StepDetailKey is the canonical key for RunDetail.Steps / ActivityRun step
+// lookups. The NUL separator avoids collisions between job and step ids.
+func StepDetailKey(jobID, stepID string) string {
+	return jobID + "\x00" + stepID
 }
 
 // LogRequest configures a log tail.
@@ -254,6 +293,17 @@ type LogEventMsg struct {
 type RunsListedMsg struct {
 	Runs []RunSummary
 	Err  error
+}
+
+// RunDetailLoadedMsg is dispatched after GetRunDetail completes. The Activity
+// model merges Plan/Statuses into the matching run so its drilldown can show
+// steps and tail logs.
+type RunDetailLoadedMsg struct {
+	ExecID   string
+	Plan     *model.Plan
+	Statuses map[string]string
+	Steps    map[string]StepInfo
+	Err      error
 }
 
 // DescribeResultMsg is dispatched after Describe completes.

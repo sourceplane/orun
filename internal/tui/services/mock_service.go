@@ -9,6 +9,7 @@ type MockOrunService struct {
 	GeneratePlanFn  func(ctx context.Context, req PlanRequest) (*PlanResult, error)
 	RunPlanFn       func(ctx context.Context, req RunRequest) (<-chan RunEvent, error)
 	ListRunsFn      func(ctx context.Context, req ListRunsRequest) ([]RunSummary, error)
+	GetRunDetailFn  func(ctx context.Context, req RunDetailRequest) (RunDetail, error)
 	DescribeFn      func(ctx context.Context, ref ResourceRef) (*ResourceDescription, error)
 	TailLogsFn      func(ctx context.Context, req LogRequest) (<-chan LogEvent, error)
 }
@@ -44,6 +45,13 @@ func (m *MockOrunService) ListRuns(ctx context.Context, req ListRunsRequest) ([]
 		return m.ListRunsFn(ctx, req)
 	}
 	return nil, nil
+}
+
+func (m *MockOrunService) GetRunDetail(ctx context.Context, req RunDetailRequest) (RunDetail, error) {
+	if m.GetRunDetailFn != nil {
+		return m.GetRunDetailFn(ctx, req)
+	}
+	return RunDetail{ExecID: req.ExecID}, nil
 }
 
 func (m *MockOrunService) Describe(ctx context.Context, ref ResourceRef) (*ResourceDescription, error) {

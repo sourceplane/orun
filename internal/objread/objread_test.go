@@ -169,6 +169,60 @@ func TestPlanSummary(t *testing.T) {
 	}
 }
 
+func TestReaderPlan(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+
+	// A revision tree carrying a compiled plan.json with jobs and steps — the
+	// full-fidelity shape the Activity drilldown enumerates.
+	planBody := []byte(`{"metadata":{"name":"release"},"jobs":[` +
+		`{"id":"cli@deploy","component":"cli","steps":[` +
+		`{"id":"build","run":"go build ./..."},` +
+		`{"id":"ship","run":"orun publish"}]}]}`)
+	planID, err := e.store.PutBlob(ctx, planBody)
+	if err != nil {
+		t.Fatalf("put plan: %v", err)
+	}
+	revID, err := e.store.PutTree(ctx, []objectstore.TreeEntry{
+		{Name: "plan.json", Kind: objectstore.KindBlob, ID: planID},
+	})
+	if err != nil {
+		t.Fatalf("put revision tree: %v", err)
+	}
+
+	r := New(e.store, e.refs, e.root)
+	plan, err := r.Plan(ctx, ExecutionView{RevisionID: string(revID)})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if plan.Metadata.Name != "release" {
+		t.Errorf("plan name = %q, want release", plan.Metadata.Name)
+	}
+	if len(plan.Jobs) != 1 || plan.Jobs[0].ID != "cli@deploy" {
+		t.Fatalf("jobs = %+v, want one cli@deploy", plan.Jobs)
+	}
+	if steps := plan.Jobs[0].Steps; len(steps) != 2 || steps[0].ID != "build" || steps[1].ID != "ship" {
+		t.Fatalf("steps = %+v, want [build ship]", plan.Jobs[0].Steps)
+	}
+
+	// Degenerate: no revision id → ErrNotFound.
+	if _, err := r.Plan(ctx, ExecutionView{}); err == nil {
+		t.Error("Plan with empty revision should error")
+	}
+	// Degenerate: undecodable plan.json → decode error.
+	badID, err := e.store.PutBlob(ctx, []byte(`{not json`))
+	if err != nil {
+		t.Fatalf("put bad plan: %v", err)
+	}
+	badRev, err := e.store.PutTree(ctx, []objectstore.TreeEntry{{Name: "plan.json", Kind: objectstore.KindBlob, ID: badID}})
+	if err != nil {
+		t.Fatalf("put bad rev: %v", err)
+	}
+	if _, err := r.Plan(ctx, ExecutionView{RevisionID: string(badRev)}); err == nil {
+		t.Error("Plan with undecodable plan.json should error")
+	}
+}
+
 func TestGetSealed(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)
