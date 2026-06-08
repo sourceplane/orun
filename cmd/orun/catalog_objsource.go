@@ -13,7 +13,9 @@ import (
 	"strings"
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
+	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/objcatalog"
+	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/objread"
 )
 
@@ -102,6 +104,25 @@ func mapString(m map[string]any, key string) string {
 	}
 	s, _ := m[key].(string)
 	return s
+}
+
+// objSourceScopeAuth reads the object-model SourceSnapshot a catalog resolved
+// against and returns its scope plus whether the catalog is authoritative
+// (main branch, clean working tree — the data-model.md §2 rule). Tolerant: an
+// unreadable/absent source yields ("", false).
+func objSourceScopeAuth(ctx context.Context, store objectstore.ObjectStore, sourceID string) (scope string, authoritative bool) {
+	if sourceID == "" {
+		return "", false
+	}
+	_, body, err := store.Get(ctx, objectstore.ObjectID(sourceID))
+	if err != nil {
+		return "", false
+	}
+	src, err := nodes.Decode[nodes.SourceSnapshot](body)
+	if err != nil {
+		return "", false
+	}
+	return src.Scope, src.Scope == "main" && src.WorkingTree == "clean"
 }
 
 // objComponentKey returns the componentKey of the catalog component matching
