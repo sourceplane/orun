@@ -18,7 +18,7 @@ epics and optional follow-ups needed to fully close the program.
 
 | Field | Value |
 |-------|-------|
-| Status | **Draft → Ready for implementation** (Bucket 1) |
+| Status | **Bucket 1 COMPLETE** — the legacy catalog/revision store is retired; the object model is the single persistence stack and the lint gate enforces it. Buckets 2–5 remain optional/epic follow-ups. |
 | Promotes | `orun-catalog-state` deferred register **D‑7 / L‑3** ("full `internal/catalogstore` retirement") |
 | Builds on | `specs/orun-object-model/` (the canonical graph), `specs/orun-catalog-state/` (`internal/objcatalog`, `internal/affected`) |
 | Target branch | `main` (PRs merged incrementally) |
@@ -52,6 +52,26 @@ Already done (reference points, no work): `internal/state` deleted;
 ---
 
 # Bucket 1 — Retire the legacy catalog/revision store (D‑7 / L‑3)
+
+> **✅ COMPLETE.** Landed incrementally in dependency order (read surface → CLI
+> re-point → kill dual-write → delete packages → gate). Outcome:
+> - **Reads (1A/1B):** every `orun catalog *` command (`tree`/`list`/`history`/
+>   `refs`/`validate`/`describe`/`diff`) plus `describe revision|trigger`,
+>   `get plans`, and `orun run <ref>` resolution read the object graph.
+> - **Writes (1D):** `orun run` single-writes the object graph (the
+>   executionstate/revision mirror is gone); `orun plan` and `orun catalog
+>   refresh` write only the object-model catalog. `bridge_mirror_warn` removed.
+> - **Producer fixes:** graph-edge `Optional` carried; the runner records an
+>   `executionKey`; revision-key derivation relocated to `internal/revkey`.
+> - **Deleted (1E):** `internal/executionstate`, `internal/revision`,
+>   `internal/catalogsync`, `internal/catalogstore`, `internal/statestore`.
+> - **Gate (1F):** `scripts/check-object-model.sh` bans all five legacy imports
+>   repo-wide.
+>
+> Accepted v1 gaps (documented in code): `catalog history`/`describe` do not
+> surface per-execution profile/environment/trigger-name or the component
+> runtime-inference block; `orun plan --catalog-source`/`--catalog-snapshot` and
+> `orun catalog refresh --sync` were removed.
 
 Must land in dependency order: **read surface → CLI re-point → kill dual-write →
 delete packages → gate.** Each `[ ]` is a reviewable PR-sized unit.
@@ -230,10 +250,12 @@ Not required for correctness; close for completeness.
 
 ## Definition of done (program)
 
-- **Legacy closed (Bucket 1):** `internal/catalogstore`, `internal/statestore`,
-  `internal/revision`, `internal/executionstate`, `internal/catalogdiff`,
+- **Legacy closed (Bucket 1): ✅ DONE.** `internal/catalogstore`,
+  `internal/statestore`, `internal/revision`, `internal/executionstate`,
   `internal/catalogsync` deleted; `orun run` single-writes the object graph; the
   lint gate bans the imports repo-wide; `orun catalog *` is unregressed.
+  (`internal/catalogdiff` is kept as the pure, store-free diff engine
+  `catalog_diff.go` feeds object-model-reconstructed snapshots into.)
 - **Epics resolved:** `orun-env-scoping` promoted + shipped (or explicitly
   parked); `orun-affected-worker` reviewed (approved + built elsewhere, or
   closed).

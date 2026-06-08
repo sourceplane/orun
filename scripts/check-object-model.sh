@@ -43,10 +43,16 @@ if grep -RnE '"objects/' --include='*.go' internal cmd 2>/dev/null \
   note "raw \"objects/\" path literal outside internal/objectstore"
 fi
 
-# 4. internal/state was deleted at M12 — no package may import it (production or
-#    test). The in-memory execution types now live in internal/execmodel.
-if grep -RnE '"github.com/sourceplane/orun/internal/state"' --include='*.go' internal cmd 2>/dev/null; then
-  note "internal/state imported — the legacy file store was deleted at M12; use internal/execmodel"
+# 4. The legacy persistence stack is retired — no package may import it
+#    (production or test). internal/state was deleted at M12; the Phase-1/2
+#    catalog/revision store (catalogstore → statestore, plus revision +
+#    executionstate + catalogsync) was deleted with orun-legacy-retirement
+#    Bucket 1. The single persistence stack is the content-addressed object
+#    model (internal/objectstore + the obj* family); execution types live in
+#    internal/execmodel and revision-key derivation in internal/revkey.
+legacy_pkgs='internal/state|internal/statestore|internal/catalogstore|internal/revision|internal/executionstate|internal/catalogsync'
+if grep -RnE "\"github.com/sourceplane/orun/($legacy_pkgs)\"" --include='*.go' internal cmd 2>/dev/null; then
+  note "legacy persistence package imported — catalogstore/statestore/revision/executionstate/catalogsync/state were retired (orun-legacy-retirement); use the object model (internal/objectstore + obj*), internal/execmodel, internal/revkey"
 fi
 
 if [ "$fail" -eq 0 ]; then
