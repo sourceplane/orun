@@ -106,7 +106,24 @@ func (m HistoryModel) View() string {
 		pad("PLAN", planW), pad("STARTED", agoW), pad("DURATION", durW))))
 	b.WriteString("\n")
 
-	for i, r := range rows {
+	// Viewport: clip rows to the available height and scroll with the cursor so
+	// the list never overflows past the top of the stage. Mirrors browse.go;
+	// History has 3 lines of chrome (title, blank, table header) and no footer.
+	maxRows := m.Height - 4
+	if maxRows < 3 {
+		maxRows = 3
+	}
+	start := 0
+	if m.Cursor >= maxRows {
+		start = m.Cursor - maxRows + 1
+	}
+	end := start + maxRows
+	if end > len(rows) {
+		end = len(rows)
+	}
+
+	for i := start; i < end; i++ {
+		r := rows[i]
 		execShort := r.ExecID
 		if len(execShort) > idW-1 {
 			execShort = execShort[:idW-1]
