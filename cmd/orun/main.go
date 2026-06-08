@@ -23,7 +23,6 @@ import (
 	"github.com/sourceplane/orun/internal/render"
 	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/runbundle"
-	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/trigger"
 	"github.com/sourceplane/orun/internal/triggerctx"
 	"github.com/sourceplane/orun/internal/ui"
@@ -458,8 +457,9 @@ func generatePlan() error {
 		return fmt.Errorf("marshal canonical plan: %w", err)
 	}
 
-	// Write plan via revision.WriteRevision (canonical layout) and the
-	// content-addressed object model (writeObjectModelPlan, below).
+	// Plans are written to the content-addressed object model only
+	// (writeObjectModelPlan, below); the legacy revision-layout write was
+	// retired (specs/orun-legacy-retirement 1D).
 	planID := execmodel.PlanChecksumShort(plan)
 	color := ui.ColorEnabledForWriter(os.Stdout)
 
@@ -467,46 +467,21 @@ func generatePlan() error {
 	if err != nil {
 		return fmt.Errorf("resolve store root: %w", err)
 	}
-	stateStore, err := statestore.NewLocalStore(statestore.LocalConfig{Root: absStoreRoot})
-	if err != nil {
-		return fmt.Errorf("open state store: %w", err)
-	}
 
-	revCfg := revision.Config{
-		Store:         stateStore,
-		JobCount:      len(plan.Jobs),
-		CatalogParent: catRes.Parent,
-	}.WithCompatibilityWrites(true)
-
-	rev, err := revision.WriteRevision(context.Background(), revCfg, trig, planBytes, planHash)
-	if err != nil {
-		return fmt.Errorf("write plan revision: %w", err)
-	}
-	if err := revision.WriteManifest(context.Background(), revCfg, rev, trig); err != nil {
-		return fmt.Errorf("write revision manifest: %w", err)
-	}
-	if planName != "" {
-		if err := revision.WriteLegacyNamedPlan(context.Background(), stateStore, planName, planBytes); err != nil {
-			return fmt.Errorf("write named plan alias: %w", err)
-		}
-	}
-
-	// `-o/--output` writes an additional copy to the user-specified path on
-	// top of the canonical layout (cli-surface.md §1.1).
+	// `-o/--output` writes a copy to the user-specified path (cli-surface.md §1.1).
 	if outputFile != "" {
 		if err := renderer.WritePlan(plan, outputFile); err != nil {
 			return fmt.Errorf("failed to write plan to %s: %w", outputFile, err)
 		}
 	}
 
-	// Additionally write the content-addressed object graph. Best-effort and
-	// isolated under .orun/objectmodel/.
-	writeObjectModelPlan(absStoreRoot, plan, planBytes, planHash, rev.RevisionKey, trig, catRes)
+	// Write the content-addressed object graph. Best-effort and isolated under
+	// .orun/objectmodel/.
+	writeObjectModelPlan(absStoreRoot, plan, planBytes, planHash, revKey, trig, catRes)
 
-	// On-success M5.a summary block (cli-surface.md §1.1). Printed before the
-	// legacy "components × envs → jobs" detail line so existing tooling that
-	// scans for that line keeps working.
-	canonicalPlanPath := filepath.Join(absStoreRoot, "revisions", rev.RevisionKey, "plan.json")
+	// On-success summary block (cli-surface.md §1.1). Printed before the
+	// "components × envs → jobs" detail line so existing tooling that scans for
+	// that line keeps working.
 	triggerScope := trig.PlanScope.Mode
 	if triggerScope == "" {
 		triggerScope = "manual"
@@ -521,10 +496,9 @@ func generatePlan() error {
 	fmt.Println()
 	fmt.Println(ui.Green(color, "✓") + " Plan revision created")
 	fmt.Println()
-	fmt.Printf("  Revision: %s\n", rev.RevisionKey)
+	fmt.Printf("  Revision: %s\n", revKey)
 	fmt.Printf("  Trigger:  %s / %s / %s\n", trig.TriggerName, triggerScope, headRev)
 	fmt.Printf("  Jobs:     %d\n", len(plan.Jobs))
-	fmt.Printf("  Path:     %s\n", canonicalPlanPath)
 	if outputFile != "" {
 		fmt.Printf("  Output:   %s\n", outputFile)
 	}
