@@ -1,22 +1,20 @@
 package main
 
 // catalog_refresh.go implements `orun catalog refresh`: the write path that
-// resolves the current workspace into a (SourceSnapshot, CatalogSnapshot)
-// pair and persists it through internal/catalogstore. It is the only writer
-// in the C5 catalog surface; every read subcommand consumes what this writes.
+// resolves the current workspace into a (SourceSnapshot, CatalogSnapshot) pair
+// and persists it to the content-addressed object graph (the legacy catalogstore
+// write was retired — specs/orun-legacy-retirement Bucket 1).
 //
-// Pipeline (task-0036 Objective 1):
+// Pipeline:
 //
 //	sourcectx.ResolveSourceSnapshot   → WorkspaceState
-//	→ build SourceSnapshot + ResolverInputs (catalog.go helpers)
+//	→ build ResolverInputs (catalog.go helpers)
 //	→ catalogresolve.BuildCatalog      → CatalogView (pure)
-//	→ catalogstore.AssembleBundle      → CatalogBundle (pure seam)
-//	→ WriteSourceSnapshot / WriteCatalogSnapshot / WriteGlobalIndexes / WriteRefs
+//	→ writeObjectModelRefresh          → object-model source + catalog + refs
 //
-// Idempotency: a byte-identical re-refresh resolves to the same
-// catalogSnapshotKey; the catalog doc already exists, so we print the §2
-// reuse form and exit 0 without re-writing (and without minting a new
-// snapshot directory).
+// Idempotency: a re-refresh of an unchanged workspace resolves to the same
+// content-addressed catalog id (catalogs/current is unmoved), reported as the §2
+// reuse form (exit 0).
 
 import (
 	"context"
@@ -27,9 +25,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
 	"github.com/sourceplane/orun/internal/catalogresolve"
-	"github.com/sourceplane/orun/internal/catalogstore"
 	"github.com/sourceplane/orun/internal/sourcectx"
-	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -132,7 +128,6 @@ func runCatalogRefresh(ctx context.Context) error {
 	repo := repoForInputs(ws.Repo, workspaceRoot)
 	shortRepo := shortRepoName(ws.Repo, workspaceRoot)
 
-	src := sourceSnapshotFromState(ws, srcKey, inputHash, createdAt)
 	inputs := resolverInputsFromState(ws, srcKey, inputHash, repo, createdAt)
 
 	// Stage 2 — pure resolve + build.
@@ -161,81 +156,11 @@ func runCatalogRefresh(ctx context.Context) error {
 
 	cat := view.Snapshot
 
-	// Open the state store + catalog store.
-	stateStore, _, err := openLocalStateStore()
-	if err != nil {
-		return exitErr(3, "open state store: %w", err)
-	}
-	store := catalogstore.New(stateStore)
-
-	// Idempotency probe: if the catalog doc already exists, this is a
-	// byte-identical re-refresh — print the reuse form and exit 0.
-	catPath, perr := catalogstore.CatalogDocPath(srcKey, cat.CatalogSnapshotKey)
-	if perr != nil {
-		return exitErr(3, "catalog doc path: %w", perr)
-	}
-	exists, perr := objectExists(ctx, stateStore, catPath)
-	if perr != nil {
-		return exitErr(3, "probe catalog doc: %w", perr)
-	}
-	if exists {
-		// Still refresh the refs so a moved ref pointer converges, but the
-		// snapshot bodies are immutable and already present.
-		if rerr := persistRefsOnly(ctx, store, src, *cat, ws, createdAt); rerr != nil {
-			return rerr
-		}
-		return finishCatalogRefresh(ctx, catalogRefreshData{
-			Reused:             true,
-			SourceSnapshotKey:  srcKey,
-			CatalogSnapshotKey: cat.CatalogSnapshotKey,
-			Ref:                ws.Ref,
-			TreeHash:           ws.TreeHash,
-			WorkingTree:        workingTreeLabel(ws.Dirty),
-			Mode:               modeLabel(cat.Authoritative),
-			Authoritative:      cat.Authoritative,
-			Dirty:              ws.Dirty,
-			Components:         cat.Summary.Components,
-			Systems:            cat.Summary.Systems,
-			APIs:               cat.Summary.APIs,
-			Resources:          cat.Summary.Resources,
-			Path:               catPath,
-		}, view, ws)
-	}
-
-	// Stage 3 — assemble the persistence bundle (pure seam).
-	bundle, err := catalogstore.AssembleBundle(catalogstore.BundleInputs{
-		Source:    src,
-		Snapshot:  cat,
-		Manifests: view.Manifests,
-		Graphs:    view.Graphs,
-		Branch:    refreshBranchScope(ws),
-		PR:        refreshPRScope(ws),
-		UpdatedAt: createdAt,
-	})
-	if err != nil {
-		return exitErr(2, "assemble bundle: %w", err)
-	}
-
-	// Stage 4 — persist (source → catalog → global indexes → refs).
-	if err := store.WriteSourceSnapshot(ctx, bundle.Source); err != nil {
-		// A byte-divergent re-write at the same key is a real conflict.
-		return exitErr(3, "write source snapshot: %w", err)
-	}
-	if err := store.WriteCatalogSnapshot(ctx, bundle.Source, bundle.Catalog, bundle.Manifests, bundle.Graphs, bundle.LocalIndexes); err != nil {
-		if errors.Is(err, catalogstore.ErrInputsInconsistent) {
-			return exitErr(2, "write catalog snapshot: %w", err)
-		}
-		return exitErr(3, "write catalog snapshot: %w", err)
-	}
-	if err := store.WriteGlobalIndexes(ctx, bundle.GlobalIndexes); err != nil {
-		return exitErr(3, "write global indexes: %w", err)
-	}
-	if err := store.WriteRefs(ctx, bundle.Refs); err != nil {
-		return exitErr(3, "write refs: %w", err)
-	}
-
-	return finishCatalogRefresh(ctx, catalogRefreshData{
-		Created:            true,
+	// The catalog is persisted to the object graph only (the legacy catalogstore
+	// write was retired). created/reused is derived from the object-model write
+	// in finishCatalogRefresh — a content-addressed catalog id unchanged from
+	// catalogs/current is an idempotent reuse.
+	data := catalogRefreshData{
 		SourceSnapshotKey:  srcKey,
 		CatalogSnapshotKey: cat.CatalogSnapshotKey,
 		Ref:                ws.Ref,
@@ -248,8 +173,8 @@ func runCatalogRefresh(ctx context.Context) error {
 		Systems:            cat.Summary.Systems,
 		APIs:               cat.Summary.APIs,
 		Resources:          cat.Summary.Resources,
-		Path:               catPath,
-	}, view, ws)
+	}
+	return finishCatalogRefresh(ctx, data, view, ws)
 }
 
 // finishCatalogRefresh is the shared tail for both the created and reused
@@ -262,31 +187,14 @@ func finishCatalogRefresh(ctx context.Context, data catalogRefreshData, view *ca
 	var warnings []string
 	if om, err := writeObjectModelRefresh(ctx, view, ws, data.SourceSnapshotKey); err != nil {
 		warnings = append(warnings, fmt.Sprintf("object-model catalog write failed: %v", err))
+		data.Created = true // write status unknown — report created rather than a false reuse
 	} else {
 		data.ObjectModel = &om
+		data.Reused = om.Reused
+		data.Created = !om.Reused
 	}
 
 	return emitRefreshResult(data, warnings)
-}
-
-// persistRefsOnly re-writes the ref pointers on an idempotent reuse so a
-// moved ref converges to the current snapshot without re-writing immutable
-// bodies. Failures here are persistence failures (exit 3).
-func persistRefsOnly(ctx context.Context, store catalogstore.Store, src catalogmodel.SourceSnapshot, cat catalogmodel.CatalogSnapshot, ws sourcectx.WorkspaceState, updatedAt string) error {
-	bundle, err := catalogstore.AssembleBundle(catalogstore.BundleInputs{
-		Source:    src,
-		Snapshot:  &cat,
-		Branch:    refreshBranchScope(ws),
-		PR:        refreshPRScope(ws),
-		UpdatedAt: updatedAt,
-	})
-	if err != nil {
-		return exitErr(2, "assemble refs bundle: %w", err)
-	}
-	if err := store.WriteRefs(ctx, bundle.Refs); err != nil {
-		return exitErr(3, "write refs: %w", err)
-	}
-	return nil
 }
 
 // emitRefreshResult renders either the JSON envelope or the §2 text form.
@@ -383,6 +291,3 @@ func hasAnyIssue(issues []catalogresolve.ValidationIssue) bool {
 	return len(issues) > 0
 }
 
-// ensure statestore import is used even if the error-path helpers above are
-// compiled out by future refactors.
-var _ = statestore.ErrNotFound

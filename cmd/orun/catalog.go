@@ -16,7 +16,6 @@ package main
 // AssembleBundle / ListRefs) rather than buried untested in a cobra RunE.
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -296,19 +295,6 @@ func resolverInputsFromState(ws sourcectx.WorkspaceState, srcKey, inputHash, rep
 		Preview:           !authoritative,
 		CreatedAt:         createdAt,
 	}
-}
-
-// objectExists reports whether an object is present at path, distinguishing a
-// genuine absence (ErrNotFound) from an I/O error the caller must surface.
-func objectExists(ctx context.Context, st statestore.StateStore, path string) (bool, error) {
-	_, _, err := st.Read(ctx, path)
-	if err == nil {
-		return true, nil
-	}
-	if errors.Is(err, statestore.ErrNotFound) {
-		return false, nil
-	}
-	return false, err
 }
 
 // catalogReadExit maps a Resolver read error onto the catalog CLI exit-code

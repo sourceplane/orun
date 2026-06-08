@@ -26,6 +26,10 @@ type objectModelRefresh struct {
 	CatalogID  string `json:"catalogId"`
 	SourceID   string `json:"sourceId"`
 	Components int    `json:"components"`
+	// Reused reports an idempotent refresh: catalogs/current already pointed at
+	// the same content-addressed catalog id (the workspace did not change). Not
+	// serialized — the envelope's top-level created/reused fields carry it.
+	Reused bool `json:"-"`
 }
 
 // writeObjectModelRefresh writes the object-model catalog for an explicit
@@ -41,6 +45,13 @@ func writeObjectModelRefresh(ctx context.Context, view *catalogresolve.CatalogVi
 	if err != nil {
 		return objectModelRefresh{}, err
 	}
+	// Capture the prior catalog target so an unchanged workspace (same
+	// content-addressed catalog id) is reported as an idempotent reuse.
+	var priorCatalog string
+	if r, rerr := refs.Read(ctx, "catalogs/current"); rerr == nil {
+		priorCatalog = r.Target
+	}
+
 	w := nodewriter.New(store, refs)
 	memo := objplan.NewResolveMemo(root)
 
@@ -56,6 +67,7 @@ func writeObjectModelRefresh(ctx context.Context, view *catalogresolve.CatalogVi
 	out := objectModelRefresh{
 		CatalogID: string(res.CatalogID),
 		SourceID:  string(res.SourceID),
+		Reused:    priorCatalog != "" && priorCatalog == string(res.CatalogID),
 	}
 	if view != nil {
 		out.Components = len(view.Manifests)
