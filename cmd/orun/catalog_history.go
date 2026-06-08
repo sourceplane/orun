@@ -1,14 +1,15 @@
 package main
 
 // catalog_history.go implements `orun catalog history <component>`: enumerate a
-// component's execution history from the catalog-local ComponentExecutionIndex
-// (cli-surface.md §7). Columns: TIME, REVISION, EXEC, TRIGGER, PROFILE, ENV,
-// STATUS — sorted newest-first, default limit 50.
+// component's execution history from the object-model execution graph
+// (objread.ComponentExecutions scan+filter join), cli-surface.md §7. Columns:
+// TIME, REVISION, EXEC, TRIGGER, PROFILE, ENV, STATUS — newest-first, limit 50.
 //
 // Filters: --trigger, --profile, --environment narrow the rows; --limit caps
-// the count. A component that has never executed has no index file: history
-// prints an empty list and exits 0 (absence is not an error per the
-// ReadComponentExecutionIndex seam).
+// the count. A component that has never executed prints an empty list and exits
+// 0. Note: the object-model execution does not record per-execution profile/
+// environment/triggerName, so those columns are empty (a documented v1 gap of
+// the catalogstore retirement; specs/orun-legacy-retirement Bucket 1).
 
 import (
 	"context"
@@ -16,9 +17,9 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
-	"github.com/sourceplane/orun/internal/catalogstore"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -79,38 +80,33 @@ func runCatalogHistory(ctx context.Context, arg string) error {
 		return exitErr(1, "--limit must be >= 0")
 	}
 
-	sel, err := parseCatalogSelector()
+	view, reader, err := loadObjCatalog(ctx)
 	if err != nil {
 		return err
 	}
 
-	stateStore, _, err := openLocalStateStore()
+	// The object-model execution scan+filter join. executionKey/revision/status
+	// come from the sealed execution; profile/environment/triggerName are not
+	// recorded on the object-model execution, so they are emitted empty (a
+	// documented v1 gap — see specs/orun-legacy-retirement Bucket 1).
+	execs, err := reader.ComponentExecutions(ctx, arg)
 	if err != nil {
-		return exitErr(3, "open state store: %w", err)
+		return exitErr(3, "read executions: %w", err)
 	}
-	store := catalogstore.New(stateStore)
-
-	cat, err := store.ResolveCatalog(ctx, sel)
-	if err != nil {
-		return catalogReadExit(err, "resolve catalog")
-	}
-
-	idx, _, ierr := catalogstore.ReadComponentExecutionIndex(ctx, stateStore, cat.SourceSnapshotKey, cat.CatalogSnapshotKey, arg)
-	if ierr != nil {
-		return exitErr(3, "read execution index: %w", ierr)
-	}
-
-	rows := append([]catalogmodel.ComponentExecutionRow(nil), idx.Executions...)
-	for i := range rows {
-		if rows[i].ComponentKey == "" {
-			rows[i].ComponentKey = idx.ComponentKey
-		}
-		if rows[i].SourceSnapshotKey == "" {
-			rows[i].SourceSnapshotKey = idx.SourceSnapshotKey
-		}
-		if rows[i].CatalogSnapshotKey == "" {
-			rows[i].CatalogSnapshotKey = idx.CatalogSnapshotKey
-		}
+	srcKey := view.SourceID
+	catKey := objCatalogSnapshotKey(view)
+	compKey := objComponentKey(view, arg)
+	rows := make([]catalogmodel.ComponentExecutionRow, 0, len(execs))
+	for _, e := range execs {
+		rows = append(rows, catalogmodel.ComponentExecutionRow{
+			ComponentKey:       compKey,
+			SourceSnapshotKey:  srcKey,
+			CatalogSnapshotKey: catKey,
+			RevisionKey:        e.RevisionID,
+			ExecutionKey:       e.ExecutionKey,
+			Status:             e.Status,
+			CreatedAt:          e.StartedAt.UTC().Format(time.RFC3339),
+		})
 	}
 	rows = filterHistoryRows(rows)
 	sort.SliceStable(rows, func(a, b int) bool { return rows[a].CreatedAt > rows[b].CreatedAt })
