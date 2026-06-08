@@ -307,28 +307,6 @@ func TestCatalogRefs_E2E_EmptyStore(t *testing.T) {
 	}
 }
 
-func TestCatalogRefresh_SyncNoop(t *testing.T) {
-	dir := withTempIntentRoot(t)
-	seedGitCatalogWorkspace(t, dir)
-	resetCatalogFlags(t)
-	catalogSyncFlag = true
-
-	// --sync now performs the full local refresh first, then reports the
-	// not-configured notice from the wired NoopSyncer (and still exits 0).
-	out := captureStdout(t, func() error {
-		if err := runCatalogRefresh(nil); err != nil {
-			t.Fatalf("refresh --sync must exit 0, got %v", err)
-		}
-		return nil
-	})
-	if !strings.Contains(out, "Catalog snapshot created") {
-		t.Errorf("expected the local refresh summary, got:\n%s", out)
-	}
-	if !strings.Contains(out, "remote sync not configured") {
-		t.Errorf("expected sync not-configured notice, got:\n%s", out)
-	}
-}
-
 // ----- helpers -------------------------------------------------------
 
 // resetCatalogFlags zeroes the package-level catalog flag vars and restores
@@ -338,16 +316,16 @@ func resetCatalogFlags(t *testing.T) {
 	t.Helper()
 	prev := struct {
 		src, snap, diffBase, diffHead string
-		strict, noInfer, json, sync   bool
-	}{catalogSourceFlag, catalogSnapshotFlag, catalogDiffBaseFlag, catalogDiffHeadFlag, catalogStrictFlag, catalogNoInferFlag, catalogJSONFlag, catalogSyncFlag}
+		strict, noInfer, json         bool
+	}{catalogSourceFlag, catalogSnapshotFlag, catalogDiffBaseFlag, catalogDiffHeadFlag, catalogStrictFlag, catalogNoInferFlag, catalogJSONFlag}
 	catalogSourceFlag, catalogSnapshotFlag = "", ""
 	catalogDiffBaseFlag, catalogDiffHeadFlag = "", ""
-	catalogStrictFlag, catalogNoInferFlag, catalogJSONFlag, catalogSyncFlag = false, false, false, false
+	catalogStrictFlag, catalogNoInferFlag, catalogJSONFlag = false, false, false
 	t.Cleanup(func() {
 		catalogSourceFlag, catalogSnapshotFlag = prev.src, prev.snap
 		catalogDiffBaseFlag, catalogDiffHeadFlag = prev.diffBase, prev.diffHead
 		catalogStrictFlag, catalogNoInferFlag = prev.strict, prev.noInfer
-		catalogJSONFlag, catalogSyncFlag = prev.json, prev.sync
+		catalogJSONFlag = prev.json
 	})
 }
 

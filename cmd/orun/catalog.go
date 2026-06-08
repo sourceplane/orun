@@ -46,7 +46,6 @@ var (
 	catalogStrictFlag   bool
 	catalogNoInferFlag  bool
 	catalogJSONFlag     bool
-	catalogSyncFlag     bool
 )
 
 // catalogEnvelope is the Orun JSON envelope (cli-surface.md §11). The exact

@@ -28,7 +28,6 @@ import (
 	"github.com/sourceplane/orun/internal/catalogmodel"
 	"github.com/sourceplane/orun/internal/catalogresolve"
 	"github.com/sourceplane/orun/internal/catalogstore"
-	"github.com/sourceplane/orun/internal/catalogsync"
 	"github.com/sourceplane/orun/internal/sourcectx"
 	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/ui"
@@ -53,25 +52,9 @@ type catalogRefreshData struct {
 	APIs               int    `json:"apis"`
 	Resources          int    `json:"resources"`
 	Path               string `json:"path"`
-	// Sync is present only when --sync was requested. It carries the
-	// (Phase 2: noop) syncer outcome so the JSON envelope exposes the
-	// not-configured warning deterministically without changing the
-	// existing fields above.
-	Sync *catalogSyncResult `json:"sync,omitempty"`
 	// ObjectModel is present when the object-model catalog write succeeded
 	// (orun-catalog-state §2). Optional; existing keys stay byte-stable.
 	ObjectModel *objectModelRefresh `json:"objectModel,omitempty"`
-}
-
-// catalogSyncResult is the stable --json shape of the --sync outcome. In
-// Phase 2 the wired syncer is catalogsync.NoopSyncer, so Accepted is always
-// false and Warnings carries the documented not-configured notice.
-type catalogSyncResult struct {
-	Requested        bool     `json:"requested"`
-	Accepted         bool     `json:"accepted"`
-	RemoteSourceKey  string   `json:"remoteSourceKey,omitempty"`
-	RemoteCatalogKey string   `json:"remoteCatalogKey,omitempty"`
-	Warnings         []string `json:"warnings"`
 }
 
 func registerCatalogRefreshCommand(parent *cobra.Command) {
@@ -105,7 +88,6 @@ Exit codes:
 	cmd.Flags().BoolVar(&catalogStrictFlag, "strict", false, "Alias for --catalog-strict")
 	cmd.Flags().BoolVar(&catalogNoInferFlag, "no-infer", false, "Disable the inference layer (stage 6)")
 	cmd.Flags().BoolVar(&catalogJSONFlag, "json", false, "Stable machine-readable output")
-	cmd.Flags().BoolVar(&catalogSyncFlag, "sync", false, "Refresh locally, then attempt remote sync (Phase 2: no remote configured — prints the not-configured notice and exits 0)")
 
 	parent.AddCommand(cmd)
 }
@@ -217,7 +199,7 @@ func runCatalogRefresh(ctx context.Context) error {
 			APIs:               cat.Summary.APIs,
 			Resources:          cat.Summary.Resources,
 			Path:               catPath,
-		}, src, *cat, view, ws, createdAt)
+		}, view, ws)
 	}
 
 	// Stage 3 — assemble the persistence bundle (pure seam).
@@ -267,33 +249,16 @@ func runCatalogRefresh(ctx context.Context) error {
 		APIs:               cat.Summary.APIs,
 		Resources:          cat.Summary.Resources,
 		Path:               catPath,
-	}, src, *cat, view, ws, createdAt)
+	}, view, ws)
 }
 
-// catalogSyncerFactory constructs the Syncer the refresh path uses. It is a
-// package var (not a hardcoded call) so Phase 3 — or a test — can swap in a
-// different implementation without touching runCatalogRefresh. Default: the
-// Phase 2 NoopSyncer.
-var catalogSyncerFactory = func() catalogsync.Syncer { return catalogsync.NoopSyncer{} }
-
 // finishCatalogRefresh is the shared tail for both the created and reused
-// paths. The local refresh has already succeeded; when --sync is set it builds
-// a SyncPayload from the resolved snapshot, invokes the configured syncer, and
-// folds the (Phase 2: noop) result into the envelope. The local refresh result
-// is authoritative for the exit code — a noop syncer warning never fails the
-// command.
-func finishCatalogRefresh(ctx context.Context, data catalogRefreshData, src catalogmodel.SourceSnapshot, cat catalogmodel.CatalogSnapshot, view *catalogresolve.CatalogView, ws sourcectx.WorkspaceState, updatedAt string) error {
-	if catalogSyncFlag {
-		sync, err := runCatalogSync(ctx, src, cat, view, ws, updatedAt)
-		if err != nil {
-			return err
-		}
-		data.Sync = sync
-	}
-
-	// Object-model catalog write (orun-catalog-state §2): populate the cockpit's
-	// source + the change-detection impact index, reusing the same resolved
-	// view. Best-effort — a failure is a warning, never a non-zero exit.
+// paths. The local refresh has already succeeded; it writes the object-model
+// catalog (orun-catalog-state §2) — populating the cockpit's source + the
+// change-detection impact index from the same resolved view — and emits the
+// result. The object-model write is best-effort: a failure is a warning, never
+// a non-zero exit.
+func finishCatalogRefresh(ctx context.Context, data catalogRefreshData, view *catalogresolve.CatalogView, ws sourcectx.WorkspaceState) error {
 	var warnings []string
 	if om, err := writeObjectModelRefresh(ctx, view, ws, data.SourceSnapshotKey); err != nil {
 		warnings = append(warnings, fmt.Sprintf("object-model catalog write failed: %v", err))
@@ -302,91 +267,6 @@ func finishCatalogRefresh(ctx context.Context, data catalogRefreshData, src cata
 	}
 
 	return emitRefreshResult(data, warnings)
-}
-
-// runCatalogSync assembles the SyncPayload from the freshly resolved snapshot
-// and pushes it through the configured syncer. The payload is built only from
-// catalogmodel types (the catalogsync package never sees a store type). A
-// syncer error is surfaced (exit 2) but the Phase 2 NoopSyncer never errors.
-func runCatalogSync(ctx context.Context, src catalogmodel.SourceSnapshot, cat catalogmodel.CatalogSnapshot, view *catalogresolve.CatalogView, ws sourcectx.WorkspaceState, updatedAt string) (*catalogSyncResult, error) {
-	payload, err := buildSyncPayload(src, cat, view, ws, updatedAt)
-	if err != nil {
-		return nil, exitErr(2, "assemble sync payload: %w", err)
-	}
-	res, err := catalogSyncerFactory().PushCatalogSnapshot(ctx, payload, catalogsync.PushOptions{
-		AllowDirty: ws.Dirty,
-		Reason:     "orun catalog refresh --sync",
-	})
-	if err != nil {
-		return nil, exitErr(2, "sync push: %w", err)
-	}
-	warnings := res.Warnings
-	if warnings == nil {
-		warnings = []string{}
-	}
-	return &catalogSyncResult{
-		Requested:        true,
-		Accepted:         res.Accepted,
-		RemoteSourceKey:  res.RemoteSourceKey,
-		RemoteCatalogKey: res.RemoteCatalogKey,
-		Warnings:         warnings,
-	}, nil
-}
-
-// buildSyncPayload maps the resolved (source, catalog, manifests, graphs) plus
-// the assembled refs/global-indexes into a catalogsync.SyncPayload. It
-// re-assembles the bundle (a pure seam) so the created and reused paths produce
-// an identical payload shape. HistoryEvents are empty at refresh time — events
-// are appended during run/plan, not catalog resolution.
-func buildSyncPayload(src catalogmodel.SourceSnapshot, cat catalogmodel.CatalogSnapshot, view *catalogresolve.CatalogView, ws sourcectx.WorkspaceState, updatedAt string) (catalogsync.SyncPayload, error) {
-	bundle, err := catalogstore.AssembleBundle(catalogstore.BundleInputs{
-		Source:    src,
-		Snapshot:  &cat,
-		Manifests: view.Manifests,
-		Graphs:    view.Graphs,
-		Branch:    refreshBranchScope(ws),
-		PR:        refreshPRScope(ws),
-		UpdatedAt: updatedAt,
-	})
-	if err != nil {
-		return catalogsync.SyncPayload{}, err
-	}
-
-	payload := catalogsync.SyncPayload{
-		Source:        bundle.Source,
-		Catalog:       bundle.Catalog,
-		Manifests:     bundle.Manifests,
-		Graphs:        flattenCatalogGraphs(bundle.Graphs),
-		GlobalIndexes: derefGlobalIndexes(bundle.GlobalIndexes.Components),
-		SourceRef:     bundle.Refs.Source,
-		CatalogRef:    bundle.Refs.Catalog,
-		HistoryEvents: []catalogmodel.ComponentHistoryEvent{},
-	}
-	return payload, nil
-}
-
-// flattenCatalogGraphs reduces the per-kind CatalogGraphs bundle to a slice in
-// the resolver's canonical order, skipping nil (unresolved) graph slots.
-func flattenCatalogGraphs(g catalogstore.CatalogGraphs) []catalogmodel.CatalogGraph {
-	out := make([]catalogmodel.CatalogGraph, 0, 5)
-	for _, gp := range []*catalogmodel.CatalogGraph{g.Dependencies, g.Systems, g.APIs, g.Resources, g.Owners} {
-		if gp != nil {
-			out = append(out, *gp)
-		}
-	}
-	return out
-}
-
-// derefGlobalIndexes copies the assembled component global-index pointers into
-// a value slice so the SyncPayload holds no shared mutable state.
-func derefGlobalIndexes(ptrs []*catalogmodel.ComponentGlobalIndex) []catalogmodel.ComponentGlobalIndex {
-	out := make([]catalogmodel.ComponentGlobalIndex, 0, len(ptrs))
-	for _, p := range ptrs {
-		if p != nil {
-			out = append(out, *p)
-		}
-	}
-	return out
 }
 
 // persistRefsOnly re-writes the ref pointers on an idempotent reuse so a
@@ -429,7 +309,6 @@ func emitRefreshResult(d catalogRefreshData, warnings []string) error {
 		fmt.Fprintf(os.Stdout, "%s\n\n", ui.Bold(color, "↺ Catalog up to date"))
 		fmt.Fprintf(os.Stdout, "Source:   %s\n", d.SourceSnapshotKey)
 		fmt.Fprintf(os.Stdout, "Catalog:  %s\n", d.CatalogSnapshotKey)
-		renderSyncNotice(d.Sync)
 		renderRefreshWarnings(warnings)
 		return nil
 	}
@@ -450,7 +329,6 @@ func emitRefreshResult(d catalogRefreshData, warnings []string) error {
 	fmt.Fprintf(os.Stdout, "APIs:       %d\n", d.APIs)
 	fmt.Fprintf(os.Stdout, "Resources:  %d\n", d.Resources)
 	fmt.Fprintf(os.Stdout, "Path:       %s\n", d.Path)
-	renderSyncNotice(d.Sync)
 	renderRefreshWarnings(warnings)
 	return nil
 }
@@ -459,24 +337,6 @@ func emitRefreshResult(d catalogRefreshData, warnings []string) error {
 // summary. No-op when there are none.
 func renderRefreshWarnings(warnings []string) {
 	for _, w := range warnings {
-		fmt.Fprintf(os.Stdout, "  ⚠  %s\n", w)
-	}
-}
-
-// renderSyncNotice prints the --sync outcome under the refresh summary (text
-// mode). In Phase 2 this is the noop syncer's not-configured warning. No-op
-// when --sync was not requested (sync == nil).
-func renderSyncNotice(sync *catalogSyncResult) {
-	if sync == nil {
-		return
-	}
-	fmt.Fprintln(os.Stdout)
-	if sync.Accepted {
-		fmt.Fprintf(os.Stdout, "Sync:       accepted (source %s, catalog %s)\n", sync.RemoteSourceKey, sync.RemoteCatalogKey)
-	} else {
-		fmt.Fprintln(os.Stdout, "Sync:       not accepted")
-	}
-	for _, w := range sync.Warnings {
 		fmt.Fprintf(os.Stdout, "  ⚠  %s\n", w)
 	}
 }
