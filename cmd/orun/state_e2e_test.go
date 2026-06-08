@@ -38,6 +38,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/statestore"
+	"github.com/sourceplane/orun/internal/triggerctx"
 )
 
 // stateE2EFixture bundles the per-test workspace plus the seed plan key,
@@ -219,7 +220,16 @@ func TestStateE2E(t *testing.T) {
 	// M12 cutover: execution reads now go through the object graph.)
 	// Step 12: `orun describe revision latest` — the literal "latest"
 	// must normalize to "" and surface the revision key + trigger field.
+	// describeRevision reads the object graph (catalogstore retirement, 1C), so
+	// seed it with the same revision human key the legacy walk used.
 	t.Run("step12_describe_revision_latest", func(t *testing.T) {
+		trig := triggerctx.TriggerOccurrence{
+			TriggerName: "system.manual",
+			TriggerKey:  "trg-manual-e2e",
+			PlanScope:   triggerctx.PlanScope{Mode: "full"},
+		}
+		writeObjectModelPlan(filepath.Join(dir, ".orun"), plan, []byte(`{"jobs":[]}`), f.planHash, f.revKey, trig, planCatalogResolution{})
+
 		out := captureStdout(t, func() error { return describeRevision("latest") })
 		if !strings.Contains(out, f.revKey) {
 			t.Fatalf("describe output missing revision key %q:\n%s", f.revKey, out)

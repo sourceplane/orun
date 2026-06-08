@@ -10,8 +10,6 @@ import (
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/objview"
-	"github.com/sourceplane/orun/internal/revision"
-	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -39,8 +37,8 @@ func registerDescribeCommand(root *cobra.Command) {
 	})
 
 	describeCmd.AddCommand(&cobra.Command{
-		Use:   "revision [key]",
-		Short: "Describe a revision (revisions/<key>/{revision,trigger,manifest}.json)",
+		Use:   "revision [latest|checksum]",
+		Short: "Describe a revision from the object-model graph",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ref := ""
 			if len(args) > 0 {
@@ -51,8 +49,8 @@ func registerDescribeCommand(root *cobra.Command) {
 	})
 
 	describeCmd.AddCommand(&cobra.Command{
-		Use:   "trigger [key]",
-		Short: "Describe a trigger (revisions/<key>/trigger.json)",
+		Use:   "trigger [latest|checksum]",
+		Short: "Describe the trigger that produced a revision",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ref := ""
 			if len(args) > 0 {
@@ -320,34 +318,45 @@ type PlanJobRef struct {
 	Job model.PlanJob
 }
 
-// describeRevision renders the revision document and its embedded
-// trigger summary. ref="" resolves the latest revision; the literal
-// "latest" is normalized to "" so users can type either form (Option A
-// from ai/proposals/task-0019-spec-update.md — CLI-side normalization,
-// no resolver change).
+// describeRevision renders a PlanRevision and the trigger that produced it from
+// the object-model revision graph. ref accepts the same grammar as describePlan:
+// "" / "latest" → revisions/latest, else a plan checksum (full or unique
+// prefix). The legacy per-revision manifest summary (latest-execution line) is
+// gone with catalogstore; execution detail now lives in `orun status` /
+// `orun catalog history` / `describe run`.
 func describeRevision(ref string) error {
 	if ref == "latest" {
 		ref = ""
 	}
 	color := ui.ColorEnabledForWriter(os.Stdout)
-	store, _, err := openLocalStateStore()
-	if err != nil {
-		return err
+	d, ok := objResolveRevisionDetail(ref)
+	if !ok {
+		return fmt.Errorf("revision not found: %s", ref)
 	}
-	revRef, err := revision.ResolveRevision(context.Background(), store, ref, revision.ResolveOptions{})
-	if err != nil {
-		return fmt.Errorf("resolve revision: %w", err)
+	rev := d.Revision
+	trig := d.Trigger
+	revKey := rev.HumanKey
+	if revKey == "" {
+		revKey = string(d.RevID)
 	}
-	rev := revRef.Revision
-	trig := revRef.Trigger
-	revKey := rev.RevisionKey
+	source := "by-hash"
+	if d.FromLatest {
+		source = "latest"
+	}
 
 	if getOutputFormat == "json" {
 		out := map[string]interface{}{
 			"revisionKey": revKey,
-			"revision":    rev,
-			"trigger":     trig,
-			"source":      string(revRef.Source),
+			"revisionId":  string(d.RevID),
+			"planHash":    rev.PlanHash,
+			"sourceId":    rev.SourceID,
+			"catalogId":   rev.CatalogID,
+			"jobCount":    rev.JobCount,
+			"scope":       rev.Scope,
+			"source":      source,
+		}
+		if d.HasTrigger {
+			out["trigger"] = trig
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -356,64 +365,41 @@ func describeRevision(ref string) error {
 
 	fmt.Fprintf(os.Stdout, "\n%s\n", ui.Bold(color, "Revision: "+revKey))
 	fmt.Fprintln(os.Stdout, strings.Repeat("─", 60))
-	fmt.Fprintf(os.Stdout, "Revision ID:  %s\n", rev.RevisionID)
+	fmt.Fprintf(os.Stdout, "Revision ID:  %s\n", string(d.RevID))
 	fmt.Fprintf(os.Stdout, "Plan Hash:    %s\n", rev.PlanHash)
 	fmt.Fprintf(os.Stdout, "Trigger Key:  %s\n", trig.TriggerKey)
 	fmt.Fprintf(os.Stdout, "Trigger Name: %s\n", trig.TriggerName)
-	fmt.Fprintf(os.Stdout, "Source:       %s\n", string(revRef.Source))
-	if revRef.NamedRefName != "" {
-		fmt.Fprintf(os.Stdout, "Named Ref:    %s\n", revRef.NamedRefName)
+	fmt.Fprintf(os.Stdout, "Source:       %s\n", source)
+	if rev.SourceID != "" {
+		fmt.Fprintf(os.Stdout, "Source Snapshot: %s\n", rev.SourceID)
 	}
-
-	if rev.SourceSnapshotKey != "" {
-		fmt.Fprintf(os.Stdout, "Source Snapshot: %s\n", rev.SourceSnapshotKey)
+	if rev.CatalogID != "" {
+		fmt.Fprintf(os.Stdout, "Catalog Snapshot: %s\n", rev.CatalogID)
 	}
-	if rev.CatalogSnapshotKey != "" {
-		fmt.Fprintf(os.Stdout, "Catalog Snapshot: %s\n", rev.CatalogSnapshotKey)
-	}
-
-	// Latest execution under this revision (manifest summary).
-	manifestPath := statestore.ManifestPath(revKey)
-	if raw, _, mErr := store.Read(context.Background(), manifestPath); mErr == nil {
-		var manifest struct {
-			Summary struct {
-				JobCount              int      `json:"jobCount"`
-				ActiveEnvironments    []string `json:"activeEnvironments"`
-				LatestExecutionKey    string   `json:"latestExecutionKey,omitempty"`
-				LatestExecutionStatus string   `json:"latestExecutionStatus,omitempty"`
-			} `json:"summary"`
-		}
-		if jErr := json.Unmarshal(raw, &manifest); jErr == nil {
-			fmt.Fprintf(os.Stdout, "Job Count:    %d\n", manifest.Summary.JobCount)
-			if len(manifest.Summary.ActiveEnvironments) > 0 {
-				fmt.Fprintf(os.Stdout, "Environments: %s\n", strings.Join(manifest.Summary.ActiveEnvironments, ", "))
-			}
-			if manifest.Summary.LatestExecutionKey != "" {
-				fmt.Fprintf(os.Stdout, "Latest Exec:  %s (%s)\n",
-					manifest.Summary.LatestExecutionKey, manifest.Summary.LatestExecutionStatus)
-			}
-		}
+	fmt.Fprintf(os.Stdout, "Job Count:    %d\n", rev.JobCount)
+	if rev.Scope.Mode != "" {
+		fmt.Fprintf(os.Stdout, "Scope:        %s\n", rev.Scope.Mode)
 	}
 	return nil
 }
 
-// describeTrigger renders trigger.json under a revision. ref="" resolves
-// the latest revision and shows its trigger; the literal "latest" is
-// normalized to "" for consistency with describeRevision (Option A).
+// describeTrigger renders the trigger occurrence that produced a revision, from
+// the object-model graph. ref shares describeRevision's grammar. The object-model
+// TriggerOccurrence folds the legacy type/mode into Source.{Flavor,System}; the
+// legacy provider/event/action fields are not recorded (a documented v1 gap).
 func describeTrigger(ref string) error {
 	if ref == "latest" {
 		ref = ""
 	}
 	color := ui.ColorEnabledForWriter(os.Stdout)
-	store, _, err := openLocalStateStore()
-	if err != nil {
-		return err
+	d, ok := objResolveRevisionDetail(ref)
+	if !ok {
+		return fmt.Errorf("revision not found for trigger: %s", ref)
 	}
-	revRef, err := revision.ResolveRevision(context.Background(), store, ref, revision.ResolveOptions{})
-	if err != nil {
-		return fmt.Errorf("resolve revision for trigger: %w", err)
+	if !d.HasTrigger {
+		return fmt.Errorf("no trigger recorded for revision: %s", ref)
 	}
-	trig := revRef.Trigger
+	trig := d.Trigger
 
 	if getOutputFormat == "json" {
 		enc := json.NewEncoder(os.Stdout)
@@ -425,14 +411,12 @@ func describeTrigger(ref string) error {
 	fmt.Fprintln(os.Stdout, strings.Repeat("─", 60))
 	fmt.Fprintf(os.Stdout, "Trigger ID: %s\n", trig.TriggerID)
 	fmt.Fprintf(os.Stdout, "Name:       %s\n", trig.TriggerName)
-	fmt.Fprintf(os.Stdout, "Type:       %s\n", trig.TriggerType)
-	fmt.Fprintf(os.Stdout, "Mode:       %s\n", trig.Mode)
-	fmt.Fprintf(os.Stdout, "Provider:   %s\n", trig.Provider)
-	fmt.Fprintf(os.Stdout, "Event:      %s\n", trig.Event)
-	if trig.Action != "" {
-		fmt.Fprintf(os.Stdout, "Action:     %s\n", trig.Action)
+	fmt.Fprintf(os.Stdout, "Type:       %s\n", trig.Source.Flavor)
+	if trig.Source.System != "" {
+		fmt.Fprintf(os.Stdout, "Mode:       %s\n", trig.Source.System)
 	}
-	fmt.Fprintf(os.Stdout, "Scope:      %s\n", trig.PlanScope.Mode)
-	fmt.Fprintf(os.Stdout, "Revision:   %s\n", revRef.Revision.RevisionKey)
+	fmt.Fprintf(os.Stdout, "Actor:      %s\n", trig.Actor)
+	fmt.Fprintf(os.Stdout, "Scope:      %s\n", trig.Scope.Mode)
+	fmt.Fprintf(os.Stdout, "Revision:   %s\n", string(d.RevID))
 	return nil
 }

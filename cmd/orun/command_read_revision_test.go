@@ -29,10 +29,31 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/triggerctx"
 )
+
+// seedObjectModelRevision writes one revision + trigger to the object graph
+// under dir/.orun via the production plan writer, returning the plan checksum
+// (the resolvable describe ref) and the revision human key (the rendered key).
+func seedObjectModelRevision(t *testing.T, dir string) (checksum, humanKey string) {
+	t.Helper()
+	checksum = "feedface00112233445566778899aabb"
+	humanKey = "rev-test-feedfac-pdeadbeef"
+	trig := triggerctx.TriggerOccurrence{
+		TriggerName: "system.manual",
+		TriggerKey:  "trg-manual-deadbeef",
+		PlanScope:   triggerctx.PlanScope{Mode: "full"},
+		CreatedAt:   time.Date(2026, 5, 30, 18, 0, 0, 0, time.UTC),
+	}
+	plan := &model.Plan{}
+	plan.Metadata.Name = "test-plan"
+	planBytes := []byte(`{"apiVersion":"orun.io/v1alpha1","kind":"Plan","jobs":[]}`)
+	writeObjectModelPlan(filepath.Join(dir, ".orun"), plan, planBytes, checksum, humanKey, trig, planCatalogResolution{})
+	return checksum, humanKey
+}
 
 // captureStdout runs fn while os.Stdout is piped into a buffer; returns
 // what was written.
@@ -215,33 +236,34 @@ func TestGetPlans_EmptyJSON_ReturnsArray(t *testing.T) {
 
 func TestDescribeRevision_HappyPath(t *testing.T) {
 	dir := withTempIntentRoot(t)
-	revKey := seedRevisionFirstWorkspace(t, dir)
+	checksum, humanKey := seedObjectModelRevision(t, dir)
 
 	prevFmt := getOutputFormat
 	getOutputFormat = ""
 	t.Cleanup(func() { getOutputFormat = prevFmt })
 
-	out := captureStdout(t, func() error { return describeRevision(revKey) })
-	if !strings.Contains(out, revKey) {
-		t.Fatalf("describe revision did not render key %q:\n%s", revKey, out)
+	// Resolve by plan checksum (the object-model ref grammar describePlan uses).
+	out := captureStdout(t, func() error { return describeRevision(checksum) })
+	if !strings.Contains(out, humanKey) {
+		t.Fatalf("describe revision did not render key %q:\n%s", humanKey, out)
 	}
 	if !strings.Contains(out, "Plan Hash") || !strings.Contains(out, "Trigger Key") {
 		t.Fatalf("describe revision missing core fields:\n%s", out)
 	}
-	if !strings.Contains(out, "Latest Exec") {
-		t.Fatalf("describe revision should surface manifest summary latest exec:\n%s", out)
+	if !strings.Contains(out, "trg-manual-") {
+		t.Fatalf("describe revision should surface the producing trigger:\n%s", out)
 	}
 }
 
 func TestDescribeTrigger_JSON(t *testing.T) {
 	dir := withTempIntentRoot(t)
-	revKey := seedRevisionFirstWorkspace(t, dir)
+	checksum, _ := seedObjectModelRevision(t, dir)
 
 	prevFmt := getOutputFormat
 	getOutputFormat = "json"
 	t.Cleanup(func() { getOutputFormat = prevFmt })
 
-	out := captureStdout(t, func() error { return describeTrigger(revKey) })
+	out := captureStdout(t, func() error { return describeTrigger(checksum) })
 	var trig map[string]interface{}
 	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &trig); err != nil {
 		t.Fatalf("describe trigger json: %v\n%s", err, out)
@@ -253,14 +275,14 @@ func TestDescribeTrigger_JSON(t *testing.T) {
 
 func TestDescribeRevision_Latest_EmptyArg(t *testing.T) {
 	dir := withTempIntentRoot(t)
-	revKey := seedRevisionFirstWorkspace(t, dir)
+	_, humanKey := seedObjectModelRevision(t, dir)
 
 	prevFmt := getOutputFormat
 	getOutputFormat = ""
 	t.Cleanup(func() { getOutputFormat = prevFmt })
 	out := captureStdout(t, func() error { return describeRevision("") })
-	if !strings.Contains(out, revKey) {
-		t.Fatalf("describe revision (latest) should resolve to %q:\n%s", revKey, out)
+	if !strings.Contains(out, humanKey) {
+		t.Fatalf("describe revision (latest) should resolve to %q:\n%s", humanKey, out)
 	}
 }
 
