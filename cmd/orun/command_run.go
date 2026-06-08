@@ -26,6 +26,7 @@ import (
 var (
 	runPlanRef              string
 	runResolvedRevisionArg  string
+	runRevision             string // --revision <key>: run a specific PlanRevision
 	runDryRun               bool
 	runVerbose              bool
 	runWorkDir              string
@@ -311,25 +312,10 @@ func runPlan() error {
 		}
 	}
 
-	// Revision-first execution (catalog history): resolve the PlanRevision and
-	// record the ExecutionRun under it for `orun catalog history`. Skipped for
-	// --dry-run and remote runs.
-	var rx *revisionExecution
-	if !runDryRun && !remoteActive {
-		ctx := context.Background()
-		built, rxErr := setupRevisionExecution(ctx, plan, loadedIntent, execID)
-		if rxErr != nil {
-			color := ui.ColorEnabledForWriter(os.Stderr)
-			fmt.Fprintf(os.Stderr, "%s revision execution disabled: %v\n",
-				ui.Yellow(color, "warning:"), rxErr)
-		} else {
-			rx = built
-		}
-	}
-
 	// Native object-model runner: open a live working tree and drive it from
-	// the runner's lifecycle hooks; it seals natively on terminal. Isolated
-	// under .orun/objectmodel/.
+	// the runner's lifecycle hooks; it seals natively on terminal. This is the
+	// sole execution record — the legacy executionstate/revision mirror was
+	// retired (specs/orun-legacy-retirement 1D). Isolated under .orun/objectmodel/.
 	var objRun *objrun.Session
 	objStoreRoot, objStoreErr := filepath.Abs(filepath.Join(storeDir(), ".orun"))
 	if objStoreErr == nil && !runDryRun && !remoteActive {
@@ -339,29 +325,38 @@ func runPlan() error {
 
 	runErr := r.Run(plan)
 
-	// Finalize the revision-first ExecutionRun from the runner's terminal
-	// tally (catalog history).
-	if rx != nil {
-		counts := execmodel.ExecutionCounts{}
-		if st := r.SnapshotState(); st != nil {
-			counts = execmodel.SummarizeExecutionState(st)
-		}
-		finalStatus, finErr := finalizeRevisionExecution(context.Background(), rx, counts, runErr)
-		if finErr != nil {
-			color := ui.ColorEnabledForWriter(os.Stderr)
-			fmt.Fprintf(os.Stderr, "%s finalize execution: %v\n",
-				ui.Yellow(color, "warning:"), finErr)
-		}
-		printRevisionRunSummary(rx, finalStatus)
-	}
-
 	// Seal the run into the content-addressed object graph (the live working
-	// tree seals itself from the runner's terminal state).
+	// tree seals itself from the runner's terminal state), then print the
+	// post-run summary.
 	if objRun != nil {
 		finishObjectModelRun(r, objRun, runErr)
+		printRunSummary(plan, execID, runErr)
 	}
 
 	return runErr
+}
+
+// printRunSummary emits the post-run summary block (Status / Revision /
+// Execution) from the object-model run. It replaces the legacy
+// printRevisionRunSummary; the data now comes from the plan's stamped revision
+// key and the run's execution id rather than the retired executionstate mirror.
+func printRunSummary(plan *model.Plan, execID string, runErr error) {
+	color := ui.ColorEnabledForWriter(os.Stdout)
+	status := "completed"
+	icon := ui.Green(color, "✓")
+	if runErr != nil {
+		status = "failed"
+		icon = ui.Red(color, "✗")
+	}
+	fmt.Println()
+	fmt.Println(icon + " Execution " + status)
+	fmt.Println()
+	if plan != nil && plan.Metadata.Revision != nil && plan.Metadata.Revision.Key != "" {
+		fmt.Printf("  Revision:  %s\n", plan.Metadata.Revision.Key)
+	}
+	if execID != "" {
+		fmt.Printf("  Execution: %s\n", execID)
+	}
 }
 
 // uploadJobShardsAfterRun loads the execution state and uploads job shards
@@ -781,7 +776,12 @@ func findJobByIDInPlan(plan *model.Plan, jobID string) model.PlanJob {
 
 func resolveAndLoadPlan() (*model.Plan, error) {
 	runResolvedRevisionArg = ""
-	ref := runPlanRef
+	// --revision <key> selects the plan to run (it resolves against the
+	// object-model revision graph, same as a positional ref).
+	ref := runRevision
+	if ref == "" {
+		ref = runPlanRef
+	}
 	if ref == "" {
 		ref = os.Getenv("ORUN_PLAN_ID")
 	}

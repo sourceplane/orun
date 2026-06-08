@@ -34,6 +34,18 @@ import (
 	"github.com/sourceplane/orun/internal/triggerctx"
 )
 
+// withTempIntentRoot points intentRoot (and thus storeDir) at a fresh temp dir
+// for the duration of a test, restoring it on cleanup. Shared across the cmd
+// test suite.
+func withTempIntentRoot(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	prev := intentRoot
+	intentRoot = dir
+	t.Cleanup(func() { intentRoot = prev })
+	return dir
+}
+
 // seedObjectModelRevision writes one 5-job revision + trigger to the object
 // graph under dir/.orun via the production plan writer, returning the plan
 // checksum (the resolvable describe/get ref) and the revision human key (the
