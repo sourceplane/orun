@@ -401,10 +401,8 @@ func generatePlan() error {
 	// metadata is included in the hash. A plan compiled against a different
 	// catalog should produce a different revision key.
 	catRes, err := resolvePlanCatalog(context.Background(), planCatalogOptions{
-		NoRefresh:      planNoCatalogRefresh,
-		Strict:         planCatalogStrict,
-		SourceSelector: planCatalogSource,
-		SnapshotKey:    planCatalogSnapshot,
+		NoRefresh: planNoCatalogRefresh,
+		Strict:    planCatalogStrict,
 	})
 	if err != nil {
 		return fmt.Errorf("resolve plan catalog: %w", err)
