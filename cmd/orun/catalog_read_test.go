@@ -116,6 +116,20 @@ func TestCatalogDescribe_E2E(t *testing.T) {
 	if data.Manifest.Identity.Name != "svc-a" {
 		t.Errorf("manifest name = %q", data.Manifest.Identity.Name)
 	}
+	// The typed Spec/Metadata are reconstructed by round-tripping the object-
+	// model component's generic maps; assert the seeded values survive.
+	if data.Manifest.Spec.Type != "service" {
+		t.Errorf("manifest spec.type = %q, want service", data.Manifest.Spec.Type)
+	}
+	if data.Manifest.Spec.System != "payments" {
+		t.Errorf("manifest spec.system = %q, want payments", data.Manifest.Spec.System)
+	}
+	if data.Manifest.Metadata.Owner != "team/x" {
+		t.Errorf("manifest metadata.owner = %q, want team/x", data.Manifest.Metadata.Owner)
+	}
+	if data.Manifest.Source.SourceSnapshotKey == "" || data.Manifest.Source.CatalogSnapshotKey == "" {
+		t.Errorf("manifest source keys empty: %+v", data.Manifest.Source)
+	}
 	if data.Executions == nil {
 		t.Error("executions must be a non-nil array even when empty")
 	}

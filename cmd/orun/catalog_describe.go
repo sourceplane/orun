@@ -1,8 +1,8 @@
 package main
 
 // catalog_describe.go implements `orun catalog describe <component>`: resolve
-// one ComponentManifest from the selected catalog and render the cli-surface.md
-// §4 section list (text) or the full manifest + catalog-local execution rows
+// one ComponentManifest from the selected object-model catalog and render the
+// cli-surface.md §4 section list (text) or the full manifest + execution rows
 // (--json under {manifest, executions}).
 //
 // Component selectors (§4):
@@ -10,20 +10,24 @@ package main
 //   - fully-qualified key (ns/repo/name) → exact componentKey match
 //   - ambiguous bare name across repos   → exit 4 with the candidate list
 //
-// PR-2 scope note: cross-repo ambiguity can only arise once the catalog holds
-// components from multiple repos. The resolver's ResolveComponent does a direct
-// name lookup, so this file additionally scans the enumerated manifest set to
-// detect a fully-qualified-key request and to surface the §4 ambiguity exit.
+// The manifest is reconstructed from the object-model component view: Identity,
+// Spec, and Metadata are faithful (the Spec/Metadata maps round-trip back into
+// the typed structs); Source carries the source/catalog keys; the Runtime-
+// inference and Resolution-provenance sections are not recorded on the object-
+// model component (a documented v1 gap — specs/orun-legacy-retirement Bucket 1)
+// and render empty.
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
-	"github.com/sourceplane/orun/internal/catalogstore"
+	"github.com/sourceplane/orun/internal/objcatalog"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -79,39 +83,32 @@ func runCatalogDescribe(ctx context.Context, arg string) error {
 		return exitErr(1, "describe requires a component name")
 	}
 
-	sel, err := parseCatalogSelector()
+	view, reader, err := loadObjCatalog(ctx)
 	if err != nil {
 		return err
 	}
 
-	stateStore, _, err := openLocalStateStore()
-	if err != nil {
-		return exitErr(3, "open state store: %w", err)
-	}
-	store := catalogstore.New(stateStore)
-
-	cat, err := store.ResolveCatalog(ctx, sel)
-	if err != nil {
-		return catalogReadExit(err, "resolve catalog")
-	}
-
-	manifests, err := catalogstore.EnumerateComponentManifests(ctx, stateStore, cat)
-	if err != nil {
-		return exitErr(3, "enumerate components: %w", err)
-	}
-
-	manifest, err := selectComponent(manifests, arg)
+	c, err := selectObjComponent(view, arg)
 	if err != nil {
 		return err
 	}
+	manifest := buildObjManifest(view, c)
 
-	idx, _, ierr := catalogstore.ReadComponentExecutionIndex(ctx, stateStore, cat.SourceSnapshotKey, cat.CatalogSnapshotKey, manifest.Identity.Name)
-	if ierr != nil {
-		return exitErr(3, "read execution index: %w", ierr)
+	// Execution rows from the object-model join (same source as `catalog
+	// history`): executionKey/revision/status off the sealed execution.
+	execViews, eerr := reader.ComponentExecutions(ctx, arg)
+	if eerr != nil {
+		return exitErr(3, "read executions: %w", eerr)
 	}
-	execs := idx.Executions
-	if execs == nil {
-		execs = []catalogmodel.ComponentExecutionRow{}
+	execs := make([]catalogmodel.ComponentExecutionRow, 0, len(execViews))
+	for _, e := range execViews {
+		execs = append(execs, catalogmodel.ComponentExecutionRow{
+			ComponentKey: c.ComponentKey,
+			RevisionKey:  e.RevisionID,
+			ExecutionKey: e.ExecutionKey,
+			Status:       e.Status,
+			CreatedAt:    e.StartedAt.UTC().Format(time.RFC3339),
+		})
 	}
 
 	if catalogJSONFlag {
@@ -123,41 +120,77 @@ func runCatalogDescribe(ctx context.Context, arg string) error {
 	return renderCatalogDescribeText(manifest, execs)
 }
 
-// selectComponent resolves the §4 component selector against the enumerated
-// manifest set. A fully-qualified key (containing '/') is matched exactly; a
-// bare name matches on Identity.Name and exits 4 when more than one repo
-// supplies that name.
-func selectComponent(manifests []catalogmodel.ComponentManifest, arg string) (catalogmodel.ComponentManifest, error) {
+// selectObjComponent resolves the §4 component selector against the object-model
+// catalog view. A fully-qualified key (containing '/') is matched exactly; a
+// bare name matches on Name and exits 4 when more than one repo supplies it.
+func selectObjComponent(view objcatalog.CatalogView, arg string) (objcatalog.CatalogComponentView, error) {
 	if strings.Contains(arg, "/") {
-		for _, m := range manifests {
-			if m.Identity.ComponentKey == arg {
-				return m, nil
+		for _, c := range view.Components {
+			if c.ComponentKey == arg {
+				return c, nil
 			}
 		}
-		return catalogmodel.ComponentManifest{}, exitErr(6, "component %q not found in catalog", arg)
+		return objcatalog.CatalogComponentView{}, exitErr(6, "component %q not found in catalog", arg)
 	}
 
-	var matches []catalogmodel.ComponentManifest
-	for _, m := range manifests {
-		if m.Identity.Name == arg {
-			matches = append(matches, m)
+	var matches []objcatalog.CatalogComponentView
+	for _, c := range view.Components {
+		if c.Name == arg {
+			matches = append(matches, c)
 		}
 	}
 	switch len(matches) {
 	case 0:
-		return catalogmodel.ComponentManifest{}, exitErr(6, "component %q not found in catalog", arg)
+		return objcatalog.CatalogComponentView{}, exitErr(6, "component %q not found in catalog", arg)
 	case 1:
 		return matches[0], nil
 	default:
 		keys := make([]string, 0, len(matches))
-		for _, m := range matches {
-			keys = append(keys, m.Identity.ComponentKey)
+		for _, c := range matches {
+			keys = append(keys, c.ComponentKey)
 		}
 		sort.Strings(keys)
-		return catalogmodel.ComponentManifest{}, exitErr(4,
+		return objcatalog.CatalogComponentView{}, exitErr(4,
 			"component %q is ambiguous across repos; qualify with a full key: %s",
 			arg, strings.Join(keys, ", "))
 	}
+}
+
+// buildObjManifest reconstructs a typed catalogmodel.ComponentManifest from the
+// object-model component view. Spec/Metadata are recovered by round-tripping the
+// generic maps back into the typed structs (they were produced by JSON-encoding
+// those same structs); Source carries the source/catalog keys. Runtime and
+// Resolution are not recorded on the object-model component and stay zero.
+func buildObjManifest(view objcatalog.CatalogView, c objcatalog.CatalogComponentView) catalogmodel.ComponentManifest {
+	m := catalogmodel.ComponentManifest{
+		APIVersion: catalogmodel.APIVersionV1Alpha1,
+		Kind:       catalogmodel.KindComponentManifest,
+		Identity: catalogmodel.ComponentIdentity{
+			ComponentKey: c.ComponentKey,
+			Name:         c.Name,
+			Namespace:    c.Namespace,
+			Repo:         c.Repo,
+			Path:         c.Path,
+		},
+		Source: catalogmodel.ComponentSource{
+			SourceSnapshotKey:  view.SourceID,
+			CatalogSnapshotKey: objCatalogSnapshotKey(view),
+		},
+	}
+	roundTripInto(c.Spec, &m.Spec)
+	roundTripInto(c.Metadata, &m.Metadata)
+	return m
+}
+
+// roundTripInto re-decodes a generic map into a typed destination via JSON. Used
+// to recover the typed Spec/Metadata from the object-model manifest's maps; a
+// marshal/unmarshal error leaves dst at its zero value (best-effort render).
+func roundTripInto(src, dst any) {
+	b, err := json.Marshal(src)
+	if err != nil {
+		return
+	}
+	_ = json.Unmarshal(b, dst)
 }
 
 func renderCatalogDescribeText(m catalogmodel.ComponentManifest, execs []catalogmodel.ComponentExecutionRow) error {
