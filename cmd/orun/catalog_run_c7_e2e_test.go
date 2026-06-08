@@ -74,21 +74,10 @@ func TestCatalogRunC7_E2EPlanRunHistory(t *testing.T) {
 		t.Fatalf("revision index missing catalog parent: %+v", revIdx)
 	}
 
-	execIdx, _, err := statestore.ReadExecutionIndex(context.Background(), stateStore, ghaExecID)
-	if err != nil {
-		t.Fatalf("ReadExecutionIndex: %v", err)
-	}
-	if execIdx.ExecutionKey != ghaExecID {
-		t.Fatalf("execution key was rewritten: got %q want %q", execIdx.ExecutionKey, ghaExecID)
-	}
-	if execIdx.SourceSnapshotKey != revIdx.SourceSnapshotKey || execIdx.CatalogSnapshotKey != revIdx.CatalogSnapshotKey {
-		t.Fatalf("execution index parent mismatch: exec=%+v rev=%+v", execIdx, revIdx)
-	}
-
-	// (The legacy catalog-owned execution doc + ComponentExecutionIndex
-	// dual-write was removed with the catalogstore retirement; history now reads
-	// the object-model execution graph, asserted below. The executionstate
-	// index above is still written for `orun describe`/`get`.)
+	// (The run-path executionstate mirror was retired with the legacy stack;
+	// `orun run` writes only the object graph now. The legacy revision index
+	// above is still written by `orun plan` until main.go's plan-path legacy
+	// write is removed. History reads the object-model execution graph below.)
 
 	catalogJSONFlag = true
 	historyOut := captureStdout(t, func() error {
