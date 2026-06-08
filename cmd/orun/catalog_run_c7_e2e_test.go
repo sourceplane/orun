@@ -11,7 +11,6 @@ import (
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/statestore"
 )
 
 func TestCatalogRunC7_E2EPlanRunHistory(t *testing.T) {
@@ -49,7 +48,6 @@ func TestCatalogRunC7_E2EPlanRunHistory(t *testing.T) {
 	if plan.Metadata.Revision == nil || plan.Metadata.Revision.Key == "" {
 		t.Fatalf("plan missing revision metadata: %+v", plan.Metadata.Revision)
 	}
-	revKey := plan.Metadata.Revision.Key
 
 	ghaExecID := "gh-123456789-2-abcdef0"
 	runPlanRef = planPath
@@ -62,23 +60,8 @@ func TestCatalogRunC7_E2EPlanRunHistory(t *testing.T) {
 
 	_ = captureStdout(t, runPlan)
 
-	stateStore, _, err := openLocalStateStore()
-	if err != nil {
-		t.Fatalf("open state store: %v", err)
-	}
-	revIdx, _, err := statestore.ReadRevisionIndex(context.Background(), stateStore, revKey)
-	if err != nil {
-		t.Fatalf("ReadRevisionIndex: %v", err)
-	}
-	if revIdx.SourceSnapshotKey == "" || revIdx.CatalogSnapshotKey == "" {
-		t.Fatalf("revision index missing catalog parent: %+v", revIdx)
-	}
-
-	// (The run-path executionstate mirror was retired with the legacy stack;
-	// `orun run` writes only the object graph now. The legacy revision index
-	// above is still written by `orun plan` until main.go's plan-path legacy
-	// write is removed. History reads the object-model execution graph below.)
-
+	// `orun plan`/`run` now write only the object graph (the legacy revision +
+	// executionstate mirror was retired). History reads it below.
 	catalogJSONFlag = true
 	historyOut := captureStdout(t, func() error {
 		return runCatalogHistory(context.Background(), "svc-a")
