@@ -16,7 +16,6 @@ import (
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/objrun"
 	"github.com/sourceplane/orun/internal/remotestate"
-	"github.com/sourceplane/orun/internal/revision"
 	"github.com/sourceplane/orun/internal/runner"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/ui"
@@ -801,11 +800,10 @@ func resolveAndLoadPlan() (*model.Plan, error) {
 			noteRunPlanRevision(plan)
 			return plan, nil
 		}
-		if plan, revKey, err := loadPlanFromRevisionRef(ref); err == nil {
-			runResolvedRevisionArg = revKey
-			return plan, nil
-		} else if ref == "latest" || strings.HasPrefix(ref, "rev-") {
-			return nil, err
+		// A revision ref (latest / rev-<key> / checksum) the object graph could
+		// not resolve is an error, not a component name.
+		if ref == "latest" || strings.HasPrefix(ref, "rev-") {
+			return nil, fmt.Errorf("revision %q not found in the object graph", ref)
 		}
 		// Not a plan ref or file path — treat as a component name to scope the fresh plan.
 		planComponents = []string{ref}
@@ -838,30 +836,6 @@ func noteRunPlanRevision(plan *model.Plan) {
 	if key := strings.TrimSpace(plan.Metadata.Revision.Key); key != "" {
 		runResolvedRevisionArg = key
 	}
-}
-
-func loadPlanFromRevisionRef(ref string) (*model.Plan, string, error) {
-	stateStore, _, err := openLocalStateStore()
-	if err != nil {
-		return nil, "", err
-	}
-	arg := ref
-	if arg == "latest" {
-		arg = ""
-	}
-	revRef, err := revision.ResolveRevision(context.Background(), stateStore, arg, revision.ResolveOptions{})
-	if err != nil {
-		return nil, "", err
-	}
-	plan, err := parsePlanBytes(revRef.PlanBytes, ref)
-	if err != nil {
-		return nil, "", err
-	}
-	noteRunPlanRevision(plan)
-	if runResolvedRevisionArg == "" {
-		runResolvedRevisionArg = revRef.Revision.RevisionKey
-	}
-	return plan, revRef.Revision.RevisionKey, nil
 }
 
 func resolveRunnerName(flagValue string) string {
