@@ -26,50 +26,38 @@ import (
 	"github.com/sourceplane/orun/internal/catalogmodel"
 )
 
-// ----- parseCatalogSelector ------------------------------------------
+// ----- objCatalogRef (selector grammar) ------------------------------
 
-func TestParseCatalogSelector_Forms(t *testing.T) {
+func TestObjCatalogRef_Forms(t *testing.T) {
 	cases := []struct {
 		name     string
 		source   string
 		snapshot string
-		wantKind string
-		wantSnap string
+		wantRef  string
 	}{
-		{"empty defaults to current", "", "", "current", ""},
-		{"current", "current", "", "current", ""},
-		{"main", "main", "", "main", ""},
-		{"latest", "latest", "", "latest", ""},
-		{"branch", "branches/feature-x", "", "branch", ""},
-		{"pr canonical", "prs/139", "", "pr", ""},
-		{"snapshot pin", "", "cat-deadbeef", "", "cat-deadbeef"},
+		{"empty defaults to current", "", "", "catalogs/current"},
+		{"current", "current", "", "catalogs/current"},
+		{"main", "main", "", "catalogs/main"},
+		{"latest aliases current", "latest", "", "catalogs/current"},
+		{"branch", "branches/feature-x", "", "catalogs/branches/feature-x"},
+		{"pr canonical", "prs/139", "", "catalogs/prs/139"},
+		{"snapshot pin verbatim", "", "cat-deadbeef", "cat-deadbeef"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			prevSrc, prevSnap := catalogSourceFlag, catalogSnapshotFlag
-			catalogSourceFlag, catalogSnapshotFlag = tc.source, tc.snapshot
-			t.Cleanup(func() { catalogSourceFlag, catalogSnapshotFlag = prevSrc, prevSnap })
-
-			sel, err := parseCatalogSelector()
+			ref, err := objCatalogRef(tc.source, tc.snapshot)
 			if err != nil {
-				t.Fatalf("parseCatalogSelector(%q,%q): %v", tc.source, tc.snapshot, err)
+				t.Fatalf("objCatalogRef(%q,%q): %v", tc.source, tc.snapshot, err)
 			}
-			if sel.Kind != tc.wantKind {
-				t.Errorf("Kind = %q, want %q", sel.Kind, tc.wantKind)
-			}
-			if sel.Snapshot != tc.wantSnap {
-				t.Errorf("Snapshot = %q, want %q", sel.Snapshot, tc.wantSnap)
+			if ref != tc.wantRef {
+				t.Errorf("ref = %q, want %q", ref, tc.wantRef)
 			}
 		})
 	}
 }
 
-func TestParseCatalogSelector_MalformedExit1(t *testing.T) {
-	prevSrc, prevSnap := catalogSourceFlag, catalogSnapshotFlag
-	catalogSourceFlag, catalogSnapshotFlag = "branches/", ""
-	t.Cleanup(func() { catalogSourceFlag, catalogSnapshotFlag = prevSrc, prevSnap })
-
-	_, err := parseCatalogSelector()
+func TestObjCatalogRef_MalformedExit1(t *testing.T) {
+	_, err := objCatalogRef("branches/", "")
 	if err == nil {
 		t.Fatal("expected error for malformed selector, got nil")
 	}

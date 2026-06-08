@@ -1,23 +1,18 @@
 package main
 
-// catalog.go is the C5 PR-1 foundation for the `orun catalog` command
-// family. It ships the root command, the shared JSON-envelope writer, the
-// shared `--catalog-source`/`--catalog-snapshot` → catalogstore.RefSelector
-// parse glue, and the pure helpers that turn a resolved workspace into the
-// (SourceSnapshot, ResolverInputs) the engine needs. The two subcommands
-// (`refresh`, `refs`) live in catalog_refresh.go / catalog_refs.go and reuse
-// everything here.
+// catalog.go is the foundation for the `orun catalog` command family. It ships
+// the root command, the shared JSON-envelope writer, the shared selector flags,
+// and the pure helpers that turn a resolved workspace into the
+// (SourceSnapshot, ResolverInputs) the resolver needs.
 //
-// Architecture: the CLI is glue only. Every hash, key, canonical encode, and
-// bundle assembly is delegated to the engine packages
-// (internal/sourcectx, internal/catalogresolve, internal/catalogstore). The
-// CLI's own logic — selector parsing, bundle assembly, ref enumeration — was
-// deliberately pushed into tested seams (catalogstore.ParseRefSelector /
-// AssembleBundle / ListRefs) rather than buried untested in a cobra RunE.
+// Architecture: the CLI is glue only. Resolution is delegated to
+// internal/sourcectx + internal/catalogresolve; persistence and reads go to the
+// content-addressed object model (the legacy catalogstore/statestore have been
+// retired — specs/orun-legacy-retirement). Selector parsing now routes through
+// objCatalogRef (catalog_objsource.go).
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,9 +20,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
 	"github.com/sourceplane/orun/internal/catalogresolve"
-	"github.com/sourceplane/orun/internal/catalogstore"
 	"github.com/sourceplane/orun/internal/sourcectx"
-	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/spf13/cobra"
 )
 
@@ -154,20 +147,6 @@ func addCatalogSelectorFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&catalogSourceFlag, "catalog-source", "", "Resolve catalog by ref selector (current|main|latest|branches/<name>|prs/<n>|cat-<key>)")
 	cmd.Flags().StringVar(&catalogSourceFlag, "source", "", "Alias for --catalog-source")
 	cmd.Flags().StringVar(&catalogSnapshotFlag, "catalog-snapshot", "", "Bypass refs; pin to an explicit catalogSnapshotKey")
-}
-
-// parseCatalogSelector is the single shared bridge from the
-// --catalog-source/--source/--catalog-snapshot flag values to a
-// catalogstore.RefSelector. Every C5 read subcommand routes through it so
-// selector grammar (current|main|latest|branches/<name>|prs/<n>|cat-<key>
-// pin) stays defined in exactly one tested place. A malformed selector is
-// surfaced as an exit-1 validation error (cli-surface.md §2).
-func parseCatalogSelector() (catalogstore.RefSelector, error) {
-	sel, err := catalogstore.ParseRefSelector(catalogSourceFlag, catalogSnapshotFlag)
-	if err != nil {
-		return catalogstore.RefSelector{}, exitErr(1, "invalid selector: %w", err)
-	}
-	return sel, nil
 }
 
 // ----- workspace → engine-input helpers (pure glue) ------------------
@@ -297,16 +276,3 @@ func resolverInputsFromState(ws sourcectx.WorkspaceState, srcKey, inputHash, rep
 	}
 }
 
-// catalogReadExit maps a Resolver read error onto the catalog CLI exit-code
-// contract: a not-found (catalog/component/source absent) is exit 6 with a
-// friendly hint to run refresh; any other read failure is a StateStore error
-// (exit 3). The wrapped message preserves the underlying cause for --json
-// stderr and debugging.
-func catalogReadExit(err error, ctxMsg string) error {
-	if errors.Is(err, statestore.ErrNotFound) ||
-		errors.Is(err, catalogstore.ErrCatalogNotFound) ||
-		errors.Is(err, catalogstore.ErrComponentNotFound) {
-		return exitErr(6, "%s: not found (run 'orun catalog refresh' first): %w", ctxMsg, err)
-	}
-	return exitErr(3, "%s: %w", ctxMsg, err)
-}

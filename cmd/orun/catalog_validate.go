@@ -81,7 +81,7 @@ func runCatalogValidate(ctx context.Context) error {
 
 	// A malformed selector must still fail fast with the §2 exit-1 contract.
 	if catalogSourceFlag != "" || catalogSnapshotFlag != "" {
-		if _, err := parseCatalogSelector(); err != nil {
+		if _, err := objCatalogRef(catalogSourceFlag, catalogSnapshotFlag); err != nil {
 			return err
 		}
 	}
