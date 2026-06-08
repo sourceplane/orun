@@ -1,62 +1,62 @@
-# Epic: orun-env-scoping
+# Feature: orun-env-scoping (the "Z" model)
 
-> ⚠️ **STATUS: EPIC — TO BE DESIGNED / FINALIZED. Not ready for implementation.**
-> This is a holding epic that captures a product direction and the open points
-> behind it. The design, schema, migration, and deprecation window are **not yet
-> settled** and will be worked in a later revision. Nothing here is built until
-> this epic is promoted to a ready spec.
+> **Status: design converged — a small, almost-non-breaking feature** (was framed
+> as a breaking epic; it converged to a feature). **Principle: selection is a
+> *plan-time* concern; the plan is executed faithfully; a *mutating* `run` is
+> fail-closed** — the absence of an explicit selection yields no mutation.
 
-**Direction: every plan / run is scoped to exactly one environment — never
-all-env, never multi-env — resolved from an explicit selection else an
-`intent.yaml` default environment.** This is a **breaking run-path change** that
-touches planning, triggers, promotion, and CI, which is why it is its own epic
-rather than a rider on `specs/orun-catalog-state/`.
+## The model in one screen
 
-## Why an epic (not part of the cockpit spec)
-
-The cockpit work (`specs/orun-catalog-state/`) needs to let a user pick an
-environment and run a component in it. That much it does **on the existing env
-model** (select one of `intent.environments`, run via the current `--env <one>`
-path) — no schema change, no behavior change to `orun plan`/`run`. The *system-
-wide* change — making single-env mandatory everywhere and adding
-`defaultEnvironment` — is larger and breaking, so it is captured here to be
-designed and finalized separately.
-
-## Relationship to `orun-catalog-state`
-
-| Concern | Where |
-|---------|-------|
-| Cockpit env **selector** + component-scoped run on the **existing** model | `orun-catalog-state` (`environments.md`, CS6) — ships now |
-| `intent.defaultEnvironment` schema + validation | **here** (epic) |
-| Removing the no-`--env`=all-env default; deprecating `--env a,b` | **here** (epic) |
-| Single-env enforcement in `plan`/`run`/triggers/CI/promotion | **here** (epic) |
-| Migration + deprecation window | **here** (epic) |
-
-`orun-catalog-state` deferred-register entry **L-1** points here.
+- **`plan`** is a contextual artifact (shaped by trigger / `--changed` / env / component
+  flags). It **defaults to all environments** (read-only, safe, good for review/CI).
+- **Selection flags (mostly already exist):** `--env <list>`, `--component <list>`,
+  `--changed`, `--trigger` — plus the one new flag **`--all-envs`** (explicit "all";
+  `--all` is taken by the root component/CWD-scoping flag).
+- **`run`** executes the plan **faithfully** and a mutating run is **fail-closed**:
+  no explicit selection → error; all-env mutating run requires `--all-envs`;
+  `--dry-run` is the read-only escape.
+- **Promotion** = **in-plan `dependsOn` ordering** (Option B): within one run, a
+  dependent env runs after its prerequisite, and a failed prerequisite blocks its
+  dependents.
+- **Scoped plans prune dangling edges with a warning**, so a narrowed plan stays
+  self-contained and faithful.
+- **No built-in `local` env** — a sandbox is a normally-declared environment.
 
 ## Status
 
 | Field | Value |
 |-------|-------|
-| Status | **Epic — to be designed/finalized; do not implement** |
-| Type | Breaking run-path change (planning, triggers, promotion, CI) |
-| Builds on / relates to | `specs/orun-catalog-state/` (cockpit selector on the existing model) |
-| Read | `design.md` — the captured points: current model, target model, enforcement surfaces, gaps, migration concerns |
+| Status | **Design converged → ready for implementation planning** |
+| Type | Feature; additive + one deprecation-windowed break (mutating `run` fail-closed) |
+| Builds on / relates to | `specs/orun-catalog-state/` (cockpit env selector); `specs/orun-state-redesign/` (`PlanScope`/`RevSummary` carry the selection) |
+| Read order | `design.md` → `cli-surface.md` → `data-model.md` → `implementation-plan.md` → `test-plan.md` → `compatibility-and-migration.md` → `risks-and-open-questions.md` |
 
-## Open points (to finalize in the revision)
+## Decision ledger (converged)
 
-Carried verbatim from the cockpit-spec review so nothing is lost (see
-`design.md` for detail):
+| # | Decision |
+|---|----------|
+| Z-1 | Selection is a **plan-time** concern; `run` executes the plan faithfully. |
+| Z-2 | `plan` (and `run --dry-run`) default to **all** environments (read-only; safe). |
+| Z-3 | A **mutating `run` is fail-closed**: no selection → error; all-env mutating run requires `--all-envs`; `--dry-run` is the read-only escape. |
+| Z-4 | Flags: existing `--env <list>` + `--component <list>` + `--changed` + `--trigger`, plus new `--all-envs`. |
+| Z-5 | Promotion = **in-plan `dependsOn` ordering** (Option B); failed prerequisite blocks dependents. |
+| Z-6 | Scoped plans **prune dangling edges with a warning**. |
+| Z-7 | **No built-in `local` env**. |
 
-- **G-5** no-default resolution — hard error vs single-env fallback.
-- **G-6** multi-env CI / promotion → N single-env runs; want a `--env each-of`
-  fan-out (still N single-env runs) or are N invocations fine?
-- **G-7** triggers must resolve to one env (or fan out) — interacts with promotion
-  gates.
-- **G-9** `defaultEnvironment` placement — top-level field vs per-env
-  `default: true`.
-- **G-10** promotion model — staging→prod becomes a gated run *in the target
-  env*, confirm.
+## Gaps (resolutions in `design.md` §7 + `risks-and-open-questions.md`)
 
-(G-8, the cockpit affected-overlay env filter, stays in `orun-catalog-state` — it
-is a cockpit UX detail, not a run-path concern.)
+G1 fail-closed vs. pre-compiled plan · G2 cross-invocation promotion ordering (→ Option C) · G3 pruning is convention not enforcement · G4 pruning semantics · G5 selector composition · G6 `--component` exact vs. closure · G7 bare-`run` migration · G8 `--all-envs` confirmation UX · G9 idempotent cross-run skip.
+
+## Phase boundaries
+
+| In scope | Out of scope |
+|----------|--------------|
+| `--all-envs` flag; selection composition rules; dangling-edge pruning + `PrunedEdge` surfacing; in-plan promotion ordering as the single mechanism; mutating-`run` fail-closed behind a deprecation window | Cross-invocation source-status promotion gate (Option C); idempotent cross-run job skip; pruning-hardening (error-in-CI); a `--with-deps` closure mode; any built-in `local` environment |
+
+## Relationship to `orun-catalog-state`
+
+The cockpit env **selector** + component-scoped run ships in `orun-catalog-state`
+(`environments.md`, CS6). This feature is consistent with it: the cockpit's
+selection is a plan-time selection like any other, and `run` stays faithful.
+`orun-catalog-state` deferred-register entry **L-1** pointed at the original epic;
+this feature supersedes it with the converged Z model.
