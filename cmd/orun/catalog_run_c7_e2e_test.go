@@ -120,12 +120,23 @@ func TestCatalogRunC7_E2EPlanRunHistory(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("history rows = %+v; want one execution", rows)
 	}
+	// History now reads the object-model execution graph (the catalogstore
+	// retirement). The lineage keys are object-model ids (not the legacy
+	// rev-/cat- keys), and the executionKey is the object-model run handle
+	// derived from the execution id; profile/environment/triggerName are not
+	// recorded on the object-model execution (a documented v1 gap).
 	row := rows[0]
-	if row.ExecutionKey != ghaExecID || row.RevisionKey != revKey ||
-		row.SourceSnapshotKey != revIdx.SourceSnapshotKey ||
-		row.CatalogSnapshotKey != revIdx.CatalogSnapshotKey ||
-		row.ComponentKey != "sourceplane/orun/svc-a" {
-		t.Fatalf("history row missing C7 metadata: %+v", row)
+	if row.ComponentKey != "sourceplane/orun/svc-a" {
+		t.Errorf("history row componentKey = %q, want sourceplane/orun/svc-a", row.ComponentKey)
+	}
+	if !strings.HasPrefix(row.ExecutionKey, "run-") {
+		t.Errorf("history row executionKey = %q, want a run- handle", row.ExecutionKey)
+	}
+	if row.RevisionKey == "" || row.SourceSnapshotKey == "" || row.CatalogSnapshotKey == "" {
+		t.Errorf("history row missing object-model lineage: %+v", row)
+	}
+	if row.Status != "succeeded" {
+		t.Errorf("history row status = %q, want succeeded", row.Status)
 	}
 }
 

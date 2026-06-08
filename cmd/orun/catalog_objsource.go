@@ -104,6 +104,17 @@ func mapString(m map[string]any, key string) string {
 	return s
 }
 
+// objComponentKey returns the componentKey of the catalog component matching
+// arg (a bare name or a full key), or arg itself when no component matches.
+func objComponentKey(view objcatalog.CatalogView, arg string) string {
+	for _, c := range view.Components {
+		if c.ComponentKey == arg || c.Name == arg {
+			return c.ComponentKey
+		}
+	}
+	return arg
+}
+
 // objCatalogSnapshotKey is the user-facing catalogSnapshotKey for an
 // object-model catalog view: the human key when present, else the catalog
 // object id. (Replaces the legacy cat-<key>; no test pins the literal value.)

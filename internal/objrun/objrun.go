@@ -80,13 +80,25 @@ func Begin(ctx context.Context, root string, plan *model.Plan, execID string) (*
 	_, _ = mgr.RecoverStale(ctx)
 
 	wt, err := mgr.Open(ctx, runworktree.OpenInput{
-		ExecutionID: execID,
-		RevisionID:  revID,
+		ExecutionID:  execID,
+		ExecutionKey: deriveExecKey(execID),
+		RevisionID:   revID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open working tree: %w", err)
 	}
 	return &Session{mgr: mgr, wt: wt, revID: revID}, nil
+}
+
+// deriveExecKey produces a stable execution key from the execution id. The
+// object model addresses executions by id (objread.Get), so the key is a
+// display / drill-down handle, not an identity. A content-derived "run-<hash>"
+// keeps it deterministic and non-empty without the legacy stateful run-NNN
+// sequence scan — so `orun catalog history`/`describe` (which read it off the
+// sealed execution) have a real handle instead of a blank column.
+func deriveExecKey(execID string) string {
+	sum := sha256.Sum256([]byte(execID))
+	return "run-" + hex.EncodeToString(sum[:])[:12]
 }
 
 // RevisionID returns the revision the session attached to ("" for a nil session).
