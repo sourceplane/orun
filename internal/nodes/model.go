@@ -117,10 +117,11 @@ type GraphNode struct {
 }
 
 type GraphEdge struct {
-	From    string `json:"from"`
-	To      string `json:"to"`
-	Type    string `json:"type"`
-	Include string `json:"include,omitempty"` // change-detection plan-selection mode ("always"; omitted = if-selected)
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Type     string `json:"type"`
+	Optional bool   `json:"optional,omitempty"` // dependency-edge optionality, carried from the resolver (omitted when false to keep the catalog hash stable for required edges)
+	Include  string `json:"include,omitempty"`  // change-detection plan-selection mode ("always"; omitted = if-selected)
 }
 
 // CatalogGraph is one edge-kind slice (dependencies/systems/apis/resources/

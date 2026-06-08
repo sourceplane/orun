@@ -201,6 +201,59 @@ func TestLoad_CurrentRef(t *testing.T) {
 	}
 }
 
+func TestLoad_GraphEdgeOptional(t *testing.T) {
+	// The object-model catalog graph must carry dependency-edge optionality
+	// (the resolver knows it; the lossy mapping used to drop it). A faithful
+	// `orun catalog tree` re-point depends on this round-tripping.
+	f := newFixture(t)
+	ctx := context.Background()
+	cat := nodes.CatalogSnapshot{
+		Kind:            nodes.KindCatalogSnapshot,
+		HumanKey:        "cat-optional",
+		SourceID:        "sha256:" + repeat("b", 64),
+		ResolverVersion: 1,
+	}
+	graphs := []nodes.CatalogGraph{{
+		Kind:     nodes.KindCatalogGraph,
+		EdgeKind: "dependencies",
+		Nodes: []nodes.GraphNode{
+			{Key: "ns/repo/a", Kind: "component", Name: "a"},
+			{Key: "ns/repo/b", Kind: "component", Name: "b"},
+			{Key: "ns/repo/c", Kind: "component", Name: "c"},
+		},
+		Edges: []nodes.GraphEdge{
+			{From: "ns/repo/a", To: "ns/repo/b", Type: "depends_on", Optional: true},
+			{From: "ns/repo/a", To: "ns/repo/c", Type: "depends_on"},
+		},
+	}}
+	root, err := nodes.AssembleCatalog(ctx, f.store, cat, sampleManifests(), graphs, nodes.ImpactOwnership{}, nil)
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	if err := f.refs.Update(ctx, refCatalogCurrent, "", string(root)); err != nil {
+		t.Fatalf("ref update: %v", err)
+	}
+
+	view, err := New(f.store, f.refs).Load(ctx, "")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	dep, ok := view.Graph["dependencies"]
+	if !ok {
+		t.Fatalf("dependencies graph missing")
+	}
+	got := map[string]bool{}
+	for _, e := range dep.Edges {
+		got[e.To] = e.Optional
+	}
+	if !got["ns/repo/b"] {
+		t.Errorf("a→b should be optional, edges = %+v", dep.Edges)
+	}
+	if got["ns/repo/c"] {
+		t.Errorf("a→c should be required, edges = %+v", dep.Edges)
+	}
+}
+
 func TestLoad_NoImpactSubtree(t *testing.T) {
 	// A pre-CS3 catalog (no impact/ subtree at all) still loads, with Ownership
 	// left nil — the reader's forward/backward compatibility contract.
