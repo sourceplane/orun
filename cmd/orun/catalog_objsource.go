@@ -14,6 +14,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
 	"github.com/sourceplane/orun/internal/objcatalog"
+	"github.com/sourceplane/orun/internal/objread"
 )
 
 // objCatalogRef maps the legacy selector grammar
@@ -69,26 +70,48 @@ func isObjCatalogID(s string) bool {
 	return true
 }
 
-// loadObjCatalogView resolves the shared selector flags to an object-model
-// catalog ref and loads the catalog view. A missing catalog is mapped to the
-// exit-6 "run refresh" contract; any other read failure is exit 3.
-func loadObjCatalogView(ctx context.Context) (objcatalog.CatalogView, error) {
+// loadObjCatalog resolves the shared selector flags to an object-model catalog
+// ref, opens the object store once, and returns both the loaded catalog view
+// and an objread.Reader sharing the same stores (so a command can join the
+// catalog against execution history without re-opening). A missing catalog is
+// mapped to the exit-6 "run refresh" contract; any other read failure is exit 3.
+func loadObjCatalog(ctx context.Context) (objcatalog.CatalogView, *objread.Reader, error) {
 	ref, err := objCatalogRef(catalogSourceFlag, catalogSnapshotFlag)
 	if err != nil {
-		return objcatalog.CatalogView{}, err
+		return objcatalog.CatalogView{}, nil, err
 	}
-	store, refs, _, err := openObjectModel()
+	store, refs, root, err := openObjectModel()
 	if err != nil {
-		return objcatalog.CatalogView{}, exitErr(3, "open object model: %w", err)
+		return objcatalog.CatalogView{}, nil, exitErr(3, "open object model: %w", err)
 	}
 	view, err := objcatalog.New(store, refs).Load(ctx, ref)
 	if err != nil {
 		if errors.Is(err, objcatalog.ErrNotFound) {
-			return objcatalog.CatalogView{}, exitErr(6, "resolve catalog: not found (run 'orun catalog refresh' first): %w", err)
+			return objcatalog.CatalogView{}, nil, exitErr(6, "resolve catalog: not found (run 'orun catalog refresh' first): %w", err)
 		}
-		return objcatalog.CatalogView{}, exitErr(3, "resolve catalog: %w", err)
+		return objcatalog.CatalogView{}, nil, exitErr(3, "resolve catalog: %w", err)
 	}
-	return view, nil
+	return view, objread.New(store, refs, root), nil
+}
+
+// mapString reads a string field from a verbatim metadata/spec map carried on
+// an objcatalog component view (e.g. metadata.owner, spec.system).
+func mapString(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	s, _ := m[key].(string)
+	return s
+}
+
+// objCatalogSnapshotKey is the user-facing catalogSnapshotKey for an
+// object-model catalog view: the human key when present, else the catalog
+// object id. (Replaces the legacy cat-<key>; no test pins the literal value.)
+func objCatalogSnapshotKey(view objcatalog.CatalogView) string {
+	if view.HumanKey != "" {
+		return view.HumanKey
+	}
+	return string(view.ObjectID)
 }
 
 // objGraphToCatalogModel adapts one objcatalog graph slice to the

@@ -169,6 +169,58 @@ func TestPlanSummary(t *testing.T) {
 	}
 }
 
+func TestComponentExecutions(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	r := New(e.store, e.refs, e.root)
+
+	sealWithPlan := func(execID, planJSON string) {
+		t.Helper()
+		planID, err := e.store.PutBlob(ctx, []byte(planJSON))
+		if err != nil {
+			t.Fatalf("put plan: %v", err)
+		}
+		revID, err := e.store.PutTree(ctx, []objectstore.TreeEntry{{Name: "plan.json", Kind: objectstore.KindBlob, ID: planID}})
+		if err != nil {
+			t.Fatalf("put rev: %v", err)
+		}
+		wt, err := e.mgr.Open(ctx, runworktree.OpenInput{ExecutionID: execID, RevisionID: revID})
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		if err := wt.Project([]runworktree.ProjectedJob{{JobID: "j", Status: nodes.StatusSucceeded}}); err != nil {
+			t.Fatalf("project: %v", err)
+		}
+		if _, err := wt.Seal(ctx, nodes.StatusSucceeded, time.Time{}); err != nil {
+			t.Fatalf("seal: %v", err)
+		}
+		e.clk.advance(time.Minute) // distinct StartedAt so List ordering is deterministic
+	}
+
+	sealWithPlan("exec_web", `{"metadata":{"name":"r1"},"jobs":[{"id":"web@deploy","component":"web"}]}`)
+	sealWithPlan("exec_api", `{"metadata":{"name":"r2"},"jobs":[{"id":"api@deploy","component":"api"}]}`)
+	sealWithPlan("exec_both", `{"metadata":{"name":"r3"},"jobs":[{"id":"web@deploy","component":"web"},{"id":"api@deploy","component":"api"}]}`)
+
+	web, err := r.ComponentExecutions(ctx, "web")
+	if err != nil {
+		t.Fatalf("ComponentExecutions: %v", err)
+	}
+	// newest-first: exec_both (latest) then exec_web; exec_api excluded.
+	if len(web) != 2 {
+		t.Fatalf("web execs = %d, want 2: %+v", len(web), web)
+	}
+	if web[0].ExecutionID != "exec_both" || web[1].ExecutionID != "exec_web" {
+		t.Errorf("web order = [%s %s], want [exec_both exec_web]", web[0].ExecutionID, web[1].ExecutionID)
+	}
+
+	if none, err := r.ComponentExecutions(ctx, "ghost"); err != nil || len(none) != 0 {
+		t.Errorf("ghost execs = (%+v, %v), want (none, nil)", none, err)
+	}
+	if empty, err := r.ComponentExecutions(ctx, ""); err != nil || empty != nil {
+		t.Errorf("empty component = (%+v, %v), want (nil, nil)", empty, err)
+	}
+}
+
 func TestReaderPlan(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)

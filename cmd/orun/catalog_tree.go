@@ -93,7 +93,7 @@ func runCatalogTree(ctx context.Context, root string) error {
 		return exitErr(1, "invalid --direction %q (want out|in|both)", catalogTreeDirectionFlag)
 	}
 
-	view, err := loadObjCatalogView(ctx)
+	view, _, err := loadObjCatalog(ctx)
 	if err != nil {
 		return err
 	}
