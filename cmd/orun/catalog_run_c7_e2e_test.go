@@ -107,7 +107,6 @@ func resetCatalogRunE2EGlobals(t *testing.T) {
 		planName                                                    string
 		planComponents                                              []string
 		planNoCatalogRefresh                                        bool
-		planCatalogSource, planCatalogSnapshot                      string
 		planCatalogStrict                                           bool
 		runPlanRef, runResolvedRevisionArg                          string
 		runDryRun, runVerbose                                       bool
@@ -137,7 +136,6 @@ func resetCatalogRunE2EGlobals(t *testing.T) {
 		planName,
 		planComponents,
 		planNoCatalogRefresh,
-		planCatalogSource, planCatalogSnapshot,
 		planCatalogStrict,
 		runPlanRef, runResolvedRevisionArg,
 		runDryRun, runVerbose,
@@ -168,7 +166,6 @@ func resetCatalogRunE2EGlobals(t *testing.T) {
 		planName = prev.planName
 		planComponents = prev.planComponents
 		planNoCatalogRefresh = prev.planNoCatalogRefresh
-		planCatalogSource, planCatalogSnapshot = prev.planCatalogSource, prev.planCatalogSnapshot
 		planCatalogStrict = prev.planCatalogStrict
 		runPlanRef, runResolvedRevisionArg = prev.runPlanRef, prev.runResolvedRevisionArg
 		runDryRun, runVerbose = prev.runDryRun, prev.runVerbose
@@ -209,8 +206,6 @@ func resetCatalogRunE2EGlobals(t *testing.T) {
 	planName = ""
 	planComponents = nil
 	planNoCatalogRefresh = false
-	planCatalogSource = ""
-	planCatalogSnapshot = ""
 	planCatalogStrict = false
 	runPlanRef = ""
 	runResolvedRevisionArg = ""

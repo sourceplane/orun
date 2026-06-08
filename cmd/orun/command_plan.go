@@ -9,8 +9,6 @@ var (
 	artifactBackend       string
 	githubOutput          bool
 	planNoCatalogRefresh  bool
-	planCatalogSource     string
-	planCatalogSnapshot   string
 	planCatalogStrict     bool
 )
 
@@ -53,7 +51,5 @@ func registerPlanCommand(root *cobra.Command) {
 	planCmd.Flags().BoolVar(&githubOutput, "github-output", false, "Write matrix/plan_id/exec_id to $GITHUB_OUTPUT")
 
 	planCmd.Flags().BoolVar(&planNoCatalogRefresh, "no-catalog-refresh", false, "Skip catalog refresh; plan proceeds without catalog context")
-	planCmd.Flags().StringVar(&planCatalogSource, "catalog-source", "", "Select a specific source ref (current|main|latest|branches/<name>|prs/<n>)")
-	planCmd.Flags().StringVar(&planCatalogSnapshot, "catalog-snapshot", "", "Pin to an explicit catalogSnapshotKey (bypasses refresh)")
 	planCmd.Flags().BoolVar(&planCatalogStrict, "catalog-strict", false, "Fail plan on catalog resolution errors")
 }
