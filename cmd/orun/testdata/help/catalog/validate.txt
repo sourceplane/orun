@@ -8,14 +8,12 @@ them to errors.
 Examples:
   orun catalog validate
   orun catalog validate --strict
-  orun catalog validate --rebuild-indexes
   orun catalog validate --json
 
 Exit codes:
   0  No errors (warnings allowed unless --strict).
   1  At least one validation error (or any warning under --strict).
   2  Resolver internal error.
-  3  StateStore failure (including a global-index rebuild failure).
 
 Usage:
   orun catalog validate [flags]
@@ -25,7 +23,6 @@ Flags:
       --catalog-source string     Resolve catalog by ref selector (current|main|latest|branches/<name>|prs/<n>|cat-<key>)
       --catalog-strict            Promote validation warnings to errors
       --json                      Stable machine-readable output
-      --rebuild-indexes           Rebuild every global index from the source tree (catalog-store.md §8)
       --source string             Alias for --catalog-source
       --strict                    Alias for --catalog-strict
 

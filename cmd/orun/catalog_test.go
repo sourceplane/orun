@@ -337,19 +337,17 @@ func TestCatalogRefresh_SyncNoop(t *testing.T) {
 func resetCatalogFlags(t *testing.T) {
 	t.Helper()
 	prev := struct {
-		src, snap, diffBase, diffHead       string
-		strict, noInfer, json, sync, rebuild bool
-	}{catalogSourceFlag, catalogSnapshotFlag, catalogDiffBaseFlag, catalogDiffHeadFlag, catalogStrictFlag, catalogNoInferFlag, catalogJSONFlag, catalogSyncFlag, catalogValidateRebuildFlag}
+		src, snap, diffBase, diffHead string
+		strict, noInfer, json, sync   bool
+	}{catalogSourceFlag, catalogSnapshotFlag, catalogDiffBaseFlag, catalogDiffHeadFlag, catalogStrictFlag, catalogNoInferFlag, catalogJSONFlag, catalogSyncFlag}
 	catalogSourceFlag, catalogSnapshotFlag = "", ""
 	catalogDiffBaseFlag, catalogDiffHeadFlag = "", ""
 	catalogStrictFlag, catalogNoInferFlag, catalogJSONFlag, catalogSyncFlag = false, false, false, false
-	catalogValidateRebuildFlag = false
 	t.Cleanup(func() {
 		catalogSourceFlag, catalogSnapshotFlag = prev.src, prev.snap
 		catalogDiffBaseFlag, catalogDiffHeadFlag = prev.diffBase, prev.diffHead
 		catalogStrictFlag, catalogNoInferFlag = prev.strict, prev.noInfer
 		catalogJSONFlag, catalogSyncFlag = prev.json, prev.sync
-		catalogValidateRebuildFlag = prev.rebuild
 	})
 }
 
