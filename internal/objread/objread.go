@@ -384,6 +384,32 @@ func (r *Reader) PlanSummary(ctx context.Context, view ExecutionView) (name stri
 	return p.Metadata.Name, comps
 }
 
+// ComponentExecutions returns the executions (live + sealed) whose compiled
+// plan included the named component, newest-first. This is the v1 scan+filter
+// join (specs/orun-catalog-state consumers.md G-1, the CS6 choice): for each
+// execution header from List, PlanSummary's component set is matched against
+// component. Bounded by the execution count; reads one plan blob per execution.
+func (r *Reader) ComponentExecutions(ctx context.Context, component string) ([]ExecutionView, error) {
+	if strings.TrimSpace(component) == "" {
+		return nil, nil
+	}
+	all, err := r.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []ExecutionView
+	for i := range all {
+		_, comps := r.PlanSummary(ctx, all[i])
+		for _, c := range comps {
+			if c == component {
+				out = append(out, all[i])
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
 // Plan decodes an execution's full compiled plan (the revision's plan.json)
 // into a model.Plan. It is the full-fidelity sibling of PlanSummary, used by
 // the cockpit's Activity drilldown to enumerate a historical run's jobs and

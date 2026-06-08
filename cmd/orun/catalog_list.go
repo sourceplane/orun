@@ -5,23 +5,19 @@ package main
 // (COMPONENT, TYPE, OWNER, SYSTEM, LAST EXEC, STATUS) and the
 // --owner/--system/--domain/--type/--status filters.
 //
-// Data source (task-0038 Integration Note): the non-component axes of the
-// catalog-local indexes are intentionally empty in PR-1, so type/owner/system/
-// domain are derived directly from each resolved ComponentManifest (a manifest
-// walk over the resolved CatalogSnapshot), and the lastExecution*/STATUS
-// columns from the catalog-local ComponentExecutionIndex newest row. This
-// needs no new index axis. Rows are sorted by componentKey for byte-stable
-// output (the EnumerateComponentManifests seam guarantees this).
+// Data source: the object-model catalog (objcatalog) for the component rows —
+// type/owner/system/domain from each component view — and the object-model
+// execution history (objread.ComponentExecutions scan+filter join) for the
+// lastExecution*/STATUS columns. Rows follow the catalog view's component order
+// (sorted by component key) for byte-stable output. profile/environment are not
+// part of the list row (the object-model execution does not record them).
 
 import (
 	"context"
 	"fmt"
 	"os"
-	"sort"
 
-	"github.com/sourceplane/orun/internal/catalogmodel"
-	"github.com/sourceplane/orun/internal/catalogstore"
-	"github.com/sourceplane/orun/internal/statestore"
+	"github.com/sourceplane/orun/internal/objcatalog"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -95,43 +91,35 @@ func runCatalogList(ctx context.Context) error {
 		ctx = context.Background()
 	}
 
-	sel, err := parseCatalogSelector()
+	view, reader, err := loadObjCatalog(ctx)
 	if err != nil {
 		return err
 	}
 
-	stateStore, _, err := openLocalStateStore()
-	if err != nil {
-		return exitErr(3, "open state store: %w", err)
-	}
-	store := catalogstore.New(stateStore)
+	srcKey := view.SourceID
+	catKey := objCatalogSnapshotKey(view)
 
-	cat, err := store.ResolveCatalog(ctx, sel)
-	if err != nil {
-		return catalogReadExit(err, "resolve catalog")
-	}
-
-	manifests, err := catalogstore.EnumerateComponentManifests(ctx, stateStore, cat)
-	if err != nil {
-		return exitErr(3, "enumerate components: %w", err)
-	}
-
-	rows := make([]catalogListRow, 0, len(manifests))
-	for _, m := range manifests {
-		lastRev, lastExec, lastStatus := lastExecutionFor(ctx, stateStore, cat, m.Identity.Name)
+	rows := make([]catalogListRow, 0, len(view.Components))
+	for _, c := range view.Components {
 		row := catalogListRow{
-			ComponentKey:        m.Identity.ComponentKey,
-			Name:                m.Identity.Name,
-			Type:                m.Spec.Type,
-			Owner:               m.Metadata.Owner,
-			System:              m.Spec.System,
-			LastRevisionKey:     lastRev,
-			LastExecutionKey:    lastExec,
-			LastExecutionStatus: lastStatus,
-			SourceSnapshotKey:   cat.SourceSnapshotKey,
-			CatalogSnapshotKey:  cat.CatalogSnapshotKey,
+			ComponentKey:       c.ComponentKey,
+			Name:               c.Name,
+			Type:               c.Type,
+			Owner:              mapString(c.Metadata, "owner"),
+			System:             mapString(c.Spec, "system"),
+			SourceSnapshotKey:  srcKey,
+			CatalogSnapshotKey: catKey,
 		}
-		if !catalogListRowMatches(row, m) {
+		// lastExecution = newest execution that included this component (the
+		// object-model scan+filter join; profile/environment are not part of
+		// the list row).
+		if execs, err := reader.ComponentExecutions(ctx, c.Name); err == nil && len(execs) > 0 {
+			head := execs[0]
+			row.LastRevisionKey = head.RevisionID
+			row.LastExecutionKey = head.ExecutionKey
+			row.LastExecutionStatus = head.Status
+		}
+		if !catalogListRowMatches(row, c) {
 			continue
 		}
 		rows = append(rows, row)
@@ -143,10 +131,10 @@ func runCatalogList(ctx context.Context) error {
 	return renderCatalogListText(rows)
 }
 
-// catalogListRowMatches applies the §3 filter flags. domain is matched
-// against the manifest's spec.domain (not surfaced as a column but a valid
-// filter); the other axes match the rendered row fields.
-func catalogListRowMatches(row catalogListRow, m catalogmodel.ComponentManifest) bool {
+// catalogListRowMatches applies the §3 filter flags. domain is matched against
+// the component's spec.domain (not surfaced as a column but a valid filter);
+// the other axes match the rendered row fields.
+func catalogListRowMatches(row catalogListRow, c objcatalog.CatalogComponentView) bool {
 	if catalogListOwnerFlag != "" && row.Owner != catalogListOwnerFlag {
 		return false
 	}
@@ -156,31 +144,13 @@ func catalogListRowMatches(row catalogListRow, m catalogmodel.ComponentManifest)
 	if catalogListTypeFlag != "" && row.Type != catalogListTypeFlag {
 		return false
 	}
-	if catalogListDomainFlag != "" && m.Spec.Domain != catalogListDomainFlag {
+	if catalogListDomainFlag != "" && c.Domain != catalogListDomainFlag {
 		return false
 	}
 	if catalogListStatusFlag != "" && row.LastExecutionStatus != catalogListStatusFlag {
 		return false
 	}
 	return true
-}
-
-// lastExecutionFor returns the newest execution row's revision/execution/status
-// for a component from the catalog-local ComponentExecutionIndex. The index is
-// absent (and the triple empty) until executions are appended in C7; absence is
-// not an error. Rows are sorted newest-first by CreatedAt before the head is
-// taken, matching the §7 history ordering so list and history agree.
-func lastExecutionFor(ctx context.Context, stateStore statestore.StateStore, cat catalogmodel.CatalogSnapshot, name string) (string, string, string) {
-	idx, found, err := catalogstore.ReadComponentExecutionIndex(ctx, stateStore, cat.SourceSnapshotKey, cat.CatalogSnapshotKey, name)
-	if err != nil || !found || len(idx.Executions) == 0 {
-		return "", "", ""
-	}
-	rows := append([]catalogmodel.ComponentExecutionRow(nil), idx.Executions...)
-	sort.SliceStable(rows, func(a, b int) bool {
-		return rows[a].CreatedAt > rows[b].CreatedAt
-	})
-	head := rows[0]
-	return head.RevisionKey, head.ExecutionKey, head.Status
 }
 
 func renderCatalogListText(rows []catalogListRow) error {
