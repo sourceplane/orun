@@ -240,14 +240,11 @@ func TestStateE2E(t *testing.T) {
 	})
 
 	// Step 13: `orun get plans` — the revision row must appear in the
-	// table projected from manifest.json.
+	// object-model revision table (seeded by step 12).
 	t.Run("step13_get_plans_lists_revision", func(t *testing.T) {
-		rows, ok, err := loadRevisionPlanRows()
-		if err != nil {
-			t.Fatalf("loadRevisionPlanRows: %v", err)
-		}
+		rows, ok := objListRevisionRows()
 		if !ok {
-			t.Fatal("loadRevisionPlanRows reported empty layout; want at least 1 row")
+			t.Fatal("objListRevisionRows reported empty; want at least 1 row")
 		}
 		found := false
 		for _, row := range rows {

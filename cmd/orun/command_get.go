@@ -11,8 +11,6 @@ import (
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/objview"
-	"github.com/sourceplane/orun/internal/revision"
-	"github.com/sourceplane/orun/internal/statestore"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -84,21 +82,19 @@ func registerGetCommand(root *cobra.Command) {
 }
 
 func getPlans() error {
-	// M5.c: Prefer the revision-first table when revisions/ has data.
-	// Fall back to the legacy plan-hash table when only `.orun/plans/`
-	// exists.
-	if rows, ok, err := loadRevisionPlanRows(); err != nil {
-		return err
-	} else if ok {
-		return renderRevisionPlanTable(rows)
+	// Plans live in the object-model revision graph. The rich revision table
+	// (trigger + latest execution per revision) is reconstructed from it; an
+	// empty graph renders the "No plans yet" / [] empty form.
+	rows, ok := objListRevisionRows()
+	if !ok {
+		return renderPlanEntryTable(nil)
 	}
-	// Object-model revisions (plans live in the revision graph).
-	rows, _ := objListPlanRows()
-	return renderPlanEntryTable(rows)
+	return renderRevisionPlanTable(rows)
 }
 
-// revisionPlanRow is the projected row used by `orun get plans` after the
-// state-redesign rewire. One row per revision key.
+// revisionPlanRow is the projected row used by `orun get plans`. One row per
+// revision, reconstructed from the object-model revision graph
+// (objListRevisionRows).
 type revisionPlanRow struct {
 	RevisionKey  string   `json:"revisionKey"`
 	TriggerName  string   `json:"trigger"`
@@ -107,75 +103,6 @@ type revisionPlanRow struct {
 	LatestExec   string   `json:"latestExec,omitempty"`
 	LatestStatus string   `json:"status,omitempty"`
 	Environments []string `json:"environments,omitempty"`
-}
-
-// loadRevisionPlanRows scans revisions/<key>/manifest.json and projects each
-// into a revisionPlanRow. ok=false signals the new layout is empty (no
-// revisions yet) so the caller can fall back to the legacy table.
-func loadRevisionPlanRows() ([]revisionPlanRow, bool, error) {
-	store, _, err := openLocalStateStore()
-	if err != nil {
-		// Treat any open-failure as "no new layout" — the legacy
-		// fallback will still try the on-disk plans/ dir.
-		return nil, false, nil
-	}
-	ctx := context.Background()
-	infos, err := store.List(ctx, "revisions")
-	if err != nil || len(infos) == 0 {
-		return nil, false, nil
-	}
-	keys := map[string]struct{}{}
-	for _, info := range infos {
-		// Path looks like revisions/<key>/...
-		parts := strings.SplitN(info.Path, "/", 3)
-		if len(parts) < 2 || parts[0] != "revisions" {
-			continue
-		}
-		if parts[1] == "" {
-			continue
-		}
-		keys[parts[1]] = struct{}{}
-	}
-	if len(keys) == 0 {
-		return nil, false, nil
-	}
-	sorted := make([]string, 0, len(keys))
-	for k := range keys {
-		sorted = append(sorted, k)
-	}
-	sort.Strings(sorted)
-
-	rows := make([]revisionPlanRow, 0, len(sorted))
-	for _, revKey := range sorted {
-		row := revisionPlanRow{RevisionKey: revKey}
-		// Pull job count + latest exec via the manifest summary.
-		mPath := statestore.ManifestPath(revKey)
-		if raw, _, mErr := store.Read(ctx, mPath); mErr == nil {
-			var manifest revision.RevisionManifest
-			if jErr := json.Unmarshal(raw, &manifest); jErr == nil {
-				row.JobCount = manifest.Summary.JobCount
-				row.Environments = manifest.Summary.ActiveEnvironments
-				row.LatestExec = manifest.Summary.LatestExecutionKey
-				row.LatestStatus = manifest.Summary.LatestExecutionStatus
-				row.TriggerName = manifest.Trigger.Name
-				row.PlanHash = shortHash(manifest.Revision.PlanHash)
-			}
-		}
-		// If manifest didn't supply a trigger name, fall back to
-		// trigger.json on the revision dir.
-		if row.TriggerName == "" {
-			tPath := statestore.TriggerPath(revKey)
-			if raw, _, tErr := store.Read(ctx, tPath); tErr == nil {
-				var trig struct {
-					Name string `json:"name"`
-				}
-				_ = json.Unmarshal(raw, &trig)
-				row.TriggerName = trig.Name
-			}
-		}
-		rows = append(rows, row)
-	}
-	return rows, true, nil
 }
 
 // shortHash returns the first 7 chars of a hex hash, stripping a "sha256-"
