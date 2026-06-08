@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
-	"github.com/sourceplane/orun/internal/catalogstore"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/statestore"
 )
@@ -86,26 +85,10 @@ func TestCatalogRunC7_E2EPlanRunHistory(t *testing.T) {
 		t.Fatalf("execution index parent mismatch: exec=%+v rev=%+v", execIdx, revIdx)
 	}
 
-	catExecPath, err := catalogstore.CatalogExecutionDocPath(
-		revIdx.SourceSnapshotKey,
-		revIdx.CatalogSnapshotKey,
-		revKey,
-		ghaExecID,
-	)
-	if err != nil {
-		t.Fatalf("CatalogExecutionDocPath: %v", err)
-	}
-	execRaw, _, err := stateStore.Read(context.Background(), catExecPath)
-	if err != nil {
-		t.Fatalf("catalog-owned execution missing at %s: %v", catExecPath, err)
-	}
-	if !strings.Contains(string(execRaw), `"executionKey": "`+ghaExecID+`"`) ||
-		!strings.Contains(string(execRaw), `"sourceSnapshotKey": "`+revIdx.SourceSnapshotKey+`"`) ||
-		!strings.Contains(string(execRaw), `"catalogSnapshotKey": "`+revIdx.CatalogSnapshotKey+`"`) {
-		t.Fatalf("catalog execution missing expected lineage:\n%s", execRaw)
-	}
-	// (The legacy .orun/executions/<id>/state.json mirror was removed at the
-	// M12 cutover; the runner no longer writes legacy execution state.)
+	// (The legacy catalog-owned execution doc + ComponentExecutionIndex
+	// dual-write was removed with the catalogstore retirement; history now reads
+	// the object-model execution graph, asserted below. The executionstate
+	// index above is still written for `orun describe`/`get`.)
 
 	catalogJSONFlag = true
 	historyOut := captureStdout(t, func() error {
