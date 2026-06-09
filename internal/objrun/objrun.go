@@ -109,6 +109,19 @@ func (s *Session) RevisionID() objectstore.ObjectID {
 	return s.revID
 }
 
+// AttachStepLog streams a step's log into the live working tree so it seals as a
+// content blob, exactly as the AfterStepLog hook would for an executed step.
+// Its purpose is carrying prior-run logs forward for resume-skipped jobs: those
+// jobs are projected into the tree (with their cached statuses) but never run
+// this time, so their AfterStepLog hook never fires and their logs would
+// otherwise be absent from the resumed seal. Safe on a nil session (no-op).
+func (s *Session) AttachStepLog(jobID, stepID string, log []byte) error {
+	if s == nil || s.wt == nil || len(log) == 0 {
+		return nil
+	}
+	return s.wt.SetStepLog(jobID, stepID, log)
+}
+
 // InstallHooks chains the live working-tree writes onto the runner's lifecycle
 // hooks: each state tick projects the runner's authoritative job/step state into
 // the working tree (and bumps the heartbeat), and each step log is streamed as a

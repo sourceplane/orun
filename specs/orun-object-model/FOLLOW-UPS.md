@@ -30,7 +30,10 @@ logs for jobs that are not executed this run (the live `AfterStepLog` hook only
 fires for jobs that actually run). Bounded; one package seam + the cmd wiring +
 a test.
 
-**Status.** Deferred — shipped as a documented v1 limitation in #244.
+**Status.** ✅ Done (orun-legacy-retirement Bucket 5). `objrun.Session.AttachStepLog`
+re-attaches each resume-skipped job's prior step-log blobs to the new working
+tree (read via `objread.StepLog`, wired in `cmd/orun`), so the resumed seal
+carries the cached jobs' logs.
 
 ---
 
@@ -68,8 +71,9 @@ aspiration, and exercise the error-wrapping branches.
 **Scope.** Add injectable write/fsync/rename/createTemp seams to the local store
 (mirroring `statestore`) + tests. Test-only production-code indirection.
 
-**Status.** Deferred (`test-plan.md` §`internal/objectstore`) — judged not worth
-the production-path indirection for error-wrapping branches.
+**Status.** ✅ Done (orun-legacy-retirement Bucket 5). `osCreateTemp` /
+`fsyncFile` / `osRename` package seam vars let tests force the temp/fsync/rename
+failures; package coverage is 92.5%.
 
 ---
 

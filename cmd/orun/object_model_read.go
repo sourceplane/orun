@@ -15,27 +15,31 @@ import (
 )
 
 // resumeJobsFromPriorRun reads the prior execution recorded under execID in the
-// object graph and returns the jobs that already succeeded, as runner JobStates
-// (status "completed", with their step statuses), so a re-run with the same
-// --exec-id skips them. Returns nil when there is no object graph, no prior run
-// for the id, or nothing already succeeded.
+// object graph and returns (a) the jobs that already succeeded, as runner
+// JobStates (status "completed", with their step statuses), so a re-run with the
+// same --exec-id skips them, and (b) those jobs' prior step-log blobs keyed by
+// jobID→stepID, so the resumed seal can carry them forward (the live AfterStepLog
+// hook only fires for jobs that actually run). Both are nil when there is no
+// object graph, no prior run for the id, or nothing already succeeded.
 //
 // It must be called BEFORE the live working tree for this run is opened — Get on
 // a bare id prefers an in-flight tree, so opening this run's tree first would
 // shadow the prior sealed execution.
-func resumeJobsFromPriorRun(execID string) map[string]*execmodel.JobState {
+func resumeJobsFromPriorRun(execID string) (map[string]*execmodel.JobState, map[string]map[string][]byte) {
 	if execID == "" {
-		return nil
+		return nil, nil
 	}
 	reader, ok := openObjectReader()
 	if !ok {
-		return nil
+		return nil, nil
 	}
-	v, err := reader.Get(context.Background(), execID)
+	ctx := context.Background()
+	v, err := reader.Get(ctx, execID)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	out := map[string]*execmodel.JobState{}
+	logs := map[string]map[string][]byte{}
 	for _, j := range v.Jobs {
 		if objview.NodeStatusToLegacy(j.Status) != "completed" {
 			continue
@@ -44,14 +48,20 @@ func resumeJobsFromPriorRun(execID string) map[string]*execmodel.JobState {
 		if n := len(j.Attempts); n > 0 {
 			for _, s := range j.Attempts[n-1].Steps {
 				js.Steps[s.StepID] = objview.NodeStatusToLegacy(s.Status)
+				if log, lerr := reader.StepLog(ctx, v, j.JobID, s.StepID); lerr == nil && len(log) > 0 {
+					if logs[j.JobID] == nil {
+						logs[j.JobID] = map[string][]byte{}
+					}
+					logs[j.JobID][s.StepID] = log
+				}
 			}
 		}
 		out[j.JobID] = js
 	}
 	if len(out) == 0 {
-		return nil
+		return nil, nil
 	}
-	return out
+	return out, logs
 }
 
 // object_model_read.go points the read commands at the content-addressed object

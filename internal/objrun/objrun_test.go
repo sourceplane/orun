@@ -10,6 +10,9 @@ import (
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/nodes"
+	"github.com/sourceplane/orun/internal/objectstore"
+	"github.com/sourceplane/orun/internal/objectstore/refstore"
+	"github.com/sourceplane/orun/internal/objread"
 	"github.com/sourceplane/orun/internal/runner"
 	"github.com/sourceplane/orun/internal/runworktree"
 )
@@ -197,5 +200,65 @@ func TestPlanHashStableAndComponentInvariant(t *testing.T) {
 	}
 	if h1 != h2 {
 		t.Fatalf("plan hash not stable across checksum: %s vs %s", h1, h2)
+	}
+}
+
+// TestAttachStepLogCarriesForward proves a log attached to a projected-but-not-
+// run step (a resume-skipped job) is sealed and readable — the resume
+// carry-forward seam. Also covers the nil-session / empty-log no-ops.
+func TestAttachStepLogCarriesForward(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	execID := "exec-resume-1"
+	plan := &model.Plan{Metadata: model.PlanMetadata{Name: "demo"}}
+
+	sess, err := Begin(ctx, root, plan, execID)
+	if err != nil || sess == nil {
+		t.Fatalf("Begin: %v (sess=%v)", err, sess)
+	}
+
+	// A resume-skipped job: projected with a cached completed status (the
+	// state-tick hook would do this), but never run this time — so its log is
+	// attached directly rather than via the AfterStepLog hook.
+	if err := sess.wt.Project([]runworktree.ProjectedJob{
+		{JobID: "api@deploy", Status: nodes.StatusSucceeded, Steps: []runworktree.ProjectedStep{{StepID: "build", Status: nodes.StatusSucceeded}}},
+	}); err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	if err := sess.AttachStepLog("api@deploy", "build", []byte("carried log\n")); err != nil {
+		t.Fatalf("AttachStepLog: %v", err)
+	}
+	// No-ops: nil session and empty log must not error or panic.
+	if err := (*Session)(nil).AttachStepLog("x", "y", []byte("z")); err != nil {
+		t.Errorf("nil-session AttachStepLog: %v", err)
+	}
+	if err := sess.AttachStepLog("api@deploy", "build", nil); err != nil {
+		t.Errorf("empty-log AttachStepLog: %v", err)
+	}
+
+	id, err := sess.Finish(ctx, &runner.Runner{}, nil)
+	if err != nil || id == "" {
+		t.Fatalf("Finish: %v (id=%q)", err, id)
+	}
+
+	store, err := objectstore.NewLocalStore(objectstore.LocalConfig{Root: root})
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	refs, err := refstore.NewLocalRefStore(refstore.LocalConfig{Root: root, Writer: "test"})
+	if err != nil {
+		t.Fatalf("refs: %v", err)
+	}
+	reader := objread.New(store, refs, root)
+	v, err := reader.Get(ctx, "executions/latest")
+	if err != nil {
+		t.Fatalf("Get sealed: %v", err)
+	}
+	log, err := reader.StepLog(ctx, v, "api@deploy", "build")
+	if err != nil {
+		t.Fatalf("StepLog: %v", err)
+	}
+	if string(log) != "carried log\n" {
+		t.Fatalf("carried step log = %q; want %q", log, "carried log\n")
 	}
 }
