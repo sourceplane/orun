@@ -248,6 +248,43 @@ Not required for correctness; close for completeness.
 
 ---
 
+# Bucket 6 — Cockpit-side catalog auto-refresh (TUI)
+
+The cockpit reads `catalogs/current` and already gates on freshness
+(`services.catalogFresh` = current source id vs the catalog's `SourceID`), but
+on a miss it falls back to the live intent loader rather than resolving — the
+"cockpit-side resolve is a tracked follow-up" noted in `catalog_source.go`. This
+bucket closes that: the TUI keeps the object-model catalog fresh for what it
+displays, instead of relying on `orun plan`/`run`/`catalog refresh` to have run.
+
+**Design (agreed):**
+
+- **Shared engine** `internal/catalogrefresh`: `EnsureFresh(objModelRoot,
+  workspaceRoot, {Force})` — a cheap **source-hash staleness gate** (resolve the
+  source snapshot, compare its content id to `catalogs/current`'s `SourceID`),
+  then, only when stale (or `Force`), run `catalogresolve.BuildCatalog` +
+  `objplan.RefreshCatalog`. Single source of truth with the CLI resolve path so
+  CLI and TUI produce the **same** content-addressed catalog id (no churn).
+- **Concurrency:** a **non-blocking advisory try-lock** around resolve+write so a
+  concurrent CLI `orun catalog refresh` and the TUI don't both run the expensive
+  resolve (the second skips). Data integrity is already guaranteed by the
+  refstore lockfile + atomic ref rename — this only avoids wasted work.
+- **On TUI open → refresh** (`Force`, even when dirty) so the cockpit opens on a
+  current catalog; a brief `⟳ refreshing…` state covers the one-time cost.
+- **In-session → manual + toggle:** `r` = manual refresh (always available);
+  `a` = auto-refresh toggle (persisted in `prefs`). Auto runs the staleness gate
+  on the existing live-view ticker and refreshes only on change — default chosen
+  so a dirty tree doesn't resolve-on-every-edit unless the user opts in.
+- **Stale badge:** when the source differs from the loaded catalog (auto off, or
+  between ticks), show `⟳ catalog stale` prompting `r`.
+
+- [ ] **6A** — `internal/catalogrefresh` engine (staleness gate + resolve+write +
+  try-lock); cmd/orun resolve path deduped onto it; `services.RefreshCatalog`.
+- [ ] **6B** — TUI wiring: refresh-on-open, `r`/`a` keybindings, stale badge,
+  auto-on-ticker, `prefs` persistence.
+
+---
+
 ## Definition of done (program)
 
 - **Legacy closed (Bucket 1): ✅ DONE.** `internal/catalogstore`,

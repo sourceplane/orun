@@ -16,19 +16,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
+	"github.com/sourceplane/orun/internal/catalogrefresh"
 	"github.com/sourceplane/orun/internal/catalogresolve"
 	"github.com/sourceplane/orun/internal/sourcectx"
 	"github.com/spf13/cobra"
 )
-
-// catalogResolverVersion is the integer resolver version the CLI stamps on
-// every catalog it builds. It feeds catalogHash via ResolverInputs and the
-// §8 catalogInputHash. Bumping it intentionally invalidates every cached
-// catalogSnapshotKey (a resolver-behavior change must produce a new key).
-const catalogResolverVersion = 1
 
 // catalog refresh flag values. Declared at package scope so the cobra flag
 // bindings and the RunE bodies share them; reset per-invocation by cobra.
@@ -162,117 +156,32 @@ func catalogWorkspaceRoot() (string, error) {
 	return abs, nil
 }
 
-// computeCatalogAuthoritative applies the data-model.md §2 rule:
-// authoritative = (sourceScope ∈ canonical branches) AND (workingTree clean).
-// Canonical branches are branch-main and branch-protected.
-func computeCatalogAuthoritative(scope string, dirty bool) bool {
-	if dirty {
-		return false
-	}
-	switch scope {
-	case catalogmodel.SourceScopeBranchMain, catalogmodel.SourceScopeBranchProtected:
-		return true
-	default:
-		return false
-	}
-}
+// The resolver-input builders below delegate to internal/catalogrefresh — the
+// single source of truth shared with the cockpit-side resolve — so the CLI and
+// the TUI produce the same content-addressed catalog id for a given workspace.
 
-// repoForInputs returns a non-empty repo string for ResolverInputs.Repo,
-// which BuildCatalog requires. This is the human-readable "<owner>/<repo>"
-// form. Falls back to the workspace base name when the workspace has no git
-// remote (local-nogit / no-origin clones).
 func repoForInputs(wsRepo, workspaceRoot string) string {
-	if wsRepo != "" {
-		return wsRepo
-	}
-	return filepath.Base(workspaceRoot)
+	return catalogrefresh.RepoForInputs(wsRepo, workspaceRoot)
 }
 
-// shortRepoName returns the single-segment repo name used for componentKey
-// construction (`<namespace>/<repo>/<name>`). The resolver requires this to
-// be ONE path segment, so an "<owner>/<repo>" repo string is reduced to its
-// last segment. Empty input falls back to the workspace base name.
 func shortRepoName(wsRepo, workspaceRoot string) string {
-	repo := wsRepo
-	if repo == "" {
-		repo = filepath.Base(workspaceRoot)
-	}
-	// Reduce "owner/repo" (or any multi-segment form) to the final segment.
-	if idx := strings.LastIndex(repo, "/"); idx >= 0 {
-		repo = repo[idx+1:]
-	}
-	return repo
+	return catalogrefresh.ShortRepoName(wsRepo, workspaceRoot)
 }
 
 // workingTreeLabel maps the dirty bool to the catalogmodel enum.
 func workingTreeLabel(dirty bool) string {
-	if dirty {
-		return catalogmodel.WorkingTreeDirty
-	}
-	return catalogmodel.WorkingTreeClean
+	return catalogrefresh.WorkingTreeLabel(dirty)
 }
 
-// buildCatalogInputHash computes the §8 catalogInputHash for the workspace.
-// PR-1 narrow assumption: StackSources and the intent-canonical block are
-// empty for the refresh path (composition-stack resolution is a later
-// milestone). This keeps the hash deterministic and is documented in the
-// task report; when stacks land they fold in here without a CLI-shape change.
 func buildCatalogInputHash(ws sourcectx.WorkspaceState) string {
-	return sourcectx.CatalogInputHash(sourcectx.CatalogInputHashInputs{
-		TreeHash:        ws.TreeHash,
-		DirtyHash:       ws.DirtyHash,
-		OrunVersion:     version,
-		ResolverVersion: catalogResolverVersion,
-		SchemaVersion:   catalogmodel.APIVersionV1Alpha1,
-		StackSources:    nil,
-		IntentCanonical: nil,
-	})
+	return catalogrefresh.CatalogInputHash(ws, version)
 }
 
-// sourceSnapshotFromState assembles the persisted SourceSnapshot record from
-// a resolved WorkspaceState. The SourceSnapshotID is a fresh ULID; it is only
-// written on first creation (the refresh path skips the source write when the
-// doc already exists), so the non-deterministic ID never breaks idempotency.
 func sourceSnapshotFromState(ws sourcectx.WorkspaceState, srcKey, inputHash, createdAt string) catalogmodel.SourceSnapshot {
-	return catalogmodel.SourceSnapshot{
-		APIVersion:        catalogmodel.APIVersionV1Alpha1,
-		Kind:              catalogmodel.KindSourceSnapshot,
-		SourceSnapshotKey: srcKey,
-		SourceSnapshotID:  catalogmodel.NewSourceSnapshotID(),
-		Repo:              ws.Repo,
-		RemoteURL:         ws.RemoteURL,
-		Ref:               ws.Ref,
-		Branch:            ws.Branch,
-		SourceScope:       ws.Scope(),
-		HeadRevision:      ws.HeadRevision,
-		TreeHash:          ws.TreeHash,
-		WorkingTree:       workingTreeLabel(ws.Dirty),
-		DirtyHash:         ws.DirtyHash,
-		CatalogInputHash:  inputHash,
-		CreatedAt:         createdAt,
-	}
+	return catalogrefresh.SourceSnapshotFromState(ws, srcKey, inputHash, createdAt)
 }
 
-// resolverInputsFromState assembles the caller-supplied ResolverInputs the
-// pure resolver cannot invent.
 func resolverInputsFromState(ws sourcectx.WorkspaceState, srcKey, inputHash, repo, createdAt string) catalogresolve.ResolverInputs {
-	scope := ws.Scope()
-	authoritative := computeCatalogAuthoritative(scope, ws.Dirty)
-	return catalogresolve.ResolverInputs{
-		OrunVersion:       version,
-		SchemaVersion:     catalogmodel.APIVersionV1Alpha1,
-		ResolverVersion:   catalogResolverVersion,
-		StackSources:      []string{},
-		SourceSnapshotKey: srcKey,
-		CatalogInputHash:  inputHash,
-		Repo:              repo,
-		SourceScope:       scope,
-		HeadRevision:      ws.HeadRevision,
-		TreeHash:          ws.TreeHash,
-		WorkingTree:       workingTreeLabel(ws.Dirty),
-		Authoritative:     authoritative,
-		Preview:           !authoritative,
-		CreatedAt:         createdAt,
-	}
+	return catalogrefresh.ResolverInputsFromState(ws, srcKey, inputHash, repo, createdAt, version)
 }
 
