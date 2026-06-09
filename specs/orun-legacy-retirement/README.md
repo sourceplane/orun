@@ -243,8 +243,9 @@ Not required for correctness; close for completeness.
   blobs for skip-completed jobs at seal (`internal/objrun` + `internal/runworktree` seam).
 - [ ] **Packfile delta compression** (larger, profiling-gated): only if loose-object
   size becomes the bottleneck.
-- [ ] **`objectstore` atomic-write fault-injection seam** (test-only): lift coverage
-  past the 90% gate on the temp/fsync/rename error branches.
+- [x] **`objectstore` atomic-write fault-injection seam** (test-only): the
+  temp/fsync/rename error branches are now exercised via package seam vars
+  (`osCreateTemp`/`fsyncFile`/`osRename`); package coverage is 92.5%.
 
 ---
 
