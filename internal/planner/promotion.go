@@ -6,8 +6,19 @@ import (
 	"github.com/sourceplane/orun/internal/model"
 )
 
-// ResolvePromotionDependencies resolves environment promotion dependencies into
-// DAG edges (same-plan) or gates (cross-plan) on job instances.
+// ResolvePromotionDependencies resolves environment promotion dependencies
+// declared in intent (env.promotion.dependsOn) onto the plan's job instances.
+//
+// Under the env-scoping "Z" model (specs/orun-env-scoping/design.md §4):
+//   - When the prerequisite environment IS in this plan, in-plan DAG edges are
+//     added (addPromotionEdges). This is the only ENFORCED promotion mechanism:
+//     a failed prerequisite job blocks its dependents within the run.
+//   - When the prerequisite environment is NOT in this plan:
+//   - a previous-success / same-plan-or-previous-success dep records a
+//     cross-plan gate (addPromotionGates). Gates are advisory metadata —
+//     they are NOT enforced at run time; cross-pipeline (cross-invocation)
+//     gating is deferred to Option C, and the CLI emits a one-line notice.
+//   - a pure same-plan dep is PRUNED (the CLI records a PrunedEdge and warns).
 func ResolvePromotionDependencies(
 	jobInstances map[string]*model.JobInstance,
 	compInstances map[string][]*model.ComponentInstance,

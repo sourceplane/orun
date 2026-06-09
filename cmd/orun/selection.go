@@ -141,6 +141,36 @@ func warnPrunedEdges(edges []model.PrunedEdge) {
 	}
 }
 
+// countGatedJobs returns the number of jobs carrying cross-environment
+// promotion gates.
+func countGatedJobs(jobInstances map[string]*model.JobInstance) int {
+	n := 0
+	for _, job := range jobInstances {
+		if job != nil && len(job.Gates) > 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// noticePromotionGates warns (to stderr) when a plan carries cross-environment
+// promotion gates. Under the env-scoping "Z" model these gates are RECORDED but
+// NOT enforced at run time: in-plan dependsOn ordering is the only enforced
+// promotion mechanism, and cross-pipeline (cross-invocation) gating is deferred
+// to Option C (specs/orun-env-scoping). No-op when there are no gates.
+func noticePromotionGates(jobInstances map[string]*model.JobInstance) {
+	n := countGatedJobs(jobInstances)
+	if n == 0 {
+		return
+	}
+	color := ui.ColorEnabledForWriter(os.Stderr)
+	fmt.Fprintf(os.Stderr,
+		"%s %d job(s) carry cross-environment promotion gates that are recorded but not enforced; "+
+			"cross-pipeline promotion gating is deferred (specs/orun-env-scoping, Option C). "+
+			"In-plan ordering is the enforced mechanism.\n",
+		ui.Yellow(color, "note:"), n)
+}
+
 func selectionSortedKeys(set map[string]struct{}) []string {
 	out := make([]string, 0, len(set))
 	for k := range set {
