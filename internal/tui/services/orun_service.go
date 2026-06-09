@@ -53,6 +53,12 @@ type OrunService interface {
 	// staleness gate + a non-blocking try-lock. Best-effort: a missing
 	// workspace / object-model root is a no-op (zero result, no error).
 	RefreshCatalog(ctx context.Context, force bool) (CatalogRefreshResult, error)
+
+	// CatalogStale reports whether the object-model catalog was resolved against
+	// a different source than the workspace currently has (so a refresh would
+	// change it). Read-only and cheap (one source probe, no resolve). A missing
+	// object-model root reports not-stale.
+	CatalogStale(ctx context.Context) (bool, error)
 }
 
 // --- Request types ---
