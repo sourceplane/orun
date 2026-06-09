@@ -197,6 +197,10 @@ type Model struct {
 	toast     string
 	toastAt   time.Time
 	spinner   spinner.Model
+	// catalogStale is true when the object-model catalog was resolved against a
+	// different tree than the workspace currently has — surfaced as a header
+	// "⟳ stale" chip prompting ⌃r (Bucket 6C). Updated on the live-view ticker.
+	catalogStale bool
 
 	keys GlobalKeyMap
 }
@@ -252,7 +256,7 @@ func (m Model) LastError() error                       { return m.lastErr }
 func (m Model) Init() tea.Cmd {
 	// Refresh the object-model catalog on open (force — even a dirty tree) so
 	// the cockpit opens on a current catalog, then reloads when it lands.
-	return tea.Batch(loadWorkspaceCmd(m.svc), m.spinner.Tick, catalogRefreshTickCmd(), refreshCatalogCmd(m.svc, true))
+	return tea.Batch(loadWorkspaceCmd(m.svc), m.spinner.Tick, catalogRefreshTickCmd(), refreshCatalogCmd(m.svc, true), checkCatalogStaleCmd(m.svc))
 }
 
 func loadWorkspaceCmd(svc services.OrunService) tea.Cmd {
@@ -328,15 +332,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The reload runs off the UI thread; the result lands as
 		// workspaceRefreshedMsg. When auto-refresh is enabled, also re-resolve
 		// the catalog (staleness-gated, so a clean unchanged tree is a no-op).
-		cmds := []tea.Cmd{backgroundReloadCmd(m.svc), catalogRefreshTickCmd()}
+		cmds := []tea.Cmd{backgroundReloadCmd(m.svc), catalogRefreshTickCmd(), checkCatalogStaleCmd(m.svc)}
 		if m.prefs.AutoRefresh {
 			cmds = append(cmds, refreshCatalogCmd(m.svc, false))
 		}
 		return m, tea.Batch(cmds...)
 
+	case catalogStaleMsg:
+		m.catalogStale = msg.stale
+		return m, nil
+
 	case catalogRefreshedMsg:
-		// A cockpit-side resolve changed the catalog → re-read the workspace so
-		// the new component set surfaces. Fresh/skipped/failed is a no-op.
+		// A refresh just ran → the catalog is current; clear the stale badge.
+		// When it changed, re-read the workspace so the new component set
+		// surfaces. Fresh/skipped/failed only clears the badge.
+		m.catalogStale = false
 		if msg.refreshed {
 			return m, backgroundReloadCmd(m.svc)
 		}
@@ -1652,6 +1662,13 @@ func (m Model) renderHeader() string {
 			theme.StyleValue.Render(m.componentPage.Component.Name),
 		)
 	}
+	if m.catalogStale {
+		// The catalog was resolved against a different tree — prompt a refresh.
+		crumbs = append(crumbs,
+			theme.StyleDim.Render("·"),
+			theme.StylePillWarn.Render("⟳ stale (⌃r)"),
+		)
+	}
 	return theme.StyleHeader.Render(strings.Join(crumbs, " "))
 }
 
@@ -2067,6 +2084,19 @@ func refreshCatalogCmd(svc services.OrunService, force bool) tea.Cmd {
 	return func() tea.Msg {
 		res, err := svc.RefreshCatalog(context.Background(), force)
 		return catalogRefreshedMsg{refreshed: err == nil && res.Refreshed}
+	}
+}
+
+// catalogStaleMsg reports the read-only staleness probe used to drive the
+// header "⟳ stale" badge.
+type catalogStaleMsg struct{ stale bool }
+
+// checkCatalogStaleCmd probes whether the catalog is stale for the current tree
+// (read-only, no resolve). Best-effort: an error reports not-stale.
+func checkCatalogStaleCmd(svc services.OrunService) tea.Cmd {
+	return func() tea.Msg {
+		stale, err := svc.CatalogStale(context.Background())
+		return catalogStaleMsg{stale: err == nil && stale}
 	}
 }
 

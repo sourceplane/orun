@@ -41,3 +41,12 @@ func (s *LiveOrunService) RefreshCatalog(ctx context.Context, force bool) (Catal
 		CatalogID: res.CatalogID,
 	}, nil
 }
+
+// CatalogStale implements OrunService.CatalogStale (read-only).
+func (s *LiveOrunService) CatalogStale(ctx context.Context) (bool, error) {
+	if s.cfg.ObjectModelRoot == "" || s.cfg.IntentRoot == "" {
+		return false, nil
+	}
+	objRoot := filepath.Join(s.cfg.ObjectModelRoot, "objectmodel")
+	return catalogrefresh.IsStale(ctx, objRoot, s.cfg.IntentRoot)
+}

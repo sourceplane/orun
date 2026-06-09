@@ -13,6 +13,7 @@ type MockOrunService struct {
 	DescribeFn       func(ctx context.Context, ref ResourceRef) (*ResourceDescription, error)
 	TailLogsFn       func(ctx context.Context, req LogRequest) (<-chan LogEvent, error)
 	RefreshCatalogFn func(ctx context.Context, force bool) (CatalogRefreshResult, error)
+	CatalogStaleFn   func(ctx context.Context) (bool, error)
 }
 
 func (m *MockOrunService) RefreshCatalog(ctx context.Context, force bool) (CatalogRefreshResult, error) {
@@ -20,6 +21,13 @@ func (m *MockOrunService) RefreshCatalog(ctx context.Context, force bool) (Catal
 		return m.RefreshCatalogFn(ctx, force)
 	}
 	return CatalogRefreshResult{}, nil
+}
+
+func (m *MockOrunService) CatalogStale(ctx context.Context) (bool, error) {
+	if m.CatalogStaleFn != nil {
+		return m.CatalogStaleFn(ctx)
+	}
+	return false, nil
 }
 
 // Compile-time check.

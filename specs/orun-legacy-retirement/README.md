@@ -284,7 +284,7 @@ displays, instead of relying on `orun plan`/`run`/`catalog refresh` to have run.
   manual refresh on `⌃r` + the `catalog.refresh` palette command; auto-refresh on
   the live-view ticker gated by the persisted `prefs.AutoRefresh`, toggled via
   the `catalog.autorefresh` palette command.
-- [ ] **6C** *(follow-up)* — visual "⟳ catalog stale" badge driven by
+- [x] **6C** — visual "⟳ catalog stale" badge driven by
   `catalogrefresh.IsStale` (rendering only; the engine + gate already exist).
 
 ---

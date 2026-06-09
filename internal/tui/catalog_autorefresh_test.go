@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/sourceplane/orun/internal/tui/services"
@@ -107,5 +108,43 @@ func TestModel_PaletteCatalogRefresh(t *testing.T) {
 		}
 	default:
 		t.Fatal("palette catalog.refresh should invoke RefreshCatalog")
+	}
+}
+
+// checkCatalogStaleCmd reflects the service's read-only staleness probe.
+func TestCheckCatalogStaleCmd(t *testing.T) {
+	svc := &services.MockOrunService{
+		CatalogStaleFn: func(_ context.Context) (bool, error) { return true, nil },
+	}
+	if cr := checkCatalogStaleCmd(svc)().(catalogStaleMsg); !cr.stale {
+		t.Error("expected stale=true from the probe")
+	}
+	svc.CatalogStaleFn = func(_ context.Context) (bool, error) { return false, context.DeadlineExceeded }
+	if cr := checkCatalogStaleCmd(svc)().(catalogStaleMsg); cr.stale {
+		t.Error("a failed probe must report stale=false")
+	}
+}
+
+// catalogStaleMsg drives the badge; a refresh clears it.
+func TestModel_StaleBadge_SetAndClear(t *testing.T) {
+	m := NewModel(&services.MockOrunService{})
+
+	next, _ := m.Update(catalogStaleMsg{stale: true})
+	m = next.(Model)
+	if !m.catalogStale {
+		t.Fatal("catalogStaleMsg{true} should set the badge")
+	}
+	if h := m.renderHeader(); !strings.Contains(h, "stale") {
+		t.Errorf("header should show the stale chip:\n%s", h)
+	}
+
+	// A refresh (even an unchanged one) means the catalog is now current.
+	next, _ = m.Update(catalogRefreshedMsg{refreshed: false})
+	m = next.(Model)
+	if m.catalogStale {
+		t.Fatal("a refresh should clear the stale badge")
+	}
+	if h := m.renderHeader(); strings.Contains(h, "stale") {
+		t.Errorf("header should not show the stale chip when fresh:\n%s", h)
 	}
 }
