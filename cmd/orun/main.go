@@ -296,10 +296,14 @@ func generatePlan() error {
 		return fmt.Errorf("failed to plan jobs: %w", err)
 	}
 
-	// Resolve environment promotion dependencies into DAG edges or gates
+	// Resolve environment promotion dependencies into in-plan DAG edges (the
+	// enforced mechanism) or advisory cross-plan gates.
 	if err := planner.ResolvePromotionDependencies(jobInstances, instances, normalized.Environments); err != nil {
 		return fmt.Errorf("failed to resolve promotion dependencies: %w", err)
 	}
+	// Surface any recorded-but-not-enforced cross-plan promotion gates so users
+	// don't assume cross-pipeline gating is active (env-scoping ES3).
+	noticePromotionGates(jobInstances)
 
 	if debugMode {
 		fmt.Println("□ Detecting cycles...")

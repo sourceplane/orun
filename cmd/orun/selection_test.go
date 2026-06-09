@@ -157,3 +157,18 @@ func TestComputePrunedEdges(t *testing.T) {
 		}
 	})
 }
+
+func TestCountGatedJobs(t *testing.T) {
+	jobs := map[string]*model.JobInstance{
+		"a": {Gates: []model.PromotionGate{{Type: "environment-promotion"}}},
+		"b": {},
+		"c": {Gates: []model.PromotionGate{{Type: "environment-promotion"}, {Type: "environment-promotion"}}},
+		"d": nil,
+	}
+	if got := countGatedJobs(jobs); got != 2 {
+		t.Errorf("countGatedJobs = %d, want 2", got)
+	}
+	if got := countGatedJobs(map[string]*model.JobInstance{"x": {}}); got != 0 {
+		t.Errorf("countGatedJobs (no gates) = %d, want 0", got)
+	}
+}
