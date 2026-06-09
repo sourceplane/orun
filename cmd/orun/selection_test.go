@@ -172,3 +172,34 @@ func TestCountGatedJobs(t *testing.T) {
 		t.Errorf("countGatedJobs (no gates) = %d, want 0", got)
 	}
 }
+
+func TestRunSelectionPresent(t *testing.T) {
+	cases := []struct {
+		name       string
+		env        string
+		components []string
+		allEnvs    bool
+		changed    bool
+		trigger    string
+		fromCI     string
+		eventFile  string
+		want       bool
+	}{
+		{name: "bare run has no selection", want: false},
+		{name: "env", env: "staging", want: true},
+		{name: "component", components: []string{"api"}, want: true},
+		{name: "all-envs", allEnvs: true, want: true},
+		{name: "changed", changed: true, want: true},
+		{name: "named trigger", trigger: "github-pr", want: true},
+		{name: "from-ci", fromCI: "github", want: true},
+		{name: "event-file", eventFile: "/tmp/e.json", want: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := runSelectionPresent(c.env, c.components, c.allEnvs, c.changed, c.trigger, c.fromCI, c.eventFile)
+			if got != c.want {
+				t.Errorf("runSelectionPresent = %v, want %v", got, c.want)
+			}
+		})
+	}
+}

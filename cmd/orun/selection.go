@@ -171,6 +171,26 @@ func noticePromotionGates(jobInstances map[string]*model.JobInstance) {
 		ui.Yellow(color, "note:"), n)
 }
 
+// runSelectionPresent reports whether a run invocation carried an explicit
+// environment/component selection (or trigger scoping). The fail-closed guard
+// (env-scoping ES4) only fires for a mutating run with no selection.
+func runSelectionPresent(env string, components []string, allEnvs, changed bool, triggerName, fromCI, eventFile string) bool {
+	return env != "" || len(components) > 0 || allEnvs || changed ||
+		triggerName != "" || fromCI != "" || eventFile != ""
+}
+
+// warnFailClosedRun emits the env-scoping deprecation warning for a mutating
+// `orun run` invoked with no selection. During the deprecation window (Phase A)
+// it warns and proceeds (running all environments); a later release turns this
+// into a hard error (Phase B) — specs/orun-env-scoping/compatibility-and-migration.md §3.
+func warnFailClosedRun() {
+	color := ui.ColorEnabledForWriter(os.Stderr)
+	fmt.Fprintf(os.Stderr,
+		"%s a mutating 'orun run' with no selection will soon require --env/--component or --all-envs "+
+			"(or --dry-run to preview). Running all environments for now.\n",
+		ui.Yellow(color, "deprecated:"))
+}
+
 func selectionSortedKeys(set map[string]struct{}) []string {
 	out := make([]string, 0, len(set))
 	for k := range set {
