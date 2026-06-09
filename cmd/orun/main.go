@@ -279,6 +279,11 @@ func generatePlan() error {
 		fmt.Printf("  Generated %d component instances\n", count)
 	}
 
+	// Record the environment/component selection that scoped this plan
+	// (env-scoping "Z" model). PrunedEdges are populated in a later milestone.
+	planScoped := environment != "" || len(planComponents) > 0 || changedOnly || len(triggerActiveEnvs) > 0
+	planSelection := computePlanSelection(instances, planScoped, allEnvs)
+
 	if debugMode {
 		fmt.Println("□ Binding jobs and resolving dependencies...")
 	}
@@ -325,6 +330,7 @@ func generatePlan() error {
 	renderer := render.NewRenderer()
 	plan := renderer.RenderPlanWithOrder(intent.Metadata, jobInstances, jobBindings, sorted)
 	plan.Spec.CompositionSources = compositionRegistry.Sources
+	plan.Metadata.Selection = planSelection
 
 	// --- M5A: always resolve TriggerOccurrence and write a PlanRevision.
 	// The new pipeline replaces the legacy `state.SavePlan` call below.

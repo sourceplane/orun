@@ -40,6 +40,7 @@ var (
 	runComponentConcurrency int
 	runComponent            []string
 	runEnv                  string
+	runAllEnvs              bool
 	runJSON                 bool
 	runIsolation            string
 	runKeepWorkspaces       bool
@@ -91,7 +92,8 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().IntVar(&runConcurrency, "concurrency", 0, "Override plan concurrency (0 = use plan value)")
 	runCmd.Flags().IntVar(&runComponentConcurrency, "component-concurrency", 1, "Max number of components processed concurrently (0 = unlimited). Default 1 keeps the dashboard component-grouped.")
 	runCmd.Flags().StringArrayVar(&runComponent, "component", nil, "Filter jobs by component (repeatable)")
-	runCmd.Flags().StringVarP(&runEnv, "env", "e", "", "Filter jobs by environment")
+	runCmd.Flags().StringVarP(&runEnv, "env", "e", "", "Filter jobs by environment (comma-separated)")
+	runCmd.Flags().BoolVar(&runAllEnvs, "all-envs", false, "Run all environments explicitly (mutually exclusive with --env)")
 	runCmd.Flags().BoolVar(&runJSON, "json", false, "Output in JSON format")
 	runCmd.Flags().StringVar(&runIsolation, "isolation", "auto", "Per-job workspace isolation: auto (on when concurrency>1), workspace (always on), none (legacy shared tree)")
 	runCmd.Flags().BoolVar(&runKeepWorkspaces, "keep-workspaces", false, "Don't delete per-job staged workspaces after the run (debug)")
@@ -110,6 +112,9 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().StringVar(&artifactBackend, "artifact", "", "Artifact backend for upload (e.g. github)")
 
 	_ = runCmd.Flags().MarkDeprecated("job-id", "use --job instead")
+
+	// env-scoping (Z model): --env and --all-envs are mutually exclusive.
+	runCmd.MarkFlagsMutuallyExclusive("env", "all-envs")
 }
 
 // resolveEffectiveWorkDir returns the working directory to use for the runner.
@@ -827,6 +832,10 @@ func resolveAndLoadPlan() (*model.Plan, error) {
 	// Sync run-time env filter into the plan-generation global when not already set.
 	if environment == "" {
 		environment = runEnv
+	}
+	// Sync the run-time --all-envs flag into the plan-generation global.
+	if !allEnvs {
+		allEnvs = runAllEnvs
 	}
 	if len(planComponents) == 0 && len(runComponent) > 0 {
 		planComponents = runComponent
