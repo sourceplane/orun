@@ -114,6 +114,16 @@ func (l *LocalStore) objectPath(id ObjectID) (string, error) {
 	return filepath.Join(l.root, "objects", string(algo), hexpart[:2], hexpart[2:]), nil
 }
 
+// Fault-injection seams for the atomic-write path (write). Production binds the
+// real os operations; tests override these to exercise the temp / fsync /
+// rename error branches that a real filesystem rarely triggers, without racing
+// an actual disk-full / EIO condition.
+var (
+	osCreateTemp = os.CreateTemp
+	fsyncFile    = (*os.File).Sync
+	osRename     = os.Rename
+)
+
 // write stores framed bytes under id, compressing and writing atomically. It is
 // a no-op when the object already exists (idempotent).
 func (l *LocalStore) write(id ObjectID, serialized []byte) error {
@@ -129,7 +139,7 @@ func (l *LocalStore) write(id ObjectID, serialized []byte) error {
 		return fmt.Errorf("objectstore: mkdir %s: %w", dir, err)
 	}
 	compressed := l.enc.EncodeAll(serialized, nil)
-	tmp, err := os.CreateTemp(dir, "tmp-*")
+	tmp, err := osCreateTemp(dir, "tmp-*")
 	if err != nil {
 		return fmt.Errorf("objectstore: temp file: %w", err)
 	}
@@ -144,14 +154,14 @@ func (l *LocalStore) write(id ObjectID, serialized []byte) error {
 		_ = tmp.Close()
 		return fmt.Errorf("objectstore: write temp: %w", err)
 	}
-	if err := tmp.Sync(); err != nil {
+	if err := fsyncFile(tmp); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("objectstore: fsync temp: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("objectstore: close temp: %w", err)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := osRename(tmpName, path); err != nil {
 		return fmt.Errorf("objectstore: rename: %w", err)
 	}
 	cleanup = false
