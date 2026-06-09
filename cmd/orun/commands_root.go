@@ -43,6 +43,7 @@ var (
 	outputFormat             string
 	debugMode                bool
 	environment              string
+	allEnvs                  bool
 	longFormat               bool
 	expandJobs               bool
 	viewPlan                 string

@@ -3,13 +3,13 @@ package main
 import "github.com/spf13/cobra"
 
 var (
-	planName              string
-	planComponents        []string
-	planLong              bool
-	artifactBackend       string
-	githubOutput          bool
-	planNoCatalogRefresh  bool
-	planCatalogStrict     bool
+	planName             string
+	planComponents       []string
+	planLong             bool
+	artifactBackend      string
+	githubOutput         bool
+	planNoCatalogRefresh bool
+	planCatalogStrict    bool
 )
 
 var planCmd = &cobra.Command{
@@ -31,7 +31,8 @@ func registerPlanCommand(root *cobra.Command) {
 	planCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output plan file path (default: .orun/plans/)")
 	planCmd.Flags().StringVarP(&outputFormat, "format", "f", "json", "Output format (json/yaml)")
 	planCmd.Flags().BoolVar(&debugMode, "debug", false, "Enable debug output")
-	planCmd.Flags().StringVarP(&environment, "env", "e", "", "Filter by environment")
+	planCmd.Flags().StringVarP(&environment, "env", "e", "", "Filter by environment (comma-separated)")
+	planCmd.Flags().BoolVar(&allEnvs, "all-envs", false, "Plan all environments explicitly (mutually exclusive with --env)")
 	planCmd.Flags().StringArrayVar(&planComponents, "component", nil, "Filter by component (repeatable)")
 	planCmd.Flags().StringVar(&planName, "name", "", "Named plan stored in .orun/plans/<name>.json")
 	planCmd.Flags().StringVarP(&viewPlan, "view", "v", "", "View plan (dag/dag:long/dependencies/component=NAME)")
@@ -52,4 +53,7 @@ func registerPlanCommand(root *cobra.Command) {
 
 	planCmd.Flags().BoolVar(&planNoCatalogRefresh, "no-catalog-refresh", false, "Skip catalog refresh; plan proceeds without catalog context")
 	planCmd.Flags().BoolVar(&planCatalogStrict, "catalog-strict", false, "Fail plan on catalog resolution errors")
+
+	// env-scoping (Z model): --env and --all-envs are mutually exclusive.
+	planCmd.MarkFlagsMutuallyExclusive("env", "all-envs")
 }

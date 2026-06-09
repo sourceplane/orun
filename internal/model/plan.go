@@ -12,16 +12,17 @@ type Plan struct {
 
 // PlanMetadata captures immutable plan generation details.
 type PlanMetadata struct {
-	Name        string       `json:"name" yaml:"name"`
-	Description string       `json:"description,omitempty" yaml:"description,omitempty"`
-	Namespace   string       `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	GeneratedAt string       `json:"generatedAt,omitempty" yaml:"generatedAt,omitempty"`
-	Checksum    string       `json:"checksum,omitempty" yaml:"checksum,omitempty"`
+	Name        string            `json:"name" yaml:"name"`
+	Description string            `json:"description,omitempty" yaml:"description,omitempty"`
+	Namespace   string            `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	GeneratedAt string            `json:"generatedAt,omitempty" yaml:"generatedAt,omitempty"`
+	Checksum    string            `json:"checksum,omitempty" yaml:"checksum,omitempty"`
 	Scope       *PlanScope        `json:"scope,omitempty" yaml:"scope,omitempty"`
 	Trigger     *PlanTrigger      `json:"trigger,omitempty" yaml:"trigger,omitempty"`
 	Revision    *PlanRevisionMeta `json:"revision,omitempty" yaml:"revision,omitempty"`
 	Source      *PlanSourceMeta   `json:"source,omitempty" yaml:"source,omitempty"`
 	Catalog     *PlanCatalogMeta  `json:"catalog,omitempty" yaml:"catalog,omitempty"`
+	Selection   *PlanSelection    `json:"selection,omitempty" yaml:"selection,omitempty"`
 	// WorkDir is the intent directory path relative to the workspace root
 	// (the directory where orun plan was invoked). orun run uses this when
 	// intent auto-discovery fails (e.g. in GHA where the intent lives in a
@@ -71,16 +72,43 @@ type PlanSourceMeta struct {
 // When Skipped is true, the catalog was deliberately bypassed
 // (--no-catalog-refresh) and other fields are empty.
 type PlanCatalogMeta struct {
-	SnapshotKey      string `json:"snapshotKey,omitempty" yaml:"snapshotKey,omitempty"`
-	CatalogHash      string `json:"catalogHash,omitempty" yaml:"catalogHash,omitempty"`
+	SnapshotKey       string `json:"snapshotKey,omitempty" yaml:"snapshotKey,omitempty"`
+	CatalogHash       string `json:"catalogHash,omitempty" yaml:"catalogHash,omitempty"`
 	SourceSnapshotKey string `json:"sourceSnapshotKey,omitempty" yaml:"sourceSnapshotKey,omitempty"`
-	Skipped          bool   `json:"skipped" yaml:"skipped"`
+	Skipped           bool   `json:"skipped" yaml:"skipped"`
 }
 
 // PlanScope records the component scoping applied when the plan was generated.
 type PlanScope struct {
 	DetectedComponent string   `json:"detectedComponent" yaml:"detectedComponent"`
 	Components        []string `json:"components" yaml:"components"`
+}
+
+// PlanSelection records the environment/component selection that scoped this
+// plan (env-scoping "Z" model — specs/orun-env-scoping/data-model.md §2).
+// It is a deterministic function of the selection inputs and folds into the
+// plan hash like the rest of metadata. Mode is "full" when no narrowing was
+// applied, else "scoped". AllEnvs is true when an explicit --all-envs was
+// passed (vs. the implicit all-environments default), letting `run`
+// distinguish a deliberate all-env plan from an unscoped one.
+type PlanSelection struct {
+	Envs       []string `json:"envs" yaml:"envs"`
+	Components []string `json:"components" yaml:"components"`
+	Mode       string   `json:"mode" yaml:"mode"`
+	AllEnvs    bool     `json:"allEnvs" yaml:"allEnvs"`
+	// PrunedEdges records dependency edges dropped because their endpoint was
+	// not in the selection (env-scoping ES2). Empty for a full plan.
+	PrunedEdges []PrunedEdge `json:"prunedEdges,omitempty" yaml:"prunedEdges,omitempty"`
+}
+
+// PrunedEdge is a dependency edge dropped because one endpoint is not in the
+// expanded plan (env-scoping data-model.md §3). Kind is "promotion" or
+// "component"; From is always in the plan, To is the dropped endpoint.
+type PrunedEdge struct {
+	Kind   string `json:"kind" yaml:"kind"`
+	From   string `json:"from" yaml:"from"`
+	To     string `json:"to" yaml:"to"`
+	Reason string `json:"reason" yaml:"reason"`
 }
 
 // PlanExecution defines runtime behavior for plan execution.
@@ -92,7 +120,7 @@ type PlanExecution struct {
 
 // PlanSpec holds specification about the plan and its bindings
 type PlanSpec struct {
-	JobBindings        map[string]string         `json:"jobBindings,omitempty" yaml:"jobBindings,omitempty"`                     // model -> JobRegistry name mapping
+	JobBindings        map[string]string           `json:"jobBindings,omitempty" yaml:"jobBindings,omitempty"` // model -> JobRegistry name mapping
 	CompositionSources []ResolvedCompositionSource `json:"compositionSources,omitempty" yaml:"compositionSources,omitempty"`
 }
 
@@ -108,33 +136,33 @@ type ResolvedCompositionSource struct {
 
 // PlanJob is the execution unit in the final plan
 type PlanJob struct {
-	ID            string                 `json:"id" yaml:"id"`
-	UID           string                 `json:"uid,omitempty" yaml:"uid,omitempty"`
-	DisplayName   string                 `json:"displayName,omitempty" yaml:"displayName,omitempty"`
-	CheckName     string                 `json:"checkName,omitempty" yaml:"checkName,omitempty"`
-	Name          string                 `json:"name" yaml:"name"`
-	Component     string                 `json:"component" yaml:"component"`
-	Environment   string                 `json:"environment" yaml:"environment"`
-	Composition   string                 `json:"composition,omitempty" yaml:"composition,omitempty"`
-	Profile       string                 `json:"profile,omitempty" yaml:"profile,omitempty"`
-	ProfileSource string                 `json:"profileSource,omitempty" yaml:"profileSource,omitempty"`
-	ProfileRuleTriggerRef string         `json:"profileRuleTriggerRef,omitempty" yaml:"profileRuleTriggerRef,omitempty"`
-	JobRegistry   string                 `json:"jobRegistry,omitempty" yaml:"jobRegistry,omitempty"` // Name of the JobRegistry used
-	Job           string                 `json:"job,omitempty" yaml:"job,omitempty"`                 // Specific job from registry
-	RunsOn        string                 `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`
-	Path          string                 `json:"path,omitempty" yaml:"path,omitempty"` // Working directory for job execution
-	Steps         []PlanStep             `json:"steps" yaml:"steps"`
-	DependsOn     []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
-	AdvisoryDependsOn        []string `json:"advisoryDependsOn,omitempty" yaml:"advisoryDependsOn,omitempty"`
-	DependencyMode           string   `json:"dependencyMode,omitempty" yaml:"dependencyMode,omitempty"`
-	DependencySource         string   `json:"dependencySource,omitempty" yaml:"dependencySource,omitempty"`
-	DependencyRuleTriggerRef string   `json:"dependencyRuleTriggerRef,omitempty" yaml:"dependencyRuleTriggerRef,omitempty"`
-	Gates         []PlanPromotionGate    `json:"gates,omitempty" yaml:"gates,omitempty"`
-	Timeout       string                 `json:"timeout,omitempty" yaml:"timeout,omitempty"`
-	Retries       int                    `json:"retries,omitempty" yaml:"retries,omitempty"`
-	Env           map[string]interface{} `json:"env,omitempty" yaml:"env,omitempty"`
-	Labels        map[string]string      `json:"labels,omitempty" yaml:"labels,omitempty"`
-	Parameters    map[string]interface{} `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+	ID                       string                 `json:"id" yaml:"id"`
+	UID                      string                 `json:"uid,omitempty" yaml:"uid,omitempty"`
+	DisplayName              string                 `json:"displayName,omitempty" yaml:"displayName,omitempty"`
+	CheckName                string                 `json:"checkName,omitempty" yaml:"checkName,omitempty"`
+	Name                     string                 `json:"name" yaml:"name"`
+	Component                string                 `json:"component" yaml:"component"`
+	Environment              string                 `json:"environment" yaml:"environment"`
+	Composition              string                 `json:"composition,omitempty" yaml:"composition,omitempty"`
+	Profile                  string                 `json:"profile,omitempty" yaml:"profile,omitempty"`
+	ProfileSource            string                 `json:"profileSource,omitempty" yaml:"profileSource,omitempty"`
+	ProfileRuleTriggerRef    string                 `json:"profileRuleTriggerRef,omitempty" yaml:"profileRuleTriggerRef,omitempty"`
+	JobRegistry              string                 `json:"jobRegistry,omitempty" yaml:"jobRegistry,omitempty"` // Name of the JobRegistry used
+	Job                      string                 `json:"job,omitempty" yaml:"job,omitempty"`                 // Specific job from registry
+	RunsOn                   string                 `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`
+	Path                     string                 `json:"path,omitempty" yaml:"path,omitempty"` // Working directory for job execution
+	Steps                    []PlanStep             `json:"steps" yaml:"steps"`
+	DependsOn                []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
+	AdvisoryDependsOn        []string               `json:"advisoryDependsOn,omitempty" yaml:"advisoryDependsOn,omitempty"`
+	DependencyMode           string                 `json:"dependencyMode,omitempty" yaml:"dependencyMode,omitempty"`
+	DependencySource         string                 `json:"dependencySource,omitempty" yaml:"dependencySource,omitempty"`
+	DependencyRuleTriggerRef string                 `json:"dependencyRuleTriggerRef,omitempty" yaml:"dependencyRuleTriggerRef,omitempty"`
+	Gates                    []PlanPromotionGate    `json:"gates,omitempty" yaml:"gates,omitempty"`
+	Timeout                  string                 `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Retries                  int                    `json:"retries,omitempty" yaml:"retries,omitempty"`
+	Env                      map[string]interface{} `json:"env,omitempty" yaml:"env,omitempty"`
+	Labels                   map[string]string      `json:"labels,omitempty" yaml:"labels,omitempty"`
+	Parameters               map[string]interface{} `json:"parameters,omitempty" yaml:"parameters,omitempty"`
 }
 
 // PlanPromotionGate is a cross-plan evidence gate in the plan output.
