@@ -98,25 +98,8 @@ func TestWriteCatalogEnvelope_Shape(t *testing.T) {
 
 // ----- pure input-builder helpers ------------------------------------
 
-func TestComputeCatalogAuthoritative(t *testing.T) {
-	cases := []struct {
-		scope string
-		dirty bool
-		want  bool
-	}{
-		{catalogmodel.SourceScopeBranchMain, false, true},
-		{catalogmodel.SourceScopeBranchProtected, false, true},
-		{catalogmodel.SourceScopeBranchMain, true, false},
-		{catalogmodel.SourceScopeBranchFeature, false, false},
-		{catalogmodel.SourceScopePR, false, false},
-		{catalogmodel.SourceScopeLocalDirty, false, false},
-	}
-	for _, tc := range cases {
-		if got := computeCatalogAuthoritative(tc.scope, tc.dirty); got != tc.want {
-			t.Errorf("authoritative(%q, dirty=%v) = %v, want %v", tc.scope, tc.dirty, got, tc.want)
-		}
-	}
-}
+// (authoritative-flag coverage moved to internal/catalogrefresh, where the
+// resolver-input logic now lives.)
 
 func TestShortRepoName(t *testing.T) {
 	cases := []struct {
