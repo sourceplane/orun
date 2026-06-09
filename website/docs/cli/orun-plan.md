@@ -18,6 +18,8 @@ orun plan network-foundation
 
 When run without `--intent`, `orun` automatically discovers `intent.yaml` by walking up the directory tree to the git root. The plan is always **global** — it always includes all components. Use the positional argument or `--component` to explicitly restrict compilation to specific components.
 
+Restrict environments with `--env <list>` (comma-separated), or make the all-environments default explicit with `--all-envs` (`--env` and `--all-envs` are mutually exclusive). A scoped plan is **self-contained**: dependency or promotion edges pointing at environments/components left out of the selection are pruned, reported as a warning, and recorded under `metadata.selection.prunedEdges`. The selection itself is stamped on the plan as `metadata.selection` (`envs`, `components`, `mode`, `allEnvs`).
+
 Every successful compile produces an immutable **`PlanRevision`** — the pairing of
 the compiled plan with the trigger occurrence that produced it — recorded in the
 content-addressed object model under `.orun/objectmodel/`, with the
@@ -127,7 +129,8 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | `--format`, `-f` | Output format: `json` or `yaml` |
 | `--name` | Give the plan a memorable name for later reference via `--plan <name>` |
 | `--debug` | Enable debug logging during planning |
-| `--env`, `-e` | Restrict compilation to one environment |
+| `--env`, `-e` | Restrict compilation to specific environments (comma-separated) |
+| `--all-envs` | Compile all environments explicitly (mutually exclusive with `--env`) |
 | `--component` | Restrict compilation to one or more components (repeatable) |
 | `--view`, `-v` | Render a view such as `dag`, `dependencies`, or `component=<name>` |
 | `--changed` | Enable change-aware filtering |

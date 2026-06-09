@@ -100,7 +100,11 @@ When environments are activated by different triggers (e.g., PR activates previe
 }
 ```
 
-Gates require that the same component succeeded in the referenced environment for the same source revision before execution is allowed.
+Gates encode that the same component should have succeeded in the referenced environment for the same source revision.
+
+:::note Gates are advisory today
+Cross-plan promotion **gates are recorded in the plan but not yet enforced at run time** — cross-pipeline (cross-invocation) gating is deferred (the env-scoping "Z" model calls this "Option C"). In-plan `dependsOn` ordering is the only *enforced* promotion mechanism. `orun plan`/`run` print a one-line notice when a plan carries gates, so you know they are not gating execution. To order a promotion chain end-to-end today, include the related environments in one plan/run (e.g. `--all-envs`). See the [env-scoping spec](https://github.com/sourceplane/orun/tree/main/specs/orun-env-scoping).
+:::
 
 ## Strategies
 
@@ -134,9 +138,9 @@ The `satisfy` field controls how the dependency is checked:
 
 | Mode | Behavior |
 |------|----------|
-| `same-plan` | Requires both environments in the same plan. Errors if the dependency environment is not active. |
-| `previous-success` | Always uses prior evidence gates, even if both environments happen to be active. |
-| `same-plan-or-previous-success` | Uses DAG edges when both are active, falls back to gates otherwise. **(default)** |
+| `same-plan` | Uses in-plan DAG ordering when both environments are in the plan. If the dependency environment is **not** in the (scoped) plan, the edge is **pruned with a warning** and the selected environment runs standalone (env-scoping "Z" model — earlier releases errored here). |
+| `previous-success` | Records a prior-evidence gate. Gates are advisory today (see the note above) — not enforced at run time. |
+| `same-plan-or-previous-success` | Uses in-plan DAG edges when both are in the plan; records an (advisory) gate otherwise. **(default)** |
 
 ## Match
 
