@@ -303,9 +303,14 @@ func runPlan() error {
 	// in a prior run of this --exec-id, read from the object graph. Computed
 	// before the live working tree for this run is opened so the prior sealed
 	// execution under the same id is not shadowed by this run's in-flight tree.
+	// priorStepLogs carries the resume-skipped jobs' prior step logs forward so
+	// the resumed seal has logs for the cached jobs (read before the live tree
+	// opens; attached after Begin below).
+	var priorStepLogs map[string]map[string][]byte
 	if !runDryRun && !remoteActive && r.JobID == "" {
-		if resume := resumeJobsFromPriorRun(execID); len(resume) > 0 {
+		if resume, logs := resumeJobsFromPriorRun(execID); len(resume) > 0 {
 			r.ResumeJobs = resume
+			priorStepLogs = logs
 			color := ui.ColorEnabledForWriter(os.Stderr)
 			fmt.Fprintf(os.Stderr, "%s resume: %d job(s) already succeeded — skipping\n",
 				ui.Yellow(color, "↻"), len(resume))
@@ -321,6 +326,14 @@ func runPlan() error {
 	if objStoreErr == nil && !runDryRun && !remoteActive {
 		objRun = beginObjectModelRun(objStoreRoot, plan, execID)
 		installObjectRunnerHooks(r, objRun)
+		// Carry prior-run logs forward for resume-skipped jobs (their
+		// AfterStepLog hook won't fire this run). The runner's state-tick hook
+		// projects the cached jobs into the tree; this attaches their logs.
+		for jobID, steps := range priorStepLogs {
+			for stepID, log := range steps {
+				_ = objRun.AttachStepLog(jobID, stepID, log)
+			}
+		}
 	}
 
 	runErr := r.Run(plan)

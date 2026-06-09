@@ -43,7 +43,7 @@ func TestResumeJobsFromPriorRun(t *testing.T) {
 		Jobs: []nodes.JobInput{
 			{Record: nodes.JobRun{JobID: "a@deploy", Folder: "j-a", Status: nodes.StatusSucceeded},
 				Attempts: []nodes.AttemptInput{{Record: nodes.JobAttempt{Attempt: 1, Status: nodes.StatusSucceeded},
-					Steps: []nodes.StepInput{{Record: nodes.StepAttempt{StepID: "build", Status: nodes.StatusSucceeded}}}}}},
+					Steps: []nodes.StepInput{{Record: nodes.StepAttempt{StepID: "build", Status: nodes.StatusSucceeded}, Log: []byte("prior build log")}}}}},
 			{Record: nodes.JobRun{JobID: "b@deploy", Folder: "j-b", Status: nodes.StatusFailed},
 				Attempts: []nodes.AttemptInput{{Record: nodes.JobAttempt{Attempt: 1, Status: nodes.StatusFailed},
 					Steps: []nodes.StepInput{{Record: nodes.StepAttempt{StepID: "build", Status: nodes.StatusFailed}}}}}},
@@ -56,7 +56,7 @@ func TestResumeJobsFromPriorRun(t *testing.T) {
 	// ./.orun/objectmodel — chdir into the workspace.
 	t.Chdir(root)
 
-	resume := resumeJobsFromPriorRun("prior-1")
+	resume, logs := resumeJobsFromPriorRun("prior-1")
 	if len(resume) != 1 {
 		t.Fatalf("resume = %v; want only the one succeeded job", resume)
 	}
@@ -67,13 +67,20 @@ func TestResumeJobsFromPriorRun(t *testing.T) {
 	if _, ok := resume["b@deploy"]; ok {
 		t.Fatalf("failed job b@deploy must not be resumed")
 	}
+	// The succeeded job's prior step log is carried forward for the resumed seal.
+	if got := string(logs["a@deploy"]["build"]); got != "prior build log" {
+		t.Fatalf("carried step log = %q; want %q", got, "prior build log")
+	}
+	if _, ok := logs["b@deploy"]; ok {
+		t.Fatalf("failed job b@deploy must not carry logs")
+	}
 
 	// An unknown exec id has no prior run → nil (a fresh run, nothing skipped).
-	if r := resumeJobsFromPriorRun("does-not-exist"); r != nil {
+	if r, _ := resumeJobsFromPriorRun("does-not-exist"); r != nil {
 		t.Fatalf("unknown id resume = %v; want nil", r)
 	}
 	// Empty exec id → nil.
-	if r := resumeJobsFromPriorRun(""); r != nil {
+	if r, _ := resumeJobsFromPriorRun(""); r != nil {
 		t.Fatalf("empty id resume = %v; want nil", r)
 	}
 }

@@ -239,7 +239,7 @@ Enforcement surfaces (design §3 — all breaking):
 
 Not required for correctness; close for completeness.
 
-- [ ] **Resume — carry step logs forward** (small): re-attach prior step-log
+- [x] **Resume — carry step logs forward** (small): re-attach prior step-log
   blobs for skip-completed jobs at seal (`internal/objrun` + `internal/runworktree` seam).
 - [ ] **Packfile delta compression** (larger, profiling-gated): only if loose-object
   size becomes the bottleneck.
