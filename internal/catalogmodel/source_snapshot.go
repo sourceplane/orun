@@ -43,15 +43,11 @@ const (
 
 // APIVersion / Kind constants used by every persisted catalog object.
 const (
-	APIVersionV1Alpha1     = "orun.io/v1alpha1"
-	KindSourceSnapshot     = "SourceSnapshot"
-	KindCatalogSnapshot    = "CatalogSnapshot"
-	KindComponentManifest  = "ComponentManifest"
-	KindCatalogGraph       = "CatalogGraph"
-	KindComponentEvent     = "ComponentCatalogEvent"
-	KindComponent          = "Component"
-	KindSourceRef          = "SourceRef"
-	KindCatalogRef         = "CatalogRef"
-	KindComponentGlobal    = "ComponentGlobalIndex"
-	KindComponentExecIndex = "ComponentExecutionIndex"
+	APIVersionV1Alpha1    = "orun.io/v1alpha1"
+	KindSourceSnapshot    = "SourceSnapshot"
+	KindCatalogSnapshot   = "CatalogSnapshot"
+	KindComponentManifest = "ComponentManifest"
+	KindCatalogGraph      = "CatalogGraph"
+	KindComponentEvent    = "ComponentCatalogEvent"
+	KindComponent         = "Component"
 )

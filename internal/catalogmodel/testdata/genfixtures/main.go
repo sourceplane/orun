@@ -32,15 +32,11 @@ func main() {
 	}
 
 	fixtures := map[string]any{
-		"source_snapshot.json":         buildSourceSnapshot(),
-		"catalog_snapshot.json":        buildCatalogSnapshot(),
-		"component_manifest.json":      buildComponentManifest(),
-		"catalog_graph.json":           buildCatalogGraph(),
-		"component_history_event.json": buildComponentHistoryEvent(),
-		"source_ref.json":              buildSourceRef(),
-		"catalog_ref.json":             buildCatalogRef(),
-		"component_global_index.json":  buildComponentGlobalIndex(),
-		"component_yaml.json":          buildComponentYAML(),
+		"source_snapshot.json":    buildSourceSnapshot(),
+		"catalog_snapshot.json":   buildCatalogSnapshot(),
+		"component_manifest.json": buildComponentManifest(),
+		"catalog_graph.json":      buildCatalogGraph(),
+		"component_yaml.json":     buildComponentYAML(),
 	}
 
 	for name, v := range fixtures {
@@ -163,8 +159,8 @@ func buildComponentManifest() catalogmodel.ComponentManifest {
 			},
 			Tags: []string{"cloudflare", "api", "edge"},
 			Annotations: map[string]string{
-				"github.com/team":             "platform-edge",
-				"datadoghq.com/service-name":  "api-edge",
+				"github.com/team":            "platform-edge",
+				"datadoghq.com/service-name": "api-edge",
 			},
 		},
 		Spec: catalogmodel.ComponentSpec{
@@ -219,9 +215,9 @@ func buildComponentManifest() catalogmodel.ComponentManifest {
 		},
 		Resolution: catalogmodel.ComponentResolution{
 			InheritedFrom: map[string]string{
-				"metadata.labels.repo":                   "intent.yaml:catalog.defaults.labels.repo",
-				"metadata.owner":                         "component.yaml:spec.owner",
-				"spec.environments.production.profile":   "component.yaml:spec.environments.production.profile",
+				"metadata.labels.repo":                 "intent.yaml:catalog.defaults.labels.repo",
+				"metadata.owner":                       "component.yaml:spec.owner",
+				"spec.environments.production.profile": "component.yaml:spec.environments.production.profile",
 			},
 			InferredFrom: map[string][]string{
 				"runtime.inferred.languages":  {"apps/api-edge/package.json"},
@@ -243,82 +239,6 @@ func buildCatalogGraph() catalogmodel.CatalogGraph {
 		},
 		Edges: []catalogmodel.GraphEdge{
 			{From: "sourceplane/orun/api-edge", To: "sourceplane/orun/identity-worker", Type: catalogmodel.RelCalls, Optional: false},
-		},
-	}
-}
-
-func buildComponentHistoryEvent() catalogmodel.ComponentHistoryEvent {
-	return catalogmodel.ComponentHistoryEvent{
-		APIVersion:         catalogmodel.APIVersionV1Alpha1,
-		Kind:               catalogmodel.KindComponentEvent,
-		EventType:          catalogmodel.EventExecutionCompleted,
-		ComponentKey:       "sourceplane/orun/api-edge",
-		SourceSnapshotKey:  "src-branch-main-cdef456a-t5ab21c3",
-		CatalogSnapshotKey: "cat-c8e91d2a",
-		RevisionKey:        "rev-main-def456a-p8f31c09",
-		ExecutionKey:       "run-001",
-		TriggerName:        "github-push-main",
-		Profile:            "worker.release",
-		Environment:        "production",
-		Status:             "completed",
-		At:                 "2026-05-31T00:03:00Z",
-	}
-}
-
-func buildSourceRef() catalogmodel.SourceRef {
-	return catalogmodel.SourceRef{
-		APIVersion:        catalogmodel.APIVersionV1Alpha1,
-		Kind:              catalogmodel.KindSourceRef,
-		Name:              "main",
-		SourceScope:       catalogmodel.SourceScopeBranchMain,
-		SourceSnapshotKey: "src-branch-main-cdef456a-t5ab21c3",
-		HeadRevision:      "def456a1b2c3",
-		TreeHash:          "5ab21c3",
-		WorkingTree:       catalogmodel.WorkingTreeClean,
-		Authoritative:     true,
-		UpdatedAt:         "2026-05-31T00:00:00Z",
-	}
-}
-
-func buildCatalogRef() catalogmodel.CatalogRef {
-	return catalogmodel.CatalogRef{
-		APIVersion:         catalogmodel.APIVersionV1Alpha1,
-		Kind:               catalogmodel.KindCatalogRef,
-		Name:               "main",
-		SourceScope:        catalogmodel.SourceScopeBranchMain,
-		SourceSnapshotKey:  "src-branch-main-cdef456a-t5ab21c3",
-		CatalogSnapshotKey: "cat-c8e91d2a",
-		CatalogHash:        "sha256:c8e91d2a0000000000000000000000000000000000000000000000000000000",
-		HeadRevision:       "def456a1b2c3",
-		TreeHash:           "5ab21c3",
-		Authoritative:      true,
-		Preview:            false,
-		UpdatedAt:          "2026-05-31T00:00:00Z",
-	}
-}
-
-func buildComponentGlobalIndex() catalogmodel.ComponentGlobalIndex {
-	return catalogmodel.ComponentGlobalIndex{
-		APIVersion:   catalogmodel.APIVersionV1Alpha1,
-		Kind:         catalogmodel.KindComponentGlobal,
-		ComponentKey: "sourceplane/orun/api-edge",
-		Name:         "api-edge",
-		Repo:         "sourceplane/orun",
-		Latest: catalogmodel.ComponentIndexLocation{
-			SourceSnapshotKey:  "src-branch-main-cdef456a-t5ab21c3",
-			CatalogSnapshotKey: "cat-c8e91d2a",
-		},
-		Main: catalogmodel.ComponentIndexLocation{
-			SourceSnapshotKey:  "src-branch-main-cdef456a-t5ab21c3",
-			CatalogSnapshotKey: "cat-c8e91d2a",
-			ManifestPath:       "components/api-edge/manifest.json",
-		},
-		Previews: []catalogmodel.ComponentIndexPreview{
-			{
-				SourceScope:        catalogmodel.SourceScopePR,
-				SourceSnapshotKey:  "src-pr-139-abc123-t9f81a4d",
-				CatalogSnapshotKey: "cat-9f81a4d2",
-			},
 		},
 	}
 }

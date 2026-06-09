@@ -26,10 +26,6 @@ func TestGoldenRoundtrip(t *testing.T) {
 		{"CatalogSnapshot", "catalog_snapshot.json", &catalogmodel.CatalogSnapshot{}},
 		{"ComponentManifest", "component_manifest.json", &catalogmodel.ComponentManifest{}},
 		{"CatalogGraph", "catalog_graph.json", &catalogmodel.CatalogGraph{}},
-		{"ComponentHistoryEvent", "component_history_event.json", &catalogmodel.ComponentHistoryEvent{}},
-		{"SourceRef", "source_ref.json", &catalogmodel.SourceRef{}},
-		{"CatalogRef", "catalog_ref.json", &catalogmodel.CatalogRef{}},
-		{"ComponentGlobalIndex", "component_global_index.json", &catalogmodel.ComponentGlobalIndex{}},
 		{"ComponentYAML", "component_yaml.json", &catalogmodel.ComponentYAML{}},
 	}
 	for _, tc := range cases {

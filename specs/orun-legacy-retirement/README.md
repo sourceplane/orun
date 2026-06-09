@@ -18,7 +18,7 @@ epics and optional follow-ups needed to fully close the program.
 
 | Field | Value |
 |-------|-------|
-| Status | **Bucket 1 COMPLETE** — the legacy catalog/revision store is retired; the object model is the single persistence stack and the lint gate enforces it. Buckets 2–5 remain optional/epic follow-ups. |
+| Status | **Buckets 1, 5, 6 effectively COMPLETE.** Bucket 1: the legacy catalog/revision store is retired; the object model is the single persistence stack and the lint gate enforces it. Bucket 6: cockpit catalog auto-refresh shipped (engine + TUI wiring + stale badge). Bucket 5: resume step-log carry-forward and the `objectstore` fault-injection seam are done; packfile delta compression stays deferred (profiling-gated). Buckets 2–4 remain gated (perf trigger / design decision / approval). |
 | Promotes | `orun-catalog-state` deferred register **D‑7 / L‑3** ("full `internal/catalogstore` retirement") |
 | Builds on | `specs/orun-object-model/` (the canonical graph), `specs/orun-catalog-state/` (`internal/objcatalog`, `internal/affected`) |
 | Target branch | `main` (PRs merged incrementally) |
@@ -81,12 +81,12 @@ delete packages → gate.** Each `[ ]` is a reviewable PR-sized unit.
 `internal/objcatalog.Reader` today only `Load`s a single `CatalogView`. The
 catalog CLI needs more before it can move off `catalogstore`.
 
-- [ ] **Two-snapshot catalog diff** in `internal/objcatalog` (replaces
+- [x] **Two-snapshot catalog diff** in `internal/objcatalog` (replaces
   `internal/catalogdiff` + `catalogstore` reads behind `orun catalog diff`).
-- [ ] **Catalog event / validation views** for `catalog_run_events.go` and
+- [x] **Catalog event / validation views** for `catalog_run_events.go` and
   `catalog_validate.go` (currently `catalogstore.events` / strict re-resolve into
   the legacy store).
-- [ ] **Component → execution history join** for `orun catalog history` (today
+- [x] **Component → execution history join** for `orun catalog history` (today
   `catalogstore.ReadComponentExecutionIndex`). **Decision:** start with
   `objread` scan + filter (`objread.PlanSummary` over `RunSummary.Components`,
   the CS6 v1 choice); only build the `objindex` component index (Bucket 2) if
@@ -99,48 +99,48 @@ catalog CLI needs more before it can move off `catalogstore`.
 
 One PR per command (all currently import `catalogstore` + `catalogmodel`):
 
-- [ ] `cmd/orun/catalog_list.go` → `objcatalog.Load(...).Components`
-- [ ] `cmd/orun/catalog_describe.go` → `objcatalog` component view
-- [ ] `cmd/orun/catalog_tree.go` → `objcatalog` graph view
-- [ ] `cmd/orun/catalog_refs.go` → `refstore` ref listing (drop `catalogstore.listrefs`)
-- [ ] `cmd/orun/catalog_validate.go` → keep `catalogresolve` (strict); read/write via the object model only
-- [ ] `cmd/orun/catalog_diff.go` → `objcatalog` diff (1A); retire `internal/catalogdiff`
-- [ ] `cmd/orun/catalog_history.go` → `objread`/`objindex` join (1A); drop `ComponentExecutionIndex`
-- [ ] `cmd/orun/catalog_run_events.go` → object-graph event view
-- [ ] `cmd/orun/catalog_plan_resolve.go` → drop `revision` + `catalogstore`
-- [ ] `cmd/orun/catalog_refresh.go` → **remove the legacy write**: today (CS9) it
+- [x] `cmd/orun/catalog_list.go` → `objcatalog.Load(...).Components`
+- [x] `cmd/orun/catalog_describe.go` → `objcatalog` component view
+- [x] `cmd/orun/catalog_tree.go` → `objcatalog` graph view
+- [x] `cmd/orun/catalog_refs.go` → `refstore` ref listing (drop `catalogstore.listrefs`)
+- [x] `cmd/orun/catalog_validate.go` → keep `catalogresolve` (strict); read/write via the object model only
+- [x] `cmd/orun/catalog_diff.go` → `objcatalog` diff (1A); retire `internal/catalogdiff`
+- [x] `cmd/orun/catalog_history.go` → `objread`/`objindex` join (1A); drop `ComponentExecutionIndex`
+- [x] `cmd/orun/catalog_run_events.go` → object-graph event view
+- [x] `cmd/orun/catalog_plan_resolve.go` → drop `revision` + `catalogstore`
+- [x] `cmd/orun/catalog_refresh.go` → **remove the legacy write**: today (CS9) it
   writes *both* the object model (`objplan.RefreshCatalog`) and
   `catalogstore`/`catalogsync`. Keep only the object-model write; retire
   `internal/catalogsync` (NoopSyncer).
-- [ ] `cmd/orun/catalog.go` → drop the shared `catalogstore.New(stateStore)`
+- [x] `cmd/orun/catalog.go` → drop the shared `catalogstore.New(stateStore)`
   helper + `statestore` wiring.
-- [ ] `cmd/orun/catalog_affected.go` → **already** on the object model; no change.
+- [x] `cmd/orun/catalog_affected.go` → **already** on the object model; no change.
 
 **Done when:** no `cmd/orun/catalog_*.go` imports `catalogstore` or `statestore`.
 
 ## 1C. Re-point the remaining read commands off `revision`/`statestore`
 
-- [ ] `cmd/orun/command_describe.go` — `describe revision|trigger|plan` still call
+- [x] `cmd/orun/command_describe.go` — `describe revision|trigger|plan` still call
   `revision.ResolveRevision` + `statestore.ManifestPath/TriggerPath`. Move to
   `objread` (revision/trigger/plan are graph nodes).
-- [ ] `cmd/orun/command_get.go` — `get plans|triggers` reads
+- [x] `cmd/orun/command_get.go` — `get plans|triggers` reads
   `statestore.ManifestPath` + `revision.RevisionManifest`. Move to
   `objread`/`objplan`.
-- [ ] `cmd/orun/read_resolve.go` — drop the `statestore` read-store helper.
-- [ ] `cmd/orun/main.go` — remove the `statestore` read-store wiring once unused.
+- [x] `cmd/orun/read_resolve.go` — drop the `statestore` read-store helper.
+- [x] `cmd/orun/main.go` — remove the `statestore` read-store wiring once unused.
 
 **Done when:** `status`/`logs`/`describe`/`get` read only the object graph.
 
 ## 1D. Kill the run-path dual-write (the heart of it)
 
-- [ ] `cmd/orun/command_run_revision.go` — **delete the
+- [x] `cmd/orun/command_run_revision.go` — **delete the
   `executionstate.CreateExecution` / `MarkTerminal` mirror.** The canonical
   execution is already written by `internal/objrun` (`command_run.go`); this
   file's only job is the legacy revision layout + `orun catalog history`. Dead
   once 1B/1C land.
-- [ ] `cmd/orun/command_run.go` — drop the `revision` resolve import if it only
+- [x] `cmd/orun/command_run.go` — drop the `revision` resolve import if it only
   fed the mirror.
-- [ ] `cmd/orun/bridge_mirror_warn.go` — **delete** (its only purpose is
+- [x] `cmd/orun/bridge_mirror_warn.go` — **delete** (its only purpose is
   surfacing `bridge-mirror-failed` events from the legacy layout; no mirror ⇒ no
   warnings).
 
@@ -150,25 +150,30 @@ One PR per command (all currently import `catalogstore` + `catalogmodel`):
 
 After 1B–1D these have **zero** production importers:
 
-- [ ] `internal/catalogstore/` — delete
-- [ ] `internal/revision/` — delete (incl. `legacy.go`, `legacy_scan.go`, `manifest.go`)
-- [ ] `internal/executionstate/` — delete
-- [ ] `internal/statestore/` — delete (nothing rides it once `catalogstore`/`revision` are gone)
-- [ ] `internal/catalogdiff/`, `internal/catalogsync/` — delete (catalog-CLI-only)
-- [ ] Prune now-orphaned store-only types from `internal/catalogmodel`
-  (refs/indexes/events/`ComponentExecutionRow`) — keep the shared manifest types.
+- [x] `internal/catalogstore/` — delete
+- [x] `internal/revision/` — delete (incl. `legacy.go`, `legacy_scan.go`, `manifest.go`)
+- [x] `internal/executionstate/` — delete
+- [x] `internal/statestore/` — delete (nothing rides it once `catalogstore`/`revision` are gone)
+- [x] `internal/catalogdiff/`, `internal/catalogsync/` — delete (catalog-CLI-only)
+- [x] Prune now-orphaned store-only types from `internal/catalogmodel`: deleted
+  `SourceRef`/`CatalogRef` (refs), `ComponentGlobalIndex`/`ComponentIndexLocation`/
+  `ComponentIndexPreview`/`ComponentExecutionIndex` (indexes), `ComponentHistoryEvent`
+  + the `Event*` enum (events), and their `Kind*` constants + golden fixtures.
+  **Kept:** the shared manifest types, the `RefName*` vocabulary (`catalog diff`
+  selectors), and `ComponentExecutionRow` — still the row shape
+  `catalog describe`/`history` render from the object-graph join.
 
 **Done when:** the packages are gone; `go build ./...` + `go test ./...` green.
 
 ## 1F. Tighten the lint gate + docs
 
-- [ ] `scripts/check-object-model.sh` — extend the §4 import ban (today only
+- [x] `scripts/check-object-model.sh` — extend the §4 import ban (today only
   `internal/state`) to also forbid `internal/catalogstore`,
   `internal/statestore`, `internal/revision`, `internal/executionstate`
   repo-wide.
-- [ ] Repoint/delete the deleted packages' test suites; confirm `make test` +
+- [x] Repoint/delete the deleted packages' test suites; confirm `make test` +
   `make test-object-model` + `make verify-generated` stay green, `-race` clean.
-- [ ] Mark **D‑7 / L‑3 done** in `specs/orun-catalog-state/risks-and-open-questions.md`;
+- [x] Mark **D‑7 / L‑3 done** in `specs/orun-catalog-state/risks-and-open-questions.md`;
   update `specs/orun-object-model/IMPLEMENTATION-STATUS.md` + `FOLLOW-UPS.md`.
 
 **Done when:** the object model is the single persistence stack and the gate
@@ -294,14 +299,22 @@ displays, instead of relying on `orun plan`/`run`/`catalog refresh` to have run.
 
 - **Legacy closed (Bucket 1): ✅ DONE.** `internal/catalogstore`,
   `internal/statestore`, `internal/revision`, `internal/executionstate`,
-  `internal/catalogsync` deleted; `orun run` single-writes the object graph; the
-  lint gate bans the imports repo-wide; `orun catalog *` is unregressed.
+  `internal/catalogsync` deleted; the orphaned store-only types in
+  `internal/catalogmodel` are pruned; `orun run` single-writes the object graph;
+  the lint gate bans the imports repo-wide; `orun catalog *` is unregressed.
   (`internal/catalogdiff` is kept as the pure, store-free diff engine
   `catalog_diff.go` feeds object-model-reconstructed snapshots into.)
-- **Epics resolved:** `orun-env-scoping` promoted + shipped (or explicitly
-  parked); `orun-affected-worker` reviewed (approved + built elsewhere, or
-  closed).
-- **Follow-ups:** Bucket 5 items closed or consciously left as documented
-  limitations.
+- **Cockpit auto-refresh (Bucket 6): ✅ DONE.** The shared
+  `internal/catalogrefresh` engine (staleness gate + resolve+write + advisory
+  try-lock) backs both the CLI resolve path and the TUI, so they produce the
+  same content-addressed catalog id; the cockpit refreshes on open, exposes
+  manual + auto-refresh, and shows a `⟳ stale` badge.
+- **Follow-ups (Bucket 5): ✅ mostly DONE.** Resume step-log carry-forward and
+  the `objectstore` atomic-write fault-injection seam are landed; packfile delta
+  compression stays a documented, profiling-gated deferral.
+- **Epics resolved (Buckets 3–4): still gated.** `orun-env-scoping` awaits the
+  design finalization (3.0) before promotion; `orun-affected-worker` awaits the
+  review/approval gate (4.0). `objindex` (Bucket 2) is a pull-in only if the
+  history scan is measured too slow.
 </content>
 </invoke>
