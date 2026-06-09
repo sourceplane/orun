@@ -278,10 +278,14 @@ displays, instead of relying on `orun plan`/`run`/`catalog refresh` to have run.
 - **Stale badge:** when the source differs from the loaded catalog (auto off, or
   between ticks), show `⟳ catalog stale` prompting `r`.
 
-- [ ] **6A** — `internal/catalogrefresh` engine (staleness gate + resolve+write +
-  try-lock); cmd/orun resolve path deduped onto it; `services.RefreshCatalog`.
-- [ ] **6B** — TUI wiring: refresh-on-open, `r`/`a` keybindings, stale badge,
-  auto-on-ticker, `prefs` persistence.
+- [x] **6A** — `internal/catalogrefresh` engine (staleness gate + resolve+write +
+  try-lock); cmd/orun resolve path deduped onto it. *(#298)*
+- [x] **6B** — TUI wiring: `services.RefreshCatalog`; refresh-on-open (force);
+  manual refresh on `⌃r` + the `catalog.refresh` palette command; auto-refresh on
+  the live-view ticker gated by the persisted `prefs.AutoRefresh`, toggled via
+  the `catalog.autorefresh` palette command.
+- [ ] **6C** *(follow-up)* — visual "⟳ catalog stale" badge driven by
+  `catalogrefresh.IsStale` (rendering only; the engine + gate already exist).
 
 ---
 

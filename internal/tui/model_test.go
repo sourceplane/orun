@@ -169,13 +169,27 @@ func TestModel_ReloadKey_TriggersLoadWorkspaceCmd(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected reload cmd")
 	}
-	if msg := cmd(); msg == nil {
-		t.Fatal("reload cmd returned nil msg")
-	}
+	// ⌃r now batches the workspace reload with a catalog refresh; run the
+	// batched sub-commands so the load fires.
+	runCmd(cmd)
 	select {
 	case <-called:
 	default:
 		t.Fatal("LoadWorkspace was not invoked by reload cmd")
+	}
+}
+
+// runCmd executes a tea.Cmd, recursing into tea.BatchMsg sub-commands so a test
+// can drive a batched command's side effects.
+func runCmd(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			runCmd(c)
+		}
 	}
 }
 

@@ -16,6 +16,12 @@ type Prefs struct {
 	// environment in the workspace.
 	SelectedEnv  string                    `json:"selectedEnv,omitempty"`
 	PerComponent map[string]ComponentPrefs `json:"perComponent,omitempty"`
+	// AutoRefresh, when true, re-resolves the object-model catalog on the
+	// live-view ticker (staleness-gated, so a clean unchanged tree is a no-op).
+	// Default false: the cockpit refreshes on open and on manual ⌃r, but does
+	// not resolve-on-every-tick unless the user opts in (a dirty tree would
+	// otherwise re-resolve on every edit).
+	AutoRefresh bool `json:"autoRefresh,omitempty"`
 }
 
 // ComponentPrefs is the per-component sticky state for Component Studio: the
