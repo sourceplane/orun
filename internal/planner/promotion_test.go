@@ -190,7 +190,12 @@ func TestResolvePromotionDependencies_CrossPlanGates(t *testing.T) {
 	}
 }
 
-func TestResolvePromotionDependencies_SamePlanOnlyError(t *testing.T) {
+// TestResolvePromotionDependencies_SamePlanInactiveIsPruned verifies the
+// env-scoping "Z" model behavior: a same-plan promotion dependency whose
+// prerequisite environment is not in this (scoped) plan is pruned rather than
+// fatal. The selected environment runs standalone; the CLI records/warns the
+// dropped edge (see specs/orun-env-scoping/design.md §3–§4).
+func TestResolvePromotionDependencies_SamePlanInactiveIsPruned(t *testing.T) {
 	jobInstances := map[string]*model.JobInstance{
 		"web.prod.release": {
 			ID: "web.prod.release", Component: "web", Environment: "prod",
@@ -218,8 +223,11 @@ func TestResolvePromotionDependencies_SamePlanOnlyError(t *testing.T) {
 	}
 
 	err := ResolvePromotionDependencies(jobInstances, compInstances, environments)
-	if err == nil {
-		t.Fatal("expected error when same-plan dependency is not active")
+	if err != nil {
+		t.Fatalf("same-plan inactive dep must be pruned, not fatal; got error: %v", err)
+	}
+	if got := jobInstances["web.prod.release"].DependsOn; len(got) != 0 {
+		t.Errorf("expected no promotion edge (pruned), got: %v", got)
 	}
 }
 

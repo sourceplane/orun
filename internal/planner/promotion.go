@@ -46,10 +46,12 @@ func ResolvePromotionDependencies(
 			} else if !depActive && (dep.Satisfy == "previous-success" || dep.Satisfy == "same-plan-or-previous-success") {
 				addPromotionGates(jobInstances, envToJobs, envName, dep)
 			} else if !depActive && dep.Satisfy == "same-plan" {
-				return fmt.Errorf(
-					"environment %s requires same-plan promotion from %s, but %s is not active in this plan",
-					envName, dep.Environment, dep.Environment,
-				)
+				// env-scoping (Z model): a same-plan promotion edge whose
+				// prerequisite environment is not in this (scoped) plan is
+				// pruned rather than fatal. The CLI records it as a PrunedEdge
+				// and warns (specs/orun-env-scoping/design.md §3–§4); the
+				// selected environment runs standalone.
+				continue
 			}
 		}
 	}

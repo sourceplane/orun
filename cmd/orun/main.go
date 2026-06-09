@@ -280,9 +280,12 @@ func generatePlan() error {
 	}
 
 	// Record the environment/component selection that scoped this plan
-	// (env-scoping "Z" model). PrunedEdges are populated in a later milestone.
+	// (env-scoping "Z" model), including any dependency edges pruned because
+	// their endpoint was filtered out of this scoped plan.
 	planScoped := environment != "" || len(planComponents) > 0 || changedOnly || len(triggerActiveEnvs) > 0
 	planSelection := computePlanSelection(instances, planScoped, allEnvs)
+	planSelection.PrunedEdges = computePrunedEdges(instances, normalized.Environments)
+	warnPrunedEdges(planSelection.PrunedEdges)
 
 	if debugMode {
 		fmt.Println("□ Binding jobs and resolving dependencies...")
