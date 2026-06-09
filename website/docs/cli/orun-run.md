@@ -173,7 +173,8 @@ orun run --changed --explain
 | `--concurrency` | Override plan concurrency (0 uses the plan's value) |
 | `--component-concurrency` | Max components processed concurrently (default 1; 0 = unlimited). Default 1 keeps the dashboard component-grouped |
 | `--component` | Filter jobs to a specific component (repeatable) |
-| `--env`, `-e` | Filter jobs to a specific environment |
+| `--env`, `-e` | Filter jobs to specific environments (comma-separated) |
+| `--all-envs` | Run all environments explicitly (mutually exclusive with `--env`) |
 | `--all` | Disable CWD-based component scoping; run all jobs |
 | `--json` | Output execution summary in JSON format |
 | `--isolation` | Per-job workspace isolation: `auto` (on when concurrency > 1), `workspace` (always on), or `none` (legacy shared tree). Default: `auto` |
@@ -207,6 +208,25 @@ These flags generate a fresh plan scoped to changed components before running. T
 :::note Deprecated flag
 `--job-id` is a deprecated alias for `--job`. Use `--job` in new scripts.
 :::
+
+## Environment selection and the fail-closed guard
+
+`orun run` runs every environment by default. Narrow it with `--env <list>`
+(comma-separated) or `--component <list>`, or make the all-environments choice
+explicit with `--all-envs`. `--env` and `--all-envs` are mutually exclusive.
+
+For safety, a **mutating** `orun run` with no environment/component selection is
+guarded. Today it prints a deprecation warning and still runs all environments;
+a future release turns this into a hard error. To run everything explicitly,
+pass `--all-envs`. `--dry-run` previews are never guarded, and a saved
+plan/revision or a component argument already counts as an explicit selection.
+
+```bash
+orun run --env staging          # one environment
+orun run --env staging,prod     # several
+orun run --all-envs             # all environments, explicitly
+orun run --dry-run              # preview all environments (read-only)
+```
 
 ## Backend resolution
 

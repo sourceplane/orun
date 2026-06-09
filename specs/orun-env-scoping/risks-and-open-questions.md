@@ -21,12 +21,12 @@ Z-decisions are in `design.md` §5; the D-rows below are the gap resolutions
 
 ## Open questions (need a call within the cited milestone)
 
-| # | Question | Options | Needed by |
-|---|----------|---------|-----------|
-| Q-1 | Should repeated `--env a --env b` be accepted alongside the comma form? | (a) comma only (matches today); (b) also `StringSlice` repeatable | ES1; propose (a) for parity, revisit if users ask |
-| Q-2 | Interactive `--all-envs` confirmation default | (a) prompt unless `--yes` / non-TTY; (b) always require `--yes` | ES4; propose (a) |
-| Q-3 | Does `--all-envs` on `plan` (read-only) need any guard at all? | (a) no — `plan` is read-only; (b) symmetric with `run` | ES1; propose (a) |
-| Q-4 | Phase B (warn→error) timing | next minor vs. next major | before Phase B PR |
+| # | Question | Options | Status |
+|---|----------|---------|--------|
+| ~~Q-1~~ | ~~Repeated `--env a --env b` alongside the comma form?~~ | **RESOLVED → (a) comma only** (matches today). Shipped in ES1; revisit if users ask. | done |
+| Q-2 | Interactive `--all-envs` confirmation default | (a) prompt unless `--yes` / non-TTY; (b) always require `--yes` | **Deferred to Phase B** — Phase A (ES4) warns and proceeds; the `--yes`/prompt path ships with the warn→error flip. |
+| ~~Q-3~~ | ~~Does `--all-envs` on `plan` (read-only) need a guard?~~ | **RESOLVED → (a) no** — `plan` is read-only; only a mutating `run` is guarded. Shipped in ES4. | done |
+| Q-4 | Phase B (warn→error) timing | next minor vs. next major | **Open** — decide before the Phase B PR. |
 
 ## Risk register
 
