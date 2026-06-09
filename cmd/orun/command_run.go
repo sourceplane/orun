@@ -840,6 +840,13 @@ func resolveAndLoadPlan() (*model.Plan, error) {
 	if len(planComponents) == 0 && len(runComponent) > 0 {
 		planComponents = runComponent
 	}
+	// env-scoping (Z model, ES4): a mutating `orun run` that would compile and
+	// execute a fresh full plan with no explicit selection is fail-closed.
+	// During the deprecation window this warns and proceeds (Phase A); a later
+	// release turns it into a hard error. --dry-run is the read-only escape.
+	if !runDryRun && !runSelectionPresent(environment, planComponents, allEnvs, changedOnly, triggerName, fromCI, eventFile) {
+		warnFailClosedRun()
+	}
 	if genErr := generatePlan(); genErr != nil {
 		return nil, fmt.Errorf("failed to generate plan: %w", genErr)
 	}
