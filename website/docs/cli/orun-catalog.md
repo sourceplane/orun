@@ -54,7 +54,7 @@ orun catalog refresh --json
 | `--catalog-snapshot` | Bypass refs; pin to an explicit `catalogSnapshotKey` |
 
 Exit codes: `0` created or reused · `1` validation error (or any warning under
-`--strict`) · `2` resolver internal error · `3` state-store conflict.
+`--strict`) · `2` resolver internal error · `3` object-store ref conflict.
 
 ## `orun catalog affected`
 

@@ -1,70 +1,37 @@
 ---
-title: orun state
+title: orun state (removed)
 ---
 
-`orun state` exposes maintenance commands for the on-disk state store.
-The command is **hidden** from `orun --help` because end-users rarely
-need it; tooling and migration scripts call it directly.
+:::caution Removed in v2.15.0
+The `orun state` command — including the hidden `orun state migrate` — has been
+**removed**. It existed only to rehome workspaces into the legacy revision/catalog
+file store, which was retired when the content-addressed **object model** became
+the single persistence stack. There is no migration target anymore, so the command
+no longer has a purpose.
+:::
 
-## Subcommands
+## What replaced it
 
-### `orun state migrate`
+orun records all of its state — sources, catalogs, revisions, executions, jobs,
+steps, and logs — in the object model under `.orun/objectmodel/`. Nothing needs to
+be migrated into it: `orun plan`, `orun run`, and `orun catalog refresh` write it
+directly, and every read command resolves through it.
 
-Rehomes a pre-v2.10.0 `.orun/` workspace into the new revision-first
-layout described in [State model](../concepts/state-model.md).
+- **Inspect state** with `orun status`, `orun logs`, `orun describe`, `orun get`,
+  and the `orun catalog` group — all read the object model.
+- **Reclaim space** with [`orun gc`](../concepts/state-model.md#garbage-collection),
+  which mark-and-sweeps unreferenced objects under a retention policy. This is the
+  only maintenance command the object model needs.
 
-For every legacy `.orun/plans/<sha>.json`, the command:
+## Upgrading an old workspace
 
-1. Synthesizes a `system.migrated` `TriggerOccurrence` whose
-   `triggerKey` reflects the plan's checksum.
-2. Resolves the corresponding `PlanRevision` via the same
-   `internal/revision.ResolveRevision` path used by live planning, so
-   the revision key is identical to one produced by a fresh plan with
-   the same content.
-3. Walks `.orun/executions/` for any execution whose stored
-   `planChecksum` matches the legacy plan, attaches it to the new
-   revision under `revisions/<key>/executions/run-NNN/`, and promotes
-   the legacy `state.json` / `metadata.json` through
-   `executionstate.Bridge.MirrorRunnerOutput`.
-4. Updates `refs/` and `indexes/` so resolver lookups find the rehomed
-   revisions and executions.
-
-Executions whose plan hash is no longer present in `.orun/plans/`
-attach to an `ensureUnknownRevision` placeholder so no run is dropped.
-
-#### Usage
-
-```bash
-orun state migrate           # apply
-orun state migrate --dry-run # preview
-```
-
-The command is **idempotent** — running it twice produces identical
-output. It is also safe to run after partial migrations: anything
-already rehomed under the new layout is skipped.
-
-#### When you need it
-
-- You are upgrading a long-running workspace from a pre-v2.10.0 release
-  and want `orun status`, `orun describe revision latest`, and
-  `orun get plans` to surface historical runs.
-- You are scripting a bulk import of plans/executions captured from a
-  CI artifact archive.
-
-You do **not** need to migrate to keep using orun — the state store
-keeps reading legacy `.orun/plans/` and `.orun/executions/` paths
-transparently. Migration upgrades the surface; it is not a correctness
-prerequisite.
-
-## Flags
-
-| Flag | Meaning |
-| --- | --- |
-| `--dry-run` | Print every write that would occur, then exit without touching disk. |
+A workspace that still has a pre-v2.15.0 `.orun/plans/` or `.orun/executions/`
+tree (or a v2.10–v2.14 `.orun/revisions/` tree) does **not** need migrating — orun
+ignores those paths. You can delete them once you no longer need the historical
+files. The object model itself is unchanged across the cutover, so recent catalogs
+and executions remain readable.
 
 ## Related
 
-- [State model](../concepts/state-model.md) — the layout you are
-  migrating into.
-- [`orun describe revision`](./orun-describe.md) — the read surface that
-  benefits most from migration.
+- [State model](../concepts/state-model.md) — the object-model layout on disk.
+- [v2.15.0 release notes](../release-notes/v2.15.0.md) — the retirement.

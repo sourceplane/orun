@@ -106,22 +106,20 @@ Equivalent to `orun component <name> --long`. Shows the merged view with all inp
 
 ### `describe revision`
 
-Renders the `revision.json` + `manifest.json` pair for the resolved
-`PlanRevision`. Includes the trigger summary, plan hash, job count,
-on-disk path, and the latest execution's status. `latest` resolves to
-the newest revision in `refs/latest-revision.json`.
+Renders the resolved `PlanRevision` node from the object model — the
+trigger summary, plan hash, job count, and the latest execution's status.
+`latest` resolves to the newest revision via the `revisions/latest` ref.
 
 ### `describe trigger`
 
-Renders the `TriggerOccurrence` (`trigger.json`) for the resolved
-revision. `latest` follows the same ref as `describe revision latest`;
-passing a trigger name resolves through `refs/triggers/<name>/latest.json`.
+Renders the trigger occurrence (the *why*) of the resolved revision,
+read from the object model. `latest` follows the same revision as
+`describe revision latest`.
 
 ### `describe execution`
 
-Renders the `ExecutionRun` (`execution.json` + `snapshot.latest.json`)
-for the resolved execution. Falls back to the legacy
-`.orun/executions/<id>/` tree when the new layout has no match. See
+Renders the resolved execution node (the run summary plus its job/step
+status) read from the object model. See
 [State model](../concepts/state-model.md) for the resolution chain.
 
 ## Related commands

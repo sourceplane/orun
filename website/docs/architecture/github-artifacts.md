@@ -48,7 +48,7 @@ Components:
 | --- | --- | --- |
 | 1 | `orun github runs` | List workflow runs + artifact names only. Parses exec-id, role, status from names. Fast. |
 | 2 | `orun github status` | Download plan shard manifests only (no logs). Exact status. |
-| 3 | `orun github pull` | Full shard download + hydrate into `.orun/executions/`. |
+| 3 | `orun github pull` | Full shard download + import into the object model. |
 
 See [orun github](../cli/orun-github.md) for the full command reference.
 

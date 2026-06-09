@@ -147,7 +147,14 @@ own:
 - **Live, keystroke-free refresh.** The cockpit re-reads the catalog on a short
   interval, so a component you edit on disk — or a catalog written by an external
   `orun plan`/`run` or the universal refresh hook — appears within a few seconds
-  without a reload. `ctrl+r` still forces an immediate refresh.
+  without a reload.
+- **Keeps its own catalog fresh.** The cockpit resolves a current catalog when it
+  opens (even for a dirty tree). In-session, `ctrl+r` (or the `catalog.refresh`
+  palette command) forces an immediate refresh, and the `catalog.autorefresh`
+  palette command enables periodic re-resolve on change (off by default, persisted
+  in `~/.orun/cockpit.json`). When the loaded catalog drifts from the working tree,
+  a `⟳ stale (⌃r)` badge appears in the header. See the
+  [TUI reference](/cli/orun-tui#catalog-freshness) for the full workflow.
 - **Changed / affected overlay.** Each row is badged by the change-detection
   engine: a filled dot for a **directly changed** component, a hollow dot for one
   **affected** through a dependency. Press `c` to filter to only the changed and
@@ -163,7 +170,8 @@ Press `⏎` on a component to open its **Component page** — the resolved detai
 (path, envs, profile, dependencies, `change.watches`, change badge) plus a
 **Recent executions** section (the runs that touched this component). Drill into an
 execution to reach the run → job → logs view. This mirrors the object graph: every
-level reads from the state store.
+level reads from the object-model store (the catalog and the sealed executions
+under `.orun/objectmodel/`).
 
 ### Environment selector and component-scoped run
 
