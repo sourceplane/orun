@@ -10,8 +10,16 @@ type MockOrunService struct {
 	RunPlanFn       func(ctx context.Context, req RunRequest) (<-chan RunEvent, error)
 	ListRunsFn      func(ctx context.Context, req ListRunsRequest) ([]RunSummary, error)
 	GetRunDetailFn  func(ctx context.Context, req RunDetailRequest) (RunDetail, error)
-	DescribeFn      func(ctx context.Context, ref ResourceRef) (*ResourceDescription, error)
-	TailLogsFn      func(ctx context.Context, req LogRequest) (<-chan LogEvent, error)
+	DescribeFn       func(ctx context.Context, ref ResourceRef) (*ResourceDescription, error)
+	TailLogsFn       func(ctx context.Context, req LogRequest) (<-chan LogEvent, error)
+	RefreshCatalogFn func(ctx context.Context, force bool) (CatalogRefreshResult, error)
+}
+
+func (m *MockOrunService) RefreshCatalog(ctx context.Context, force bool) (CatalogRefreshResult, error) {
+	if m.RefreshCatalogFn != nil {
+		return m.RefreshCatalogFn(ctx, force)
+	}
+	return CatalogRefreshResult{}, nil
 }
 
 // Compile-time check.

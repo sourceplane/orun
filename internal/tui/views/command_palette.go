@@ -31,6 +31,8 @@ func DefaultPaletteCommands() []CommandPaletteCommand {
 		{ID: "plan.save", Title: "Save current plan", Hint: "s"},
 		{ID: "plan.dryrun", Title: "Dry-run current plan", Hint: "d"},
 		{ID: "workspace.reload", Title: "Reload workspace", Hint: "⌃r"},
+		{ID: "catalog.refresh", Title: "Refresh catalog (re-resolve workspace)", Keyword: "resolve sync stale"},
+		{ID: "catalog.autorefresh", Title: "Toggle catalog auto-refresh", Keyword: "watch live stale"},
 		{ID: "ui.toggle.inspector", Title: "Toggle inspector drawer", Hint: "i"},
 		{ID: "ui.toggle.sidebar", Title: "Toggle sidebar", Hint: "tab"},
 		{ID: "app.quit", Title: "Quit Orun cockpit", Hint: "q"},

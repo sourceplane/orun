@@ -250,7 +250,9 @@ func (m Model) LastError() error                       { return m.lastErr }
 // Init kicks off workspace loading, starts the spinner, and arms the live-view
 // refresh ticker so the cockpit reflects external writes without a keystroke.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadWorkspaceCmd(m.svc), m.spinner.Tick, catalogRefreshTickCmd())
+	// Refresh the object-model catalog on open (force — even a dirty tree) so
+	// the cockpit opens on a current catalog, then reloads when it lands.
+	return tea.Batch(loadWorkspaceCmd(m.svc), m.spinner.Tick, catalogRefreshTickCmd(), refreshCatalogCmd(m.svc, true))
 }
 
 func loadWorkspaceCmd(svc services.OrunService) tea.Cmd {
@@ -324,8 +326,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case catalogRefreshTickMsg:
 		// Live view (D-9): silently reload the workspace and re-arm the tick.
 		// The reload runs off the UI thread; the result lands as
-		// workspaceRefreshedMsg.
-		return m, tea.Batch(backgroundReloadCmd(m.svc), catalogRefreshTickCmd())
+		// workspaceRefreshedMsg. When auto-refresh is enabled, also re-resolve
+		// the catalog (staleness-gated, so a clean unchanged tree is a no-op).
+		cmds := []tea.Cmd{backgroundReloadCmd(m.svc), catalogRefreshTickCmd()}
+		if m.prefs.AutoRefresh {
+			cmds = append(cmds, refreshCatalogCmd(m.svc, false))
+		}
+		return m, tea.Batch(cmds...)
+
+	case catalogRefreshedMsg:
+		// A cockpit-side resolve changed the catalog → re-read the workspace so
+		// the new component set surfaces. Fresh/skipped/failed is a no-op.
+		if msg.refreshed {
+			return m, backgroundReloadCmd(m.svc)
+		}
+		return m, nil
 
 	case liveRefreshTickMsg:
 		// While a run is in flight, re-read its per-job/step state so the
@@ -713,9 +728,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Reload):
+		// ⌃r re-resolves the catalog (force) and reloads the view.
 		m.loading = true
 		m.lastErr = nil
-		return m, loadWorkspaceCmd(m.svc)
+		return m, tea.Batch(loadWorkspaceCmd(m.svc), refreshCatalogCmd(m.svc, true))
 	case key.Matches(msg, m.keys.ToggleMode):
 		// Tab cycles between Components and Activity at the top level.
 		if m.activeMode == ModeBrowse {
@@ -1459,6 +1475,18 @@ func (m Model) applyPaletteCommand(c views.CommandPaletteCommand) (tea.Model, te
 	case "workspace.reload":
 		m.loading = true
 		return m, loadWorkspaceCmd(m.svc)
+	case "catalog.refresh":
+		m.loading = true
+		return m, tea.Batch(loadWorkspaceCmd(m.svc), refreshCatalogCmd(m.svc, true))
+	case "catalog.autorefresh":
+		m.prefs.AutoRefresh = !m.prefs.AutoRefresh
+		SavePrefs(m.prefs)
+		state := "off"
+		if m.prefs.AutoRefresh {
+			state = "on"
+		}
+		cmd := m.setToast("Catalog auto-refresh " + state)
+		return m, cmd
 	case "ui.toggle.inspector":
 		m.showInspector = !m.showInspector
 		return m, nil
@@ -2024,6 +2052,21 @@ func backgroundReloadCmd(svc services.OrunService) tea.Cmd {
 	return func() tea.Msg {
 		snap, err := svc.LoadWorkspace(context.Background(), services.WorkspaceRequest{})
 		return workspaceRefreshedMsg{Snapshot: snap, Err: err}
+	}
+}
+
+// catalogRefreshedMsg reports a cockpit-side catalog resolve. Refreshed is true
+// only when the catalog actually changed, so the handler reloads the workspace
+// to surface the new components; a fresh/skipped/failed refresh is a no-op.
+type catalogRefreshedMsg struct{ refreshed bool }
+
+// refreshCatalogCmd re-resolves the object-model catalog (staleness-gated unless
+// force) off the UI thread. Best-effort: any error is swallowed and reported as
+// "not refreshed" so a hostile workspace never blocks the cockpit.
+func refreshCatalogCmd(svc services.OrunService, force bool) tea.Cmd {
+	return func() tea.Msg {
+		res, err := svc.RefreshCatalog(context.Background(), force)
+		return catalogRefreshedMsg{refreshed: err == nil && res.Refreshed}
 	}
 }
 

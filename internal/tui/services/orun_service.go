@@ -47,6 +47,12 @@ type OrunService interface {
 	// TailLogs streams log lines for a job/step. The channel is closed when
 	// the log file ends (or the context is cancelled for live tailing).
 	TailLogs(ctx context.Context, req LogRequest) (<-chan LogEvent, error)
+
+	// RefreshCatalog resolves the workspace into the object-model catalog when
+	// it is stale for the current tree (or force=true), under a source-hash
+	// staleness gate + a non-blocking try-lock. Best-effort: a missing
+	// workspace / object-model root is a no-op (zero result, no error).
+	RefreshCatalog(ctx context.Context, force bool) (CatalogRefreshResult, error)
 }
 
 // --- Request types ---
