@@ -2,218 +2,182 @@
 title: State model
 ---
 
-`orun` keeps a complete history of every plan it has compiled and every
-execution it has run on disk under `.orun/`. Since v2.10.0 that history is
-**trigger-first, revision-first** — every plan is filed under the
-`TriggerOccurrence` that produced it, and every execution is filed under
-that revision.
+`orun` keeps a complete history of every catalog it has resolved, every plan it
+has compiled, and every execution it has run as a **content-addressed object
+graph** under `.orun/objectmodel/`. This object model is the **single**
+persistence stack — the legacy revision/catalog file store was retired in
+v2.15.0, so there is one store and one write path.
 
-This page documents the layout. It is the same layout the future R2/S3 and
-Orun Cloud drivers will use; only the storage backend changes.
+This page documents the layout. It is the same layout the future R2/S3 and Orun
+Cloud drivers will use; only the storage backend changes.
 
-## Why revision-first
+## Why content addressing
 
-Pre-v2.10.0, plans lived as flat `.orun/plans/<sha>.json` files. The plan
-told you *what* would run but not *why* it was compiled, and `orun status`
-had to scan execution directories to reconstruct the link back to the plan.
-The new layout makes the chain explicit:
+Every record is named by the hash of its content, and identical content is stored
+once. That gives three properties for free:
+
+- **Immutable history.** A node never changes after it is written; new state is a
+  new node. Tampering is detectable (a read verifies `hash(body) == id`).
+- **Cheap reuse.** Re-resolving an unchanged workspace, or re-running the same
+  revision, re-derives the same ids and writes nothing new — it is a ref move, not
+  a rewrite.
+- **Trivial sync.** Because ids are content hashes, pushing or pulling to a remote
+  store is a set difference (`Has`-before-`Put`).
+
+The chain it records is explicit:
 
 ```
-TriggerOccurrence  →  PlanRevision  →  ExecutionRun(s)
-   why                  what               how it went
+SourceSnapshot  →  Catalog  →  Revision  →  Execution  →  Job → Attempt → Step
+   the VCS state     the         the plan      one run       the work, with logs
+   at resolve time   resolved     + trigger
+                     component    that produced
+                     graph        it
 ```
-
-Every `orun plan` resolves a `TriggerOccurrence` first, even for ad-hoc
-local invocations — those become a `system.manual` trigger so the
-trigger / revision / execution chain is unbroken.
 
 ## On-disk layout
 
+Two directories sit under the object-model root (`.orun/objectmodel/`):
+
 ```
-.orun/
-├── version.json                            # storage version marker
-├── revisions/
-│   └── rev-<scope>-<shortSha>-p<planHash8>/
-│       ├── trigger.json                    # TriggerOccurrence (why)
-│       ├── plan.json                       # the compiled plan (what)
-│       ├── revision.json                   # PlanRevision summary
-│       ├── manifest.json                   # latest execution summary
-│       └── executions/
-│           └── run-NNN/
-│               ├── execution.json          # ExecutionRun
-│               ├── snapshot.latest.json    # current job/step state
-│               └── logs/<job>/<step>.log   # raw step output
-├── refs/
-│   ├── latest-revision.json                # → newest revision key
-│   ├── latest-execution.json               # → newest execution under newest revision
-│   └── triggers/
-│       └── <name>/
-│           ├── latest.json                 # latest revision for this trigger
-│           └── <scope>.json                # per-scope pin (e.g. pr-139)
-├── indexes/
-│   ├── revisions/<key>.json                # quick lookup → revision summary
-│   └── executions/<key>.json               # quick lookup → execution summary
-├── plans/                                  # legacy compatibility mirror
-│   ├── <checksum>.json
-│   └── latest.json
-└── executions/                             # legacy compatibility mirror
-    └── <legacy-exec-id>/...                # hardlinked from revisions/.../executions/run-NNN/
+.orun/objectmodel/
+├── objects/
+│   └── <algo>/<hex[:2]>/<hex[2:]>     # immutable, content-addressed nodes
+│                                      # (zstd-compressed). blobs = record bodies
+│                                      # & raw logs; trees = the Merkle nodes that
+│                                      # link a Source/Catalog/Revision/Execution
+│                                      # to its record and children.
+└── refs/
+    └── <name>.json                    # the mutable layer: a named pointer
+                                       # { "kind":"Ref", "target":"<algo>:<hex>",
+                                       #   "updatedAt":..., "writer":... }
 ```
 
-The compatibility mirror is enabled by default so existing tooling that
-reads `.orun/plans/` and `.orun/executions/` continues to work. Disable it
-with `--state-compat-writes=false` once you have migrated.
+Objects are immutable and append-only; **all** mutation lives in `refs/`. A ref
+write is an atomic temp-file + `fsync` + rename, and updates use a
+compare-and-swap (with a per-ref lockfile locally, conditional writes remotely),
+so concurrent writers never corrupt a pointer.
+
+### The refs
+
+Refs are logical paths under `refs/`. The standard namespaces:
+
+| Ref | Points at |
+| --- | --- |
+| `sources/current`, `sources/main`, `sources/branches/<name>`, `sources/prs/<n>` | the latest `SourceSnapshot` for a scope |
+| `catalogs/current`, `catalogs/main` | the latest resolved `Catalog` snapshot |
+| `revisions/latest`, `revisions/by-hash/<planHash>` | a `PlanRevision` (trigger + plan) |
+| `executions/latest` | the newest sealed execution across all revisions |
+| `executions/by-id/<execId>` | a sealed execution by its execution id |
+| `executions/live/<execId>` | an in-flight run's working handle (removed on seal) |
+
+`orun status`, `orun logs`, `orun describe`, and `orun get` resolve a single ref
+(default `executions/latest`, or `executions/by-id/<execId>` for `--exec-id`) and
+walk the graph from there.
 
 ## The component catalog
 
-Alongside the run state above, orun maintains a content-addressed **object-model
-catalog** under `.orun/objectmodel/`: the resolved component set, its dependency
-graphs, and an `impact/` index (an ownership map plus per-component fingerprints).
-The `catalogs/current` ref points at the latest snapshot.
+The `catalogs/current` ref points at the resolved **component catalog**: the
+component set, its dependency graphs, and an `impact/` index (an ownership map
+plus per-component fingerprints).
 
 This catalog is the read model for **change detection** (`orun plan/run --changed`,
 [`orun catalog affected`](../cli/orun-catalog.md)) and the cockpit's component view.
-It is content-addressed, so re-resolving an unchanged workspace is a cheap ref move
-rather than a rewrite. `orun catalog refresh` writes it explicitly; `orun plan` and
-a universal pre-run refresh hook keep `catalogs/current` fresh transparently, so the
-catalog is usually current without a manual step. See [`orun catalog`](../cli/orun-catalog.md)
-for the full command group.
-
-## TriggerOccurrence
-
-Captures the **why** of a plan. Every plan resolves one of:
-
-| Trigger type | When emitted |
-| --- | --- |
-| `system.manual` | Bare `orun plan` / `orun run` with no `--trigger` and no `--from-ci`. |
-| `system.manual-changed` | Manual invocation with `--changed`. |
-| `system.replay` | A re-plan from an existing revision. |
-| `system.api` | Plan compiled by the backend / a programmatic caller. |
-| `system.migrated` | Synthesized by `orun state migrate` for legacy plans. |
-| `declared` | Matched a `triggerBindings:` entry in `intent.yaml` (`--trigger NAME` or `--from-ci github --event-file …`). |
-
-Schema fields:
-
-```json
-{
-  "kind": "TriggerOccurrence",
-  "triggerId":   "trg_01JX...",
-  "triggerKey":  "trg-pr139-def456a",
-  "triggerType": "declared",
-  "triggerName": "github-pull-request",
-  "mode":        "event-file",
-  "provider":    "github",
-  "event":       "pull_request",
-  "action":      "synchronize",
-  "source": {
-    "repo":         "sourceplane/orun",
-    "ref":          "refs/pull/139/head",
-    "sourceScope":  "pr-139",
-    "headRevision": "def456a...",
-    "baseRevision": "abc1239...",
-    "workingTree":  "clean"
-  },
-  "planScope": {
-    "mode":              "changed",
-    "base":              "abc1239...",
-    "head":              "def456a...",
-    "changedComponents": ["api-edge-worker"]
-  }
-}
-```
-
-See [Trigger bindings](./trigger-bindings.md) for how declared triggers
-match a CI event.
+Because it is content-addressed, re-resolving an unchanged workspace is a cheap ref
+move rather than a rewrite. `orun catalog refresh` writes it explicitly; `orun plan`
+and a universal pre-run refresh hook keep `catalogs/current` fresh transparently,
+and the cockpit refreshes it on open. See [`orun catalog`](../cli/orun-catalog.md)
+for the full command group and [v2.14.0 release notes](../release-notes/v2.14.0.md)
+for the change-detection engine.
 
 ## PlanRevision
 
-A `PlanRevision` is the immutable pairing of a `TriggerOccurrence` and a
-plan checksum. The revision **key** has the form
+A `PlanRevision` is the immutable pairing of the **trigger occurrence** (the *why*
+of a plan — a CI event, a declared trigger binding, or a `system.manual` trigger
+for ad-hoc local runs) and the **compiled plan** (the *what*). Re-running the same
+trigger with an unchanged plan re-derives the same revision (idempotent);
+recompiling against a changed plan or commit creates a new revision next to it.
+`revisions/latest` always points at the most recently created revision.
 
+See [Trigger bindings](./trigger-bindings.md) for how a declared trigger matches a
+CI event.
+
+## ExecutionRun: live, then sealed
+
+`orun run` records an execution in two phases:
+
+1. **Live.** On start, it publishes an `executions/live/<execId>` handle and
+   builds the run in an ephemeral working tree (`run/` under the object-model
+   root). Each state tick and step log is projected into that working tree so
+   in-flight readers (`orun status`, the cockpit Activity view) can follow the run.
+2. **Sealed.** On finish, the working tree is written into immutable `objects/`,
+   `executions/latest` (and `executions/by-id/<execId>`) is moved to the sealed
+   root, and the live handle and working tree are removed.
+
+There is a **single write path** — the runner writes the object graph directly.
+The legacy dual-write (mirroring runner output into a separate revision/execution
+file layout) was removed in v2.15.0.
+
+Cross-run resume (`--exec-id`) reuses a prior run's sealed jobs: a job that already
+succeeded is skipped and re-projected into the new execution, **carrying its prior
+step logs forward** so the resumed seal is complete.
+
+## Garbage collection
+
+Because objects are immutable and shared, unreferenced nodes accumulate. `orun gc`
+is a mark-and-sweep over reachability from refs plus a retention policy (keep the
+last N sealed executions per scope, keep everything named or reachable from a kept
+node):
+
+```bash
+orun gc --dry-run                 # report what would be reclaimed
+orun gc --keep 20                 # keep the last 20 executions per scope
+orun gc --prune-older-than 720h   # plus an age cutoff
 ```
-rev-<scope>-<shortHeadSha>-p<planHash8>
-```
 
-so `rev-pr139-def456a-p8f31c09` reads as *the plan compiled for PR 139 at
-commit `def456a` whose plan hashes to `8f31c09…`*. Re-running the same
-trigger with an unchanged plan returns the same revision (idempotent);
-recompiling against a changed plan (or different commit) creates a new
-revision next to it.
-
-`refs/latest-revision.json` always points at the most recently created
-revision. Per-trigger refs under `refs/triggers/<name>/` let you look up
-"the latest revision for trigger `github-pull-request`" or "the latest
-revision for `pr-139`" in a single read.
-
-## ExecutionRun
-
-Every `orun run` writes an `ExecutionRun` under its revision:
-
-```
-revisions/rev-pr139-def456a-p8f31c09/
-└── executions/
-    └── run-001/
-        ├── execution.json
-        ├── snapshot.latest.json
-        └── logs/...
-```
-
-Subsequent runs of the same revision become `run-002`, `run-003`, …
-deterministically. `refs/latest-execution.json` points at the newest run
-across all revisions; `manifest.json` inside a revision tracks the latest
-run for that revision specifically.
-
-The runner still writes its native `.orun/executions/<legacy-id>/` tree;
-the `executionstate.Bridge` mirrors each tick into `revisions/.../run-NNN/`
-via hardlinks (with a copy fallback on cross-device file systems). This
-lets every existing reader keep working unchanged while new readers prefer
-the revision-first path.
+GC is safe to interrupt — it deletes only proven-unreachable objects — and a grace
+window protects objects newer than a recent seal so in-flight closures are never
+collected.
 
 ## Resolution chain
 
-`orun status`, `orun logs`, `orun describe`, and `orun run` follow the
-same resolver:
+`orun status`, `orun logs`, `orun describe`, and `orun run` follow the same
+resolver against the object reader over `.orun/objectmodel`:
 
-1. `--revision <key>` → exact revision lookup.
-2. `--exec-id <key>` → use `indexes/executions/` to find the revision +
-   run.
-3. `--plan <hash|name>` → resolve through the revision summary (plan
-   hash → revision).
-4. (default) → `refs/latest-execution.json`.
-5. (compat fallback) → scan `.orun/executions/` for the legacy id when no
-   new-layout match exists.
+1. `--exec-id <id>` → `executions/by-id/<id>`.
+2. `--revision <key>` → that revision's latest execution.
+3. (default) → `executions/latest`.
 
-## Migrating a pre-v2.10.0 workspace
+From the resolved execution node, the reader walks to its jobs, attempts, steps,
+and log blobs.
 
-The hidden `orun state migrate` command walks `.orun/plans/` and
-`.orun/executions/`, synthesizes a `system.migrated` trigger per legacy
-plan, and rehomes each plan + its executions under the new layout. It is
-idempotent — re-running it after new state has landed only fills in the
-gaps. See [`orun state` →
-`migrate`](../cli/orun-state.md) for the exact flags.
+## Upgrading from a pre-v2.15.0 workspace
 
-## What is *not* in Phase 1
+Earlier releases also wrote a parallel **legacy** layout — flat `.orun/plans/` and
+`.orun/executions/` directories (and, on the v2.10–v2.14 line, a revision-first
+`.orun/revisions/<key>/...` tree). v2.15.0 removed that layout and the
+`orun state migrate` command that produced it. orun no longer reads or writes those
+paths; they are inert and can be deleted once you no longer need the historical
+files. The object model itself is unchanged, so catalogs and executions written by
+recent releases remain readable.
 
-- **R2 / S3 / Cloud `StateStore` drivers.** The local driver is the only
-  driver shipping today. The interface is frozen so remote drivers can be
-  added without changing callers.
-- **Distributed locking.** Concurrent writes from a single host are safe
-  via `CreateIfAbsent` and `CompareAndSwap`; cross-host coordination is a
-  Phase 3 problem.
-- **Cross-plan evidence reuse.** Reusing artifacts from a previous
-  revision in a later plan is reserved for Phase 3.
-- **TUI surface changes.** The TUI continues to read through the cockpit
-  bridge; surfacing trigger / revision metadata directly in the TUI panes
-  is on the cockpit roadmap, not this redesign.
+## What is *not* in v1
+
+- **R2 / S3 / Cloud object-store drivers.** The local driver is the only driver
+  shipping today. The interface is frozen so remote drivers can be added without
+  changing callers.
+- **Packfiles.** Objects are stored loose (one zstd file per object) with a
+  two-char fanout; packing with delta compression is a deferred, profiling-gated
+  milestone.
+- **Cross-host distributed locking.** Concurrent writes from a single host are
+  safe via compare-and-swap on refs; cross-host coordination is a later problem.
 
 ## References
 
-- [`orun plan`](../cli/orun-plan.md) — emits a fresh revision on every
-  successful compile.
-- [`orun run`](../cli/orun-run.md) — `--revision` flag and resolution
-  chain.
+- [`orun plan`](../cli/orun-plan.md) — emits a fresh revision on every successful
+  compile.
+- [`orun run`](../cli/orun-run.md) — the live → sealed execution write path.
 - [`orun describe`](../cli/orun-describe.md) — `revision`, `trigger`, and
   `execution` aliases.
-- [`orun state`](../cli/orun-state.md) — hidden `migrate` command.
-- [Trigger bindings](./trigger-bindings.md) — how declared triggers
-  match CI events.
+- [`orun catalog`](../cli/orun-catalog.md) — the catalog command group over the
+  object model.
+- [Trigger bindings](./trigger-bindings.md) — how declared triggers match CI events.

@@ -72,6 +72,7 @@ The inspector auto-opens when the terminal is at least 100 columns wide. Below t
 | `?` | Help |
 | `:` | Command palette |
 | `/` | Search |
+| `ctrl+r` | Refresh the catalog now |
 | `ctrl+o` | Navigate back (mode history) |
 | `ctrl+i` | Navigate forward (mode history) |
 | `esc` | Back / pop drilldown level |
@@ -179,9 +180,30 @@ Live jobs pulse via a four-frame wall-clock spinner. Step rows show jump-back ch
 ◀◀ esc esc · back to run
 ```
 
+## Catalog freshness
+
+The Browse view reads the [object-model catalog](../concepts/state-model.md#the-component-catalog).
+The cockpit keeps it current for you rather than relying on an external
+`orun plan`/`run`/`catalog refresh` having run:
+
+- **Refresh on open.** Launching the cockpit resolves and persists a current
+  catalog (even for a dirty tree), so you start on an up-to-date view.
+- **Manual refresh.** `ctrl+r` — or the `catalog.refresh` command-palette command
+  (`:`) — forces an immediate refresh at any time.
+- **Auto-refresh toggle.** The `catalog.autorefresh` command-palette command turns
+  on periodic refresh (on the live-view tick), refreshing only when the source has
+  changed. It is **off by default** so a dirty tree does not re-resolve on every
+  edit; the choice persists across sessions (see Preferences).
+- **Stale badge.** When the loaded catalog no longer matches the working tree, the
+  header shows a `⟳ stale (⌃r)` pill prompting a refresh.
+
+The cockpit and the CLI share one resolve engine, so both produce the **same**
+content-addressed catalog id, and a non-blocking lock keeps a concurrent
+`orun catalog refresh` and the cockpit from both running the expensive resolve.
+
 ## Preferences
 
-The TUI persists inspector visibility, bottom panel visibility, sidebar collapsed state, and sticky per-component overrides (env / trigger) to:
+The TUI persists inspector visibility, bottom panel visibility, sidebar collapsed state, the catalog **auto-refresh** toggle (`autoRefresh`, default off), and sticky per-component overrides (env / trigger) to:
 
 ```text
 ~/.orun/cockpit.json

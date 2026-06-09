@@ -107,6 +107,6 @@ Outside GitHub Actions, remote logs use the local Orun CLI session from `orun au
 
 ## Log storage
 
-Logs are written to `.orun/executions/{exec-id}/logs/{job}/{step}.log` during local execution. Each step's raw output is stored separately, making it easy to diff, archive, or forward logs from individual steps.
+During local execution each step's raw output is stored as its own content-addressed log blob in the object model under `.orun/objectmodel/`, attached to that step's node. Per-step storage makes it easy to diff, archive, or forward logs from individual steps; `orun logs` reads them back through the object reader.
 
 When running with `--remote-state`, logs are streamed to the backend during execution and retrieved via the backend API.

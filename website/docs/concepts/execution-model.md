@@ -95,32 +95,23 @@ Within a phase, `orun` sorts by `order` and then preserves declaration order.
 
 ## Execution records and state
 
-Each `orun run` creates an isolated execution record under `.orun/executions/{exec-id}/`:
+Each `orun run` records an immutable **execution** in the content-addressed object
+model under `.orun/objectmodel/`: the execution node and its jobs, attempts, steps,
+and per-step log blobs, with `executions/latest` (and `executions/by-id/<exec-id>`)
+moved to point at the sealed run. While the run is in flight it is published under
+`executions/live/<exec-id>` so live readers can follow it. See
+[State model](../concepts/state-model.md) for the full layout.
 
-```
-.orun/
-  executions/
-    latest          → symlink to most recent exec
-    my-plan-20240601-a1b2c3/
-      metadata.json     # timing, user, trigger, job counts
-      state.json        # per-job and per-step completion status
-      logs/
-        job-id/
-          step-id.log   # raw step output
-```
+That model enables:
 
-That structure enables:
-
-- **Resumable execution** — already-completed jobs are skipped
-- **Job-level retry** — `--job <id> --retry` clears only that job's state
-- **Immutable logs** — `orun logs` reads from the execution record
-- **Parallel-safe CI** — each run gets its own `exec-id`, avoiding shared state collisions
+- **Resumable execution** — already-completed jobs are skipped (and carry their
+  prior step logs forward)
+- **Job-level retry** — `--job <id> --retry` re-runs only that job
+- **Immutable logs** — `orun logs` reads the sealed log blobs
+- **Parallel-safe CI** — each run gets its own `exec-id`, content-addressed and
+  collision-free
 
 Use `ORUN_EXEC_ID` or `--exec-id` to pin an ID from CI for traceability.
-
-### Migration from legacy state
-
-If you have a pre-v0.10 `.orun-state.json` file, `orun run` automatically migrates it into the new structure on first execution.
 
 ## Working directory rules
 
@@ -160,7 +151,7 @@ The `orun github` command tree provides remote inspection without downloading fu
 
 - `orun github runs` — list workflow runs with artifact shard counts
 - `orun github status` — lightweight remote status via artifact name parsing
-- `orun github pull` — full download, synthesize, and hydrate into local `.orun/executions/`
+- `orun github pull` — full download, synthesize, and import into the local object model
 - `orun github logs` — download specific job shard logs
 
 ### Partial hydration

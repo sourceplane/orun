@@ -149,4 +149,4 @@ Persisted state lives in `internal/tui/prefs.go`:
 ~/.orun/cockpit.json
 ```
 
-Fields include `SidebarCollapsed`, `InspectorVisible`, `BottomPanelVisible`, and `PerComponent` (sticky env / trigger overrides keyed by component name). `LoadPrefs()` returns `DefaultPrefs()` on any read error; `SavePrefs()` swallows write errors — prefs are non-critical and must never break the cockpit.
+Fields include `SidebarCollapsed`, `InspectorVisible`, `BottomPanelVisible`, `AutoRefresh` (the catalog auto-refresh toggle, default off), and `PerComponent` (sticky env / trigger overrides keyed by component name). `LoadPrefs()` returns `DefaultPrefs()` on any read error; `SavePrefs()` swallows write errors — prefs are non-critical and must never break the cockpit.

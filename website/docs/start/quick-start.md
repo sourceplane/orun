@@ -106,7 +106,7 @@ cd examples/infra/infra-1/
 3. `component` showed the merged component view that feeds the compiler.
 4. `plan` expanded environment and component subscriptions into concrete jobs and dependency edges, then stored the result in `.orun/plans/`.
 5. `run --dry-run` previewed the immutable plan artifact.
-6. `run` executed it; progress was recorded in `.orun/executions/`.
+6. `run` executed it; progress was recorded in the object model under `.orun/objectmodel/`.
 
 ## Next steps
 

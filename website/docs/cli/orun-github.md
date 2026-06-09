@@ -18,7 +18,7 @@ The repository is resolved from `GITHUB_REPOSITORY` or inferred from the `origin
 | Command | Purpose |
 | --- | --- |
 | `orun github runs` | List workflow runs and their artifact shards |
-| `orun github pull` | Download all shards and hydrate into `.orun/executions/` |
+| `orun github pull` | Download all shards and hydrate into the object model |
 | `orun github status` | Quick remote status via artifact name parsing |
 | `orun github logs` | Download specific job shard logs |
 
@@ -55,7 +55,7 @@ orun github runs --sha 0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b --details --limi
 
 ### `orun github pull`
 
-Download all Orun artifact shards from a GitHub Actions workflow run, synthesize the execution, and hydrate into the local `.orun/executions/` layout. Once hydrated, existing `orun status`, `orun logs`, and `orun describe` can inspect the execution offline.
+Download all Orun artifact shards from a GitHub Actions workflow run, synthesize the execution, and import it into the local object model (it prints `imported … into the object graph`). Once hydrated, existing `orun status`, `orun logs`, and `orun describe` can inspect the execution offline.
 
 ```bash
 # Pull the latest run for the current branch

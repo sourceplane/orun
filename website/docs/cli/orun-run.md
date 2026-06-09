@@ -18,11 +18,11 @@ The optional positional argument controls what gets run:
 - **plan hash or name** — runs the matching saved plan from `.orun/plans/`
 - _(omitted)_ — generates a fresh plan from the current intent and runs it
 
-Since v2.10.0 every execution is filed under its `PlanRevision` at
-`.orun/revisions/<revisionKey>/executions/run-NNN/`. Use
-`--revision <key>` to skip the resolution chain and execute a specific
-revision directly. See [State model](../concepts/state-model.md) for
-the resolution order and the on-disk layout.
+Every execution is recorded as an immutable node in the object model under its
+`PlanRevision`, with `executions/latest` moved to point at it. Use
+`--revision <key>` to skip the resolution chain and execute a specific revision
+directly. See [State model](../concepts/state-model.md) for the resolution order
+and the on-disk layout.
 
 ```bash
 # Generate and run a fresh plan scoped to one component
@@ -221,19 +221,20 @@ These flags generate a fresh plan scoped to changed components before running. T
 
 ## State and execution records
 
-Each run creates an execution record under `.orun/executions/{exec-id}/`:
+Each run records an immutable **execution** in the content-addressed object model
+under `.orun/objectmodel/` — the execution node and its jobs, attempts, steps, and
+per-step log blobs — and moves `executions/latest` (and `executions/by-id/<exec-id>`)
+to point at it. While the run is in flight it is published under
+`executions/live/<exec-id>` so `orun status`, `orun logs`, and the cockpit can
+follow it; on finish it is sealed into immutable objects. See
+[State model](../concepts/state-model.md) for the layout.
 
-- `state.json` — per-job and per-step completion status
-- `metadata.json` — timing, user, trigger, and job counts
-- `logs/{job}/{step}.log` — raw step output
+That model lets `run`:
 
-That structure lets `run`:
-
-- skip already-completed jobs on resume
+- skip already-completed jobs on resume (`--exec-id`), carrying their prior step
+  logs forward
 - retry a single failed job with `--job` and `--retry`
 - record immutable per-execution logs accessible via `orun logs`
-
-If a `.orun-state.json` file exists from a pre-v0.10 installation, `orun run` automatically migrates it on the first execution.
 
 ## Plan resolution
 

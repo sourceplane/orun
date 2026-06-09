@@ -18,29 +18,20 @@ orun plan network-foundation
 
 When run without `--intent`, `orun` automatically discovers `intent.yaml` by walking up the directory tree to the git root. The plan is always **global** — it always includes all components. Use the positional argument or `--component` to explicitly restrict compilation to specific components.
 
-Since v2.10.0 every successful compile produces a **`PlanRevision`**.
-The plan is filed under
-`.orun/revisions/<revisionKey>/plan.json` together with the
-`TriggerOccurrence` (`trigger.json`) that produced it. The legacy
-`.orun/plans/{checksum}.json` and `.orun/plans/latest.json` paths are
-still written by default as a compatibility mirror so existing tooling
-keeps working — see [State model](../concepts/state-model.md) for the
-full layout. `orun run` resolves `latest` automatically, so you rarely
-need to specify an output path.
-
-A successful `orun plan` prints the new summary block, e.g.
-
-```
-✓ Plan revision created
-
-Revision: rev-pr139-def456a-p8f31c09
-Trigger:  github-pull-request / pr-139 / def456a
-Jobs:     12
-Path:     .orun/revisions/rev-pr139-def456a-p8f31c09/plan.json
-```
+Every successful compile produces an immutable **`PlanRevision`** — the pairing of
+the compiled plan with the trigger occurrence that produced it — recorded in the
+content-addressed object model under `.orun/objectmodel/`, with the
+`revisions/latest` ref moved to point at it. `orun run` resolves the latest
+revision automatically, so you rarely need to specify an output path. See
+[State model](../concepts/state-model.md) for the full layout.
 
 Bare `orun plan` invocations resolve a `system.manual` trigger so the
 revision/trigger chain is unbroken even for ad-hoc local runs.
+
+Before compiling, `orun plan` refreshes the object-model catalog so change
+detection and the cockpit see current component data. Use `--no-catalog-refresh`
+to skip that step, or `--catalog-strict` to fail the plan when the catalog cannot
+be resolved.
 
 ## Common examples
 
@@ -146,6 +137,8 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | `--uncommitted` | Scope to uncommitted changes |
 | `--untracked` | Scope to untracked files |
 | `--explain` | Print how `--changed` resolved its base and head refs |
+| `--no-catalog-refresh` | Skip the pre-plan catalog refresh; plan without catalog context |
+| `--catalog-strict` | Fail the plan on catalog resolution errors |
 | `--trigger` | Named trigger binding for environment activation |
 | `--from-ci` | CI provider for event normalization (e.g. `github`) |
 | `--event-file` | Path to provider event JSON file |
@@ -176,7 +169,7 @@ This replaces the need for `actions/upload-artifact@v4` and manual `jq` piping i
 
 The generated plan contains explicit jobs, dependency edges, step phases, labels, and runtime metadata. Read [plan schema](../reference/plan-schema.md) for the full structure.
 
-Plans stored in `.orun/plans/` can be inspected with `orun get plans` and `orun describe plan <id>`.
+Recorded plans can be inspected with `orun get plans` and `orun describe plan <id>`, which read the plan nodes from the object model.
 
 Use `--config-dir` only when you need to load legacy folder-shaped compositions instead of intent-declared packages.
 

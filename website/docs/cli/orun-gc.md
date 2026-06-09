@@ -2,7 +2,8 @@
 title: orun gc
 ---
 
-`orun gc` removes old execution records and orphan plan files based on a retention policy.
+`orun gc` reclaims disk by removing objects in the [object model](../concepts/state-model.md)
+that are no longer reachable from any ref, under a retention policy.
 
 ## Usage
 
@@ -10,7 +11,10 @@ title: orun gc
 orun gc
 ```
 
-By default, `gc` keeps the most recent 10 executions and removes anything older than 30 days. Plans that are no longer referenced by any execution and are older than 30 days are also removed.
+By default, `gc` keeps the most recent 10 executions per scope and sweeps every
+object not reachable from a retained ref. It is a mark-and-sweep — it deletes only
+proven-unreachable objects — and reports the number of objects removed and
+execution refs pruned, then reindexes.
 
 ## Common examples
 
@@ -49,7 +53,9 @@ orun gc --all
 
 ## What gets removed
 
-- Execution directories under `.orun/executions/` that exceed the retention policy
-- Orphan plan files under `.orun/plans/` that are older than 30 days and not referenced by any retained execution
-
-The `latest` symlink and named plans are not removed by `gc`.
+`gc` prunes execution refs beyond the `--keep` count (all of them with `--all`),
+then sweeps every object — execution, job, step, log, plan, revision, and catalog
+node — that is no longer reachable from a surviving ref. Objects shared with a
+retained execution (by content addressing) are kept. Refs that are still current —
+`catalogs/current`, `executions/latest`, and the named source/catalog refs — and
+everything reachable from them are never removed.

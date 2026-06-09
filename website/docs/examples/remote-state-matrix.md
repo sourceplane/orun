@@ -6,7 +6,7 @@ Run `orun` jobs across parallel GitHub Actions matrix workers coordinated throug
 
 ## Why local remote-state?
 
-Default `orun run` stores execution state on the local filesystem under `.orun/executions/{execID}/`. This works for a single machine but cannot coordinate between independent runners.
+Default `orun run` stores execution state on the local filesystem in the object model under `.orun/objectmodel/`. This works for a single machine but cannot coordinate between independent runners.
 
 **Remote state** moves that coordination to orun-backend.  Every runner — whether a GitHub Actions job or a terminal on your laptop — reads and writes the same backend run record.
 
@@ -20,7 +20,7 @@ Running the harness locally is useful because:
 
 | | Local filesystem state | Remote state |
 |---|---|---|
-| State location | `.orun/executions/{id}/` on disk | orun-backend (Cloudflare D1 + KV) |
+| State location | `.orun/objectmodel/` on disk | orun-backend (Cloudflare D1 + KV) |
 | Coordination across machines | Not possible | Yes — shared backend run record |
 | Claim enforcement | Advisory file lock (`flock`) | Backend atomic claim |
 | Dependency wait | Polls local state | Polls backend `/v1/runs/{id}/runnable` |
