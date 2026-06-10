@@ -17,7 +17,8 @@ import (
 // cache is derived state under <root>/cache/resolve/ — deletable and
 // rebuildable; a miss only costs a recompute, never correctness.
 type ResolveMemo struct {
-	dir string
+	dir    string
+	inputs string // extra-source inputs digest folded into the key (WithInputsDigest)
 }
 
 // NewResolveMemo returns a memo rooted at <root>/cache/resolve.
@@ -29,15 +30,36 @@ type memoEntry struct {
 	CatalogID string `json:"catalogId"`
 }
 
-// key derives the cache filename for a source id + resolver version. The source
-// id's hex tail is used (the "<algo>:" prefix is folded out) to keep the name in
-// the path alphabet.
+// inputsDigest holds the extra-source resolver inputs digest the memo key
+// includes (CODEOWNERS + the composition lock — files that feed the resolved
+// catalog but may be untracked, so the sourceId alone cannot witness their
+// change). Set via WithInputsDigest; empty for callers with no such inputs.
+//
+// Without this, an edit to an untracked .orun/compositions.lock.yaml would
+// leave the sourceId unchanged and the memo would serve a catalog that no
+// longer reflects the lock — a staleness bug, not just a cache miss.
+func (m *ResolveMemo) WithInputsDigest(digest string) *ResolveMemo {
+	if m == nil {
+		return nil
+	}
+	cp := *m
+	cp.inputs = digest
+	return &cp
+}
+
+// key derives the cache filename for a source id + resolver version (+ the
+// optional workspace-inputs digest). The source id's hex tail is used (the
+// "<algo>:" prefix is folded out) to keep the name in the path alphabet.
 func (m *ResolveMemo) key(sourceID objectstore.ObjectID, resolverVersion int) string {
 	hex := string(sourceID)
 	if i := strings.IndexByte(hex, ':'); i >= 0 {
 		hex = hex[i+1:]
 	}
-	return filepath.Join(m.dir, hex+"-rv"+strconv.Itoa(resolverVersion)+".json")
+	name := hex + "-rv" + strconv.Itoa(resolverVersion)
+	if m.inputs != "" {
+		name += "-in" + m.inputs
+	}
+	return filepath.Join(m.dir, name+".json")
 }
 
 // Get returns the memoized catalog id for (sourceID, resolverVersion), or

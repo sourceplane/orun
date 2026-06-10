@@ -82,6 +82,7 @@ func writeObjectModelPlan(orunDir string, plan *model.Plan, planBytes []byte, pl
 		Strict:              planCatalogStrict,
 		OwnerResolver:       ownerResolverForCWD(),
 		CompositionResolver: compositionResolverForCWD(),
+		InputsDigest:        inputsDigestForCWD(),
 	})
 	if err != nil {
 		warnObjectModel("%v", err)

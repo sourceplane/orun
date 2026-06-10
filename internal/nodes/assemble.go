@@ -334,10 +334,36 @@ func lastSegment(s string) string {
 	return s
 }
 
+// shortHexTail returns the first n chars of an object id's hex tail (after the
+// "<algo>:" prefix), for collision-disambiguating filenames.
+func shortHexTail(id string, n int) string {
+	if i := strings.IndexByte(id, ':'); i >= 0 {
+		id = id[i+1:]
+	}
+	if len(id) > n {
+		return id[:n]
+	}
+	return id
+}
+
 // assembleEntities writes each derived entity as entities/<Kind>/<name>.json and
 // returns the entities/ subtree id plus the per-kind counts. The subtree is
 // always written (possibly empty) for a uniform catalog tree shape.
+//
+// Filenames are the sanitized entity name; when two entities of one kind share
+// a sanitized name (e.g. Groups "@org-a/edge" and "@org-b/edge" both → "edge"),
+// the colliding entries fall back to the sanitized full entityKey so the tree
+// stays valid (duplicate tree names are rejected by the store) and the naming
+// stays deterministic.
 func assembleEntities(ctx context.Context, s store, entities []Entity) (ObjectID, map[string]int, error) {
+	// First pass: count sanitized names per kind to detect collisions.
+	nameCount := map[string]int{} // "<kind>/<sanitizedName>" → occurrences
+	keyCount := map[string]int{}  // "<kind>/<sanitizedKey>" → occurrences
+	for _, e := range entities {
+		nameCount[e.Kind+"/"+sanitizeSegment(e.Identity.Name)]++
+		keyCount[e.Kind+"/"+sanitizeSegment(e.Identity.EntityKey)]++
+	}
+
 	counts := map[string]int{}
 	byKind := map[string][]objectstore.TreeEntry{}
 	for _, e := range entities {
@@ -353,7 +379,17 @@ func assembleEntities(ctx context.Context, s store, entities []Entity) (ObjectID
 		if err != nil {
 			return "", nil, err
 		}
-		byKind[e.Kind] = append(byKind[e.Kind], blobEntry(sanitizeSegment(e.Identity.Name)+".json", id))
+		fileBase := sanitizeSegment(e.Identity.Name)
+		if nameCount[e.Kind+"/"+fileBase] > 1 {
+			fileBase = sanitizeSegment(e.Identity.EntityKey)
+			if keyCount[e.Kind+"/"+fileBase] > 1 {
+				// Even the sanitized keys fold together (e.g. "a/b" vs "a-b"):
+				// disambiguate with the content-derived blob id, which is unique
+				// per distinct entity and deterministic.
+				fileBase += "-" + shortHexTail(string(id), 8)
+			}
+		}
+		byKind[e.Kind] = append(byKind[e.Kind], blobEntry(fileBase+".json", id))
 		counts[e.Kind]++
 	}
 	kinds := make([]string, 0, len(byKind))

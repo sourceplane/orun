@@ -39,3 +39,46 @@
   dying store to avoid.
 - SC8 is the keystone — SC4/SC6 define the shape of derived entities and
   integration keys; SC8 is what produces them at runtime via composition `effects`.
+
+## Post-epic hardening review (as-built audit)
+
+Fixed in the hardening pass (`resolverVersion` 8→9):
+
+- **Entity filename collision** — two derived entities of one kind sharing a
+  sanitized name (Groups `@org-a/edge`/`@org-b/edge`, APIs `ns1/r/auth`/`ns2/r/auth`)
+  failed the *entire* catalog write with "duplicate tree entry name". Colliding
+  entries now fall back to the sanitized entityKey (then a content-hash suffix).
+- **Untracked-input staleness** — CODEOWNERS and `.orun/compositions.lock.yaml`
+  feed the resolved catalog but may be invisible to the source id (the lock is
+  commonly gitignored). The resolve memo now folds a `WorkspaceInputsDigest`
+  into its key, and `EnsureFresh`/`IsStale` gate on an inputs stamp — a lock
+  re-pin can never serve a stale catalog (verified: same `sourceId`, moved
+  `catalogId`).
+- **CODEOWNERS precedence** — corrected to GitHub's documented order
+  (`.github/` → root → `docs/`).
+- **`provenance.manifestHash`** — the resolver's canonical manifestHash is now
+  carried into the envelope (data-model.md §2; previously dropped).
+- **Empty legacy `spec.composition`** — the zero `{"source":"","type":""}` block
+  is no longer emitted for unbound components.
+- **`catalog list --kind <Kind>`** — the SC3/SC4 "done when" surface, now
+  implemented over `entities/<Kind>/`.
+
+Known deviations / recommended follow-ups (deliberate, recorded):
+
+- **Owner key grammar** — relations/Group keys carry the raw CODEOWNERS string
+  (`@org/team`) rather than the spec's `group:<name>` grammar. Kept for
+  greppability and CODEOWNERS round-trip; revisit before SaaS federation (key
+  grammar unification across kinds — Environment keys are bare names too).
+- **`catalogHash` / display key** — the legacy `cat-…` snapshot key is computed
+  pre-binding (over manifests + five graphs) and does not cover the envelope or
+  composition bindings; two object-model catalogs can share a display key.
+  Aligning it with §10 (entities + relations.json) belongs to the five-graph
+  retirement follow-up.
+- **Hash discipline (invariant 4)** — the envelope blob id covers provenance
+  (content addressing has no exclusion seam); the §10 "manifestHash excludes
+  provenance" property is honored by the *carried* `provenance.manifestHash`,
+  not by the blob id. Acceptable because provenance is deterministic from
+  source, but the invariant text should be read accordingly.
+- **Group/User `spec.members`**, Composition semver/lifecycle enrichment,
+  `effects.graph` (Deployment/Resource/API emission), lazy `v1alpha1→v1`
+  up-conversion, and the five-graph retirement remain the recorded follow-ups.

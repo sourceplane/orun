@@ -183,6 +183,17 @@ func compositionResolverForCWD() objplan.CompositionResolver {
 	return objplan.CompositionResolverForWorkspace(root)
 }
 
+// inputsDigestForCWD derives the CODEOWNERS + composition-lock inputs digest
+// for the catalog workspace root, folded into the resolve-memo key so a change
+// to either file always misses the memo (never a stale catalog).
+func inputsDigestForCWD() string {
+	root, err := catalogWorkspaceRoot()
+	if err != nil {
+		return ""
+	}
+	return objplan.WorkspaceInputsDigest(root)
+}
+
 // The resolver-input builders below delegate to internal/catalogrefresh — the
 // single source of truth shared with the cockpit-side resolve — so the CLI and
 // the TUI produce the same content-addressed catalog id for a given workspace.
