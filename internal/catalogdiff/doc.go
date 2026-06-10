@@ -3,7 +3,7 @@
 //
 // # Authority
 //
-// Behavioral spec source: specs/orun-component-catalog/cli-surface.md §6
+// Behavioral spec source: specs/archive/orun-component-catalog/cli-surface.md §6
 // (`orun catalog diff`). The diff is the engine behind that command; the CLI
 // layer (cmd/orun/catalog_diff.go) is glue that resolves the base/head
 // snapshots, hands them to Diff, and renders the Result.
