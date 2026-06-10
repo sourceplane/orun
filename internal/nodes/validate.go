@@ -84,6 +84,23 @@ func (g CatalogGraph) Validate() error {
 	return nil
 }
 
+// Validate checks an Entity (the generic multi-kind envelope node,
+// orun-service-catalog/data-model.md §2). Lenient on the key grammar: derived
+// kinds (Group from a CODEOWNERS owner, API/Resource from a ref) carry opaque
+// keys that need not satisfy the 3-segment componentKey rule.
+func (e Entity) Validate() error {
+	if e.Kind == "" {
+		return invalidf("entity kind empty")
+	}
+	if e.Identity.EntityKey == "" {
+		return invalidf("entity %q: empty entityKey", e.Kind)
+	}
+	if e.Identity.Name == "" {
+		return invalidf("entity %q: empty name", e.Identity.EntityKey)
+	}
+	return nil
+}
+
 // Validate checks a RelationGraph: kind discriminator plus non-empty endpoints
 // and type on every edge (orun-service-catalog/data-model.md §3).
 func (g RelationGraph) Validate() error {

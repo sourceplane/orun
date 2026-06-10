@@ -46,6 +46,7 @@ type CatalogSnapshot struct {
 	SourceID        string                `json:"sourceId"`
 	ResolverVersion int                   `json:"resolverVersion"`
 	ComponentCount  int                   `json:"componentCount"`
+	CountsByKind    map[string]int        `json:"countsByKind,omitempty"`
 	Components      []CatalogComponentRef `json:"components"`
 	GraphIDs        map[string]string     `json:"graphIds,omitempty"`
 	Issues          []CatalogIssue        `json:"issues,omitempty"`

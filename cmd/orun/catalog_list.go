@@ -105,8 +105,8 @@ func runCatalogList(ctx context.Context) error {
 			ComponentKey:       c.ComponentKey,
 			Name:               c.Name,
 			Type:               c.Type,
-			Owner:              mapString(c.Metadata, "owner"),
-			System:             mapString(c.Spec, "system"),
+			Owner:              c.Owner, // projected from the ownership block (SC1 reshape)
+			System:             c.System,
 			SourceSnapshotKey:  srcKey,
 			CatalogSnapshotKey: catKey,
 		}
