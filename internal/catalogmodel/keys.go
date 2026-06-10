@@ -38,6 +38,11 @@ var (
 	// componentKeyPattern is the 3-segment `<namespace>/<repo>/<name>` shape.
 	// Each segment matches [a-z0-9._-]+ per identity-and-keys.md §4.
 	componentKeyPattern = regexp.MustCompile(`^[a-z0-9._-]+/[a-z0-9._-]+/[a-z0-9._-]+$`)
+	// entityKeyPattern is the entityKey shape: the 3-segment componentKey form,
+	// optionally prefixed with a reserved 4th `<tenant>/` segment for SC12
+	// multi-tenant federation (S-8). v1 never emits the tenant segment, but the
+	// grammar reserves it now so adding tenancy later does not break key formats.
+	entityKeyPattern = regexp.MustCompile(`^([a-z0-9._-]+/)?[a-z0-9._-]+/[a-z0-9._-]+/[a-z0-9._-]+$`)
 )
 
 // ErrInvalidKey is returned by every Validate*Key function on a malformed
@@ -201,6 +206,48 @@ func CatalogKeyPattern() *regexp.Regexp { return catalogKeyPattern }
 // ComponentKeyPattern returns the regexp every well-formed componentKey
 // must satisfy.
 func ComponentKeyPattern() *regexp.Regexp { return componentKeyPattern }
+
+// EntityKeyParts is the structured form of an entityKey. Tenant is reserved for
+// SC12 (S-8) and empty for every v1 key.
+type EntityKeyParts struct {
+	Tenant    string
+	Namespace string
+	Repo      string
+	Name      string
+}
+
+// FormatEntityKey assembles a `<namespace>/<repo>/<name>` entityKey. It is the
+// generalized form of FormatComponentKey shared by every kind (§1).
+func FormatEntityKey(namespace, repo, name string) string {
+	return namespace + "/" + repo + "/" + name
+}
+
+// ParseEntityKey splits an entityKey into its parts. It accepts both the
+// 3-segment v1 form and the reserved 4-segment `<tenant>/…` form (S-8); the
+// tenant is returned empty for 3-segment keys. A malformed key yields
+// ErrInvalidKey.
+func ParseEntityKey(key string) (EntityKeyParts, error) {
+	if !entityKeyPattern.MatchString(key) {
+		return EntityKeyParts{}, fmt.Errorf("%w: %q does not match %s", ErrInvalidKey, key, entityKeyPattern)
+	}
+	segs := strings.Split(key, "/")
+	if len(segs) == 4 {
+		return EntityKeyParts{Tenant: segs[0], Namespace: segs[1], Repo: segs[2], Name: segs[3]}, nil
+	}
+	return EntityKeyParts{Namespace: segs[0], Repo: segs[1], Name: segs[2]}, nil
+}
+
+// ValidateEntityKey reports a non-nil error when key is not a well-formed
+// entityKey (3-segment, or the reserved 4-segment tenant form).
+func ValidateEntityKey(key string) error {
+	if !entityKeyPattern.MatchString(key) {
+		return fmt.Errorf("%w: %q does not match %s", ErrInvalidKey, key, entityKeyPattern)
+	}
+	return nil
+}
+
+// EntityKeyPattern returns the regexp every well-formed entityKey must satisfy.
+func EntityKeyPattern() *regexp.Regexp { return entityKeyPattern }
 
 // nextULID returns a fresh monotonic ULID string. Wraps the package-level
 // entropy source so callers don't need to thread one through.

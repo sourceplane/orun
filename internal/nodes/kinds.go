@@ -32,6 +32,10 @@ const (
 	KindStoreVersion          = "StoreVersion"
 	KindImpactOwnership       = "ImpactOwnership"
 	KindComponentFingerprint  = "ComponentFingerprint"
+	// KindRelationGraph is the single typed relation-graph blob that replaces
+	// the per-edge-kind CatalogGraph slices (orun-service-catalog/data-model.md
+	// §3). Introduced in SC0; emitted by the resolver in SC2.
+	KindRelationGraph = "RelationGraph"
 )
 
 // Source scope values (identity-and-keys.md §3).

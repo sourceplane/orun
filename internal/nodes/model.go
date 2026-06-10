@@ -77,6 +77,53 @@ type ComponentManifest struct {
 	Provenance map[string]any    `json:"provenance,omitempty"`
 }
 
+// EntityIdentity is the generalized, multi-kind identity tuple for a catalog
+// entity (orun-service-catalog/data-model.md §2). It is the kind-agnostic
+// successor to ComponentIdentity; `kind` distinguishes two entities that share
+// a name. `tenant` is reserved for SC12 (S-8) and omitted in v1.
+type EntityIdentity struct {
+	EntityKey string `json:"entityKey"`
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Repo      string `json:"repo"`
+	Tenant    string `json:"tenant,omitempty"`
+	Path      string `json:"path,omitempty"`
+}
+
+// Entity is the L1 node mirror of catalogmodel.EntityEnvelope — the resolved,
+// content-addressed blob for any catalog kind (Component/API/Resource/System/
+// …). The deep metadata/ownership/lifecycle/spec/contracts/… blocks are carried
+// as generic values here exactly as ComponentManifest carries metadata/spec/
+// provenance; the resolver (catalogresolve) owns their detailed shape. SC0
+// introduces the type; the resolver begins emitting it in SC1.
+type Entity struct {
+	APIVersion   string           `json:"apiVersion"`
+	Kind         string           `json:"kind"`
+	Identity     EntityIdentity   `json:"identity"`
+	Metadata     map[string]any   `json:"metadata,omitempty"`
+	Ownership    map[string]any   `json:"ownership,omitempty"`
+	Lifecycle    map[string]any   `json:"lifecycle,omitempty"`
+	Spec         map[string]any   `json:"spec,omitempty"`
+	Relations    []EntityRelation `json:"relations,omitempty"`
+	Contracts    map[string]any   `json:"contracts,omitempty"`
+	Integrations map[string]any   `json:"integrations,omitempty"`
+	Docs         map[string]any   `json:"docs,omitempty"`
+	Links        []map[string]any `json:"links,omitempty"`
+	Provenance   map[string]any   `json:"provenance,omitempty"`
+	Extensions   map[string]any   `json:"extensions,omitempty"`
+}
+
+// EntityRelation is one typed forward edge owned by an Entity (data-model.md
+// §3). Inverses are materialized by the reader, never stored.
+type EntityRelation struct {
+	Type     string `json:"type"`
+	To       string `json:"to"`
+	ToKind   string `json:"toKind"`
+	Optional bool   `json:"optional,omitempty"`
+	Include  string `json:"include,omitempty"`
+}
+
 // ImpactOwnership is the change-detection ownership map (data-model.md §2). It
 // lives inside the catalog tree at impact/ownership.json and folds into the
 // catalog Merkle root; it is a deterministic function of the resolved catalog +
