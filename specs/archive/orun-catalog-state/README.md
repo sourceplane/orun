@@ -1,5 +1,13 @@
 # Spec: orun-catalog-state
 
+> **📦 ARCHIVED — implemented & stable.** All milestones **CS1–CS9 shipped**
+> (see `IMPLEMENTATION-STATUS.md`): the component catalog is served from
+> object-graph state and the unified `internal/affected` change-detection engine
+> powers `plan`/`run --changed`, `orun catalog affected`, and the cockpit's
+> changed/affected view. The **code** (`internal/affected`, `internal/objcatalog`,
+> the cockpit read seam) is now the living reference; this spec is kept as a
+> frozen historical record. `specs/orun-service-catalog/` builds on this substrate.
+
 **The component catalog is served from the object-graph state, and orun gains a
 single change-detection engine — built on a virtual Merkle tree of component
 inputs — that powers the cockpit's "what changed / what's affected" view *and*
@@ -25,7 +33,7 @@ these surfaces.
 
 | Field | Value |
 |-------|-------|
-| Status | **Draft → Ready for implementation** |
+| Status | **✅ Implemented — CS1–CS9 complete (shipped); archived as a frozen record.** The change-detection engine + catalog-from-state is live; the code is the reference. |
 | Builds on | `specs/orun-object-model/` (object graph), `specs/archive/orun-component-catalog/` (`catalogresolve`, `catalogmodel`) |
 | Replaces | the ad-hoc `--changed` path: `internal/git/changes.go` + `internal/git/intentdiff.go` usage in `cmd/orun/main.go` (`isPathChanged`, `collectChangedComponents`) + `expand.DependencyResolver` in the changed path — consolidated into one engine (`change-detection.md`) |
 | Downstream | `specs/orun-affected-worker/` — **under review, out of scope** |

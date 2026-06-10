@@ -44,5 +44,5 @@
   scope; running the authority in the cloud is separate).
 - `impact/closure.json` and `impact/fingerprints/` (AW3/AW4) until measured
   necessary — and each requires a producer-side change proposed back to
-  `specs/orun-catalog-state/`.
+  `specs/archive/orun-catalog-state/`.
 - GitHub App installation/auth plumbing beyond what the webhook contract needs.

@@ -111,7 +111,7 @@ orun compositions scaffold <composition> [--out dir]      (orun create fronts th
   (`contract`), §5 (`scaffold`), §11 (open edge: scaffold template engine);
   `design.md` §3 (CR-1, the three planes); `cli-surface.md` §6 (the
   `orun compositions scaffold` / `orun create` surface, SC9).
-- Canonical house style: `specs/orun-catalog-state/`.
+- Canonical house style: `specs/archive/orun-catalog-state/`.
 - Two `component.yaml` parsers (both must accept the generated file): the
   permissive plan engine (`internal/model.ComponentManifest`) and the strict
   catalog (`internal/catalogmodel.ComponentYAML`, struct-generated schema).

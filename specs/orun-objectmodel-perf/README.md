@@ -18,7 +18,7 @@ crossed.
 | Status | **Holding — not started; both items profiling/scale-gated.** No work until a pull-in trigger fires. |
 | Type | Optional performance/scale optimizations (no behavior change) |
 | Relocated from | `specs/archive/orun-legacy-retirement/` (Bucket 2 + Bucket 5 packfile) |
-| Builds on | `specs/orun-object-model/` (the content-addressed graph), `specs/orun-catalog-state/` (`internal/objread`, `orun catalog history`) |
+| Builds on | `specs/orun-object-model/` (the content-addressed graph), `specs/archive/orun-catalog-state/` (`internal/objread`, `orun catalog history`) |
 | Constraint | Both are pure optimizations: identical content ids, identical CLI output; **do not** change `orun catalog *` semantics. |
 
 ---
@@ -71,5 +71,5 @@ when its pull-in trigger fires; until then this spec is the standing record of
 ## References
 
 - `specs/orun-object-model/FOLLOW-UPS.md` §2 — the packfile item in full.
-- `specs/orun-catalog-state/` — `orun catalog history` and the component→execution join.
+- `specs/archive/orun-catalog-state/` — `orun catalog history` and the component→execution join.
 - `specs/archive/orun-legacy-retirement/` — the archived program these were relocated from.
