@@ -1,0 +1,19 @@
+Lint the workspace's authored component.yaml files for orun.io/v1 readiness.
+
+migrate is read-only and advisory: it never rewrites files. It reports, per
+component, the gaps that keep it from being a first-class v1 catalog entity —
+a missing owner (no authored owner and no CODEOWNERS match), a legacy
+apiVersion, a missing lifecycle stage, or a missing system. v1 authoring is
+additive, so an un-migrated component still resolves; this is the paved path
+to adopt the richer model.
+
+Usage:
+  orun catalog migrate [flags]
+
+Flags:
+      --json   Emit the CatalogMigrateResult JSON envelope
+
+Global Flags:
+      --all                 Disable CWD-based component scoping; process all components
+  -c, --config-dir string   Config directory for JobRegistry definitions (or set ORUN_CONFIG_DIR; use * or ** for recursive scanning)
+  -i, --intent string       Intent file path (auto-discovered if not set) (default "intent.yaml")
