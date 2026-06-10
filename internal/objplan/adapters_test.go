@@ -7,6 +7,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
 	"github.com/sourceplane/orun/internal/catalogresolve"
+	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/sourcectx"
 )
@@ -381,6 +382,83 @@ func TestMapEntity_Composition(t *testing.T) {
 	}
 	if c, _ := m.Spec["composition"].(map[string]any); c != nil && c["source"] != "" {
 		t.Errorf("unbacked type should not bind a composition source: %v", c)
+	}
+}
+
+// TestMapEntity_CompositionEffects asserts SC8: a backing composition's
+// effects.integrations populate the component's integrations (authored wins),
+// and the effects declaration is carried into spec.composition.effects.
+func TestMapEntity_CompositionEffects(t *testing.T) {
+	t.Parallel()
+	resolver := CompositionResolver(func(typ string) *CompositionMeta {
+		return &CompositionMeta{
+			Name:   "platform",
+			Digest: "sha256:d",
+			Effects: &model.CompositionEffects{
+				Integrations: map[string]any{
+					"datadog":   map[string]any{"team": "golden"},
+					"pagerduty": map[string]any{"serviceId": "PX"},
+				},
+				Provides:   []string{"default/orun/worker-api"},
+				Scorecards: map[string]any{"satisfies": []any{"has-runbook"}},
+			},
+		}
+	})
+	cm := &catalogmodel.ComponentManifest{
+		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/w", Name: "w", Namespace: "ns", Repo: "repo"},
+		Spec:     catalogmodel.ComponentSpec{Type: "worker"},
+		// Authored integration for datadog must win over the golden-path one.
+		Integrations: map[string]any{"datadog": map[string]any{"team": "authored"}},
+	}
+	m := mapEntity(cm, 8, nil, resolver)
+	// Authored datadog wins; pagerduty comes from effects.
+	dd, _ := m.Integrations["datadog"].(map[string]any)
+	if dd["team"] != "authored" {
+		t.Errorf("authored integration should win: %v", m.Integrations["datadog"])
+	}
+	if m.Integrations["pagerduty"] == nil {
+		t.Errorf("effects integration not merged: %v", m.Integrations)
+	}
+	// effects declaration carried into spec.composition.effects.
+	comp, _ := m.Spec["composition"].(map[string]any)
+	eff, _ := comp["effects"].(map[string]any)
+	if eff == nil || eff["integrations"] == nil || eff["scorecards"] == nil {
+		t.Fatalf("spec.composition.effects = %v", comp["effects"])
+	}
+	if provides, _ := eff["provides"].([]any); len(provides) != 1 || provides[0] != "default/orun/worker-api" {
+		t.Errorf("effects.provides = %v", eff["provides"])
+	}
+}
+
+// TestCompositionResolver_ReadsEffectsFromManifest asserts SC8: the resolver
+// reads per-type effects from the composition manifests under a dir source.
+func TestCompositionResolver_ReadsEffectsFromManifest(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".orun"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lock := "kind: CompositionLock\nsources:\n  - name: plat\n    kind: dir\n    path: ./comps\n    resolvedDigest: sha256:d\n    exports:\n      - worker\n"
+	if err := os.WriteFile(filepath.Join(dir, ".orun", "compositions.lock.yaml"), []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "comps", "worker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "apiVersion: x\nkind: Composition\nmetadata:\n  name: worker\nspec:\n  type: worker\n  defaultJob: deploy\n  jobs:\n    - name: deploy\n  effects:\n    integrations:\n      datadog:\n        team: edge\n    provides:\n      - default/orun/worker-api\n"
+	if err := os.WriteFile(filepath.Join(dir, "comps", "worker", "composition.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := CompositionResolverForWorkspace(dir)
+	if r == nil {
+		t.Fatal("resolver nil")
+	}
+	meta := r("worker")
+	if meta == nil || meta.Effects == nil {
+		t.Fatalf("worker effects not read: %+v", meta)
+	}
+	if meta.Effects.Integrations["datadog"] == nil || len(meta.Effects.Provides) != 1 {
+		t.Errorf("effects = %+v", meta.Effects)
 	}
 }
 

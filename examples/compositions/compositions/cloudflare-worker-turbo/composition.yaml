@@ -12,6 +12,19 @@ spec:
   defaultJob: verify-deploy
   defaultProfile: verify
 
+  # Golden-path effects (orun-service-catalog SC8): what running this
+  # composition contributes to the catalog. Declarations only — the live plane
+  # records what actually happened.
+  effects:
+    integrations:
+      cloudflare:
+        product: workers
+    provides:
+      - default/orun/cloudflare-edge
+    scorecards:
+      satisfies:
+        - has-deploy-pipeline
+
   jobs:
     - name: verify-deploy
       templateRef:

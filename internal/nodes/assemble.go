@@ -297,6 +297,11 @@ func compositionSpec(spec map[string]any) map[string]any {
 			out[k] = v
 		}
 	}
+	// SC8: carry the effects declaration (integrations/provides/scorecards) into
+	// the Composition entity — declarations only; the live plane records actuals.
+	if eff, ok := c["effects"].(map[string]any); ok && len(eff) > 0 {
+		out["effects"] = eff
+	}
 	if len(out) == 0 {
 		return nil
 	}
