@@ -68,7 +68,7 @@ The cockpit can **run** from the component/job level, reusing the **same path as
 runner). The run is **component-scoped for the cockpit's selected environment**
 (G-2 = component-scoped; env scoping = `environments.md`): exactly one selected
 env, on the **existing** env model. The single-env *redesign* is a separate epic
-(`specs/orun-env-scoping/`). The action seam:
+(`specs/archive/orun-env-scoping/`). The action seam:
 
 - is **not** part of the read seam, so a read-only consumer (web UI) is simply
   **not given** it — capability-by-construction, not a runtime "is this UI

@@ -39,7 +39,7 @@
 - The cockpit can **select an environment and run a component in it, on the
   existing env model** (no schema change, no change to `orun plan`/`run`). The
   single-env *direction* (`defaultEnvironment`, removing the all-env path) is a
-  separate breaking epic — `specs/orun-env-scoping/` (deferred L-1);
+  separate breaking epic — `specs/archive/orun-env-scoping/` (deferred L-1);
   `environments.md` covers only the cockpit's current behavior.
 
 **Non-goals**
@@ -181,4 +181,4 @@ support is specified then. This spec makes **no** structural accommodation for i
 | S-10 | Intent-impact `watch` semantics could be lost in the migration. | CD-3: preserved verbatim; fixture coverage (`test-plan.md`). |
 | S-11 | Fingerprint determinism across machines (macOS NFD/NFC, separators). | Project git's normalization for committed files; canonical-encode the overlay (`change-detection.md` §3). |
 | S-12 | The cockpit must be a *consumer*, not reach into the store; a web UI must be read-only by construction. | `consumers.md`: read seam (view-models) vs action seam kept separate; web UI gets the read seam only. G-1/G-2 resolved (scan+filter; single-env component-scoped run). |
-| S-13 | Single-env enforcement is a breaking run-path change masquerading as a small cockpit feature. | Split out: the cockpit runs on the **existing** env model (`environments.md`); the breaking redesign (`defaultEnvironment`, removing all-env) is its own epic `specs/orun-env-scoping/` (deferred L-1). |
+| S-13 | Single-env enforcement is a breaking run-path change masquerading as a small cockpit feature. | Split out: the cockpit runs on the **existing** env model (`environments.md`); the breaking redesign (`defaultEnvironment`, removing all-env) is its own epic `specs/archive/orun-env-scoping/` (deferred L-1). |

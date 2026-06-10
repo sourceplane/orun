@@ -86,7 +86,7 @@ describe; relations link across kinds; round-trip parity per kind. **Design:**
 **Goal:** orun-native entities from execution truth.
 - Emit `Environment` from component env bindings + execution; emit `Deployment`
   records from `objrun`. Add the `deployedTo`/`runsOn` relations. **Coordinate
-  with `specs/orun-env-scoping/`** — Environment identity here is additive,
+  with `specs/archive/orun-env-scoping/`** — Environment identity here is additive,
   read-only, and may supply that epic's needs.
 
 **Deps:** SC3. **PR scope:** 2 PRs (Environment; Deployment). **Done when:**

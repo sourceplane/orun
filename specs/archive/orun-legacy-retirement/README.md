@@ -1,5 +1,18 @@
 # Spec: orun-legacy-retirement
 
+> **📦 ARCHIVED — complete.** The core program — retiring the legacy
+> catalog/revision store so the content-addressed object model is the single
+> persistence stack — **shipped in v2.15.0** (Buckets 1, 5, 6; the lint gate
+> enforces single-stack). Bucket 3 (env-scoping) shipped too (now
+> `specs/archive/orun-env-scoping/`). The remaining items were **relocated** so
+> nothing is lost:
+> - **Bucket 2** (`objindex` accelerator) + **Bucket 5** packfile delta
+>   compression → `specs/orun-objectmodel-perf/` (optional, profiling-gated).
+> - **Bucket 4** (`orun-affected-worker`) → its own epic
+>   `specs/orun-affected-worker/` (under review; not part of this program).
+>
+> Kept as a frozen historical snapshot; not maintained.
+
 **The closeout plan.** `internal/state` (the legacy ExecState file store) was
 deleted at the object-model M12 cutover, but a second legacy stack survives: the
 Phase‑1/2 **revision + catalog store** (`internal/catalogstore` →
@@ -18,7 +31,7 @@ epics and optional follow-ups needed to fully close the program.
 
 | Field | Value |
 |-------|-------|
-| Status | **Buckets 1, 5, 6 effectively COMPLETE.** Bucket 1: the legacy catalog/revision store is retired; the object model is the single persistence stack and the lint gate enforces it. Bucket 6: cockpit catalog auto-refresh shipped (engine + TUI wiring + stale badge). Bucket 5: resume step-log carry-forward and the `objectstore` fault-injection seam are done; packfile delta compression stays deferred (profiling-gated). Bucket 3 (`orun-env-scoping`) shipped in v2.15.0 (the converged "Z" model, ES1–ES5). Only Bucket 2 (optional `objindex` accelerator, perf-gated) and Bucket 4 (`orun-affected-worker`, a separate unapproved epic) remain gated. |
+| Status | **Buckets 1, 5, 6 effectively COMPLETE.** Bucket 1: the legacy catalog/revision store is retired; the object model is the single persistence stack and the lint gate enforces it. Bucket 6: cockpit catalog auto-refresh shipped (engine + TUI wiring + stale badge). Bucket 5: resume step-log carry-forward and the `objectstore` fault-injection seam are done; packfile delta compression stays deferred (profiling-gated). Bucket 3 (`orun-env-scoping`) shipped in v2.15.0 (the converged "Z" model, ES1–ES5). Bucket 2 (`objindex`) + the Bucket 5 packfile item are **relocated to `specs/orun-objectmodel-perf/`**; Bucket 4 (`orun-affected-worker`) is now **its own epic**. See the archive banner above. |
 | Promotes | `orun-catalog-state` deferred register **D‑7 / L‑3** ("full `internal/catalogstore` retirement") |
 | Builds on | `specs/orun-object-model/` (the canonical graph), `specs/orun-catalog-state/` (`internal/objcatalog`, `internal/affected`) |
 | Target branch | `main` (PRs merged incrementally) |
@@ -194,6 +207,8 @@ Highest-leverage item: **1D** (delete the dual-write) — but only safe **after*
 
 # Bucket 2 — `objindex` component→execution index (L‑2)
 
+> **Relocated → `specs/orun-objectmodel-perf/` §1** (archived here for history).
+
 *Optional accelerator for 1A's history join; only if scan + filter is too slow.*
 
 - [ ] Build a derived component→execution index in `internal/objindex` (mirrors
@@ -212,14 +227,14 @@ Highest-leverage item: **1D** (delete the dual-write) — but only safe **after*
 > keeps its comma-separated list, and a new **`--all-envs`** flag plus a
 > **fail-closed mutating `run`** (deprecation Phase A) carry the safety intent
 > without a hard break. Scoped plans prune dangling edges with a warning; env
-> promotion compiles to in-plan `dependsOn` ordering. See `specs/orun-env-scoping/`
+> promotion compiles to in-plan `dependsOn` ordering. See `specs/archive/orun-env-scoping/`
 > (`README.md` + `IMPLEMENTATION-STATUS.md`).
 >
 > The checklist below is the **original breaking design, retained for history and
 > now superseded** — it was *not* implemented as written.
 
 - [x] **3.0 Finalize the design** — resolved via the converged Z model
-  (`specs/orun-env-scoping/design.md` §5 decision ledger Z-1…Z-7); epic promoted
+  (`specs/archive/orun-env-scoping/design.md` §5 decision ledger Z-1…Z-7); epic promoted
   and shipped in v2.15.0.
 
 Enforcement surfaces *(original breaking design — superseded by the Z model)*:
@@ -238,6 +253,9 @@ Enforcement surfaces *(original breaking design — superseded by the Z model)*:
 
 # Bucket 4 — Epic: `orun-affected-worker` (under review)
 
+> **Relocated → its own epic `specs/orun-affected-worker/`** (under review; not
+> part of this program — archived here for history).
+
 - [ ] **4.0 Review/approval gate** — currently "UNDER REVIEW — not a current
   requirement; do not implement." Get an explicit decision before any work.
 - [ ] If approved: implement milestones **AW0 → AW5** (Cloudflare Worker, TS;
@@ -254,7 +272,7 @@ Not required for correctness; close for completeness.
 - [x] **Resume — carry step logs forward** (small): re-attach prior step-log
   blobs for skip-completed jobs at seal (`internal/objrun` + `internal/runworktree` seam).
 - [ ] **Packfile delta compression** (larger, profiling-gated): only if loose-object
-  size becomes the bottleneck.
+  size becomes the bottleneck. *(Relocated → `specs/orun-objectmodel-perf/` §2.)*
 - [x] **`objectstore` atomic-write fault-injection seam** (test-only): the
   temp/fsync/rename error branches are now exercised via package seam vars
   (`osCreateTemp`/`fsyncFile`/`osRename`); package coverage is 92.5%.
@@ -320,7 +338,7 @@ displays, instead of relying on `orun plan`/`run`/`catalog refresh` to have run.
   the `objectstore` atomic-write fault-injection seam are landed; packfile delta
   compression stays a documented, profiling-gated deferral.
 - **Epics (Buckets 3–4):** **Bucket 3 (`orun-env-scoping`): ✅ DONE** — shipped in
-  v2.15.0 as the converged "Z" model (ES1–ES5; see `specs/orun-env-scoping/`).
+  v2.15.0 as the converged "Z" model (ES1–ES5; see `specs/archive/orun-env-scoping/`).
   **Bucket 4 (`orun-affected-worker`): still gated** — awaits the review/approval
   gate (4.0); it is a separate service/repo and the only remaining program epic.
   `objindex` (Bucket 2) is a pull-in only if the history scan is measured too slow.

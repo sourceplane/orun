@@ -4,7 +4,7 @@
 > the env model that exists today** — no schema change, no change to
 > `orun plan`/`run` behavior. The larger direction (single-env everywhere, an
 > `intent.yaml` default environment, removing the all-env path) is a **breaking
-> run-path change captured in its own epic: `specs/orun-env-scoping/`** (deferred
+> run-path change captured in its own epic: `specs/archive/orun-env-scoping/`** (deferred
 > register L-1). This doc covers only what the TUI does now.
 
 ## 1. What the cockpit does now
