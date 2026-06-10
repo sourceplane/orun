@@ -31,7 +31,7 @@
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| Building "mini-git" balloons in scope | Med | High | Hard anti-goal on packfiles/deltas/custom DB (`claude-goals.md` §7). Loose+zstd+GC only. Contract frozen at M1–M2. |
+| Building "mini-git" balloons in scope | Med | High | Hard anti-goal on packfiles/deltas/custom DB (`_archive/claude-goals.md` §7). Loose+zstd+GC only. Contract frozen at M1–M2. |
 | Inspectability regression vs Phase 1/2 (`cat .orun`) | Med | Med | Hybrid: working view + porcelain landed at M6 before any read rewire (M8). |
 | Live-execution crash leaves corrupt state | Med | High | Working tree is the only mutable surface; seal is atomic publish; partial objects inert+GC'd; crash-recovery test (invariant 10, M7). |
 | GC races a concurrent seal and collects an in-flight closure | Low | High | Grace window (objects newer than `gracePeriod` never swept) + seal gc-fence; GC-safety property test. |

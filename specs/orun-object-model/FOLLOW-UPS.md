@@ -1,6 +1,6 @@
 # Object-model — post-M12 follow-ups
 
-The **M0–M13 roadmap is complete** (see `IMPLEMENTATION-STATUS.md`): the
+The **M0–M13 roadmap is complete** (see `_archive/IMPLEMENTATION-STATUS.md`): the
 content-addressed object model is the sole execution representation, the legacy
 `internal/state` file store is deleted, and the coexistence flags are removed.
 

@@ -14,7 +14,7 @@ the same object graph through the same interfaces.
 
 | Field | Value |
 |-------|-------|
-| Status | **Draft → Ready for implementation** |
+| Status | **Implemented — M0–M13 complete (shipped); the object model is the unconditional, single persistence stack.** This spec is the **canonical, active reference** for orun's state model. Implementation-time records are archived under [`_archive/`](_archive/). |
 | Phase | 3 of 3 — unification + content-addressed rewrite |
 | Predecessors | `specs/archive/orun-state-redesign/` (Phase 1), `specs/archive/orun-component-catalog/` (Phase 2) |
 | Supersedes | the Phase 1 global layout (`revisions/…`) and the Phase 2 catalog-parent **mirror** (both collapse into one object graph) |
@@ -56,7 +56,8 @@ the leaves (trigger, execution) are events.
 
 ## Read order
 
-New contributors and implementing agents read in this order:
+This spec is the **authoritative, active reference** for orun's persistence
+model. Read the reference docs in this order:
 
 1. **`why-this-model.md`** — the rationale. Why a content-addressed object
    graph, what it buys, what it costs, and the argument for the rewrite. Team-
@@ -79,12 +80,25 @@ New contributors and implementing agents read in this order:
    `orun show`, `orun log`, `orun ls-tree`, `orun gc`, `orun fsck`).
 9. **`compatibility-and-migration.md`** — one-shot legacy ingest, additive,
    never destructive.
-10. **`claude-goals.md`** — operating goals, constraints, and definition-of-
-    done for the implementing Claude agents.
-11. **`implementation-plan.md`** — milestones **M0 → M13**, each with goal,
-    dependencies, suggested PR scope, and "done when" criteria.
-12. **`test-plan.md`** — coverage targets, property tests, E2E walk.
-13. **`risks-and-open-questions.md`** — live risk and decision register.
+10. **`risks-and-open-questions.md`** — live risk and decision register.
+11. **`FOLLOW-UPS.md`** — optional, deferred post-M12 work (none required for
+    correctness; the perf items are tracked in `specs/orun-objectmodel-perf/`).
+
+## Implementation history (archived)
+
+The build is complete (M0–M13 shipped). The implementation-time records — status,
+milestone plans, agent goals, and the test plan — are preserved under
+[`_archive/`](_archive/) for provenance; they are **not** the current reference:
+
+- **`_archive/IMPLEMENTATION-STATUS.md`** — the as-built record (M0–M13, the M12
+  cutover, layer/coverage table, test results).
+- **`_archive/implementation-plan.md`** — milestones **M0 → M13** with goals,
+  dependencies, suggested PR scope, and "done when" criteria.
+- **`_archive/M12-native-runner-rewrite.md`**, **`_archive/M12-hydrate-refactor.md`**,
+  **`_archive/M12-tui-repoint.md`** — the M12 cutover sub-plans.
+- **`_archive/test-plan.md`** — coverage targets, property tests, E2E walk.
+- **`_archive/claude-goals.md`** — operating goals / definition-of-done for the
+  implementing agents.
 
 ## Phase boundaries
 
