@@ -13,6 +13,28 @@ The Orchestrator owns roadmap, sequencing, quality, and state.
 
 ---
 
+> ## Status — the state-model arc is complete
+>
+> The three-phase local state-model build is **done and shipped (v2.15.0)**:
+> Phase 1 `orun-state-redesign` → Phase 2 `orun-component-catalog` → Phase 3
+> `orun-object-model` (the content-addressed object graph that is now the single
+> persistence stack). **Phases 1 & 2 are archived** under
+> `specs/archive/` — they are superseded historical references, not active drivers.
+>
+> The **active authoritative architecture references** are now:
+> - `specs/orun-object-model/` — the object model (the single persistence stack).
+> - `specs/orun-catalog-state/` — the catalog + change-detection surface over it.
+>
+> The orchestration **mechanics** below (the loop, the brief cache, the PR-sized
+> task standard, the proposal protocol, the role standards) are an epic-agnostic
+> reusable template. Examples that still name `orun-component-catalog` (the
+> state.json sample, the worked "Example Prompt Output") are **historical
+> illustrations** of how a now-complete epic was driven — read them for the
+> *shape* of a task, not as the current target. Point new work at the active spec
+> the user names; do not assume the state-model arc still has open milestones.
+
+---
+
 # Operating Loop
 
 For every cycle:
@@ -28,14 +50,21 @@ For every cycle:
 1. Read `/ai/context/current.md`
 2. Read `/ai/context/task-ledger.md`, `/ai/context/decisions.md`, and `/ai/context/open-risks.md`
 3. Read `/ai/state.json`
-4. Read `specs/orun-component-catalog/README.md` first — it is the index and read-order for the **active authoritative spec** (Phase 2 — the SourceSnapshot/CatalogSnapshot model that wraps the Phase 1 trigger/revision/execution lineage). Then load whichever sibling documents the next task touches: `design.md`, `data-model.md`, `identity-and-keys.md`, `resolution-pipeline.md`, `catalog-store.md`, `compatibility-and-migration.md`, `cli-surface.md`, `sync-model.md`, `implementation-plan.md`, `test-plan.md`, `risks-and-open-questions.md`. All new work flows from this spec set unless the user redirects.
-   - Predecessor (Phase 1, **COMPLETE** — M0–M6 merged): `specs/orun-state-redesign/`. Read it as a reference whenever a Phase 2 task touches `internal/statestore`, `internal/triggerctx`, `internal/revision`, `internal/executionstate`, or the existing CLI flow. Phase 2 must preserve every Phase 1 invariant; never weaken a coverage floor or rename a Phase 1 field.
-   - Secondary specs still on disk but **not** the active driver this phase:
-     - `.kiro/specs/orun-tui-cockpit/{requirements,design,tasks}.md` — Bubble Tea cockpit; consumes `CatalogSnapshot` once Phase 2 reaches Milestone C5. Do not generate new TUI tasks until C5 is merged unless the user explicitly asks.
-     - `.kiro/specs/github-artifacts/{requirements,design}.md` — RunBundle / GHA artifact pipeline; cross-check that the new source/catalog parent keys do not invalidate the existing `gh-{run_id}-{attempt}-{sha}` ExecID shape.
+4. Read the **active spec** the user named (or `/ai/state.json`'s `active_spec`).
+   For state-model questions, the authoritative references are
+   `specs/orun-object-model/README.md` (the object model — start here) and
+   `specs/orun-catalog-state/README.md` (catalog + change detection); load
+   whichever sibling documents the next task touches. The state-model build arc
+   is complete, so treat these as architecture references rather than a source of
+   open milestones unless the user opens new work against them.
+   - Archived predecessors (COMPLETE, superseded — read only as historical
+     reference): `specs/archive/orun-state-redesign/` (Phase 1) and
+     `specs/archive/orun-component-catalog/` (Phase 2). Their stores were deleted
+     in `specs/orun-legacy-retirement/` Bucket 1; surviving code is the object
+     model. See `specs/archive/README.md` for the brief.
 5. Inspect current repo code (not docs only)
 6. Inspect open PRs, merged PRs, failing tests
-7. Compare progress against the orun-component-catalog spec and the current milestone (C0 → C9 in `specs/orun-component-catalog/implementation-plan.md`)
+7. Compare progress against the active spec's milestones (e.g. the `IMPLEMENTATION-STATUS.md` / `implementation-plan.md` of the spec the user is driving)
 8. Identify production-grade gaps, integration risks, missing seams
 9. Inspect any outstanding `/ai/proposals/**` spec-change proposals
 10. Accept, revise, defer, or ask the user about proposals before baking them into new tasks
@@ -73,72 +102,38 @@ Always evaluate:
 
 Active architecture source:
 
-- `specs/orun-component-catalog/` is the **active authoritative spec** for
-  Phase 2 — the SourceSnapshot/CatalogSnapshot model that wraps the Phase 1
-  trigger/revision/execution lineage with a content-addressed component
-  catalog. The spec is a multi-document engineering design pack (no rigid
-  requirements/design/tasks triplet — see `README.md` for the index and
-  read order):
-  - `README.md` — entry point. Status table, doc map, phase boundaries, how
-    each agent role uses the spec.
-  - `design.md` — problem, goals/non-goals, architecture, on-disk layout,
-    package boundaries, correctness properties, alternatives considered,
-    dependency additions.
-  - `data-model.md` — every persisted JSON schema (`SourceSnapshot`,
-    `CatalogSnapshot`, `ComponentManifest`, `CatalogGraphs`,
-    `CatalogLocalIndexes`, `RefUpdate`, `GlobalIndexUpdate`,
-    `ComponentCatalogEvent`).
-  - `identity-and-keys.md` — frozen on-disk contract for `src_*`, `cat_*`,
-    `cmp_*` IDs and source/catalog keys. Changing these rules requires
-    Phase 3 migration.
-  - `resolution-pipeline.md` — the 10-stage pure resolver from workspace
-    inputs to `ResolvedCatalog`.
-  - `catalog-store.md` — `internal/catalogstore` `Writer`/`Resolver`
-    interfaces, atomicity guarantees, error taxonomy, path conventions
-    (raw path concatenation forbidden).
-  - `compatibility-and-migration.md` — preserved CLI workflows table,
-    `stateCompatibilityWrites` flag, reader fallback, optional
-    `orun catalog migrate`.
-  - `cli-surface.md` — exact behavioral changes per `orun` command, new
-    `orun catalog *` subcommands, new `--catalog-source` /
-    `--catalog-snapshot` / `--catalog-strict` / `--no-catalog-refresh` /
-    `--no-infer` flags.
-  - `sync-model.md` — `internal/catalogsync` future seam (`Syncer`
-    interface + `NoopSyncer` + `SyncPayload`); no HTTP, no auth, no DB
-    schema in this phase.
-  - `implementation-plan.md` — **milestones C0–C9 (not waves).** Each
-    milestone declares goal, dependencies, suggested PR scope, and
-    "done when" criteria. **Implementer agents have latitude to scope
-    their own PRs within a milestone.**
-  - `test-plan.md` — coverage targets (≥90 % core, ≥85 % diff,
-    ≥80 % sync), property-based tests (`pgregory.net/rapid`), E2E walk.
-  - `risks-and-open-questions.md` — live risk and open-question register.
-  When generating tasks for the catalog phase, read `README.md` first,
-  then load the milestone from `implementation-plan.md` and the design
-  sections it cites. Task prompts MUST name the milestone ID and the
-  design sections the implementer must respect; they MUST NOT prescribe a
-  PR count or sub-task numbering. New risks discovered during
-  implementation are appended to `risks-and-open-questions.md`.
-- `specs/orun-state-redesign/` is the **predecessor (Phase 1, COMPLETE —
-  M0–M6 merged)**. Read it as a reference whenever a Phase 2 task touches
-  `internal/statestore`, `internal/triggerctx`, `internal/revision`,
-  `internal/executionstate`, or the existing CLI flow. Phase 2 must
-  preserve every Phase 1 invariant: do not weaken a coverage floor, do
-  not rename a Phase 1 field, do not remove a preserved CLI workflow.
-- Secondary specs (kept on disk, not the active driver this phase):
-  - `.kiro/specs/orun-tui-cockpit/` — Bubble Tea cockpit. Will consume
-    `CatalogSnapshot` after Milestone C5 lands. Do not start new TUI tasks
-    until C5 is merged unless the user explicitly redirects.
-  - `.kiro/specs/github-artifacts/` — RunBundle / GHA artifact pipeline.
-    Cross-check that the new source/catalog parent keys remain compatible
-    with the existing `gh-{run_id}-{attempt}-{sha}` ExecID format produced
-    by `internal/runbundle`.
+- `specs/orun-object-model/` is the **authoritative architecture reference** for
+  Orun's persistence: the content-addressed object graph (`objects/` + `refs/`
+  under `.orun/objectmodel/`) that is now the single store for sources, catalogs,
+  revisions, executions, jobs, steps, and logs. Its `IMPLEMENTATION-STATUS.md`
+  records the (complete) M0–M13 build; `object-store.md`, `data-model.md`, and
+  `identity-and-keys.md` are the frozen contracts. Any task touching state,
+  persistence, or run records must respect this model.
+- `specs/orun-catalog-state/` is the authoritative reference for the **component
+  catalog and change detection** over that object model: the `internal/affected`
+  engine, the ownership map + fingerprints, `orun catalog *`, and the live cockpit
+  read seam (`IMPLEMENTATION-STATUS.md` tracks CS1–CS9, complete).
+- **Archived (superseded historical references — read only, do not drive work
+  from them):** `specs/archive/orun-state-redesign/` (Phase 1) and
+  `specs/archive/orun-component-catalog/` (Phase 2). They built the trigger/
+  revision/execution lineage and the SourceSnapshot/CatalogSnapshot model that
+  Phase 3 collapsed into the object graph; their stores (`internal/statestore`,
+  `internal/revision`, `internal/executionstate`, `internal/catalogstore`,
+  `internal/catalogsync`) were deleted in `specs/orun-legacy-retirement/`
+  Bucket 1. See `specs/archive/README.md` for the brief. Consult them only to
+  understand how the current model was reached.
+- Other active specs on disk (drive work from whichever the user names):
+  `specs/orun-legacy-retirement/` (Buckets 1/5/6 shipped; 2–4 gated),
+  `specs/orun-env-scoping/` (shipped v2.15.0), and the newer
+  `specs/orun-scaffolding/`, `specs/orun-scorecards/`,
+  `specs/orun-service-catalog/`.
 - If specs and code reality conflict, prefer a bounded migration task or a spec
   proposal (write to `/ai/proposals/`). Do not silently follow stale docs.
-- New task prompts must name the relevant specs in `Read First` (always include
-  `specs/orun-component-catalog/README.md` plus the specific milestone and the
-  design sections in scope for catalog-touching work; cite
-  `specs/orun-state-redesign/` whenever Phase 1 packages are also touched).
+- New task prompts must name the relevant specs in `Read First` — the active
+  spec's `README.md` plus the specific design sections in scope. For state/
+  catalog work that is `specs/orun-object-model/README.md` and/or
+  `specs/orun-catalog-state/README.md`; cite the archived
+  `specs/archive/...` packs only when explaining historical contracts.
 - Do not assume uncertain user, account, credential, environment, or product
   decisions. Pause for human input when the wrong assumption would create
   rework, risk, or externally visible changes.
@@ -148,13 +143,12 @@ Operational access assumptions:
 - The Orchestrator, Implementer, and Verifier may assume full authenticated
   access to `gh` for GitHub PRs, Actions, checks, workflow logs, and repository
   inspection.
-- The orun-component-catalog feature is local-only (Phase 2): no external
-  credentials, cloud resources, or remote object stores. `internal/catalogsync`
-  ships only the `Syncer` interface and a `NoopSyncer` — no HTTP client, no
-  auth, no DB schema. R2/S3/Supabase/DO and the SaaS sync driver are explicitly
-  out of scope until Phase 3.
-- The orun-tui-cockpit feature is a local CLI enhancement that does not require
-  external credentials, cloud resources, or deployment infrastructure.
+- The object model and catalog are local-only today: no external credentials,
+  cloud resources, or remote object stores. Remote drivers (R2/S3/Cloud) are a
+  frozen seam, not shipping work — out of scope unless a spec the user names
+  opens them.
+- The cockpit (TUI) is a local CLI enhancement that does not require external
+  credentials, cloud resources, or deployment infrastructure.
 - When component naming, integration patterns, or architectural decisions are
   unclear, ask the user instead of guessing.
 
@@ -336,8 +330,8 @@ and any non-obvious tension between spec direction and code reality.
 This is what you would tell a teammate at a whiteboard in 60 seconds.
 
 ## Active Spec Pointer
-- spec: <path, e.g. specs/orun-component-catalog>
-- milestone: <ID, e.g. C3>
+- spec: <path of the spec the user is driving, e.g. specs/orun-object-model>
+- milestone: <ID, or `complete` for a finished arc>
 - milestone_done_when_remaining: <bullets — only the criteria still
   outstanding for the current milestone, copied or paraphrased from
   implementation-plan.md>
@@ -484,46 +478,47 @@ Rules:
 
 ```json
 {
-  "goal": "Phase 2 source/catalog snapshot model for Orun (component catalog)",
+  "goal": "<one line: what the active spec is driving toward>",
   "current_task": "0022",
   "completed": ["0001", "0002", "..."],
   "repo_health": "green",
-  "next_focus": "orun-component-catalog Milestone C0",
-  "active_spec": "specs/orun-component-catalog",
-  "active_milestone": "C0",
+  "next_focus": "<active spec + milestone, or the next leverage point>",
+  "active_spec": "specs/orun-object-model",
+  "active_milestone": "complete",
   "secondary_specs": [
-    "specs/orun-state-redesign",
-    ".kiro/specs/orun-tui-cockpit",
-    ".kiro/specs/github-artifacts"
+    "specs/orun-catalog-state",
+    "specs/orun-legacy-retirement"
   ],
-  "last_verified": "2026-05-31",
+  "last_verified": "2026-06-10",
   "waiting_for_input": "false",
   "task_agent": "ai/tasks/task-0022.md",
   "phase_history": {
     "phase_1_orun_state_redesign": {
-      "spec": "specs/orun-state-redesign",
+      "spec": "specs/archive/orun-state-redesign",
       "milestones": "M0–M6",
-      "status": "COMPLETE",
-      "closed": "2026-05-30",
-      "final_pr": "#165",
-      "coverage_floors": {
-        "internal/statestore": "95.7%",
-        "internal/revision": "90.3%",
-        "internal/executionstate": "90.0%",
-        "internal/triggerctx": "passes"
-      }
+      "status": "COMPLETE — superseded, archived"
+    },
+    "phase_2_orun_component_catalog": {
+      "spec": "specs/archive/orun-component-catalog",
+      "milestones": "C0–C9",
+      "status": "COMPLETE — superseded, archived"
+    },
+    "phase_3_orun_object_model": {
+      "spec": "specs/orun-object-model",
+      "milestones": "M0–M13",
+      "status": "COMPLETE — the single persistence stack"
     }
   }
 }
 ```
 
 `active_spec` is the spec pack the next task MUST cite in `Read First`.
-`active_milestone` is the current milestone from
-`specs/orun-component-catalog/implementation-plan.md` the Orchestrator is feeding
-into implementer prompts. Bump it forward only when every PR satisfying the
-previous milestone's "done when" criteria is merged and verified. Implementer
-agents may split a milestone across multiple PRs; the milestone advances only
-when the full "done when" list is satisfied.
+`active_milestone` is the current milestone from the active spec's
+`implementation-plan.md` (or `complete` when that spec's arc is finished). Bump
+it forward only when every PR satisfying the previous milestone's "done when"
+criteria is merged and verified. Implementer agents may split a milestone across
+multiple PRs; the milestone advances only when the full "done when" list is
+satisfied.
 
 `task_agent` always holds the path to the most recently produced task or verify `.md` file. Update it immediately after writing each file — do not batch.
 `waiting_for_input` is a string field with values `"true"` or `"false"`.
@@ -710,25 +705,31 @@ If seams weak:
 
 Example Prompt Output
 
+> **Historical illustration.** The task below is the original Milestone C0
+> kickoff for the now-complete, archived `orun-component-catalog` (Phase 2). It
+> is preserved to show the *shape* of a well-formed implementer prompt — read it
+> for structure, not as a current target. The spec it cites now lives under
+> `specs/archive/orun-component-catalog/`.
+
 # Task 1
 
 Agent: Implementer
 Current Repo Context:
-The orun-component-catalog spec at `specs/orun-component-catalog/` is
+The orun-component-catalog spec at `specs/archive/orun-component-catalog/` is
 authoritative for this task. Phase 2 of the source/catalog snapshot model is
-being built on top of the merged Phase 1 (`specs/orun-state-redesign/`,
+being built on top of the merged Phase 1 (`specs/archive/orun-state-redesign/`,
 M0–M6). This task targets Milestone C0 (Foundation: pure data models +
 JSON-Schema generation) per
-`specs/orun-component-catalog/implementation-plan.md`.
+`specs/archive/orun-component-catalog/implementation-plan.md`.
 Objective:
 Introduce `internal/catalogmodel` with the Phase 2 data types
 (`SourceSnapshot`, `CatalogSnapshot`, `ComponentManifest`, `CatalogGraphs`,
 `CatalogLocalIndexes`, `RefUpdate`, `GlobalIndexUpdate`,
-`ComponentCatalogEvent`) per `specs/orun-component-catalog/data-model.md`,
+`ComponentCatalogEvent`) per `specs/archive/orun-component-catalog/data-model.md`,
 matching the lowerCamelCase JSON field names exactly. Add canonical-JSON
 (sorted keys, no whitespace) marshalers used by hashing and ID prefix
 helpers (`src_`, `cat_`, `cmp_`) per
-`specs/orun-component-catalog/identity-and-keys.md`. Wire
+`specs/archive/orun-component-catalog/identity-and-keys.md`. Wire
 `go generate ./internal/catalogmodel` to emit a JSON Schema artifact under
 `internal/catalogmodel/schema/` and add `make verify-generated` to CI.
 PR Boundary:
@@ -737,15 +738,15 @@ package + canonical encoder + schema generator, with no CLI changes and no
 storage writes. If you split the schema generator into its own PR, keep both
 landed before C1 begins.
 Read First:
-specs/orun-component-catalog/README.md (entry + read order)
-specs/orun-component-catalog/implementation-plan.md (Milestone C0)
-specs/orun-component-catalog/data-model.md (all sections)
-specs/orun-component-catalog/identity-and-keys.md (§1–§4 ID prefixes,
+specs/archive/orun-component-catalog/README.md (entry + read order)
+specs/archive/orun-component-catalog/implementation-plan.md (Milestone C0)
+specs/archive/orun-component-catalog/data-model.md (all sections)
+specs/archive/orun-component-catalog/identity-and-keys.md (§1–§4 ID prefixes,
 canonical encoding)
-specs/orun-component-catalog/test-plan.md (§1 Coverage targets, §3
+specs/archive/orun-component-catalog/test-plan.md (§1 Coverage targets, §3
 property-based determinism tests)
 Reference Only:
-specs/orun-state-redesign/data-model.md (Phase 1 types — Phase 2 must not
+specs/archive/orun-state-redesign/data-model.md (Phase 1 types — Phase 2 must not
 rename or weaken them)
 Non-Goals:
 No `internal/catalogresolve`, `internal/catalogstore`, or
