@@ -215,12 +215,13 @@ func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifest
 // Entity kind constants for the derived multi-kind entities (mirrors
 // catalogmodel.EntityKind*; kept local so nodes carries no catalogmodel import).
 const (
-	EntityKindComponent = "Component"
-	EntityKindAPI       = "API"
-	EntityKindResource  = "Resource"
-	EntityKindSystem    = "System"
-	EntityKindDomain    = "Domain"
-	EntityKindGroup     = "Group"
+	EntityKindComponent   = "Component"
+	EntityKindAPI         = "API"
+	EntityKindResource    = "Resource"
+	EntityKindSystem      = "System"
+	EntityKindDomain      = "Domain"
+	EntityKindGroup       = "Group"
+	EntityKindEnvironment = "Environment"
 )
 
 // deriveEntities builds the distinct non-Component entities implied by the
@@ -254,6 +255,8 @@ func deriveEntities(manifests []ComponentManifest) []Entity {
 				ensure(EntityKindGroup, r.To, lastSegment(r.To))
 			case r.Type == "dependsOn" && r.ToKind == EntityKindResource:
 				ensure(EntityKindResource, r.To, lastSegment(r.To))
+			case r.Type == "deployedTo" && r.ToKind == EntityKindEnvironment:
+				ensure(EntityKindEnvironment, r.To, lastSegment(r.To))
 			}
 		}
 		for _, api := range contractAPIs(m.Contracts) {
