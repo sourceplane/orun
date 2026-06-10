@@ -179,7 +179,60 @@ func buildObjManifest(view objcatalog.CatalogView, c objcatalog.CatalogComponent
 	}
 	roundTripInto(c.Spec, &m.Spec)
 	roundTripInto(c.Metadata, &m.Metadata)
+	// Owner/maintainers/contacts moved out of metadata into the ownership block
+	// in the SC1 envelope reshape; recover them so describe/diff see the full
+	// manifest (losslessness, invariant 3).
+	if c.Owner != "" {
+		m.Metadata.Owner = c.Owner
+	}
+	if add := stringSliceField(c.Ownership, "additionalOwners"); len(add) > 0 {
+		m.Metadata.Maintainers = add
+	}
+	if contacts := contactsField(c.Ownership); len(contacts) > 0 {
+		m.Metadata.Contacts = contacts
+	}
 	return m
+}
+
+// stringSliceField reads a []string from a generic envelope block (e.g.
+// ownership.additionalOwners), tolerating absent/typed-wrong values.
+func stringSliceField(m map[string]any, key string) []string {
+	raw, ok := m[key].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// contactsField reconstructs the ownership.contacts list (type→value) into the
+// flat map the catalogmodel manifest carries.
+func contactsField(m map[string]any) map[string]string {
+	raw, ok := m["contacts"].([]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for _, v := range raw {
+		c, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		t, _ := c["type"].(string)
+		val, _ := c["value"].(string)
+		if t != "" {
+			out[t] = val
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // roundTripInto re-decodes a generic map into a typed destination via JSON. Used

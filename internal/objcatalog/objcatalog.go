@@ -55,8 +55,10 @@ type FingerprintView struct {
 }
 
 // CatalogComponentView mirrors a ComponentManifest, flattened for rendering. The
-// deep Metadata/Spec blocks are carried verbatim so a richer consumer can reach
-// any resolved field; the scalar fields are projected for convenience.
+// deep Metadata/Spec/Ownership/Lifecycle/Relations blocks are carried verbatim
+// so a richer consumer can reach any resolved field; the scalar fields are
+// projected for convenience. Ownership/lifecycle are projected out of the entity
+// envelope (orun-service-catalog/data-model.md §2) for `catalog describe`.
 type CatalogComponentView struct {
 	ComponentKey string
 	Name         string
@@ -65,10 +67,27 @@ type CatalogComponentView struct {
 	Path         string
 	Type         string
 	Domain       string
+	System       string
+	Owner        string
+	OwnerSource  string
+	Stage        string
+	Tier         string
 	Environments map[string]EnvView
 	DependsOn    []string
 	Metadata     map[string]any
+	Ownership    map[string]any
+	Lifecycle    map[string]any
+	Relations    []RelationView
 	Spec         map[string]any
+}
+
+// RelationView is one typed edge owned by an entity (data-model.md §3).
+type RelationView struct {
+	Type     string
+	To       string
+	ToKind   string
+	Optional bool
+	Include  string
 }
 
 // EnvView is one component-environment binding (spec.environments.<name>).
@@ -335,8 +354,11 @@ func (r *Reader) readFingerprints(ctx context.Context, treeID objectstore.Object
 	return out, nil
 }
 
-// componentView flattens a manifest into the rendering view, projecting the
-// scalar fields out of the verbatim spec while carrying spec/metadata whole.
+// componentView flattens an entity-envelope manifest into the rendering view,
+// projecting the scalar fields out of the verbatim envelope while carrying the
+// deep blocks whole. Dependencies and system/domain membership are read from the
+// typed relations (they no longer live inline in spec); owner/lifecycle are read
+// from the ownership/lifecycle blocks.
 func componentView(m nodes.ComponentManifest) CatalogComponentView {
 	v := CatalogComponentView{
 		ComponentKey: m.Identity.ComponentKey,
@@ -346,30 +368,38 @@ func componentView(m nodes.ComponentManifest) CatalogComponentView {
 		Path:         m.Identity.Path,
 		Type:         m.Type,
 		Metadata:     m.Metadata,
+		Ownership:    m.Ownership,
+		Lifecycle:    m.Lifecycle,
 		Spec:         m.Spec,
 	}
 	if v.Type == "" {
 		v.Type = stringField(m.Spec, "type")
 	}
+	// Ownership/lifecycle are projected from the envelope blocks (SC1 reshape).
+	v.Owner = stringField(m.Ownership, "owner")
+	v.OwnerSource = stringField(m.Ownership, "source")
+	v.Stage = stringField(m.Lifecycle, "stage")
+	v.Tier = stringField(m.Lifecycle, "tier")
+	// System/Domain/Environments/DependsOn still read from the (lossless) spec
+	// block; SC2 promotes the dependency edges fully to relations.json.
+	v.System = stringField(m.Spec, "system")
 	v.Domain = stringField(m.Spec, "domain")
 	v.Environments = environmentViews(m.Spec)
 	v.DependsOn = dependsOn(m.Spec)
+	v.Relations = relationViews(m.Relations)
 	return v
 }
 
-// environmentViews reads spec.environments.<name> = {profile, active}.
-func environmentViews(spec map[string]any) map[string]EnvView {
-	envs, ok := spec["environments"].(map[string]any)
-	if !ok || len(envs) == 0 {
+// relationViews carries the typed envelope relations into the read view for
+// richer consumers (the portal/graph). The CLI/TUI convenience scalars
+// (DependsOn/System/Domain) still derive from spec in SC1.
+func relationViews(rels []nodes.EntityRelation) []RelationView {
+	if len(rels) == 0 {
 		return nil
 	}
-	out := make(map[string]EnvView, len(envs))
-	for name, raw := range envs {
-		body, _ := raw.(map[string]any)
-		out[name] = EnvView{
-			Profile: stringField(body, "profile"),
-			Active:  boolField(body, "active"),
-		}
+	out := make([]RelationView, 0, len(rels))
+	for _, r := range rels {
+		out = append(out, RelationView{Type: r.Type, To: r.To, ToKind: r.ToKind, Optional: r.Optional, Include: r.Include})
 	}
 	return out
 }
@@ -399,6 +429,23 @@ func dependsOn(spec map[string]any) []string {
 		return nil
 	}
 	sort.Strings(out)
+	return out
+}
+
+// environmentViews reads spec.environments.<name> = {profile, active}.
+func environmentViews(spec map[string]any) map[string]EnvView {
+	envs, ok := spec["environments"].(map[string]any)
+	if !ok || len(envs) == 0 {
+		return nil
+	}
+	out := make(map[string]EnvView, len(envs))
+	for name, raw := range envs {
+		body, _ := raw.(map[string]any)
+		out[name] = EnvView{
+			Profile: stringField(body, "profile"),
+			Active:  boolField(body, "active"),
+		}
+	}
 	return out
 }
 

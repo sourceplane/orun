@@ -40,10 +40,9 @@ func sampleManifests() []nodes.ComponentManifest {
 				Repo:         "orun",
 				Path:         "apps/api-edge/component.yaml",
 			},
-			Type: "cloudflare-worker",
-			Metadata: map[string]any{
-				"owner": "team/platform-edge",
-			},
+			Type:      "cloudflare-worker",
+			Ownership: map[string]any{"owner": "team/platform-edge", "source": "authored"},
+			Lifecycle: map[string]any{"stage": "production", "maturity": nil},
 			Spec: map[string]any{
 				"type":   "cloudflare-worker",
 				"domain": "edge",
@@ -57,6 +56,11 @@ func sampleManifests() []nodes.ComponentManifest {
 						map[string]any{"key": "sourceplane/orun/identity", "name": "identity"},
 					},
 				},
+			},
+			Relations: []nodes.EntityRelation{
+				{Type: "dependsOn", To: "sourceplane/orun/shared", ToKind: "Component"},
+				{Type: "dependsOn", To: "sourceplane/orun/identity", ToKind: "Component"},
+				{Type: "partOf", To: "edge", ToKind: "Domain"},
 			},
 		},
 		{
@@ -163,8 +167,12 @@ func TestLoad_CurrentRef(t *testing.T) {
 	if len(api.DependsOn) != 2 || api.DependsOn[0] != "sourceplane/orun/identity" || api.DependsOn[1] != "sourceplane/orun/shared" {
 		t.Errorf("DependsOn = %v", api.DependsOn)
 	}
-	if api.Metadata["owner"] != "team/platform-edge" {
-		t.Errorf("Metadata not carried: %v", api.Metadata)
+	// Owner is projected from the ownership block (no longer in metadata).
+	if api.Owner != "team/platform-edge" || api.OwnerSource != "authored" {
+		t.Errorf("owner projection = %q/%q", api.Owner, api.OwnerSource)
+	}
+	if api.Stage != "production" {
+		t.Errorf("Stage = %q", api.Stage)
 	}
 
 	// shared has type from spec only (manifest.Type empty) and no deps/envs.
@@ -407,8 +415,9 @@ func TestIsObjectID(t *testing.T) {
 }
 
 func TestComponentView_SpecEdgeCases(t *testing.T) {
-	// environments with a non-map body, and dependencies.components holding a
-	// keyless map and a non-map element — all handled without panicking.
+	// environments with a non-map body is handled without panicking; the typed
+	// relations project into DependsOn (Component edges only) and System/Domain
+	// (first partOf membership of each kind).
 	m := nodes.ComponentManifest{
 		Kind: nodes.KindComponentManifest,
 		Identity: nodes.ComponentIdentity{
@@ -418,6 +427,8 @@ func TestComponentView_SpecEdgeCases(t *testing.T) {
 			Repo:         "orun",
 		},
 		Spec: map[string]any{
+			"system": "ident",
+			"domain": "plat",
 			"environments": map[string]any{
 				"prod":   map[string]any{"active": true, "profile": "p"},
 				"broken": "not-a-map",
@@ -430,6 +441,10 @@ func TestComponentView_SpecEdgeCases(t *testing.T) {
 				},
 			},
 		},
+		Relations: []nodes.EntityRelation{
+			{Type: "dependsOn", To: "sourceplane/orun/a", ToKind: "Component"},
+			{Type: "partOf", To: "ident", ToKind: "System"},
+		},
 	}
 	v := componentView(m)
 	if v.Type != "" {
@@ -441,8 +456,16 @@ func TestComponentView_SpecEdgeCases(t *testing.T) {
 	if got := v.Environments["prod"]; !got.Active || got.Profile != "p" {
 		t.Errorf("prod env = %+v", got)
 	}
+	// DependsOn keeps only keyed dependency entries (from the lossless spec block).
 	if len(v.DependsOn) != 1 || v.DependsOn[0] != "sourceplane/orun/a" {
 		t.Errorf("DependsOn should keep only keyed entries: %v", v.DependsOn)
+	}
+	if v.System != "ident" || v.Domain != "plat" {
+		t.Errorf("System/Domain projection = %q/%q", v.System, v.Domain)
+	}
+	// Typed relations are carried additively for the portal/graph.
+	if len(v.Relations) != 2 {
+		t.Errorf("Relations carried = %d, want 2", len(v.Relations))
 	}
 }
 

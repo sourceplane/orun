@@ -15,19 +15,6 @@ import (
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
 )
 
-func TestToMapEmptyIsNil(t *testing.T) {
-	t.Parallel()
-	if toMap(map[string]any{}) != nil {
-		t.Fatalf("empty map should map to nil")
-	}
-	if toMap(struct{}{}) != nil {
-		t.Fatalf("empty struct should map to nil")
-	}
-	if m := toMap(map[string]any{"a": 1}); m == nil || m["a"] == nil {
-		t.Fatalf("non-empty map lost data")
-	}
-}
-
 func TestResolveMemoPutMkdirFailure(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

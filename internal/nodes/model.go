@@ -66,15 +66,32 @@ type ComponentIdentity struct {
 }
 
 // ComponentManifest is the fully-resolved component definition (a content
-// blob). The deep metadata/spec/provenance sections are carried as generic
-// maps here; the resolver (catalogresolve) owns their detailed shape.
+// blob). It is the Component-kind specialization of the shared entity envelope
+// (orun-service-catalog/data-model.md §2): the flat metadata block splits into
+// metadata/ownership/lifecycle, dependencies promote to relations/contracts,
+// and the resolver/inference provenance stays hash-excluded by convention. The
+// deep blocks are carried as generic maps here; the resolver (catalogresolve)
+// and the objplan mapper (mapEntity) own their detailed shape.
+//
+// SC0 added the generic nodes.Entity mirror for the other kinds (API/Resource/
+// …); SC3 generalizes the storage to entities/<Kind>/. Until then Component
+// remains the only resolved kind and ComponentManifest is its envelope.
 type ComponentManifest struct {
-	Kind       string            `json:"kind"`
-	Identity   ComponentIdentity `json:"identity"`
-	Type       string            `json:"type,omitempty"`
-	Metadata   map[string]any    `json:"metadata,omitempty"`
-	Spec       map[string]any    `json:"spec,omitempty"`
-	Provenance map[string]any    `json:"provenance,omitempty"`
+	APIVersion   string            `json:"apiVersion,omitempty"`
+	Kind         string            `json:"kind"`
+	Identity     ComponentIdentity `json:"identity"`
+	Type         string            `json:"type,omitempty"`
+	Metadata     map[string]any    `json:"metadata,omitempty"`
+	Ownership    map[string]any    `json:"ownership,omitempty"`
+	Lifecycle    map[string]any    `json:"lifecycle,omitempty"`
+	Spec         map[string]any    `json:"spec,omitempty"`
+	Relations    []EntityRelation  `json:"relations,omitempty"`
+	Contracts    map[string]any    `json:"contracts,omitempty"`
+	Integrations map[string]any    `json:"integrations,omitempty"`
+	Docs         map[string]any    `json:"docs,omitempty"`
+	Links        []map[string]any  `json:"links,omitempty"`
+	Provenance   map[string]any    `json:"provenance,omitempty"`
+	Extensions   map[string]any    `json:"extensions,omitempty"`
 }
 
 // EntityIdentity is the generalized, multi-kind identity tuple for a catalog
