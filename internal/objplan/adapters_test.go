@@ -298,6 +298,32 @@ func TestMapEntity_Envelope(t *testing.T) {
 	}
 }
 
+// TestMapEntity_EnvironmentRelations asserts SC4: a component's environment
+// bindings emit deployedTo edges to derived Environment entities (sorted).
+func TestMapEntity_EnvironmentRelations(t *testing.T) {
+	t.Parallel()
+	cm := &catalogmodel.ComponentManifest{
+		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", Namespace: "ns", Repo: "repo"},
+		Spec: catalogmodel.ComponentSpec{
+			Type: "worker",
+			Environments: map[string]catalogmodel.ComponentEnvironment{
+				"production": {Profile: "release", Active: true},
+				"staging":    {Profile: "pr", Active: false},
+			},
+		},
+	}
+	m := mapEntity(cm, 5, nil)
+	var envs []string
+	for _, r := range m.Relations {
+		if r.Type == "deployedTo" && r.ToKind == "Environment" {
+			envs = append(envs, r.To)
+		}
+	}
+	if len(envs) != 2 || envs[0] != "production" || envs[1] != "staging" {
+		t.Fatalf("deployedTo env edges = %v", envs)
+	}
+}
+
 // TestMapEntity_UnknownOwner asserts an unowned component gets owner=unknown,
 // TestMapEntity_CodeownersOwnership asserts the ownership precedence (S-2):
 // authored owner wins; otherwise a CODEOWNERS match supplies owner + source;

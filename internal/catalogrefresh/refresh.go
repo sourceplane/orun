@@ -40,9 +40,10 @@ import (
 // blob graduates from the flat manifest to the entity envelope), 2→3 for SC2
 // (the catalog tree gains the single typed relations.json graph), and 3→4 for
 // SC3 (the catalog tree gains the entities/<Kind>/ subtree + catalog.json
-// countsByKind). Every catalog id moves once per bump, the resolve memo misses
-// once, and content addressing re-stabilizes (S-1).
-const ResolverVersion = 4
+// countsByKind), and 4→5 for SC4 (component env bindings emit deployedTo edges
+// + derived Environment entities). Every catalog id moves once per bump, the
+// resolve memo misses once, and content addressing re-stabilizes (S-1).
+const ResolverVersion = 5
 
 // lockTTL bounds how long a refresh lock is honored before it is treated as
 // stale (a crashed holder) and reclaimed. A resolve+write is sub-second; this

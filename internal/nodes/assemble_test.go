@@ -210,6 +210,7 @@ func TestAssembleCatalogDerivesMultiKindEntities(t *testing.T) {
 				{Type: "partOf", To: "ns/repo/platform", ToKind: "Domain"},
 				{Type: "ownedBy", To: "@org/api-team", ToKind: "Group"},
 				{Type: "dependsOn", To: "ns/repo/cache", ToKind: "Resource"},
+				{Type: "deployedTo", To: "production", ToKind: "Environment"},
 			},
 			Contracts: map[string]any{
 				"provides": []any{map[string]any{"api": "ns/repo/api-spec"}},
@@ -229,7 +230,7 @@ func TestAssembleCatalogDerivesMultiKindEntities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode catalog: %v", err)
 	}
-	want := map[string]int{"Component": 2, "System": 1, "Domain": 1, "Group": 1, "Resource": 1, "API": 2}
+	want := map[string]int{"Component": 2, "System": 1, "Domain": 1, "Group": 1, "Resource": 1, "API": 2, "Environment": 1}
 	for k, v := range want {
 		if snap.CountsByKind[k] != v {
 			t.Errorf("countsByKind[%s] = %d, want %d (%v)", k, snap.CountsByKind[k], v, snap.CountsByKind)
@@ -245,7 +246,7 @@ func TestAssembleCatalogDerivesMultiKindEntities(t *testing.T) {
 	for _, kd := range kindDirs {
 		gotKinds[kd.Name] = true
 	}
-	for _, k := range []string{"System", "Domain", "Group", "Resource", "API"} {
+	for _, k := range []string{"System", "Domain", "Group", "Resource", "API", "Environment"} {
 		if !gotKinds[k] {
 			t.Errorf("entities/ missing kind %q (got %v)", k, gotKinds)
 		}

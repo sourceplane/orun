@@ -319,6 +319,19 @@ func entityRelations(cm *catalogmodel.ComponentManifest, own resolvedOwner) []no
 			Type: catalogmodel.RelTypeDependsOn, To: r, ToKind: catalogmodel.EntityKindResource,
 		})
 	}
+	// deployedTo edges from the component's environment bindings (SC4): each
+	// declared environment becomes a derived Environment entity that the
+	// component deploys to. Sorted by env name for determinism.
+	envNames := make([]string, 0, len(cm.Spec.Environments))
+	for env := range cm.Spec.Environments {
+		envNames = append(envNames, env)
+	}
+	sort.Strings(envNames)
+	for _, env := range envNames {
+		rels = append(rels, nodes.EntityRelation{
+			Type: catalogmodel.RelTypeDeployedTo, To: env, ToKind: catalogmodel.EntityKindEnvironment,
+		})
+	}
 	sort.SliceStable(rels, func(i, j int) bool {
 		if rels[i].Type != rels[j].Type {
 			return rels[i].Type < rels[j].Type
