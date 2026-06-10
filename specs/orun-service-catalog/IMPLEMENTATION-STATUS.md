@@ -14,7 +14,7 @@
 | Milestone | Phase | Status | PR | Notes |
 |-----------|-------|--------|----|-------|
 | SC0 — Shared types & version foundation | A | **Landed** | — | promoted `EntityKind` (full enum + Owner→Group alias); `EntityEnvelope` + per-kind specs in `catalogmodel`, mirrored as `nodes.Entity`; typed relation vocabulary + inverses; reserved `tenant` segment; `v1alpha1→v1` up-convert seam (no rewrites yet) |
-| SC1 — Resolved envelope reshape + CODEOWNERS ownership | A | Not started | — | the load-bearing reshape; `resolverVersion` bump (one-time id move) |
+| SC1 — Resolved envelope reshape + CODEOWNERS ownership | A | **Partial (envelope landed; CODEOWNERS next)** | — | `mapManifest`→`mapEntity`: `metadata` splits into `metadata`/`ownership`/`lifecycle`; `relations`/`contracts`/`provenance` blocks emitted; `apiVersion`→`orun.io/v1`; `resolverVersion` 1→2 (one-time id move, S-1). `spec` kept lossless through SC1 (deps fully promote to relations.json in SC2). Ownership source = `authored`/`unknown` from authored owner; CODEOWNERS-derived ownership is the follow-up PR |
 | SC2 — Unified typed relation graph | A | Not started | — | `relations.json`; `internal/affected` repoint; parity-gated |
 | SC3 — Multi-kind entities | B | Not started | — | API/Resource/System/Domain/Group first-class; kind-aware read |
 | SC4 — Derived Environment & Deployment | B | Not started | — | from execution; coordinate with `orun-env-scoping` |

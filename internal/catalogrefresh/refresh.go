@@ -35,7 +35,13 @@ import (
 // ResolverVersion is the integer resolver version stamped on resolver inputs
 // (identity-and-keys.md §9). It must match the value the CLI uses so CLI/TUI
 // catalogs share a content id.
-const ResolverVersion = 1
+//
+// Bumped 1→2 for the orun-service-catalog SC1 envelope reshape: the resolved
+// blob graduates from the flat manifest to the entity envelope (metadata splits
+// into metadata/ownership/lifecycle; dependencies promote to relations/
+// contracts; apiVersion → orun.io/v1). Every catalog id moves once, the resolve
+// memo misses once, and content addressing re-stabilizes (S-1).
+const ResolverVersion = 2
 
 // lockTTL bounds how long a refresh lock is honored before it is treated as
 // stale (a crashed holder) and reclaimed. A resolve+write is sub-second; this

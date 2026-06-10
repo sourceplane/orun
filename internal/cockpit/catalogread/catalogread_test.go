@@ -42,7 +42,11 @@ func fixture(t *testing.T) (*Reader, string) {
 	manifests := []nodes.ComponentManifest{
 		{Kind: nodes.KindComponentManifest, Identity: nodes.ComponentIdentity{
 			ComponentKey: "ns/repo/api", Name: "api", Namespace: "ns", Repo: "repo", Path: "apps/api/component.yaml"},
-			Type: "worker", Spec: map[string]any{"type": "worker", "domain": "edge"}},
+			Type: "worker", Spec: map[string]any{"type": "worker", "domain": "edge"},
+			Relations: []nodes.EntityRelation{
+				{Type: "dependsOn", To: "ns/repo/shared", ToKind: "Component"},
+				{Type: "partOf", To: "edge", ToKind: "Domain"},
+			}},
 		{Kind: nodes.KindComponentManifest, Identity: nodes.ComponentIdentity{
 			ComponentKey: "ns/repo/shared", Name: "shared", Namespace: "ns", Repo: "repo", Path: "libs/shared/component.yaml"}},
 	}

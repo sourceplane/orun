@@ -54,7 +54,7 @@ func BuildCatalogNodes(view *catalogresolve.CatalogView, resolverVersion int) (n
 			if cm == nil {
 				continue
 			}
-			manifests = append(manifests, mapManifest(cm))
+			manifests = append(manifests, mapEntity(cm, resolverVersion))
 		}
 	}
 
@@ -141,13 +141,16 @@ func buildOwnership(view *catalogresolve.CatalogView) nodes.ImpactOwnership {
 	return o
 }
 
-// mapManifest converts a catalogmodel.ComponentManifest to the node form. The
-// stable identity fields are mapped explicitly; the deep metadata/spec/runtime
-// blocks are carried verbatim into the node's generic maps so no resolved
-// information is lost.
-func mapManifest(cm *catalogmodel.ComponentManifest) nodes.ComponentManifest {
+// mapEntity reshapes a catalogmodel.ComponentManifest into the Component-kind
+// entity envelope node (orun-service-catalog/data-model.md §2). The flat
+// authored metadata splits into metadata/ownership/lifecycle; dependencies and
+// system/domain/owner edges promote to relations; provided/consumed APIs become
+// contracts; inference/inheritance stays in provenance. The deep spec/runtime
+// blocks are carried verbatim so no resolved information is lost.
+func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int) nodes.ComponentManifest {
 	m := nodes.ComponentManifest{
-		Kind: nodes.KindComponentManifest,
+		APIVersion: catalogmodel.APIVersionV1,
+		Kind:       nodes.KindComponentManifest,
 		Identity: nodes.ComponentIdentity{
 			ComponentKey: cm.Identity.ComponentKey,
 			Name:         cm.Identity.Name,
@@ -158,14 +161,210 @@ func mapManifest(cm *catalogmodel.ComponentManifest) nodes.ComponentManifest {
 			// dirname is the component dir for ownership/fingerprints.
 			Path: cm.Identity.SourceFile,
 		},
-		Metadata:   toMap(cm.Metadata),
+		Type:       cm.Spec.Type,
+		Metadata:   entityMetadata(cm.Metadata),
+		Ownership:  entityOwnership(cm.Metadata),
+		Lifecycle:  entityLifecycle(cm.Spec),
 		Spec:       toMap(cm.Spec),
-		Provenance: toMap(cm.Resolution),
-	}
-	if t, ok := m.Spec["type"].(string); ok {
-		m.Type = t
+		Relations:  entityRelations(cm),
+		Contracts:  entityContracts(cm.Spec.Dependencies.APIs),
+		Provenance: entityProvenance(cm.Resolution, resolverVersion),
 	}
 	return m
+}
+
+// toMap round-trips a value through JSON into a generic map so the node record
+// carries the resolver's nested data canonically (the spec block is kept whole
+// and lossless — dependencies/system/domain stay here through SC1; SC2 promotes
+// them fully to relations.json). Returns nil for an empty result.
+func toMap(v any) map[string]any {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil || len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
+// entityMetadata projects the descriptive block (owner/maintainers/contacts
+// move to ownership; lifecycle/tier move to lifecycle).
+func entityMetadata(md catalogmodel.ComponentMetadata) map[string]any {
+	out := map[string]any{}
+	putNonEmpty(out, "title", md.Title)
+	putNonEmpty(out, "description", md.Description)
+	if len(md.Labels) > 0 {
+		out["labels"] = strMapToAny(md.Labels)
+	}
+	if len(md.Tags) > 0 {
+		out["tags"] = strSliceToAny(md.Tags)
+	}
+	if len(md.Annotations) > 0 {
+		out["annotations"] = strMapToAny(md.Annotations)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// entityOwnership builds the ownership block, recording the claim source (S-2).
+// SC1 derives the owner from the authored metadata.owner; CODEOWNERS-derived
+// ownership lands in the follow-up. The block is always present (owner may be
+// "unknown") so the portal can render an ownership cell for every entity.
+func entityOwnership(md catalogmodel.ComponentMetadata) map[string]any {
+	out := map[string]any{}
+	if md.Owner != "" {
+		out["owner"] = md.Owner
+		out["source"] = catalogmodel.OwnershipSourceAuthored
+	} else {
+		out["owner"] = catalogmodel.OwnershipSourceUnknown
+		out["source"] = catalogmodel.OwnershipSourceUnknown
+	}
+	if len(md.Maintainers) > 0 {
+		out["additionalOwners"] = strSliceToAny(md.Maintainers)
+	}
+	if len(md.Contacts) > 0 {
+		// Deterministic order: sort by contact type.
+		types := make([]string, 0, len(md.Contacts))
+		for t := range md.Contacts {
+			types = append(types, t)
+		}
+		sort.Strings(types)
+		contacts := make([]any, 0, len(types))
+		for _, t := range types {
+			contacts = append(contacts, map[string]any{"type": t, "value": md.Contacts[t]})
+		}
+		out["contacts"] = contacts
+	}
+	return out
+}
+
+// entityLifecycle builds the lifecycle block. `stage` defaults to experimental
+// (data-model.md §2); `maturity` is emitted as explicit null — it is recomputed
+// from L2 by the v2 scorecard engine and never authored (CR-1).
+func entityLifecycle(spec catalogmodel.ComponentSpec) map[string]any {
+	stage := spec.Lifecycle
+	if stage == "" {
+		stage = catalogmodel.LifecycleStageExperimental
+	}
+	out := map[string]any{
+		"stage":    stage,
+		"maturity": nil,
+	}
+	putNonEmpty(out, "tier", spec.Tier)
+	return out
+}
+
+// entityRelations promotes the resolved dependency/membership/ownership edges
+// into the envelope's typed relations array (data-model.md §3): ownedBy (owner),
+// partOf (system/domain), dependsOn (component + resource edges). Sorted by
+// (type, to) for determinism.
+func entityRelations(cm *catalogmodel.ComponentManifest) []nodes.EntityRelation {
+	var rels []nodes.EntityRelation
+	if cm.Metadata.Owner != "" {
+		rels = append(rels, nodes.EntityRelation{
+			Type: catalogmodel.RelTypeOwnedBy, To: cm.Metadata.Owner, ToKind: catalogmodel.EntityKindGroup,
+		})
+	}
+	if cm.Spec.System != "" {
+		rels = append(rels, nodes.EntityRelation{
+			Type: catalogmodel.RelTypePartOf, To: cm.Spec.System, ToKind: catalogmodel.EntityKindSystem,
+		})
+	}
+	if cm.Spec.Domain != "" {
+		rels = append(rels, nodes.EntityRelation{
+			Type: catalogmodel.RelTypePartOf, To: cm.Spec.Domain, ToKind: catalogmodel.EntityKindDomain,
+		})
+	}
+	for _, d := range cm.Spec.Dependencies.Components {
+		rels = append(rels, nodes.EntityRelation{
+			Type: catalogmodel.RelTypeDependsOn, To: d.Key, ToKind: catalogmodel.EntityKindComponent,
+			Optional: d.Optional, Include: d.Include,
+		})
+	}
+	for _, r := range cm.Spec.Dependencies.Resources.Uses {
+		rels = append(rels, nodes.EntityRelation{
+			Type: catalogmodel.RelTypeDependsOn, To: r, ToKind: catalogmodel.EntityKindResource,
+		})
+	}
+	sort.SliceStable(rels, func(i, j int) bool {
+		if rels[i].Type != rels[j].Type {
+			return rels[i].Type < rels[j].Type
+		}
+		return rels[i].To < rels[j].To
+	})
+	return rels
+}
+
+// entityContracts builds the contracts block from the resolved provided/consumed
+// APIs (data-model.md §2). Returns nil when no APIs are declared.
+func entityContracts(apis catalogmodel.APIDependencies) map[string]any {
+	out := map[string]any{}
+	if len(apis.Provides) > 0 {
+		provides := make([]any, 0, len(apis.Provides))
+		for _, a := range apis.Provides {
+			provides = append(provides, map[string]any{"api": a})
+		}
+		out["provides"] = provides
+	}
+	if len(apis.Consumes) > 0 {
+		consumes := make([]any, 0, len(apis.Consumes))
+		for _, a := range apis.Consumes {
+			consumes = append(consumes, map[string]any{"api": a})
+		}
+		out["consumes"] = consumes
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// entityProvenance carries the inheritance/inference trail plus the resolver
+// stamp. Deterministic from inputs, so it folds stably into the catalog id.
+func entityProvenance(res catalogmodel.ComponentResolution, resolverVersion int) map[string]any {
+	out := map[string]any{
+		"resolver": map[string]any{
+			"resolverVersion": resolverVersion,
+			"schemaVersion":   catalogmodel.APIVersionV1,
+		},
+	}
+	if len(res.InheritedFrom) > 0 {
+		out["inheritedFrom"] = strMapToAny(res.InheritedFrom)
+	}
+	if len(res.InferredFrom) > 0 {
+		inf := map[string]any{}
+		for k, v := range res.InferredFrom {
+			inf[k] = strSliceToAny(v)
+		}
+		out["inferredFrom"] = inf
+	}
+	return out
+}
+
+func putNonEmpty(m map[string]any, key, val string) {
+	if val != "" {
+		m[key] = val
+	}
+}
+
+func strMapToAny(in map[string]string) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func strSliceToAny(in []string) []any {
+	out := make([]any, len(in))
+	for i, v := range in {
+		out[i] = v
+	}
+	return out
 }
 
 func mapGraph(g *catalogmodel.CatalogGraph, edgeKind string) nodes.CatalogGraph {
@@ -177,19 +376,4 @@ func mapGraph(g *catalogmodel.CatalogGraph, edgeKind string) nodes.CatalogGraph 
 		out.Edges = append(out.Edges, nodes.GraphEdge{From: e.From, To: e.To, Type: e.Type, Optional: e.Optional, Include: e.Include})
 	}
 	return out
-}
-
-// toMap round-trips a value through JSON into a generic map so the node record
-// carries the resolver's nested data canonically. Returns nil for an empty
-// result so the field is omitted.
-func toMap(v any) map[string]any {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil || len(m) == 0 {
-		return nil
-	}
-	return m
 }

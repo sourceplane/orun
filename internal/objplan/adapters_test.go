@@ -173,13 +173,13 @@ func TestBuildCatalogNodesManyGraphsPositional(t *testing.T) {
 	}
 }
 
-func TestMapManifest_CarriesChangeWatches(t *testing.T) {
+func TestMapEntity_CarriesChangeWatches(t *testing.T) {
 	t.Parallel()
 	cm := &catalogmodel.ComponentManifest{
 		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", Namespace: "ns", Repo: "repo"},
 		Spec:     catalogmodel.ComponentSpec{Type: "worker", Change: &catalogmodel.ComponentChange{Watches: []string{"env", "groups"}}},
 	}
-	m := mapManifest(cm)
+	m := mapEntity(cm, 2)
 	// The node manifest spec carries change.watches verbatim — the path the
 	// affected engine reads (spec.change.watches) for intent-impact watch mode.
 	change, ok := m.Spec["change"].(map[string]any)
@@ -189,6 +189,133 @@ func TestMapManifest_CarriesChangeWatches(t *testing.T) {
 	watches, ok := change["watches"].([]any)
 	if !ok || len(watches) != 2 || watches[0] != "env" || watches[1] != "groups" {
 		t.Fatalf("change.watches = %v", change["watches"])
+	}
+}
+
+// TestMapEntity_Envelope asserts the SC1 reshape: the flat manifest splits into
+// metadata/ownership/lifecycle, dependencies/system/domain/owner promote to
+// typed relations, and provided/consumed APIs become contracts.
+func TestMapEntity_Envelope(t *testing.T) {
+	t.Parallel()
+	cm := &catalogmodel.ComponentManifest{
+		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", Namespace: "ns", Repo: "repo", SourceFile: "apps/api/component.yaml"},
+		Metadata: catalogmodel.ComponentMetadata{
+			Title:       "API",
+			Description: "the api",
+			Owner:       "platform",
+			Maintainers: []string{"alice"},
+			Contacts:    map[string]string{"slack": "#api", "email": "api@x"},
+			Labels:      map[string]string{"team": "platform"},
+			Tags:        []string{"edge"},
+		},
+		Spec: catalogmodel.ComponentSpec{
+			Type:      "worker",
+			Lifecycle: "production",
+			Tier:      "tier-1",
+			System:    "identity",
+			Domain:    "platform",
+			Dependencies: catalogmodel.ComponentDependencies{
+				Components: []catalogmodel.ComponentDependency{{Key: "ns/repo/db", Name: "db", Optional: true, Include: "always"}},
+				APIs:       catalogmodel.APIDependencies{Provides: []string{"ns/repo/api-spec"}, Consumes: []string{"ns/repo/auth"}},
+				Resources:  catalogmodel.ResourceDependencies{Uses: []string{"ns/repo/cache"}},
+			},
+		},
+		Runtime:    catalogmodel.ComponentRuntime{Inferred: catalogmodel.ComponentInferred{Languages: []string{"go"}}},
+		Resolution: catalogmodel.ComponentResolution{InheritedFrom: map[string]string{"spec.lifecycle": "intent.yaml"}},
+	}
+	m := mapEntity(cm, 2)
+
+	if m.APIVersion != catalogmodel.APIVersionV1 || m.Type != "worker" {
+		t.Fatalf("apiVersion/type = %q/%q", m.APIVersion, m.Type)
+	}
+	// metadata no longer carries owner/lifecycle.
+	if _, ok := m.Metadata["owner"]; ok {
+		t.Errorf("owner must not remain in metadata: %v", m.Metadata)
+	}
+	if m.Metadata["title"] != "API" {
+		t.Errorf("metadata.title = %v", m.Metadata["title"])
+	}
+	// ownership block, with source.
+	if m.Ownership["owner"] != "platform" || m.Ownership["source"] != catalogmodel.OwnershipSourceAuthored {
+		t.Errorf("ownership = %v", m.Ownership)
+	}
+	contacts, _ := m.Ownership["contacts"].([]any)
+	if len(contacts) != 2 { // sorted by type: email, slack
+		t.Errorf("contacts = %v", m.Ownership["contacts"])
+	} else if c0 := contacts[0].(map[string]any); c0["type"] != "email" {
+		t.Errorf("contacts not sorted by type: %v", contacts)
+	}
+	// lifecycle block, maturity explicit null.
+	if m.Lifecycle["stage"] != "production" || m.Lifecycle["tier"] != "tier-1" {
+		t.Errorf("lifecycle = %v", m.Lifecycle)
+	}
+	if mat, ok := m.Lifecycle["maturity"]; !ok || mat != nil {
+		t.Errorf("lifecycle.maturity must be present and null: %v (ok=%v)", mat, ok)
+	}
+	// relations: ownedBy(Group), partOf(System), partOf(Domain), dependsOn x2.
+	wantRel := map[string]string{} // type|to -> toKind
+	for _, r := range m.Relations {
+		wantRel[r.Type+"|"+r.To] = r.ToKind
+	}
+	if wantRel["ownedBy|platform"] != "Group" || wantRel["partOf|identity"] != "System" ||
+		wantRel["partOf|platform"] != "Domain" || wantRel["dependsOn|ns/repo/db"] != "Component" ||
+		wantRel["dependsOn|ns/repo/cache"] != "Resource" {
+		t.Errorf("relations = %+v", m.Relations)
+	}
+	// relations sorted by (type,to): dependsOn before ownedBy before partOf.
+	if m.Relations[0].Type != "dependsOn" {
+		t.Errorf("relations not sorted: %+v", m.Relations)
+	}
+	// the component dep carries optional/include through.
+	for _, r := range m.Relations {
+		if r.To == "ns/repo/db" && (!r.Optional || r.Include != "always") {
+			t.Errorf("dep edge lost optional/include: %+v", r)
+		}
+	}
+	// contracts from APIs.
+	provides, _ := m.Contracts["provides"].([]any)
+	consumes, _ := m.Contracts["consumes"].([]any)
+	if len(provides) != 1 || len(consumes) != 1 {
+		t.Errorf("contracts = %v", m.Contracts)
+	}
+	// spec stays lossless in SC1 (dependencies/system/domain remain) — SC2
+	// promotes them fully to relations.json.
+	if _, ok := m.Spec["dependencies"]; !ok {
+		t.Errorf("spec should retain dependencies (lossless) in SC1: %v", m.Spec)
+	}
+	if m.Spec["system"] != "identity" || m.Spec["domain"] != "platform" {
+		t.Errorf("spec should retain system/domain: %v", m.Spec)
+	}
+	// provenance resolver stamp.
+	res, _ := m.Provenance["resolver"].(map[string]any)
+	if res == nil || res["resolverVersion"] != 2 {
+		t.Errorf("provenance.resolver = %v", m.Provenance["resolver"])
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("envelope invalid: %v", err)
+	}
+}
+
+// TestMapEntity_UnknownOwner asserts an unowned component gets owner=unknown,
+// source=unknown and no ownedBy relation.
+func TestMapEntity_UnknownOwner(t *testing.T) {
+	t.Parallel()
+	cm := &catalogmodel.ComponentManifest{
+		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/x", Name: "x", Namespace: "ns", Repo: "repo"},
+		Spec:     catalogmodel.ComponentSpec{Type: "service"},
+	}
+	m := mapEntity(cm, 2)
+	if m.Ownership["owner"] != catalogmodel.OwnershipSourceUnknown || m.Ownership["source"] != catalogmodel.OwnershipSourceUnknown {
+		t.Errorf("unowned ownership = %v", m.Ownership)
+	}
+	for _, r := range m.Relations {
+		if r.Type == "ownedBy" {
+			t.Errorf("unowned component must have no ownedBy relation: %+v", m.Relations)
+		}
+	}
+	// stage defaults to experimental.
+	if m.Lifecycle["stage"] != catalogmodel.LifecycleStageExperimental {
+		t.Errorf("default stage = %v", m.Lifecycle["stage"])
 	}
 }
 
