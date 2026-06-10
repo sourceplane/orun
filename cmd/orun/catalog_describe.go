@@ -201,6 +201,11 @@ func buildObjManifest(view objcatalog.CatalogView, c objcatalog.CatalogComponent
 	if contacts := contactsField(c.Ownership); len(contacts) > 0 {
 		m.Metadata.Contacts = contacts
 	}
+	// Catalog-hub blocks (SC6) carried verbatim from the envelope.
+	m.Integrations = c.Integrations
+	m.Extensions = c.Extensions
+	roundTripInto(c.Docs, &m.Docs)
+	roundTripInto(c.Links, &m.Links)
 	return m
 }
 
@@ -339,6 +344,19 @@ func renderCatalogDescribeText(m catalogmodel.ComponentManifest, execs []catalog
 		kv("Uses", strings.Join(m.Spec.Dependencies.Resources.Uses, ", "))
 	}
 
+	if len(m.Integrations) > 0 {
+		section("Integrations")
+		for _, k := range sortedAnyMapKeys(m.Integrations) {
+			fmt.Fprintf(out, "  %s\n", k)
+		}
+	}
+	if len(m.Extensions) > 0 {
+		section("Extensions")
+		for _, k := range sortedAnyMapKeys(m.Extensions) {
+			fmt.Fprintf(out, "  %s\n", k)
+		}
+	}
+
 	section("Runtime inference")
 	kv("Languages", strings.Join(m.Runtime.Inferred.Languages, ", "))
 	kv("PackageMgrs", strings.Join(m.Runtime.Inferred.PackageManagers, ", "))
@@ -396,6 +414,15 @@ func sortedEnvKeys(m map[string]catalogmodel.ComponentEnvironment) []string {
 }
 
 func sortedStringKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedAnyMapKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

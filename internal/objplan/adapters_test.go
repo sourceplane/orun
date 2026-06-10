@@ -298,6 +298,47 @@ func TestMapEntity_Envelope(t *testing.T) {
 	}
 }
 
+// TestMapEntity_CatalogHubBlocks asserts SC6: integrations/links/docs/extensions
+// carry from the resolved manifest into the envelope (extensions preserved).
+func TestMapEntity_CatalogHubBlocks(t *testing.T) {
+	t.Parallel()
+	cm := &catalogmodel.ComponentManifest{
+		Identity:     catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", Namespace: "ns", Repo: "repo"},
+		Spec:         catalogmodel.ComponentSpec{Type: "worker"},
+		Integrations: map[string]any{"datadog": map[string]any{"service": "api"}},
+		Links:        []catalogmodel.ComponentLink{{Title: "Dash", URL: "https://x", Icon: "dashboard"}},
+		Docs:         &catalogmodel.ComponentDocs{TechDocs: "docs/", Runbooks: []string{"docs/run.md"}, ADRs: []string{"docs/adr-1.md"}},
+		Extensions:   map[string]any{"x-acme": map[string]any{"tier": "gold"}},
+	}
+	m := mapEntity(cm, 6, nil)
+	if m.Integrations["datadog"] == nil {
+		t.Errorf("integrations not carried: %v", m.Integrations)
+	}
+	if m.Extensions["x-acme"] == nil {
+		t.Errorf("extensions not preserved: %v", m.Extensions)
+	}
+	if m.Docs["techdocs"] != "docs/" {
+		t.Errorf("docs = %v", m.Docs)
+	}
+	if runbooks, _ := m.Docs["runbooks"].([]any); len(runbooks) != 1 {
+		t.Errorf("docs.runbooks = %v", m.Docs["runbooks"])
+	}
+	if adrs, _ := m.Docs["adrs"].([]any); len(adrs) != 1 {
+		t.Errorf("docs.adrs = %v", m.Docs["adrs"])
+	}
+	if len(m.Links) != 1 || m.Links[0]["title"] != "Dash" || m.Links[0]["icon"] != "dashboard" {
+		t.Errorf("links = %v", m.Links)
+	}
+	// nil docs/links/integrations → nil blocks (no panic).
+	bare := mapEntity(&catalogmodel.ComponentManifest{
+		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/b", Name: "b"},
+		Spec:     catalogmodel.ComponentSpec{Type: "lib"},
+	}, 6, nil)
+	if bare.Docs != nil || bare.Links != nil || bare.Integrations != nil {
+		t.Errorf("bare blocks should be nil: docs=%v links=%v int=%v", bare.Docs, bare.Links, bare.Integrations)
+	}
+}
+
 // TestMapEntity_EnvironmentRelations asserts SC4: a component's environment
 // bindings emit deployedTo edges to derived Environment entities (sorted).
 func TestMapEntity_EnvironmentRelations(t *testing.T) {

@@ -105,6 +105,10 @@ type CatalogComponentView struct {
 	Ownership    map[string]any
 	Lifecycle    map[string]any
 	Relations    []RelationView
+	Integrations map[string]any
+	Extensions   map[string]any
+	Docs         map[string]any
+	Links        []map[string]any
 	Spec         map[string]any
 }
 
@@ -462,6 +466,10 @@ func componentView(m nodes.ComponentManifest) CatalogComponentView {
 		Metadata:     m.Metadata,
 		Ownership:    m.Ownership,
 		Lifecycle:    m.Lifecycle,
+		Integrations: m.Integrations,
+		Extensions:   m.Extensions,
+		Docs:         m.Docs,
+		Links:        m.Links,
 		Spec:         m.Spec,
 	}
 	if v.Type == "" {

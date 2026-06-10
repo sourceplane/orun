@@ -87,6 +87,28 @@ type ComponentYAMLSpec struct {
 	Labels       map[string]string                   `json:"labels,omitempty"`
 	Env          map[string]string                   `json:"env,omitempty"`
 	Change       *ComponentYAMLChange                `json:"change,omitempty"`
+	// Integrations / Links / Docs / Extensions are the catalog-hub authoring
+	// blocks (orun-service-catalog SC6). `integrations` is a map of typed join
+	// keys (datadog/pagerduty/…); `extensions` carries namespaced x-<vendor>
+	// blocks preserved verbatim on round-trip (data-model.md §8).
+	Integrations map[string]any      `json:"integrations,omitempty"`
+	Links        []ComponentYAMLLink `json:"links,omitempty"`
+	Docs         *ComponentYAMLDocs  `json:"docs,omitempty"`
+	Extensions   map[string]any      `json:"extensions,omitempty"`
+}
+
+// ComponentYAMLLink is one authored external link (data-model.md §2).
+type ComponentYAMLLink struct {
+	Title string `json:"title"`
+	URL   string `json:"url"`
+	Icon  string `json:"icon,omitempty"`
+}
+
+// ComponentYAMLDocs points at techdocs/runbooks/ADRs (data-model.md §2).
+type ComponentYAMLDocs struct {
+	TechDocs string   `json:"techdocs,omitempty"`
+	Runbooks []string `json:"runbooks,omitempty"`
+	ADRs     []string `json:"adrs,omitempty"`
 }
 
 // ComponentYAMLChange declares which intent change signals affect this
