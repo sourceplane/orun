@@ -6,10 +6,10 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **In progress — Phases A/B/C landed (SC0–SC6 + SC1b), adoption started (SC10)** |
-| Shipped | SC0, SC1 (+SC1b CODEOWNERS), SC2, SC3, SC4, SC5, SC6, SC10 (partial) — the full resolved entity graph (envelope · relations.json · multi-kind `entities/<Kind>/` · derived Environments), the derived-on-read live plane, and the integrations hub + extension registry, all dogfooded in `examples/` |
-| Remaining | SC7–SC8 (compositions as catalogued producers — a registry/lockfile integration), SC10 (broaden + example compositions), SC11 (legacy migration tooling) |
-| Resolver version | bumped 1→6 across SC1–SC6 (one content-id move per envelope/tree change, S-1) |
+| Status | **In progress — Phases A/B/C + SC7 landed (SC0–SC7 + SC1b), adoption started (SC10)** |
+| Shipped | SC0, SC1 (+SC1b CODEOWNERS), SC2, SC3, SC4, SC5, SC6, SC7, SC10 (partial) — the full resolved entity graph (envelope · relations.json · multi-kind `entities/<Kind>/` · derived Environments · Composition-as-Entity), the derived-on-read live plane, and the integrations hub + extension registry, all dogfooded in `examples/` |
+| Remaining | SC8 (composition `effects`→derivation — needs an `effects` authoring surface on the composition manifest), SC10 (broaden + example compositions), SC11 (legacy migration tooling) |
+| Resolver version | bumped 1→7 across SC1–SC7 (one content-id move per envelope/tree change, S-1) |
 | Builds on | `orun-object-model` (merged), `orun-component-catalog`, `orun-catalog-state`; legacy stack retired (`orun-legacy-retirement`) |
 | Store | single object model (`.orun/objectmodel/`); no dual-write |
 | apiVersion | `orun.io/v1` (graduated in SC1); lazy up-conversion of older blobs is SC11 |
