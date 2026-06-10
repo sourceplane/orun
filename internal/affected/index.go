@@ -103,13 +103,31 @@ func (d *Detector) index() *catalogIndex {
 		idx.allComps = append(idx.allComps, c.ComponentKey)
 	}
 
-	// Dependency edges live in the "dependencies" graph slice: From depends_on To.
-	if g, ok := d.catalog.Graph["dependencies"]; ok {
-		for _, e := range g.Edges {
+	// Dependency adjacency comes from the single typed relation graph
+	// (relations.json, SC2/CV-1): component→component `dependsOn` edges, carrying
+	// the same optional/include semantics the change engine has always used. A
+	// catalog written before relations.json existed falls back to the legacy
+	// "dependencies" graph slice so old snapshots still resolve.
+	switch {
+	case len(d.catalog.Relations) > 0:
+		for _, e := range d.catalog.Relations {
+			if e.Type != "dependsOn" || e.ToKind != "Component" {
+				continue
+			}
 			idx.deps[e.From] = append(idx.deps[e.From], e.To)
 			idx.dependents[e.To] = append(idx.dependents[e.To], e.From)
 			if e.Include == "always" {
 				idx.depsAlways[e.From] = append(idx.depsAlways[e.From], e.To)
+			}
+		}
+	default:
+		if g, ok := d.catalog.Graph["dependencies"]; ok {
+			for _, e := range g.Edges {
+				idx.deps[e.From] = append(idx.deps[e.From], e.To)
+				idx.dependents[e.To] = append(idx.dependents[e.To], e.From)
+				if e.Include == "always" {
+					idx.depsAlways[e.From] = append(idx.depsAlways[e.From], e.To)
+				}
 			}
 		}
 	}

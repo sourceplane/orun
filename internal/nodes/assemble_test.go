@@ -163,6 +163,57 @@ func TestAssembleCatalogTreeAndNoSelfID(t *testing.T) {
 	}
 }
 
+func TestAssembleCatalogWritesRelations(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := mem()
+	manifests := []ComponentManifest{
+		{Identity: ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", Namespace: "ns", Repo: "repo"},
+			Relations: []EntityRelation{
+				{Type: "dependsOn", To: "ns/repo/db", ToKind: "Component", Include: "always"},
+				{Type: "ownedBy", To: "team-x", ToKind: "Group"},
+			}},
+		{Identity: ComponentIdentity{ComponentKey: "ns/repo/db", Name: "db", Namespace: "ns", Repo: "repo"}},
+	}
+	catID, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 3}, manifests, nil, ImpactOwnership{}, nil)
+	if err != nil {
+		t.Fatalf("AssembleCatalog: %v", err)
+	}
+	relBlob, relKind := findEntry(t, s, catID, fileRelations)
+	if relKind != objectstore.KindBlob {
+		t.Fatalf("relations.json not a blob: %s", relKind)
+	}
+	rg, err := Decode[RelationGraph]([]byte(blobBody(t, s, relBlob)))
+	if err != nil {
+		t.Fatalf("decode relations: %v", err)
+	}
+	if rg.Kind != KindRelationGraph || len(rg.Edges) != 2 {
+		t.Fatalf("relation graph = %+v", rg)
+	}
+	// Edges are sorted by (from, fromKind, type, to): dependsOn before ownedBy.
+	if rg.Edges[0].Type != "dependsOn" || rg.Edges[0].From != "ns/repo/api" || rg.Edges[0].FromKind != "Component" {
+		t.Fatalf("first edge = %+v", rg.Edges[0])
+	}
+	if rg.Edges[0].Include != "always" || rg.Edges[1].Type != "ownedBy" {
+		t.Fatalf("edges = %+v", rg.Edges)
+	}
+}
+
+func TestRelationGraphValidate(t *testing.T) {
+	t.Parallel()
+	if err := (RelationGraph{Kind: "Nope"}).Validate(); err == nil {
+		t.Fatal("bad kind accepted")
+	}
+	bad := RelationGraph{Kind: KindRelationGraph, Edges: []RelationEdge{{From: "a", Type: "", To: "b"}}}
+	if err := bad.Validate(); err == nil {
+		t.Fatal("empty edge type accepted")
+	}
+	ok := RelationGraph{Kind: KindRelationGraph, Edges: []RelationEdge{{From: "a", Type: "dependsOn", To: "b"}}}
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("valid graph rejected: %v", err)
+	}
+}
+
 func TestAssembleCatalogWritesImpact(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

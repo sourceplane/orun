@@ -36,12 +36,12 @@ import (
 // (identity-and-keys.md §9). It must match the value the CLI uses so CLI/TUI
 // catalogs share a content id.
 //
-// Bumped 1→2 for the orun-service-catalog SC1 envelope reshape: the resolved
-// blob graduates from the flat manifest to the entity envelope (metadata splits
-// into metadata/ownership/lifecycle; dependencies promote to relations/
-// contracts; apiVersion → orun.io/v1). Every catalog id moves once, the resolve
-// memo misses once, and content addressing re-stabilizes (S-1).
-const ResolverVersion = 2
+// Bumped 1→2 for the orun-service-catalog SC1 envelope reshape (the resolved
+// blob graduates from the flat manifest to the entity envelope) and 2→3 for SC2
+// (the catalog tree gains the single typed relations.json graph). Every catalog
+// id moves once per bump, the resolve memo misses once, and content addressing
+// re-stabilizes (S-1).
+const ResolverVersion = 3
 
 // lockTTL bounds how long a refresh lock is honored before it is treated as
 // stale (a crashed holder) and reclaimed. A resolve+write is sub-second; this

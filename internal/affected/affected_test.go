@@ -54,6 +54,47 @@ func sampleCatalog() *objcatalog.CatalogView {
 	}
 }
 
+// sampleCatalogRelations is sampleCatalog with the dependency edges expressed as
+// the single typed relations.json graph (SC2) instead of the legacy
+// "dependencies" graph slice — the same edges, the new source.
+func sampleCatalogRelations() *objcatalog.CatalogView {
+	c := sampleCatalog()
+	c.Graph = nil
+	c.Relations = []objcatalog.RelationEdgeView{
+		{From: "ns/repo/api", FromKind: "Component", Type: "dependsOn", To: "ns/repo/shared", ToKind: "Component"},
+		{From: "ns/repo/web", FromKind: "Component", Type: "dependsOn", To: "ns/repo/shared", ToKind: "Component"},
+		// A non-Component dependsOn edge (a Resource) and an ownedBy edge must be
+		// ignored by the component change-closure — parity with the legacy path.
+		{From: "ns/repo/api", FromKind: "Component", Type: "dependsOn", To: "ns/repo/cache", ToKind: "Resource"},
+		{From: "ns/repo/api", FromKind: "Component", Type: "ownedBy", To: "team-x", ToKind: "Group"},
+	}
+	return c
+}
+
+// TestDetect_RelationsParityWithLegacyGraph is the CV-1 parity gate: change
+// detection over relations.json must produce byte-identical selection to the
+// legacy five-graph "dependencies" slice across representative scenarios.
+func TestDetect_RelationsParityWithLegacyGraph(t *testing.T) {
+	scenarios := []struct {
+		name string
+		src  ChangeSource
+	}{
+		{"shared-leaf-changed", fakeSource{files: []string{"libs/shared/x.go"}}},
+		{"api-changed", fakeSource{files: []string{"apps/api/x.go"}}},
+		{"web-and-shared", fakeSource{files: []string{"apps/web/x.go", "libs/shared/y.go"}}},
+		{"nothing", fakeSource{files: []string{"README.md"}}},
+	}
+	for _, sc := range scenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			legacy := detect(t, sampleCatalog(), IntentImpactWatch, sc.src)
+			modern := detect(t, sampleCatalogRelations(), IntentImpactWatch, sc.src)
+			if !reflect.DeepEqual(legacy, modern) {
+				t.Fatalf("relations.json selection diverged from legacy graph\nlegacy=%+v\nmodern=%+v", legacy, modern)
+			}
+		})
+	}
+}
+
 func detect(t *testing.T, cat *objcatalog.CatalogView, policy IntentImpact, src ChangeSource) Result {
 	t.Helper()
 	r, err := NewDetector(cat, policy).Detect(context.Background(), src)
