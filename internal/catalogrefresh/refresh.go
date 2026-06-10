@@ -44,11 +44,13 @@ import (
 // + derived Environment entities), 5→6 for SC6 (the manifest carries the
 // integrations/links/docs/extensions catalog-hub blocks), and 6→7 for SC7
 // (spec.composition + composedBy edges + derived Composition entities from the
-// composition lock), and 7→8 for SC8 (composition effects → integrations
-// population + the effects declaration carried into the Composition node). Every
-// catalog id moves once per bump, the resolve memo misses once, and content
-// addressing re-stabilizes (S-1).
-const ResolverVersion = 8
+// composition lock), 7→8 for SC8 (composition effects → integrations
+// population + the effects declaration carried into the Composition node), and
+// 8→9 for the post-epic hardening review (provenance.manifestHash carried into
+// the envelope per data-model.md §2; the empty legacy composition block dropped
+// from spec). Every catalog id moves once per bump, the resolve memo misses
+// once, and content addressing re-stabilizes (S-1).
+const ResolverVersion = 9
 
 // lockTTL bounds how long a refresh lock is honored before it is treated as
 // stale (a crashed holder) and reclaimed. A resolve+write is sub-second; this
@@ -107,8 +109,11 @@ func EnsureFresh(ctx context.Context, objModelRoot, workspaceRoot string, force 
 	}
 
 	// Staleness gate: when the stored catalog was resolved against the current
-	// source, it is fresh — skip the expensive resolve (unless forced).
-	if !force {
+	// source AND the extra-source inputs (CODEOWNERS + composition lock, which
+	// may be untracked and so invisible to the source id) are unchanged since
+	// the last refresh, it is fresh — skip the expensive resolve (unless forced).
+	curInputs := objplan.WorkspaceInputsDigest(workspaceRoot)
+	if !force && curInputs == readInputsStamp(objModelRoot) {
 		if cat, lerr := objcatalog.New(store, refs).Load(ctx, "catalogs/current"); lerr == nil && cat.SourceID == curSrcID {
 			return Result{Fresh: true, SourceID: curSrcID, CatalogID: string(cat.ObjectID)}, nil
 		}
@@ -140,10 +145,11 @@ func EnsureFresh(ctx context.Context, objModelRoot, workspaceRoot string, force 
 		Workspace:      ws,
 		SourceHumanKey: sourcectx.BuildSourceSnapshotKey(ws),
 		Resolve:        func() (*catalogresolve.CatalogView, error) { return view, nil },
-	}, objplan.Options{Strict: cfg.Strict, OwnerResolver: objplan.OwnerResolverForWorkspace(workspaceRoot), CompositionResolver: objplan.CompositionResolverForWorkspace(workspaceRoot)})
+	}, objplan.Options{Strict: cfg.Strict, OwnerResolver: objplan.OwnerResolverForWorkspace(workspaceRoot), CompositionResolver: objplan.CompositionResolverForWorkspace(workspaceRoot), InputsDigest: curInputs})
 	if err != nil {
 		return Result{}, fmt.Errorf("write object-model catalog: %w", err)
 	}
+	writeInputsStamp(objModelRoot, curInputs)
 
 	return Result{
 		Refreshed: true,
@@ -151,6 +157,29 @@ func EnsureFresh(ctx context.Context, objModelRoot, workspaceRoot string, force 
 		CatalogID: string(res.CatalogID),
 		SourceID:  string(res.SourceID),
 	}, nil
+}
+
+// inputsStampPath is the sidecar recording the workspace-inputs digest the last
+// refresh resolved with. Derived state under cache/ — deletable; a missing
+// stamp just forfeits one Fresh shortcut.
+func inputsStampPath(objModelRoot string) string {
+	return filepath.Join(objModelRoot, "cache", "resolve-inputs")
+}
+
+func readInputsStamp(objModelRoot string) string {
+	b, err := os.ReadFile(inputsStampPath(objModelRoot))
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func writeInputsStamp(objModelRoot, digest string) {
+	path := inputsStampPath(objModelRoot)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return // best-effort: a missing stamp only costs a re-resolve
+	}
+	_ = os.WriteFile(path, []byte(digest), 0o644)
 }
 
 // IsStale reports whether the object-model catalog at catalogs/current was
@@ -181,7 +210,12 @@ func IsStale(ctx context.Context, objModelRoot, workspaceRoot string) (bool, err
 	if err != nil {
 		return true, nil
 	}
-	return cat.SourceID != curSrcID, nil
+	if cat.SourceID != curSrcID {
+		return true, nil
+	}
+	// Extra-source inputs (CODEOWNERS + composition lock) changed since the last
+	// refresh → stale even though the source id matches.
+	return objplan.WorkspaceInputsDigest(workspaceRoot) != readInputsStamp(objModelRoot), nil
 }
 
 // sourceID returns the content id of the source snapshot for ws — the same id

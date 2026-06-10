@@ -4,11 +4,16 @@ Resolves the catalog via the shared source selector (default 'current') and
 prints one row per component with its type, owner, system, and last execution
 status. The filter flags narrow the set; output is sorted by component key.
 
+--kind switches from the Component rows to the derived multi-kind entities
+(API, Resource, System, Domain, Group, Environment, Composition) of that kind.
+
 Examples:
   orun catalog list
   orun catalog list --source main
   orun catalog list --owner team/platform-edge
   orun catalog list --type cloudflare-worker
+  orun catalog list --kind System
+  orun catalog list --kind Environment
   orun catalog list --json
 
 Exit codes:
@@ -25,6 +30,7 @@ Flags:
       --catalog-source string     Resolve catalog by ref selector (current|main|latest|branches/<name>|prs/<n>|cat-<key>)
       --domain string             Only components in this domain
       --json                      Stable machine-readable output
+      --kind string               List entities of this kind (API|Resource|System|Domain|Group|Environment|Composition) instead of components
       --owner string              Only components with this owner
       --source string             Alias for --catalog-source
       --status string             Only components whose last execution has this status

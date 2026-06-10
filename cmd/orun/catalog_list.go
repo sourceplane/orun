@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/sourceplane/orun/internal/catalogmodel"
 	"github.com/sourceplane/orun/internal/objcatalog"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
@@ -30,7 +31,16 @@ var (
 	catalogListDomainFlag string
 	catalogListTypeFlag   string
 	catalogListStatusFlag string
+	catalogListKindFlag   string
 )
+
+// catalogListEntityRow is one row of the kind-scoped listing (--kind <Kind>,
+// orun-service-catalog SC3/SC4): the derived non-Component entities.
+type catalogListEntityRow struct {
+	Kind      string `json:"kind"`
+	EntityKey string `json:"entityKey"`
+	Name      string `json:"name"`
+}
 
 // catalogListRow is one row of the CatalogListResult envelope `data` array.
 // Field names are the stable §3 JSON contract.
@@ -57,11 +67,16 @@ Resolves the catalog via the shared source selector (default 'current') and
 prints one row per component with its type, owner, system, and last execution
 status. The filter flags narrow the set; output is sorted by component key.
 
+--kind switches from the Component rows to the derived multi-kind entities
+(API, Resource, System, Domain, Group, Environment, Composition) of that kind.
+
 Examples:
   orun catalog list
   orun catalog list --source main
   orun catalog list --owner team/platform-edge
   orun catalog list --type cloudflare-worker
+  orun catalog list --kind System
+  orun catalog list --kind Environment
   orun catalog list --json
 
 Exit codes:
@@ -81,6 +96,7 @@ Exit codes:
 	cmd.Flags().StringVar(&catalogListDomainFlag, "domain", "", "Only components in this domain")
 	cmd.Flags().StringVar(&catalogListTypeFlag, "type", "", "Only components of this type")
 	cmd.Flags().StringVar(&catalogListStatusFlag, "status", "", "Only components whose last execution has this status")
+	cmd.Flags().StringVar(&catalogListKindFlag, "kind", "", "List entities of this kind (API|Resource|System|Domain|Group|Environment|Composition) instead of components")
 	cmd.Flags().BoolVar(&catalogJSONFlag, "json", false, "Stable machine-readable output")
 
 	parent.AddCommand(cmd)
@@ -89,6 +105,10 @@ Exit codes:
 func runCatalogList(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+
+	if catalogListKindFlag != "" && catalogListKindFlag != "Component" {
+		return runCatalogListKind(ctx, catalogListKindFlag)
 	}
 
 	view, reader, err := loadObjCatalog(ctx)
@@ -129,6 +149,41 @@ func runCatalogList(ctx context.Context) error {
 		return writeCatalogEnvelope(kindCatalogListResult, rows, nil)
 	}
 	return renderCatalogListText(rows)
+}
+
+// runCatalogListKind lists the derived entities of one kind from the
+// entities/<Kind>/ subtree (orun-service-catalog SC3/SC4). The legacy Owner
+// kind name is accepted as an alias for Group.
+func runCatalogListKind(ctx context.Context, kind string) error {
+	kind = catalogmodel.NormalizeEntityKind(kind)
+	if !catalogmodel.IsEntityKind(kind) {
+		return exitErr(1, "unknown entity kind %q (one of %v)", kind, catalogmodel.AllEntityKinds())
+	}
+	view, _, err := loadObjCatalog(ctx)
+	if err != nil {
+		return err
+	}
+	rows := make([]catalogListEntityRow, 0, len(view.Entities))
+	for _, e := range view.Entities {
+		if e.Kind != kind {
+			continue
+		}
+		rows = append(rows, catalogListEntityRow{Kind: e.Kind, EntityKey: e.EntityKey, Name: e.Name})
+	}
+	if catalogJSONFlag {
+		return writeCatalogEnvelope(kindCatalogListResult, rows, nil)
+	}
+	color := ui.ColorEnabledForWriter(os.Stdout)
+	fmt.Printf("%s\n\n", ui.Bold(color, "Catalog entities — "+kind))
+	if len(rows) == 0 {
+		fmt.Println("(none)")
+		return nil
+	}
+	fmt.Printf("%-40s %s\n", "ENTITY", "KEY")
+	for _, r := range rows {
+		fmt.Printf("%-40s %s\n", r.Name, r.EntityKey)
+	}
+	return nil
 }
 
 // catalogListRowMatches applies the §3 filter flags. domain is matched against

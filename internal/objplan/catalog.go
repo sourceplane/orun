@@ -154,6 +154,11 @@ func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerRes
 		comp = compositionResolver(cm.Spec.Type)
 	}
 	spec := toMap(cm.Spec)
+	// The legacy zero CompositionRef serializes as {"source":"","type":""} —
+	// drop it so an unbound component carries no composition block at all.
+	if c, ok := spec["composition"].(map[string]any); ok && c["source"] == "" && c["type"] == "" {
+		delete(spec, "composition")
+	}
 	if comp != nil {
 		if spec == nil {
 			spec = map[string]any{}
@@ -191,7 +196,7 @@ func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerRes
 		Docs:         docsBlock(cm.Docs),
 		Links:        linksBlock(cm.Links),
 		Extensions:   cm.Extensions,
-		Provenance:   entityProvenance(cm.Resolution, resolverVersion),
+		Provenance:   entityProvenance(cm, resolverVersion),
 	}
 	return m
 }
@@ -470,13 +475,18 @@ func entityContracts(apis catalogmodel.APIDependencies) map[string]any {
 
 // entityProvenance carries the inheritance/inference trail plus the resolver
 // stamp. Deterministic from inputs, so it folds stably into the catalog id.
-func entityProvenance(res catalogmodel.ComponentResolution, resolverVersion int) map[string]any {
+func entityProvenance(cm *catalogmodel.ComponentManifest, resolverVersion int) map[string]any {
+	res := cm.Resolution
 	out := map[string]any{
 		"resolver": map[string]any{
 			"resolverVersion": resolverVersion,
 			"schemaVersion":   catalogmodel.APIVersionV1,
 		},
 	}
+	// The resolver's canonical manifestHash (computed over the resolved manifest
+	// minus provenance/source, identity-and-keys.md §10) — the spec's
+	// provenance.manifestHash field (data-model.md §2).
+	putNonEmpty(out, "manifestHash", cm.Source.ManifestHash)
 	if len(res.InheritedFrom) > 0 {
 		out["inheritedFrom"] = strMapToAny(res.InheritedFrom)
 	}

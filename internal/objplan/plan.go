@@ -33,6 +33,11 @@ type Options struct {
 	// catalogresolve pure; derived identically at every catalog-build path so the
 	// catalog content id stays path-independent.
 	CompositionResolver CompositionResolver
+	// InputsDigest is WorkspaceInputsDigest(root) — the CODEOWNERS + composition
+	// lock digest folded into the resolve-memo key, so a change to those files
+	// (which feed the catalog but may be untracked) always misses the memo
+	// instead of serving a stale catalog.
+	InputsDigest string
 }
 
 // OwnerResolver maps a component's workspace-relative source path to its
@@ -84,7 +89,7 @@ func RefreshCatalog(ctx context.Context, w *nodewriter.Writer, store objectstore
 	if opts.NoCatalog || in.Resolve == nil {
 		return res, nil
 	}
-	catID, err := writeCatalogMemoized(ctx, w, store, memo, src, srcID, rv, in.Resolve, opts.Strict, opts.OwnerResolver, opts.CompositionResolver)
+	catID, err := writeCatalogMemoized(ctx, w, store, memo.WithInputsDigest(opts.InputsDigest), src, srcID, rv, in.Resolve, opts.Strict, opts.OwnerResolver, opts.CompositionResolver)
 	if err != nil {
 		return res, err
 	}
@@ -112,7 +117,7 @@ func Plan(ctx context.Context, w *nodewriter.Writer, store objectstore.ObjectSto
 
 	var catID objectstore.ObjectID
 	if !opts.NoCatalog && in.Resolve != nil {
-		catID, err = writeCatalogMemoized(ctx, w, store, memo, src, srcID, rv, in.Resolve, opts.Strict, opts.OwnerResolver, opts.CompositionResolver)
+		catID, err = writeCatalogMemoized(ctx, w, store, memo.WithInputsDigest(opts.InputsDigest), src, srcID, rv, in.Resolve, opts.Strict, opts.OwnerResolver, opts.CompositionResolver)
 		if err != nil {
 			return res, err
 		}

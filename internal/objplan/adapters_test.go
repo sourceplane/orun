@@ -462,6 +462,68 @@ func TestCompositionResolver_ReadsEffectsFromManifest(t *testing.T) {
 	}
 }
 
+// TestWorkspaceInputsDigest asserts the digest tracks the extra-source resolver
+// inputs: present files digest, a content change moves the digest, and absent
+// files (or an empty root) yield "".
+func TestWorkspaceInputsDigest(t *testing.T) {
+	t.Parallel()
+	if WorkspaceInputsDigest("") != "" {
+		t.Error("empty root should yield empty digest")
+	}
+	dir := t.TempDir()
+	if WorkspaceInputsDigest(dir) != "" {
+		t.Error("no inputs files should yield empty digest")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "CODEOWNERS"), []byte("* @team\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d1 := WorkspaceInputsDigest(dir)
+	if d1 == "" {
+		t.Fatal("CODEOWNERS present but digest empty")
+	}
+	// Adding the composition lock changes the digest.
+	if err := os.MkdirAll(filepath.Join(dir, ".orun"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".orun", "compositions.lock.yaml"), []byte("kind: CompositionLock\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d2 := WorkspaceInputsDigest(dir)
+	if d2 == d1 {
+		t.Error("adding the lock should change the digest")
+	}
+	// Editing the lock changes it again; the digest is deterministic.
+	if err := os.WriteFile(filepath.Join(dir, ".orun", "compositions.lock.yaml"), []byte("kind: CompositionLock\nsources: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d3 := WorkspaceInputsDigest(dir)
+	if d3 == d2 {
+		t.Error("editing the lock should change the digest")
+	}
+	if WorkspaceInputsDigest(dir) != d3 {
+		t.Error("digest not deterministic")
+	}
+}
+
+// TestMapEntity_ManifestHashAndCompositionCleanup asserts the hardening-review
+// fixes: provenance carries the resolver's manifestHash (data-model.md §2), and
+// an unbound component's empty legacy composition block is dropped from spec.
+func TestMapEntity_ManifestHashAndCompositionCleanup(t *testing.T) {
+	t.Parallel()
+	cm := &catalogmodel.ComponentManifest{
+		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/x", Name: "x", Namespace: "ns", Repo: "repo"},
+		Source:   catalogmodel.ComponentSource{ManifestHash: "sha256:feedface"},
+		Spec:     catalogmodel.ComponentSpec{Type: "service"},
+	}
+	m := mapEntity(cm, 9, nil, nil)
+	if m.Provenance["manifestHash"] != "sha256:feedface" {
+		t.Errorf("provenance.manifestHash = %v", m.Provenance["manifestHash"])
+	}
+	if _, ok := m.Spec["composition"]; ok {
+		t.Errorf("empty legacy composition block should be dropped: %v", m.Spec["composition"])
+	}
+}
+
 // TestCompositionResolverForWorkspace reads a composition lock from a temp dir.
 func TestCompositionResolverForWorkspace(t *testing.T) {
 	t.Parallel()

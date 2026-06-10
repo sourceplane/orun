@@ -287,6 +287,42 @@ func kindTreeID(t *testing.T, s *objectstore.MemStore, entitiesTree objectstore.
 	return ""
 }
 
+// TestAssembleCatalogEntityNameCollision is the regression for the duplicate
+// tree-entry failure: two derived entities of one kind whose names share a last
+// segment (e.g. Groups "@org-a/edge" and "@org-b/edge") must both be written,
+// disambiguated by their sanitized entityKey, never failing the catalog write.
+func TestAssembleCatalogEntityNameCollision(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := mem()
+	manifests := []ComponentManifest{
+		{Identity: ComponentIdentity{ComponentKey: "ns/repo/a", Name: "a", Namespace: "ns", Repo: "repo"},
+			Relations: []EntityRelation{{Type: "ownedBy", To: "@org-a/edge", ToKind: "Group"}}},
+		{Identity: ComponentIdentity{ComponentKey: "ns/repo/b", Name: "b", Namespace: "ns", Repo: "repo"},
+			Relations: []EntityRelation{{Type: "ownedBy", To: "@org-b/edge", ToKind: "Group"}}},
+	}
+	catID, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 9}, manifests, nil, ImpactOwnership{}, nil)
+	if err != nil {
+		t.Fatalf("AssembleCatalog with colliding Group names: %v", err)
+	}
+	entTree, _ := findEntry(t, s, catID, dirEntities)
+	groups, err := s.GetTree(ctx, kindTreeID(t, s, entTree, "Group"))
+	if err != nil {
+		t.Fatalf("group subtree: %v", err)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("group entries = %d, want 2 (both colliding groups written)", len(groups))
+	}
+	// Both fall back to the sanitized entityKey, distinct and deterministic.
+	names := map[string]bool{}
+	for _, g := range groups {
+		names[g.Name] = true
+	}
+	if !names["org-a-edge.json"] || !names["org-b-edge.json"] {
+		t.Errorf("collision filenames = %v, want org-a-edge.json + org-b-edge.json", names)
+	}
+}
+
 func TestEntityValidate(t *testing.T) {
 	t.Parallel()
 	if err := (Entity{}).Validate(); err == nil {

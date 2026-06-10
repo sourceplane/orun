@@ -75,3 +75,34 @@ func TestPlanDefaultsScopeMode(t *testing.T) {
 		t.Fatalf("revision not written with defaulted scope")
 	}
 }
+
+// TestResolveMemoInputsDigestKeysSeparately is the staleness regression: the
+// same (sourceId, resolverVersion) with a different workspace-inputs digest
+// (CODEOWNERS / composition lock changed) must MISS the memo — never serve the
+// catalog resolved under the old inputs.
+func TestResolveMemoInputsDigestKeysSeparately(t *testing.T) {
+	t.Parallel()
+	m := NewResolveMemo(t.TempDir())
+	src, cat := id("a"), id("b")
+
+	a := m.WithInputsDigest("aaaa1111")
+	if err := a.Put(src, 9, cat); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if got, ok := a.Get(src, 9); !ok || got != cat {
+		t.Fatalf("same-digest Get = %v,%v", got, ok)
+	}
+	// A different digest (the lock changed) misses.
+	if _, ok := m.WithInputsDigest("bbbb2222").Get(src, 9); ok {
+		t.Fatal("changed inputs digest must miss the memo")
+	}
+	// No digest (no CODEOWNERS/lock) is its own key space.
+	if _, ok := m.Get(src, 9); ok {
+		t.Fatal("empty-digest key must not see the digested entry")
+	}
+	// nil-memo WithInputsDigest is a safe no-op.
+	var nilMemo *ResolveMemo
+	if nilMemo.WithInputsDigest("x") != nil {
+		t.Fatal("nil memo should stay nil")
+	}
+}
