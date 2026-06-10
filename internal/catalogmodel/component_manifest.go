@@ -10,14 +10,35 @@ package catalogmodel
 // Immutable after first write. Status mutations live in the per-catalog
 // component-execution-index, not here.
 type ComponentManifest struct {
-	APIVersion string                  `json:"apiVersion"`
-	Kind       string                  `json:"kind"`
-	Identity   ComponentIdentity       `json:"identity"`
-	Source     ComponentSource         `json:"source"`
-	Metadata   ComponentMetadata       `json:"metadata"`
-	Spec       ComponentSpec           `json:"spec"`
-	Runtime    ComponentRuntime        `json:"runtime"`
-	Resolution ComponentResolution     `json:"resolution"`
+	APIVersion string              `json:"apiVersion"`
+	Kind       string              `json:"kind"`
+	Identity   ComponentIdentity   `json:"identity"`
+	Source     ComponentSource     `json:"source"`
+	Metadata   ComponentMetadata   `json:"metadata"`
+	Spec       ComponentSpec       `json:"spec"`
+	Runtime    ComponentRuntime    `json:"runtime"`
+	Resolution ComponentResolution `json:"resolution"`
+	// Integrations / Links / Docs / Extensions are the catalog-hub blocks
+	// (orun-service-catalog SC6): typed join keys, external links, docs
+	// pointers, and namespaced x-<vendor> extensions preserved verbatim.
+	Integrations map[string]any  `json:"integrations,omitempty"`
+	Links        []ComponentLink `json:"links,omitempty"`
+	Docs         *ComponentDocs  `json:"docs,omitempty"`
+	Extensions   map[string]any  `json:"extensions,omitempty"`
+}
+
+// ComponentLink is one external link (data-model.md §2).
+type ComponentLink struct {
+	Title string `json:"title"`
+	URL   string `json:"url"`
+	Icon  string `json:"icon,omitempty"`
+}
+
+// ComponentDocs points at techdocs/runbooks/ADRs (data-model.md §2).
+type ComponentDocs struct {
+	TechDocs string   `json:"techdocs,omitempty"`
+	Runbooks []string `json:"runbooks,omitempty"`
+	ADRs     []string `json:"adrs,omitempty"`
 }
 
 // ComponentIdentity is the stable cross-source identity of a component. The
@@ -60,16 +81,16 @@ type ComponentMetadata struct {
 
 // ComponentSpec mirrors the `spec` block of the resolved manifest.
 type ComponentSpec struct {
-	Type         string                            `json:"type"`
-	Lifecycle    string                            `json:"lifecycle"`
-	System       string                            `json:"system"`
-	Domain       string                            `json:"domain"`
-	Tier         string                            `json:"tier"`
-	Composition  CompositionRef                    `json:"composition"`
-	Parameters   map[string]string                 `json:"parameters"`
-	Environments map[string]ComponentEnvironment   `json:"environments"`
-	Dependencies ComponentDependencies             `json:"dependencies"`
-	Change       *ComponentChange                  `json:"change,omitempty"`
+	Type         string                          `json:"type"`
+	Lifecycle    string                          `json:"lifecycle"`
+	System       string                          `json:"system"`
+	Domain       string                          `json:"domain"`
+	Tier         string                          `json:"tier"`
+	Composition  CompositionRef                  `json:"composition"`
+	Parameters   map[string]string               `json:"parameters"`
+	Environments map[string]ComponentEnvironment `json:"environments"`
+	Dependencies ComponentDependencies           `json:"dependencies"`
+	Change       *ComponentChange                `json:"change,omitempty"`
 }
 
 // ComponentChange carries the resolved change-detection "watch" sections (the

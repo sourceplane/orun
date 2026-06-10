@@ -162,16 +162,53 @@ func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerRes
 			// dirname is the component dir for ownership/fingerprints.
 			Path: cm.Identity.SourceFile,
 		},
-		Type:       cm.Spec.Type,
-		Metadata:   entityMetadata(cm.Metadata),
-		Ownership:  entityOwnership(cm.Metadata, own),
-		Lifecycle:  entityLifecycle(cm.Spec),
-		Spec:       toMap(cm.Spec),
-		Relations:  entityRelations(cm, own),
-		Contracts:  entityContracts(cm.Spec.Dependencies.APIs),
-		Provenance: entityProvenance(cm.Resolution, resolverVersion),
+		Type:         cm.Spec.Type,
+		Metadata:     entityMetadata(cm.Metadata),
+		Ownership:    entityOwnership(cm.Metadata, own),
+		Lifecycle:    entityLifecycle(cm.Spec),
+		Spec:         toMap(cm.Spec),
+		Relations:    entityRelations(cm, own),
+		Contracts:    entityContracts(cm.Spec.Dependencies.APIs),
+		Integrations: cm.Integrations,
+		Docs:         docsBlock(cm.Docs),
+		Links:        linksBlock(cm.Links),
+		Extensions:   cm.Extensions,
+		Provenance:   entityProvenance(cm.Resolution, resolverVersion),
 	}
 	return m
+}
+
+// docsBlock projects the docs pointers onto the envelope's generic docs map.
+func docsBlock(d *catalogmodel.ComponentDocs) map[string]any {
+	if d == nil {
+		return nil
+	}
+	out := map[string]any{}
+	putNonEmpty(out, "techdocs", d.TechDocs)
+	if len(d.Runbooks) > 0 {
+		out["runbooks"] = strSliceToAny(d.Runbooks)
+	}
+	if len(d.ADRs) > 0 {
+		out["adrs"] = strSliceToAny(d.ADRs)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// linksBlock projects the external links onto the envelope's generic link list.
+func linksBlock(links []catalogmodel.ComponentLink) []map[string]any {
+	if len(links) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(links))
+	for _, l := range links {
+		m := map[string]any{"title": l.Title, "url": l.URL}
+		putNonEmpty(m, "icon", l.Icon)
+		out = append(out, m)
+	}
+	return out
 }
 
 // resolvedOwner is the effective ownership claim for an entity: the primary

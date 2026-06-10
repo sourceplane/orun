@@ -57,6 +57,22 @@ func authoredToManifest(am AuthoredManifest, namespace, repo string) *catalogmod
 	}
 	cm.Identity.ComponentKey = catalogmodel.FormatComponentKey(namespace, repo, c.Metadata.Name)
 
+	// Catalog-hub blocks (SC6): integrations / links / docs / extensions carry
+	// from the authored spec to the resolved manifest verbatim (x-<vendor>
+	// blocks are preserved on round-trip, data-model.md §8).
+	if len(c.Spec.Integrations) > 0 {
+		cm.Integrations = c.Spec.Integrations
+	}
+	if len(c.Spec.Extensions) > 0 {
+		cm.Extensions = c.Spec.Extensions
+	}
+	for _, l := range c.Spec.Links {
+		cm.Links = append(cm.Links, catalogmodel.ComponentLink{Title: l.Title, URL: l.URL, Icon: l.Icon})
+	}
+	if d := c.Spec.Docs; d != nil && (d.TechDocs != "" || len(d.Runbooks) > 0 || len(d.ADRs) > 0) {
+		cm.Docs = &catalogmodel.ComponentDocs{TechDocs: d.TechDocs, Runbooks: d.Runbooks, ADRs: d.ADRs}
+	}
+
 	// Change-detection watches — carry the authored signals into the resolved
 	// manifest (the catalog-canonical home the affected engine reads). Pointer +
 	// omitempty so a watch-less component leaves the manifest hash unchanged.

@@ -85,6 +85,27 @@
           },
           "type": "array"
         },
+        "docs": {
+          "additionalProperties": false,
+          "properties": {
+            "adrs": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "runbooks": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "techdocs": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
         "domain": {
           "type": "string"
         },
@@ -109,6 +130,14 @@
           },
           "type": "object"
         },
+        "extensions": {
+          "additionalProperties": {},
+          "type": "object"
+        },
+        "integrations": {
+          "additionalProperties": {},
+          "type": "object"
+        },
         "labels": {
           "additionalProperties": {
             "type": "string"
@@ -117,6 +146,28 @@
         },
         "lifecycle": {
           "type": "string"
+        },
+        "links": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "icon": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "url"
+            ],
+            "type": "object"
+          },
+          "type": "array"
         },
         "owner": {
           "type": "string"
