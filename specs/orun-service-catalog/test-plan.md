@@ -5,7 +5,7 @@
 > the hash-discipline tests, the scorecard/effects fixtures, the up-conversion
 > parity gate, the examples gate, and the E2E walk. Every test ties back to an
 > invariant in `design.md` §11 and a sharpness edge S-1…S-9 (§12). The posture
-> mirrors the predecessor packs (`orun-component-catalog/test-plan.md`,
+> mirrors the predecessor packs (`archive/orun-component-catalog/test-plan.md`,
 > `orun-catalog-state/test-plan.md`): coverage gates fail CI, parity gates run
 > both paths until the old one is removed, and property tests assert the
 > invariant by name.

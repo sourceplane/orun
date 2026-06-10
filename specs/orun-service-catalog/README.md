@@ -31,7 +31,7 @@ signals back into the catalog.
 | Field | Value |
 |-------|-------|
 | Status | **Draft → Ready for review** |
-| Builds on | `specs/orun-object-model/` (object graph), `specs/orun-component-catalog/` (`catalogresolve`, `catalogmodel`), `specs/orun-catalog-state/` (`objcatalog`, `internal/affected`) |
+| Builds on | `specs/orun-object-model/` (object graph), `specs/archive/orun-component-catalog/` (`catalogresolve`, `catalogmodel`), `specs/orun-catalog-state/` (`objcatalog`, `internal/affected`) |
 | Reshapes | the flat Phase-2 `nodes.ComponentManifest` (`identity/metadata/spec/provenance`) into the multi-kind **entity envelope**; `catalogresolve/graph.go` five-graph builder into one typed relation graph |
 | Promotes | `catalogmodel.EntityRef` / `EntityKind` (scaffolding, currently unused) to first-class entity kinds |
 | apiVersion | `orun.io/v1alpha1` → **`orun.io/v1`** (lazy up-conversion on read; SC0) |
@@ -120,11 +120,11 @@ the permissive plan-engine parser) and the **struct-generated** JSON schema
 - "MUST / SHOULD / MAY" carry RFC 2119 weight in `data-model.md`,
   `compositions.md`, and `migration.md` (the correctness/compatibility contracts).
 - Entity keys are three-segment `<namespace>/<repo>/<name>` per
-  `specs/orun-component-catalog/identity-and-keys.md`, generalized with a `kind`.
+  `specs/archive/orun-component-catalog/identity-and-keys.md`, generalized with a `kind`.
 
 ## Out-of-band references
 
-- Predecessor specs: `specs/orun-object-model/`, `specs/orun-component-catalog/`,
+- Predecessor specs: `specs/orun-object-model/`, `specs/archive/orun-component-catalog/`,
   `specs/orun-catalog-state/`.
 - Coordinated epic: `specs/orun-env-scoping/` (Environment entity, SC4).
 - Packages changed: `internal/catalogmodel`, `internal/catalogresolve`,

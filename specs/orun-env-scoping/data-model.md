@@ -14,7 +14,7 @@ The plan/revision schemas from `orun-state-redesign` already record what was
 selected; this feature populates them, it does not change their shape:
 
 - `TriggerOccurrence.PlanScope`
-  (`orun-state-redesign/data-model.md` §2):
+  (`archive/orun-state-redesign/data-model.md` §2):
   `{ mode, activationMode, activeEnvironments[], changedComponents[] }`.
 - `RevSummary` (`revision.json`):
   `{ scope, activeEnvironments[], changedComponents[] }`.
