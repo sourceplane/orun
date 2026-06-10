@@ -1,9 +1,11 @@
 # Archived specs
 
-Epics that are **complete and superseded** — their design has shipped and been
-absorbed into a later epic, so they are no longer the authoritative reference for
-how orun works today. They are kept here as **frozen historical snapshots**: useful
-for understanding how the current model was reached, but not maintained.
+Epics that are **complete** — either *superseded* (their design shipped and was
+absorbed into a later epic) or *implemented and stable* (their design shipped and
+the **code** is now the reference). Either way they are no longer the
+authoritative spec for how orun works today, and are kept here as **frozen
+historical snapshots**: useful for understanding how the current model was
+reached, but not maintained.
 
 > Note: documents inside an archived epic may reference sibling specs by their
 > original `specs/<epic>/` paths (pre-archive) and describe on-disk layouts or
@@ -35,8 +37,8 @@ catalog resolution, identity/keys, and the catalog-parent mirror.
 - **Status:** Implemented — built on Phase 1 (milestones C0–C9).
 - **Superseded by:** [`specs/orun-object-model/`](../orun-object-model/) (Phase 3),
   which collapsed the Phase 2 catalog-parent **mirror** into the same object graph.
-  The active change-detection / `orun catalog` work continued in
-  [`specs/orun-catalog-state/`](../orun-catalog-state/).
+  The change-detection / `orun catalog` work landed in
+  [`specs/archive/orun-catalog-state/`](orun-catalog-state/) (implemented).
 - **Code today:** `internal/catalogstore` was deleted in
   [`specs/archive/orun-legacy-retirement/`](orun-legacy-retirement/) Bucket 1; the
   resolution model lives on in `internal/catalogresolve`, `internal/catalogmodel`,
@@ -69,6 +71,19 @@ additive feature.
   `internal/planner` (promotion), surfaced by `orun plan`/`run` and the
   env-promotion concept docs.
 
+### `orun-catalog-state/` — catalog-from-state + unified change detection
+
+Serves the component catalog from the object graph and consolidates `--changed`
+into one engine: ownership map + virtual-Merkle-tree fingerprints, the
+`internal/affected` changed/affected engine, `orun catalog affected`, and the
+cockpit's changed/affected view + drill-down.
+
+- **Status:** ✅ Implemented — milestones **CS1–CS9 complete**.
+- **Code today (the live reference):** `internal/affected` (the unified engine),
+  `internal/objcatalog` (catalog read view), the cockpit read seam
+  (`internal/cockpit/catalogread`), and the `plan`/`run --changed` +
+  `orun catalog affected` paths. `specs/orun-service-catalog/` builds on this.
+
 ## The state-model arc (for context)
 
 ```
@@ -76,9 +91,11 @@ Phase 1  orun-state-redesign      (archived)  ─┐
 Phase 2  orun-component-catalog    (archived)  ─┼─►  Phase 3  orun-object-model   (active)
                                                 │         the single, content-addressed
                                                 │         persistence stack
-         orun-catalog-state        (active)  ───┘    change-detection engine + orun catalog
+         orun-catalog-state        (archived) ─┘    change-detection engine + orun catalog (implemented)
          orun-legacy-retirement    (archived)        deleted the Phase 1/2 stores (shipped v2.15.0)
 ```
 
-The current authoritative references are `specs/orun-object-model/` and
-`specs/orun-catalog-state/`.
+The current authoritative spec reference is `specs/orun-object-model/` (the live
+persistence model). For change detection / `orun catalog`, the **code** is the
+reference (`internal/affected`, `internal/objcatalog`); the archived
+`specs/archive/orun-catalog-state/` spec records the design.

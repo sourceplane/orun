@@ -2,7 +2,7 @@
 
 > ⚠️ **STATUS: UNDER REVIEW — NOT A CURRENT REQUIREMENT.** This spec is a
 > forward-looking sketch, held for review. **Do not implement it**, and do **not**
-> let it drive the orun-side design: `specs/orun-catalog-state/` makes no
+> let it drive the orun-side design: `specs/archive/orun-catalog-state/` makes no
 > structural accommodation for this worker beyond noting that the artifacts it
 > would consume are content-addressed and already remotable. When this spec is
 > reviewed and approved, any orun-side support will be specified at that time.
@@ -12,7 +12,7 @@
 **A Cloudflare Worker that, per GitHub event, turns a changed-file set into an
 *affected component set* in milliseconds — approximate, advisory, and re-verified
 by an authoritative full resolve.** It is a **pure consumer** of the impact
-artifacts that `orun` publishes (`specs/orun-catalog-state/`). It computes; it is
+artifacts that `orun` publishes (`specs/archive/orun-catalog-state/`). It computes; it is
 never the source of truth.
 
 This is the **slow-path/fast-path** split made concrete: `orun` (the producer)
@@ -25,7 +25,7 @@ resolve wins.
 | Field | Value |
 |-------|-------|
 | Status | **UNDER REVIEW — not a current requirement; do not implement** |
-| Gated on | A separate review/approval, **then** `specs/orun-catalog-state/` CS3 (artifacts published) + CS7 (`orun catalog affected` conformance oracle) |
+| Gated on | A separate review/approval, **then** `specs/archive/orun-catalog-state/` CS3 (artifacts published) + CS7 (`orun catalog affected` conformance oracle) |
 | Runtime | Cloudflare Worker (TypeScript); state in R2 (objects) + KV (ref/index pointers) |
 | Producer/authority | `orun` — `orun catalog affected` is the **conformance oracle** this worker must match |
 | Language | TypeScript (the rest of the model is Go; this is the one cross-language seam — see drift risk) |
@@ -85,7 +85,7 @@ closure logic by contract (the conformance fixture in
 
 ## Out-of-band references
 
-- Producer spec: `specs/orun-catalog-state/` (the impact index, the contract,
+- Producer spec: `specs/archive/orun-catalog-state/` (the impact index, the contract,
   the conformance oracle).
 - Object model: `specs/orun-object-model/` (content addressing, `objremote`
   closure that moves the index to remote storage).

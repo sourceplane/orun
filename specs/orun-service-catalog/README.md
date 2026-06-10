@@ -31,7 +31,7 @@ signals back into the catalog.
 | Field | Value |
 |-------|-------|
 | Status | **Draft → Ready for review** |
-| Builds on | `specs/orun-object-model/` (object graph), `specs/archive/orun-component-catalog/` (`catalogresolve`, `catalogmodel`), `specs/orun-catalog-state/` (`objcatalog`, `internal/affected`) |
+| Builds on | `specs/orun-object-model/` (object graph), `specs/archive/orun-component-catalog/` (`catalogresolve`, `catalogmodel`), `specs/archive/orun-catalog-state/` (`objcatalog`, `internal/affected`) |
 | Reshapes | the flat Phase-2 `nodes.ComponentManifest` (`identity/metadata/spec/provenance`) into the multi-kind **entity envelope**; `catalogresolve/graph.go` five-graph builder into one typed relation graph |
 | Promotes | `catalogmodel.EntityRef` / `EntityKind` (scaffolding, currently unused) to first-class entity kinds |
 | apiVersion | `orun.io/v1alpha1` → **`orun.io/v1`** (lazy up-conversion on read; SC0) |
@@ -125,7 +125,7 @@ the permissive plan-engine parser) and the **struct-generated** JSON schema
 ## Out-of-band references
 
 - Predecessor specs: `specs/orun-object-model/`, `specs/archive/orun-component-catalog/`,
-  `specs/orun-catalog-state/`.
+  `specs/archive/orun-catalog-state/`.
 - Coordinated epic: `specs/archive/orun-env-scoping/` (Environment entity, SC4).
 - Packages changed: `internal/catalogmodel`, `internal/catalogresolve`,
   `internal/nodes`, `internal/objplan`, `internal/objcatalog`, `internal/affected`,

@@ -13,7 +13,7 @@ always-on, at org scale. The authoritative computation (a full Go resolve) is
 too slow per-event. So:
 
 ```
-PRODUCER / AUTHORITY (orun, specs/orun-catalog-state)        CONSUMER / ESTIMATOR (this worker)
+PRODUCER / AUTHORITY (orun, specs/archive/orun-catalog-state)        CONSUMER / ESTIMATOR (this worker)
 ──────────────────────────────────────────────             ──────────────────────────────────
 full resolve on boundaries (plan, refresh, merge)            per GitHub event:
   → CatalogSnapshot + impact/ownership.json                    fetch index@base (R2, edge-cached)

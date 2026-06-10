@@ -107,7 +107,7 @@ pass (D-9).
   composition effects SC8). This spec is **extracted** from its `design.md` §6 and
   `data-model.md` §6/§7.
 - Predecessor specs: `specs/orun-object-model/`, `specs/archive/orun-component-catalog/`,
-  `specs/orun-catalog-state/` (`objcatalog`, the object sweep / GC).
+  `specs/archive/orun-catalog-state/` (`objcatalog`, the object sweep / GC).
 - Packages changed: `internal/scorecard` (new), `internal/catalogmodel`
   (the `Scorecard` definition struct + generated schema), `internal/objcatalog`
   (read the overlay), the live-plane writer (SC5), `internal/catalogresolve`
