@@ -55,6 +55,7 @@ const (
 	kindCatalogHistoryResult  = "CatalogHistoryResult"
 	kindCatalogValidateResult = "CatalogValidateResult"
 	kindCatalogDiffResult     = "CatalogDiffResult"
+	kindCatalogMigrateResult  = "CatalogMigrateResult"
 )
 
 // writeCatalogEnvelope renders data as the standard envelope to stdout with
@@ -132,6 +133,7 @@ Run 'orun catalog <subcommand> --help' for details on each.`,
 	registerCatalogDiffCommand(catalogCmd)
 	registerCatalogRefsCommand(catalogCmd)
 	registerCatalogAffectedCommand(catalogCmd)
+	registerCatalogMigrateCommand(catalogCmd)
 
 	root.AddCommand(catalogCmd)
 }
