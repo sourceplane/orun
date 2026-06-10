@@ -13,7 +13,7 @@
 
 | Milestone | Phase | Status | PR | Notes |
 |-----------|-------|--------|----|-------|
-| SC0 — Shared types & version foundation | A | Not started | — | promote `EntityKind`; envelope types; reserve `tenant` segment; v1 conversion seam |
+| SC0 — Shared types & version foundation | A | **Landed** | — | promoted `EntityKind` (full enum + Owner→Group alias); `EntityEnvelope` + per-kind specs in `catalogmodel`, mirrored as `nodes.Entity`; typed relation vocabulary + inverses; reserved `tenant` segment; `v1alpha1→v1` up-convert seam (no rewrites yet) |
 | SC1 — Resolved envelope reshape + CODEOWNERS ownership | A | Not started | — | the load-bearing reshape; `resolverVersion` bump (one-time id move) |
 | SC2 — Unified typed relation graph | A | Not started | — | `relations.json`; `internal/affected` repoint; parity-gated |
 | SC3 — Multi-kind entities | B | Not started | — | API/Resource/System/Domain/Group first-class; kind-aware read |
