@@ -133,7 +133,7 @@ func EnsureFresh(ctx context.Context, objModelRoot, workspaceRoot string, force 
 		Workspace:      ws,
 		SourceHumanKey: sourcectx.BuildSourceSnapshotKey(ws),
 		Resolve:        func() (*catalogresolve.CatalogView, error) { return view, nil },
-	}, objplan.Options{Strict: cfg.Strict})
+	}, objplan.Options{Strict: cfg.Strict, OwnerResolver: objplan.OwnerResolverForWorkspace(workspaceRoot)})
 	if err != nil {
 		return Result{}, fmt.Errorf("write object-model catalog: %w", err)
 	}

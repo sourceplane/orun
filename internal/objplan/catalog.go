@@ -39,7 +39,7 @@ var graphKinds = []string{"dependencies", "systems", "apis", "resources", "owner
 // CatalogGraphs, and the change-detection ImpactOwnership map. resolverVersion
 // stamps the snapshot (it participates in the resolve memo key, not in catalog
 // identity).
-func BuildCatalogNodes(view *catalogresolve.CatalogView, resolverVersion int) (nodes.CatalogSnapshot, []nodes.ComponentManifest, []nodes.CatalogGraph, nodes.ImpactOwnership, []nodes.ComponentFingerprint) {
+func BuildCatalogNodes(view *catalogresolve.CatalogView, resolverVersion int, ownerResolver OwnerResolver) (nodes.CatalogSnapshot, []nodes.ComponentManifest, []nodes.CatalogGraph, nodes.ImpactOwnership, []nodes.ComponentFingerprint) {
 	cat := nodes.CatalogSnapshot{
 		Kind:            nodes.KindCatalogSnapshot,
 		ResolverVersion: resolverVersion,
@@ -54,7 +54,7 @@ func BuildCatalogNodes(view *catalogresolve.CatalogView, resolverVersion int) (n
 			if cm == nil {
 				continue
 			}
-			manifests = append(manifests, mapEntity(cm, resolverVersion))
+			manifests = append(manifests, mapEntity(cm, resolverVersion, ownerResolver))
 		}
 	}
 
@@ -147,7 +147,8 @@ func buildOwnership(view *catalogresolve.CatalogView) nodes.ImpactOwnership {
 // system/domain/owner edges promote to relations; provided/consumed APIs become
 // contracts; inference/inheritance stays in provenance. The deep spec/runtime
 // blocks are carried verbatim so no resolved information is lost.
-func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int) nodes.ComponentManifest {
+func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerResolver OwnerResolver) nodes.ComponentManifest {
+	own := resolveOwner(cm, ownerResolver)
 	m := nodes.ComponentManifest{
 		APIVersion: catalogmodel.APIVersionV1,
 		Kind:       nodes.KindComponentManifest,
@@ -163,14 +164,46 @@ func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int) nodes.Co
 		},
 		Type:       cm.Spec.Type,
 		Metadata:   entityMetadata(cm.Metadata),
-		Ownership:  entityOwnership(cm.Metadata),
+		Ownership:  entityOwnership(cm.Metadata, own),
 		Lifecycle:  entityLifecycle(cm.Spec),
 		Spec:       toMap(cm.Spec),
-		Relations:  entityRelations(cm),
+		Relations:  entityRelations(cm, own),
 		Contracts:  entityContracts(cm.Spec.Dependencies.APIs),
 		Provenance: entityProvenance(cm.Resolution, resolverVersion),
 	}
 	return m
+}
+
+// resolvedOwner is the effective ownership claim for an entity: the primary
+// owner, any additional owners, and the source of the claim (S-2).
+type resolvedOwner struct {
+	owner      string
+	additional []string
+	source     string // authored | CODEOWNERS | unknown
+}
+
+// resolveOwner applies the ownership precedence (design.md §4.3, S-2): an
+// authored metadata.owner wins (source=authored); otherwise CODEOWNERS over the
+// component's source path supplies it (source=CODEOWNERS); otherwise the entity
+// is unowned (source=unknown) — flagged, never silently false-owned.
+func resolveOwner(cm *catalogmodel.ComponentManifest, ownerResolver OwnerResolver) resolvedOwner {
+	if cm.Metadata.Owner != "" {
+		return resolvedOwner{
+			owner:      cm.Metadata.Owner,
+			additional: append([]string(nil), cm.Metadata.Maintainers...),
+			source:     catalogmodel.OwnershipSourceAuthored,
+		}
+	}
+	if ownerResolver != nil {
+		if owners := ownerResolver(cm.Identity.SourceFile); len(owners) > 0 {
+			return resolvedOwner{
+				owner:      owners[0],
+				additional: append(append([]string(nil), owners[1:]...), cm.Metadata.Maintainers...),
+				source:     catalogmodel.OwnershipSourceCODEOWNERS,
+			}
+		}
+	}
+	return resolvedOwner{owner: catalogmodel.OwnershipSourceUnknown, source: catalogmodel.OwnershipSourceUnknown}
 }
 
 // toMap round-trips a value through JSON into a generic map so the node record
@@ -210,21 +243,17 @@ func entityMetadata(md catalogmodel.ComponentMetadata) map[string]any {
 	return out
 }
 
-// entityOwnership builds the ownership block, recording the claim source (S-2).
-// SC1 derives the owner from the authored metadata.owner; CODEOWNERS-derived
-// ownership lands in the follow-up. The block is always present (owner may be
-// "unknown") so the portal can render an ownership cell for every entity.
-func entityOwnership(md catalogmodel.ComponentMetadata) map[string]any {
-	out := map[string]any{}
-	if md.Owner != "" {
-		out["owner"] = md.Owner
-		out["source"] = catalogmodel.OwnershipSourceAuthored
-	} else {
-		out["owner"] = catalogmodel.OwnershipSourceUnknown
-		out["source"] = catalogmodel.OwnershipSourceUnknown
+// entityOwnership builds the ownership block from the resolved owner (authored
+// or CODEOWNERS-derived), recording the claim source (S-2). The block is always
+// present (owner may be "unknown") so the portal can render an ownership cell
+// for every entity.
+func entityOwnership(md catalogmodel.ComponentMetadata, own resolvedOwner) map[string]any {
+	out := map[string]any{
+		"owner":  own.owner,
+		"source": own.source,
 	}
-	if len(md.Maintainers) > 0 {
-		out["additionalOwners"] = strSliceToAny(md.Maintainers)
+	if len(own.additional) > 0 {
+		out["additionalOwners"] = strSliceToAny(own.additional)
 	}
 	if len(md.Contacts) > 0 {
 		// Deterministic order: sort by contact type.
@@ -262,11 +291,11 @@ func entityLifecycle(spec catalogmodel.ComponentSpec) map[string]any {
 // into the envelope's typed relations array (data-model.md §3): ownedBy (owner),
 // partOf (system/domain), dependsOn (component + resource edges). Sorted by
 // (type, to) for determinism.
-func entityRelations(cm *catalogmodel.ComponentManifest) []nodes.EntityRelation {
+func entityRelations(cm *catalogmodel.ComponentManifest, own resolvedOwner) []nodes.EntityRelation {
 	var rels []nodes.EntityRelation
-	if cm.Metadata.Owner != "" {
+	if own.source != catalogmodel.OwnershipSourceUnknown && own.owner != "" {
 		rels = append(rels, nodes.EntityRelation{
-			Type: catalogmodel.RelTypeOwnedBy, To: cm.Metadata.Owner, ToKind: catalogmodel.EntityKindGroup,
+			Type: catalogmodel.RelTypeOwnedBy, To: own.owner, ToKind: catalogmodel.EntityKindGroup,
 		})
 	}
 	if cm.Spec.System != "" {

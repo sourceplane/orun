@@ -66,7 +66,7 @@ func refreshObjectCatalog(ctx context.Context) (refreshedCatalog, error) {
 		Workspace:      ws,
 		SourceHumanKey: srcKey,
 		Resolve:        resolve,
-	}, objplan.Options{})
+	}, objplan.Options{OwnerResolver: objplan.OwnerResolverForWorkspace(workspaceRoot)})
 	if err != nil {
 		return refreshedCatalog{}, err
 	}
