@@ -410,6 +410,103 @@ func (r *Reader) ComponentExecutions(ctx context.Context, component string) ([]E
 	return out, nil
 }
 
+// Deployment is one entry of the L2 live plane (orun-service-catalog
+// design.md §6 / data-model.md §6): the latest execution that ran a component
+// in a given environment. It is derived on read from objrun execution truth and
+// is NEVER persisted into an L1 catalog blob (CR-1).
+type Deployment struct {
+	Environment string
+	Revision    string // the execution's revision tree id
+	ExecutionID string
+	ExecutionKey string
+	Status      string // the execution status (succeeded/failed/…)
+	Health      string // derived: ok | degraded | unknown
+	DeployedAt  time.Time
+}
+
+// ComponentDeployments projects the live plane for one component: the most
+// recent execution per environment that included the component, newest-first by
+// environment. A pure projection of objrun (the same scan/join
+// ComponentExecutions uses, refined to (component, environment) pairs) — nothing
+// is persisted. Environments with no execution are not returned.
+func (r *Reader) ComponentDeployments(ctx context.Context, component string) ([]Deployment, error) {
+	if strings.TrimSpace(component) == "" {
+		return nil, nil
+	}
+	all, err := r.List(ctx) // newest-first
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []Deployment
+	for i := range all {
+		for _, env := range r.planEnvironmentsFor(ctx, all[i], component) {
+			if seen[env] {
+				continue // a newer execution already claimed this environment
+			}
+			seen[env] = true
+			ev := all[i]
+			when := ev.StartedAt
+			if ev.FinishedAt != nil {
+				when = *ev.FinishedAt
+			}
+			out = append(out, Deployment{
+				Environment:  env,
+				Revision:     ev.RevisionID,
+				ExecutionID:  ev.ExecutionID,
+				ExecutionKey: ev.ExecutionKey,
+				Status:       ev.Status,
+				Health:       healthFromStatus(ev.Status),
+				DeployedAt:   when,
+			})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Environment < out[j].Environment })
+	return out, nil
+}
+
+// planEnvironmentsFor returns the distinct environments the named component runs
+// in within one execution's compiled plan. Best-effort: a missing/undecodable
+// plan yields nil.
+func (r *Reader) planEnvironmentsFor(ctx context.Context, view ExecutionView, component string) []string {
+	body, err := r.planBlob(ctx, view)
+	if err != nil {
+		return nil
+	}
+	var p struct {
+		Jobs []struct {
+			Component   string `json:"component"`
+			Environment string `json:"environment"`
+		} `json:"jobs"`
+	}
+	if json.Unmarshal(body, &p) != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var envs []string
+	for _, j := range p.Jobs {
+		if j.Component != component || j.Environment == "" || seen[j.Environment] {
+			continue
+		}
+		seen[j.Environment] = true
+		envs = append(envs, j.Environment)
+	}
+	return envs
+}
+
+// healthFromStatus derives a coarse health signal from an execution status (the
+// v1 live-plane health; the scorecard engine refines maturity in the v2 epic).
+func healthFromStatus(status string) string {
+	switch status {
+	case nodes.StatusSucceeded:
+		return "ok"
+	case nodes.StatusFailed, nodes.StatusCancelled:
+		return "degraded"
+	default:
+		return "unknown"
+	}
+}
+
 // Plan decodes an execution's full compiled plan (the revision's plan.json)
 // into a model.Plan. It is the full-fidelity sibling of PlanSummary, used by
 // the cockpit's Activity drilldown to enumerate a historical run's jobs and

@@ -28,6 +28,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
 	"github.com/sourceplane/orun/internal/objcatalog"
+	"github.com/sourceplane/orun/internal/objread"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -35,8 +36,9 @@ import (
 // catalogDescribeData is the --json payload: the full manifest plus the
 // catalog-local execution rows for the component (§4).
 type catalogDescribeData struct {
-	Manifest   catalogmodel.ComponentManifest       `json:"manifest"`
-	Executions []catalogmodel.ComponentExecutionRow `json:"executions"`
+	Manifest    catalogmodel.ComponentManifest       `json:"manifest"`
+	Executions  []catalogmodel.ComponentExecutionRow `json:"executions"`
+	Deployments []objread.Deployment                 `json:"deployments,omitempty"`
 }
 
 func registerCatalogDescribeCommand(parent *cobra.Command) {
@@ -111,13 +113,21 @@ func runCatalogDescribe(ctx context.Context, arg string) error {
 		})
 	}
 
+	// Live plane (L2): the latest deployment per environment, derived on read
+	// from objrun execution truth (never persisted — CR-1).
+	deployments, derr := reader.ComponentDeployments(ctx, arg)
+	if derr != nil {
+		return exitErr(3, "read deployments: %w", derr)
+	}
+
 	if catalogJSONFlag {
 		return writeCatalogEnvelope(kindCatalogDescribeResult, catalogDescribeData{
-			Manifest:   manifest,
-			Executions: execs,
+			Manifest:    manifest,
+			Executions:  execs,
+			Deployments: deployments,
 		}, nil)
 	}
-	return renderCatalogDescribeText(manifest, execs)
+	return renderCatalogDescribeText(manifest, execs, deployments)
 }
 
 // selectObjComponent resolves the §4 component selector against the object-model
@@ -246,7 +256,7 @@ func roundTripInto(src, dst any) {
 	_ = json.Unmarshal(b, dst)
 }
 
-func renderCatalogDescribeText(m catalogmodel.ComponentManifest, execs []catalogmodel.ComponentExecutionRow) error {
+func renderCatalogDescribeText(m catalogmodel.ComponentManifest, execs []catalogmodel.ComponentExecutionRow, deployments []objread.Deployment) error {
 	color := ui.ColorEnabledForWriter(os.Stdout)
 	out := os.Stdout
 
@@ -334,6 +344,22 @@ func renderCatalogDescribeText(m catalogmodel.ComponentManifest, execs []catalog
 	kv("PackageMgrs", strings.Join(m.Runtime.Inferred.PackageManagers, ", "))
 	kv("Frameworks", strings.Join(m.Runtime.Inferred.Frameworks, ", "))
 	kv("Infra", strings.Join(m.Runtime.Inferred.Infra, ", "))
+
+	// L2 live plane: the latest deployment per environment, derived on read from
+	// objrun (orun-service-catalog design.md §6). Never persisted into the L1
+	// manifest (CR-1).
+	section("Live deployments")
+	if len(deployments) == 0 {
+		fmt.Fprintln(out, "  (none)")
+	} else {
+		for _, d := range deployments {
+			when := ""
+			if !d.DeployedAt.IsZero() {
+				when = d.DeployedAt.UTC().Format(time.RFC3339)
+			}
+			fmt.Fprintf(out, "  %-14s %-10s health=%-9s %s\n", d.Environment, d.Status, d.Health, when)
+		}
+	}
 
 	section("Latest executions")
 	if len(execs) == 0 {
