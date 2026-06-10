@@ -7,6 +7,23 @@ metadata:
 spec:
   type: cloudflare-worker-turbo
   domain: platform-runtime
+  system: edge-gateway
+  lifecycle: production
+  integrations:
+    datadog:
+      service: api-edge-worker
+      team: platform-runtime
+    pagerduty:
+      serviceId: PEDGE01
+  links:
+    - title: Runbook
+      url: https://example.com/runbooks/api-edge
+      icon: book
+  docs:
+    techdocs: docs/
+  extensions:
+    x-orun-demo:
+      tier: gold
   subscribe:
     environments:
       - name: dev
