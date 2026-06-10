@@ -6,9 +6,10 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **In progress — Phase D landed (SC0–SC8 + SC1b), adoption started (SC10)** |
-| Shipped | SC0, SC1 (+SC1b CODEOWNERS), SC2, SC3, SC4, SC5, SC6, SC7, SC8, SC10 (partial) — the full resolved entity graph (envelope · relations.json · multi-kind `entities/<Kind>/` · derived Environments · Composition-as-Entity), the derived-on-read live plane, the integrations hub + extension registry, and compositions as catalogued **producers** (`effects`→integrations), all dogfooded in `examples/` |
-| Remaining | SC8 graph-effects (emit Deployment/Resource/API entities from `effects.graph`), SC10 (broaden + example compositions), SC11 (legacy migration tooling) |
+| Status | **All in-scope milestones landed — SC0–SC8, SC10, SC11 (SC9/SC12 extracted/deferred)** |
+| Shipped | SC0, SC1 (+SC1b CODEOWNERS), SC2, SC3, SC4, SC5, SC6, SC7, SC8, SC10, SC11 — the full resolved entity graph (envelope · relations.json · multi-kind `entities/<Kind>/` · derived Environments · Composition-as-Entity), the derived-on-read live plane, the integrations hub + extension registry, compositions as catalogued **producers** (`effects`→integrations), the examples dogfood, and the `orun catalog migrate` adoption lint |
+| Follow-ups (in-milestone) | SC8 graph-effects (emit Deployment/Resource/API from `effects.graph`); SC11 lazy `v1alpha1→v1` up-conversion on read + composition codemod; SC10 broaden component coverage |
+| Out of scope (extracted/deferred) | SC9 → `specs/orun-scaffolding/` (v2); SC12 → attestation + multi-tenant federation (follow-on); scorecard engine → `specs/orun-scorecards/` (v2) |
 | Resolver version | bumped 1→8 across SC1–SC8 (one content-id move per envelope/tree change, S-1) |
 | Builds on | `orun-object-model` (merged), `orun-component-catalog`, `orun-catalog-state`; legacy stack retired (`orun-legacy-retirement`) |
 | Store | single object model (`.orun/objectmodel/`); no dual-write |
