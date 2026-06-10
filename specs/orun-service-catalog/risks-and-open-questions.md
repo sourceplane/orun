@@ -18,7 +18,7 @@
 | D-7 | One store or dual-write | **Single store only (the object model); no dual-write** | The `catalogstore` era is over (`orun-legacy-retirement`). Every milestone writes the object model only (`implementation-plan.md` "No double-write"). |
 | D-8 | `Owner` kind label | **Rename `EntityKind: Owner → Group`, with a read-time alias** | Portal vocabulary; non-destructive — persisted `Owner` nodes/edges read-alias to `Group`; owner keys (`group:*`/`user:*`) unchanged (`migration.md` §4). |
 | D-9 | Scorecard missing input | **Missing-input predicate → `unknown` (counts as not-passed, rendered distinctly), never a silent pass** | A hand-maintained checklist that drifts is the failure mode; external-data rules degrade to `unknown`, not false-pass (S-5, `data-model.md` §7). |
-| D-10 | Env-as-entity scope here | **Environment-as-entity is additive + read-only in this spec; the single-env redesign stays in `specs/orun-env-scoping/`** | This spec can *supply* the identity that epic needs without implementing it; avoids a collision (S-4, SC4). |
+| D-10 | Env-as-entity scope here | **Environment-as-entity is additive + read-only in this spec; the single-env redesign stays in `specs/archive/orun-env-scoping/`** | This spec can *supply* the identity that epic needs without implementing it; avoids a collision (S-4, SC4). |
 | D-11 | Non-Component authoring (was Q-1) | **Derive API/Resource/… from component specs; one escape hatch — a top-level `apis:`/`resources:` block in `intent.yaml` for shared/ownerless contracts. Dedicated `api.yaml` files deferred (L-6).** | Convention-first (D-4); covers the shared-contract case without a new file-discovery/parser surface. |
 | D-12 | Live-plane persistence (was Q-2) | **Deployments/health derived on read (scan+filter over `objrun`); no persisted overlay, no `objindex` in v1.** | Avoids a cache-coherence problem; matches the `orun-catalog-state` scan+filter precedent; `objindex` deferred (L-7). |
 | D-13 | Extension registry (was Q-4) | **Compiled-in for first-party `x-orun-*`; in-repo config for org `x-<vendor>-*`; remote-fetch deferred (L-3).** | First-party validated; orgs register without recompiling; remote carries supply-chain concerns. Mirrors composition source model. |
@@ -48,7 +48,7 @@ the two that belong to extracted epics are owned there.
 > `specs/orun-scorecards/` (v2) and **golden-path scaffolding** by
 > `specs/orun-scaffolding/` (v2), both drafted for separate review (L-8/L-9);
 > no-default env resolution, `defaultEnvironment` placement, multi-env
-> CI/promotion, single-env enforcement are owned by `specs/orun-env-scoping/` and
+> CI/promotion, single-env enforcement are owned by `specs/archive/orun-env-scoping/` and
 > finalized in that epic (L-5); `extends`-precedence, `effects` expressivity
 > ceiling, and composition semver bump policy are tracked in `compositions.md`
 > §11 and resolved within SC7–SC8.
@@ -81,7 +81,7 @@ the two that belong to extracted epics are owned there.
 | **L-2** | **SaaS web UI build** (read-only consumer) | Out of scope to build; the read/action seam is kept open (`orun-catalog-state` consumers, L-5 there) | the web UI is designed |
 | **L-3** | **Vendor integration connectors / SaaS fan-out implementation** | The registry defines the *seam* only (SC6); vendor adapters ship separately | a connector is prioritized |
 | **L-4** | **R2/S3 remote object driver** | Rides the existing `objremote` closure; no change needed in this spec | a remote-object backend is required |
-| **L-5** | **System-wide single-env enforcement** | Breaking run-path change beyond the catalog boundary; owned by `specs/orun-env-scoping/` | the env-scoping epic lands; coordinate at SC4 |
+| **L-5** | **System-wide single-env enforcement** | Breaking run-path change beyond the catalog boundary; owned by `specs/archive/orun-env-scoping/` | the env-scoping epic lands; coordinate at SC4 |
 | **L-6** | **Dedicated per-kind authoring files** (`api.yaml`/`resource.yaml`) | Only if Q-1 chooses derive-only for v1 | a kind needs first-class authoring beyond component specs |
 | **L-7** | **`objindex` component/entity→execution index** | v1 uses an L2 scan + filter join over `objrun` (the cockpit's existing pattern) | the scan + filter join is measured too slow at scale |
 | **L-8** | **Scorecard engine** (production-readiness / maturity) | Extracted for separate review; this epic keeps only the foundations (D-17) | review `specs/orun-scorecards/` (drafted, v2) — gated on SC5/SC8 |

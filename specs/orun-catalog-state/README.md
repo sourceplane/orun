@@ -75,7 +75,7 @@ sourcectx → SourceID(current)             ChangeSource (git diff  OR  virtual-
    mapped to the object lineage, the event model, and the gaps (G-1…G-4).
 4. **`environments.md`** — the cockpit env selector + component-scoped run on the
    **existing** env model (no schema change). The single-env redesign is a
-   separate epic, `specs/orun-env-scoping/`.
+   separate epic, `specs/archive/orun-env-scoping/`.
 5. **`data-model.md`** — the ownership map, the virtual-tree fingerprints, the
    `Affected` result type, the catalog read-view types, the `Path` fix.
 6. **`cli-surface.md`** — universal refresh, cockpit behavior + the changed

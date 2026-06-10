@@ -1,6 +1,6 @@
 # Object-model — post-M12 follow-ups
 
-The **M0–M13 roadmap is complete** (see `IMPLEMENTATION-STATUS.md`): the
+The **M0–M13 roadmap is complete** (see `_archive/IMPLEMENTATION-STATUS.md`): the
 content-addressed object model is the sole execution representation, the legacy
 `internal/state` file store is deleted, and the coexistence flags are removed.
 
@@ -52,7 +52,8 @@ interaction, read-path fallthrough (loose → pack). `design.md` lists it as a
 "deferred milestone, profiling-gated" — i.e., do it only when profiling on real
 histories shows loose objects are the bottleneck.
 
-**Status.** Deferred to Phase-3 (`design.md`, `risks-and-open-questions.md`).
+**Status.** Deferred, profiling-gated. Now owned by `specs/orun-objectmodel-perf/`
+§2 (relocated from the archived `orun-legacy-retirement` Bucket 5).
 
 ---
 
@@ -85,8 +86,9 @@ efforts' own designs. The command was removed in the object-model cutover; those
 specs are stale with respect to it, but reconciling them belongs to those
 efforts, not this one.
 
-The remaining **legacy catalog/revision store** (`internal/catalogstore` →
+The **legacy catalog/revision store** (`internal/catalogstore` →
 `internal/statestore`, plus `internal/revision` / `internal/executionstate` — the
-Phase‑1/2 stack still dual-written on `orun run` and backing `orun catalog *`) is
-**not** part of this object-model roadmap either. Its retirement is planned
-separately in `specs/orun-legacy-retirement/` (the promoted D‑7 / L‑3 follow-on).
+Phase‑1/2 stack) was **not** part of this object-model roadmap either; its
+retirement was completed separately in `specs/archive/orun-legacy-retirement/`
+(the promoted D‑7 / L‑3 follow-on, archived; the stack is deleted and the lint
+gate bans the imports).

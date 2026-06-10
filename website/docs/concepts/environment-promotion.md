@@ -103,7 +103,7 @@ When environments are activated by different triggers (e.g., PR activates previe
 Gates encode that the same component should have succeeded in the referenced environment for the same source revision.
 
 :::note Gates are advisory today
-Cross-plan promotion **gates are recorded in the plan but not yet enforced at run time** — cross-pipeline (cross-invocation) gating is deferred (the env-scoping "Z" model calls this "Option C"). In-plan `dependsOn` ordering is the only *enforced* promotion mechanism. `orun plan`/`run` print a one-line notice when a plan carries gates, so you know they are not gating execution. To order a promotion chain end-to-end today, include the related environments in one plan/run (e.g. `--all-envs`). See the [env-scoping spec](https://github.com/sourceplane/orun/tree/main/specs/orun-env-scoping).
+Cross-plan promotion **gates are recorded in the plan but not yet enforced at run time** — cross-pipeline (cross-invocation) gating is deferred (the env-scoping "Z" model calls this "Option C"). In-plan `dependsOn` ordering is the only *enforced* promotion mechanism. `orun plan`/`run` print a one-line notice when a plan carries gates, so you know they are not gating execution. To order a promotion chain end-to-end today, include the related environments in one plan/run (e.g. `--all-envs`). See the [env-scoping spec](https://github.com/sourceplane/orun/tree/main/specs/archive/orun-env-scoping).
 :::
 
 ## Strategies

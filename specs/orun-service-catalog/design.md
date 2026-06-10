@@ -60,7 +60,7 @@
   `specs/orun-scaffolding/` (v2); only the authored composition `scaffold` block
   stays (`compositions.md` §5).
 - Shipping vendor integration *connectors* (the registry defines the seam only).
-- The single-env redesign (`specs/orun-env-scoping/`); Environment-as-entity here
+- The single-env redesign (`specs/archive/orun-env-scoping/`); Environment-as-entity here
   is additive and coordinates with, but does not implement, that epic.
 
 ## 3. The three planes (formalized)

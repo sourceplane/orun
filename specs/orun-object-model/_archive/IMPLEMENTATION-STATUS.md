@@ -14,7 +14,7 @@ store is **deleted**; and the `ORUN_OBJECT_MODEL` / `ORUN_OBJECT_RUNNER`
 coexistence flags are **removed** (the object model is unconditional, no longer
 gated).
 
-**Legacy persistence stack fully retired** (`specs/orun-legacy-retirement/`
+**Legacy persistence stack fully retired** (`specs/archive/orun-legacy-retirement/`
 Bucket 1): the Phase-1/2 catalog/revision store — `internal/catalogstore`,
 `internal/statestore`, `internal/revision`, `internal/executionstate`,
 `internal/catalogsync` — is **deleted**. Every `orun catalog *` command,

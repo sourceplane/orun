@@ -1,5 +1,10 @@
 # Feature: orun-env-scoping (the "Z" model)
 
+> **📦 ARCHIVED — complete.** Shipped in **v2.15.0** (ES1–ES5) and closed. Kept as
+> a frozen historical snapshot, not maintained; the behavior lives on in the
+> `orun plan`/`run` selection model and the env-promotion docs. For current
+> reference see `specs/orun-catalog-state/`.
+
 > **Status: ✅ shipped in v2.15.0 — a small, almost-non-breaking feature** (was
 > framed as a breaking epic; it converged to a feature). **Principle: selection is a
 > *plan-time* concern; the plan is executed faithfully; a *mutating* `run` is

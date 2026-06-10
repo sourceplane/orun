@@ -97,7 +97,7 @@ all as a **consumer** of the read/action seams (`consumers.md`).
   level via the existing `objrun` path, **component-scoped for the one selected
   env** (`environments.md`), only for components active in it. The single-env
   *redesign* (`defaultEnvironment`, removing the all-env path) is a separate epic
-  (`specs/orun-env-scoping/`, L-1) — **not here**. The action seam stays separate
+  (`specs/archive/orun-env-scoping/`, L-1) — **not here**. The action seam stays separate
   from the read seam.
 
 **Deps:** CS2, CS3, CS4. **PR scope:** 4–5 PRs (seam; gate+hook; view-models +

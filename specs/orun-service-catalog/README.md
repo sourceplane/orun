@@ -35,7 +35,7 @@ signals back into the catalog.
 | Reshapes | the flat Phase-2 `nodes.ComponentManifest` (`identity/metadata/spec/provenance`) into the multi-kind **entity envelope**; `catalogresolve/graph.go` five-graph builder into one typed relation graph |
 | Promotes | `catalogmodel.EntityRef` / `EntityKind` (scaffolding, currently unused) to first-class entity kinds |
 | apiVersion | `orun.io/v1alpha1` → **`orun.io/v1`** (lazy up-conversion on read; SC0) |
-| Coordinates with | `specs/orun-env-scoping/` (env-as-entity, SC4, can unblock that epic) |
+| Coordinates with | `specs/archive/orun-env-scoping/` (env-as-entity, SC4, can unblock that epic) |
 | Decisions locked | derived-truth catalog; three planes (authored / resolved-immutable / live-mutable); one typed relation graph shared with the change engine; compositions are catalogued producers of derived truth; convention-over-configuration authoring; lazy schema up-conversion (never destructive); examples migrate in-repo; a legacy migration path is delivered |
 
 ## The one-paragraph thesis
@@ -100,7 +100,7 @@ COMPOSITIONS as PRODUCERS:  a golden-path run emits Deployment + Environment ent
 
 | In scope (this spec) | Out of scope |
 |----------------------|--------------|
-| Entity envelope (`metadata`/`ownership`/`lifecycle`/`relations`/`contracts`/`integrations`/`docs`/`provenance`/`extensions`); promotion to multi-kind (Component/API/Resource/System/Domain/Group + derived Environment/Deployment); the unified typed relation graph; CODEOWNERS-derived ownership; the **live plane** (deployments/health derived from execution) + the reserved `lifecycle.maturity` foundation; the integrations hub + typed extension registry; composition envelope + contract + `effects` derivation (graph + integrations) + the authored `scaffold` / `effects.scorecards` declarations; updating `examples/**`; the legacy migration tooling + doc; lazy `v1` up-conversion | **The scorecard engine — extracted to `specs/orun-scorecards/` (v2)**; **golden-path scaffolding / `orun create` — extracted to `specs/orun-scaffolding/` (v2)**; attestation/signing + multi-tenant federation (SC12, **follow-on**); the SaaS web UI build (read seam kept open — `consumers.md` of `orun-catalog-state`, L-5); external integration *connectors* (the registry defines the seam; vendor adapters ship separately); the single-env redesign (`specs/orun-env-scoping/`); R2/S3 remote object driver (rides `objremote`, deferred) |
+| Entity envelope (`metadata`/`ownership`/`lifecycle`/`relations`/`contracts`/`integrations`/`docs`/`provenance`/`extensions`); promotion to multi-kind (Component/API/Resource/System/Domain/Group + derived Environment/Deployment); the unified typed relation graph; CODEOWNERS-derived ownership; the **live plane** (deployments/health derived from execution) + the reserved `lifecycle.maturity` foundation; the integrations hub + typed extension registry; composition envelope + contract + `effects` derivation (graph + integrations) + the authored `scaffold` / `effects.scorecards` declarations; updating `examples/**`; the legacy migration tooling + doc; lazy `v1` up-conversion | **The scorecard engine — extracted to `specs/orun-scorecards/` (v2)**; **golden-path scaffolding / `orun create` — extracted to `specs/orun-scaffolding/` (v2)**; attestation/signing + multi-tenant federation (SC12, **follow-on**); the SaaS web UI build (read seam kept open — `consumers.md` of `orun-catalog-state`, L-5); external integration *connectors* (the registry defines the seam; vendor adapters ship separately); the single-env redesign (`specs/archive/orun-env-scoping/`); R2/S3 remote object driver (rides `objremote`, deferred) |
 
 ## Convention over configuration (locked)
 
@@ -126,7 +126,7 @@ the permissive plan-engine parser) and the **struct-generated** JSON schema
 
 - Predecessor specs: `specs/orun-object-model/`, `specs/archive/orun-component-catalog/`,
   `specs/orun-catalog-state/`.
-- Coordinated epic: `specs/orun-env-scoping/` (Environment entity, SC4).
+- Coordinated epic: `specs/archive/orun-env-scoping/` (Environment entity, SC4).
 - Packages changed: `internal/catalogmodel`, `internal/catalogresolve`,
   `internal/nodes`, `internal/objplan`, `internal/objcatalog`, `internal/affected`,
   `internal/composition`, `internal/model` (`composition.go`), `cmd/orun`, and
