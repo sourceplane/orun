@@ -44,9 +44,11 @@ import (
 // + derived Environment entities), 5→6 for SC6 (the manifest carries the
 // integrations/links/docs/extensions catalog-hub blocks), and 6→7 for SC7
 // (spec.composition + composedBy edges + derived Composition entities from the
-// composition lock). Every catalog id moves once per bump, the resolve memo
-// misses once, and content addressing re-stabilizes (S-1).
-const ResolverVersion = 7
+// composition lock), and 7→8 for SC8 (composition effects → integrations
+// population + the effects declaration carried into the Composition node). Every
+// catalog id moves once per bump, the resolve memo misses once, and content
+// addressing re-stabilizes (S-1).
+const ResolverVersion = 8
 
 // lockTTL bounds how long a refresh lock is honored before it is treated as
 // stale (a crashed holder) and reclaimed. A resolve+write is sub-second; this

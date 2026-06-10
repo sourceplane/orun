@@ -160,6 +160,13 @@ func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerRes
 		}
 		spec["composition"] = compositionSpecMap(comp)
 	}
+	// SC8: a backing composition's effects.integrations declaration populates the
+	// component's integrations (the golden path registers the service); authored
+	// integrations (SC6) still win on a key conflict.
+	integrations := cm.Integrations
+	if comp != nil && comp.Effects != nil {
+		integrations = mergeIntegrations(cm.Integrations, comp.Effects.Integrations)
+	}
 	m := nodes.ComponentManifest{
 		APIVersion: catalogmodel.APIVersionV1,
 		Kind:       nodes.KindComponentManifest,
@@ -180,7 +187,7 @@ func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerRes
 		Spec:         spec,
 		Relations:    entityRelations(cm, own, comp),
 		Contracts:    entityContracts(cm.Spec.Dependencies.APIs),
-		Integrations: cm.Integrations,
+		Integrations: integrations,
 		Docs:         docsBlock(cm.Docs),
 		Links:        linksBlock(cm.Links),
 		Extensions:   cm.Extensions,
@@ -190,13 +197,45 @@ func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerRes
 }
 
 // compositionSpecMap projects a composition binding onto the spec.composition
-// block (data-model.md §5): the source name + content digest + source pointer.
+// block (data-model.md §5): the source name + content digest + source pointer,
+// plus the SC8 effects *declaration* (what the golden path produces).
 func compositionSpecMap(c *CompositionMeta) map[string]any {
 	out := map[string]any{"source": c.Name}
 	putNonEmpty(out, "digest", c.Digest)
 	putNonEmpty(out, "sourceKind", c.SourceKind)
 	putNonEmpty(out, "sourceRef", c.SourceRef)
 	putNonEmpty(out, "sourcePath", c.SourcePath)
+	if c.Effects != nil {
+		eff := map[string]any{}
+		if len(c.Effects.Integrations) > 0 {
+			eff["integrations"] = c.Effects.Integrations
+		}
+		if len(c.Effects.Scorecards) > 0 {
+			eff["scorecards"] = c.Effects.Scorecards
+		}
+		if len(c.Effects.Provides) > 0 {
+			eff["provides"] = strSliceToAny(c.Effects.Provides)
+		}
+		if len(eff) > 0 {
+			out["effects"] = eff
+		}
+	}
+	return out
+}
+
+// mergeIntegrations overlays the golden-path-declared integrations under any
+// authored ones (authored wins). Returns nil when both are empty.
+func mergeIntegrations(authored, declared map[string]any) map[string]any {
+	if len(authored) == 0 && len(declared) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(authored)+len(declared))
+	for k, v := range declared {
+		out[k] = v
+	}
+	for k, v := range authored {
+		out[k] = v
+	}
 	return out
 }
 

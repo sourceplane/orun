@@ -47,15 +47,37 @@ type CompositionDocument struct {
 
 // CompositionDocumentSpec is the portable contract for one composition type.
 type CompositionDocumentSpec struct {
-	Type              string                       `yaml:"type" json:"type"`
-	Description       string                       `yaml:"description,omitempty" json:"description,omitempty"`
-	DefaultJob        string                       `yaml:"defaultJob" json:"defaultJob"`
-	DefaultProfile    string                       `yaml:"defaultProfile,omitempty" json:"defaultProfile,omitempty"`
-	SchemaRef         *ResourceRef                 `yaml:"schemaRef,omitempty" json:"schemaRef,omitempty"`
-	ParameterSchema   map[string]interface{}       `yaml:"parameterSchema,omitempty" json:"parameterSchema,omitempty"`
-	ExecutionProfiles map[string]ExecutionProfile  `yaml:"executionProfiles,omitempty" json:"executionProfiles,omitempty"`
-	Jobs              []CompositionJobEntry        `yaml:"jobs" json:"jobs"`
-	Profiles          []CompositionProfileEntry    `yaml:"profiles,omitempty" json:"profiles,omitempty"`
+	Type              string                      `yaml:"type" json:"type"`
+	Description       string                      `yaml:"description,omitempty" json:"description,omitempty"`
+	DefaultJob        string                      `yaml:"defaultJob" json:"defaultJob"`
+	DefaultProfile    string                      `yaml:"defaultProfile,omitempty" json:"defaultProfile,omitempty"`
+	SchemaRef         *ResourceRef                `yaml:"schemaRef,omitempty" json:"schemaRef,omitempty"`
+	ParameterSchema   map[string]interface{}      `yaml:"parameterSchema,omitempty" json:"parameterSchema,omitempty"`
+	ExecutionProfiles map[string]ExecutionProfile `yaml:"executionProfiles,omitempty" json:"executionProfiles,omitempty"`
+	Jobs              []CompositionJobEntry       `yaml:"jobs" json:"jobs"`
+	Profiles          []CompositionProfileEntry   `yaml:"profiles,omitempty" json:"profiles,omitempty"`
+	// Effects declares what running this golden path contributes back to the
+	// catalog (orun-service-catalog SC8, compositions.md §3/§4): integration
+	// join-keys it registers, APIs/Resources it provisions, and the scorecard
+	// contributions it satisfies. Declarations only — the live plane records what
+	// actually happened (declared-vs-actual, S-7).
+	Effects *CompositionEffects `yaml:"effects,omitempty" json:"effects,omitempty"`
+}
+
+// CompositionEffects is the producer declaration on a composition (data-model.md
+// §5). All fields are intent, not observation.
+type CompositionEffects struct {
+	// Integrations is the join-key shape the golden path registers (datadog,
+	// pagerduty, …) — merged into the integrations block of every component the
+	// composition backs.
+	Integrations map[string]interface{} `yaml:"integrations,omitempty" json:"integrations,omitempty"`
+	// Provides names the API/Resource entity keys the golden path provisions or
+	// exposes (derived into entities via the composition).
+	Provides []string `yaml:"provides,omitempty" json:"provides,omitempty"`
+	// Scorecards is the scorecard-contribution declaration, carried verbatim into
+	// the resolved Composition node but NOT evaluated here (the scorecard engine
+	// is the v2 epic specs/orun-scorecards/).
+	Scorecards map[string]interface{} `yaml:"scorecards,omitempty" json:"scorecards,omitempty"`
 }
 
 // ResourceRef is a named reference to another resource in the same package.
@@ -69,14 +91,14 @@ type CompositionJobEntry struct {
 	TemplateRef *ResourceRef `yaml:"templateRef,omitempty" json:"templateRef,omitempty"`
 
 	// Inline job fields (used when templateRef is nil)
-	Description string                 `yaml:"description,omitempty" json:"description,omitempty"`
-	RunsOn      string                 `yaml:"runsOn,omitempty" json:"runsOn,omitempty"`
-	Timeout     string                 `yaml:"timeout,omitempty" json:"timeout,omitempty"`
-	Retries     int                    `yaml:"retries,omitempty" json:"retries,omitempty"`
-	Steps       []Step                 `yaml:"steps,omitempty" json:"steps,omitempty"`
-	Inputs      map[string]interface{} `yaml:"inputs,omitempty" json:"inputs,omitempty"`
-	Labels      map[string]string      `yaml:"labels,omitempty" json:"labels,omitempty"`
-	Capabilities []string              `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
+	Description  string                 `yaml:"description,omitempty" json:"description,omitempty"`
+	RunsOn       string                 `yaml:"runsOn,omitempty" json:"runsOn,omitempty"`
+	Timeout      string                 `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	Retries      int                    `yaml:"retries,omitempty" json:"retries,omitempty"`
+	Steps        []Step                 `yaml:"steps,omitempty" json:"steps,omitempty"`
+	Inputs       map[string]interface{} `yaml:"inputs,omitempty" json:"inputs,omitempty"`
+	Labels       map[string]string      `yaml:"labels,omitempty" json:"labels,omitempty"`
+	Capabilities []string               `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
 }
 
 // CompositionProfileEntry represents a profile in the composition — either inline or via profileRef.
@@ -112,9 +134,9 @@ type ExecutionProfile struct {
 
 // ProfilePolicies defines enforcement rules for a profile.
 type ProfilePolicies struct {
-	RequireCleanGitTree          bool `yaml:"requireCleanGitTree,omitempty" json:"requireCleanGitTree,omitempty"`
+	RequireCleanGitTree           bool `yaml:"requireCleanGitTree,omitempty" json:"requireCleanGitTree,omitempty"`
 	RequirePinnedTerraformVersion bool `yaml:"requirePinnedTerraformVersion,omitempty" json:"requirePinnedTerraformVersion,omitempty"`
-	RequireApproval              bool `yaml:"requireApproval,omitempty" json:"requireApproval,omitempty"`
+	RequireApproval               bool `yaml:"requireApproval,omitempty" json:"requireApproval,omitempty"`
 }
 
 // ProfileJobSpec selects which steps from a base job are included in a profile.
@@ -141,10 +163,10 @@ type CompositionPackage struct {
 
 // CompositionPackageSpec defines versioned exported compositions.
 type CompositionPackageSpec struct {
-	Version      string                   `yaml:"version" json:"version"`
-	Orun        CompositionPackageOrun `yaml:"orun,omitempty" json:"orun,omitempty"`
-	Exports      []CompositionExport      `yaml:"exports" json:"exports"`
-	Dependencies []CompositionDependency  `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
+	Version      string                  `yaml:"version" json:"version"`
+	Orun         CompositionPackageOrun  `yaml:"orun,omitempty" json:"orun,omitempty"`
+	Exports      []CompositionExport     `yaml:"exports" json:"exports"`
+	Dependencies []CompositionDependency `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
 }
 
 // CompositionPackageOrun constrains compatible orun versions.
@@ -225,10 +247,10 @@ type CompositionLockSource struct {
 
 // ComponentSchemaDocument is the self-describing schema definition (kind: ComponentSchema).
 type ComponentSchemaDocument struct {
-	APIVersion string               `yaml:"apiVersion" json:"apiVersion"`
-	Kind       string               `yaml:"kind" json:"kind"`
-	Metadata   Metadata             `yaml:"metadata" json:"metadata"`
-	Spec       ComponentSchemaSpec  `yaml:"spec" json:"spec"`
+	APIVersion string              `yaml:"apiVersion" json:"apiVersion"`
+	Kind       string              `yaml:"kind" json:"kind"`
+	Metadata   Metadata            `yaml:"metadata" json:"metadata"`
+	Spec       ComponentSchemaSpec `yaml:"spec" json:"spec"`
 }
 
 // ComponentSchemaSpec defines the JSON schema for a component type.
