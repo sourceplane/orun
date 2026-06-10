@@ -59,7 +59,7 @@ func writeObjectModelRefresh(ctx context.Context, view *catalogresolve.CatalogVi
 		Workspace:      ws,
 		SourceHumanKey: srcHumanKey,
 		Resolve:        func() (*catalogresolve.CatalogView, error) { return view, nil },
-	}, objplan.Options{Strict: catalogStrictFlag})
+	}, objplan.Options{Strict: catalogStrictFlag, OwnerResolver: ownerResolverForCWD()})
 	if err != nil {
 		return objectModelRefresh{}, err
 	}

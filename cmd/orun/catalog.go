@@ -20,6 +20,7 @@ import (
 	"github.com/sourceplane/orun/internal/catalogmodel"
 	"github.com/sourceplane/orun/internal/catalogrefresh"
 	"github.com/sourceplane/orun/internal/catalogresolve"
+	"github.com/sourceplane/orun/internal/objplan"
 	"github.com/sourceplane/orun/internal/sourcectx"
 	"github.com/spf13/cobra"
 )
@@ -154,6 +155,19 @@ func catalogWorkspaceRoot() (string, error) {
 		return "", fmt.Errorf("resolve workspace root: %w", err)
 	}
 	return abs, nil
+}
+
+// ownerResolverForCWD derives the CODEOWNERS owner resolver for the catalog
+// workspace root, or nil when the root can't be resolved or no CODEOWNERS file
+// exists. Every cmd-side catalog build uses it so the resolved ownership — and
+// thus the catalog content id — matches the refresh path (orun-service-catalog
+// SC1, S-2).
+func ownerResolverForCWD() objplan.OwnerResolver {
+	root, err := catalogWorkspaceRoot()
+	if err != nil {
+		return nil
+	}
+	return objplan.OwnerResolverForWorkspace(root)
 }
 
 // The resolver-input builders below delegate to internal/catalogrefresh — the

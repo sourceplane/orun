@@ -1,6 +1,8 @@
 package objplan
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
@@ -118,7 +120,7 @@ func sampleView() *catalogresolve.CatalogView {
 
 func TestBuildCatalogNodes(t *testing.T) {
 	t.Parallel()
-	cat, manifests, graphs, ownership, _ := BuildCatalogNodes(sampleView(), 2)
+	cat, manifests, graphs, ownership, _ := BuildCatalogNodes(sampleView(), 2, nil)
 	if cat.Kind != nodes.KindCatalogSnapshot || cat.ResolverVersion != 2 || cat.HumanKey != "cat-x" {
 		t.Fatalf("catalog = %+v", cat)
 	}
@@ -146,7 +148,7 @@ func TestBuildCatalogNodes(t *testing.T) {
 		t.Fatalf("derived ownership invalid: %v", err)
 	}
 	// nil view is tolerated.
-	c2, m2, g2, o2, _ := BuildCatalogNodes(nil, 1)
+	c2, m2, g2, o2, _ := BuildCatalogNodes(nil, 1, nil)
 	if c2.Kind != nodes.KindCatalogSnapshot || m2 != nil || g2 != nil {
 		t.Fatalf("nil view = %+v %v %v", c2, m2, g2)
 	}
@@ -164,7 +166,7 @@ func TestBuildCatalogNodesManyGraphsPositional(t *testing.T) {
 			{}, {}, {}, {}, {}, {}, // 6 graphs: 5 named + 1 overflow
 		},
 	}
-	_, _, graphs, _, _ := BuildCatalogNodes(view, 1)
+	_, _, graphs, _, _ := BuildCatalogNodes(view, 1, nil)
 	want := []string{"dependencies", "systems", "apis", "resources", "owners", "graph5"}
 	for i, g := range graphs {
 		if g.EdgeKind != want[i] {
@@ -179,7 +181,7 @@ func TestMapEntity_CarriesChangeWatches(t *testing.T) {
 		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", Namespace: "ns", Repo: "repo"},
 		Spec:     catalogmodel.ComponentSpec{Type: "worker", Change: &catalogmodel.ComponentChange{Watches: []string{"env", "groups"}}},
 	}
-	m := mapEntity(cm, 2)
+	m := mapEntity(cm, 2, nil)
 	// The node manifest spec carries change.watches verbatim — the path the
 	// affected engine reads (spec.change.watches) for intent-impact watch mode.
 	change, ok := m.Spec["change"].(map[string]any)
@@ -223,7 +225,7 @@ func TestMapEntity_Envelope(t *testing.T) {
 		Runtime:    catalogmodel.ComponentRuntime{Inferred: catalogmodel.ComponentInferred{Languages: []string{"go"}}},
 		Resolution: catalogmodel.ComponentResolution{InheritedFrom: map[string]string{"spec.lifecycle": "intent.yaml"}},
 	}
-	m := mapEntity(cm, 2)
+	m := mapEntity(cm, 2, nil)
 
 	if m.APIVersion != catalogmodel.APIVersionV1 || m.Type != "worker" {
 		t.Fatalf("apiVersion/type = %q/%q", m.APIVersion, m.Type)
@@ -297,6 +299,89 @@ func TestMapEntity_Envelope(t *testing.T) {
 }
 
 // TestMapEntity_UnknownOwner asserts an unowned component gets owner=unknown,
+// TestMapEntity_CodeownersOwnership asserts the ownership precedence (S-2):
+// authored owner wins; otherwise a CODEOWNERS match supplies owner + source;
+// otherwise unknown. The ownedBy relation tracks the resolved owner.
+func TestMapEntity_CodeownersOwnership(t *testing.T) {
+	t.Parallel()
+	resolver := OwnerResolver(func(path string) []string {
+		if path == "apps/api/component.yaml" {
+			return []string{"@org/api-team", "@org/sre"}
+		}
+		return nil
+	})
+
+	// 1. No authored owner + CODEOWNERS match → source=CODEOWNERS.
+	cm := &catalogmodel.ComponentManifest{
+		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", Namespace: "ns", Repo: "repo", SourceFile: "apps/api/component.yaml"},
+		Spec:     catalogmodel.ComponentSpec{Type: "worker"},
+	}
+	m := mapEntity(cm, 3, resolver)
+	if m.Ownership["owner"] != "@org/api-team" || m.Ownership["source"] != catalogmodel.OwnershipSourceCODEOWNERS {
+		t.Fatalf("codeowners ownership = %v", m.Ownership)
+	}
+	add, _ := m.Ownership["additionalOwners"].([]any)
+	if len(add) != 1 || add[0] != "@org/sre" {
+		t.Errorf("additionalOwners = %v", m.Ownership["additionalOwners"])
+	}
+	var ownedBy bool
+	for _, r := range m.Relations {
+		if r.Type == "ownedBy" && r.To == "@org/api-team" && r.ToKind == "Group" {
+			ownedBy = true
+		}
+	}
+	if !ownedBy {
+		t.Errorf("missing ownedBy relation to CODEOWNERS owner: %+v", m.Relations)
+	}
+
+	// 2. Authored owner wins over CODEOWNERS.
+	cm.Metadata.Owner = "authored-team"
+	m = mapEntity(cm, 3, resolver)
+	if m.Ownership["owner"] != "authored-team" || m.Ownership["source"] != catalogmodel.OwnershipSourceAuthored {
+		t.Fatalf("authored should win: %v", m.Ownership)
+	}
+
+	// 3. No authored owner + no CODEOWNERS match → unknown, no ownedBy edge.
+	cm2 := &catalogmodel.ComponentManifest{
+		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/orphan", Name: "orphan", Namespace: "ns", Repo: "repo", SourceFile: "libs/orphan/component.yaml"},
+		Spec:     catalogmodel.ComponentSpec{Type: "library"},
+	}
+	m = mapEntity(cm2, 3, resolver)
+	if m.Ownership["source"] != catalogmodel.OwnershipSourceUnknown {
+		t.Fatalf("orphan should be unknown: %v", m.Ownership)
+	}
+	for _, r := range m.Relations {
+		if r.Type == "ownedBy" {
+			t.Errorf("unowned must have no ownedBy edge: %+v", m.Relations)
+		}
+	}
+}
+
+// TestOwnerResolverForWorkspace reads a CODEOWNERS file from a temp workspace.
+func TestOwnerResolverForWorkspace(t *testing.T) {
+	t.Parallel()
+	if OwnerResolverForWorkspace("") != nil {
+		t.Error("empty root should yield nil resolver")
+	}
+	dir := t.TempDir()
+	if OwnerResolverForWorkspace(dir) != nil {
+		t.Error("no CODEOWNERS file should yield nil resolver")
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".github"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".github", "CODEOWNERS"), []byte("apps/* @team\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := OwnerResolverForWorkspace(dir)
+	if r == nil {
+		t.Fatal("CODEOWNERS present but resolver nil")
+	}
+	if owners := r("apps/api"); len(owners) != 1 || owners[0] != "@team" {
+		t.Errorf("resolver(apps/api) = %v", owners)
+	}
+}
+
 // source=unknown and no ownedBy relation.
 func TestMapEntity_UnknownOwner(t *testing.T) {
 	t.Parallel()
@@ -304,7 +389,7 @@ func TestMapEntity_UnknownOwner(t *testing.T) {
 		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/x", Name: "x", Namespace: "ns", Repo: "repo"},
 		Spec:     catalogmodel.ComponentSpec{Type: "service"},
 	}
-	m := mapEntity(cm, 2)
+	m := mapEntity(cm, 2, nil)
 	if m.Ownership["owner"] != catalogmodel.OwnershipSourceUnknown || m.Ownership["source"] != catalogmodel.OwnershipSourceUnknown {
 		t.Errorf("unowned ownership = %v", m.Ownership)
 	}

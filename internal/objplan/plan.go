@@ -22,7 +22,16 @@ type Options struct {
 	NoCatalog bool
 	// ResolverVersion keys the resolve memo; defaults to 1 when zero.
 	ResolverVersion int
+	// OwnerResolver, when set, supplies CODEOWNERS-derived owners for a
+	// component's source path (orun-service-catalog SC1, S-2). It is provided by
+	// the caller (which reads CODEOWNERS) so catalogresolve stays pure. Authored
+	// ownership still wins; this fills the gap when none is authored.
+	OwnerResolver OwnerResolver
 }
+
+// OwnerResolver maps a component's workspace-relative source path to its
+// CODEOWNERS owners (the first is primary), or nil when none match.
+type OwnerResolver func(path string) []string
 
 // Input carries the pre-computed plan inputs plus a lazy catalog resolver. The
 // resolver is only invoked on a memo miss, which is what makes the strict walk
@@ -69,7 +78,7 @@ func RefreshCatalog(ctx context.Context, w *nodewriter.Writer, store objectstore
 	if opts.NoCatalog || in.Resolve == nil {
 		return res, nil
 	}
-	catID, err := writeCatalogMemoized(ctx, w, store, memo, src, srcID, rv, in.Resolve, opts.Strict)
+	catID, err := writeCatalogMemoized(ctx, w, store, memo, src, srcID, rv, in.Resolve, opts.Strict, opts.OwnerResolver)
 	if err != nil {
 		return res, err
 	}
@@ -97,7 +106,7 @@ func Plan(ctx context.Context, w *nodewriter.Writer, store objectstore.ObjectSto
 
 	var catID objectstore.ObjectID
 	if !opts.NoCatalog && in.Resolve != nil {
-		catID, err = writeCatalogMemoized(ctx, w, store, memo, src, srcID, rv, in.Resolve, opts.Strict)
+		catID, err = writeCatalogMemoized(ctx, w, store, memo, src, srcID, rv, in.Resolve, opts.Strict, opts.OwnerResolver)
 		if err != nil {
 			return res, err
 		}
@@ -147,6 +156,7 @@ func writeCatalogMemoized(
 	resolverVersion int,
 	resolve func() (*catalogresolve.CatalogView, error),
 	strict bool,
+	ownerResolver OwnerResolver,
 ) (objectstore.ObjectID, error) {
 	catalogRefs := CatalogRefs(src)
 
@@ -168,7 +178,7 @@ func writeCatalogMemoized(
 		}
 		return "", nil // tolerant: skip the catalog edge
 	}
-	cat, manifests, graphs, ownership, fingerprints := BuildCatalogNodes(view, resolverVersion)
+	cat, manifests, graphs, ownership, fingerprints := BuildCatalogNodes(view, resolverVersion, ownerResolver)
 	cat.SourceID = string(srcID)
 	catID, err := w.WriteCatalog(ctx, cat, manifests, graphs, ownership, fingerprints, catalogRefs...)
 	if err != nil {
