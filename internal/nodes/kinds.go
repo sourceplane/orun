@@ -92,6 +92,7 @@ const (
 	fileOwnership   = "ownership.json"
 	dirFingerprints = "fingerprints"
 	fileRelations   = "relations.json"
+	dirEntities     = "entities"
 	dirExecutions = "executions"
 	dirJobs       = "jobs"
 	dirAttempts   = "attempts"

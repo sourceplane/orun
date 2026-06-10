@@ -199,6 +199,75 @@ func TestAssembleCatalogWritesRelations(t *testing.T) {
 	}
 }
 
+func TestAssembleCatalogDerivesMultiKindEntities(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := mem()
+	manifests := []ComponentManifest{
+		{Identity: ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", Namespace: "ns", Repo: "repo"},
+			Relations: []EntityRelation{
+				{Type: "partOf", To: "ns/repo/identity", ToKind: "System"},
+				{Type: "partOf", To: "ns/repo/platform", ToKind: "Domain"},
+				{Type: "ownedBy", To: "@org/api-team", ToKind: "Group"},
+				{Type: "dependsOn", To: "ns/repo/cache", ToKind: "Resource"},
+			},
+			Contracts: map[string]any{
+				"provides": []any{map[string]any{"api": "ns/repo/api-spec"}},
+				"consumes": []any{map[string]any{"api": "ns/repo/auth"}},
+			}},
+		// A second component in the same system must not double-count it.
+		{Identity: ComponentIdentity{ComponentKey: "ns/repo/web", Name: "web", Namespace: "ns", Repo: "repo"},
+			Relations: []EntityRelation{{Type: "partOf", To: "ns/repo/identity", ToKind: "System"}}},
+	}
+	catID, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 4}, manifests, nil, ImpactOwnership{}, nil)
+	if err != nil {
+		t.Fatalf("AssembleCatalog: %v", err)
+	}
+	// catalog.json carries countsByKind.
+	catBlob, _ := findEntry(t, s, catID, fileCatalog)
+	snap, err := Decode[CatalogSnapshot]([]byte(blobBody(t, s, catBlob)))
+	if err != nil {
+		t.Fatalf("decode catalog: %v", err)
+	}
+	want := map[string]int{"Component": 2, "System": 1, "Domain": 1, "Group": 1, "Resource": 1, "API": 2}
+	for k, v := range want {
+		if snap.CountsByKind[k] != v {
+			t.Errorf("countsByKind[%s] = %d, want %d (%v)", k, snap.CountsByKind[k], v, snap.CountsByKind)
+		}
+	}
+	// entities/ subtree holds one tree per derived kind.
+	entTree, entKind := findEntry(t, s, catID, dirEntities)
+	if entKind != objectstore.KindTree {
+		t.Fatalf("entities not a tree: %s", entKind)
+	}
+	kindDirs, _ := s.GetTree(ctx, entTree)
+	gotKinds := map[string]bool{}
+	for _, kd := range kindDirs {
+		gotKinds[kd.Name] = true
+	}
+	for _, k := range []string{"System", "Domain", "Group", "Resource", "API"} {
+		if !gotKinds[k] {
+			t.Errorf("entities/ missing kind %q (got %v)", k, gotKinds)
+		}
+	}
+}
+
+func TestEntityValidate(t *testing.T) {
+	t.Parallel()
+	if err := (Entity{}).Validate(); err == nil {
+		t.Error("empty kind accepted")
+	}
+	if err := (Entity{Kind: "System"}).Validate(); err == nil {
+		t.Error("empty entityKey accepted")
+	}
+	if err := (Entity{Kind: "System", Identity: EntityIdentity{EntityKey: "k"}}).Validate(); err == nil {
+		t.Error("empty name accepted")
+	}
+	if err := (Entity{Kind: "System", Identity: EntityIdentity{EntityKey: "k", Name: "n"}}).Validate(); err != nil {
+		t.Errorf("valid entity rejected: %v", err)
+	}
+}
+
 func TestRelationGraphValidate(t *testing.T) {
 	t.Parallel()
 	if err := (RelationGraph{Kind: "Nope"}).Validate(); err == nil {

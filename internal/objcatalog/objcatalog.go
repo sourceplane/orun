@@ -30,6 +30,7 @@ const (
 	fileOwnership   = "ownership.json"
 	dirFingerprints = "fingerprints"
 	fileRelations   = "relations.json"
+	dirEntities     = "entities"
 )
 
 // CatalogView is one resolved catalog, read back from the object graph. It is
@@ -38,11 +39,23 @@ type CatalogView struct {
 	SourceID     string                     // edge: the source it was resolved against (freshness gate)
 	HumanKey     string                     // the catalog snapshot's human key
 	Components   []CatalogComponentView     // catalog members, sorted by component key
+	Entities     []EntityView               // derived non-Component entities (API/Resource/System/Domain/Group, SC3), sorted by (kind, key)
+	CountsByKind map[string]int             // per-kind entity counts from catalog.json (SC3); nil for older catalogs
 	Graph        map[string]GraphView       // edgeKind → graph slice (dependencies, systems, …)
 	Relations    []RelationEdgeView         // the single typed relation graph (relations.json, SC2); nil for older catalogs
 	Ownership    *OwnershipView             // nil when impact/ is absent (older catalogs)
 	Fingerprints map[string]FingerprintView // componentKey → stored input fingerprint; nil when absent
 	ObjectID     objectstore.ObjectID       // the catalog Merkle root this view was read from
+}
+
+// EntityView is the read view of one derived multi-kind entity blob under
+// entities/<Kind>/ (orun-service-catalog/data-model.md §2/§4).
+type EntityView struct {
+	Kind      string
+	EntityKey string
+	Name      string
+	Namespace string
+	Repo      string
 }
 
 // RelationEdgeView is one forward edge of the catalog-wide relation graph
@@ -205,6 +218,7 @@ func (r *Reader) Load(ctx context.Context, ref string) (CatalogView, error) {
 			}
 			view.SourceID = snap.SourceID
 			view.HumanKey = snap.HumanKey
+			view.CountsByKind = snap.CountsByKind
 			sawCatalog = true
 		case e.Name == dirComponents && e.Kind == objectstore.KindTree:
 			comps, cerr := r.readComponents(ctx, e.ID)
@@ -212,6 +226,12 @@ func (r *Reader) Load(ctx context.Context, ref string) (CatalogView, error) {
 				return CatalogView{}, cerr
 			}
 			view.Components = comps
+		case e.Name == dirEntities && e.Kind == objectstore.KindTree:
+			ents, eerr := r.readEntities(ctx, e.ID)
+			if eerr != nil {
+				return CatalogView{}, eerr
+			}
+			view.Entities = ents
 		case e.Name == dirGraph && e.Kind == objectstore.KindTree:
 			graph, gerr := r.readGraph(ctx, e.ID)
 			if gerr != nil {
@@ -282,6 +302,52 @@ func (r *Reader) readComponents(ctx context.Context, treeID objectstore.ObjectID
 		out = append(out, componentView(m))
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].ComponentKey < out[j].ComponentKey })
+	return out, nil
+}
+
+// readEntities walks the entities/<Kind>/ subtree and decodes every derived
+// entity blob into a flat, sorted view (sorted by kind then entityKey). The
+// kind label comes from the decoded blob, independent of the directory name.
+func (r *Reader) readEntities(ctx context.Context, treeID objectstore.ObjectID) ([]EntityView, error) {
+	kindTrees, err := r.store.GetTree(ctx, treeID)
+	if err != nil {
+		return nil, err
+	}
+	var out []EntityView
+	for _, kt := range kindTrees {
+		if kt.Kind != objectstore.KindTree {
+			continue
+		}
+		blobs, berr := r.store.GetTree(ctx, kt.ID)
+		if berr != nil {
+			return nil, berr
+		}
+		for _, b := range blobs {
+			if b.Kind != objectstore.KindBlob {
+				continue
+			}
+			e, derr := decodeBlob[nodes.Entity](ctx, r.store, b.ID)
+			if derr != nil {
+				return nil, derr
+			}
+			out = append(out, EntityView{
+				Kind:      e.Kind,
+				EntityKey: e.Identity.EntityKey,
+				Name:      e.Identity.Name,
+				Namespace: e.Identity.Namespace,
+				Repo:      e.Identity.Repo,
+			})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Kind != out[j].Kind {
+			return out[i].Kind < out[j].Kind
+		}
+		return out[i].EntityKey < out[j].EntityKey
+	})
+	if len(out) == 0 {
+		return nil, nil
+	}
 	return out, nil
 }
 

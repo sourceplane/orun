@@ -171,6 +171,21 @@ func TestLoad_CurrentRef(t *testing.T) {
 	if api.Owner != "team/platform-edge" || api.OwnerSource != "authored" {
 		t.Errorf("owner projection = %q/%q", api.Owner, api.OwnerSource)
 	}
+
+	// SC3: the Domain entity derived from the partOf relation is enumerated,
+	// and catalog.json carries countsByKind.
+	var sawDomain bool
+	for _, e := range view.Entities {
+		if e.Kind == "Domain" && e.Name == "edge" {
+			sawDomain = true
+		}
+	}
+	if !sawDomain {
+		t.Errorf("derived Domain entity not enumerated: %+v", view.Entities)
+	}
+	if view.CountsByKind["Component"] != 2 || view.CountsByKind["Domain"] != 1 {
+		t.Errorf("countsByKind = %v", view.CountsByKind)
+	}
 	if api.Stage != "production" {
 		t.Errorf("Stage = %q", api.Stage)
 	}
@@ -324,6 +339,54 @@ func TestLoad_WithImpactOwnership(t *testing.T) {
 	}
 	if len(o.IgnoreDirs) != 2 {
 		t.Errorf("ignoreDirs = %v", o.IgnoreDirs)
+	}
+}
+
+func TestLoad_ReadsEntities_MultiKindAndSkips(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	sysBlob, _ := f.store.PutBlob(ctx, []byte(`{"apiVersion":"orun.io/v1","kind":"System","identity":{"entityKey":"ns/repo/identity","kind":"System","name":"identity"}}`))
+	grpBlob, _ := f.store.PutBlob(ctx, []byte(`{"apiVersion":"orun.io/v1","kind":"Group","identity":{"entityKey":"@org/team","kind":"Group","name":"team"}}`))
+	// A kind subtree with a valid blob plus a stray non-blob entry (skipped).
+	strayTree, _ := f.store.PutTree(ctx, nil)
+	sysTree, _ := f.store.PutTree(ctx, []objectstore.TreeEntry{
+		{Name: "identity.json", Kind: objectstore.KindBlob, ID: sysBlob},
+		{Name: "stray", Kind: objectstore.KindTree, ID: strayTree},
+	})
+	grpTree, _ := f.store.PutTree(ctx, []objectstore.TreeEntry{{Name: "team.json", Kind: objectstore.KindBlob, ID: grpBlob}})
+	// A top-level non-tree entry (skipped) sits beside the kind subtrees.
+	entities, _ := f.store.PutTree(ctx, []objectstore.TreeEntry{
+		{Name: "System", Kind: objectstore.KindTree, ID: sysTree},
+		{Name: "Group", Kind: objectstore.KindTree, ID: grpTree},
+		{Name: "note.txt", Kind: objectstore.KindBlob, ID: sysBlob},
+	})
+	root := seedCatalogWithExtraSubtree(t, f, dirEntities, entities)
+
+	view, err := New(f.store, f.refs).Load(ctx, string(root))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(view.Entities) != 2 {
+		t.Fatalf("entities = %+v", view.Entities)
+	}
+	// Sorted by (kind, key): Group before System.
+	if view.Entities[0].Kind != "Group" || view.Entities[0].Name != "team" {
+		t.Errorf("first entity = %+v", view.Entities[0])
+	}
+	if view.Entities[1].Kind != "System" || view.Entities[1].EntityKey != "ns/repo/identity" {
+		t.Errorf("second entity = %+v", view.Entities[1])
+	}
+}
+
+func TestLoad_CorruptEntityBlob(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	bad, _ := f.store.PutBlob(ctx, []byte(`{not json`))
+	kindTree, _ := f.store.PutTree(ctx, []objectstore.TreeEntry{{Name: "x.json", Kind: objectstore.KindBlob, ID: bad}})
+	entities, _ := f.store.PutTree(ctx, []objectstore.TreeEntry{{Name: "System", Kind: objectstore.KindTree, ID: kindTree}})
+	root := seedCatalogWithExtraSubtree(t, f, dirEntities, entities)
+	if _, err := New(f.store, f.refs).Load(ctx, string(root)); err == nil {
+		t.Fatal("corrupt entity blob should fail load")
 	}
 }
 

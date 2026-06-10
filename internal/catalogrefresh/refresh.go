@@ -37,11 +37,12 @@ import (
 // catalogs share a content id.
 //
 // Bumped 1→2 for the orun-service-catalog SC1 envelope reshape (the resolved
-// blob graduates from the flat manifest to the entity envelope) and 2→3 for SC2
-// (the catalog tree gains the single typed relations.json graph). Every catalog
-// id moves once per bump, the resolve memo misses once, and content addressing
-// re-stabilizes (S-1).
-const ResolverVersion = 3
+// blob graduates from the flat manifest to the entity envelope), 2→3 for SC2
+// (the catalog tree gains the single typed relations.json graph), and 3→4 for
+// SC3 (the catalog tree gains the entities/<Kind>/ subtree + catalog.json
+// countsByKind). Every catalog id moves once per bump, the resolve memo misses
+// once, and content addressing re-stabilizes (S-1).
+const ResolverVersion = 4
 
 // lockTTL bounds how long a refresh lock is honored before it is treated as
 // stale (a crashed holder) and reclaimed. A resolve+write is sub-second; this

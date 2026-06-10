@@ -157,8 +157,21 @@ func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifest
 		graphIDs[g.EdgeKind] = string(gid)
 	}
 
+	// Derive the non-Component entities (API/Resource/System/Domain/Group) from
+	// the relations/contracts already carried on each manifest, and write them
+	// under entities/<Kind>/ (orun-service-catalog SC3). Component blobs remain
+	// under components/ in this milestone; the full unification to
+	// entities/Component/ is the SC3 follow-up.
+	derived := deriveEntities(manifests)
+	entitiesTreeID, countsByKind, err := assembleEntities(ctx, s, derived)
+	if err != nil {
+		return "", err
+	}
+	countsByKind[EntityKindComponent] = len(refs)
+
 	cat.Components = refs
 	cat.ComponentCount = len(refs)
+	cat.CountsByKind = countsByKind
 	if len(graphIDs) > 0 {
 		cat.GraphIDs = graphIDs
 	}
@@ -192,10 +205,140 @@ func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifest
 	return s.PutTree(ctx, []objectstore.TreeEntry{
 		blobEntry(fileCatalog, catBlobID),
 		treeEntry(dirComponents, compTreeID),
+		treeEntry(dirEntities, entitiesTreeID),
 		treeEntry(dirGraph, graphTreeID),
 		blobEntry(fileRelations, relationsBlobID),
 		treeEntry(dirImpact, impactTreeID),
 	})
+}
+
+// Entity kind constants for the derived multi-kind entities (mirrors
+// catalogmodel.EntityKind*; kept local so nodes carries no catalogmodel import).
+const (
+	EntityKindComponent = "Component"
+	EntityKindAPI       = "API"
+	EntityKindResource  = "Resource"
+	EntityKindSystem    = "System"
+	EntityKindDomain    = "Domain"
+	EntityKindGroup     = "Group"
+)
+
+// deriveEntities builds the distinct non-Component entities implied by the
+// component set: System/Domain (partOf), Group (ownedBy), API (contracts),
+// Resource (dependsOn Resource). Deterministic: returned sorted by (kind, key).
+func deriveEntities(manifests []ComponentManifest) []Entity {
+	type key struct{ kind, k string }
+	seen := map[key]*Entity{}
+	order := []key{}
+	ensure := func(kind, entityKey, name string) {
+		kk := key{kind, entityKey}
+		if _, ok := seen[kk]; ok {
+			return
+		}
+		e := &Entity{
+			APIVersion: "orun.io/v1",
+			Kind:       kind,
+			Identity:   EntityIdentity{EntityKey: entityKey, Kind: kind, Name: name},
+		}
+		seen[kk] = e
+		order = append(order, kk)
+	}
+	for _, m := range manifests {
+		for _, r := range m.Relations {
+			switch {
+			case r.Type == "partOf" && r.ToKind == EntityKindSystem:
+				ensure(EntityKindSystem, r.To, lastSegment(r.To))
+			case r.Type == "partOf" && r.ToKind == EntityKindDomain:
+				ensure(EntityKindDomain, r.To, lastSegment(r.To))
+			case r.Type == "ownedBy" && r.ToKind == EntityKindGroup:
+				ensure(EntityKindGroup, r.To, lastSegment(r.To))
+			case r.Type == "dependsOn" && r.ToKind == EntityKindResource:
+				ensure(EntityKindResource, r.To, lastSegment(r.To))
+			}
+		}
+		for _, api := range contractAPIs(m.Contracts) {
+			ensure(EntityKindAPI, api, lastSegment(api))
+		}
+	}
+	sort.Slice(order, func(i, j int) bool {
+		if order[i].kind != order[j].kind {
+			return order[i].kind < order[j].kind
+		}
+		return order[i].k < order[j].k
+	})
+	out := make([]Entity, 0, len(order))
+	for _, kk := range order {
+		out = append(out, *seen[kk])
+	}
+	return out
+}
+
+// contractAPIs returns the api keys named in a manifest's contracts block
+// (provides + consumes), tolerating the generic-map shape.
+func contractAPIs(contracts map[string]any) []string {
+	if contracts == nil {
+		return nil
+	}
+	var out []string
+	for _, side := range []string{"provides", "consumes"} {
+		list, _ := contracts[side].([]any)
+		for _, raw := range list {
+			entry, _ := raw.(map[string]any)
+			if api, _ := entry["api"].(string); api != "" {
+				out = append(out, api)
+			}
+		}
+	}
+	return out
+}
+
+func lastSegment(s string) string {
+	if i := strings.LastIndexByte(s, '/'); i >= 0 && i < len(s)-1 {
+		return s[i+1:]
+	}
+	return s
+}
+
+// assembleEntities writes each derived entity as entities/<Kind>/<name>.json and
+// returns the entities/ subtree id plus the per-kind counts. The subtree is
+// always written (possibly empty) for a uniform catalog tree shape.
+func assembleEntities(ctx context.Context, s store, entities []Entity) (ObjectID, map[string]int, error) {
+	counts := map[string]int{}
+	byKind := map[string][]objectstore.TreeEntry{}
+	for _, e := range entities {
+		e.APIVersion = "orun.io/v1"
+		if err := e.Validate(); err != nil {
+			return "", nil, err
+		}
+		b, err := Encode(e)
+		if err != nil {
+			return "", nil, err
+		}
+		id, err := s.PutBlob(ctx, b)
+		if err != nil {
+			return "", nil, err
+		}
+		byKind[e.Kind] = append(byKind[e.Kind], blobEntry(sanitizeSegment(e.Identity.Name)+".json", id))
+		counts[e.Kind]++
+	}
+	kinds := make([]string, 0, len(byKind))
+	for k := range byKind {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	kindEntries := make([]objectstore.TreeEntry, 0, len(kinds))
+	for _, k := range kinds {
+		treeID, err := s.PutTree(ctx, byKind[k])
+		if err != nil {
+			return "", nil, err
+		}
+		kindEntries = append(kindEntries, treeEntry(sanitizeSegment(k), treeID))
+	}
+	treeID, err := s.PutTree(ctx, kindEntries)
+	if err != nil {
+		return "", nil, err
+	}
+	return treeID, counts, nil
 }
 
 // assembleRelations builds the single typed relation graph (relations.json) from
