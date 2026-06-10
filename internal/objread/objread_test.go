@@ -221,6 +221,66 @@ func TestComponentExecutions(t *testing.T) {
 	}
 }
 
+func TestComponentDeployments(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	r := New(e.store, e.refs, e.root)
+
+	sealWithPlan := func(execID, status, planJSON string) {
+		t.Helper()
+		planID, err := e.store.PutBlob(ctx, []byte(planJSON))
+		if err != nil {
+			t.Fatalf("put plan: %v", err)
+		}
+		revID, err := e.store.PutTree(ctx, []objectstore.TreeEntry{{Name: "plan.json", Kind: objectstore.KindBlob, ID: planID}})
+		if err != nil {
+			t.Fatalf("put rev: %v", err)
+		}
+		wt, err := e.mgr.Open(ctx, runworktree.OpenInput{ExecutionID: execID, RevisionID: revID})
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		if err := wt.Project([]runworktree.ProjectedJob{{JobID: "j", Status: status}}); err != nil {
+			t.Fatalf("project: %v", err)
+		}
+		if _, err := wt.Seal(ctx, status, time.Time{}); err != nil {
+			t.Fatalf("seal: %v", err)
+		}
+		e.clk.advance(time.Minute)
+	}
+
+	// Oldest: api deployed to production (succeeded).
+	sealWithPlan("exec_old", nodes.StatusSucceeded, `{"metadata":{"name":"r1"},"jobs":[{"id":"api@prod","component":"api","environment":"production"}]}`)
+	// Newer: api to staging (failed) + web to production.
+	sealWithPlan("exec_mid", nodes.StatusFailed, `{"metadata":{"name":"r2"},"jobs":[{"id":"api@stg","component":"api","environment":"staging"},{"id":"web@prod","component":"web","environment":"production"}]}`)
+	// Newest: api to production again (succeeded) — supersedes exec_old for prod.
+	sealWithPlan("exec_new", nodes.StatusSucceeded, `{"metadata":{"name":"r3"},"jobs":[{"id":"api@prod","component":"api","environment":"production"}]}`)
+
+	deps, err := r.ComponentDeployments(ctx, "api")
+	if err != nil {
+		t.Fatalf("ComponentDeployments: %v", err)
+	}
+	// api runs in production (latest = exec_new, succeeded) and staging (exec_mid, failed).
+	if len(deps) != 2 {
+		t.Fatalf("api deployments = %d, want 2: %+v", len(deps), deps)
+	}
+	// Sorted by environment: production, staging.
+	if deps[0].Environment != "production" || deps[0].ExecutionID != "exec_new" || deps[0].Health != "ok" {
+		t.Errorf("prod deployment = %+v, want exec_new/ok", deps[0])
+	}
+	if deps[1].Environment != "staging" || deps[1].ExecutionID != "exec_mid" || deps[1].Health != "degraded" {
+		t.Errorf("staging deployment = %+v, want exec_mid/degraded", deps[1])
+	}
+
+	// Empty/unknown component degrade gracefully.
+	if d, err := r.ComponentDeployments(ctx, ""); err != nil || d != nil {
+		t.Errorf("empty component = (%+v, %v)", d, err)
+	}
+	if d, err := r.ComponentDeployments(ctx, "ghost"); err != nil || len(d) != 0 {
+		t.Errorf("ghost component = (%+v, %v)", d, err)
+	}
+}
+
 func TestReaderPlan(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)
