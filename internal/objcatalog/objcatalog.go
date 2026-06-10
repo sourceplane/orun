@@ -29,6 +29,7 @@ const (
 	dirImpact       = "impact"
 	fileOwnership   = "ownership.json"
 	dirFingerprints = "fingerprints"
+	fileRelations   = "relations.json"
 )
 
 // CatalogView is one resolved catalog, read back from the object graph. It is
@@ -38,9 +39,22 @@ type CatalogView struct {
 	HumanKey     string                     // the catalog snapshot's human key
 	Components   []CatalogComponentView     // catalog members, sorted by component key
 	Graph        map[string]GraphView       // edgeKind → graph slice (dependencies, systems, …)
+	Relations    []RelationEdgeView         // the single typed relation graph (relations.json, SC2); nil for older catalogs
 	Ownership    *OwnershipView             // nil when impact/ is absent (older catalogs)
 	Fingerprints map[string]FingerprintView // componentKey → stored input fingerprint; nil when absent
 	ObjectID     objectstore.ObjectID       // the catalog Merkle root this view was read from
+}
+
+// RelationEdgeView is one forward edge of the catalog-wide relation graph
+// (orun-service-catalog/data-model.md §3), read from relations.json.
+type RelationEdgeView struct {
+	From     string
+	FromKind string
+	Type     string
+	To       string
+	ToKind   string
+	Optional bool
+	Include  string
 }
 
 // FingerprintView is the read view of one impact/fingerprints/<name>.json blob:
@@ -204,6 +218,18 @@ func (r *Reader) Load(ctx context.Context, ref string) (CatalogView, error) {
 				return CatalogView{}, gerr
 			}
 			view.Graph = graph
+		case e.Name == fileRelations && e.Kind == objectstore.KindBlob:
+			rg, rerr := decodeBlob[nodes.RelationGraph](ctx, r.store, e.ID)
+			if rerr != nil {
+				return CatalogView{}, rerr
+			}
+			view.Relations = make([]RelationEdgeView, 0, len(rg.Edges))
+			for _, ed := range rg.Edges {
+				view.Relations = append(view.Relations, RelationEdgeView{
+					From: ed.From, FromKind: ed.FromKind, Type: ed.Type,
+					To: ed.To, ToKind: ed.ToKind, Optional: ed.Optional, Include: ed.Include,
+				})
+			}
 		case e.Name == dirImpact && e.Kind == objectstore.KindTree:
 			own, fps, ierr := r.readImpact(ctx, e.ID)
 			if ierr != nil {

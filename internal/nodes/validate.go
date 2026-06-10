@@ -84,6 +84,20 @@ func (g CatalogGraph) Validate() error {
 	return nil
 }
 
+// Validate checks a RelationGraph: kind discriminator plus non-empty endpoints
+// and type on every edge (orun-service-catalog/data-model.md §3).
+func (g RelationGraph) Validate() error {
+	if g.Kind != KindRelationGraph {
+		return invalidf("relationGraph kind %q", g.Kind)
+	}
+	for _, e := range g.Edges {
+		if e.From == "" || e.To == "" || e.Type == "" {
+			return invalidf("relationGraph edge %q→[%s]→%q has empty endpoint/type", e.From, e.Type, e.To)
+		}
+	}
+	return nil
+}
+
 // Validate checks an ImpactOwnership (data-model.md §5). The component map keys
 // must be clean workspace-relative directories and the values valid component
 // keys; schemaVersion must be present so a cross-version consumer can reject an

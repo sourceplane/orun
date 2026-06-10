@@ -197,6 +197,29 @@ type CatalogGraph struct {
 	Edges    []GraphEdge `json:"edges"`
 }
 
+// RelationGraph is the single typed relation graph (orun-service-catalog/
+// data-model.md §3) — one blob per catalog (relations.json) replacing the
+// per-edge-kind CatalogGraph slices. Only the forward edge is stored; the reader
+// materializes inverses. Edges are sorted by (from, fromKind, type, to) for
+// determinism. Must not embed catalogId.
+type RelationGraph struct {
+	Kind  string         `json:"kind"`
+	Edges []RelationEdge `json:"edges"`
+}
+
+// RelationEdge is one typed forward edge spanning kinds (data-model.md §3). The
+// optional/include attributes carry change-detection semantics (CV-1) and must
+// survive resolve → internal/affected.
+type RelationEdge struct {
+	From     string `json:"from"`
+	FromKind string `json:"fromKind"`
+	Type     string `json:"type"`
+	To       string `json:"to"`
+	ToKind   string `json:"toKind"`
+	Optional bool   `json:"optional,omitempty"`
+	Include  string `json:"include,omitempty"`
+}
+
 // RevisionScope captures the planning scope (full vs changed-subset). It is
 // part of the plan inputs and therefore part of revision identity.
 type RevisionScope struct {

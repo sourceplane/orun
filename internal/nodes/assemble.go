@@ -181,6 +181,10 @@ func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifest
 	if err != nil {
 		return "", err
 	}
+	relationsBlobID, err := assembleRelations(ctx, s, manifests)
+	if err != nil {
+		return "", err
+	}
 	impactTreeID, err := assembleImpact(ctx, s, ownership, fingerprints)
 	if err != nil {
 		return "", err
@@ -189,8 +193,52 @@ func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifest
 		blobEntry(fileCatalog, catBlobID),
 		treeEntry(dirComponents, compTreeID),
 		treeEntry(dirGraph, graphTreeID),
+		blobEntry(fileRelations, relationsBlobID),
 		treeEntry(dirImpact, impactTreeID),
 	})
+}
+
+// assembleRelations builds the single typed relation graph (relations.json) from
+// the entity relations carried on each manifest and writes it as a blob. The
+// forward edge is from the entity to its relation target; edges are sorted by
+// (from, fromKind, type, to) for determinism (data-model.md §3). The blob is
+// always written (possibly empty) so the catalog tree shape stays uniform.
+func assembleRelations(ctx context.Context, s store, manifests []ComponentManifest) (ObjectID, error) {
+	var edges []RelationEdge
+	for _, m := range manifests {
+		// Every resolved kind today is a Component; SC3 carries the entity kind
+		// explicitly when other kinds gain first-class entities.
+		from := m.Identity.ComponentKey
+		for _, r := range m.Relations {
+			edges = append(edges, RelationEdge{
+				From: from, FromKind: "Component",
+				Type: r.Type, To: r.To, ToKind: r.ToKind,
+				Optional: r.Optional, Include: r.Include,
+			})
+		}
+	}
+	sort.Slice(edges, func(i, j int) bool {
+		a, b := edges[i], edges[j]
+		if a.From != b.From {
+			return a.From < b.From
+		}
+		if a.FromKind != b.FromKind {
+			return a.FromKind < b.FromKind
+		}
+		if a.Type != b.Type {
+			return a.Type < b.Type
+		}
+		return a.To < b.To
+	})
+	rg := RelationGraph{Kind: KindRelationGraph, Edges: edges}
+	if err := rg.Validate(); err != nil {
+		return "", err
+	}
+	b, err := Encode(rg)
+	if err != nil {
+		return "", err
+	}
+	return s.PutBlob(ctx, b)
 }
 
 // assembleImpact writes the impact/ subtree: ownership.json plus the
