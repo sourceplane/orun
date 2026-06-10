@@ -41,11 +41,12 @@ import (
 // (the catalog tree gains the single typed relations.json graph), and 3→4 for
 // SC3 (the catalog tree gains the entities/<Kind>/ subtree + catalog.json
 // countsByKind), and 4→5 for SC4 (component env bindings emit deployedTo edges
-// + derived Environment entities), and 5→6 for SC6 (the manifest carries the
-// integrations/links/docs/extensions catalog-hub blocks). Every catalog id moves
-// once per bump, the resolve memo misses once, and content addressing
-// re-stabilizes (S-1).
-const ResolverVersion = 6
+// + derived Environment entities), 5→6 for SC6 (the manifest carries the
+// integrations/links/docs/extensions catalog-hub blocks), and 6→7 for SC7
+// (spec.composition + composedBy edges + derived Composition entities from the
+// composition lock). Every catalog id moves once per bump, the resolve memo
+// misses once, and content addressing re-stabilizes (S-1).
+const ResolverVersion = 7
 
 // lockTTL bounds how long a refresh lock is honored before it is treated as
 // stale (a crashed holder) and reclaimed. A resolve+write is sub-second; this
@@ -137,7 +138,7 @@ func EnsureFresh(ctx context.Context, objModelRoot, workspaceRoot string, force 
 		Workspace:      ws,
 		SourceHumanKey: sourcectx.BuildSourceSnapshotKey(ws),
 		Resolve:        func() (*catalogresolve.CatalogView, error) { return view, nil },
-	}, objplan.Options{Strict: cfg.Strict, OwnerResolver: objplan.OwnerResolverForWorkspace(workspaceRoot)})
+	}, objplan.Options{Strict: cfg.Strict, OwnerResolver: objplan.OwnerResolverForWorkspace(workspaceRoot), CompositionResolver: objplan.CompositionResolverForWorkspace(workspaceRoot)})
 	if err != nil {
 		return Result{}, fmt.Errorf("write object-model catalog: %w", err)
 	}

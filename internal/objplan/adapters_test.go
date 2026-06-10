@@ -120,7 +120,7 @@ func sampleView() *catalogresolve.CatalogView {
 
 func TestBuildCatalogNodes(t *testing.T) {
 	t.Parallel()
-	cat, manifests, graphs, ownership, _ := BuildCatalogNodes(sampleView(), 2, nil)
+	cat, manifests, graphs, ownership, _ := BuildCatalogNodes(sampleView(), 2, nil, nil)
 	if cat.Kind != nodes.KindCatalogSnapshot || cat.ResolverVersion != 2 || cat.HumanKey != "cat-x" {
 		t.Fatalf("catalog = %+v", cat)
 	}
@@ -148,7 +148,7 @@ func TestBuildCatalogNodes(t *testing.T) {
 		t.Fatalf("derived ownership invalid: %v", err)
 	}
 	// nil view is tolerated.
-	c2, m2, g2, o2, _ := BuildCatalogNodes(nil, 1, nil)
+	c2, m2, g2, o2, _ := BuildCatalogNodes(nil, 1, nil, nil)
 	if c2.Kind != nodes.KindCatalogSnapshot || m2 != nil || g2 != nil {
 		t.Fatalf("nil view = %+v %v %v", c2, m2, g2)
 	}
@@ -166,7 +166,7 @@ func TestBuildCatalogNodesManyGraphsPositional(t *testing.T) {
 			{}, {}, {}, {}, {}, {}, // 6 graphs: 5 named + 1 overflow
 		},
 	}
-	_, _, graphs, _, _ := BuildCatalogNodes(view, 1, nil)
+	_, _, graphs, _, _ := BuildCatalogNodes(view, 1, nil, nil)
 	want := []string{"dependencies", "systems", "apis", "resources", "owners", "graph5"}
 	for i, g := range graphs {
 		if g.EdgeKind != want[i] {
@@ -181,7 +181,7 @@ func TestMapEntity_CarriesChangeWatches(t *testing.T) {
 		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", Namespace: "ns", Repo: "repo"},
 		Spec:     catalogmodel.ComponentSpec{Type: "worker", Change: &catalogmodel.ComponentChange{Watches: []string{"env", "groups"}}},
 	}
-	m := mapEntity(cm, 2, nil)
+	m := mapEntity(cm, 2, nil, nil)
 	// The node manifest spec carries change.watches verbatim — the path the
 	// affected engine reads (spec.change.watches) for intent-impact watch mode.
 	change, ok := m.Spec["change"].(map[string]any)
@@ -225,7 +225,7 @@ func TestMapEntity_Envelope(t *testing.T) {
 		Runtime:    catalogmodel.ComponentRuntime{Inferred: catalogmodel.ComponentInferred{Languages: []string{"go"}}},
 		Resolution: catalogmodel.ComponentResolution{InheritedFrom: map[string]string{"spec.lifecycle": "intent.yaml"}},
 	}
-	m := mapEntity(cm, 2, nil)
+	m := mapEntity(cm, 2, nil, nil)
 
 	if m.APIVersion != catalogmodel.APIVersionV1 || m.Type != "worker" {
 		t.Fatalf("apiVersion/type = %q/%q", m.APIVersion, m.Type)
@@ -310,7 +310,7 @@ func TestMapEntity_CatalogHubBlocks(t *testing.T) {
 		Docs:         &catalogmodel.ComponentDocs{TechDocs: "docs/", Runbooks: []string{"docs/run.md"}, ADRs: []string{"docs/adr-1.md"}},
 		Extensions:   map[string]any{"x-acme": map[string]any{"tier": "gold"}},
 	}
-	m := mapEntity(cm, 6, nil)
+	m := mapEntity(cm, 6, nil, nil)
 	if m.Integrations["datadog"] == nil {
 		t.Errorf("integrations not carried: %v", m.Integrations)
 	}
@@ -333,9 +333,84 @@ func TestMapEntity_CatalogHubBlocks(t *testing.T) {
 	bare := mapEntity(&catalogmodel.ComponentManifest{
 		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/b", Name: "b"},
 		Spec:     catalogmodel.ComponentSpec{Type: "lib"},
-	}, 6, nil)
+	}, 6, nil, nil)
 	if bare.Docs != nil || bare.Links != nil || bare.Integrations != nil {
 		t.Errorf("bare blocks should be nil: docs=%v links=%v int=%v", bare.Docs, bare.Links, bare.Integrations)
+	}
+}
+
+// TestMapEntity_Composition asserts SC7: a composition resolver binds a
+// component type to its composition, emitting spec.composition + a composedBy
+// relation.
+func TestMapEntity_Composition(t *testing.T) {
+	t.Parallel()
+	resolver := CompositionResolver(func(typ string) *CompositionMeta {
+		if typ == "cloudflare-worker" {
+			return &CompositionMeta{Name: "example-platform", Digest: "sha256:abc", SourceKind: "dir", SourcePath: "./compositions"}
+		}
+		return nil
+	})
+	cm := &catalogmodel.ComponentManifest{
+		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/w", Name: "w", Namespace: "ns", Repo: "repo"},
+		Spec:     catalogmodel.ComponentSpec{Type: "cloudflare-worker"},
+	}
+	m := mapEntity(cm, 7, nil, resolver)
+	comp, ok := m.Spec["composition"].(map[string]any)
+	if !ok || comp["source"] != "example-platform" || comp["digest"] != "sha256:abc" {
+		t.Fatalf("spec.composition = %v", m.Spec["composition"])
+	}
+	var composedBy bool
+	for _, r := range m.Relations {
+		if r.Type == "composedBy" && r.To == "example-platform" && r.ToKind == "Composition" {
+			composedBy = true
+		}
+	}
+	if !composedBy {
+		t.Errorf("missing composedBy relation: %+v", m.Relations)
+	}
+
+	// A type with no backing composition gets no composedBy edge and no bound
+	// composition source (the empty CompositionRef block from the base spec is
+	// inert — source stays "").
+	cm.Spec.Type = "unknown-type"
+	m = mapEntity(cm, 7, nil, resolver)
+	for _, r := range m.Relations {
+		if r.Type == "composedBy" {
+			t.Errorf("unbacked type should not get composedBy edge: %+v", m.Relations)
+		}
+	}
+	if c, _ := m.Spec["composition"].(map[string]any); c != nil && c["source"] != "" {
+		t.Errorf("unbacked type should not bind a composition source: %v", c)
+	}
+}
+
+// TestCompositionResolverForWorkspace reads a composition lock from a temp dir.
+func TestCompositionResolverForWorkspace(t *testing.T) {
+	t.Parallel()
+	if CompositionResolverForWorkspace("") != nil {
+		t.Error("empty root should yield nil resolver")
+	}
+	dir := t.TempDir()
+	if CompositionResolverForWorkspace(dir) != nil {
+		t.Error("no lock should yield nil resolver")
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".orun"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lock := "apiVersion: x\nkind: CompositionLock\nsources:\n  - name: plat\n    kind: dir\n    resolvedDigest: sha256:d\n    exports:\n      - cloudflare-worker\n      - terraform\n"
+	if err := os.WriteFile(filepath.Join(dir, ".orun", "compositions.lock.yaml"), []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := CompositionResolverForWorkspace(dir)
+	if r == nil {
+		t.Fatal("lock present but resolver nil")
+	}
+	meta := r("terraform")
+	if meta == nil || meta.Name != "plat" || meta.Digest != "sha256:d" {
+		t.Errorf("resolver(terraform) = %+v", meta)
+	}
+	if r("nonexistent-type") != nil {
+		t.Error("unknown type should resolve to nil")
 	}
 }
 
@@ -353,7 +428,7 @@ func TestMapEntity_EnvironmentRelations(t *testing.T) {
 			},
 		},
 	}
-	m := mapEntity(cm, 5, nil)
+	m := mapEntity(cm, 5, nil, nil)
 	var envs []string
 	for _, r := range m.Relations {
 		if r.Type == "deployedTo" && r.ToKind == "Environment" {
@@ -383,7 +458,7 @@ func TestMapEntity_CodeownersOwnership(t *testing.T) {
 		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", Namespace: "ns", Repo: "repo", SourceFile: "apps/api/component.yaml"},
 		Spec:     catalogmodel.ComponentSpec{Type: "worker"},
 	}
-	m := mapEntity(cm, 3, resolver)
+	m := mapEntity(cm, 3, resolver, nil)
 	if m.Ownership["owner"] != "@org/api-team" || m.Ownership["source"] != catalogmodel.OwnershipSourceCODEOWNERS {
 		t.Fatalf("codeowners ownership = %v", m.Ownership)
 	}
@@ -403,7 +478,7 @@ func TestMapEntity_CodeownersOwnership(t *testing.T) {
 
 	// 2. Authored owner wins over CODEOWNERS.
 	cm.Metadata.Owner = "authored-team"
-	m = mapEntity(cm, 3, resolver)
+	m = mapEntity(cm, 3, resolver, nil)
 	if m.Ownership["owner"] != "authored-team" || m.Ownership["source"] != catalogmodel.OwnershipSourceAuthored {
 		t.Fatalf("authored should win: %v", m.Ownership)
 	}
@@ -413,7 +488,7 @@ func TestMapEntity_CodeownersOwnership(t *testing.T) {
 		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/orphan", Name: "orphan", Namespace: "ns", Repo: "repo", SourceFile: "libs/orphan/component.yaml"},
 		Spec:     catalogmodel.ComponentSpec{Type: "library"},
 	}
-	m = mapEntity(cm2, 3, resolver)
+	m = mapEntity(cm2, 3, resolver, nil)
 	if m.Ownership["source"] != catalogmodel.OwnershipSourceUnknown {
 		t.Fatalf("orphan should be unknown: %v", m.Ownership)
 	}
@@ -456,7 +531,7 @@ func TestMapEntity_UnknownOwner(t *testing.T) {
 		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/x", Name: "x", Namespace: "ns", Repo: "repo"},
 		Spec:     catalogmodel.ComponentSpec{Type: "service"},
 	}
-	m := mapEntity(cm, 2, nil)
+	m := mapEntity(cm, 2, nil, nil)
 	if m.Ownership["owner"] != catalogmodel.OwnershipSourceUnknown || m.Ownership["source"] != catalogmodel.OwnershipSourceUnknown {
 		t.Errorf("unowned ownership = %v", m.Ownership)
 	}

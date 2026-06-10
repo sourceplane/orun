@@ -222,6 +222,7 @@ const (
 	EntityKindDomain      = "Domain"
 	EntityKindGroup       = "Group"
 	EntityKindEnvironment = "Environment"
+	EntityKindComposition = "Composition"
 )
 
 // deriveEntities builds the distinct non-Component entities implied by the
@@ -231,15 +232,19 @@ func deriveEntities(manifests []ComponentManifest) []Entity {
 	type key struct{ kind, k string }
 	seen := map[key]*Entity{}
 	order := []key{}
-	ensure := func(kind, entityKey, name string) {
+	ensure := func(kind, entityKey, name string, spec map[string]any) {
 		kk := key{kind, entityKey}
-		if _, ok := seen[kk]; ok {
+		if e, ok := seen[kk]; ok {
+			if e.Spec == nil && spec != nil { // enrich a previously-minimal entity
+				e.Spec = spec
+			}
 			return
 		}
 		e := &Entity{
 			APIVersion: "orun.io/v1",
 			Kind:       kind,
 			Identity:   EntityIdentity{EntityKey: entityKey, Kind: kind, Name: name},
+			Spec:       spec,
 		}
 		seen[kk] = e
 		order = append(order, kk)
@@ -248,19 +253,21 @@ func deriveEntities(manifests []ComponentManifest) []Entity {
 		for _, r := range m.Relations {
 			switch {
 			case r.Type == "partOf" && r.ToKind == EntityKindSystem:
-				ensure(EntityKindSystem, r.To, lastSegment(r.To))
+				ensure(EntityKindSystem, r.To, lastSegment(r.To), nil)
 			case r.Type == "partOf" && r.ToKind == EntityKindDomain:
-				ensure(EntityKindDomain, r.To, lastSegment(r.To))
+				ensure(EntityKindDomain, r.To, lastSegment(r.To), nil)
 			case r.Type == "ownedBy" && r.ToKind == EntityKindGroup:
-				ensure(EntityKindGroup, r.To, lastSegment(r.To))
+				ensure(EntityKindGroup, r.To, lastSegment(r.To), nil)
 			case r.Type == "dependsOn" && r.ToKind == EntityKindResource:
-				ensure(EntityKindResource, r.To, lastSegment(r.To))
+				ensure(EntityKindResource, r.To, lastSegment(r.To), nil)
 			case r.Type == "deployedTo" && r.ToKind == EntityKindEnvironment:
-				ensure(EntityKindEnvironment, r.To, lastSegment(r.To))
+				ensure(EntityKindEnvironment, r.To, lastSegment(r.To), nil)
+			case r.Type == "composedBy" && r.ToKind == EntityKindComposition:
+				ensure(EntityKindComposition, r.To, lastSegment(r.To), compositionSpec(m.Spec))
 			}
 		}
 		for _, api := range contractAPIs(m.Contracts) {
-			ensure(EntityKindAPI, api, lastSegment(api))
+			ensure(EntityKindAPI, api, lastSegment(api), nil)
 		}
 	}
 	sort.Slice(order, func(i, j int) bool {
@@ -272,6 +279,26 @@ func deriveEntities(manifests []ComponentManifest) []Entity {
 	out := make([]Entity, 0, len(order))
 	for _, kk := range order {
 		out = append(out, *seen[kk])
+	}
+	return out
+}
+
+// compositionSpec projects a derived Composition entity's spec from the backing
+// component's spec.composition block (the source name + content digest + source
+// pointer, data-model.md §5). Returns nil when absent.
+func compositionSpec(spec map[string]any) map[string]any {
+	c, ok := spec["composition"].(map[string]any)
+	if !ok || len(c) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, k := range []string{"source", "digest", "sourceKind", "sourceRef", "sourcePath"} {
+		if v, ok := c[k].(string); ok && v != "" {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

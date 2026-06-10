@@ -278,6 +278,7 @@ func renderCatalogDescribeText(m catalogmodel.ComponentManifest, execs []catalog
 	kv("Key", m.Identity.ComponentKey)
 	kv("Name", m.Identity.Name)
 	kv("Type", m.Spec.Type)
+	kv("Composition", m.Spec.Composition.Source) // the golden path backing this component (SC7)
 	kv("Lifecycle", m.Spec.Lifecycle)
 	kv("Title", m.Metadata.Title)
 	kv("Description", m.Metadata.Description)

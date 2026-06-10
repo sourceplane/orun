@@ -27,6 +27,12 @@ type Options struct {
 	// the caller (which reads CODEOWNERS) so catalogresolve stays pure. Authored
 	// ownership still wins; this fills the gap when none is authored.
 	OwnerResolver OwnerResolver
+	// CompositionResolver, when set, maps a component type to the composition
+	// that backs it (from the composition lock, SC7), emitting composedBy
+	// relations + derived Composition entities. Caller-provided to keep
+	// catalogresolve pure; derived identically at every catalog-build path so the
+	// catalog content id stays path-independent.
+	CompositionResolver CompositionResolver
 }
 
 // OwnerResolver maps a component's workspace-relative source path to its
@@ -78,7 +84,7 @@ func RefreshCatalog(ctx context.Context, w *nodewriter.Writer, store objectstore
 	if opts.NoCatalog || in.Resolve == nil {
 		return res, nil
 	}
-	catID, err := writeCatalogMemoized(ctx, w, store, memo, src, srcID, rv, in.Resolve, opts.Strict, opts.OwnerResolver)
+	catID, err := writeCatalogMemoized(ctx, w, store, memo, src, srcID, rv, in.Resolve, opts.Strict, opts.OwnerResolver, opts.CompositionResolver)
 	if err != nil {
 		return res, err
 	}
@@ -106,7 +112,7 @@ func Plan(ctx context.Context, w *nodewriter.Writer, store objectstore.ObjectSto
 
 	var catID objectstore.ObjectID
 	if !opts.NoCatalog && in.Resolve != nil {
-		catID, err = writeCatalogMemoized(ctx, w, store, memo, src, srcID, rv, in.Resolve, opts.Strict, opts.OwnerResolver)
+		catID, err = writeCatalogMemoized(ctx, w, store, memo, src, srcID, rv, in.Resolve, opts.Strict, opts.OwnerResolver, opts.CompositionResolver)
 		if err != nil {
 			return res, err
 		}
@@ -157,6 +163,7 @@ func writeCatalogMemoized(
 	resolve func() (*catalogresolve.CatalogView, error),
 	strict bool,
 	ownerResolver OwnerResolver,
+	compositionResolver CompositionResolver,
 ) (objectstore.ObjectID, error) {
 	catalogRefs := CatalogRefs(src)
 
@@ -178,7 +185,7 @@ func writeCatalogMemoized(
 		}
 		return "", nil // tolerant: skip the catalog edge
 	}
-	cat, manifests, graphs, ownership, fingerprints := BuildCatalogNodes(view, resolverVersion, ownerResolver)
+	cat, manifests, graphs, ownership, fingerprints := BuildCatalogNodes(view, resolverVersion, ownerResolver, compositionResolver)
 	cat.SourceID = string(srcID)
 	catID, err := w.WriteCatalog(ctx, cat, manifests, graphs, ownership, fingerprints, catalogRefs...)
 	if err != nil {

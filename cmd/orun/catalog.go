@@ -170,6 +170,17 @@ func ownerResolverForCWD() objplan.OwnerResolver {
 	return objplan.OwnerResolverForWorkspace(root)
 }
 
+// compositionResolverForCWD derives the composition-lock resolver for the
+// catalog workspace root (SC7), or nil when unresolvable. Used by every cmd-side
+// catalog build so composition bindings match the refresh path.
+func compositionResolverForCWD() objplan.CompositionResolver {
+	root, err := catalogWorkspaceRoot()
+	if err != nil {
+		return nil
+	}
+	return objplan.CompositionResolverForWorkspace(root)
+}
+
 // The resolver-input builders below delegate to internal/catalogrefresh — the
 // single source of truth shared with the cockpit-side resolve — so the CLI and
 // the TUI produce the same content-addressed catalog id for a given workspace.
@@ -198,4 +209,3 @@ func sourceSnapshotFromState(ws sourcectx.WorkspaceState, srcKey, inputHash, cre
 func resolverInputsFromState(ws sourcectx.WorkspaceState, srcKey, inputHash, repo, createdAt string) catalogresolve.ResolverInputs {
 	return catalogrefresh.ResolverInputsFromState(ws, srcKey, inputHash, repo, createdAt, version)
 }
-

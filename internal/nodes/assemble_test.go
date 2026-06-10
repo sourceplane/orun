@@ -211,6 +211,10 @@ func TestAssembleCatalogDerivesMultiKindEntities(t *testing.T) {
 				{Type: "ownedBy", To: "@org/api-team", ToKind: "Group"},
 				{Type: "dependsOn", To: "ns/repo/cache", ToKind: "Resource"},
 				{Type: "deployedTo", To: "production", ToKind: "Environment"},
+				{Type: "composedBy", To: "example-platform", ToKind: "Composition"},
+			},
+			Spec: map[string]any{
+				"composition": map[string]any{"source": "example-platform", "digest": "sha256:abc"},
 			},
 			Contracts: map[string]any{
 				"provides": []any{map[string]any{"api": "ns/repo/api-spec"}},
@@ -230,7 +234,7 @@ func TestAssembleCatalogDerivesMultiKindEntities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode catalog: %v", err)
 	}
-	want := map[string]int{"Component": 2, "System": 1, "Domain": 1, "Group": 1, "Resource": 1, "API": 2, "Environment": 1}
+	want := map[string]int{"Component": 2, "System": 1, "Domain": 1, "Group": 1, "Resource": 1, "API": 2, "Environment": 1, "Composition": 1}
 	for k, v := range want {
 		if snap.CountsByKind[k] != v {
 			t.Errorf("countsByKind[%s] = %d, want %d (%v)", k, snap.CountsByKind[k], v, snap.CountsByKind)
@@ -246,11 +250,41 @@ func TestAssembleCatalogDerivesMultiKindEntities(t *testing.T) {
 	for _, kd := range kindDirs {
 		gotKinds[kd.Name] = true
 	}
-	for _, k := range []string{"System", "Domain", "Group", "Resource", "API", "Environment"} {
+	for _, k := range []string{"System", "Domain", "Group", "Resource", "API", "Environment", "Composition"} {
 		if !gotKinds[k] {
 			t.Errorf("entities/ missing kind %q (got %v)", k, gotKinds)
 		}
 	}
+	// The derived Composition entity is enriched with the backing component's
+	// spec.composition (source + digest).
+	compTree, _ := s.GetTree(ctx, kindTreeID(t, s, entTree, "Composition"))
+	if len(compTree) != 1 {
+		t.Fatalf("Composition kind subtree = %d entries", len(compTree))
+	}
+	ce, err := Decode[Entity]([]byte(blobBody(t, s, compTree[0].ID)))
+	if err != nil {
+		t.Fatalf("decode composition entity: %v", err)
+	}
+	spec := ce.Spec
+	if spec == nil || spec["source"] != "example-platform" || spec["digest"] != "sha256:abc" {
+		t.Errorf("composition entity spec = %v", ce.Spec)
+	}
+}
+
+// kindTreeID returns the object id of the entities/<kind>/ subtree.
+func kindTreeID(t *testing.T, s *objectstore.MemStore, entitiesTree objectstore.ObjectID, kind string) objectstore.ObjectID {
+	t.Helper()
+	entries, err := s.GetTree(context.Background(), entitiesTree)
+	if err != nil {
+		t.Fatalf("get entities tree: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name == kind {
+			return e.ID
+		}
+	}
+	t.Fatalf("kind subtree %q not found", kind)
+	return ""
 }
 
 func TestEntityValidate(t *testing.T) {
