@@ -115,7 +115,7 @@ func engineSelection(t *testing.T, root string, files []string, impact string) m
 	if err != nil {
 		t.Fatalf("refs: %v", err)
 	}
-	cat, manifests, graphs, ownership, fps := objplan.BuildCatalogNodes(view, 1, nil)
+	cat, manifests, graphs, ownership, fps := objplan.BuildCatalogNodes(view, 1, nil, nil)
 	cat.SourceID = "sha256:" + repeat64('a')
 	id, err := nodes.AssembleCatalog(ctx, store, cat, manifests, graphs, ownership, fps)
 	if err != nil {

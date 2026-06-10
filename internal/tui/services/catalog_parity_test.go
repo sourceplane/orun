@@ -209,7 +209,7 @@ func buildFreshCatalogAndRead(t *testing.T, ctx context.Context, ws, om string) 
 		t.Fatalf("source id: %v", err)
 	}
 
-	cat, manifests, graphs, ownership, fps := objplan.BuildCatalogNodes(view, 1, nil)
+	cat, manifests, graphs, ownership, fps := objplan.BuildCatalogNodes(view, 1, nil, nil)
 	cat.SourceID = string(srcID)
 	id, err := nodes.AssembleCatalog(ctx, store, cat, manifests, graphs, ownership, fps)
 	if err != nil {

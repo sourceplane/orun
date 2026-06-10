@@ -39,7 +39,7 @@ var graphKinds = []string{"dependencies", "systems", "apis", "resources", "owner
 // CatalogGraphs, and the change-detection ImpactOwnership map. resolverVersion
 // stamps the snapshot (it participates in the resolve memo key, not in catalog
 // identity).
-func BuildCatalogNodes(view *catalogresolve.CatalogView, resolverVersion int, ownerResolver OwnerResolver) (nodes.CatalogSnapshot, []nodes.ComponentManifest, []nodes.CatalogGraph, nodes.ImpactOwnership, []nodes.ComponentFingerprint) {
+func BuildCatalogNodes(view *catalogresolve.CatalogView, resolverVersion int, ownerResolver OwnerResolver, compositionResolver CompositionResolver) (nodes.CatalogSnapshot, []nodes.ComponentManifest, []nodes.CatalogGraph, nodes.ImpactOwnership, []nodes.ComponentFingerprint) {
 	cat := nodes.CatalogSnapshot{
 		Kind:            nodes.KindCatalogSnapshot,
 		ResolverVersion: resolverVersion,
@@ -54,7 +54,7 @@ func BuildCatalogNodes(view *catalogresolve.CatalogView, resolverVersion int, ow
 			if cm == nil {
 				continue
 			}
-			manifests = append(manifests, mapEntity(cm, resolverVersion, ownerResolver))
+			manifests = append(manifests, mapEntity(cm, resolverVersion, ownerResolver, compositionResolver))
 		}
 	}
 
@@ -147,8 +147,19 @@ func buildOwnership(view *catalogresolve.CatalogView) nodes.ImpactOwnership {
 // system/domain/owner edges promote to relations; provided/consumed APIs become
 // contracts; inference/inheritance stays in provenance. The deep spec/runtime
 // blocks are carried verbatim so no resolved information is lost.
-func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerResolver OwnerResolver) nodes.ComponentManifest {
+func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerResolver OwnerResolver, compositionResolver CompositionResolver) nodes.ComponentManifest {
 	own := resolveOwner(cm, ownerResolver)
+	var comp *CompositionMeta
+	if compositionResolver != nil && cm.Spec.Type != "" {
+		comp = compositionResolver(cm.Spec.Type)
+	}
+	spec := toMap(cm.Spec)
+	if comp != nil {
+		if spec == nil {
+			spec = map[string]any{}
+		}
+		spec["composition"] = compositionSpecMap(comp)
+	}
 	m := nodes.ComponentManifest{
 		APIVersion: catalogmodel.APIVersionV1,
 		Kind:       nodes.KindComponentManifest,
@@ -166,8 +177,8 @@ func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerRes
 		Metadata:     entityMetadata(cm.Metadata),
 		Ownership:    entityOwnership(cm.Metadata, own),
 		Lifecycle:    entityLifecycle(cm.Spec),
-		Spec:         toMap(cm.Spec),
-		Relations:    entityRelations(cm, own),
+		Spec:         spec,
+		Relations:    entityRelations(cm, own, comp),
 		Contracts:    entityContracts(cm.Spec.Dependencies.APIs),
 		Integrations: cm.Integrations,
 		Docs:         docsBlock(cm.Docs),
@@ -176,6 +187,17 @@ func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerRes
 		Provenance:   entityProvenance(cm.Resolution, resolverVersion),
 	}
 	return m
+}
+
+// compositionSpecMap projects a composition binding onto the spec.composition
+// block (data-model.md §5): the source name + content digest + source pointer.
+func compositionSpecMap(c *CompositionMeta) map[string]any {
+	out := map[string]any{"source": c.Name}
+	putNonEmpty(out, "digest", c.Digest)
+	putNonEmpty(out, "sourceKind", c.SourceKind)
+	putNonEmpty(out, "sourceRef", c.SourceRef)
+	putNonEmpty(out, "sourcePath", c.SourcePath)
+	return out
 }
 
 // docsBlock projects the docs pointers onto the envelope's generic docs map.
@@ -328,11 +350,16 @@ func entityLifecycle(spec catalogmodel.ComponentSpec) map[string]any {
 // into the envelope's typed relations array (data-model.md §3): ownedBy (owner),
 // partOf (system/domain), dependsOn (component + resource edges). Sorted by
 // (type, to) for determinism.
-func entityRelations(cm *catalogmodel.ComponentManifest, own resolvedOwner) []nodes.EntityRelation {
+func entityRelations(cm *catalogmodel.ComponentManifest, own resolvedOwner, comp *CompositionMeta) []nodes.EntityRelation {
 	var rels []nodes.EntityRelation
 	if own.source != catalogmodel.OwnershipSourceUnknown && own.owner != "" {
 		rels = append(rels, nodes.EntityRelation{
 			Type: catalogmodel.RelTypeOwnedBy, To: own.owner, ToKind: catalogmodel.EntityKindGroup,
+		})
+	}
+	if comp != nil && comp.Name != "" {
+		rels = append(rels, nodes.EntityRelation{
+			Type: catalogmodel.RelTypeComposedBy, To: comp.Name, ToKind: catalogmodel.EntityKindComposition,
 		})
 	}
 	if cm.Spec.System != "" {
