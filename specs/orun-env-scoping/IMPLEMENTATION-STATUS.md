@@ -1,7 +1,10 @@
 # Implementation Status — orun-env-scoping ("Z" model)
 
-> Live record of what shipped. The design is in `design.md`; milestones in
-> `implementation-plan.md`. All milestones merged to `main` incrementally.
+> **✅ Closed — shipped in v2.15.0.** Live record of what shipped. The design is
+> in `design.md`; milestones in `implementation-plan.md`. All milestones (ES1–ES5)
+> merged to `main` incrementally and released in **v2.15.0**. The deferred items
+> (L-1…L-4, Phase B) are explicitly out of scope for this epic — tracked future
+> work, not blockers.
 
 ## Milestones
 
@@ -11,7 +14,7 @@
 | **ES2** | Prune dangling edges with a warning | ✅ merged | #307 | A `same-plan` promotion dep to an unselected env is pruned (not fatal); `computePrunedEdges` records component + promotion prunes; `metadata.selection.prunedEdges` + stderr warning. |
 | **ES3** | In-plan promotion as the single enforced mechanism | ✅ merged | #308 | Documented the promotion contract (in-plan ordering = enforced; cross-plan gates = advisory metadata, never read by the runner); one-line notice when inert gates are recorded. |
 | **ES4** | Mutating `run` fail-closed (deprecation Phase A) | ✅ merged | #309 | A mutating `orun run` with no selection warns and proceeds (Phase A); `--dry-run` is the read-only escape; `--all-envs`/any selection is exempt. `runSelectionPresent` predicate. |
-| **ES5** | End-to-end + docs | ✅ this PR | — | `cmd/orun/envscoping_e2e_test.go` (selection metadata: full / scoped / `--all-envs`); this status doc. |
+| **ES5** | End-to-end + docs | ✅ merged | #310 | `cmd/orun/envscoping_e2e_test.go` (selection metadata: full / scoped / `--all-envs`); this status doc. |
 
 ## Behavior summary (as shipped)
 

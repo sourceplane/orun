@@ -18,7 +18,7 @@ epics and optional follow-ups needed to fully close the program.
 
 | Field | Value |
 |-------|-------|
-| Status | **Buckets 1, 5, 6 effectively COMPLETE.** Bucket 1: the legacy catalog/revision store is retired; the object model is the single persistence stack and the lint gate enforces it. Bucket 6: cockpit catalog auto-refresh shipped (engine + TUI wiring + stale badge). Bucket 5: resume step-log carry-forward and the `objectstore` fault-injection seam are done; packfile delta compression stays deferred (profiling-gated). Buckets 2–4 remain gated (perf trigger / design decision / approval). |
+| Status | **Buckets 1, 5, 6 effectively COMPLETE.** Bucket 1: the legacy catalog/revision store is retired; the object model is the single persistence stack and the lint gate enforces it. Bucket 6: cockpit catalog auto-refresh shipped (engine + TUI wiring + stale badge). Bucket 5: resume step-log carry-forward and the `objectstore` fault-injection seam are done; packfile delta compression stays deferred (profiling-gated). Bucket 3 (`orun-env-scoping`) shipped in v2.15.0 (the converged "Z" model, ES1–ES5). Only Bucket 2 (optional `objindex` accelerator, perf-gated) and Bucket 4 (`orun-affected-worker`, a separate unapproved epic) remain gated. |
 | Promotes | `orun-catalog-state` deferred register **D‑7 / L‑3** ("full `internal/catalogstore` retirement") |
 | Builds on | `specs/orun-object-model/` (the canonical graph), `specs/orun-catalog-state/` (`internal/objcatalog`, `internal/affected`) |
 | Target branch | `main` (PRs merged incrementally) |
@@ -203,19 +203,26 @@ Highest-leverage item: **1D** (delete the dual-write) — but only safe **after*
 
 ---
 
-# Bucket 3 — Epic: `orun-env-scoping` (breaking single-env change)
+# Bucket 3 — Epic: `orun-env-scoping` — ✅ SHIPPED (v2.15.0)
 
-A **holding epic** today ("do not implement"). Promote to a ready spec by
-resolving the open points, then implement across the run path
-(`specs/orun-env-scoping/design.md`).
+> **✅ DONE — shipped in v2.15.0 (ES1–ES5).** This was a **holding epic** ("do
+> not implement"); the design was finalized and the feature shipped. It
+> **converged away from the original breaking single-env design below** to the
+> non-breaking **"Z" model**: `plan` still defaults to all environments, `--env`
+> keeps its comma-separated list, and a new **`--all-envs`** flag plus a
+> **fail-closed mutating `run`** (deprecation Phase A) carry the safety intent
+> without a hard break. Scoped plans prune dangling edges with a warning; env
+> promotion compiles to in-plan `dependsOn` ordering. See `specs/orun-env-scoping/`
+> (`README.md` + `IMPLEMENTATION-STATUS.md`).
+>
+> The checklist below is the **original breaking design, retained for history and
+> now superseded** — it was *not* implemented as written.
 
-- [ ] **3.0 Finalize the design** — resolve **G‑5** (no-default resolution;
-  propose fallback-then-error), **G‑6** (`--env each-of` fan-out vs N
-  invocations), **G‑7** (trigger → one env), **G‑9** (`defaultEnvironment`
-  placement), **G‑10** (promotion = gated run in target env). Promote
-  epic → ready spec.
+- [x] **3.0 Finalize the design** — resolved via the converged Z model
+  (`specs/orun-env-scoping/design.md` §5 decision ledger Z-1…Z-7); epic promoted
+  and shipped in v2.15.0.
 
-Enforcement surfaces (design §3 — all breaking):
+Enforcement surfaces *(original breaking design — superseded by the Z model)*:
 
 - [ ] **Schema/validation** — add `intent.defaultEnvironment`; validate it names a real env.
 - [ ] **`--env` flag** (`plan`/`run`) — single value only; `a,b` → error; absence → default, not all-env.
@@ -312,9 +319,10 @@ displays, instead of relying on `orun plan`/`run`/`catalog refresh` to have run.
 - **Follow-ups (Bucket 5): ✅ mostly DONE.** Resume step-log carry-forward and
   the `objectstore` atomic-write fault-injection seam are landed; packfile delta
   compression stays a documented, profiling-gated deferral.
-- **Epics resolved (Buckets 3–4): still gated.** `orun-env-scoping` awaits the
-  design finalization (3.0) before promotion; `orun-affected-worker` awaits the
-  review/approval gate (4.0). `objindex` (Bucket 2) is a pull-in only if the
-  history scan is measured too slow.
+- **Epics (Buckets 3–4):** **Bucket 3 (`orun-env-scoping`): ✅ DONE** — shipped in
+  v2.15.0 as the converged "Z" model (ES1–ES5; see `specs/orun-env-scoping/`).
+  **Bucket 4 (`orun-affected-worker`): still gated** — awaits the review/approval
+  gate (4.0); it is a separate service/repo and the only remaining program epic.
+  `objindex` (Bucket 2) is a pull-in only if the history scan is measured too slow.
 </content>
 </invoke>

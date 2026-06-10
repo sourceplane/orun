@@ -1,7 +1,7 @@
 # Feature: orun-env-scoping (the "Z" model)
 
-> **Status: design converged — a small, almost-non-breaking feature** (was framed
-> as a breaking epic; it converged to a feature). **Principle: selection is a
+> **Status: ✅ shipped in v2.15.0 — a small, almost-non-breaking feature** (was
+> framed as a breaking epic; it converged to a feature). **Principle: selection is a
 > *plan-time* concern; the plan is executed faithfully; a *mutating* `run` is
 > fail-closed** — the absence of an explicit selection yields no mutation.
 
@@ -26,7 +26,7 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Implemented — ES1–ES5 merged (fail-closed `run` at deprecation Phase A); see `IMPLEMENTATION-STATUS.md`** |
+| Status | **✅ Closed — shipped in v2.15.0** (ES1–ES5; fail-closed `run` at deprecation Phase A). Deferred: L-1…L-4 + Phase B (tracked future work). See `IMPLEMENTATION-STATUS.md`. |
 | Type | Feature; additive + one deprecation-windowed break (mutating `run` fail-closed) |
 | Builds on / relates to | `specs/orun-catalog-state/` (cockpit env selector); `specs/orun-state-redesign/` (`PlanScope`/`RevSummary` carry the selection) |
 | Read order | `design.md` → `cli-surface.md` → `data-model.md` → `implementation-plan.md` → `test-plan.md` → `compatibility-and-migration.md` → `risks-and-open-questions.md` |
