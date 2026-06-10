@@ -1,0 +1,29 @@
+# CODEOWNERS for the orun examples workspace.
+#
+# orun's catalog resolver reads this file (relative to the examples workspace
+# root) and derives each component's owner from the last matching rule when the
+# component authors none (orun-service-catalog SC1, ownership.source = CODEOWNERS).
+# Last match wins; a slash-bearing pattern is anchored to the workspace root.
+
+# Default owner for everything in the examples workspace.
+*                       @sourceplane/platform
+
+# Runtime / edge apps.
+apps/api-edge/          @sourceplane/platform-runtime
+apps/identity-worker/   @sourceplane/platform-identity
+apps/projects-worker/   @sourceplane/platform-projects
+apps/web-console/       @sourceplane/platform-web
+apps/admin-console/     @sourceplane/platform-web
+
+# Shared packages + SDK.
+packages/               @sourceplane/platform-shared
+
+# Infrastructure.
+infra/                  @sourceplane/platform-infra
+
+# Deploy + charts examples.
+deploy/                 @sourceplane/platform-delivery
+charts/                 @sourceplane/platform-delivery
+
+# Marketing website.
+website/                @sourceplane/web

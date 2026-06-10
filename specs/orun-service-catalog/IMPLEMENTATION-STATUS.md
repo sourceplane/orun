@@ -23,7 +23,7 @@
 | SC7 — Composition envelope + contract | D | Not started | — | Composition-as-Entity; semver + lifecycle |
 | SC8 — Composition `effects` → derivation | D | Not started | — | **keystone**: produces SC4 + SC6 data; declared-vs-actual |
 | SC9 — Golden-path scaffolding | D | **Extracted (v2)** | — | → `specs/orun-scaffolding/` (SCF*, gated on SC7) |
-| SC10 — Migrate the in-repo examples | E | Not started | — | `examples/**` to v1; CODEOWNERS; both-parsers gate |
+| SC10 — Migrate the in-repo examples | E | **Started (CODEOWNERS + representative component; compositions migration pending)** | — | `examples/CODEOWNERS` added (ownership now derives for all 15 example components); `apps/api-edge` enriched with `system`/`lifecycle`/`integrations`/`links`/`docs`/`extensions` — verified end-to-end via `catalog describe` (owner from CODEOWNERS longest-prefix, System entity, integrations, preserved `x-orun-demo`). `validate`/`plan` green. Remaining: convert example compositions + broaden component coverage |
 | SC11 — Legacy migration tooling + document | E | Not started | — | lazy up-conversion; `catalog/compositions migrate` |
 | SC12 — Attestation + multi-tenant federation | F | **Deferred (follow-on)** | — | separate spec recommended |
 
