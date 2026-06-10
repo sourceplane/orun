@@ -13,7 +13,7 @@
 ## 1. Principles
 
 The posture matches the predecessor migration docs
-(`orun-component-catalog/compatibility-and-migration.md`,
+(`archive/orun-component-catalog/compatibility-and-migration.md`,
 `orun-object-model/compatibility-and-migration.md`): **additive, never
 destructive**. Concretely:
 

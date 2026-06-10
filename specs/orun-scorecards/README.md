@@ -99,14 +99,14 @@ pass (D-9).
 - "MUST / SHOULD / MAY" carry RFC 2119 weight in `data-model.md` (the schema /
   correctness contract).
 - Entity keys are three-segment `<namespace>/<repo>/<name>` per
-  `specs/orun-component-catalog/identity-and-keys.md`, paired with `kind`.
+  `specs/archive/orun-component-catalog/identity-and-keys.md`, paired with `kind`.
 
 ## Out-of-band references
 
 - Parent epic: `specs/orun-service-catalog/` (envelope SC1, live plane SC5,
   composition effects SC8). This spec is **extracted** from its `design.md` §6 and
   `data-model.md` §6/§7.
-- Predecessor specs: `specs/orun-object-model/`, `specs/orun-component-catalog/`,
+- Predecessor specs: `specs/orun-object-model/`, `specs/archive/orun-component-catalog/`,
   `specs/orun-catalog-state/` (`objcatalog`, the object sweep / GC).
 - Packages changed: `internal/scorecard` (new), `internal/catalogmodel`
   (the `Scorecard` definition struct + generated schema), `internal/objcatalog`

@@ -3,7 +3,7 @@
 > Universal refresh, cockpit behavior (incl. the Q2 changed/affected view),
 > `plan`/`run --changed` migration, the `orun catalog refresh` repoint, and the
 > new `orun catalog affected` command (the `internal/affected` engine on the
-> CLI). Envelope conventions follow `orun-component-catalog/cli-surface.md` §11
+> CLI). Envelope conventions follow `archive/orun-component-catalog/cli-surface.md` §11
 > (apiVersion/kind/data/warnings).
 
 ## 0. Universal refresh (every command)

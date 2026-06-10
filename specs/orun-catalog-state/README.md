@@ -8,7 +8,7 @@ everywhere.
 
 This is a projection-and-unification spec, not a new store. It builds on
 `specs/orun-object-model/` (the content-addressed object graph, merged) and
-`specs/orun-component-catalog/` (`catalogresolve`, `catalogmodel`). It (1) makes
+`specs/archive/orun-component-catalog/` (`catalogresolve`, `catalogmodel`). It (1) makes
 the cockpit render the catalog from the graph, (2) replaces the scattered,
 ad-hoc `--changed` logic with one reusable change-detection engine over the
 catalog, and (3) makes the object-model catalog the canonical catalog home for
@@ -26,7 +26,7 @@ these surfaces.
 | Field | Value |
 |-------|-------|
 | Status | **Draft → Ready for implementation** |
-| Builds on | `specs/orun-object-model/` (object graph), `specs/orun-component-catalog/` (`catalogresolve`, `catalogmodel`) |
+| Builds on | `specs/orun-object-model/` (object graph), `specs/archive/orun-component-catalog/` (`catalogresolve`, `catalogmodel`) |
 | Replaces | the ad-hoc `--changed` path: `internal/git/changes.go` + `internal/git/intentdiff.go` usage in `cmd/orun/main.go` (`isPathChanged`, `collectChangedComponents`) + `expand.DependencyResolver` in the changed path — consolidated into one engine (`change-detection.md`) |
 | Downstream | `specs/orun-affected-worker/` — **under review, out of scope** |
 | Target branch | `main` (PRs merged incrementally) |
@@ -112,7 +112,7 @@ be lossless (the `Path` fix, CS1).
 
 ## Out-of-band references
 
-- Predecessor specs: `specs/orun-object-model/`, `specs/orun-component-catalog/`.
+- Predecessor specs: `specs/orun-object-model/`, `specs/archive/orun-component-catalog/`.
 - Downstream (under review): `specs/orun-affected-worker/`.
 - Packages consumed/changed: `internal/objread` (pattern), `internal/objplan`,
   `internal/nodes`, `internal/catalogresolve`, `internal/sourcectx`,

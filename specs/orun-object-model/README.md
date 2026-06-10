@@ -16,7 +16,7 @@ the same object graph through the same interfaces.
 |-------|-------|
 | Status | **Draft → Ready for implementation** |
 | Phase | 3 of 3 — unification + content-addressed rewrite |
-| Predecessors | `specs/orun-state-redesign/` (Phase 1), `specs/orun-component-catalog/` (Phase 2) |
+| Predecessors | `specs/archive/orun-state-redesign/` (Phase 1), `specs/archive/orun-component-catalog/` (Phase 2) |
 | Supersedes | the Phase 1 global layout (`revisions/…`) and the Phase 2 catalog-parent **mirror** (both collapse into one object graph) |
 | Target branch | `main` (PRs merged incrementally) |
 | Decisions locked | hybrid store (CAS + materialized working view); revisions dedup across triggers; loose+zstd+GC first (packfiles deferred); runner rewrite staged behind `ORUN_OBJECT_RUNNER`; sha256 (pluggable algo) |
@@ -108,7 +108,7 @@ New contributors and implementing agents read in this order:
 
 ## Out-of-band references
 
-- Predecessor specs: `specs/orun-state-redesign/`, `specs/orun-component-catalog/`.
+- Predecessor specs: `specs/archive/orun-state-redesign/`, `specs/archive/orun-component-catalog/`.
 - Existing packages this spec consumes or replaces: `internal/statestore`
   (generalized into `internal/objectstore`), `internal/revision`,
   `internal/executionstate`, `internal/triggerctx`, `internal/sourcectx`,

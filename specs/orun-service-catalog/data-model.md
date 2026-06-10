@@ -14,7 +14,7 @@
   whitespace) for content addressing, and **pretty-encoded** when materialized for
   reading (`orun objects cat` / `checkout`), exactly as today.
 - An **entityKey** is `<namespace>/<repo>/<name>` (per
-  `orun-component-catalog/identity-and-keys.md` §4), now paired with `kind` so the
+  `archive/orun-component-catalog/identity-and-keys.md` §4), now paired with `kind` so the
   same name under two kinds is distinct.
 - `provenance` is **excluded** from `manifestHash` (per §10 there); all other
   envelope blocks are included.

@@ -102,7 +102,7 @@ orun compositions scaffold <composition> [--out dir]      (orun create fronts th
   (`compositions.md` §3) — accessed as `{{ .serviceName }}` etc. — never an
   ambient or host-derived namespace.
 - Entity keys are three-segment `<namespace>/<repo>/<name>` per
-  `specs/orun-component-catalog/identity-and-keys.md`, generalized with a `kind`
+  `specs/archive/orun-component-catalog/identity-and-keys.md`, generalized with a `kind`
   (the generated `component.yaml` keys into this grammar like any authored one).
 
 ## Out-of-band references

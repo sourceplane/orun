@@ -80,7 +80,7 @@ failures; package coverage is 92.5%.
 ## Explicitly out of scope here
 
 `orun state migrate` / catalog migrators referenced in the **other** spec trees
-(`specs/orun-state-redesign/`, `specs/orun-component-catalog/`) describe those
+(`specs/archive/orun-state-redesign/`, `specs/archive/orun-component-catalog/`) describe those
 efforts' own designs. The command was removed in the object-model cutover; those
 specs are stale with respect to it, but reconciling them belongs to those
 efforts, not this one.

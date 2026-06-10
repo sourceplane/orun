@@ -28,7 +28,7 @@
 |-------|-------|
 | Status | **✅ Closed — shipped in v2.15.0** (ES1–ES5; fail-closed `run` at deprecation Phase A). Deferred: L-1…L-4 + Phase B (tracked future work). See `IMPLEMENTATION-STATUS.md`. |
 | Type | Feature; additive + one deprecation-windowed break (mutating `run` fail-closed) |
-| Builds on / relates to | `specs/orun-catalog-state/` (cockpit env selector); `specs/orun-state-redesign/` (`PlanScope`/`RevSummary` carry the selection) |
+| Builds on / relates to | `specs/orun-catalog-state/` (cockpit env selector); `specs/archive/orun-state-redesign/` (`PlanScope`/`RevSummary` carry the selection) |
 | Read order | `design.md` → `cli-surface.md` → `data-model.md` → `implementation-plan.md` → `test-plan.md` → `compatibility-and-migration.md` → `risks-and-open-questions.md` |
 
 ## Decision ledger (converged)

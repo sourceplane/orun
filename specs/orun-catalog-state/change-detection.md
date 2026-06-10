@@ -126,7 +126,7 @@ detection (and it is the substrate a future remote consumer would mirror).
   over-approximation* of the resolver's read-set (it can only over-report, never
   miss). The candidate-set listing also captures *additions* (a new
   `package.json` changes the dir listing → the fingerprint changes), which
-  provenance alone would miss. See `orun-component-catalog/resolution-pipeline.md`.
+  provenance alone would miss. See `archive/orun-component-catalog/resolution-pipeline.md`.
 
 `impact/fingerprints/` is **always present** so the catalog tree shape stays
 uniform and its Merkle id deterministic.
