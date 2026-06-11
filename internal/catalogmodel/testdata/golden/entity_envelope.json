@@ -1,0 +1,107 @@
+{
+  "apiVersion": "orun.io/v1",
+  "contracts": {
+    "consumes": [
+      {
+        "api": "default/orun/auth-api"
+      }
+    ],
+    "provides": [
+      {
+        "api": "default/orun/identity-api",
+        "definition": "openapi",
+        "ref": "openapi/identity.yaml",
+        "stability": "stable",
+        "visibility": "public"
+      }
+    ]
+  },
+  "docs": {
+    "runbooks": [
+      "docs/runbook.md"
+    ],
+    "techdocs": "docs/"
+  },
+  "extensions": {
+    "x-acme": {
+      "tier": "gold"
+    }
+  },
+  "identity": {
+    "entityKey": "default/orun/identity-worker",
+    "kind": "Component",
+    "name": "identity-worker",
+    "namespace": "default",
+    "path": "apps/identity-worker/component.yaml",
+    "repo": "orun"
+  },
+  "integrations": {
+    "datadog": {
+      "service": "identity-worker"
+    }
+  },
+  "kind": "Component",
+  "lifecycle": {
+    "maturity": null,
+    "stage": "production",
+    "tier": "tier-1"
+  },
+  "links": [
+    {
+      "icon": "dashboard",
+      "title": "Dashboard",
+      "url": "https://example.com/d"
+    }
+  ],
+  "metadata": {
+    "description": "Identity edge worker",
+    "labels": {
+      "runtime": "cloudflare",
+      "team": "platform"
+    },
+    "tags": [
+      "edge",
+      "tier-1"
+    ],
+    "title": "Identity Worker"
+  },
+  "ownership": {
+    "additionalOwners": [
+      "group:sre"
+    ],
+    "contacts": [
+      {
+        "primary": true,
+        "type": "slack",
+        "value": "#edge"
+      }
+    ],
+    "escalation": "pagerduty:edge-oncall",
+    "owner": "group:platform-edge",
+    "source": "CODEOWNERS"
+  },
+  "provenance": {
+    "attestation": null,
+    "manifestHash": "sha256:abc",
+    "resolver": {
+      "resolverVersion": 9,
+      "schemaVersion": "orun.io/v1"
+    }
+  },
+  "relations": [
+    {
+      "include": "if-selected",
+      "to": "default/orun/auth-svc",
+      "toKind": "Component",
+      "type": "dependsOn"
+    },
+    {
+      "to": "group:platform-edge",
+      "toKind": "Group",
+      "type": "ownedBy"
+    }
+  ],
+  "spec": {
+    "type": "worker"
+  }
+}

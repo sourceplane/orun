@@ -27,6 +27,7 @@ func TestGoldenRoundtrip(t *testing.T) {
 		{"ComponentManifest", "component_manifest.json", &catalogmodel.ComponentManifest{}},
 		{"CatalogGraph", "catalog_graph.json", &catalogmodel.CatalogGraph{}},
 		{"ComponentYAML", "component_yaml.json", &catalogmodel.ComponentYAML{}},
+		{"EntityEnvelope", "entity_envelope.json", &catalogmodel.EntityEnvelope{}},
 	}
 	for _, tc := range cases {
 		tc := tc
