@@ -2,6 +2,7 @@ package objcatalog
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/sourceplane/orun/internal/clock"
@@ -384,6 +385,51 @@ func TestLoad_ReadsEntities_MultiKindAndSkips(t *testing.T) {
 	// The Group blob has no spec → zero members, no panic.
 	if view.Entities[0].MemberCount != 0 || view.Entities[0].Members != nil {
 		t.Errorf("group membership should be empty: %d %v", view.Entities[0].MemberCount, view.Entities[0].Members)
+	}
+}
+
+// TestLoad_LazyUpConvertsFlatManifest reads a pre-SC1 (v1alpha1, flat) component
+// blob — owner inside metadata, lifecycle in spec, no ownership/lifecycle blocks
+// — and asserts the read view up-converts it to the v1 envelope shape without
+// the stored blob changing (invariant #7).
+func TestLoad_LazyUpConvertsFlatManifest(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	// The flat pre-SC1 shape: apiVersion v1alpha1, metadata.owner, spec.lifecycle,
+	// no ownership/lifecycle blocks. (Kind must be ComponentManifest to validate.)
+	flat := `{"apiVersion":"orun.io/v1alpha1","kind":"ComponentManifest",` +
+		`"identity":{"componentKey":"ns/repo/legacy","name":"legacy","namespace":"ns","repo":"repo"},` +
+		`"metadata":{"owner":"@org/legacy-team","title":"Legacy"},` +
+		`"spec":{"type":"service","lifecycle":"production","domain":"legacy-domain"}}`
+	blob, _ := f.store.PutBlob(ctx, []byte(flat))
+	compTree, _ := f.store.PutTree(ctx, []objectstore.TreeEntry{{Name: "legacy.json", Kind: objectstore.KindBlob, ID: blob}})
+	root := seedCatalogWithExtraSubtree(t, f, dirComponents, compTree)
+
+	view, err := New(f.store, f.refs).Load(ctx, string(root))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(view.Components) != 1 {
+		t.Fatalf("components = %+v", view.Components)
+	}
+	c := view.Components[0]
+	// Owner is up-converted to a typed ref with source=authored, even though the
+	// stored blob had it inside metadata.
+	if c.Owner != "group:org/legacy-team" || c.OwnerSource != "authored" {
+		t.Errorf("up-converted owner = %q/%q", c.Owner, c.OwnerSource)
+	}
+	// Lifecycle stage is synthesized from spec.lifecycle.
+	if c.Stage != "production" {
+		t.Errorf("up-converted stage = %q", c.Stage)
+	}
+	// Domain still reads from the (lossless) spec block.
+	if c.Domain != "legacy-domain" {
+		t.Errorf("domain = %q", c.Domain)
+	}
+	// The stored blob is untouched (still flat) — up-conversion is read-only.
+	_, body, _ := f.store.Get(ctx, blob)
+	if !strings.Contains(string(body), `"owner":"@org/legacy-team"`) {
+		t.Errorf("stored blob must be unchanged (read-only up-conversion): %s", body)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/catalogmodel"
 	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
@@ -307,6 +308,7 @@ func (r *Reader) readComponents(ctx context.Context, treeID objectstore.ObjectID
 		if derr != nil {
 			return nil, derr
 		}
+		upConvertManifest(&m)
 		out = append(out, componentView(m))
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].ComponentKey < out[j].ComponentKey })
@@ -464,6 +466,41 @@ func (r *Reader) readFingerprints(ctx context.Context, treeID objectstore.Object
 // deep blocks whole. Dependencies and system/domain membership are read from the
 // typed relations (they no longer live inline in spec); owner/lifecycle are read
 // from the ownership/lifecycle blocks.
+// upConvertManifest lazily up-converts a pre-v1 (flat, pre-SC1) manifest blob to
+// the v1 envelope shape ON READ, never mutating the stored blob (invariant #7,
+// migration.md §2). Old immutable snapshots keep their bytes; a read of one just
+// sees the v1 shape. Within-v1 evolution is additive (missing blocks read as
+// absent), so only the one flat→envelope reshape needs handling here:
+//
+//   - the flat manifest carried `owner` inside metadata and had no ownership
+//     block → synthesize ownership{owner, source:authored};
+//   - lifecycle lived in spec.lifecycle with no lifecycle block → synthesize it;
+//   - stamp apiVersion to v1 (catalogmodel up-convert seam).
+//
+// A blob already in the v1 envelope shape (ownership present) is left untouched.
+func upConvertManifest(m *nodes.ComponentManifest) {
+	if v, ok := catalogmodel.UpConvertAPIVersion(m.APIVersion); ok {
+		m.APIVersion = v
+	} else if m.APIVersion == "" {
+		m.APIVersion = catalogmodel.APIVersionV1
+	}
+	// Already v1-shaped (the resolver always emits an ownership block).
+	if m.Ownership != nil {
+		return
+	}
+	// Pre-SC1 flat shape: owner lived in metadata.
+	if owner := stringField(m.Metadata, "owner"); owner != "" {
+		key, _ := catalogmodel.NormalizeOwnerRef(owner)
+		m.Ownership = map[string]any{"owner": key, "source": catalogmodel.OwnershipSourceAuthored}
+		delete(m.Metadata, "owner")
+	}
+	if m.Lifecycle == nil {
+		if stage := stringField(m.Spec, "lifecycle"); stage != "" {
+			m.Lifecycle = map[string]any{"stage": stage, "maturity": nil}
+		}
+	}
+}
+
 func componentView(m nodes.ComponentManifest) CatalogComponentView {
 	v := CatalogComponentView{
 		ComponentKey: m.Identity.ComponentKey,
