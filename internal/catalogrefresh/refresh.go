@@ -54,10 +54,11 @@ import (
 // enrichment (each Group/User/System/Domain/Environment/Composition/API/Resource
 // entity carries spec.members + memberCount — the inverse-edge membership), and
 // 11→12 for composition version/lifecycle carried from the composition manifest
-// into spec.composition + the Composition entity. Every catalog id moves once
-// per bump, the resolve memo misses once, and content addressing re-stabilizes
-// (S-1).
-const ResolverVersion = 12
+// into spec.composition + the Composition entity), and 12→13 for surfacing the
+// inferred runtime (languages/frameworks/infra/packageManagers) on the envelope
+// spec (data-model.md §4). Every catalog id moves once per bump, the resolve
+// memo misses once, and content addressing re-stabilizes (S-1).
+const ResolverVersion = 13
 
 // lockTTL bounds how long a refresh lock is honored before it is treated as
 // stale (a crashed holder) and reclaimed. A resolve+write is sub-second; this
