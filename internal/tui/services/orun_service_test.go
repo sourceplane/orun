@@ -92,7 +92,7 @@ func TestServiceTypes_ZeroValuesUsable(t *testing.T) {
 	_ = WorkspaceLoadedMsg{}
 	_ = PlanGeneratedMsg{}
 	_ = RunEventMsg{}
-	_ = LogEventMsg{}
+	_ = LogBatchMsg{}
 	_ = RunsListedMsg{}
 	_ = DescribeResultMsg{}
 	_ = ErrMsg{}

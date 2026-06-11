@@ -35,6 +35,12 @@ type logLine struct {
 	TS     string
 }
 
+// maxLogLines bounds the retained scrollback. A long live run (a package
+// install alone can emit tens of thousands of lines) would otherwise grow the
+// buffer — and the cost of every viewport rebuild — without limit. The oldest
+// lines are dropped; the footer reports how many were trimmed.
+const maxLogLines = 4000
+
 // LogExplorerModel is the streaming log viewer. It owns a viewport for
 // scrollback plus a filter input, an errors summary card, severity-aware
 // rendering, and a follow/pause control. Drop a TailLogs channel in via
@@ -48,9 +54,16 @@ type LogExplorerModel struct {
 	Width  int
 	Height int
 
+	// stream is the generation id of the attached tail. Batches stamped with
+	// any other id belong to a superseded tail and are discarded, so a stale
+	// pump (or a cancelled stream's close-sentinel) can never append foreign
+	// lines or flip this view to "ended".
+	stream int64
+
 	viewport   viewport.Model
 	filter     textinput.Model
 	lines      []logLine
+	trimmed    int // lines dropped from the head by the buffer cap
 	ready      bool
 	follow     bool // auto-scroll to bottom on new lines
 	errorsOnly bool // filter view to errors+warnings only
@@ -66,30 +79,37 @@ func NewLogExplorerModel() LogExplorerModel {
 	return LogExplorerModel{viewport: vp, filter: ti, follow: true}
 }
 
-// Attach installs a TailLogs channel and resets the buffer.
+// Attach installs a TailLogs channel and resets the buffer. The fresh stream
+// id supersedes any previous tail: its in-flight batches no longer match and
+// are dropped on arrival.
 func (m LogExplorerModel) Attach(ch <-chan services.LogEvent, jobID, stepID string, live bool) (LogExplorerModel, tea.Cmd) {
 	m.Events = ch
 	m.JobID = jobID
 	m.StepID = stepID
 	m.Live = live
 	m.lines = nil
+	m.trimmed = 0
 	m.follow = true
 	m.errorsOnly = false
 	m.ended = false
+	m.stream = events.NextLogStream()
 	m.rebuildViewport()
 	if ch == nil {
 		return m, nil
 	}
-	return m, events.WaitForLogEvent(ch)
+	return m, events.WaitForLogBatch(ch, m.stream)
 }
 
 // Detach clears the attached stream + buffer without resetting size info.
+// Bumping the stream id orphans any in-flight pump on the old channel.
 func (m LogExplorerModel) Detach() LogExplorerModel {
 	m.Events = nil
 	m.JobID = ""
 	m.StepID = ""
 	m.Live = false
 	m.lines = nil
+	m.trimmed = 0
+	m.stream = events.NextLogStream()
 	m.rebuildViewport()
 	return m
 }
@@ -106,41 +126,75 @@ func (m LogExplorerModel) Init() tea.Cmd { return nil }
 func (m LogExplorerModel) SetSize(w, h int) LogExplorerModel {
 	m.Width = w
 	m.Height = h
-	// Reserve: header (1) + errors card (≤7) + filter (1) + status footer (1)
-	// + margins (2) ≈ 12. Be generous to avoid clipping the status line.
-	innerH := h - 12
-	if innerH < 3 {
-		innerH = 3
-	}
 	m.viewport.Width = w - 2
-	m.viewport.Height = innerH
 	m.ready = true
 	m.rebuildViewport()
 	return m
 }
 
+// viewportHeight computes the scrollback height from the ACTUAL chrome around
+// it (header + errors card + filter + footer), so the composed view is always
+// exactly m.Height lines tall. A fixed reservation would make the frame's
+// height oscillate as the errors card grows during a live run — vertical
+// jitter that turns any renderer hiccup into persistent ghost rows.
+func (m LogExplorerModel) viewportHeight() int {
+	h := m.Height
+	if h <= 0 {
+		h = 20
+	}
+	chrome := 3 // header + filter + footer
+	if card := m.renderErrorsCard(); card != "" {
+		chrome += lipgloss.Height(card)
+	}
+	inner := h - chrome
+	if inner < 3 {
+		inner = 3
+	}
+	return inner
+}
+
 func (m LogExplorerModel) Update(msg tea.Msg) (LogExplorerModel, tea.Cmd) {
 	switch msg := msg.(type) {
-	case services.LogEventMsg:
-		if msg.Event.Line != "" {
-			sev := classifySeverity(msg.Event.Line)
-			if msg.Event.IsError && sev < SevError {
+	case services.LogBatchMsg:
+		// A batch from a superseded tail (older stream id) is dropped whole:
+		// neither its lines nor its close-sentinel may touch the current view.
+		if msg.Stream != m.stream {
+			return m, nil
+		}
+		appended := false
+		for _, ev := range msg.Events {
+			if ev.Line == "" {
+				continue
+			}
+			sev := classifySeverity(ev.Line)
+			if ev.IsError && sev < SevError {
 				sev = SevError
 			}
 			m.lines = append(m.lines, logLine{
-				StepID: msg.Event.StepID,
-				Line:   msg.Event.Line,
+				StepID: ev.StepID,
+				Line:   ev.Line,
 				Sev:    sev,
-				TS:     msg.Event.Timestamp.Format("15:04:05"),
+				TS:     ev.Timestamp.Format("15:04:05"),
 			})
+			appended = true
+		}
+		// Cap the scrollback (copy, so the dropped head can be collected).
+		if over := len(m.lines) - maxLogLines; over > 0 {
+			kept := make([]logLine, maxLogLines)
+			copy(kept, m.lines[over:])
+			m.lines = kept
+			m.trimmed += over
+		}
+		if appended {
 			m.rebuildViewport()
-		} else {
-			// Sentinel: empty line means the upstream channel closed.
+		}
+		if msg.Closed {
 			m.ended = true
 			m.Live = false
+			return m, nil
 		}
-		if m.Events != nil && msg.Event.Line != "" {
-			return m, events.WaitForLogEvent(m.Events)
+		if m.Events != nil {
+			return m, events.WaitForLogBatch(m.Events, m.stream)
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -317,14 +371,19 @@ func (m LogExplorerModel) View() string {
 	if step == "" {
 		step = "all steps"
 	}
+	// Pill glyphs stay on the cockpit's vetted single-width set. U+23F8 "⏸"
+	// (and friends with an emoji presentation) render two cells wide on some
+	// terminals while measuring one — a line that then lands on the terminal's
+	// last column wraps, scrolls the alt screen one row, and desyncs the
+	// renderer (ghost rows). ▌ is already proven single-width in this UI.
 	livePill := theme.StylePillIdle.Render("○ idle")
 	switch {
 	case m.ended:
-		livePill = theme.StylePillIdle.Render("■ ended")
+		livePill = theme.StylePillIdle.Render("○ ended")
 	case m.Live && m.follow:
 		livePill = theme.StylePillRunning.Render("● LIVE")
 	case m.Live && !m.follow:
-		livePill = theme.StylePillWarn.Render("⏸ PAUSED")
+		livePill = theme.StylePillWarn.Render("▌▌ PAUSED")
 	}
 	modePills := ""
 	if m.errorsOnly {
@@ -340,9 +399,6 @@ func (m LogExplorerModel) View() string {
 
 	errors := m.renderErrorsCard()
 	body := m.viewport.View()
-	if len(m.lines) == 0 {
-		body = theme.StyleDim.Render("  waiting for log lines…")
-	}
 
 	// ── Footer status line ──────────────────────────────────────────────
 	footer := m.renderStatusFooter()
@@ -366,8 +422,12 @@ func (m LogExplorerModel) renderStatusFooter() string {
 			warns++
 		}
 	}
+	lineCount := fmt.Sprintf("%d lines", total)
+	if m.trimmed > 0 {
+		lineCount = fmt.Sprintf("%d lines (%d earlier trimmed)", total, m.trimmed)
+	}
 	parts := []string{
-		theme.StyleDim.Render(fmt.Sprintf("%d lines", total)),
+		theme.StyleDim.Render(lineCount),
 	}
 	if errs > 0 {
 		parts = append(parts, theme.StylePillError.Render(fmt.Sprintf("%d err", errs)))
@@ -422,7 +482,6 @@ func (m LogExplorerModel) renderErrorsCard() string {
 	var b strings.Builder
 	b.WriteString(theme.StyleSectionTitle.Render("Errors"))
 	b.WriteString(theme.StyleDim.Render(fmt.Sprintf("  (%d)", len(errs))))
-	b.WriteString("\n")
 	for _, e := range tail {
 		step := e.StepID
 		if step == "" {
@@ -432,20 +491,26 @@ func (m LogExplorerModel) renderErrorsCard() string {
 		// error line can't wrap and break the frame.
 		avail := width - 4 - lipgloss.Width(step) - 1
 		line := truncate(e.Line, avail)
-		b.WriteString("  " + theme.StyleChipDim.Render(step) + " " +
-			theme.StylePillError.Render(line) + "\n")
+		b.WriteString("\n  " + theme.StyleChipDim.Render(step) + " " +
+			theme.StylePillError.Render(line))
 	}
 	if len(errs) > max {
-		b.WriteString(theme.StyleDim.Render(fmt.Sprintf("  +%d more\n", len(errs)-max)))
+		b.WriteString("\n" + theme.StyleDim.Render(fmt.Sprintf("  +%d more", len(errs)-max)))
 	}
+	// No trailing newline: the caller stacks pieces with strings.Join("\n"),
+	// and a trailing newline here would inject a phantom blank line whose
+	// presence depends on whether errors exist — frame-height jitter.
 	return b.String()
 }
 
-// severityGlyph returns a colored 1-char prefix for the gutter.
+// severityGlyph returns a colored 1-char prefix for the gutter. Glyphs come
+// from the cockpit's vetted single-width set — U+2716 "✖" has an emoji
+// presentation that renders two cells on some terminals, which widens the
+// line past its measured width and wraps/scrolls the alt screen.
 func severityGlyph(s Severity) string {
 	switch s {
 	case SevError:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).Render("✖")
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).Render("✗")
 	case SevWarn:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#fbbf24")).Render("▲")
 	case SevDebug:
@@ -502,7 +567,20 @@ func (m *LogExplorerModel) rebuildViewport() {
 		body := truncate(l.Line, width-headW)
 		b.WriteString(head + severityStyle(l.Sev).Render(body) + "\n")
 	}
-	m.viewport.SetContent(strings.TrimRight(b.String(), "\n"))
+	// Track the chrome's current height so the composed frame stays exactly
+	// m.Height tall (the errors card can grow as a live run streams errors).
+	m.viewport.Height = m.viewportHeight()
+	content := strings.TrimRight(b.String(), "\n")
+	if content == "" {
+		// Keep the viewport in place (it pads to its height) so the frame
+		// doesn't reshape when the first line lands.
+		if len(m.lines) == 0 {
+			content = theme.StyleDim.Render("  waiting for log lines…")
+		} else {
+			content = theme.StyleDim.Render("  no lines match the filter")
+		}
+	}
+	m.viewport.SetContent(content)
 	if m.follow {
 		m.viewport.GotoBottom()
 	}

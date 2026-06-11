@@ -503,7 +503,7 @@ func (m ActivityModel) Init() tea.Cmd { return nil }
 // Update handles key + log-stream messages.
 func (m ActivityModel) Update(msg tea.Msg) (ActivityModel, tea.Cmd) {
 	switch msg := msg.(type) {
-	case services.LogEventMsg:
+	case services.LogBatchMsg:
 		var cmd tea.Cmd
 		m.Logs, cmd = m.Logs.Update(msg)
 		return m, cmd

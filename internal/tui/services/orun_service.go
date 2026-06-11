@@ -365,9 +365,16 @@ type RunEventMsg struct {
 	Event RunEvent
 }
 
-// LogEventMsg wraps a streaming LogEvent.
-type LogEventMsg struct {
-	Event LogEvent
+// LogBatchMsg carries one coalesced batch of streamed LogEvents. Stream is
+// the tail's generation id (events.NextLogStream): consumers discard batches
+// whose Stream doesn't match their currently attached tail, so a superseded
+// pump or a cancelled stream's close-sentinel can never contaminate the live
+// view. Closed reports that the channel ended (possibly alongside trailing
+// events).
+type LogBatchMsg struct {
+	Stream int64
+	Events []LogEvent
+	Closed bool
 }
 
 // CatalogLoadedMsg is dispatched after LoadCatalog completes. A nil Snapshot

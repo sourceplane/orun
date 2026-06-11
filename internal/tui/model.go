@@ -676,8 +676,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case services.LogEventMsg:
-		// Route to whichever surface is consuming logs.
+	case services.LogBatchMsg:
+		// Route to whichever surface is consuming logs. Each surface compares
+		// the batch's stream id against its attached tail, so a batch only ever
+		// lands in the view that owns the stream.
 		var cmd tea.Cmd
 		m.logView, cmd = m.logView.Update(msg)
 		var cmd2 tea.Cmd
