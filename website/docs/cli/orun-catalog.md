@@ -2,11 +2,13 @@
 title: orun catalog
 ---
 
-`orun catalog` resolves, persists, and inspects the **component catalog** — the
-resolved set of components (plus their dependency graphs and the impact index)
-for a workspace at a given source snapshot. It is the content-addressed
-foundation that powers change detection (`--changed`), the `orun catalog
-affected` query, and the cockpit's live component view.
+`orun catalog` resolves, persists, and inspects the **service catalog** — the
+typed entity model (components plus derived Systems, Domains, Groups, APIs,
+Resources, Environments, and Compositions, with their relation graph and the
+impact index) for a workspace at a given source snapshot. It is the
+content-addressed foundation that powers change detection (`--changed`), the
+`orun catalog affected` query, and the cockpit's live component view. The
+model itself is described in [Service catalog](../concepts/service-catalog.md).
 
 ```bash
 orun catalog            # summary of the catalog command group
@@ -26,6 +28,7 @@ orun catalog <sub> --help
 | `diff` | Compare two catalog snapshots |
 | `validate` | Re-resolve in strict mode and report validation issues |
 | `refs` | List every catalog ref with its resolved source/catalog keys |
+| `migrate` | Lint authored `component.yaml` files for `orun.io/v1` readiness (read-only) |
 
 A catalog is also written transparently as a side effect of using orun: `orun
 plan` and a universal pre-run refresh hook keep `catalogs/current` fresh, so the
@@ -103,7 +106,8 @@ component was (or wasn't) selected.
 
 ```bash
 orun catalog list                 # components in the current catalog
-orun catalog describe <name>      # the full resolved manifest for one component
+orun catalog list --kind System   # derived entities of another kind
+orun catalog describe <name>      # the full v1 envelope for one entity
 orun catalog tree                 # the catalog relationship graphs
 orun catalog history <name>       # a component's execution history
 orun catalog diff <a> <b>         # compare two catalog snapshots
@@ -113,8 +117,45 @@ orun catalog refs                 # every catalog ref + resolved source/catalog 
 These read whatever has been persisted (most recently `catalogs/current`); they
 never resolve unless you ask for `refresh`.
 
+### `orun catalog list`
+
+Prints one row per component — key, type, owner, system, and last execution
+status. Owners are typed refs (`group:<name>`, `user:<name>`), resolved from
+authored manifests or `CODEOWNERS`.
+
+| Flag | Purpose |
+| --- | --- |
+| `--kind <Kind>` | List derived entities of a kind (`API\|Resource\|System\|Domain\|Group\|Environment\|Composition`) instead of components; derived entities show a MEMBERS count |
+| `--owner` / `--system` / `--domain` / `--type` / `--status` | Narrow the component set |
+| `--json` | Stable machine-readable output |
+
+### `orun catalog describe`
+
+Renders the full `orun.io/v1` envelope for one entity: identity and lifecycle,
+ownership (with its provenance), environments, dependencies, APIs, resources,
+integrations, vendor extensions, inferred runtime, live deployments, latest
+executions, and resolution provenance. The argument may be a bare name or a
+fully-qualified `namespace/repo/name` key; an ambiguous bare name exits `4`
+with the candidate keys.
+
+## `orun catalog migrate`
+
+Read-only, advisory lint of the workspace's authored `component.yaml` files
+for `orun.io/v1` readiness. Reports, per component, the gaps that keep it from
+being a first-class v1 entity — a legacy `apiVersion`, a missing owner (none
+authored and no `CODEOWNERS` match), a missing `lifecycle` stage, a missing
+`system` — plus a summary count of ready components. It **never rewrites
+files**; v1 authoring is additive and un-migrated components still resolve.
+
+```bash
+orun catalog migrate          # per-file findings + ready count
+orun catalog migrate --json   # the CatalogMigrateResult envelope, for CI
+```
+
 ## See also
 
+- [Service catalog](../concepts/service-catalog.md) — the entity model, the
+  relation graph, ownership provenance, and the live plane.
 - [Change detection](../concepts/change-detection.md) — `--changed` on
   `plan`/`run`/`component`, powered by this engine.
 - [Change watches](../concepts/change-watches.md) — `spec.change.watches`, read

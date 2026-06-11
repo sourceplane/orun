@@ -3,9 +3,10 @@
  *
  * IA shaped around the operator journey:
  *
- *   1. start      → install, quick-start
- *   2. principles → design ethos (load-bearing)
- *   3. concepts   → the model (intent, compositions, plans, triggers)
+ *   1. overview   → what orun is, how it works, the resource model,
+ *                   design principles, glossary (load-bearing)
+ *   2. start      → install, quick-start
+ *   3. concepts   → the model (intent, compositions, plans, triggers, catalog)
  *   4. cockpit    → the operator surface (overview, architecture)
  *   5. execute    → runners, execution model
  *   6. cli        → command reference
@@ -21,7 +22,18 @@
 const sidebars = {
   docsSidebar: [
     'intro',
-    'principles',
+    {
+      type: 'category',
+      label: 'Overview',
+      collapsed: false,
+      items: [
+        'overview/what-is-orun',
+        'overview/how-orun-works',
+        'overview/resource-model',
+        'principles',
+        'overview/glossary',
+      ],
+    },
     {
       type: 'category',
       label: 'Start',
@@ -45,6 +57,7 @@ const sidebars = {
         'concepts/dependency-rules',
         'concepts/environment-promotion',
         'concepts/runtime-environment',
+        'concepts/service-catalog',
         'concepts/state-model',
         'concepts/change-detection',
         'concepts/change-watches',
@@ -146,7 +159,7 @@ const sidebars = {
     {
       type: 'category',
       label: 'Release notes',
-      items: ['release-notes/v2.15.0', 'release-notes/v2.14.0', 'release-notes/v2.13.0', 'release-notes/v2.10.0', 'release-notes/v2.9.0', 'release-notes/v2.8.0', 'release-notes/v2.7.0', 'release-notes/v2.6.0'],
+      items: ['release-notes/v2.16.0', 'release-notes/v2.15.0', 'release-notes/v2.14.0', 'release-notes/v2.13.0', 'release-notes/v2.10.0', 'release-notes/v2.9.0', 'release-notes/v2.8.0', 'release-notes/v2.7.0', 'release-notes/v2.6.0'],
     },
     {
       type: 'category',
