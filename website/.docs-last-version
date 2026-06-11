@@ -1,6 +1,6 @@
 # Docs last updated for version
 
-v2.3.0
+v2.16.0
 
 ## How to use this file
 
@@ -8,19 +8,25 @@ When updating docs next time, run:
 
 ```bash
 # Get all changes since docs were last updated
-git log v2.3.0..HEAD --oneline
+git log v2.16.0..HEAD --oneline
 ```
 
 Then update this file to the new version after the docs PR is merged.
 
 ## What was covered in this update
 
-- Change watches: spec.change.watches for component opt-in to intent change signals
-- --intent-impact flag (all/watch/none) for controlling global intent impact behavior
-- Enhanced --explain output showing matched/unmatched watches
-- Breaking: default intent-impact is now "watch" (was implicitly "all")
-- New: concepts/change-watches.md
-- Updated: concepts/change-detection.md (intent-aware scoping table, --intent-impact flag)
-- Updated: reference/configuration.md (change.watches section)
-- Updated: concepts/intent-model.md (change.watches reference)
-- Updated: sidebars.js (added change-watches entry)
+- Docs redesign: new philosophy-first "Overview" section
+  - New: overview/what-is-orun.md (positioning, what orun is/is not, ecosystem fit)
+  - New: overview/how-orun-works.md (the declare → compile → execute → record mental model)
+  - New: overview/resource-model.md (the typed apiVersion/kind document model; authored/compiled/recorded classes)
+  - New: overview/glossary.md (full vocabulary with links)
+  - Moved 'principles' into the Overview sidebar category (URL unchanged)
+  - intro.mdx: added catalog pillar, re-pointed reading paths at the Overview
+  - docusaurus.config.js: Overview navbar entry, footer links, Releases navbar link un-staled (was v2.9.0)
+- Service catalog (v2.16.0 epic, SC0–SC11)
+  - New: concepts/service-catalog.md (entity kinds, orun.io/v1 envelope, CODEOWNERS ownership
+    provenance, relations.json, composition effects, live plane, catalog migrate)
+  - Updated: cli/orun-catalog.md (migrate subcommand, list --kind, describe envelope, see-also)
+  - Updated: concepts/compositions.md (version, lifecycle, effects section)
+- Release notes: release-notes/v2.16.0.md; sidebars.js updated
+- README.md: stale v1.12.3 references bumped to v2.16.0

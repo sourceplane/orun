@@ -158,6 +158,36 @@ spec:
 
 For simpler compositions, everything can live in a single file with inline schemas and jobs. This is still supported but split-kind is recommended for compositions with multiple profiles or reusable jobs.
 
+## Versioning, lifecycle, and effects
+
+A composition is a **golden path**, and golden paths evolve. Three spec fields
+(v2.16.0) make that evolution first-class:
+
+```yaml
+spec:
+  version: 2.3.0        # semver, layered on the content digest
+  lifecycle: stable     # stable | beta | deprecated
+  effects:              # what running this path contributes to the catalog
+    integrations:
+      cloudflare: { product: workers }
+    provides: [default/orun/cloudflare-edge]   # Resource entities
+    exposes: [default/orun/edge-http-api]      # API entities
+    scorecards:
+      satisfies: [has-deploy-pipeline]
+```
+
+- **`version` + `lifecycle`** let platform teams publish, stage, and retire
+  golden paths deliberately. Pinning a `deprecated` composition version
+  surfaces a warning at resolve time.
+- **`effects`** declare the path's consequences once, centrally: every
+  component that adopts the type gets its integrations, provided Resources,
+  and exposed APIs linked into the [service catalog](service-catalog.md)
+  without authoring them per component.
+
+Compositions are themselves catalog entities (`kind: Composition`), related to
+the components that ride them — so "which services are on the old golden
+path?" is a catalog query, not an audit.
+
 ## Why compositions scale well
 
 - They keep execution logic centralized instead of duplicating shell scripts across repositories.

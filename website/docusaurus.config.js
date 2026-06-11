@@ -49,10 +49,11 @@ const config = {
       title: 'orun',
       items: [
         { to: '/', label: 'Docs', position: 'left' },
+        { to: '/overview/what-is-orun', label: 'Overview', position: 'left' },
         { to: '/principles', label: 'Principles', position: 'left' },
         { to: '/cockpit/overview', label: 'Cockpit', position: 'left' },
         { to: '/cli/orun', label: 'CLI', position: 'left' },
-        { to: '/release-notes/v2.9.0', label: 'Releases', position: 'right' },
+        { to: '/release-notes/v2.16.0', label: 'Releases', position: 'right' },
         {
           href: 'https://github.com/sourceplane/orun',
           label: 'GitHub',
@@ -66,6 +67,7 @@ const config = {
         {
           title: 'Start',
           items: [
+            { label: 'What is orun?', to: '/overview/what-is-orun' },
             { label: 'Installation', to: '/start/installation' },
             { label: 'Quick start', to: '/start/quick-start' },
             { label: 'Design principles', to: '/principles' },
@@ -74,10 +76,12 @@ const config = {
         {
           title: 'Model',
           items: [
+            { label: 'The resource model', to: '/overview/resource-model' },
             { label: 'Intent model', to: '/concepts/intent-model' },
             { label: 'Compositions', to: '/concepts/compositions' },
             { label: 'Plan DAG', to: '/concepts/plan-dag' },
-            { label: 'Trigger bindings', to: '/concepts/trigger-bindings' },
+            { label: 'Service catalog', to: '/concepts/service-catalog' },
+            { label: 'Glossary', to: '/overview/glossary' },
           ],
         },
         {
