@@ -125,9 +125,10 @@ orun tui      # explicit
 orun          # bare invocation opens the cockpit on an interactive terminal
 ```
 
-A three-pane Bubble Tea shell: sidebar (modes), main pane (active view), inspector
-(field list for the selection). Modes are `Browse`, `Component`, `Plan Studio`,
-`Activity`, `Logs`, `History`, and `Catalog`. See
+A three-pane Bubble Tea shell: sidebar (surfaces), main pane (active view),
+inspector (field list for the selection). The two top-level surfaces are
+`Catalog` (the home surface) and `Activity`; `Plan Studio`, `Logs`, and
+`History` are reached from within them. See
 [cockpit architecture](/cockpit/architecture) for the full mode and drilldown
 machine.
 
@@ -139,11 +140,44 @@ runner as `orun run`, persists state and per-step logs to `.orun/`, and streams
 those logs into the Activity and Logs surfaces live. See the
 [TUI reference](/cli/orun-tui) for the run and live-log workflow.
 
-## The component catalog view
+## The Catalog surface — knowledge and work in one screen
 
-Browse renders the workspace's component list from the **object-model catalog**
-(the same one [`orun catalog`](/cli/orun-catalog) reads), and stays current on its
-own:
+The **Catalog** is the cockpit's home surface (`1`, or the `goto.catalog`
+palette command): the cockpit view of the
+[service-catalog entity model](/cli/orun-catalog). It replaced the former
+Browse and Component surfaces — every entity the resolver derived from your
+workspace is here, and Component entities carry the full work surface:
+
+- **Kind tabs with counts.** `[` / `]` (or `←`/`→`) cycle through the kinds
+  present in the catalog — Component, API, Resource, System, Domain, Group,
+  Composition, Environment, Deployment — each with its entity count. The
+  surface opens on the **Component** tab; the `All` tab mixes kinds with a
+  kind glyph per row.
+- **Envelope columns per kind.** Components lead with OWNER (CODEOWNERS-derived
+  ownership) and STAGE (lifecycle); Compositions show VERSION and lifecycle
+  stage; derived kinds show member counts.
+- **Changed / affected overlay.** Component rows are badged by the
+  change-detection engine: a filled dot for a **directly changed** component,
+  a hollow dot for one **affected** through a dependency. Press `c` to filter
+  to only the changed and affected components — the cockpit view of
+  `orun catalog affected`.
+- **A walkable graph.** `⏎` opens an entity's detail page: identity, ownership,
+  lifecycle, and a **Connections** list — its members and typed relation edges
+  (`dependsOn`, `partOf`, `ownedBy`, `deployedTo`, `composedBy`, …, with `◂`
+  marking incoming edges). Connections are navigable: `⏎` follows an edge to
+  its other endpoint, `esc` walks back. The header breadcrumb tracks the path.
+- **Execution history, in place.** A Component's detail page shows its source
+  detail (path, profile, watches), live change state, last-run status, and an
+  **Executions** section; `⏎` on an execution drills straight into the
+  Activity run → job → logs view, reading the sealed executions under
+  `.orun/objectmodel/`.
+- **Run from the graph.** `r` runs the selected component for the selected
+  environment (confirm-then-execute through the same internal runner as
+  `orun run`); `g` composes it in Plan Studio.
+
+### Catalog freshness
+
+The surface stays current on its own:
 
 - **Live, keystroke-free refresh.** The cockpit re-reads the catalog on a short
   interval, so a component you edit on disk — or a catalog written by an external
@@ -156,59 +190,14 @@ own:
   in `~/.orun/cockpit.json`). When the loaded catalog drifts from the working tree,
   a `⟳ stale (⌃r)` badge appears in the header. See the
   [TUI reference](/cli/orun-tui#catalog-freshness) for the full workflow.
-- **Changed / affected overlay.** Each row is badged by the change-detection
-  engine: a filled dot for a **directly changed** component, a hollow dot for one
-  **affected** through a dependency. Press `c` to filter to only the changed and
-  affected rows — the cockpit view of `orun catalog affected`.
-- **Freshness gate.** When the catalog is fresh for a clean tree, the list is
-  served straight from the catalog; a dirty tree falls back to the live intent
-  loader so uncommitted edits show immediately. Either way the row data
-  (`name/type/domain/path/envs/profile/dependsOn/watches`) is identical.
-
-### Drill down: catalog → component → job → logs
-
-Press `⏎` on a component to open its **Component page** — the resolved detail
-(path, envs, profile, dependencies, `change.watches`, change badge) plus a
-**Recent executions** section (the runs that touched this component). Drill into an
-execution to reach the run → job → logs view. This mirrors the object graph: every
-level reads from the object-model store (the catalog and the sealed executions
-under `.orun/objectmodel/`).
-
-## The Catalog surface — the multi-kind entity explorer
-
-Press `3` (or `tab`-cycle, or the `goto.catalog` palette command) to open the
-**Catalog** surface: the cockpit view of the
-[service-catalog entity model](/cli/orun-catalog). Where Browse is the *work*
-surface (components you can compose and run), Catalog is the *knowledge*
-surface — every entity the resolver derived from your workspace:
-
-- **Kind tabs with counts.** `[` / `]` (or `←`/`→`) cycle through the kinds
-  present in the catalog — Component, API, Resource, System, Domain, Group,
-  Composition, Environment, Deployment — each with its entity count. The `All`
-  tab mixes kinds with a kind glyph per row.
-- **Envelope columns per kind.** Components lead with OWNER (CODEOWNERS-derived
-  ownership) and STAGE (lifecycle); Compositions show VERSION and lifecycle
-  stage; derived kinds show member counts.
-- **A walkable graph.** `⏎` opens an entity's detail page: identity, ownership,
-  lifecycle, and a **Connections** list — its members and typed relation edges
-  (`dependsOn`, `partOf`, `ownedBy`, `deployedTo`, `composedBy`, …, with `◂`
-  marking incoming edges). Connections are navigable: `⏎` follows an edge to
-  its other endpoint, `esc` walks back. The header breadcrumb tracks the path.
-- **Same freshness model as Browse.** The surface reads the resolved catalog at
-  `catalogs/current`; the header's `⟳ stale (⌃r)` badge tells you when a
-  refresh would change it.
-- **The work surface, on every component.** Component entities carry the
-  changed/affected overlay (CHG column, `c` filters to changed-only), the
-  last-run status (LAST column), and an **Executions** section on the detail
-  page that drills straight into the Activity run view. `r` runs the selected
-  component for the selected environment (same confirm-then-execute flow as
-  the Component page), `g` composes it in Plan Studio, `o` opens its classic
-  page. Knowledge surface and work surface are one screen.
+- **Freshness gate.** When the catalog is fresh for a clean tree, the component
+  work-surface context is served straight from the catalog; a dirty tree falls
+  back to the live intent loader so uncommitted edits show immediately.
 
 ### Environment selector and component-scoped run
 
 The cockpit holds one **selected environment** (shown in the header), cycled with
-`e` and remembered between sessions. From a component page, `r` launches a
+`e` and remembered between sessions. On a component, `r` launches a
 **component-scoped run for the selected environment** — only when the component is
 active in it — through the same `orun run` path (it confirms, then executes and
 persists state + logs). `g` opens Plan Studio to compose instead. This uses the

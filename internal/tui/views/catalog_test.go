@@ -43,8 +43,15 @@ func keyRunes(s string) tea.KeyMsg {
 
 func TestCatalog_KindTabsFromSnapshot(t *testing.T) {
 	m := NewCatalogModel().SetSnapshot(testCatalogSnapshot())
+	// The home surface opens on the Component tab (the working objects).
+	if got := m.ActiveKind(); got != "Component" {
+		t.Fatalf("default kind = %q, want Component", got)
+	}
+	// A later refresh keeps the user's tab.
+	m, _ = m.Update(keyRunes("["))
+	m = m.SetSnapshot(testCatalogSnapshot())
 	if got := m.ActiveKind(); got != "All" {
-		t.Fatalf("default kind = %q, want All", got)
+		t.Fatalf("refresh moved the tab: kind = %q, want All", got)
 	}
 	// Canonical order: All, Component, System, Group, Composition.
 	want := []string{"All", "Component", "System", "Group", "Composition"}
@@ -65,6 +72,7 @@ func TestCatalog_KindTabsFromSnapshot(t *testing.T) {
 
 func TestCatalog_FilterAndSelection(t *testing.T) {
 	m := NewCatalogModel().SetSnapshot(testCatalogSnapshot())
+	m, _ = m.Update(keyRunes("[")) // Component (default) → All
 	m = m.SetFilter("edge-team")
 	rows := m.filtered()
 	// Matches the Group by name and the api Component by owner.
@@ -141,9 +149,8 @@ func TestCatalog_ViewRendersTabsAndRows(t *testing.T) {
 			t.Errorf("list view missing %q", want)
 		}
 	}
-	// Component tab leads with OWNER and STAGE columns, plus the work-surface
-	// LAST and CHG columns.
-	m, _ = m.Update(keyRunes("]"))
+	// The Component tab (the default) leads with OWNER and STAGE columns,
+	// plus the work-surface LAST and CHG columns.
 	out = m.View()
 	for _, want := range []string{"OWNER", "STAGE", "LAST", "CHG", "group:edge-team", "production"} {
 		if !strings.Contains(out, want) {
@@ -259,8 +266,7 @@ func TestCatalog_RefreshDropsDeadMiddleOfStack(t *testing.T) {
 func TestCatalog_RefreshClampsDetailCursor(t *testing.T) {
 	m := NewCatalogModel().SetSnapshot(testCatalogSnapshot())
 	// Drill checkout (System): 2 links after member dedupe.
-	m, _ = m.Update(keyRunes("]")) // Component tab
-	m, _ = m.Update(keyRunes("]")) // System tab
+	m, _ = m.Update(keyRunes("]")) // Component (default) → System tab
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m, _ = m.Update(keyRunes("G")) // cursor to last link
 	if m.detailCursor == 0 {

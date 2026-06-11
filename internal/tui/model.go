@@ -53,25 +53,27 @@ import (
 type Mode int
 
 const (
-	ModeBrowse Mode = iota
+	// ModeCatalog is the cockpit's home surface: the multi-kind entity
+	// explorer that absorbed the former Browse/Component surfaces — its
+	// Component entities carry the full work surface (change overlay, run,
+	// compose, execution history).
+	ModeCatalog Mode = iota
 	ModePlanStudio
 	ModeRunDashboard
 	ModeLogExplorer
 	ModeHistory
 	ModeActivity
-	ModeComponent
-	ModeCatalog
 )
 
 // ModeComponentStudio is an alias for the inline Compose surface that
-// is reached via `enter` on a component in Browse. The underlying
+// is reached via `g` on a component in the Catalog. The underlying
 // PlanStudioModel is reused as the implementation engine.
 const ModeComponentStudio = ModePlanStudio
 
 func (m Mode) String() string {
 	switch m {
-	case ModeBrowse:
-		return "browse"
+	case ModeCatalog:
+		return "catalog"
 	case ModePlanStudio:
 		return "plan-studio"
 	case ModeRunDashboard:
@@ -82,19 +84,13 @@ func (m Mode) String() string {
 		return "history"
 	case ModeActivity:
 		return "activity"
-	case ModeComponent:
-		return "component"
-	case ModeCatalog:
-		return "catalog"
 	}
 	return "unknown"
 }
 
 func (m Mode) sidebarKey() string {
 	switch m {
-	case ModeBrowse, ModePlanStudio, ModeComponent:
-		return "browse"
-	case ModeCatalog:
+	case ModeCatalog, ModePlanStudio:
 		return "catalog"
 	}
 	return "activity"
@@ -103,7 +99,7 @@ func (m Mode) sidebarKey() string {
 // searchable reports whether the mode's stage supports the `/` filter bar.
 func (m Mode) searchable() bool {
 	switch m {
-	case ModeBrowse, ModeHistory, ModeLogExplorer, ModeCatalog:
+	case ModeCatalog, ModeHistory, ModeLogExplorer:
 		return true
 	}
 	return false
@@ -147,16 +143,14 @@ type Model struct {
 	prefs Prefs
 
 	// Children views
-	navigator     views.NavigatorModel
-	browse        views.BrowseModel
-	history       views.HistoryModel
-	planStudio    views.PlanStudioModel
-	runView       views.RunViewModel
-	logView       views.LogExplorerModel
-	activity      views.ActivityModel
-	componentPage views.ComponentPageModel
-	catalog       views.CatalogModel
-	inspector     views.InspectorModel
+	navigator  views.NavigatorModel
+	history    views.HistoryModel
+	planStudio views.PlanStudioModel
+	runView    views.RunViewModel
+	logView    views.LogExplorerModel
+	activity   views.ActivityModel
+	catalog    views.CatalogModel
+	inspector  views.InspectorModel
 
 	// selectedEnv is the cockpit's currently selected environment
 	// (environments.md §1) — used for the component-scoped run action and shown
@@ -180,8 +174,8 @@ type Model struct {
 	// doesn't wipe a historical run the user is currently inspecting.
 	runDetails map[string]services.RunDetail
 
-	// Component Studio context — set when the user presses `enter` on a
-	// component in Browse; cleared when they `esc` back out.
+	// Component Studio context — set when the user presses `g` on a
+	// component in the Catalog; cleared when they `esc` back out.
 	studioComponent string
 
 	// History stacks for back/forward navigation. We push the current mode
@@ -247,16 +241,14 @@ func NewModel(svc services.OrunService) Model {
 
 	return Model{
 		svc:              svc,
-		activeMode:       ModeBrowse,
+		activeMode:       ModeCatalog,
 		activePanel:      PanelMain,
 		navigator:        views.NewNavigatorModel(),
-		browse:           views.NewBrowseModel(),
 		history:          views.NewHistoryModel(),
 		planStudio:       views.NewPlanStudioModel(),
 		runView:          views.NewRunViewModel(),
 		logView:          views.NewLogExplorerModel(),
 		activity:         views.NewActivityModel(),
-		componentPage:    views.NewComponentPageModel(),
 		catalog:          views.NewCatalogModel(),
 		inspector:        views.NewInspectorModel(),
 		commandPalette:   views.NewCommandPaletteModel(),
@@ -346,7 +338,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.lastErr = nil
 		m.workspace = msg.Snapshot
-		m.browse.Workspace = msg.Snapshot
 		m.ensureSelectedEnv()
 		if msg.Snapshot != nil && msg.Snapshot.IntentFile != "" {
 			m.planStudio = m.planStudio.SetRequest(services.PlanRequest{
@@ -359,7 +350,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				[]string{"manual", "ci", "schedule", "promote"},
 			)
 		}
-		m.syncComponentPage()
 		m.syncCatalogContext()
 		m.refreshInspectorSelection()
 		return m, listRunsCmd(m.svc)
@@ -418,9 +408,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.workspace = msg.Snapshot
-		m.browse.Workspace = msg.Snapshot
 		m.ensureSelectedEnv()
-		m.syncComponentPage()
 		m.syncCatalogContext()
 		m.refreshInspectorSelection()
 		return m, nil
@@ -429,7 +417,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err == nil {
 			m.history.Runs = msg.Runs
 			m.refreshActivityRuns()
-			m.syncComponentPage()
 			m.syncCatalogContext()
 		}
 		return m, nil
@@ -468,15 +455,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		req.NamedPlan = msg.Name
 		m.planStudio = m.planStudio.MarkGenerating()
 		return m, views.GeneratePlanCmd(m.svc, req)
-
-	case views.ComponentOpenMsg:
-		// Drill into the component page (catalog→component→job→logs, §3).
-		m = m.switchMode(ModeComponent)
-		m.componentPage = m.componentPage.SetComponent(
-			m.componentByName(msg.Name), m.history.Runs)
-		m.componentPage.Env = m.selectedEnv
-		m.refreshInspectorSelection()
-		return m, nil
 
 	case views.ComponentJobOpenMsg:
 		// Hand off to the Activity run→job→logs drilldown for this execution.
@@ -795,17 +773,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.lastErr = nil
 		return m, tea.Batch(loadWorkspaceCmd(m.svc), refreshCatalogCmd(m.svc, true), loadCatalogCmd(m.svc))
 	case key.Matches(msg, m.keys.ToggleMode):
-		// Tab cycles the top-level surfaces: Components → Activity → Catalog.
-		switch m.activeMode {
-		case ModeBrowse:
-			mm := m.switchMode(ModeActivity)
-			_, cmd := mm.activity.AutoAttachCmd()
-			return mm, cmd
-		case ModeActivity:
+		// Tab toggles the two top-level surfaces: Catalog ⇄ Activity.
+		if m.activeMode == ModeActivity {
 			return m.switchMode(ModeCatalog), loadCatalogCmd(m.svc)
-		default:
-			return m.switchMode(ModeBrowse), nil
 		}
+		mm := m.switchMode(ModeActivity)
+		_, cmd := mm.activity.AutoAttachCmd()
+		return mm, cmd
 	case key.Matches(msg, m.keys.ToggleSidebar):
 		m.sidebarCollapsed = !m.sidebarCollapsed
 		m.prefs.SidebarCollapsed = m.sidebarCollapsed
@@ -864,14 +838,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.navBack) > 0 {
 			return m.goBack(), nil
 		}
-	case key.Matches(msg, m.keys.GoBrowse):
-		return m.switchMode(ModeBrowse), nil
+	case key.Matches(msg, m.keys.GoCatalog):
+		return m.switchMode(ModeCatalog), loadCatalogCmd(m.svc)
 	case key.Matches(msg, m.keys.GoActivity):
 		mm := m.switchMode(ModeActivity)
 		_, cmd := mm.activity.AutoAttachCmd()
 		return mm, cmd
-	case key.Matches(msg, m.keys.GoCatalog):
-		return m.switchMode(ModeCatalog), loadCatalogCmd(m.svc)
 	case key.Matches(msg, m.keys.GoPlan):
 		return m.switchMode(ModePlanStudio), nil
 	case key.Matches(msg, m.keys.GoRun):
@@ -880,9 +852,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.switchMode(ModeLogExplorer), nil
 	case key.Matches(msg, m.keys.GoHistory):
 		return m.switchMode(ModeHistory), nil
-	case msg.String() == "e" && (m.activeMode == ModeBrowse || m.activeMode == ModeComponent || m.activeMode == ModeCatalog):
+	case msg.String() == "e" && m.activeMode == ModeCatalog:
 		// Cycle the selected environment (environments.md §1). Scoped to the
-		// catalog/component surfaces; Plan Studio keeps its own `e` via forwardKey.
+		// catalog surface; Plan Studio keeps its own `e` via forwardKey.
 		m.cycleEnv()
 		return m, nil
 	}
@@ -893,11 +865,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) forwardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.activeMode {
-	case ModeBrowse:
-		var c tea.Cmd
-		m.browse, c = m.browse.Update(msg)
-		m.refreshInspectorSelection()
-		return m, c
 	case ModePlanStudio:
 		var cmd tea.Cmd
 		m.planStudio, cmd = m.planStudio.Update(msg)
@@ -946,10 +913,6 @@ func (m Model) forwardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.activity.Level != beforeLevel {
 			return m, tea.Batch(c, tea.ClearScreen)
 		}
-		return m, c
-	case ModeComponent:
-		var c tea.Cmd
-		m.componentPage, c = m.componentPage.Update(msg)
 		return m, c
 	case ModeCatalog:
 		wasRoot := m.catalog.AtRoot()
@@ -1048,8 +1011,6 @@ func (m Model) goForward() Model {
 
 func (m *Model) applySearch(q string) {
 	switch m.activeMode {
-	case ModeBrowse:
-		m.browse = m.browse.SetFilter(q)
 	case ModeHistory:
 		m.history = m.history.SetFilter(q)
 	case ModeCatalog:
@@ -1099,13 +1060,12 @@ func (m *Model) cycleEnv() {
 		}
 	}
 	m.selectedEnv = envs[(idx+1)%len(envs)]
-	m.componentPage.Env = m.selectedEnv
 	m.prefs.SelectedEnv = m.selectedEnv
 	SavePrefs(m.prefs)
 }
 
 // componentByName returns the workspace component summary with the given name,
-// or nil. Used to seed the component page and validate run requests.
+// or nil. Used to validate component-scoped run requests.
 func (m *Model) componentByName(name string) *services.ComponentSummary {
 	if m.workspace == nil {
 		return nil
@@ -1117,21 +1077,6 @@ func (m *Model) componentByName(name string) *services.ComponentSummary {
 		}
 	}
 	return nil
-}
-
-// syncComponentPage refreshes the component page's component summary + execution
-// list from the latest workspace/history so the live ticker and run history land
-// without leaving the page. No-op unless a component is open.
-func (m *Model) syncComponentPage() {
-	if m.componentPage.Component == nil {
-		return
-	}
-	updated := m.componentByName(m.componentPage.Component.Name)
-	if updated == nil {
-		updated = m.componentPage.Component
-	}
-	m.componentPage = m.componentPage.SetComponent(updated, m.history.Runs)
-	m.componentPage.Env = m.selectedEnv
 }
 
 // syncCatalogContext refreshes the Catalog surface's Component work-surface
@@ -1166,15 +1111,6 @@ func envContains(envs []string, name string) bool {
 
 func (m *Model) refreshInspectorSelection() {
 	switch m.activeMode {
-	case ModeBrowse:
-		if sel := m.browse.Selected(); sel != nil {
-			m.inspector = m.inspector.SetDescription(componentDesc(sel, m.history.Runs))
-		}
-	case ModeComponent:
-		if m.componentPage.Component != nil {
-			m.inspector = m.inspector.SetDescription(
-				componentDesc(m.componentPage.Component, m.history.Runs))
-		}
 	case ModeHistory:
 		if sel := m.history.Selected(); sel != nil {
 			m.inspector = m.inspector.SetDescription(runDesc(sel))
@@ -1196,58 +1132,6 @@ func (m *Model) refreshInspectorSelection() {
 		} else if sel := m.planStudio.SelectedJob(); sel != nil {
 			m.inspector = m.inspector.SetDescription(planJobDesc(sel))
 		}
-	}
-}
-
-func componentDesc(c *services.ComponentSummary, runs []services.RunSummary) *services.ResourceDescription {
-	recent := recentRunsForComponent(c.Name, runs, 5)
-	fields := []services.DescField{
-		{Label: "type", Value: c.Type},
-		{Label: "domain", Value: c.Domain},
-		{Label: "path", Value: c.Path},
-		{Label: "envs", Value: strings.Join(c.Envs, ",")},
-		{Label: "profile", Value: c.Profile},
-		{Label: "depends-on", Value: strings.Join(c.DependsOn, ",")},
-		{Label: "watches", Value: strings.Join(c.Watches, ",")},
-		{Label: "last run", Value: c.LastRunStatus},
-	}
-	// Envelope enrichment (catalog-served lists only) — ownership, system
-	// membership, and lifecycle from the resolved entity envelope.
-	if c.Owner != "" {
-		owner := c.Owner
-		if c.OwnerSource != "" {
-			owner += " (" + c.OwnerSource + ")"
-		}
-		fields = append(fields, services.DescField{Label: "owner", Value: owner})
-	}
-	if c.System != "" {
-		fields = append(fields, services.DescField{Label: "system", Value: c.System})
-	}
-	if c.Stage != "" {
-		fields = append(fields, services.DescField{Label: "stage", Value: c.Stage})
-	}
-	if c.Tier != "" {
-		fields = append(fields, services.DescField{Label: "tier", Value: c.Tier})
-	}
-	if len(recent) > 0 {
-		lines := make([]string, 0, len(recent))
-		for _, r := range recent {
-			id := r.ExecID
-			if len(id) > 8 {
-				id = id[:8]
-			}
-			lines = append(lines, fmt.Sprintf("%s %s", id, r.Status))
-		}
-		fields = append(fields, services.DescField{
-			Label: "recent runs",
-			Value: strings.Join(lines, "\n"),
-		})
-	}
-	return &services.ResourceDescription{
-		Kind:    "component",
-		Name:    c.Name,
-		Summary: c.Type + " · " + c.Domain,
-		Fields:  fields,
 	}
 }
 
@@ -1477,10 +1361,7 @@ func (m *Model) propagateSize() {
 	m.logView = m.logView.SetSize(cw, h)
 	m.activity = m.activity.SetSize(cw, h)
 	m.planStudio = m.planStudio.SetSize(cw, h)
-	m.componentPage = m.componentPage.SetSize(cw, h)
 	m.catalog = m.catalog.SetSize(cw, h)
-	m.browse.Width = cw
-	m.browse.Height = h
 	m.history.Width = cw
 	m.history.Height = h
 	// The inspector box (DoubleBorder + Padding) likewise reserves 2 cols.
@@ -1586,13 +1467,13 @@ func (m Model) applyPaletteCommand(c views.CommandPaletteCommand) (tea.Model, te
 	m.commandPalette = m.commandPalette.Close()
 	m.showCommandPalette = false
 	switch c.ID {
-	case "goto.browse":
-		return m.switchMode(ModeBrowse), nil
 	case "goto.plan":
 		return m.switchMode(ModePlanStudio), nil
 	case "goto.run", "goto.logs", "goto.history", "goto.activity":
 		return m.switchMode(ModeActivity), nil
-	case "goto.catalog":
+	// goto.browse is the retired Components surface — tolerated as an alias so
+	// stale palette muscle memory still lands somewhere sensible.
+	case "goto.catalog", "goto.browse":
 		return m.switchMode(ModeCatalog), loadCatalogCmd(m.svc)
 	case "plan.generate":
 		m = m.switchMode(ModePlanStudio)
@@ -1785,12 +1666,6 @@ func (m Model) renderHeader() string {
 			)
 		}
 	}
-	if m.activeMode == ModeComponent && m.componentPage.Component != nil {
-		crumbs = append(crumbs,
-			theme.StyleDim.Render("›"),
-			theme.StyleValue.Render(m.componentPage.Component.Name),
-		)
-	}
 	if m.activeMode == ModeCatalog {
 		if bc := m.catalog.Breadcrumb(); len(bc) > 0 {
 			crumbs = append(crumbs,
@@ -1822,8 +1697,6 @@ func (m Model) renderStage() string {
 	}
 	var body string
 	switch m.activeMode {
-	case ModeBrowse:
-		body = m.browse.View()
 	case ModePlanStudio:
 		body = m.planStudio.View()
 	case ModeRunDashboard:
@@ -1834,8 +1707,6 @@ func (m Model) renderStage() string {
 		body = m.history.View()
 	case ModeActivity:
 		body = m.activity.View()
-	case ModeComponent:
-		body = m.componentPage.View()
 	case ModeCatalog:
 		body = m.catalog.View()
 	}
@@ -1886,21 +1757,6 @@ func (m Model) contextualKeys() []key.Binding {
 			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 			key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "list ⇄ graph")),
 			m.keys.ToggleBottom,
-		)
-	case ModeBrowse:
-		out = append(out,
-			key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "open")),
-			key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "env")),
-			key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "changed-only")),
-			m.keys.Search,
-		)
-	case ModeComponent:
-		out = append(out,
-			key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "open run")),
-			key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "run")),
-			key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "env")),
-			key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "compose")),
-			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 		)
 	case ModeHistory:
 		out = append(out, m.keys.Search)
@@ -1984,15 +1840,13 @@ func (m Model) renderBottomPanel() string {
 
 func (m Model) renderHelpModal() string {
 	groups := [][]string{
-		{"Global", "tab cycle surface", "i toggle inspector",
+		{"Global", "tab catalog ⇄ activity", "i toggle inspector",
 			"⌃b toggle sidebar", "⌃r reload", ": commands", "/ search", "? help", "q quit"},
-		{"Navigation", "1 components", "2 activity", "3 catalog", "esc back", "⌃o back", "⌃i forward"},
-		{"Components", "enter open component", "g compose", "e cycle env", "c changed-only", "/ filter"},
-		{"Component", "enter open run", "r run (selected env)", "g compose", "esc back"},
+		{"Navigation", "1 catalog", "2 activity", "esc back", "⌃o back", "⌃i forward"},
+		{"Catalog", "[ ] cycle kind", "enter open entity / follow / open run",
+			"r run (selected env)", "g compose", "c changed-only", "e cycle env", "esc back", "/ filter"},
 		{"Compose", "g generate", "d dry-run", "R real run", "s save", "e/t/C cycle"},
 		{"Activity", "tab cycle pane", "↑/↓ move", "enter tail logs", "r runs · l logs"},
-		{"Catalog", "[ ] cycle kind", "enter open entity / follow / open run",
-			"r run component", "g compose", "o component page", "c changed-only", "e cycle env", "esc back", "/ filter"},
 	}
 	var b strings.Builder
 	b.WriteString(theme.StyleModalTitle.Render("Cockpit · Help"))
