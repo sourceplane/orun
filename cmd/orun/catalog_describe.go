@@ -206,6 +206,11 @@ func buildObjManifest(view objcatalog.CatalogView, c objcatalog.CatalogComponent
 	m.Extensions = c.Extensions
 	roundTripInto(c.Docs, &m.Docs)
 	roundTripInto(c.Links, &m.Links)
+	// Inferred runtime now lives in the envelope spec.runtime — recover it so the
+	// "Runtime inference" describe section renders (previously a documented gap).
+	if rt, ok := c.Spec["runtime"].(map[string]any); ok {
+		roundTripInto(rt, &m.Runtime.Inferred)
+	}
 	return m
 }
 

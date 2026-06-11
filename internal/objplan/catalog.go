@@ -168,6 +168,15 @@ func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerRes
 		}
 		spec["composition"] = compositionSpecMap(comp)
 	}
+	// Surface the inferred runtime profile (languages/frameworks/infra/package
+	// managers) on the envelope spec (data-model.md §4) — a queryable portal
+	// facet the resolver computes but SC1 dropped. Omitted when nothing inferred.
+	if rt := runtimeBlock(cm.Runtime.Inferred); rt != nil {
+		if spec == nil {
+			spec = map[string]any{}
+		}
+		spec["runtime"] = rt
+	}
 	// SC8: a backing composition's effects.integrations declaration populates the
 	// component's integrations (the golden path registers the service); authored
 	// integrations (SC6) still win on a key conflict.
@@ -229,6 +238,29 @@ func compositionSpecMap(c *CompositionMeta) map[string]any {
 		if len(eff) > 0 {
 			out["effects"] = eff
 		}
+	}
+	return out
+}
+
+// runtimeBlock projects the inferred runtime traits onto the spec.runtime shape
+// (data-model.md §4). Returns nil when nothing was inferred so the field is
+// omitted rather than emitting empty arrays.
+func runtimeBlock(inf catalogmodel.ComponentInferred) map[string]any {
+	out := map[string]any{}
+	if len(inf.Languages) > 0 {
+		out["languages"] = strSliceToAny(inf.Languages)
+	}
+	if len(inf.Frameworks) > 0 {
+		out["frameworks"] = strSliceToAny(inf.Frameworks)
+	}
+	if len(inf.Infra) > 0 {
+		out["infra"] = strSliceToAny(inf.Infra)
+	}
+	if len(inf.PackageManagers) > 0 {
+		out["packageManagers"] = strSliceToAny(inf.PackageManagers)
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

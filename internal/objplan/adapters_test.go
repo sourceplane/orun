@@ -430,6 +430,39 @@ func TestMapEntity_CompositionEffects(t *testing.T) {
 	}
 }
 
+// TestMapEntity_RuntimeInference asserts the inferred runtime is surfaced on the
+// envelope spec (data-model §4); a component with nothing inferred omits it.
+func TestMapEntity_RuntimeInference(t *testing.T) {
+	t.Parallel()
+	cm := &catalogmodel.ComponentManifest{
+		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api", Namespace: "ns", Repo: "repo"},
+		Spec:     catalogmodel.ComponentSpec{Type: "worker"},
+		Runtime: catalogmodel.ComponentRuntime{Inferred: catalogmodel.ComponentInferred{
+			Languages: []string{"go", "typescript"}, Frameworks: []string{"react"}, PackageManagers: []string{"pnpm"},
+		}},
+	}
+	m := mapEntity(cm, 13, nil, nil)
+	rt, _ := m.Spec["runtime"].(map[string]any)
+	if rt == nil {
+		t.Fatalf("spec.runtime missing: %v", m.Spec)
+	}
+	langs, _ := rt["languages"].([]any)
+	if len(langs) != 2 || langs[0] != "go" {
+		t.Errorf("runtime.languages = %v", rt["languages"])
+	}
+	if pm, _ := rt["packageManagers"].([]any); len(pm) != 1 || pm[0] != "pnpm" {
+		t.Errorf("runtime.packageManagers = %v", rt["packageManagers"])
+	}
+	// Nothing inferred → no runtime block.
+	bare := mapEntity(&catalogmodel.ComponentManifest{
+		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/b", Name: "b"},
+		Spec:     catalogmodel.ComponentSpec{Type: "lib"},
+	}, 13, nil, nil)
+	if _, ok := bare.Spec["runtime"]; ok {
+		t.Errorf("empty runtime should be omitted: %v", bare.Spec["runtime"])
+	}
+}
+
 // TestMapEntity_CompositionVersion asserts Step 4: a composition's
 // version/lifecycle are carried onto the component's spec.composition.
 func TestMapEntity_CompositionVersion(t *testing.T) {
