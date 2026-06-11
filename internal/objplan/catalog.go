@@ -191,7 +191,7 @@ func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerRes
 		Lifecycle:    entityLifecycle(cm.Spec),
 		Spec:         spec,
 		Relations:    entityRelations(cm, own, comp),
-		Contracts:    entityContracts(cm.Spec.Dependencies.APIs),
+		Contracts:    entityContracts(cm.Spec.Dependencies.APIs, cm.Identity.Namespace, cm.Identity.Repo),
 		Integrations: integrations,
 		Docs:         docsBlock(cm.Docs),
 		Links:        linksBlock(cm.Links),
@@ -280,30 +280,34 @@ func linksBlock(links []catalogmodel.ComponentLink) []map[string]any {
 // resolvedOwner is the effective ownership claim for an entity: the primary
 // owner, any additional owners, and the source of the claim (S-2).
 type resolvedOwner struct {
-	owner      string
-	additional []string
-	source     string // authored | CODEOWNERS | unknown
+	owner      string   // normalized typed ref (group:/user:) or "unknown"
+	ownerKind  string   // Group | User ("" when unknown)
+	additional []string // normalized typed refs
+	source     string   // authored | CODEOWNERS | unknown
 }
 
 // resolveOwner applies the ownership precedence (design.md §4.3, S-2): an
 // authored metadata.owner wins (source=authored); otherwise CODEOWNERS over the
 // component's source path supplies it (source=CODEOWNERS); otherwise the entity
-// is unowned (source=unknown) — flagged, never silently false-owned.
+// is unowned (source=unknown) — flagged, never silently false-owned. The owner
+// and additionalOwners are normalized to typed refs (group:/user:, §3).
 func resolveOwner(cm *catalogmodel.ComponentManifest, ownerResolver OwnerResolver) resolvedOwner {
-	if cm.Metadata.Owner != "" {
-		return resolvedOwner{
-			owner:      cm.Metadata.Owner,
-			additional: append([]string(nil), cm.Metadata.Maintainers...),
-			source:     catalogmodel.OwnershipSourceAuthored,
+	mk := func(primary string, rest []string, source string) resolvedOwner {
+		key, kind := catalogmodel.NormalizeOwnerRef(primary)
+		add := make([]string, 0, len(rest))
+		for _, r := range rest {
+			if k, _ := catalogmodel.NormalizeOwnerRef(r); k != "" {
+				add = append(add, k)
+			}
 		}
+		return resolvedOwner{owner: key, ownerKind: kind, additional: add, source: source}
+	}
+	if cm.Metadata.Owner != "" {
+		return mk(cm.Metadata.Owner, cm.Metadata.Maintainers, catalogmodel.OwnershipSourceAuthored)
 	}
 	if ownerResolver != nil {
 		if owners := ownerResolver(cm.Identity.SourceFile); len(owners) > 0 {
-			return resolvedOwner{
-				owner:      owners[0],
-				additional: append(append([]string(nil), owners[1:]...), cm.Metadata.Maintainers...),
-				source:     catalogmodel.OwnershipSourceCODEOWNERS,
-			}
+			return mk(owners[0], append(append([]string(nil), owners[1:]...), cm.Metadata.Maintainers...), catalogmodel.OwnershipSourceCODEOWNERS)
 		}
 	}
 	return resolvedOwner{owner: catalogmodel.OwnershipSourceUnknown, source: catalogmodel.OwnershipSourceUnknown}
@@ -395,25 +399,28 @@ func entityLifecycle(spec catalogmodel.ComponentSpec) map[string]any {
 // partOf (system/domain), dependsOn (component + resource edges). Sorted by
 // (type, to) for determinism.
 func entityRelations(cm *catalogmodel.ComponentManifest, own resolvedOwner, comp *CompositionMeta) []nodes.EntityRelation {
+	ns, repo := cm.Identity.Namespace, cm.Identity.Repo
+	qualify := func(v string) string { return catalogmodel.QualifyEntityKey(ns, repo, v) }
+
 	var rels []nodes.EntityRelation
 	if own.source != catalogmodel.OwnershipSourceUnknown && own.owner != "" {
 		rels = append(rels, nodes.EntityRelation{
-			Type: catalogmodel.RelTypeOwnedBy, To: own.owner, ToKind: catalogmodel.EntityKindGroup,
+			Type: catalogmodel.RelTypeOwnedBy, To: own.owner, ToKind: own.ownerKind,
 		})
 	}
 	if comp != nil && comp.Name != "" {
 		rels = append(rels, nodes.EntityRelation{
-			Type: catalogmodel.RelTypeComposedBy, To: comp.Name, ToKind: catalogmodel.EntityKindComposition,
+			Type: catalogmodel.RelTypeComposedBy, To: qualify(comp.Name), ToKind: catalogmodel.EntityKindComposition,
 		})
 	}
 	if cm.Spec.System != "" {
 		rels = append(rels, nodes.EntityRelation{
-			Type: catalogmodel.RelTypePartOf, To: cm.Spec.System, ToKind: catalogmodel.EntityKindSystem,
+			Type: catalogmodel.RelTypePartOf, To: qualify(cm.Spec.System), ToKind: catalogmodel.EntityKindSystem,
 		})
 	}
 	if cm.Spec.Domain != "" {
 		rels = append(rels, nodes.EntityRelation{
-			Type: catalogmodel.RelTypePartOf, To: cm.Spec.Domain, ToKind: catalogmodel.EntityKindDomain,
+			Type: catalogmodel.RelTypePartOf, To: qualify(cm.Spec.Domain), ToKind: catalogmodel.EntityKindDomain,
 		})
 	}
 	for _, d := range cm.Spec.Dependencies.Components {
@@ -424,7 +431,7 @@ func entityRelations(cm *catalogmodel.ComponentManifest, own resolvedOwner, comp
 	}
 	for _, r := range cm.Spec.Dependencies.Resources.Uses {
 		rels = append(rels, nodes.EntityRelation{
-			Type: catalogmodel.RelTypeDependsOn, To: r, ToKind: catalogmodel.EntityKindResource,
+			Type: catalogmodel.RelTypeDependsOn, To: qualify(r), ToKind: catalogmodel.EntityKindResource,
 		})
 	}
 	// deployedTo edges from the component's environment bindings (SC4): each
@@ -437,7 +444,7 @@ func entityRelations(cm *catalogmodel.ComponentManifest, own resolvedOwner, comp
 	sort.Strings(envNames)
 	for _, env := range envNames {
 		rels = append(rels, nodes.EntityRelation{
-			Type: catalogmodel.RelTypeDeployedTo, To: env, ToKind: catalogmodel.EntityKindEnvironment,
+			Type: catalogmodel.RelTypeDeployedTo, To: qualify(env), ToKind: catalogmodel.EntityKindEnvironment,
 		})
 	}
 	sort.SliceStable(rels, func(i, j int) bool {
@@ -450,22 +457,22 @@ func entityRelations(cm *catalogmodel.ComponentManifest, own resolvedOwner, comp
 }
 
 // entityContracts builds the contracts block from the resolved provided/consumed
-// APIs (data-model.md §2). Returns nil when no APIs are declared.
-func entityContracts(apis catalogmodel.APIDependencies) map[string]any {
+// APIs (data-model.md §2), qualifying bare api refs to namespaced keys. Returns
+// nil when no APIs are declared.
+func entityContracts(apis catalogmodel.APIDependencies, namespace, repo string) map[string]any {
+	side := func(refs []string) []any {
+		out := make([]any, 0, len(refs))
+		for _, a := range refs {
+			out = append(out, map[string]any{"api": catalogmodel.QualifyEntityKey(namespace, repo, a)})
+		}
+		return out
+	}
 	out := map[string]any{}
 	if len(apis.Provides) > 0 {
-		provides := make([]any, 0, len(apis.Provides))
-		for _, a := range apis.Provides {
-			provides = append(provides, map[string]any{"api": a})
-		}
-		out["provides"] = provides
+		out["provides"] = side(apis.Provides)
 	}
 	if len(apis.Consumes) > 0 {
-		consumes := make([]any, 0, len(apis.Consumes))
-		for _, a := range apis.Consumes {
-			consumes = append(consumes, map[string]any{"api": a})
-		}
-		out["consumes"] = consumes
+		out["consumes"] = side(apis.Consumes)
 	}
 	if len(out) == 0 {
 		return nil

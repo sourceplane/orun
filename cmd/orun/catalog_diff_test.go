@@ -152,12 +152,12 @@ func TestCatalogDiff_E2E_JSON_Exit0(t *testing.T) {
 	}
 	foundOwner := false
 	for _, f := range data.Changed[0].Fields {
-		if f.Path == "metadata.owner" && f.Base == "team/x" && f.Head == "team/y" {
+		if f.Path == "metadata.owner" && f.Base == "group:team/x" && f.Head == "group:team/y" {
 			foundOwner = true
 		}
 	}
 	if !foundOwner {
-		t.Errorf("expected metadata.owner team/x→team/y, got %+v", data.Changed[0].Fields)
+		t.Errorf("expected metadata.owner group:team/x→group:team/y, got %+v", data.Changed[0].Fields)
 	}
 	if len(data.Added) != 1 || data.Added[0].Name != "svc-b" {
 		t.Errorf("Added = %+v, want [svc-b]", data.Added)

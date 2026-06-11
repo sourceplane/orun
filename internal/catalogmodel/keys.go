@@ -249,6 +249,74 @@ func ValidateEntityKey(key string) error {
 // EntityKeyPattern returns the regexp every well-formed entityKey must satisfy.
 func EntityKeyPattern() *regexp.Regexp { return entityKeyPattern }
 
+// Typed entity-ref prefixes for the kinds that are external identities rather
+// than namespaced repo entities (data-model.md §3): a Group/User is referenced
+// as `group:<name>` / `user:<name>`, never a 3-segment componentKey.
+const (
+	EntityRefPrefixGroup = "group:"
+	EntityRefPrefixUser  = "user:"
+)
+
+// NormalizeOwnerRef classifies an authored or CODEOWNERS owner string into a
+// typed entity ref + kind (data-model.md §3, the key-grammar unification). The
+// raw forms it accepts:
+//
+//	@org/team        → group:org/team   (Group)   — a GitHub team
+//	team/platform    → group:team/platform (Group)
+//	platform         → group:platform   (Group)   — a bare team name
+//	@alice           → user:alice       (User)    — a GitHub @handle
+//	alice@corp.com   → user:alice@corp.com (User) — an email
+//	group:x / user:x → unchanged (already typed)
+//
+// An empty owner yields ("", "").
+func NormalizeOwnerRef(owner string) (key, kind string) {
+	owner = strings.TrimSpace(owner)
+	if owner == "" {
+		return "", ""
+	}
+	if strings.HasPrefix(owner, EntityRefPrefixGroup) {
+		return owner, EntityKindGroup
+	}
+	if strings.HasPrefix(owner, EntityRefPrefixUser) {
+		return owner, EntityKindUser
+	}
+	isHandle := strings.HasPrefix(owner, "@")
+	h := strings.TrimPrefix(owner, "@")
+	switch {
+	case strings.ContainsRune(h, '@'): // email
+		return EntityRefPrefixUser + h, EntityKindUser
+	case strings.ContainsRune(h, '/'): // org/team
+		return EntityRefPrefixGroup + h, EntityKindGroup
+	case isHandle: // bare @handle
+		return EntityRefPrefixUser + h, EntityKindUser
+	default: // bare team name
+		return EntityRefPrefixGroup + h, EntityKindGroup
+	}
+}
+
+// QualifyEntityKey turns a possibly-bare entity reference into a stable key:
+// an already-typed ref (`group:`/`user:`/any `<x>:`) or an already-namespaced
+// `<ns>/<repo>/<name>` key passes through unchanged; a bare name is qualified to
+// `<namespace>/<repo>/<name>` (data-model.md §1/§4). Used for the derived
+// System/Domain/Environment/Composition/API/Resource keys so every first-class
+// entity carries a uniform 3-segment key.
+func QualifyEntityKey(namespace, repo, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if strings.ContainsRune(value, ':') { // typed ref (group:/user:/x-vendor:…)
+		return value
+	}
+	if strings.Count(value, "/") >= 2 { // already a 3-segment key
+		return value
+	}
+	if namespace == "" {
+		namespace = "default"
+	}
+	return namespace + "/" + repo + "/" + value
+}
+
 // nextULID returns a fresh monotonic ULID string. Wraps the package-level
 // entropy source so callers don't need to thread one through.
 func nextULID() string { return newULID().String() }

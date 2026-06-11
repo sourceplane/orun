@@ -150,6 +150,49 @@ func TestParseEntityKeyInvalid(t *testing.T) {
 	}
 }
 
+func TestNormalizeOwnerRef(t *testing.T) {
+	cases := []struct {
+		in       string
+		wantKey  string
+		wantKind string
+	}{
+		{"@org/team", "group:org/team", catalogmodel.EntityKindGroup},
+		{"team/platform", "group:team/platform", catalogmodel.EntityKindGroup},
+		{"platform", "group:platform", catalogmodel.EntityKindGroup},
+		{"@alice", "user:alice", catalogmodel.EntityKindUser},
+		{"alice@corp.com", "user:alice@corp.com", catalogmodel.EntityKindUser},
+		{"group:already", "group:already", catalogmodel.EntityKindGroup},
+		{"user:already", "user:already", catalogmodel.EntityKindUser},
+		{"  @org/team  ", "group:org/team", catalogmodel.EntityKindGroup},
+		{"", "", ""},
+	}
+	for _, c := range cases {
+		k, kind := catalogmodel.NormalizeOwnerRef(c.in)
+		if k != c.wantKey || kind != c.wantKind {
+			t.Errorf("NormalizeOwnerRef(%q) = %q,%q want %q,%q", c.in, k, kind, c.wantKey, c.wantKind)
+		}
+	}
+}
+
+func TestQualifyEntityKey(t *testing.T) {
+	cases := []struct {
+		ns, repo, val, want string
+	}{
+		{"default", "orun", "production", "default/orun/production"},   // bare → qualified
+		{"default", "orun", "edge-gateway", "default/orun/edge-gateway"},
+		{"default", "orun", "ns2/repo2/api", "ns2/repo2/api"},          // already 3-segment → passthrough
+		{"default", "orun", "group:org/team", "group:org/team"},        // typed ref → passthrough
+		{"default", "orun", "x-vendor:thing", "x-vendor:thing"},        // any typed ref
+		{"", "orun", "production", "default/orun/production"},          // empty ns defaults
+		{"default", "orun", "  ", ""},                                  // blank → empty
+	}
+	for _, c := range cases {
+		if got := catalogmodel.QualifyEntityKey(c.ns, c.repo, c.val); got != c.want {
+			t.Errorf("QualifyEntityKey(%q,%q,%q) = %q, want %q", c.ns, c.repo, c.val, got, c.want)
+		}
+	}
+}
+
 // TestEntityEnvelopeSerialize asserts a fully-populated envelope canonically
 // encodes deterministically and round-trips back to an equal envelope — the
 // SC0 "types compile + serialize" gate.
