@@ -222,6 +222,10 @@ type Model struct {
 	// different tree than the workspace currently has — surfaced as a header
 	// "⟳ stale" chip prompting ⌃r (Bucket 6C). Updated on the live-view ticker.
 	catalogStale bool
+	// brandPhase drives the header wordmark's gradient shimmer; advanced by
+	// the brand ticker. Phase only changes colors — never text or width — so
+	// the animation can't destabilize the frame.
+	brandPhase int
 
 	keys GlobalKeyMap
 }
@@ -276,7 +280,16 @@ func (m Model) LastError() error                       { return m.lastErr }
 func (m Model) Init() tea.Cmd {
 	// Refresh the object-model catalog on open (force — even a dirty tree) so
 	// the cockpit opens on a current catalog, then reloads when it lands.
-	return tea.Batch(loadWorkspaceCmd(m.svc), m.spinner.Tick, catalogRefreshTickCmd(), refreshCatalogCmd(m.svc, true), checkCatalogStaleCmd(m.svc), loadCatalogCmd(m.svc))
+	return tea.Batch(loadWorkspaceCmd(m.svc), m.spinner.Tick, catalogRefreshTickCmd(), refreshCatalogCmd(m.svc, true), checkCatalogStaleCmd(m.svc), loadCatalogCmd(m.svc), brandTickCmd())
+}
+
+// brandTickMsg advances the header wordmark's gradient shimmer.
+type brandTickMsg struct{}
+
+// brandTickCmd paces the brand animation. ~2.5 fps is enough for a smooth
+// shimmer while keeping idle repaints (and battery cost) negligible.
+func brandTickCmd() tea.Cmd {
+	return tea.Tick(400*time.Millisecond, func(time.Time) tea.Msg { return brandTickMsg{} })
 }
 
 // loadCatalogCmd reads the multi-kind entity catalog for the Catalog surface.
@@ -368,6 +381,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case catalogStaleMsg:
 		m.catalogStale = msg.stale
 		return m, nil
+
+	case brandTickMsg:
+		m.brandPhase++
+		return m, brandTickCmd()
 
 	case catalogRefreshedMsg:
 		// A refresh just ran → the catalog is current; clear the stale badge.
@@ -1647,7 +1664,7 @@ func (m Model) renderHeader() string {
 	}
 
 	crumbs := []string{
-		theme.StyleHeaderAccent.Render("◆ orun"),
+		theme.BrandMark(m.brandPhase),
 		theme.StyleDim.Render("│"),
 		theme.StyleLabel.Render("intent ") + theme.StyleValue.Render(intent),
 		theme.StyleDim.Render("·"),
@@ -1683,7 +1700,56 @@ func (m Model) renderHeader() string {
 			theme.StylePillWarn.Render("⟳ stale (⌃r)"),
 		)
 	}
-	return theme.StyleHeader.Render(strings.Join(crumbs, " "))
+	header := theme.StyleHeader.Render(strings.Join(crumbs, " "))
+	if detail := m.renderHeaderDetail(); detail != "" {
+		header += "\n" + detail
+	}
+	return header
+}
+
+// renderHeaderDetail renders the header's second line: the workspace's
+// top-level source context (branch, head revision, tree state) plus the
+// resolved catalog's identity and size. Pieces that don't exist (no git, no
+// catalog yet) are simply omitted; an entirely empty line collapses the
+// header back to one row.
+func (m Model) renderHeaderDetail() string {
+	var parts []string
+	add := func(label, value string) {
+		if value == "" {
+			return
+		}
+		parts = append(parts, theme.StyleLabel.Render(label+" ")+theme.StyleValue.Render(value))
+	}
+	if m.workspace != nil {
+		src := m.workspace.Source
+		add("repo", src.Repo)
+		add("branch", src.Branch)
+		add("head", src.Head)
+		if src.Head != "" || src.Branch != "" {
+			tree := theme.StylePillSuccess.Render("clean")
+			if src.Dirty {
+				tree = theme.StylePillWarn.Render("dirty")
+			}
+			parts = append(parts, theme.StyleLabel.Render("tree ")+tree)
+		}
+	}
+	if snap := m.catalog.Snapshot; snap != nil {
+		add("catalog", snap.HumanKey)
+		if n := len(snap.Entities); n > 0 {
+			parts = append(parts, theme.StyleDim.Render(fmt.Sprintf("%d entities", n)))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	// Indent under the brand mark so the detail line reads as part of the
+	// header block.
+	sep := theme.StyleDim.Render(" · ")
+	line := strings.Repeat(" ", lipgloss.Width(theme.BrandMark(0))) + " " + strings.Join(parts, sep)
+	if max := m.width - 2; max > 0 && lipgloss.Width(line) > max {
+		line = ansi.Truncate(line, max, "…")
+	}
+	return theme.StyleHeader.Render(line)
 }
 
 func (m Model) renderRule() string {
