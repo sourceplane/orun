@@ -63,22 +63,45 @@ Fixed in the hardening pass (`resolverVersion` 8→9):
 - **`catalog list --kind <Kind>`** — the SC3/SC4 "done when" surface, now
   implemented over `entities/<Kind>/`.
 
-Known deviations / recommended follow-ups (deliberate, recorded):
+## Model-strengthening pass (post-review, resolverVersion 8→14)
 
-- **Owner key grammar** — relations/Group keys carry the raw CODEOWNERS string
-  (`@org/team`) rather than the spec's `group:<name>` grammar. Kept for
-  greppability and CODEOWNERS round-trip; revisit before SaaS federation (key
-  grammar unification across kinds — Environment keys are bare names too).
+Acting on the review's findings + recommendations — one PR each, verified +
+merged:
+
+1. **Property + golden test hardening** — a `rapid` generator over
+   `AssembleCatalog` with adversarial colliding keys (the SC3-collision-class
+   net) + an `EntityEnvelope` golden round-trip fixture.
+2. **Key-grammar unification** — `NormalizeOwnerRef`/`QualifyEntityKey`: Group/
+   User refs become `group:`/`user:`; System/Domain/Environment/Composition/API/
+   Resource keys are qualified to `<ns>/<repo>/<name>`. (Resolves the deviation
+   below.)
+3. **Membership enrichment** — every derived entity carries `spec.members` +
+   `memberCount` (the inverse edges); `catalog list --kind` shows a MEMBERS
+   column.
+4. **Composition version + lifecycle** — authored on the composition manifest,
+   carried onto `spec.composition` + the Composition entity; `describe` renders
+   `source@version (lifecycle)`.
+5. **Inferred runtime** — `spec.runtime` (languages/frameworks/infra/
+   packageManagers) surfaced on the Component envelope (was resolved-but-dropped).
+6. **`effects.graph`** — composition `provides`→Resource entities (component
+   `dependsOn`) and `exposes`→API entities (component `contracts`), the SC8
+   producer keystone completed.
+7. **Lazy `v1alpha1→v1` up-conversion on read** — invariant #7: a pre-SC1 flat
+   blob reshapes to the v1 envelope on read, the stored bytes untouched.
+
+Remaining recommended follow-ups (deliberate, recorded):
+
 - **`catalogHash` / display key** — the legacy `cat-…` snapshot key is computed
   pre-binding (over manifests + five graphs) and does not cover the envelope or
-  composition bindings; two object-model catalogs can share a display key.
-  Aligning it with §10 (entities + relations.json) belongs to the five-graph
-  retirement follow-up.
+  composition bindings; two object-model catalogs can share a display key. The
+  authoritative identity is the object-model `catalogId` (content-addressed,
+  correct), so this is a cosmetic display-label gap, not a correctness one;
+  aligning the display key with §10 belongs to the five-graph retirement.
 - **Hash discipline (invariant 4)** — the envelope blob id covers provenance
   (content addressing has no exclusion seam); the §10 "manifestHash excludes
   provenance" property is honored by the *carried* `provenance.manifestHash`,
-  not by the blob id. Acceptable because provenance is deterministic from
-  source, but the invariant text should be read accordingly.
-- **Group/User `spec.members`**, Composition semver/lifecycle enrichment,
-  `effects.graph` (Deployment/Resource/API emission), lazy `v1alpha1→v1`
-  up-conversion, and the five-graph retirement remain the recorded follow-ups.
+  not by the blob id. Acceptable because provenance is deterministic from source.
+- **Five-graph retirement** — `relations.json` already powers change detection;
+  `graph/` is still written for `catalog diff`. Retiring it (projecting the diff
+  off `relations.json`) + moving `catalogHash` to §10 is the remaining
+  structural follow-up.
