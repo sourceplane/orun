@@ -127,8 +127,9 @@ orun          # bare invocation opens the cockpit on an interactive terminal
 
 A three-pane Bubble Tea shell: sidebar (modes), main pane (active view), inspector
 (field list for the selection). Modes are `Browse`, `Component`, `Plan Studio`,
-`Activity`, `Logs`, `History`. See [cockpit architecture](/cockpit/architecture)
-for the full mode and drilldown machine.
+`Activity`, `Logs`, `History`, and `Catalog`. See
+[cockpit architecture](/cockpit/architecture) for the full mode and drilldown
+machine.
 
 The cockpit is the **default command** — a bare `orun` opens it on an interactive
 terminal, and falls back to printing help in non-interactive shells or when
@@ -172,6 +173,30 @@ Press `⏎` on a component to open its **Component page** — the resolved detai
 execution to reach the run → job → logs view. This mirrors the object graph: every
 level reads from the object-model store (the catalog and the sealed executions
 under `.orun/objectmodel/`).
+
+## The Catalog surface — the multi-kind entity explorer
+
+Press `3` (or `tab`-cycle, or the `goto.catalog` palette command) to open the
+**Catalog** surface: the cockpit view of the
+[service-catalog entity model](/cli/orun-catalog). Where Browse is the *work*
+surface (components you can compose and run), Catalog is the *knowledge*
+surface — every entity the resolver derived from your workspace:
+
+- **Kind tabs with counts.** `[` / `]` (or `←`/`→`) cycle through the kinds
+  present in the catalog — Component, API, Resource, System, Domain, Group,
+  Composition, Environment, Deployment — each with its entity count. The `All`
+  tab mixes kinds with a kind glyph per row.
+- **Envelope columns per kind.** Components lead with OWNER (CODEOWNERS-derived
+  ownership) and STAGE (lifecycle); Compositions show VERSION and lifecycle
+  stage; derived kinds show member counts.
+- **A walkable graph.** `⏎` opens an entity's detail page: identity, ownership,
+  lifecycle, and a **Connections** list — its members and typed relation edges
+  (`dependsOn`, `partOf`, `ownedBy`, `deployedTo`, `composedBy`, …, with `◂`
+  marking incoming edges). Connections are navigable: `⏎` follows an edge to
+  its other endpoint, `esc` walks back. The header breadcrumb tracks the path.
+- **Same freshness model as Browse.** The surface reads the resolved catalog at
+  `catalogs/current`; the header's `⟳ stale (⌃r)` badge tells you when a
+  refresh would change it.
 
 ### Environment selector and component-scoped run
 

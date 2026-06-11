@@ -31,21 +31,19 @@ func TestNewModel_Defaults(t *testing.T) {
 	}
 }
 
-func TestModel_TabTogglesTopLevelMode(t *testing.T) {
+func TestModel_TabCyclesTopLevelSurfaces(t *testing.T) {
 	tab := tea.KeyMsg{Type: tea.KeyTab}
 	m := NewModel(&services.MockOrunService{})
 	if m.ActiveMode() != ModeBrowse {
 		t.Fatalf("expected ModeBrowse at start, got %v", m.ActiveMode())
 	}
-	next, _ := m.Update(tab)
-	m = next.(Model)
-	if m.ActiveMode() != ModeActivity {
-		t.Fatalf("after tab: ActiveMode = %v, want ModeActivity", m.ActiveMode())
-	}
-	next, _ = m.Update(tab)
-	m = next.(Model)
-	if m.ActiveMode() != ModeBrowse {
-		t.Fatalf("after second tab: ActiveMode = %v, want ModeBrowse", m.ActiveMode())
+	want := []Mode{ModeActivity, ModeCatalog, ModeBrowse}
+	for i, w := range want {
+		next, _ := m.Update(tab)
+		m = next.(Model)
+		if m.ActiveMode() != w {
+			t.Fatalf("after tab %d: ActiveMode = %v, want %v", i+1, m.ActiveMode(), w)
+		}
 	}
 }
 

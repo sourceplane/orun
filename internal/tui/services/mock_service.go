@@ -5,15 +5,23 @@ import "context"
 // MockOrunService satisfies OrunService with function-field hooks so unit
 // tests can configure return values per call.
 type MockOrunService struct {
-	LoadWorkspaceFn func(ctx context.Context, req WorkspaceRequest) (*WorkspaceSnapshot, error)
-	GeneratePlanFn  func(ctx context.Context, req PlanRequest) (*PlanResult, error)
-	RunPlanFn       func(ctx context.Context, req RunRequest) (<-chan RunEvent, error)
-	ListRunsFn      func(ctx context.Context, req ListRunsRequest) ([]RunSummary, error)
-	GetRunDetailFn  func(ctx context.Context, req RunDetailRequest) (RunDetail, error)
+	LoadWorkspaceFn  func(ctx context.Context, req WorkspaceRequest) (*WorkspaceSnapshot, error)
+	GeneratePlanFn   func(ctx context.Context, req PlanRequest) (*PlanResult, error)
+	RunPlanFn        func(ctx context.Context, req RunRequest) (<-chan RunEvent, error)
+	ListRunsFn       func(ctx context.Context, req ListRunsRequest) ([]RunSummary, error)
+	GetRunDetailFn   func(ctx context.Context, req RunDetailRequest) (RunDetail, error)
 	DescribeFn       func(ctx context.Context, ref ResourceRef) (*ResourceDescription, error)
 	TailLogsFn       func(ctx context.Context, req LogRequest) (<-chan LogEvent, error)
 	RefreshCatalogFn func(ctx context.Context, force bool) (CatalogRefreshResult, error)
 	CatalogStaleFn   func(ctx context.Context) (bool, error)
+	LoadCatalogFn    func(ctx context.Context) (*CatalogSnapshot, error)
+}
+
+func (m *MockOrunService) LoadCatalog(ctx context.Context) (*CatalogSnapshot, error) {
+	if m.LoadCatalogFn != nil {
+		return m.LoadCatalogFn(ctx)
+	}
+	return nil, nil
 }
 
 func (m *MockOrunService) RefreshCatalog(ctx context.Context, force bool) (CatalogRefreshResult, error) {

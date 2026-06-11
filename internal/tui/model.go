@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/tui/services"
@@ -59,6 +60,7 @@ const (
 	ModeHistory
 	ModeActivity
 	ModeComponent
+	ModeCatalog
 )
 
 // ModeComponentStudio is an alias for the inline Compose surface that
@@ -82,6 +84,8 @@ func (m Mode) String() string {
 		return "activity"
 	case ModeComponent:
 		return "component"
+	case ModeCatalog:
+		return "catalog"
 	}
 	return "unknown"
 }
@@ -90,6 +94,8 @@ func (m Mode) sidebarKey() string {
 	switch m {
 	case ModeBrowse, ModePlanStudio, ModeComponent:
 		return "browse"
+	case ModeCatalog:
+		return "catalog"
 	}
 	return "activity"
 }
@@ -129,6 +135,7 @@ type Model struct {
 	logView       views.LogExplorerModel
 	activity      views.ActivityModel
 	componentPage views.ComponentPageModel
+	catalog       views.CatalogModel
 	inspector     views.InspectorModel
 
 	// selectedEnv is the cockpit's currently selected environment
@@ -230,6 +237,7 @@ func NewModel(svc services.OrunService) Model {
 		logView:          views.NewLogExplorerModel(),
 		activity:         views.NewActivityModel(),
 		componentPage:    views.NewComponentPageModel(),
+		catalog:          views.NewCatalogModel(),
 		inspector:        views.NewInspectorModel(),
 		commandPalette:   views.NewCommandPaletteModel(),
 		loading:          true,
@@ -256,7 +264,15 @@ func (m Model) LastError() error                       { return m.lastErr }
 func (m Model) Init() tea.Cmd {
 	// Refresh the object-model catalog on open (force — even a dirty tree) so
 	// the cockpit opens on a current catalog, then reloads when it lands.
-	return tea.Batch(loadWorkspaceCmd(m.svc), m.spinner.Tick, catalogRefreshTickCmd(), refreshCatalogCmd(m.svc, true), checkCatalogStaleCmd(m.svc))
+	return tea.Batch(loadWorkspaceCmd(m.svc), m.spinner.Tick, catalogRefreshTickCmd(), refreshCatalogCmd(m.svc, true), checkCatalogStaleCmd(m.svc), loadCatalogCmd(m.svc))
+}
+
+// loadCatalogCmd reads the multi-kind entity catalog for the Catalog surface.
+func loadCatalogCmd(svc services.OrunService) tea.Cmd {
+	return func() tea.Msg {
+		snap, err := svc.LoadCatalog(context.Background())
+		return services.CatalogLoadedMsg{Snapshot: snap, Err: err}
+	}
 }
 
 func loadWorkspaceCmd(svc services.OrunService) tea.Cmd {
@@ -344,11 +360,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case catalogRefreshedMsg:
 		// A refresh just ran → the catalog is current; clear the stale badge.
-		// When it changed, re-read the workspace so the new component set
-		// surfaces. Fresh/skipped/failed only clears the badge.
+		// When it changed, re-read the workspace + entity catalog so the new
+		// member set surfaces. Fresh/skipped/failed only clears the badge.
 		m.catalogStale = false
 		if msg.refreshed {
-			return m, backgroundReloadCmd(m.svc)
+			return m, tea.Batch(backgroundReloadCmd(m.svc), loadCatalogCmd(m.svc))
+		}
+		return m, nil
+
+	case services.CatalogLoadedMsg:
+		// Best-effort: a failed read keeps the current snapshot (mirrors
+		// workspaceRefreshedMsg) so a transient store error never blanks the
+		// Catalog surface.
+		if msg.Err != nil {
+			return m, nil
+		}
+		m.catalog = m.catalog.SetSnapshot(msg.Snapshot)
+		if m.activeMode == ModeCatalog {
+			m.refreshInspectorSelection()
 		}
 		return m, nil
 
@@ -741,15 +770,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// ⌃r re-resolves the catalog (force) and reloads the view.
 		m.loading = true
 		m.lastErr = nil
-		return m, tea.Batch(loadWorkspaceCmd(m.svc), refreshCatalogCmd(m.svc, true))
+		return m, tea.Batch(loadWorkspaceCmd(m.svc), refreshCatalogCmd(m.svc, true), loadCatalogCmd(m.svc))
 	case key.Matches(msg, m.keys.ToggleMode):
-		// Tab cycles between Components and Activity at the top level.
-		if m.activeMode == ModeBrowse {
+		// Tab cycles the top-level surfaces: Components → Activity → Catalog.
+		switch m.activeMode {
+		case ModeBrowse:
 			mm := m.switchMode(ModeActivity)
 			_, cmd := mm.activity.AutoAttachCmd()
 			return mm, cmd
+		case ModeActivity:
+			return m.switchMode(ModeCatalog), loadCatalogCmd(m.svc)
+		default:
+			return m.switchMode(ModeBrowse), nil
 		}
-		return m.switchMode(ModeBrowse), nil
 	case key.Matches(msg, m.keys.ToggleSidebar):
 		m.sidebarCollapsed = !m.sidebarCollapsed
 		m.prefs.SidebarCollapsed = m.sidebarCollapsed
@@ -771,7 +804,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showCommandPalette = true
 		return m, nil
 	case key.Matches(msg, m.keys.Search):
-		if m.activeMode == ModeBrowse || m.activeMode == ModeHistory || m.activeMode == ModeLogExplorer {
+		if m.activeMode == ModeBrowse || m.activeMode == ModeHistory || m.activeMode == ModeLogExplorer || m.activeMode == ModeCatalog {
 			m.searchActive = true
 			m.search.SetValue("")
 			m.search.Focus()
@@ -804,6 +837,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.refreshInspectorSelection()
 			return m, cmd
 		}
+		if m.activeMode == ModeCatalog && !m.catalog.AtRoot() {
+			m.catalog, _ = m.catalog.Update(tea.KeyMsg{Type: tea.KeyEsc})
+			m.refreshInspectorSelection()
+			return m, nil
+		}
 		return m.goBack(), nil
 	case key.Matches(msg, m.keys.Forward):
 		return m.goForward(), nil
@@ -821,6 +859,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.refreshInspectorSelection()
 			return m, cmd
 		}
+		if m.activeMode == ModeCatalog && !m.catalog.AtRoot() {
+			m.catalog, _ = m.catalog.Update(msg)
+			m.refreshInspectorSelection()
+			return m, nil
+		}
 		if len(m.navBack) > 0 {
 			return m.goBack(), nil
 		}
@@ -830,6 +873,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		mm := m.switchMode(ModeActivity)
 		_, cmd := mm.activity.AutoAttachCmd()
 		return mm, cmd
+	case key.Matches(msg, m.keys.GoCatalog):
+		return m.switchMode(ModeCatalog), loadCatalogCmd(m.svc)
 	case key.Matches(msg, m.keys.GoPlan):
 		return m.switchMode(ModePlanStudio), nil
 	case key.Matches(msg, m.keys.GoRun):
@@ -909,6 +954,18 @@ func (m Model) forwardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var c tea.Cmd
 		m.componentPage, c = m.componentPage.Update(msg)
 		return m, c
+	case ModeCatalog:
+		wasRoot := m.catalog.AtRoot()
+		var c tea.Cmd
+		m.catalog, c = m.catalog.Update(msg)
+		m.refreshInspectorSelection()
+		// Drilling between list and detail swaps the whole stage body; force a
+		// repaint so the line-diff renderer can't leave residue (same rationale
+		// as the Activity level transitions).
+		if m.catalog.AtRoot() != wasRoot {
+			return m, tea.Batch(c, tea.ClearScreen)
+		}
+		return m, c
 	}
 	return m, nil
 }
@@ -928,6 +985,9 @@ func (m Model) switchMode(target Mode) Model {
 		m.showInspector = true
 	}
 	if target == ModePlanStudio && m.width >= 100 {
+		m.showInspector = true
+	}
+	if target == ModeCatalog && m.width >= 100 {
 		m.showInspector = true
 	}
 	m.refreshInspectorSelection()
@@ -968,6 +1028,8 @@ func (m *Model) applySearch(q string) {
 		m.browse = m.browse.SetFilter(q)
 	case ModeHistory:
 		m.history = m.history.SetFilter(q)
+	case ModeCatalog:
+		m.catalog = m.catalog.SetFilter(q)
 	}
 }
 
@@ -1080,6 +1142,10 @@ func (m *Model) refreshInspectorSelection() {
 		if d := m.activity.InspectorDesc(); d != nil {
 			m.inspector = m.inspector.SetDescription(d)
 		}
+	case ModeCatalog:
+		if d := m.catalog.InspectorDesc(); d != nil {
+			m.inspector = m.inspector.SetDescription(d)
+		}
 	case ModePlanStudio:
 		if step := m.planStudio.SelectedStep(); step != nil {
 			if job := m.planStudio.SelectedJob(); job != nil {
@@ -1103,6 +1169,24 @@ func componentDesc(c *services.ComponentSummary, runs []services.RunSummary) *se
 		{Label: "depends-on", Value: strings.Join(c.DependsOn, ",")},
 		{Label: "watches", Value: strings.Join(c.Watches, ",")},
 		{Label: "last run", Value: c.LastRunStatus},
+	}
+	// Envelope enrichment (catalog-served lists only) — ownership, system
+	// membership, and lifecycle from the resolved entity envelope.
+	if c.Owner != "" {
+		owner := c.Owner
+		if c.OwnerSource != "" {
+			owner += " (" + c.OwnerSource + ")"
+		}
+		fields = append(fields, services.DescField{Label: "owner", Value: owner})
+	}
+	if c.System != "" {
+		fields = append(fields, services.DescField{Label: "system", Value: c.System})
+	}
+	if c.Stage != "" {
+		fields = append(fields, services.DescField{Label: "stage", Value: c.Stage})
+	}
+	if c.Tier != "" {
+		fields = append(fields, services.DescField{Label: "tier", Value: c.Tier})
 	}
 	if len(recent) > 0 {
 		lines := make([]string, 0, len(recent))
@@ -1324,11 +1408,12 @@ func planStepsBlock(steps []model.PlanStep) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// truncateOneLine collapses whitespace and trims the result to max runes.
+// truncateOneLine collapses whitespace and trims the result to max cells
+// (rune-aware — a byte slice could split a multi-byte rune).
 func truncateOneLine(s string, max int) string {
 	s = strings.Join(strings.Fields(s), " ")
-	if max > 0 && len(s) > max {
-		return s[:max-1] + "…"
+	if max > 0 && lipgloss.Width(s) > max {
+		return ansi.Truncate(s, max, "…")
 	}
 	return s
 }
@@ -1352,6 +1437,7 @@ func (m *Model) propagateSize() {
 	m.activity = m.activity.SetSize(cw, h)
 	m.planStudio = m.planStudio.SetSize(cw, h)
 	m.componentPage = m.componentPage.SetSize(cw, h)
+	m.catalog = m.catalog.SetSize(cw, h)
 	m.browse.Width = cw
 	m.browse.Height = h
 	m.history.Width = cw
@@ -1465,6 +1551,8 @@ func (m Model) applyPaletteCommand(c views.CommandPaletteCommand) (tea.Model, te
 		return m.switchMode(ModePlanStudio), nil
 	case "goto.run", "goto.logs", "goto.history", "goto.activity":
 		return m.switchMode(ModeActivity), nil
+	case "goto.catalog":
+		return m.switchMode(ModeCatalog), loadCatalogCmd(m.svc)
 	case "plan.generate":
 		m = m.switchMode(ModePlanStudio)
 		m.planStudio = m.planStudio.MarkGenerating()
@@ -1662,6 +1750,14 @@ func (m Model) renderHeader() string {
 			theme.StyleValue.Render(m.componentPage.Component.Name),
 		)
 	}
+	if m.activeMode == ModeCatalog {
+		if bc := m.catalog.Breadcrumb(); len(bc) > 0 {
+			crumbs = append(crumbs,
+				theme.StyleDim.Render("›"),
+				theme.StyleValue.Render(strings.Join(bc, " › ")),
+			)
+		}
+	}
 	if m.catalogStale {
 		// The catalog was resolved against a different tree — prompt a refresh.
 		crumbs = append(crumbs,
@@ -1699,6 +1795,8 @@ func (m Model) renderStage() string {
 		body = m.activity.View()
 	case ModeComponent:
 		body = m.componentPage.View()
+	case ModeCatalog:
+		body = m.catalog.View()
 	}
 	if m.searchActive {
 		body = m.search.View() + "\n\n" + body
@@ -1765,6 +1863,13 @@ func (m Model) contextualKeys() []key.Binding {
 		)
 	case ModeHistory:
 		out = append(out, m.keys.Search)
+	case ModeCatalog:
+		out = append(out,
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "open")),
+			key.NewBinding(key.WithKeys("[", "]"), key.WithHelp("[ ]", "kind")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
+			m.keys.Search,
+		)
 	}
 	out = append(out, m.keys.Palette, m.keys.ToggleInspector, m.keys.ToggleSidebar, m.keys.Help, m.keys.Quit)
 	return out
@@ -1828,13 +1933,14 @@ func (m Model) renderBottomPanel() string {
 
 func (m Model) renderHelpModal() string {
 	groups := [][]string{
-		{"Global", "tab components ⇄ activity", "i toggle inspector",
+		{"Global", "tab cycle surface", "i toggle inspector",
 			"⌃b toggle sidebar", "⌃r reload", ": commands", "/ search", "? help", "q quit"},
-		{"Navigation", "1 components", "2 activity", "esc back", "⌃o back", "⌃i forward"},
+		{"Navigation", "1 components", "2 activity", "3 catalog", "esc back", "⌃o back", "⌃i forward"},
 		{"Components", "enter open component", "g compose", "e cycle env", "c changed-only", "/ filter"},
 		{"Component", "enter open run", "r run (selected env)", "g compose", "esc back"},
 		{"Compose", "g generate", "d dry-run", "R real run", "s save", "e/t/C cycle"},
 		{"Activity", "tab cycle pane", "↑/↓ move", "enter tail logs", "r runs · l logs"},
+		{"Catalog", "[ ] cycle kind", "enter open entity", "enter follow connection", "esc back", "/ filter"},
 	}
 	var b strings.Builder
 	b.WriteString(theme.StyleModalTitle.Render("Cockpit · Help"))

@@ -25,6 +25,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/tui/services"
@@ -1456,6 +1457,8 @@ func buildSparkline(runs []ActivityRun) string {
 
 // --- Helpers --------------------------------------------------------------
 
+// truncate clips s to at most w visible cells, appending "…" when clipped.
+// ANSI- and rune-aware (a byte slice would split escapes or multi-byte runes).
 func truncate(s string, w int) string {
 	if w <= 0 {
 		return ""
@@ -1466,7 +1469,7 @@ func truncate(s string, w int) string {
 	if w <= 1 {
 		return "…"
 	}
-	return s[:w-1] + "…"
+	return ansi.Truncate(s, w, "…")
 }
 
 func truncateMultiline(s string, w int) string {
