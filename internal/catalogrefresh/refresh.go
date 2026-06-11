@@ -48,9 +48,11 @@ import (
 // population + the effects declaration carried into the Composition node), and
 // 8→9 for the post-epic hardening review (provenance.manifestHash carried into
 // the envelope per data-model.md §2; the empty legacy composition block dropped
-// from spec). Every catalog id moves once per bump, the resolve memo misses
-// once, and content addressing re-stabilizes (S-1).
-const ResolverVersion = 9
+// from spec), and 9→10 for the key-grammar unification (Group/User refs become
+// group:/user:; System/Domain/Environment/Composition/API/Resource keys are
+// qualified to <ns>/<repo>/<name>). Every catalog id moves once per bump, the
+// resolve memo misses once, and content addressing re-stabilizes (S-1).
+const ResolverVersion = 10
 
 // lockTTL bounds how long a refresh lock is honored before it is treated as
 // stale (a crashed holder) and reclaimed. A resolve+write is sub-second; this

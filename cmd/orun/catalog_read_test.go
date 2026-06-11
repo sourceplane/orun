@@ -124,8 +124,8 @@ func TestCatalogDescribe_E2E(t *testing.T) {
 	if data.Manifest.Spec.System != "payments" {
 		t.Errorf("manifest spec.system = %q, want payments", data.Manifest.Spec.System)
 	}
-	if data.Manifest.Metadata.Owner != "team/x" {
-		t.Errorf("manifest metadata.owner = %q, want team/x", data.Manifest.Metadata.Owner)
+	if data.Manifest.Metadata.Owner != "group:team/x" {
+		t.Errorf("manifest metadata.owner = %q, want group:team/x", data.Manifest.Metadata.Owner)
 	}
 	if data.Manifest.Source.SourceSnapshotKey == "" || data.Manifest.Source.CatalogSnapshotKey == "" {
 		t.Errorf("manifest source keys empty: %+v", data.Manifest.Source)

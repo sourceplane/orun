@@ -238,8 +238,8 @@ func TestMapEntity_Envelope(t *testing.T) {
 	if m.Metadata["title"] != "API" {
 		t.Errorf("metadata.title = %v", m.Metadata["title"])
 	}
-	// ownership block, with source.
-	if m.Ownership["owner"] != "platform" || m.Ownership["source"] != catalogmodel.OwnershipSourceAuthored {
+	// ownership block, with source — owner normalized to a typed group: ref.
+	if m.Ownership["owner"] != "group:platform" || m.Ownership["source"] != catalogmodel.OwnershipSourceAuthored {
 		t.Errorf("ownership = %v", m.Ownership)
 	}
 	contacts, _ := m.Ownership["contacts"].([]any)
@@ -260,8 +260,8 @@ func TestMapEntity_Envelope(t *testing.T) {
 	for _, r := range m.Relations {
 		wantRel[r.Type+"|"+r.To] = r.ToKind
 	}
-	if wantRel["ownedBy|platform"] != "Group" || wantRel["partOf|identity"] != "System" ||
-		wantRel["partOf|platform"] != "Domain" || wantRel["dependsOn|ns/repo/db"] != "Component" ||
+	if wantRel["ownedBy|group:platform"] != "Group" || wantRel["partOf|ns/repo/identity"] != "System" ||
+		wantRel["partOf|ns/repo/platform"] != "Domain" || wantRel["dependsOn|ns/repo/db"] != "Component" ||
 		wantRel["dependsOn|ns/repo/cache"] != "Resource" {
 		t.Errorf("relations = %+v", m.Relations)
 	}
@@ -362,7 +362,7 @@ func TestMapEntity_Composition(t *testing.T) {
 	}
 	var composedBy bool
 	for _, r := range m.Relations {
-		if r.Type == "composedBy" && r.To == "example-platform" && r.ToKind == "Composition" {
+		if r.Type == "composedBy" && r.To == "ns/repo/example-platform" && r.ToKind == "Composition" {
 			composedBy = true
 		}
 	}
@@ -575,7 +575,7 @@ func TestMapEntity_EnvironmentRelations(t *testing.T) {
 			envs = append(envs, r.To)
 		}
 	}
-	if len(envs) != 2 || envs[0] != "production" || envs[1] != "staging" {
+	if len(envs) != 2 || envs[0] != "ns/repo/production" || envs[1] != "ns/repo/staging" {
 		t.Fatalf("deployedTo env edges = %v", envs)
 	}
 }
@@ -599,16 +599,16 @@ func TestMapEntity_CodeownersOwnership(t *testing.T) {
 		Spec:     catalogmodel.ComponentSpec{Type: "worker"},
 	}
 	m := mapEntity(cm, 3, resolver, nil)
-	if m.Ownership["owner"] != "@org/api-team" || m.Ownership["source"] != catalogmodel.OwnershipSourceCODEOWNERS {
+	if m.Ownership["owner"] != "group:org/api-team" || m.Ownership["source"] != catalogmodel.OwnershipSourceCODEOWNERS {
 		t.Fatalf("codeowners ownership = %v", m.Ownership)
 	}
 	add, _ := m.Ownership["additionalOwners"].([]any)
-	if len(add) != 1 || add[0] != "@org/sre" {
+	if len(add) != 1 || add[0] != "group:org/sre" {
 		t.Errorf("additionalOwners = %v", m.Ownership["additionalOwners"])
 	}
 	var ownedBy bool
 	for _, r := range m.Relations {
-		if r.Type == "ownedBy" && r.To == "@org/api-team" && r.ToKind == "Group" {
+		if r.Type == "ownedBy" && r.To == "group:org/api-team" && r.ToKind == "Group" {
 			ownedBy = true
 		}
 	}
@@ -619,7 +619,7 @@ func TestMapEntity_CodeownersOwnership(t *testing.T) {
 	// 2. Authored owner wins over CODEOWNERS.
 	cm.Metadata.Owner = "authored-team"
 	m = mapEntity(cm, 3, resolver, nil)
-	if m.Ownership["owner"] != "authored-team" || m.Ownership["source"] != catalogmodel.OwnershipSourceAuthored {
+	if m.Ownership["owner"] != "group:authored-team" || m.Ownership["source"] != catalogmodel.OwnershipSourceAuthored {
 		t.Fatalf("authored should win: %v", m.Ownership)
 	}
 
