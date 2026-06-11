@@ -51,11 +51,13 @@ type CatalogView struct {
 // EntityView is the read view of one derived multi-kind entity blob under
 // entities/<Kind>/ (orun-service-catalog/data-model.md §2/§4).
 type EntityView struct {
-	Kind      string
-	EntityKey string
-	Name      string
-	Namespace string
-	Repo      string
+	Kind        string
+	EntityKey   string
+	Name        string
+	Namespace   string
+	Repo        string
+	MemberCount int      // components referencing this entity (Step 3 membership)
+	Members     []string // the referencing component keys, sorted
 }
 
 // RelationEdgeView is one forward edge of the catalog-wide relation graph
@@ -334,13 +336,16 @@ func (r *Reader) readEntities(ctx context.Context, treeID objectstore.ObjectID) 
 			if derr != nil {
 				return nil, derr
 			}
-			out = append(out, EntityView{
+			ev := EntityView{
 				Kind:      e.Kind,
 				EntityKey: e.Identity.EntityKey,
 				Name:      e.Identity.Name,
 				Namespace: e.Identity.Namespace,
 				Repo:      e.Identity.Repo,
-			})
+			}
+			ev.MemberCount = intField(e.Spec, "memberCount")
+			ev.Members = stringSliceField(e.Spec, "members")
+			out = append(out, ev)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -564,6 +569,38 @@ func stringField(m map[string]any, key string) string {
 	}
 	s, _ := m[key].(string)
 	return s
+}
+
+// intField reads a numeric field (JSON numbers decode as float64).
+func intField(m map[string]any, key string) int {
+	if m == nil {
+		return 0
+	}
+	switch v := m[key].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	}
+	return 0
+}
+
+// stringSliceField reads a []string from a generic []any field.
+func stringSliceField(m map[string]any, key string) []string {
+	if m == nil {
+		return nil
+	}
+	raw, ok := m[key].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func boolField(m map[string]any, key string) bool {

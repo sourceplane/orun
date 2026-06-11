@@ -269,6 +269,28 @@ func TestAssembleCatalogDerivesMultiKindEntities(t *testing.T) {
 	if spec == nil || spec["source"] != "example-platform" || spec["digest"] != "sha256:abc" {
 		t.Errorf("composition entity spec = %v", ce.Spec)
 	}
+	// Membership enrichment: the Composition entity records the components it
+	// composes (the api component composedBy it). memberCount round-trips as a
+	// JSON number.
+	mem, _ := spec["members"].([]any)
+	if len(mem) != 1 || mem[0] != "ns/repo/api" {
+		t.Errorf("composition members = %v, want [ns/repo/api]", spec["members"])
+	}
+	if mc, _ := spec["memberCount"].(float64); mc != 1 {
+		t.Errorf("composition memberCount = %v, want 1", spec["memberCount"])
+	}
+
+	// The System "ns/repo/identity" is shared by two components (api + web) —
+	// members must be the deduped, sorted union.
+	sysBlobs, _ := s.GetTree(ctx, kindTreeID(t, s, entTree, "System"))
+	se, err := Decode[Entity]([]byte(blobBody(t, s, sysBlobs[0].ID)))
+	if err != nil {
+		t.Fatalf("decode system entity: %v", err)
+	}
+	sysMem, _ := se.Spec["members"].([]any)
+	if len(sysMem) != 2 || sysMem[0] != "ns/repo/api" || sysMem[1] != "ns/repo/web" {
+		t.Errorf("system members = %v, want [ns/repo/api ns/repo/web]", se.Spec["members"])
+	}
 }
 
 // kindTreeID returns the object id of the entities/<kind>/ subtree.

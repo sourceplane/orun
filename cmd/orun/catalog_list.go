@@ -37,9 +37,10 @@ var (
 // catalogListEntityRow is one row of the kind-scoped listing (--kind <Kind>,
 // orun-service-catalog SC3/SC4): the derived non-Component entities.
 type catalogListEntityRow struct {
-	Kind      string `json:"kind"`
-	EntityKey string `json:"entityKey"`
-	Name      string `json:"name"`
+	Kind        string `json:"kind"`
+	EntityKey   string `json:"entityKey"`
+	Name        string `json:"name"`
+	MemberCount int    `json:"memberCount"`
 }
 
 // catalogListRow is one row of the CatalogListResult envelope `data` array.
@@ -168,7 +169,7 @@ func runCatalogListKind(ctx context.Context, kind string) error {
 		if e.Kind != kind {
 			continue
 		}
-		rows = append(rows, catalogListEntityRow{Kind: e.Kind, EntityKey: e.EntityKey, Name: e.Name})
+		rows = append(rows, catalogListEntityRow{Kind: e.Kind, EntityKey: e.EntityKey, Name: e.Name, MemberCount: e.MemberCount})
 	}
 	if catalogJSONFlag {
 		return writeCatalogEnvelope(kindCatalogListResult, rows, nil)
@@ -179,9 +180,9 @@ func runCatalogListKind(ctx context.Context, kind string) error {
 		fmt.Println("(none)")
 		return nil
 	}
-	fmt.Printf("%-40s %s\n", "ENTITY", "KEY")
+	fmt.Printf("%-32s %-36s %s\n", "ENTITY", "KEY", "MEMBERS")
 	for _, r := range rows {
-		fmt.Printf("%-40s %s\n", r.Name, r.EntityKey)
+		fmt.Printf("%-32s %-36s %d\n", r.Name, r.EntityKey, r.MemberCount)
 	}
 	return nil
 }

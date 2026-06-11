@@ -50,9 +50,12 @@ import (
 // the envelope per data-model.md §2; the empty legacy composition block dropped
 // from spec), and 9→10 for the key-grammar unification (Group/User refs become
 // group:/user:; System/Domain/Environment/Composition/API/Resource keys are
-// qualified to <ns>/<repo>/<name>). Every catalog id moves once per bump, the
-// resolve memo misses once, and content addressing re-stabilizes (S-1).
-const ResolverVersion = 10
+// qualified to <ns>/<repo>/<name>), and 10→11 for derived-entity membership
+// enrichment (each Group/User/System/Domain/Environment/Composition/API/Resource
+// entity carries spec.members + memberCount — the inverse-edge membership).
+// Every catalog id moves once per bump, the resolve memo misses once, and
+// content addressing re-stabilizes (S-1).
+const ResolverVersion = 11
 
 // lockTTL bounds how long a refresh lock is honored before it is treated as
 // stale (a crashed holder) and reclaimed. A resolve+write is sub-second; this
