@@ -22,11 +22,12 @@ type CommandPaletteCommand struct {
 // DefaultPaletteCommands returns the canonical palette command set.
 func DefaultPaletteCommands() []CommandPaletteCommand {
 	return []CommandPaletteCommand{
-		{ID: "goto.browse", Title: "Go to Browse", Hint: "1"},
+		{ID: "goto.browse", Title: "Go to Components", Hint: "1", Keyword: "browse"},
 		{ID: "goto.plan", Title: "Compose component (last opened)", Hint: ""},
-		{ID: "goto.run", Title: "Go to Activity", Hint: "2"},
-		{ID: "goto.logs", Title: "Go to Log Explorer", Hint: "4"},
-		{ID: "goto.history", Title: "Go to History", Hint: "5"},
+		{ID: "goto.run", Title: "Go to Activity", Hint: "2", Keyword: "runs history"},
+		{ID: "goto.catalog", Title: "Go to Catalog (entities)", Hint: "3", Keyword: "entity api resource system domain group composition environment deployment"},
+		{ID: "goto.logs", Title: "Go to Log Explorer", Keyword: "logs"},
+		{ID: "goto.history", Title: "Go to History", Keyword: "past runs"},
 		{ID: "plan.generate", Title: "Generate plan", Hint: "g", Keyword: "compile build"},
 		{ID: "plan.save", Title: "Save current plan", Hint: "s"},
 		{ID: "plan.dryrun", Title: "Dry-run current plan", Hint: "d"},

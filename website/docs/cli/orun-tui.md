@@ -61,12 +61,14 @@ The inspector auto-opens when the terminal is at least 100 columns wide. Below t
 | Activity | Drilldown across runs, jobs, and steps with live status. |
 | Logs | Streaming log explorer scoped to a run, job, or step. |
 | History | Past runs and plans, sorted by recency. |
+| Catalog | Multi-kind entity explorer: every catalog entity (Component, API, Resource, System, Domain, Group, Composition, Environment, Deployment) with kind tabs, ownership/lifecycle columns, and walkable relation edges. |
 
 ## Global keys
 
 | Key | Action |
 | --- | --- |
-| `tab` | Switch between components and activity |
+| `tab` | Cycle the top-level surfaces (components → activity → catalog) |
+| `1` / `2` / `3` | Jump to Components / Activity / Catalog |
 | `i` | Toggle inspector |
 | `b` | Toggle bottom panel |
 | `?` | Help |
@@ -179,6 +181,26 @@ Live jobs pulse via a four-frame wall-clock spinner. Step rows show jump-back ch
 ◀ esc · back to job
 ◀◀ esc esc · back to run
 ```
+
+## Catalog (entity explorer)
+
+The Catalog surface (`3`) renders the resolved service catalog as a browsable
+graph. The list level shows kind tabs with per-kind counts; the detail level
+shows one entity's envelope (identity, ownership, lifecycle) plus its
+**Connections** — members and typed relation edges, each navigable.
+
+| Key | Action |
+| --- | --- |
+| `[` / `]` (or `←` / `→`) | Cycle kind tab (All → Component → API → …) |
+| `↑` / `↓` | Move selection |
+| `⏎` | Open entity / follow a connection |
+| `esc` | Pop back one entity (or pop mode at the list) |
+| `/` | Filter by name, kind, key, or owner |
+
+Connections marked `◂` are incoming edges (e.g. `◂ deployedTo` on an
+Environment lists the components deployed to it). A `⤴` suffix marks an
+endpoint outside the loaded catalog (e.g. a cross-repo dependency) — shown but
+not followable.
 
 ## Catalog freshness
 

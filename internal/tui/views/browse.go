@@ -183,12 +183,33 @@ func (m BrowseModel) View() string {
 		return b.String()
 	}
 
-	// Column widths.
+	// Column widths. The OWNER column (envelope ownership, SC1b) only renders
+	// when the catalog-served list actually carries owners and the stage is
+	// wide enough to keep NAME readable.
+	showOwner := false
+	for _, c := range m.Workspace.Components {
+		if c.Owner != "" {
+			showOwner = true
+			break
+		}
+	}
+	if width < 64 {
+		showOwner = false
+	}
 	nameW := clamp(width*45/100, 16, 56)
 	typeW := clamp(width*20/100, 8, 24)
+	ownerW := 0
+	if showOwner {
+		ownerW = clamp(width*22/100, 10, 26)
+		nameW = clamp(width*32/100, 14, 40)
+	}
 
-	header := theme.StyleTableHeader.Render(fmt.Sprintf(" %s  %s  %s",
-		pad("NAME", nameW), pad("TYPE", typeW), "CHG"))
+	headerCols := fmt.Sprintf(" %s  %s  %s", pad("NAME", nameW), pad("TYPE", typeW), "CHG")
+	if showOwner {
+		headerCols = fmt.Sprintf(" %s  %s  %s  %s",
+			pad("NAME", nameW), pad("OWNER", ownerW), pad("TYPE", typeW), "CHG")
+	}
+	header := theme.StyleTableHeader.Render(headerCols)
 	b.WriteString(" " + header)
 	b.WriteString("\n")
 
@@ -225,12 +246,23 @@ func (m BrowseModel) View() string {
 		if i == m.Cursor {
 			nameStyled = theme.StyleTitle.Render(c.Name)
 		}
-		line := fmt.Sprintf(" %s %s  %s  %s",
-			glyph,
-			padStyled(nameStyled, c.Name, nameW),
-			pad(c.Type, typeW),
-			changedMark,
-		)
+		var line string
+		if showOwner {
+			line = fmt.Sprintf(" %s %s  %s  %s  %s",
+				glyph,
+				padStyled(nameStyled, c.Name, nameW),
+				pad(zoa(c.Owner), ownerW),
+				pad(c.Type, typeW),
+				changedMark,
+			)
+		} else {
+			line = fmt.Sprintf(" %s %s  %s  %s",
+				glyph,
+				padStyled(nameStyled, c.Name, nameW),
+				pad(c.Type, typeW),
+				changedMark,
+			)
+		}
 		if i == m.Cursor {
 			bar := theme.StyleCursorBar.Render("▌")
 			b.WriteString(bar + theme.StyleTableRowSelected.Render(line))
@@ -248,15 +280,15 @@ func (m BrowseModel) View() string {
 	return b.String()
 }
 
+// pad clips s to w visible cells (rune-aware) and pads with spaces so the
+// result is always exactly w cells — truncating a double-width rune can land
+// one cell short, so padding happens after the clip.
 func pad(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
 	if lipgloss.Width(s) > w {
-		if w <= 1 {
-			return s[:w]
-		}
-		return s[:w-1] + "…"
+		s = truncate(s, w)
 	}
 	return s + strings.Repeat(" ", w-lipgloss.Width(s))
 }
@@ -266,10 +298,7 @@ func pad(s string, w int) string {
 func padStyled(styled, raw string, w int) string {
 	rawW := lipgloss.Width(raw)
 	if rawW >= w {
-		if w <= 1 {
-			return raw[:w]
-		}
-		return raw[:w-1] + "…"
+		return pad(raw, w)
 	}
 	return styled + strings.Repeat(" ", w-rawW)
 }

@@ -59,6 +59,13 @@ type OrunService interface {
 	// change it). Read-only and cheap (one source probe, no resolve). A missing
 	// object-model root reports not-stale.
 	CatalogStale(ctx context.Context) (bool, error)
+
+	// LoadCatalog reads the multi-kind entity view of the object-model catalog
+	// at catalogs/current (components, derived entities, typed relations,
+	// per-kind counts) for the Catalog surface. Best-effort: an absent or
+	// unreadable object model returns (nil, nil) so the surface renders its
+	// empty state rather than an error.
+	LoadCatalog(ctx context.Context) (*CatalogSnapshot, error)
 }
 
 // --- Request types ---
@@ -181,6 +188,16 @@ type ComponentSummary struct {
 	// changed), or "" (unaffected). Changed == (ChangeKind != "").
 	ChangeKind    string
 	LastRunStatus string // "success" | "failed" | "running" | ""
+
+	// Envelope enrichment (orun-service-catalog SC1/SC1b) — populated when the
+	// component list is served from the object-model catalog; empty on the live
+	// intent-loader path (the parity guard compares the intent-derived fields
+	// above only).
+	Owner       string // ownership.owner entity ref (group:x / user:y)
+	OwnerSource string // "authored" | "codeowners" | "inherited" | ""
+	System      string // partOf System name
+	Stage       string // lifecycle.stage
+	Tier        string // lifecycle.tier
 }
 
 // PlanSummary is the row-level view of a saved plan.
@@ -261,6 +278,58 @@ type RunSummary struct {
 	Components []string
 }
 
+// CatalogSnapshot is the multi-kind entity view of the object-model catalog
+// rendered by the Catalog surface (orun-service-catalog data-model.md §2–§4).
+// Entities carries every catalog member — components and derived kinds — in a
+// single uniform projection; Relations is the typed relation graph
+// (relations.json) with forward edges only.
+type CatalogSnapshot struct {
+	HumanKey     string         // catalog display key (cat-…)
+	CountsByKind map[string]int // per-kind entity counts
+	Entities     []EntitySummary
+	Relations    []RelationSummary
+	LoadedAt     time.Time
+}
+
+// EntitySummary is the row-level projection of one catalog entity of any kind.
+// Kind-specific fields are zero for kinds they don't apply to.
+type EntitySummary struct {
+	Kind      string // Component | API | Resource | System | Domain | Group | User | Composition | Environment | Deployment
+	EntityKey string // <namespace>/<repo>/<name>
+	Name      string
+	Namespace string
+	Repo      string
+
+	// Component envelope projections.
+	Type        string
+	Domain      string
+	System      string
+	Owner       string
+	OwnerSource string
+	Stage       string
+	Tier        string
+	Envs        []string
+
+	// Derived-entity membership (SC: spec.members).
+	MemberCount int
+	Members     []string // referencing component keys, sorted
+
+	// Composition versioning.
+	Version   string
+	Lifecycle string
+}
+
+// RelationSummary is one forward edge of the catalog-wide typed relation graph.
+type RelationSummary struct {
+	From     string
+	FromKind string
+	Type     string
+	To       string
+	ToKind   string
+	Optional bool
+	Include  string
+}
+
 // ResourceDescription is the structured payload rendered by the Inspector.
 type ResourceDescription struct {
 	Kind    string
@@ -299,6 +368,14 @@ type RunEventMsg struct {
 // LogEventMsg wraps a streaming LogEvent.
 type LogEventMsg struct {
 	Event LogEvent
+}
+
+// CatalogLoadedMsg is dispatched after LoadCatalog completes. A nil Snapshot
+// with a nil Err means no catalog exists yet (the Catalog surface shows its
+// empty state and prompts a refresh).
+type CatalogLoadedMsg struct {
+	Snapshot *CatalogSnapshot
+	Err      error
 }
 
 // RunsListedMsg is dispatched after ListRuns completes.

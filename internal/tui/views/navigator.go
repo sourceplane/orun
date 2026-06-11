@@ -35,6 +35,7 @@ func NewNavigatorModel() NavigatorModel {
 		Items: []SidebarItem{
 			{Icon: "◆", Label: "Components", Mode: "browse"},
 			{Icon: "▶", Label: "Activity", Mode: "activity"},
+			{Icon: "⬢", Label: "Catalog", Mode: "catalog"},
 		},
 	}
 }

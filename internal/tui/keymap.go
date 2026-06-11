@@ -13,14 +13,15 @@ type GlobalKeyMap struct {
 	Cancel          key.Binding
 	Reload          key.Binding
 
-	// Two top-level modes.
+	// Three top-level surfaces.
 	GoBrowse   key.Binding
 	GoActivity key.Binding
+	GoCatalog  key.Binding
 
 	// Activity-mode optional bottom panel.
 	ToggleBottom key.Binding
 
-	// Tab toggles between the two top-level modes.
+	// Tab cycles through the top-level surfaces.
 	ToggleMode key.Binding
 
 	// Back / Forward across mode history.
@@ -50,8 +51,9 @@ func DefaultGlobalKeyMap() GlobalKeyMap {
 		Reload:          key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("⌃r", "reload")),
 		GoBrowse:        key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "components")),
 		GoActivity:      key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "activity")),
+		GoCatalog:       key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "catalog")),
 		ToggleBottom:    key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "bottom panel")),
-		ToggleMode:      key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "components ⇄ activity")),
+		ToggleMode:      key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "cycle surface")),
 		Back:            key.NewBinding(key.WithKeys("backspace", "ctrl+o"), key.WithHelp("⌫", "back")),
 		Forward:         key.NewBinding(key.WithKeys("ctrl+i"), key.WithHelp("⌃i", "forward")),
 		// Legacy / inert
@@ -72,7 +74,7 @@ func (k GlobalKeyMap) ShortHelp() []key.Binding {
 // FullHelp returns the table-style help shown by the `?` overlay.
 func (k GlobalKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.GoBrowse, k.GoActivity, k.ToggleMode},
+		{k.GoBrowse, k.GoActivity, k.GoCatalog, k.ToggleMode},
 		{k.Back, k.Forward, k.Cancel},
 		{k.ToggleSidebar, k.ToggleInspector, k.Reload},
 		{k.Help, k.Palette, k.Search},

@@ -40,7 +40,7 @@ type CatalogView struct {
 	SourceID     string                     // edge: the source it was resolved against (freshness gate)
 	HumanKey     string                     // the catalog snapshot's human key
 	Components   []CatalogComponentView     // catalog members, sorted by component key
-	Entities     []EntityView               // derived non-Component entities (API/Resource/System/Domain/Group, SC3), sorted by (kind, key)
+	Entities     []EntityView               // derived non-Component entities (API/Resource/System/Domain/Group/Composition/Environment/Deployment, SC3–SC8), sorted by (kind, key)
 	CountsByKind map[string]int             // per-kind entity counts from catalog.json (SC3); nil for older catalogs
 	Graph        map[string]GraphView       // edgeKind → graph slice (dependencies, systems, …)
 	Relations    []RelationEdgeView         // the single typed relation graph (relations.json, SC2); nil for older catalogs
