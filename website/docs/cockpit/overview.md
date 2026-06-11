@@ -197,6 +197,13 @@ surface — every entity the resolver derived from your workspace:
 - **Same freshness model as Browse.** The surface reads the resolved catalog at
   `catalogs/current`; the header's `⟳ stale (⌃r)` badge tells you when a
   refresh would change it.
+- **The work surface, on every component.** Component entities carry the
+  changed/affected overlay (CHG column, `c` filters to changed-only), the
+  last-run status (LAST column), and an **Executions** section on the detail
+  page that drills straight into the Activity run view. `r` runs the selected
+  component for the selected environment (same confirm-then-execute flow as
+  the Component page), `g` composes it in Plan Studio, `o` opens its classic
+  page. Knowledge surface and work surface are one screen.
 
 ### Environment selector and component-scoped run
 

@@ -134,19 +134,32 @@ func TestCatalog_DrillAndGraphWalk(t *testing.T) {
 
 func TestCatalog_ViewRendersTabsAndRows(t *testing.T) {
 	m := NewCatalogModel().SetSnapshot(testCatalogSnapshot())
-	m = m.SetSize(100, 30)
+	m = m.SetSize(120, 30)
 	out := m.View()
 	for _, want := range []string{"Catalog", "5 entities", "cat-abc123", "Component 2", "System 1", "api", "web"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("list view missing %q", want)
 		}
 	}
-	// Component tab leads with OWNER and STAGE columns.
+	// Component tab leads with OWNER and STAGE columns, plus the work-surface
+	// LAST and CHG columns.
 	m, _ = m.Update(keyRunes("]"))
 	out = m.View()
-	for _, want := range []string{"OWNER", "STAGE", "group:edge-team", "production"} {
+	for _, want := range []string{"OWNER", "STAGE", "LAST", "CHG", "group:edge-team", "production"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("component tab missing %q", want)
+		}
+	}
+	// Below the responsive threshold the envelope columns yield, but the
+	// work-surface columns stay.
+	narrow := m.SetSize(80, 30)
+	out = narrow.View()
+	if strings.Contains(out, "STAGE") {
+		t.Error("narrow component tab should drop the STAGE column")
+	}
+	for _, want := range []string{"OWNER", "LAST", "CHG"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("narrow component tab missing %q", want)
 		}
 	}
 	// Detail view shows the envelope + connections.
