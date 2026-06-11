@@ -36,6 +36,37 @@ const (
 	BrandName        = "orun"
 )
 
+// EntityKindGlyph maps a service-catalog entity kind (orun-service-catalog
+// data-model.md §2) to its single-cell marker. This is the catalog extension
+// of the cockpit glyph language; every surface that renders mixed-kind entity
+// lists (the TUI Catalog surface, a future `catalog list --kind` renderer)
+// reads from here so the alphabet never drifts.
+func EntityKindGlyph(kind string) Glyph {
+	switch kind {
+	case "Component":
+		return "◆"
+	case "API":
+		return "◇"
+	case "Resource":
+		return "▣"
+	case "System":
+		return "⬢"
+	case "Domain":
+		return "▦"
+	case "Group":
+		return "◎"
+	case "User":
+		return "●"
+	case "Composition":
+		return "❖"
+	case "Environment":
+		return "◍"
+	case "Deployment":
+		return "▲"
+	}
+	return "·"
+}
+
 // Separators kept as data so layouts share spacing rules.
 const (
 	SepInline = " · "  // inline: "Plan a1b2 · Run xyz · State running"

@@ -9,8 +9,6 @@ package services
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -18,7 +16,6 @@ import (
 	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/objcatalog"
 	"github.com/sourceplane/orun/internal/objectstore"
-	"github.com/sourceplane/orun/internal/objectstore/refstore"
 	"github.com/sourceplane/orun/internal/objplan"
 	"github.com/sourceplane/orun/internal/sourcectx"
 )
@@ -31,20 +28,8 @@ import (
 // miss; the §0 universal refresh hook and explicit orun commands keep the store
 // fresh (a cockpit-side resolve is a tracked follow-up).
 func (s *LiveOrunService) freshCatalogComponents(ctx context.Context, workspaceRoot string) ([]ComponentSummary, bool) {
-	if s.cfg.ObjectModelRoot == "" {
-		return nil, false
-	}
-	root := filepath.Join(s.cfg.ObjectModelRoot, "objectmodel")
-	// Only adopt the object model if it actually has content (mirrors objReader).
-	if _, err := os.Stat(filepath.Join(root, "objects")); err != nil {
-		return nil, false
-	}
-	store, err := objectstore.NewLocalStore(objectstore.LocalConfig{Root: root})
-	if err != nil {
-		return nil, false
-	}
-	refs, err := refstore.NewLocalRefStore(refstore.LocalConfig{Root: root, Writer: "tui"})
-	if err != nil {
+	store, refs, ok := openObjectModel(s.cfg.ObjectModelRoot)
+	if !ok {
 		return nil, false
 	}
 
@@ -75,19 +60,8 @@ func (s *LiveOrunService) freshCatalogComponents(ctx context.Context, workspaceR
 // against. Best-effort: an absent/unreadable store or a detection error returns
 // a nil map so the component list renders with no badges rather than failing.
 func (s *LiveOrunService) catalogChangeOverlay(ctx context.Context, workspaceRoot string) map[string]string {
-	if s.cfg.ObjectModelRoot == "" {
-		return nil
-	}
-	root := filepath.Join(s.cfg.ObjectModelRoot, "objectmodel")
-	if _, err := os.Stat(filepath.Join(root, "objects")); err != nil {
-		return nil
-	}
-	store, err := objectstore.NewLocalStore(objectstore.LocalConfig{Root: root})
-	if err != nil {
-		return nil
-	}
-	refs, err := refstore.NewLocalRefStore(refstore.LocalConfig{Root: root, Writer: "tui"})
-	if err != nil {
+	store, refs, ok := openObjectModel(s.cfg.ObjectModelRoot)
+	if !ok {
 		return nil
 	}
 

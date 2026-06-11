@@ -24,8 +24,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/tui/services"
@@ -943,14 +941,7 @@ func (m ActivityModel) renderIndex() string {
 	if maxRows < 3 {
 		maxRows = 3
 	}
-	start := 0
-	if m.Cursor >= maxRows {
-		start = m.Cursor - maxRows + 1
-	}
-	end := start + maxRows
-	if end > len(m.Runs) {
-		end = len(m.Runs)
-	}
+	start, end := viewportWindow(m.Cursor, len(m.Runs), maxRows)
 
 	for i := start; i < end; i++ {
 		r := m.Runs[i]
@@ -1141,14 +1132,7 @@ func (m ActivityModel) renderJobPage() string {
 	if maxRows < 3 {
 		maxRows = 3
 	}
-	start := 0
-	if m.stepCursor >= maxRows {
-		start = m.stepCursor - maxRows + 1
-	}
-	end := start + maxRows
-	if end > len(steps) {
-		end = len(steps)
-	}
+	start, end := viewportWindow(m.stepCursor, len(steps), maxRows)
 
 	for i := start; i < end; i++ {
 		s := steps[i]
@@ -1456,21 +1440,6 @@ func buildSparkline(runs []ActivityRun) string {
 }
 
 // --- Helpers --------------------------------------------------------------
-
-// truncate clips s to at most w visible cells, appending "…" when clipped.
-// ANSI- and rune-aware (a byte slice would split escapes or multi-byte runes).
-func truncate(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	if lipgloss.Width(s) <= w {
-		return s
-	}
-	if w <= 1 {
-		return "…"
-	}
-	return ansi.Truncate(s, w, "…")
-}
 
 func truncateMultiline(s string, w int) string {
 	s = strings.ReplaceAll(s, "\n", " ↵ ")

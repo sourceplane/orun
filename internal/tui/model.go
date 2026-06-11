@@ -100,6 +100,26 @@ func (m Mode) sidebarKey() string {
 	return "activity"
 }
 
+// searchable reports whether the mode's stage supports the `/` filter bar.
+func (m Mode) searchable() bool {
+	switch m {
+	case ModeBrowse, ModeHistory, ModeLogExplorer, ModeCatalog:
+		return true
+	}
+	return false
+}
+
+// autoInspector reports whether entering the mode opens the inspector on wide
+// terminals so the selection's detail is immediately visible. A per-mode
+// affordance, not a sticky preference — it is never persisted to prefs.
+func (m Mode) autoInspector() bool {
+	switch m {
+	case ModeActivity, ModePlanStudio, ModeCatalog:
+		return true
+	}
+	return false
+}
+
 // Panel — legacy enum retained so the few remaining test references keep
 // compiling; the cockpit's real focus model is mode + drawer visibility.
 type Panel int
@@ -804,7 +824,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showCommandPalette = true
 		return m, nil
 	case key.Matches(msg, m.keys.Search):
-		if m.activeMode == ModeBrowse || m.activeMode == ModeHistory || m.activeMode == ModeLogExplorer || m.activeMode == ModeCatalog {
+		if m.activeMode.searchable() {
 			m.searchActive = true
 			m.search.SetValue("")
 			m.search.Focus()
@@ -824,45 +844,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case key.Matches(msg, m.keys.Back):
-		// Inside Activity, prefer popping a drilldown level before
-		// falling back to global mode-back history.
-		if m.activeMode == ModeActivity && !m.activity.AtRoot() {
-			var cmd tea.Cmd
-			m.activity, cmd = m.activity.Update(msg)
-			return m, cmd
-		}
-		if m.activeMode == ModePlanStudio && !m.planStudio.AtRoot() {
-			var cmd tea.Cmd
-			m.planStudio, cmd = m.planStudio.Update(msg)
-			m.refreshInspectorSelection()
-			return m, cmd
-		}
-		if m.activeMode == ModeCatalog && !m.catalog.AtRoot() {
-			m.catalog, _ = m.catalog.Update(tea.KeyMsg{Type: tea.KeyEsc})
-			m.refreshInspectorSelection()
-			return m, nil
+		// Back (⌫ / ⌃o) pops the active mode's drilldown level first, then
+		// falls back to global mode-back history.
+		if mm, cmd, ok := m.popDrill(); ok {
+			return mm, cmd
 		}
 		return m.goBack(), nil
 	case key.Matches(msg, m.keys.Forward):
 		return m.goForward(), nil
 	case key.Matches(msg, m.keys.Cancel):
-		// Esc when no overlay is open: inside Activity, pop drilldown
-		// level first; otherwise act as "back".
-		if m.activeMode == ModeActivity && !m.activity.AtRoot() {
-			var cmd tea.Cmd
-			m.activity, cmd = m.activity.Update(msg)
-			return m, cmd
-		}
-		if m.activeMode == ModePlanStudio && !m.planStudio.AtRoot() {
-			var cmd tea.Cmd
-			m.planStudio, cmd = m.planStudio.Update(msg)
-			m.refreshInspectorSelection()
-			return m, cmd
-		}
-		if m.activeMode == ModeCatalog && !m.catalog.AtRoot() {
-			m.catalog, _ = m.catalog.Update(msg)
-			m.refreshInspectorSelection()
-			return m, nil
+		// Esc when no overlay is open: pop the active mode's drilldown level
+		// first; otherwise act as "back".
+		if mm, cmd, ok := m.popDrill(); ok {
+			return mm, cmd
 		}
 		if len(m.navBack) > 0 {
 			return m.goBack(), nil
@@ -981,17 +975,44 @@ func (m Model) switchMode(target Mode) Model {
 	// When entering Activity, force the inspector on so the user sees job
 	// details immediately. We don't persist this to prefs — it's a per-mode
 	// affordance, not a sticky preference.
-	if target == ModeActivity && m.width >= 100 {
-		m.showInspector = true
-	}
-	if target == ModePlanStudio && m.width >= 100 {
-		m.showInspector = true
-	}
-	if target == ModeCatalog && m.width >= 100 {
+	if target.autoInspector() && m.width >= 100 {
 		m.showInspector = true
 	}
 	m.refreshInspectorSelection()
 	return m
+}
+
+// popDrill pops one drilldown level of the active mode's stage, if it has a
+// drill stack and is below its root. It forwards a synthetic esc so ⌫/⌃o and
+// esc behave identically (the drilldown views pop on esc). ok=false means the
+// mode is at its root (or has no drill stack) and the caller should fall back
+// to global mode-back history. This is the single place a mode's drill stack
+// participates in back/esc dispatch — a new drillable mode adds one case here.
+func (m Model) popDrill() (Model, tea.Cmd, bool) {
+	esc := tea.KeyMsg{Type: tea.KeyEsc}
+	switch m.activeMode {
+	case ModeActivity:
+		if !m.activity.AtRoot() {
+			var cmd tea.Cmd
+			m.activity, cmd = m.activity.Update(esc)
+			m.refreshInspectorSelection()
+			return m, cmd, true
+		}
+	case ModePlanStudio:
+		if !m.planStudio.AtRoot() {
+			var cmd tea.Cmd
+			m.planStudio, cmd = m.planStudio.Update(esc)
+			m.refreshInspectorSelection()
+			return m, cmd, true
+		}
+	case ModeCatalog:
+		if !m.catalog.AtRoot() {
+			m.catalog, _ = m.catalog.Update(esc)
+			m.refreshInspectorSelection()
+			return m, nil, true
+		}
+	}
+	return m, nil, false
 }
 
 // goBack pops the back-stack into the active mode, pushing the current
