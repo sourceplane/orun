@@ -33,8 +33,7 @@ Each pane is its own Bubble Tea sub-model, owned by the root model:
 
 | Sub-model | Pane |
 | --- | --- |
-| `BrowseModel` | Main, Browse mode (catalog component list + changed/affected overlay) |
-| `ComponentPageModel` | Main, Component mode (component detail + recent executions) |
+| `CatalogModel` | Main, Catalog mode (multi-kind entity explorer + component work surface: changed/affected overlay, last-run, executions) |
 | `PlanStudioModel` | Main, Plan Studio mode |
 | `ActivityModel` | Main, Activity mode |
 | `LogExplorerModel` | Main, Logs mode |
@@ -43,7 +42,7 @@ Each pane is its own Bubble Tea sub-model, owned by the root model:
 
 Sub-models receive only the messages and the slice of screen real estate the root model gives them. They don't reach into each other.
 
-Browse and Component read through the catalog read seam (`internal/cockpit/catalogread` → `internal/cockpit/viewmodel`), which composes the object-model catalog with the `internal/affected` change-detection engine for the changed/affected overlay. The component drill-down (`⏎`) hands off to the Activity run → job → logs drilldown for a chosen execution. A live-view ticker re-reads the catalog off the UI thread so external writes appear without a keystroke.
+The Catalog's work-surface context reads through the catalog read seam (`internal/cockpit/catalogread` → `internal/cockpit/viewmodel`), which composes the object-model catalog with the `internal/affected` change-detection engine for the changed/affected overlay; the entity list itself is projected from `internal/objcatalog` by the service layer. An execution row (`⏎`) hands off to the Activity run → job → logs drilldown. A live-view ticker re-reads the catalog off the UI thread so external writes appear without a keystroke.
 
 ## Mode machine
 
@@ -55,7 +54,7 @@ navBack    []Mode
 navFwd     []Mode
 ```
 
-`ctrl+o` pops `navBack` (and pushes onto `navFwd`); `ctrl+i` is the inverse. Direct mode jumps (`g a`, `g p`, `g r`, `g l`, `g h`, `g c`) push the previous mode onto `navBack` and clear `navFwd`.
+`ctrl+o` pops `navBack` (and pushes onto `navFwd`); `ctrl+i` is the inverse. Direct mode jumps (`1` catalog, `2` activity, palette commands) push the previous mode onto `navBack` and clear `navFwd`.
 
 ## Drilldown machine
 
@@ -63,6 +62,7 @@ Inside a mode, navigation is a stack of levels:
 
 | Mode | Levels |
 | --- | --- |
+| Catalog | List → Entity → Entity → … (graph walk, unbounded) |
 | Activity | Index → Run → Job → Step (4 levels) |
 | Plan Studio | Jobs → Steps → Step (3 levels) |
 

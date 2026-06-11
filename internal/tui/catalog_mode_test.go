@@ -25,7 +25,7 @@ func modeTestSnapshot() *services.CatalogSnapshot {
 	}
 }
 
-// Key 3 switches to the Catalog surface and kicks a catalog load.
+// Key 1 switches to the Catalog surface and kicks a catalog load.
 func TestModel_CatalogModeKeyAndLoad(t *testing.T) {
 	loaded := false
 	svc := &services.MockOrunService{
@@ -35,7 +35,7 @@ func TestModel_CatalogModeKeyAndLoad(t *testing.T) {
 		},
 	}
 	m := NewModel(svc)
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	m = next.(Model)
 	if m.ActiveMode() != ModeCatalog {
 		t.Fatalf("ActiveMode = %v, want ModeCatalog", m.ActiveMode())
@@ -78,7 +78,10 @@ func TestModel_CatalogLoadBestEffort(t *testing.T) {
 // Esc inside a drilled catalog entity pops the drill level, not the mode.
 func TestModel_CatalogEscPopsDrillFirst(t *testing.T) {
 	m := NewModel(&services.MockOrunService{})
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	// Visit Activity then return so the mode-back stack has an entry.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = next.(Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	m = next.(Model)
 	next, _ = m.Update(services.CatalogLoadedMsg{Snapshot: modeTestSnapshot()})
 	m = next.(Model)
@@ -97,7 +100,7 @@ func TestModel_CatalogEscPopsDrillFirst(t *testing.T) {
 	}
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = next.(Model)
-	if m.ActiveMode() != ModeBrowse {
+	if m.ActiveMode() != ModeActivity {
 		t.Fatalf("esc at catalog root should pop the mode stack, got %v", m.ActiveMode())
 	}
 }
@@ -130,7 +133,7 @@ func TestModel_PaletteGotoCatalog(t *testing.T) {
 // Slash search filters the catalog rows.
 func TestModel_CatalogSearchFilters(t *testing.T) {
 	m := NewModel(&services.MockOrunService{})
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	m = next.(Model)
 	next, _ = m.Update(services.CatalogLoadedMsg{Snapshot: modeTestSnapshot()})
 	m = next.(Model)

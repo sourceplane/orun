@@ -50,27 +50,13 @@ func TestModel_CycleEnv(t *testing.T) {
 	}
 }
 
-func TestModel_ComponentOpenSwitchesToComponentPage(t *testing.T) {
+func TestModel_StartsOnCatalogSurface(t *testing.T) {
 	m := loadedModel(t, &services.WorkspaceSnapshot{
 		Environments: []string{"dev"},
 		Components:   []services.ComponentSummary{{Name: "api", Type: "worker"}},
 	})
-	next, _ := m.Update(views.ComponentOpenMsg{Name: "api"})
-	m = next.(Model)
-	if m.ActiveMode() != ModeComponent {
-		t.Fatalf("ActiveMode = %v, want ModeComponent", m.ActiveMode())
-	}
-	if m.componentPage.Component == nil || m.componentPage.Component.Name != "api" {
-		t.Fatalf("component page not scoped to api: %+v", m.componentPage.Component)
-	}
-	if m.componentPage.Env != "dev" {
-		t.Errorf("component page env = %q, want dev", m.componentPage.Env)
-	}
-	// esc returns to Browse.
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m = next.(Model)
-	if m.ActiveMode() != ModeBrowse {
-		t.Fatalf("after esc: ActiveMode = %v, want ModeBrowse", m.ActiveMode())
+	if m.ActiveMode() != ModeCatalog {
+		t.Fatalf("ActiveMode = %v, want ModeCatalog (the home surface)", m.ActiveMode())
 	}
 }
 

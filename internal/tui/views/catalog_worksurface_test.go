@@ -31,6 +31,7 @@ func workSurfaceModel() CatalogModel {
 
 func TestCatalog_ChangedOnlyFilter(t *testing.T) {
 	m := workSurfaceModel()
+	m, _ = m.Update(keyRunes("[")) // Component (default) → All
 	m, _ = m.Update(keyRunes("c"))
 	rows := m.filtered()
 	// Only the two changed/affected components survive — the System, Group,
@@ -50,8 +51,7 @@ func TestCatalog_ChangedOnlyFilter(t *testing.T) {
 }
 
 func TestCatalog_ChangeAndLastRunColumns(t *testing.T) {
-	m := workSurfaceModel().SetSize(120, 30)
-	m, _ = m.Update(keyRunes("]")) // Component tab
+	m := workSurfaceModel().SetSize(120, 30) // Component tab is the default
 	out := m.View()
 	for _, want := range []string{"2 changed", "success"} {
 		if !strings.Contains(out, want) {
@@ -62,14 +62,13 @@ func TestCatalog_ChangeAndLastRunColumns(t *testing.T) {
 
 func TestCatalog_ComponentActions(t *testing.T) {
 	m := workSurfaceModel()
-	// Cursor 0 on All = api (a Component) — r/g/o emit the work messages.
+	// Cursor 0 on All = api (a Component) — r/g emit the work messages.
 	cases := []struct {
 		key  string
 		want any
 	}{
 		{"r", ComponentRunRequestedMsg{Name: "api"}},
 		{"g", ComponentEnterMsg{Name: "api"}},
-		{"o", ComponentOpenMsg{Name: "api"}},
 	}
 	for _, tc := range cases {
 		_, cmd := m.Update(keyRunes(tc.key))

@@ -17,8 +17,8 @@ import (
 
 func TestNewModel_Defaults(t *testing.T) {
 	m := NewModel(&services.MockOrunService{})
-	if m.ActiveMode() != ModeBrowse {
-		t.Errorf("ActiveMode = %v, want ModeBrowse", m.ActiveMode())
+	if m.ActiveMode() != ModeCatalog {
+		t.Errorf("ActiveMode = %v, want ModeCatalog", m.ActiveMode())
 	}
 	if m.ActivePanel() != PanelMain {
 		t.Errorf("ActivePanel = %v, want PanelMain", m.ActivePanel())
@@ -31,13 +31,13 @@ func TestNewModel_Defaults(t *testing.T) {
 	}
 }
 
-func TestModel_TabCyclesTopLevelSurfaces(t *testing.T) {
+func TestModel_TabTogglesTopLevelSurfaces(t *testing.T) {
 	tab := tea.KeyMsg{Type: tea.KeyTab}
 	m := NewModel(&services.MockOrunService{})
-	if m.ActiveMode() != ModeBrowse {
-		t.Fatalf("expected ModeBrowse at start, got %v", m.ActiveMode())
+	if m.ActiveMode() != ModeCatalog {
+		t.Fatalf("expected ModeCatalog at start, got %v", m.ActiveMode())
 	}
-	want := []Mode{ModeActivity, ModeCatalog, ModeBrowse}
+	want := []Mode{ModeActivity, ModeCatalog, ModeActivity}
 	for i, w := range want {
 		next, _ := m.Update(tab)
 		m = next.(Model)
@@ -520,11 +520,12 @@ func TestModel_DryRunRequested_RunPlanErrorStaysInPlanStudio(t *testing.T) {
 
 func TestMode_String(t *testing.T) {
 	cases := map[Mode]string{
-		ModeBrowse:       "browse",
+		ModeCatalog:      "catalog",
 		ModePlanStudio:   "plan-studio",
 		ModeRunDashboard: "run-dashboard",
 		ModeLogExplorer:  "log-explorer",
 		ModeHistory:      "history",
+		ModeActivity:     "activity",
 	}
 	for m, want := range cases {
 		if got := m.String(); got != want {

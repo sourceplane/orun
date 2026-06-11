@@ -35,9 +35,6 @@ func TestWorkspaceRefreshed_SwapsSnapshot(t *testing.T) {
 	if m.Workspace() != fresh {
 		t.Fatal("expected the refreshed snapshot to be swapped in")
 	}
-	if m.browse.Workspace != fresh {
-		t.Fatal("expected the browse view to track the refreshed snapshot")
-	}
 }
 
 // TestWorkspaceRefreshed_BestEffortOnError proves a failed background refresh
@@ -46,7 +43,6 @@ func TestWorkspaceRefreshed_BestEffortOnError(t *testing.T) {
 	m := NewModel(&services.MockOrunService{})
 	good := &services.WorkspaceSnapshot{IntentName: "demo"}
 	m.workspace = good
-	m.browse.Workspace = good
 	m.loading = false
 
 	next, cmd := m.Update(workspaceRefreshedMsg{Err: errLoad})

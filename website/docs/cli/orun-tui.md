@@ -40,11 +40,11 @@ The cockpit is a three-pane shell with an optional bottom information band:
 ├──────────────┬────────────────────────────────────────┬───────────────────┤
 │ SIDEBAR      │ MAIN                                   │ INSPECTOR         │
 │              │                                        │                   │
-│ Components   │ mode-specific view                     │ selected item     │
-│ Environments │ (browse / plan studio / activity /     │ field list        │
-│ Plans        │  logs / history)                       │ one-line previews │
-│ Runs         │                                        │                   │
-│ Logs         │                                        │                   │
+│ Catalog      │ mode-specific view                     │ selected item     │
+│ Activity     │ (catalog / plan studio / activity /    │ field list        │
+│              │  logs / history)                       │ one-line previews │
+│              │                                        │                   │
+│              │                                        │                   │
 ├──────────────┴────────────────────────────────────────┴───────────────────┤
 │ BOTTOM PANEL (toggle with `b`) — level-aware overview                     │
 └───────────────────────────────────────────────────────────────────────────┘
@@ -56,19 +56,22 @@ The inspector auto-opens when the terminal is at least 100 columns wide. Below t
 
 | Mode | Purpose |
 | --- | --- |
-| Browse | Lists components, environments, compositions, and per-component metadata. |
+| Catalog | The home surface: every catalog entity (Component, API, Resource, System, Domain, Group, Composition, Environment, Deployment) with kind tabs, ownership/lifecycle columns, walkable relation edges — and, on Component entities, the full work surface (change overlay, run, compose, execution history). |
 | Plan Studio | Compose intent, generate plans, drill into jobs and steps, dry-run or real-run from the TUI. |
 | Activity | Drilldown across runs, jobs, and steps with live status. |
 | Logs | Streaming log explorer scoped to a run, job, or step. |
 | History | Past runs and plans, sorted by recency. |
-| Catalog | Multi-kind entity explorer: every catalog entity (Component, API, Resource, System, Domain, Group, Composition, Environment, Deployment) with kind tabs, ownership/lifecycle columns, and walkable relation edges. |
+
+The former **Browse** and **Component** surfaces are absorbed into the Catalog:
+component rows live on the Catalog's Component tab (the default tab), and the
+entity detail page carries everything the Component page used to show.
 
 ## Global keys
 
 | Key | Action |
 | --- | --- |
-| `tab` | Cycle the top-level surfaces (components → activity → catalog) |
-| `1` / `2` / `3` | Jump to Components / Activity / Catalog |
+| `tab` | Toggle the top-level surfaces (catalog ⇄ activity) |
+| `1` / `2` | Jump to Catalog / Activity |
 | `i` | Toggle inspector |
 | `b` | Toggle bottom panel |
 | `?` | Help |
@@ -79,12 +82,6 @@ The inspector auto-opens when the terminal is at least 100 columns wide. Below t
 | `ctrl+i` | Navigate forward (mode history) |
 | `esc` | Back / pop drilldown level |
 | `q` | Quit |
-| `g a` | Go to Activity |
-| `g p` | Go to Plan Studio |
-| `g r` | Go to Run dashboard |
-| `g l` | Go to Logs |
-| `g h` | Go to History |
-| `g c` | Go to Components |
 
 ## Plan Studio (Compose)
 
@@ -184,15 +181,16 @@ Live jobs pulse via a four-frame wall-clock spinner. Step rows show jump-back ch
 
 ## Catalog (entity explorer)
 
-The Catalog surface (`3`) renders the resolved service catalog as a browsable
-graph. The list level shows kind tabs with per-kind counts; the detail level
-shows one entity's envelope (identity, ownership, lifecycle) plus its
-**Connections** — members and typed relation edges, each navigable.
+The Catalog surface (`1`, the home surface) renders the resolved service
+catalog as a browsable graph. The list level shows kind tabs with per-kind
+counts and opens on the **Component** tab; the detail level shows one entity's
+envelope (identity, ownership, lifecycle) plus its **Connections** — members
+and typed relation edges, each navigable.
 
-Component entities also carry the full work surface: the Component tab adds
-**LAST** (last-run status) and **CHG** (changed/affected overlay) columns, the
-detail page adds the live change state and an **Executions** section, and the
-same action keys as the Component page work on any selected component.
+Component entities carry the full work surface: the Component tab adds
+**LAST** (last-run status) and **CHG** (changed/affected overlay) columns, and
+the detail page shows the source detail (path, profile, watches), the live
+change state, and an **Executions** section.
 
 | Key | Action |
 | --- | --- |
@@ -201,7 +199,6 @@ same action keys as the Component page work on any selected component.
 | `⏎` | Open entity / follow a connection / open an execution |
 | `r` | Run the selected component for the selected environment (confirms first) |
 | `g` | Compose the selected component in Plan Studio |
-| `o` | Open the classic Component page |
 | `e` | Cycle the selected environment |
 | `c` | Toggle changed-only (changed/affected components) |
 | `esc` | Pop back one entity (or pop mode at the list) |
@@ -215,7 +212,7 @@ jumps straight into that run's Activity drilldown (run → jobs → steps → lo
 
 ## Catalog freshness
 
-The Browse view reads the [object-model catalog](../concepts/state-model.md#the-component-catalog).
+The Catalog surface reads the [object-model catalog](../concepts/state-model.md#the-component-catalog).
 The cockpit keeps it current for you rather than relying on an external
 `orun plan`/`run`/`catalog refresh` having run:
 

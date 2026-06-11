@@ -19,10 +19,10 @@ import (
 // and relation edges are themselves navigable — so the catalog reads as a
 // browsable graph, not a flat list.
 //
-// Component entities additionally carry the work surface: the changed/affected
-// overlay (c toggles changed-only), a component-scoped run (r), compose (g),
-// the classic component page (o), and an EXECUTIONS section on the detail page
-// whose rows drill into the Activity run view.
+// Component entities carry the full work surface (this surface replaced the
+// former Browse/Component pages): the changed/affected overlay (c toggles
+// changed-only), a component-scoped run (r), compose (g), and an EXECUTIONS
+// section on the detail page whose rows drill into the Activity run view.
 //
 // Levels:
 //
@@ -178,9 +178,21 @@ func (m CatalogModel) SetSnapshot(snap *services.CatalogSnapshot) CatalogModel {
 	}
 	sort.Strings(extra)
 	kinds = append(kinds, extra...)
+	firstLoad := len(m.kinds) == 0
 	m.kinds = kinds
 	if m.kindIdx >= len(m.kinds) {
 		m.kindIdx = 0
+	}
+	// The catalog is the cockpit's home surface; open it on the Component tab
+	// (the primary working objects) the first time a snapshot lands. Later
+	// refreshes never move the user's tab.
+	if firstLoad {
+		for i, k := range m.kinds {
+			if k == "Component" {
+				m.kindIdx = i
+				break
+			}
+		}
 	}
 	if rows := m.filtered(); m.Cursor >= len(rows) {
 		m.Cursor = 0
@@ -278,10 +290,31 @@ func (m CatalogModel) filtered() []services.EntitySummary {
 
 // --- Component work-surface messages -----------------------------------------
 
-// componentActionCmd maps the r/g/o action keys on a Component entity to the
-// same messages the Browse/Component surfaces emit, so the root model's run,
-// compose, and open flows are shared verbatim. Nil for non-component entities
-// and unknown keys.
+// ComponentEnterMsg signals the user pressed `g` on a component to compose a
+// plan for it. The root model opens Component Studio scoped to the named
+// component and kicks off an auto-generate.
+type ComponentEnterMsg struct {
+	Name string
+}
+
+// ComponentRunRequestedMsg asks the root model to run the named component,
+// scoped to the cockpit's selected environment (environments.md §1). The root
+// model owns the env + the action seam, so it validates active-in-env and
+// dispatches the run.
+type ComponentRunRequestedMsg struct {
+	Name string
+}
+
+// ComponentJobOpenMsg signals the user drilled into an execution. The root
+// model hands off to the Activity run→job→logs drilldown focused on this
+// execution.
+type ComponentJobOpenMsg struct {
+	ExecID string
+}
+
+// componentActionCmd maps the r/g action keys on a Component entity to the
+// work-surface messages, so the root model's run and compose flows are shared
+// verbatim. Nil for non-component entities and unknown keys.
 func componentActionCmd(sel *services.EntitySummary, key string) tea.Cmd {
 	if sel == nil || sel.Kind != "Component" {
 		return nil
@@ -292,8 +325,6 @@ func componentActionCmd(sel *services.EntitySummary, key string) tea.Cmd {
 		return func() tea.Msg { return ComponentRunRequestedMsg{Name: name} }
 	case "g":
 		return func() tea.Msg { return ComponentEnterMsg{Name: name} }
-	case "o":
-		return func() tea.Msg { return ComponentOpenMsg{Name: name} }
 	}
 	return nil
 }
@@ -334,7 +365,7 @@ func (m CatalogModel) Update(msg tea.Msg) (CatalogModel, tea.Cmd) {
 	case "c":
 		m.ChangedOnly = !m.ChangedOnly
 		m.Cursor = 0
-	case "r", "g", "o":
+	case "r", "g":
 		return m, componentActionCmd(m.Selected(), km.String())
 	case "enter":
 		if sel := m.Selected(); sel != nil {
@@ -362,7 +393,7 @@ func (m CatalogModel) updateDetail(km tea.KeyMsg) (CatalogModel, tea.Cmd) {
 		if len(rows) > 0 {
 			m.detailCursor = len(rows) - 1
 		}
-	case "r", "g", "o":
+	case "r", "g":
 		return m, componentActionCmd(m.Selected(), km.String())
 	case "enter":
 		if m.detailCursor >= 0 && m.detailCursor < len(rows) {
@@ -521,15 +552,20 @@ func (m CatalogModel) InspectorDesc() *services.ResourceDescription {
 		return nil
 	}
 	desc := entityDesc(sel, m.outEdges[entityRef{sel.Kind, sel.EntityKey}], m.inEdges[entityRef{sel.Kind, sel.EntityKey}])
-	// Work-surface context for components: change overlay, last run, and the
-	// recent execution list (mirrors the Browse inspector).
+	// Work-surface context for components: source detail (path, profile,
+	// watches — the fields the former Component page carried), the change
+	// overlay, last run, and the recent execution list.
 	if c, ok := m.componentInfo(*sel); ok {
-		if c.ChangeKind != "" {
-			desc.Fields = append(desc.Fields, services.DescField{Label: "change", Value: c.ChangeKind})
+		add := func(label, value string) {
+			if value != "" {
+				desc.Fields = append(desc.Fields, services.DescField{Label: label, Value: value})
+			}
 		}
-		if c.LastRunStatus != "" {
-			desc.Fields = append(desc.Fields, services.DescField{Label: "last run", Value: c.LastRunStatus})
-		}
+		add("path", c.Path)
+		add("profile", c.Profile)
+		add("watches", strings.Join(c.Watches, ","))
+		add("change", c.ChangeKind)
+		add("last run", c.LastRunStatus)
 		if runs := m.compRuns[sel.Name]; len(runs) > 0 {
 			lines := make([]string, 0, len(runs))
 			for _, r := range runs {
@@ -691,7 +727,7 @@ func (m CatalogModel) viewList(width int) string {
 	b.WriteString("\n")
 	hints := "enter open · [ ] kind · c changed-only · / filter"
 	if sel := m.Selected(); sel != nil && sel.Kind == "Component" {
-		hints = "enter open · r run · g compose · o page · c changed-only · [ ] kind · / filter"
+		hints = "enter open · r run · g compose · c changed-only · [ ] kind · / filter"
 	}
 	b.WriteString(theme.StyleDim.Render(hints))
 	return b.String()
@@ -877,8 +913,13 @@ func (m CatalogModel) viewDetail(width int) string {
 	if len(e.Envs) > 0 {
 		field("envs", strings.Join(e.Envs, ", "))
 	}
-	// Work-surface context for components: live change overlay + last run.
+	// Work-surface context for components: the source detail the former
+	// Component page carried (path, profile, watches) plus the live change
+	// overlay and last run.
 	if c, ok := m.componentInfo(e); ok {
+		field("path", c.Path)
+		field("profile", c.Profile)
+		field("watches", strings.Join(c.Watches, ", "))
 		if c.ChangeKind != "" {
 			field("change", c.ChangeKind)
 		}
@@ -990,7 +1031,7 @@ func (m CatalogModel) viewDetail(width int) string {
 	b.WriteString("\n")
 	hints := "enter follow · esc back"
 	if e.Kind == "Component" {
-		hints = "enter follow/open run · r run · g compose · o page · esc back"
+		hints = "enter follow/open run · r run · g compose · esc back"
 	}
 	b.WriteString(theme.StyleDim.Render(hints))
 	return b.String()
