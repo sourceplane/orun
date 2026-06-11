@@ -1,9 +1,11 @@
-# Runner integration — resolution, injection, redaction, provenance
+# Runner integration — resolution, injection, redaction, materialization, provenance
 
-> How a `secret://` reference becomes plaintext in a child process and nowhere
-> else. Covers resolution against `orun-api`, env injection at step launch, the
-> log redactor, execution-platform awareness, offline behavior, and sealed-run
-> provenance. Schemas in `data-model.md`; policy in `policy-model.md`.
+> How a `secret://` reference becomes plaintext in a child process — or in a
+> deployed platform's native store — and nowhere else. Covers resolution
+> against `orun-api`, env injection at step launch, the log redactor,
+> execution-platform awareness, materialization (SD-13), offline behavior, and
+> sealed-run provenance. Schemas in `data-model.md`; policy in
+> `policy-model.md`; the catalog/operations view in `platform-integration.md`.
 
 ## 1. Where resolution happens
 
@@ -26,7 +28,15 @@ stepExecContext(job, step):
 Key properties:
 - `resolved.asEnv` is merged into the child process environment **only**. It is
   never written back to `PlanJob.Env`, the plan, refs, or any L0 object
-  (Invariant 1, `design.md` §10).
+  (Invariant 1, `design.md` §11).
+- The server walks the env chain per key — `personal(env, caller) → env → base`
+  (`data-model.md` §1.1) — so personalization and inheritance are entirely
+  server-side; the runner sends only references. Personal overlays are served
+  exclusively when the server-derived platform fact is `local-cli` and the
+  caller owns them (Invariant 9). The resolve response flags which keys were
+  served from a personal overlay, and the runner prints a one-line notice
+  (`2 secrets personally overridden: DB_URL, SMTP_HOST`) so local behavior is
+  never silently different.
 - Resolution is **batched per job** (one round-trip), cached for the job's
   lifetime in memory, and zeroed on job completion.
 - A denial (`policy-model.md` §5) fails the step with a typed error and the audit
@@ -106,7 +116,44 @@ redactor.Filter(output) :=
 - Downstream resolution of a sensitive output goes through the same
   `/v1/secrets/resolve` path, so the same policy + audit + redaction apply.
 
-## 6. Offline / local behavior (ties to Q-1)
+## 6. Materialization — the deploy job carries the last mile (SD-13)
+
+When a job's profile declares `materialize:` (`data-model.md` §2.4), the runner
+executes an explicit **materialize step** after the deploy step succeeds:
+
+```
+materializeStep(job):
+  refs ← job.materialize.secrets mapped to job.secretRefs       # subset, checked at compile
+  resolved ← (reuse the job's resolve cache — same decision, same audit)
+  adapter ← adapters[job.materialize.target]                    # typed, versioned with the composition
+  for each (key, value):
+      adapter.Put(targetBinding(job), key, value)               # e.g. SetWorkerSecret (client.go:437)
+  POST /v1/secrets/syncs { key, version, target, entityRef, execId }   # provenance (Invariant 10)
+```
+
+Properties:
+- **Same boundary.** Materialization performs no second resolve path — it uses
+  the values the job's policy decision already authorized, so "may this run
+  read it" and "may this run sync it" cannot diverge. Profiles that materialize
+  prod secrets are expected to be CI/cloud-only by policy (a `local-cli` run
+  would be denied at resolve).
+- **Adapters are typed and few.** v1 ships `cloudflare-worker` (the
+  `SetWorkerSecret` primitive orun already uses for its own KEK,
+  `internal/cloudflare/client.go:437`). Adapters declare which target binding
+  they write (derived from the provisioned entity, not free-form), so a
+  materialize step cannot be aimed at an arbitrary endpoint. Additional
+  adapters (AWS SSM/Secrets Manager, GitHub repo secrets) are a registry,
+  deferred per Q-7.
+- **Provenance, then catalog.** The sync rows stamp the provisioned entity's
+  facet (`platform-integration.md` §1) and flip prior rows to `superseded`;
+  `orun secret rotate` raises the profile's `onRotate` trigger so convergence
+  happens through the normal, plan-visible deploy path.
+- **Failure is loud.** A partial sync (some keys written, then failure) is
+  recorded per-key; the step fails, the run is unsealed-red, and operations
+  shows exactly which targets converged. Re-running the deploy is idempotent
+  (adapters overwrite by key).
+
+## 7. Offline / local behavior (ties to Q-1)
 
 orun is local-first and works fully offline (`remote-and-consumers.md:120-126`).
 Secrets necessarily depend on the backend for the value, so:
@@ -115,11 +162,16 @@ Secrets necessarily depend on the backend for the value, so:
 - `orun run` that resolves a `secret://` reference requires backend connectivity
   **for that step**; a clean error (`secret resolution requires an Orun Cloud
   login; run \`orun auth login\` or set ORUN_TOKEN`) if unauthenticated.
-- A local-only escape hatch — `ORUN_SECRET_<KEY>` env overrides for dev — is
-  available **only** when `platform == local-cli` and the policy permits it, so a
-  developer can run without the cloud while prod paths stay locked. (Decision Q-1.)
+- The sanctioned local path is the **personal overlay** (SD-11): `orun secret
+  set <KEY> --env dev --personal` stores the developer's value in the backend,
+  scoped to their GitHub user id and `local-cli` — synced across their
+  machines, never visible to CI, and resolved through the same audited path.
+  For *fully offline* runs, an `ORUN_SECRET_<KEY>` env override is available
+  **only** when `platform == local-cli` and the policy permits it for that env
+  (never prod). Personal overlays are preferred; the env override is the
+  airplane-mode fallback. (Decision Q-1.)
 
-## 7. Sealed-run provenance (Invariant 6)
+## 8. Sealed-run provenance (Invariant 6)
 
 At seal, the `ExecutionRun` records, per step, the resolved
 `{key, version, decisionId}` (from the resolve response) — **never** the value.
