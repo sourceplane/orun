@@ -154,10 +154,13 @@ func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerRes
 		comp = compositionResolver(cm.Spec.Type)
 	}
 	spec := toMap(cm.Spec)
-	// The legacy zero CompositionRef serializes as {"source":"","type":""} —
-	// drop it so an unbound component carries no composition block at all.
-	if c, ok := spec["composition"].(map[string]any); ok && c["source"] == "" && c["type"] == "" {
-		delete(spec, "composition")
+	// The legacy zero CompositionRef serializes as {"source":""} — drop it so an
+	// unbound component carries no composition block at all (a real binding always
+	// sets a non-empty source).
+	if c, ok := spec["composition"].(map[string]any); ok {
+		if s, _ := c["source"].(string); s == "" {
+			delete(spec, "composition")
+		}
 	}
 	if comp != nil {
 		if spec == nil {
@@ -207,6 +210,8 @@ func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerRes
 func compositionSpecMap(c *CompositionMeta) map[string]any {
 	out := map[string]any{"source": c.Name}
 	putNonEmpty(out, "digest", c.Digest)
+	putNonEmpty(out, "version", c.Version)
+	putNonEmpty(out, "lifecycle", c.Lifecycle)
 	putNonEmpty(out, "sourceKind", c.SourceKind)
 	putNonEmpty(out, "sourceRef", c.SourceRef)
 	putNonEmpty(out, "sourcePath", c.SourcePath)

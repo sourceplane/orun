@@ -58,6 +58,8 @@ type EntityView struct {
 	Repo        string
 	MemberCount int      // components referencing this entity (Step 3 membership)
 	Members     []string // the referencing component keys, sorted
+	Version     string   // Composition semver (Step 4); "" for other kinds
+	Lifecycle   string   // Composition lifecycle stage (Step 4)
 }
 
 // RelationEdgeView is one forward edge of the catalog-wide relation graph
@@ -345,6 +347,8 @@ func (r *Reader) readEntities(ctx context.Context, treeID objectstore.ObjectID) 
 			}
 			ev.MemberCount = intField(e.Spec, "memberCount")
 			ev.Members = stringSliceField(e.Spec, "members")
+			ev.Version = stringField(e.Spec, "version")
+			ev.Lifecycle = stringField(e.Spec, "lifecycle")
 			out = append(out, ev)
 		}
 	}

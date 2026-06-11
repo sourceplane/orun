@@ -19,12 +19,15 @@ const compositionLockPath = ".orun/compositions.lock.yaml"
 // — the same reproducible-planning record the plan engine resolves against. The
 // optional Effects (SC8) are read from the composition manifest.
 type CompositionMeta struct {
-	Name       string
-	Digest     string
-	SourceKind string
-	SourceRef  string
-	SourcePath string
-	Effects    *model.CompositionEffects
+	Name        string
+	Digest      string
+	SourceKind  string
+	SourceRef   string
+	SourcePath  string
+	Version     string // semver from the composition manifest (SC7, §5)
+	Lifecycle   string // stable|beta|deprecated
+	Description string
+	Effects     *model.CompositionEffects
 }
 
 // CompositionResolver maps a component `type` to the composition that exports
@@ -70,19 +73,24 @@ func CompositionResolverForWorkspace(root string) CompositionResolver {
 			SourceRef:  s.Ref,
 			SourcePath: s.Path,
 		}
-		// SC8: for a local (dir) source, read the composition manifests under the
-		// source path to pick up per-type effects declarations. Best-effort — a
-		// missing/undecodable manifest simply yields no effects.
-		effectsByType := map[string]*model.CompositionEffects{}
+		// SC8/SC7: for a local (dir) source, read the composition manifests under
+		// the source path to pick up per-type effects + version/lifecycle.
+		// Best-effort — a missing/undecodable manifest simply yields none.
+		specByType := map[string]model.CompositionDocumentSpec{}
 		if s.Kind == "dir" && s.Path != "" {
-			effectsByType = readCompositionEffects(filepath.Join(root, filepath.FromSlash(s.Path)))
+			specByType = readCompositionDocs(filepath.Join(root, filepath.FromSlash(s.Path)))
 		}
 		for _, t := range s.Exports {
 			if _, ok := byType[t]; ok { // first source exporting a type wins
 				continue
 			}
-			m := *meta // per-type copy so effects don't leak across types
-			m.Effects = effectsByType[t]
+			m := *meta // per-type copy so manifest detail doesn't leak across types
+			if spec, ok := specByType[t]; ok {
+				m.Effects = spec.Effects
+				m.Version = spec.Version
+				m.Lifecycle = spec.Lifecycle
+				m.Description = spec.Description
+			}
 			byType[t] = &m
 		}
 	}
@@ -92,11 +100,12 @@ func CompositionResolverForWorkspace(root string) CompositionResolver {
 	return func(t string) *CompositionMeta { return byType[t] }
 }
 
-// readCompositionEffects walks a composition source directory for composition
-// manifests (kind: Composition) and returns their per-type effects. Bounded and
-// tolerant: unreadable/unparseable files are skipped.
-func readCompositionEffects(dir string) map[string]*model.CompositionEffects {
-	out := map[string]*model.CompositionEffects{}
+// readCompositionDocs walks a composition source directory for composition
+// manifests (kind: Composition) and returns their per-type spec (effects +
+// version/lifecycle/description). Bounded and tolerant: unreadable/unparseable
+// files are skipped.
+func readCompositionDocs(dir string) map[string]model.CompositionDocumentSpec {
+	out := map[string]model.CompositionDocumentSpec{}
 	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
@@ -113,8 +122,8 @@ func readCompositionEffects(dir string) map[string]*model.CompositionEffects {
 		if yaml.Unmarshal(b, &doc) != nil || doc.Kind != "Composition" {
 			return nil
 		}
-		if doc.Spec.Type != "" && doc.Spec.Effects != nil {
-			out[doc.Spec.Type] = doc.Spec.Effects
+		if doc.Spec.Type != "" {
+			out[doc.Spec.Type] = doc.Spec
 		}
 		return nil
 	})

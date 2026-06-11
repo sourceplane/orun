@@ -101,10 +101,14 @@ type ComponentChange struct {
 }
 
 // CompositionRef points at the stack-tectonic composition that backs this
-// component's deploys.
+// component's deploys, with the resolved version/digest/lifecycle of the
+// golden path (orun-service-catalog SC7, data-model.md §5).
 type CompositionRef struct {
-	Source string `json:"source"`
-	Type   string `json:"type"`
+	Source    string `json:"source"`
+	Type      string `json:"type,omitempty"`
+	Version   string `json:"version,omitempty"`
+	Digest    string `json:"digest,omitempty"`
+	Lifecycle string `json:"lifecycle,omitempty"`
 }
 
 // ComponentEnvironment is the per-environment spec entry: which profile fires

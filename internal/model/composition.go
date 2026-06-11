@@ -47,9 +47,15 @@ type CompositionDocument struct {
 
 // CompositionDocumentSpec is the portable contract for one composition type.
 type CompositionDocumentSpec struct {
-	Type              string                      `yaml:"type" json:"type"`
-	Description       string                      `yaml:"description,omitempty" json:"description,omitempty"`
-	DefaultJob        string                      `yaml:"defaultJob" json:"defaultJob"`
+	Type        string `yaml:"type" json:"type"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+	// Version is the composition's semver (orun-service-catalog SC7,
+	// data-model.md §5); carried onto the resolved Composition entity so the
+	// golden path is a versioned, owned artifact.
+	Version string `yaml:"version,omitempty" json:"version,omitempty"`
+	// Lifecycle is the composition's maturity stage (stable|beta|deprecated).
+	Lifecycle  string `yaml:"lifecycle,omitempty" json:"lifecycle,omitempty"`
+	DefaultJob string `yaml:"defaultJob" json:"defaultJob"`
 	DefaultProfile    string                      `yaml:"defaultProfile,omitempty" json:"defaultProfile,omitempty"`
 	SchemaRef         *ResourceRef                `yaml:"schemaRef,omitempty" json:"schemaRef,omitempty"`
 	ParameterSchema   map[string]interface{}      `yaml:"parameterSchema,omitempty" json:"parameterSchema,omitempty"`
