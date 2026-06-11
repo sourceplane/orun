@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/sourceplane/orun/internal/tui/services"
 
@@ -214,19 +213,12 @@ func (m BrowseModel) View() string {
 	b.WriteString("\n")
 
 	// Viewport: clip rows to the available height and scroll with the cursor so
-	// the list never overflows past the top of the stage. Mirrors activity.go.
+	// the list never overflows past the top of the stage.
 	maxRows := m.Height - 6
 	if maxRows < 3 {
 		maxRows = 3
 	}
-	start := 0
-	if m.Cursor >= maxRows {
-		start = m.Cursor - maxRows + 1
-	}
-	end := start + maxRows
-	if end > len(rows) {
-		end = len(rows)
-	}
+	start, end := viewportWindow(m.Cursor, len(rows), maxRows)
 
 	for i := start; i < end; i++ {
 		c := rows[i]
@@ -280,94 +272,3 @@ func (m BrowseModel) View() string {
 	return b.String()
 }
 
-// pad clips s to w visible cells (rune-aware) and pads with spaces so the
-// result is always exactly w cells — truncating a double-width rune can land
-// one cell short, so padding happens after the clip.
-func pad(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	if lipgloss.Width(s) > w {
-		s = truncate(s, w)
-	}
-	return s + strings.Repeat(" ", w-lipgloss.Width(s))
-}
-
-// padStyled pads `styled` (which may contain ANSI) so its *visible* width
-// equals w, using the unstyled `raw` to measure.
-func padStyled(styled, raw string, w int) string {
-	rawW := lipgloss.Width(raw)
-	if rawW >= w {
-		return pad(raw, w)
-	}
-	return styled + strings.Repeat(" ", w-rawW)
-}
-
-func clamp(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
-
-func zoa(s string) string {
-	if s == "" {
-		return "—"
-	}
-	return s
-}
-
-func statusPillFor(s string) string {
-	switch s {
-	case "success":
-		return theme.StylePillSuccess.Render("● ok")
-	case "failed":
-		return theme.StylePillError.Render("● fail")
-	case "running":
-		return theme.StylePillRunning.Render("● run")
-	default:
-		return theme.StylePillIdle.Render("○ idle")
-	}
-}
-
-// centerCard renders a centered message card with a hint.
-func centerCard(width, height int, msg string) string {
-	if width <= 0 {
-		width = 40
-	}
-	// Clamp the message to fit comfortably inside the available width.
-	maxMsg := width - 8
-	if maxMsg < 12 {
-		maxMsg = 12
-	}
-	if len(msg) > maxMsg {
-		// soft-wrap by inserting line breaks at word boundaries
-		words := strings.Fields(msg)
-		var lines []string
-		cur := ""
-		for _, w := range words {
-			if cur == "" {
-				cur = w
-				continue
-			}
-			if len(cur)+1+len(w) > maxMsg {
-				lines = append(lines, cur)
-				cur = w
-			} else {
-				cur += " " + w
-			}
-		}
-		if cur != "" {
-			lines = append(lines, cur)
-		}
-		msg = strings.Join(lines, "\n")
-	}
-	card := theme.StyleModalCard.Render(theme.StyleDim.Render(msg))
-	if height <= 0 {
-		return lipgloss.Place(width, 6, lipgloss.Center, lipgloss.Center, card)
-	}
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, card)
-}

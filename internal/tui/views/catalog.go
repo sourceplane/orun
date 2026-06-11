@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/sourceplane/orun/internal/cockpit/style"
 	"github.com/sourceplane/orun/internal/tui/services"
 	"github.com/sourceplane/orun/internal/tui/theme"
 )
@@ -60,33 +61,10 @@ type catalogLink struct {
 	Note     string // optional / include annotations
 }
 
-// KindGlyph returns the single-cell glyph for an entity kind, extending the
-// cockpit glyph language (cockpit/style) to the catalog's kinds.
-func KindGlyph(kind string) string {
-	switch kind {
-	case "Component":
-		return "◆"
-	case "API":
-		return "◇"
-	case "Resource":
-		return "▣"
-	case "System":
-		return "⬢"
-	case "Domain":
-		return "▦"
-	case "Group":
-		return "◎"
-	case "User":
-		return "●"
-	case "Composition":
-		return "❖"
-	case "Environment":
-		return "◍"
-	case "Deployment":
-		return "▲"
-	}
-	return "·"
-}
+// KindGlyph returns the single-cell glyph for an entity kind. The mapping
+// itself lives in the shared cockpit glyph language (cockpit/style) so the
+// CLI and TUI can never drift.
+func KindGlyph(kind string) string { return style.EntityKindGlyph(kind) }
 
 func NewCatalogModel() CatalogModel { return CatalogModel{} }
 
@@ -528,14 +506,7 @@ func (m CatalogModel) viewList(width int) string {
 	if maxRows < 3 {
 		maxRows = 3
 	}
-	start := 0
-	if m.Cursor >= maxRows {
-		start = m.Cursor - maxRows + 1
-	}
-	end := start + maxRows
-	if end > len(rows) {
-		end = len(rows)
-	}
+	start, end := viewportWindow(m.Cursor, len(rows), maxRows)
 
 	for i := start; i < end; i++ {
 		e := rows[i]
@@ -721,14 +692,7 @@ func (m CatalogModel) viewDetail(width int) string {
 		if maxRows < 3 {
 			maxRows = 3
 		}
-		start := 0
-		if m.detailCursor >= maxRows {
-			start = m.detailCursor - maxRows + 1
-		}
-		end := start + maxRows
-		if end > len(links) {
-			end = len(links)
-		}
+		start, end := viewportWindow(m.detailCursor, len(links), maxRows)
 		for i := start; i < end; i++ {
 			l := links[i]
 			label := theme.StyleDim.Render(pad(l.Label, labelW))

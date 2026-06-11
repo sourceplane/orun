@@ -113,14 +113,7 @@ func (m HistoryModel) View() string {
 	if maxRows < 3 {
 		maxRows = 3
 	}
-	start := 0
-	if m.Cursor >= maxRows {
-		start = m.Cursor - maxRows + 1
-	}
-	end := start + maxRows
-	if end > len(rows) {
-		end = len(rows)
-	}
+	start, end := viewportWindow(m.Cursor, len(rows), maxRows)
 
 	for i := start; i < end; i++ {
 		r := rows[i]

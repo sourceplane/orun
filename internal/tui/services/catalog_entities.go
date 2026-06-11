@@ -9,14 +9,10 @@ package services
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"sort"
 	"time"
 
 	"github.com/sourceplane/orun/internal/objcatalog"
-	"github.com/sourceplane/orun/internal/objectstore"
-	"github.com/sourceplane/orun/internal/objectstore/refstore"
 )
 
 // EntityKindOrder is the canonical display order for entity kinds across the
@@ -31,19 +27,8 @@ var EntityKindOrder = []string{
 // absent/empty object model or a missing catalog ref returns (nil, nil) so the
 // Catalog surface renders its empty state.
 func (s *LiveOrunService) LoadCatalog(ctx context.Context) (*CatalogSnapshot, error) {
-	if s.cfg.ObjectModelRoot == "" {
-		return nil, nil
-	}
-	root := filepath.Join(s.cfg.ObjectModelRoot, "objectmodel")
-	if _, err := os.Stat(filepath.Join(root, "objects")); err != nil {
-		return nil, nil
-	}
-	store, err := objectstore.NewLocalStore(objectstore.LocalConfig{Root: root})
-	if err != nil {
-		return nil, nil
-	}
-	refs, err := refstore.NewLocalRefStore(refstore.LocalConfig{Root: root, Writer: "tui"})
-	if err != nil {
+	store, refs, ok := openObjectModel(s.cfg.ObjectModelRoot)
+	if !ok {
 		return nil, nil
 	}
 	cat, err := objcatalog.New(store, refs).Load(ctx, "catalogs/current")
