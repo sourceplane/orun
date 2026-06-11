@@ -430,6 +430,42 @@ func TestMapEntity_CompositionEffects(t *testing.T) {
 	}
 }
 
+// TestMapEntity_EffectsGraph asserts SC8 effects.graph: a composition's provides
+// become dependsOn(Resource) edges and exposes become provided APIs (contracts)
+// on every backed component, qualified to namespaced keys.
+func TestMapEntity_EffectsGraph(t *testing.T) {
+	t.Parallel()
+	resolver := CompositionResolver(func(typ string) *CompositionMeta {
+		return &CompositionMeta{Name: "plat", Effects: &model.CompositionEffects{
+			Provides: []string{"cache", "ns2/repo2/db"}, // bare → qualified; full → passthrough
+			Exposes:  []string{"http-api"},
+		}}
+	})
+	cm := &catalogmodel.ComponentManifest{
+		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/w", Name: "w", Namespace: "ns", Repo: "repo"},
+		Spec:     catalogmodel.ComponentSpec{Type: "worker"},
+	}
+	m := mapEntity(cm, 14, nil, resolver)
+	// provides → dependsOn Resource edges (qualified).
+	var res []string
+	for _, r := range m.Relations {
+		if r.Type == "dependsOn" && r.ToKind == "Resource" {
+			res = append(res, r.To)
+		}
+	}
+	if len(res) != 2 || res[0] != "ns/repo/cache" || res[1] != "ns2/repo2/db" {
+		t.Errorf("provisioned resource edges = %v", res)
+	}
+	// exposes → provided API in contracts (qualified).
+	prov, _ := m.Contracts["provides"].([]any)
+	if len(prov) != 1 {
+		t.Fatalf("contracts.provides = %v", m.Contracts)
+	}
+	if p0 := prov[0].(map[string]any); p0["api"] != "ns/repo/http-api" {
+		t.Errorf("exposed api = %v", p0["api"])
+	}
+}
+
 // TestMapEntity_RuntimeInference asserts the inferred runtime is surfaced on the
 // envelope spec (data-model §4); a component with nothing inferred omits it.
 func TestMapEntity_RuntimeInference(t *testing.T) {

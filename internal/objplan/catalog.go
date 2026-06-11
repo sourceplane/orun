@@ -203,7 +203,7 @@ func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerRes
 		Lifecycle:    entityLifecycle(cm.Spec),
 		Spec:         spec,
 		Relations:    entityRelations(cm, own, comp),
-		Contracts:    entityContracts(cm.Spec.Dependencies.APIs, cm.Identity.Namespace, cm.Identity.Repo),
+		Contracts:    entityContracts(cm.Spec.Dependencies.APIs, exposedAPIs(comp), cm.Identity.Namespace, cm.Identity.Repo),
 		Integrations: integrations,
 		Docs:         docsBlock(cm.Docs),
 		Links:        linksBlock(cm.Links),
@@ -234,6 +234,9 @@ func compositionSpecMap(c *CompositionMeta) map[string]any {
 		}
 		if len(c.Effects.Provides) > 0 {
 			eff["provides"] = strSliceToAny(c.Effects.Provides)
+		}
+		if len(c.Effects.Exposes) > 0 {
+			eff["exposes"] = strSliceToAny(c.Effects.Exposes)
 		}
 		if len(eff) > 0 {
 			out["effects"] = eff
@@ -471,6 +474,16 @@ func entityRelations(cm *catalogmodel.ComponentManifest, own resolvedOwner, comp
 			Type: catalogmodel.RelTypeDependsOn, To: qualify(r), ToKind: catalogmodel.EntityKindResource,
 		})
 	}
+	// SC8 effects.graph: a backing composition that provisions Resources makes
+	// each backed component dependOn them (the golden path *produces* the
+	// resource the component runs against).
+	if comp != nil && comp.Effects != nil {
+		for _, r := range comp.Effects.Provides {
+			rels = append(rels, nodes.EntityRelation{
+				Type: catalogmodel.RelTypeDependsOn, To: qualify(r), ToKind: catalogmodel.EntityKindResource,
+			})
+		}
+	}
 	// deployedTo edges from the component's environment bindings (SC4): each
 	// declared environment becomes a derived Environment entity that the
 	// component deploys to. Sorted by env name for determinism.
@@ -493,20 +506,49 @@ func entityRelations(cm *catalogmodel.ComponentManifest, own resolvedOwner, comp
 	return rels
 }
 
+// exposedAPIs returns the API keys a backing composition exposes (SC8
+// effects.exposes), or nil. Each becomes a provided API on the backed component.
+func exposedAPIs(comp *CompositionMeta) []string {
+	if comp == nil || comp.Effects == nil {
+		return nil
+	}
+	return comp.Effects.Exposes
+}
+
 // entityContracts builds the contracts block from the resolved provided/consumed
-// APIs (data-model.md §2), qualifying bare api refs to namespaced keys. Returns
-// nil when no APIs are declared.
-func entityContracts(apis catalogmodel.APIDependencies, namespace, repo string) map[string]any {
+// APIs (data-model.md §2) plus any composition-exposed APIs (SC8
+// effects.exposes), qualifying bare api refs to namespaced keys. The provided
+// set is deduped + sorted. Returns nil when no APIs are declared.
+func entityContracts(apis catalogmodel.APIDependencies, exposed []string, namespace, repo string) map[string]any {
+	qual := func(a string) string { return catalogmodel.QualifyEntityKey(namespace, repo, a) }
 	side := func(refs []string) []any {
 		out := make([]any, 0, len(refs))
 		for _, a := range refs {
-			out = append(out, map[string]any{"api": catalogmodel.QualifyEntityKey(namespace, repo, a)})
+			out = append(out, map[string]any{"api": qual(a)})
 		}
 		return out
 	}
+	// Merge authored provides + composition-exposed APIs (deduped, sorted).
+	provSet := map[string]bool{}
+	for _, a := range apis.Provides {
+		provSet[qual(a)] = true
+	}
+	for _, a := range exposed {
+		provSet[qual(a)] = true
+	}
+	provides := make([]string, 0, len(provSet))
+	for k := range provSet {
+		provides = append(provides, k)
+	}
+	sort.Strings(provides)
+
 	out := map[string]any{}
-	if len(apis.Provides) > 0 {
-		out["provides"] = side(apis.Provides)
+	if len(provides) > 0 {
+		pv := make([]any, 0, len(provides))
+		for _, a := range provides {
+			pv = append(pv, map[string]any{"api": a})
+		}
+		out["provides"] = pv
 	}
 	if len(apis.Consumes) > 0 {
 		out["consumes"] = side(apis.Consumes)

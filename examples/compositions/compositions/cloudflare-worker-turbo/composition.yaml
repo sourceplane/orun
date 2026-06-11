@@ -23,6 +23,8 @@ spec:
         product: workers
     provides:
       - default/orun/cloudflare-edge
+    exposes:
+      - default/orun/edge-http-api
     scorecards:
       satisfies:
         - has-deploy-pipeline

@@ -77,9 +77,12 @@ type CompositionEffects struct {
 	// pagerduty, …) — merged into the integrations block of every component the
 	// composition backs.
 	Integrations map[string]interface{} `yaml:"integrations,omitempty" json:"integrations,omitempty"`
-	// Provides names the API/Resource entity keys the golden path provisions or
-	// exposes (derived into entities via the composition).
+	// Provides names the Resource entity keys the golden path provisions
+	// (each becomes a derived Resource the backed components dependsOn).
 	Provides []string `yaml:"provides,omitempty" json:"provides,omitempty"`
+	// Exposes names the API entity keys the golden path exposes (each becomes a
+	// derived API the backed components providesApi via contracts).
+	Exposes []string `yaml:"exposes,omitempty" json:"exposes,omitempty"`
 	// Scorecards is the scorecard-contribution declaration, carried verbatim into
 	// the resolved Composition node but NOT evaluated here (the scorecard engine
 	// is the v2 epic specs/orun-scorecards/).
