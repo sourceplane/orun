@@ -345,7 +345,7 @@ func TestLoad_WithImpactOwnership(t *testing.T) {
 func TestLoad_ReadsEntities_MultiKindAndSkips(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	sysBlob, _ := f.store.PutBlob(ctx, []byte(`{"apiVersion":"orun.io/v1","kind":"System","identity":{"entityKey":"ns/repo/identity","kind":"System","name":"identity"}}`))
+	sysBlob, _ := f.store.PutBlob(ctx, []byte(`{"apiVersion":"orun.io/v1","kind":"System","identity":{"entityKey":"ns/repo/identity","kind":"System","name":"identity"},"spec":{"members":["ns/repo/a","ns/repo/b"],"memberCount":2}}`))
 	grpBlob, _ := f.store.PutBlob(ctx, []byte(`{"apiVersion":"orun.io/v1","kind":"Group","identity":{"entityKey":"@org/team","kind":"Group","name":"team"}}`))
 	// A kind subtree with a valid blob plus a stray non-blob entry (skipped).
 	strayTree, _ := f.store.PutTree(ctx, nil)
@@ -373,8 +373,17 @@ func TestLoad_ReadsEntities_MultiKindAndSkips(t *testing.T) {
 	if view.Entities[0].Kind != "Group" || view.Entities[0].Name != "team" {
 		t.Errorf("first entity = %+v", view.Entities[0])
 	}
-	if view.Entities[1].Kind != "System" || view.Entities[1].EntityKey != "ns/repo/identity" {
-		t.Errorf("second entity = %+v", view.Entities[1])
+	sys := view.Entities[1]
+	if sys.Kind != "System" || sys.EntityKey != "ns/repo/identity" {
+		t.Errorf("second entity = %+v", sys)
+	}
+	// Membership (Step 3) projects into the view.
+	if sys.MemberCount != 2 || len(sys.Members) != 2 || sys.Members[0] != "ns/repo/a" {
+		t.Errorf("system membership = %d %v", sys.MemberCount, sys.Members)
+	}
+	// The Group blob has no spec → zero members, no panic.
+	if view.Entities[0].MemberCount != 0 || view.Entities[0].Members != nil {
+		t.Errorf("group membership should be empty: %d %v", view.Entities[0].MemberCount, view.Entities[0].Members)
 	}
 }
 

@@ -221,6 +221,7 @@ const (
 	EntityKindSystem      = "System"
 	EntityKindDomain      = "Domain"
 	EntityKindGroup       = "Group"
+	EntityKindUser        = "User"
 	EntityKindEnvironment = "Environment"
 	EntityKindComposition = "Composition"
 )
@@ -249,26 +250,71 @@ func deriveEntities(manifests []ComponentManifest) []Entity {
 		seen[kk] = e
 		order = append(order, kk)
 	}
+	// members aggregates, per derived entity, the distinct Component keys that
+	// reference it (the inverse-edge membership the portal renders: a Group's
+	// owned services, a System's parts, an Environment's deployers). Recorded
+	// from the FROM side as the relations are walked.
+	members := map[key]map[string]bool{}
+	addMember := func(kind, entityKey, component string) {
+		if component == "" {
+			return
+		}
+		kk := key{kind, entityKey}
+		if members[kk] == nil {
+			members[kk] = map[string]bool{}
+		}
+		members[kk][component] = true
+	}
 	for _, m := range manifests {
+		from := m.Identity.ComponentKey
 		for _, r := range m.Relations {
 			switch {
 			case r.Type == "partOf" && r.ToKind == EntityKindSystem:
 				ensure(EntityKindSystem, r.To, lastSegment(r.To), nil)
+				addMember(EntityKindSystem, r.To, from)
 			case r.Type == "partOf" && r.ToKind == EntityKindDomain:
 				ensure(EntityKindDomain, r.To, lastSegment(r.To), nil)
-			case r.Type == "ownedBy" && r.ToKind == EntityKindGroup:
-				ensure(EntityKindGroup, r.To, lastSegment(r.To), nil)
+				addMember(EntityKindDomain, r.To, from)
+			case r.Type == "ownedBy" && (r.ToKind == EntityKindGroup || r.ToKind == EntityKindUser):
+				ensure(r.ToKind, r.To, lastSegment(r.To), nil)
+				addMember(r.ToKind, r.To, from)
 			case r.Type == "dependsOn" && r.ToKind == EntityKindResource:
 				ensure(EntityKindResource, r.To, lastSegment(r.To), nil)
+				addMember(EntityKindResource, r.To, from)
 			case r.Type == "deployedTo" && r.ToKind == EntityKindEnvironment:
 				ensure(EntityKindEnvironment, r.To, lastSegment(r.To), nil)
+				addMember(EntityKindEnvironment, r.To, from)
 			case r.Type == "composedBy" && r.ToKind == EntityKindComposition:
 				ensure(EntityKindComposition, r.To, lastSegment(r.To), compositionSpec(m.Spec))
+				addMember(EntityKindComposition, r.To, from)
 			}
 		}
 		for _, api := range contractAPIs(m.Contracts) {
 			ensure(EntityKindAPI, api, lastSegment(api), nil)
+			addMember(EntityKindAPI, api, from)
 		}
+	}
+	// Fold the membership into each derived entity's spec (members list +
+	// memberCount), deterministically sorted.
+	for kk, set := range members {
+		e := seen[kk]
+		if e == nil {
+			continue
+		}
+		mem := make([]string, 0, len(set))
+		for c := range set {
+			mem = append(mem, c)
+		}
+		sort.Strings(mem)
+		if e.Spec == nil {
+			e.Spec = map[string]any{}
+		}
+		anyMem := make([]any, len(mem))
+		for i, c := range mem {
+			anyMem[i] = c
+		}
+		e.Spec["members"] = anyMem
+		e.Spec["memberCount"] = len(mem)
 	}
 	sort.Slice(order, func(i, j int) bool {
 		if order[i].kind != order[j].kind {
