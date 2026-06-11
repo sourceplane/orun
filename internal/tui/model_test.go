@@ -389,12 +389,17 @@ func TestModel_StepLogViewFitsTerminal(t *testing.T) {
 		m = n.(Model)
 	}
 
-	// Feed long log lines (the real overflow trigger).
+	// Feed long log lines (the real overflow trigger), batched the way the
+	// live pump delivers them.
 	long := "WARN Failed to create bin at /Users/irinelinson/sourceplane/multi-tenant-saas/.orun/runs/multi-tenant-saas-20260608-368372/cli/node_modules/.bin/some-really-long-binary"
-	for i := 0; i < 40; i++ {
-		n, _ := m.Update(services.LogEventMsg{Event: services.LogEvent{
-			JobID: "cli.dev.verify", StepID: "setup-node", Line: long, Timestamp: time.Unix(0, 0),
-		}})
+	for i := 0; i < 4; i++ {
+		batch := services.LogBatchMsg{}
+		for j := 0; j < 10; j++ {
+			batch.Events = append(batch.Events, services.LogEvent{
+				JobID: "cli.dev.verify", StepID: "setup-node", Line: long, Timestamp: time.Unix(0, 0),
+			})
+		}
+		n, _ := m.Update(batch)
 		m = n.(Model)
 	}
 
