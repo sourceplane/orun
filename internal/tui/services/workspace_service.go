@@ -9,6 +9,7 @@ import (
 	"github.com/sourceplane/orun/internal/loader"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/normalize"
+	"github.com/sourceplane/orun/internal/sourcectx"
 )
 
 // LoadWorkspace discovers the intent root, loads the component tree,
@@ -61,6 +62,7 @@ func (s *LiveOrunService) LoadWorkspace(ctx context.Context, req WorkspaceReques
 
 	envNames := environmentNames(intent)
 	components := componentSummaries(intent, normalised)
+	var source SourceInfo
 
 	// Read-side freshness gate (design.md §3.1): when the object-model catalog
 	// at catalogs/current is fresh for this workspace, serve the component list
@@ -74,6 +76,7 @@ func (s *LiveOrunService) LoadWorkspace(ctx context.Context, req WorkspaceReques
 		// the changed/affected badge. Computed independently of the freshness
 		// gate so a dirty tree's edits still surface on the live-loader list.
 		applyChangeOverlay(components, s.catalogChangeOverlay(ctx, workspaceRoot))
+		source = resolveSourceInfo(ctx, workspaceRoot)
 	}
 
 	// The saved-plan listing used the legacy plan store, which is gone. In the
@@ -89,8 +92,29 @@ func (s *LiveOrunService) LoadWorkspace(ctx context.Context, req WorkspaceReques
 		Components:   components,
 		Environments: envNames,
 		Plans:        planSummaries,
+		Source:       source,
 		LoadedAt:     time.Now(),
 	}, nil
+}
+
+// resolveSourceInfo probes the workspace's VCS context for the header's
+// source line. Best-effort: any error (no git, no remote) yields a zero
+// value and the header simply omits the source details.
+func resolveSourceInfo(ctx context.Context, workspaceRoot string) SourceInfo {
+	ws, err := sourcectx.ResolveSourceSnapshot(ctx, sourcectx.ResolveOptions{WorkspacePath: workspaceRoot})
+	if err != nil {
+		return SourceInfo{}
+	}
+	head := ws.HeadRevision
+	if len(head) > 7 {
+		head = head[:7]
+	}
+	return SourceInfo{
+		Repo:   ws.Repo,
+		Branch: ws.Branch,
+		Head:   head,
+		Dirty:  ws.Dirty,
+	}
 }
 
 func environmentNames(intent *model.Intent) []string {

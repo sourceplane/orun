@@ -169,7 +169,18 @@ type WorkspaceSnapshot struct {
 	Components   []ComponentSummary
 	Environments []string
 	Plans        []PlanSummary
+	Source       SourceInfo
 	LoadedAt     time.Time
+}
+
+// SourceInfo summarizes the workspace's VCS context for the cockpit header
+// (branch, short head revision, tree cleanliness). Zero value when the
+// workspace has no git context.
+type SourceInfo struct {
+	Repo   string
+	Branch string
+	Head   string // short revision at HEAD
+	Dirty  bool   // uncommitted catalog-relevant changes
 }
 
 // ComponentSummary is the row-level view of a component for the Browse view.
