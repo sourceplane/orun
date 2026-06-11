@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -18,16 +19,24 @@ import (
 // and relation edges are themselves navigable — so the catalog reads as a
 // browsable graph, not a flat list.
 //
+// Component entities additionally carry the work surface: the changed/affected
+// overlay (c toggles changed-only), a component-scoped run (r), compose (g),
+// the classic component page (o), and an EXECUTIONS section on the detail page
+// whose rows drill into the Activity run view.
+//
 // Levels:
 //
 //	list   — kind tabs + entity rows ([ ] or ←/→ cycle kinds, ⏎ opens)
-//	detail — one entity: identity, ownership, lifecycle, members, relations;
-//	         ↑↓ moves over linked entities, ⏎ jumps to one, esc pops back
+//	detail — one entity: identity, ownership, lifecycle, members, relations,
+//	         executions; ↑↓ moves over the rows, ⏎ follows one, esc pops back
 type CatalogModel struct {
 	Snapshot *services.CatalogSnapshot
 	Width    int
 	Height   int
 	Filter   string
+	// ChangedOnly filters the list to Component entities in the
+	// changed/affected overlay (toggled with `c`, mirrors Browse).
+	ChangedOnly bool
 
 	kinds   []string // "All" + kinds present, canonical order
 	kindIdx int
@@ -40,6 +49,12 @@ type CatalogModel struct {
 	byRef    map[entityRef]services.EntitySummary
 	outEdges map[entityRef][]services.RelationSummary
 	inEdges  map[entityRef][]services.RelationSummary
+
+	// Work-surface context for Component entities, injected by the root model
+	// from the workspace + run history: change overlay, last-run status, and
+	// recent executions, keyed by component name.
+	compInfo map[string]services.ComponentSummary
+	compRuns map[string][]services.RunSummary
 }
 
 // entityRef identifies an entity across kinds (entity keys are only unique
@@ -89,6 +104,36 @@ func (m CatalogModel) SetFilter(f string) CatalogModel {
 // into), so the root model knows whether esc should pop a level or leave the
 // mode.
 func (m CatalogModel) AtRoot() bool { return len(m.stack) == 0 }
+
+// SetComponentContext installs the work-surface context for Component
+// entities: the workspace component summaries (change overlay, last-run
+// status, envs) and the recent executions per component name. Called by the
+// root model whenever the workspace or run history refreshes.
+func (m CatalogModel) SetComponentContext(comps []services.ComponentSummary, runs map[string][]services.RunSummary) CatalogModel {
+	m.compInfo = make(map[string]services.ComponentSummary, len(comps))
+	for _, c := range comps {
+		m.compInfo[c.Name] = c
+	}
+	m.compRuns = runs
+	// The changed set can shrink on refresh; keep the cursor on a real row.
+	if rows := m.filtered(); m.Cursor >= len(rows) {
+		m.Cursor = 0
+	}
+	if rows := m.detailRows(); m.detailCursor >= len(rows) {
+		m.detailCursor = 0
+	}
+	return m
+}
+
+// componentInfo returns the workspace summary for a Component entity (zero
+// value when the entity is not a component or has no workspace counterpart).
+func (m CatalogModel) componentInfo(e services.EntitySummary) (services.ComponentSummary, bool) {
+	if e.Kind != "Component" {
+		return services.ComponentSummary{}, false
+	}
+	c, ok := m.compInfo[e.Name]
+	return c, ok
+}
 
 // SetSnapshot installs a freshly loaded catalog, rebuilding the kind tabs and
 // the entity/relation indexes. Cursor and drill positions are preserved where
@@ -155,10 +200,10 @@ func (m CatalogModel) SetSnapshot(snap *services.CatalogSnapshot) CatalogModel {
 		}
 		m.stack = kept
 	}
-	// Clamp the detail cursor: the surviving tip's connections list can shrink
-	// across a refresh, and a cursor past the end would scroll the viewport
-	// beyond the rows (an empty CONNECTIONS pane).
-	if links := m.detailLinks(); m.detailCursor >= len(links) {
+	// Clamp the detail cursor: the surviving tip's row set can shrink across a
+	// refresh, and a cursor past the end would scroll the viewport beyond the
+	// rows (an empty pane).
+	if rows := m.detailRows(); m.detailCursor >= len(rows) {
 		m.detailCursor = 0
 	}
 	return m
@@ -213,6 +258,12 @@ func (m CatalogModel) filtered() []services.EntitySummary {
 		if kind != "All" && e.Kind != kind {
 			continue
 		}
+		if m.ChangedOnly {
+			c, ok := m.componentInfo(e)
+			if !ok || !c.Changed {
+				continue
+			}
+		}
 		if f != "" &&
 			!strings.Contains(strings.ToLower(e.Name), f) &&
 			!strings.Contains(strings.ToLower(e.Kind), f) &&
@@ -225,13 +276,35 @@ func (m CatalogModel) filtered() []services.EntitySummary {
 	return out
 }
 
+// --- Component work-surface messages -----------------------------------------
+
+// componentActionCmd maps the r/g/o action keys on a Component entity to the
+// same messages the Browse/Component surfaces emit, so the root model's run,
+// compose, and open flows are shared verbatim. Nil for non-component entities
+// and unknown keys.
+func componentActionCmd(sel *services.EntitySummary, key string) tea.Cmd {
+	if sel == nil || sel.Kind != "Component" {
+		return nil
+	}
+	name := sel.Name
+	switch key {
+	case "r":
+		return func() tea.Msg { return ComponentRunRequestedMsg{Name: name} }
+	case "g":
+		return func() tea.Msg { return ComponentEnterMsg{Name: name} }
+	case "o":
+		return func() tea.Msg { return ComponentOpenMsg{Name: name} }
+	}
+	return nil
+}
+
 func (m CatalogModel) Update(msg tea.Msg) (CatalogModel, tea.Cmd) {
 	km, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
 	}
 	if len(m.stack) > 0 {
-		return m.updateDetail(km), nil
+		return m.updateDetail(km)
 	}
 	switch km.String() {
 	case "down", "j":
@@ -258,6 +331,11 @@ func (m CatalogModel) Update(msg tea.Msg) (CatalogModel, tea.Cmd) {
 			m.kindIdx = (m.kindIdx - 1 + len(m.kinds)) % len(m.kinds)
 			m.Cursor = 0
 		}
+	case "c":
+		m.ChangedOnly = !m.ChangedOnly
+		m.Cursor = 0
+	case "r", "g", "o":
+		return m, componentActionCmd(m.Selected(), km.String())
 	case "enter":
 		if sel := m.Selected(); sel != nil {
 			m.stack = append(m.stack, entityRef{sel.Kind, sel.EntityKey})
@@ -267,11 +345,11 @@ func (m CatalogModel) Update(msg tea.Msg) (CatalogModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m CatalogModel) updateDetail(km tea.KeyMsg) CatalogModel {
-	links := m.detailLinks()
+func (m CatalogModel) updateDetail(km tea.KeyMsg) (CatalogModel, tea.Cmd) {
+	rows := m.detailRows()
 	switch km.String() {
 	case "down", "j":
-		if m.detailCursor+1 < len(links) {
+		if m.detailCursor+1 < len(rows) {
 			m.detailCursor++
 		}
 	case "up", "k":
@@ -281,14 +359,21 @@ func (m CatalogModel) updateDetail(km tea.KeyMsg) CatalogModel {
 	case "home":
 		m.detailCursor = 0
 	case "end", "G":
-		if len(links) > 0 {
-			m.detailCursor = len(links) - 1
+		if len(rows) > 0 {
+			m.detailCursor = len(rows) - 1
 		}
+	case "r", "g", "o":
+		return m, componentActionCmd(m.Selected(), km.String())
 	case "enter":
-		if m.detailCursor >= 0 && m.detailCursor < len(links) {
-			l := links[m.detailCursor]
-			if l.Resolved {
-				m.stack = append(m.stack, l.Ref)
+		if m.detailCursor >= 0 && m.detailCursor < len(rows) {
+			row := rows[m.detailCursor]
+			switch {
+			case row.run != nil:
+				// Hand off to the Activity run → job → logs drilldown.
+				execID := row.run.ExecID
+				return m, func() tea.Msg { return ComponentJobOpenMsg{ExecID: execID} }
+			case row.link != nil && row.link.Resolved:
+				m.stack = append(m.stack, row.link.Ref)
 				m.detailCursor = 0
 			}
 		}
@@ -296,7 +381,42 @@ func (m CatalogModel) updateDetail(km tea.KeyMsg) CatalogModel {
 		m.stack = m.stack[:len(m.stack)-1]
 		m.detailCursor = 0
 	}
-	return m
+	return m, nil
+}
+
+// detailRow is one navigable row on the detail page: a graph connection or a
+// recent execution (Component entities only). Exactly one field is set.
+type detailRow struct {
+	link *catalogLink
+	run  *services.RunSummary
+}
+
+// detailRows is the full navigable row set of the drilled entity's detail
+// page: connections first, then recent executions.
+func (m CatalogModel) detailRows() []detailRow {
+	links := m.detailLinks()
+	runs := m.detailExecutions()
+	rows := make([]detailRow, 0, len(links)+len(runs))
+	for i := range links {
+		rows = append(rows, detailRow{link: &links[i]})
+	}
+	for i := range runs {
+		rows = append(rows, detailRow{run: &runs[i]})
+	}
+	return rows
+}
+
+// detailExecutions returns the drilled Component entity's recent executions
+// (nil for other kinds or when no history is loaded).
+func (m CatalogModel) detailExecutions() []services.RunSummary {
+	if len(m.stack) == 0 {
+		return nil
+	}
+	e, ok := m.byRef[m.stack[len(m.stack)-1]]
+	if !ok || e.Kind != "Component" {
+		return nil
+	}
+	return m.compRuns[e.Name]
 }
 
 // detailLinks flattens the drilled entity's navigable neighbours: members
@@ -400,7 +520,32 @@ func (m CatalogModel) InspectorDesc() *services.ResourceDescription {
 	if sel == nil {
 		return nil
 	}
-	return entityDesc(sel, m.outEdges[entityRef{sel.Kind, sel.EntityKey}], m.inEdges[entityRef{sel.Kind, sel.EntityKey}])
+	desc := entityDesc(sel, m.outEdges[entityRef{sel.Kind, sel.EntityKey}], m.inEdges[entityRef{sel.Kind, sel.EntityKey}])
+	// Work-surface context for components: change overlay, last run, and the
+	// recent execution list (mirrors the Browse inspector).
+	if c, ok := m.componentInfo(*sel); ok {
+		if c.ChangeKind != "" {
+			desc.Fields = append(desc.Fields, services.DescField{Label: "change", Value: c.ChangeKind})
+		}
+		if c.LastRunStatus != "" {
+			desc.Fields = append(desc.Fields, services.DescField{Label: "last run", Value: c.LastRunStatus})
+		}
+		if runs := m.compRuns[sel.Name]; len(runs) > 0 {
+			lines := make([]string, 0, len(runs))
+			for _, r := range runs {
+				id := r.ExecID
+				if len(id) > 8 {
+					id = id[:8]
+				}
+				lines = append(lines, fmt.Sprintf("%s %s", id, r.Status))
+			}
+			desc.Fields = append(desc.Fields, services.DescField{
+				Label: "recent runs",
+				Value: strings.Join(lines, "\n"),
+			})
+		}
+	}
+	return desc
 }
 
 func entityDesc(e *services.EntitySummary, out, in []services.RelationSummary) *services.ResourceDescription {
@@ -475,6 +620,12 @@ func (m CatalogModel) viewList(width int) string {
 	if m.Snapshot.HumanKey != "" {
 		headerL += theme.StyleDim.Render("  ·  " + m.Snapshot.HumanKey)
 	}
+	if changed := m.changedCount(); changed > 0 {
+		headerL += "  " + theme.StyleChangedDot.Render(fmt.Sprintf("● %d changed", changed))
+	}
+	if m.ChangedOnly {
+		headerL += "  " + theme.StyleChipAccent.Render("changed-only")
+	}
 	if m.Filter != "" {
 		headerL += "  " + theme.StyleDim.Render(fmt.Sprintf("(filter: %s)", m.Filter))
 	}
@@ -486,7 +637,10 @@ func (m CatalogModel) viewList(width int) string {
 	rows := m.filtered()
 	if len(rows) == 0 {
 		hint := "No entities in this catalog."
-		if m.Filter != "" {
+		switch {
+		case m.ChangedOnly:
+			hint = "No changed components — press c to show all entities."
+		case m.Filter != "":
 			hint = fmt.Sprintf("No entities match %q.", m.Filter)
 		}
 		b.WriteString(centerCard(width, m.Height-6, hint))
@@ -494,7 +648,7 @@ func (m CatalogModel) viewList(width int) string {
 	}
 
 	kind := m.ActiveKind()
-	cols := columnsForKind(kind, width)
+	cols := m.columnsForKind(kind, width)
 	header := " "
 	for _, c := range cols {
 		header += pad(c.title, c.width) + "  "
@@ -535,9 +689,26 @@ func (m CatalogModel) viewList(width int) string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(theme.StyleDim.Render(
-		"enter open · [ ] kind · / filter · : commands"))
+	hints := "enter open · [ ] kind · c changed-only · / filter"
+	if sel := m.Selected(); sel != nil && sel.Kind == "Component" {
+		hints = "enter open · r run · g compose · o page · c changed-only · [ ] kind · / filter"
+	}
+	b.WriteString(theme.StyleDim.Render(hints))
 	return b.String()
+}
+
+// changedCount counts Component entities in the changed/affected overlay.
+func (m CatalogModel) changedCount() int {
+	if m.Snapshot == nil {
+		return 0
+	}
+	n := 0
+	for _, e := range m.Snapshot.Entities {
+		if c, ok := m.componentInfo(e); ok && c.Changed {
+			n++
+		}
+	}
+	return n
 }
 
 // catalogColumn is one list column: a title, a width, and a value projector.
@@ -547,12 +718,43 @@ type catalogColumn struct {
 	value func(services.EntitySummary) string
 }
 
+// changeMark renders the changed/affected overlay dot for a Component entity
+// row (mirrors Browse), or blanks for unaffected rows and other kinds.
+func (m CatalogModel) changeMark(e services.EntitySummary) string {
+	c, ok := m.componentInfo(e)
+	if !ok {
+		return "   "
+	}
+	switch c.ChangeKind {
+	case "changed":
+		return " " + theme.ChangedDot() + " "
+	case "affected":
+		return " " + theme.AffectedDot() + " "
+	default:
+		if c.Changed {
+			return " " + theme.ChangedDot() + " "
+		}
+	}
+	return "   "
+}
+
+// lastRunCell renders a Component entity's last-run status (glyph + word).
+func (m CatalogModel) lastRunCell(e services.EntitySummary) string {
+	c, ok := m.componentInfo(e)
+	if !ok || c.LastRunStatus == "" {
+		return "—"
+	}
+	return theme.StatusGlyph(c.LastRunStatus) + " " + c.LastRunStatus
+}
+
 // columnsForKind picks the table shape per kind so each tab leads with the
-// fields that matter for that kind.
-func columnsForKind(kind string, width int) []catalogColumn {
-	name := catalogColumn{"NAME", clamp(width*32/100, 14, 40),
+// fields that matter for that kind. Component columns are responsive: the
+// envelope columns (stage, type) yield to the work-surface columns (last run,
+// change mark) as the stage narrows.
+func (m CatalogModel) columnsForKind(kind string, width int) []catalogColumn {
+	name := catalogColumn{"NAME", clamp(width*30/100, 14, 40),
 		func(e services.EntitySummary) string { return e.Name }}
-	owner := catalogColumn{"OWNER", clamp(width*22/100, 10, 28),
+	owner := catalogColumn{"OWNER", clamp(width*20/100, 10, 26),
 		func(e services.EntitySummary) string { return zoa(e.Owner) }}
 	members := catalogColumn{"MEMBERS", 7,
 		func(e services.EntitySummary) string {
@@ -561,12 +763,14 @@ func columnsForKind(kind string, width int) []catalogColumn {
 			}
 			return fmt.Sprintf("%d", e.MemberCount)
 		}}
+	last := catalogColumn{"LAST", 12, m.lastRunCell}
+	chg := catalogColumn{"CHG", 3, m.changeMark}
 	switch kind {
 	case "All":
 		return []catalogColumn{
 			{"KIND", 12, func(e services.EntitySummary) string { return e.Kind }},
 			name,
-			{"DETAIL", clamp(width*30/100, 12, 44), func(e services.EntitySummary) string {
+			{"DETAIL", clamp(width*26/100, 12, 40), func(e services.EntitySummary) string {
 				switch e.Kind {
 				case "Component":
 					return zoa(e.Owner)
@@ -579,14 +783,19 @@ func columnsForKind(kind string, width int) []catalogColumn {
 					return "—"
 				}
 			}},
+			chg,
 		}
 	case "Component":
-		return []catalogColumn{
-			name,
-			owner,
-			{"STAGE", 10, func(e services.EntitySummary) string { return zoa(e.Stage) }},
-			{"TYPE", clamp(width*14/100, 8, 20), func(e services.EntitySummary) string { return zoa(e.Type) }},
+		cols := []catalogColumn{name, owner}
+		if width >= 110 {
+			cols = append(cols,
+				catalogColumn{"STAGE", 10, func(e services.EntitySummary) string { return zoa(e.Stage) }})
 		}
+		if width >= 84 {
+			cols = append(cols,
+				catalogColumn{"TYPE", clamp(width*14/100, 8, 20), func(e services.EntitySummary) string { return zoa(e.Type) }})
+		}
+		return append(cols, last, chg)
 	case "Composition":
 		return []catalogColumn{
 			name,
@@ -668,8 +877,45 @@ func (m CatalogModel) viewDetail(width int) string {
 	if len(e.Envs) > 0 {
 		field("envs", strings.Join(e.Envs, ", "))
 	}
+	// Work-surface context for components: live change overlay + last run.
+	if c, ok := m.componentInfo(e); ok {
+		if c.ChangeKind != "" {
+			field("change", c.ChangeKind)
+		}
+		if c.LastRunStatus != "" {
+			b.WriteString("  " + theme.StyleLabel.Render(pad("last run", 11)) +
+				theme.StatusGlyph(c.LastRunStatus) + " " +
+				theme.StyleValue.Render(c.LastRunStatus) + "\n")
+		}
+	}
 
 	links := m.detailLinks()
+	runs := m.detailExecutions()
+	if len(links) == 0 && len(runs) == 0 {
+		b.WriteString("\n")
+		b.WriteString(theme.StyleDim.Render("  no members, relations, or executions"))
+		b.WriteString("\n")
+	}
+
+	// Budget the remaining stage height across the two navigable sections;
+	// the section holding the cursor gets the larger share so the selected
+	// row is always on screen.
+	remaining := m.Height - strings.Count(b.String(), "\n") - 8
+	if remaining < 6 {
+		remaining = 6
+	}
+	connWindow := remaining / 2
+	if len(runs) == 0 {
+		connWindow = remaining
+	}
+	if connWindow > len(links) {
+		connWindow = len(links)
+	}
+	execWindow := remaining - connWindow
+	if execWindow > len(runs) {
+		execWindow = len(runs)
+	}
+
 	if len(links) > 0 {
 		b.WriteString("\n")
 		b.WriteString(theme.StyleSectionTitle.Render(fmt.Sprintf("CONNECTIONS (%d)", len(links))))
@@ -685,14 +931,13 @@ func (m CatalogModel) viewDetail(width int) string {
 			labelW = 18
 		}
 
-		// Scroll window over links so deep graphs stay inside the stage:
-		// remaining height = stage height − lines already written − room for
-		// the "… more" line and the footer hint.
-		maxRows := m.Height - strings.Count(b.String(), "\n") - 3
-		if maxRows < 3 {
-			maxRows = 3
+		// The unified detail cursor spans links then runs; this section's
+		// local cursor is only live while it points inside the links range.
+		connCursor := 0
+		if m.detailCursor < len(links) {
+			connCursor = m.detailCursor
 		}
-		start, end := viewportWindow(m.detailCursor, len(links), maxRows)
+		start, end := viewportWindow(connCursor, len(links), connWindow)
 		for i := start; i < end; i++ {
 			l := links[i]
 			label := theme.StyleDim.Render(pad(l.Label, labelW))
@@ -715,13 +960,60 @@ func (m CatalogModel) viewDetail(width int) string {
 			b.WriteString(theme.StyleDim.Render(fmt.Sprintf(" … %d more", len(links)-end)))
 			b.WriteString("\n")
 		}
-	} else {
+	}
+
+	if len(runs) > 0 {
 		b.WriteString("\n")
-		b.WriteString(theme.StyleDim.Render("  no members or relations"))
+		b.WriteString(theme.StyleSectionTitle.Render(fmt.Sprintf("EXECUTIONS (%d)", len(runs))))
 		b.WriteString("\n")
+
+		execCursor := 0
+		if m.detailCursor >= len(links) {
+			execCursor = m.detailCursor - len(links)
+		}
+		start, end := viewportWindow(execCursor, len(runs), execWindow)
+		for i := start; i < end; i++ {
+			line := " " + executionRow(runs[i])
+			if m.detailCursor == len(links)+i {
+				b.WriteString(theme.StyleCursorBar.Render("▌") + theme.StyleTableRowSelected.Render(line))
+			} else {
+				b.WriteString(" " + theme.StyleTableRow.Render(line))
+			}
+			b.WriteString("\n")
+		}
+		if end < len(runs) {
+			b.WriteString(theme.StyleDim.Render(fmt.Sprintf(" … %d more", len(runs)-end)))
+			b.WriteString("\n")
+		}
 	}
 
 	b.WriteString("\n")
-	b.WriteString(theme.StyleDim.Render("enter follow · esc back"))
+	hints := "enter follow · esc back"
+	if e.Kind == "Component" {
+		hints = "enter follow/open run · r run · g compose · o page · esc back"
+	}
+	b.WriteString(theme.StyleDim.Render(hints))
 	return b.String()
+}
+
+// executionRow formats one recent execution: status glyph, short exec id,
+// status, duration, trigger, and a dry-run marker.
+func executionRow(r services.RunSummary) string {
+	id := r.ExecID
+	if len(id) > 10 {
+		id = id[:10]
+	}
+	dur := "—"
+	if r.Duration > 0 {
+		dur = r.Duration.Round(time.Second).String()
+	}
+	line := fmt.Sprintf("%s %s  %s  %s",
+		theme.StatusGlyph(r.Status), pad(id, 10), pad(r.Status, 9), pad(dur, 7))
+	if r.Trigger != "" {
+		line += "  " + theme.StyleDim.Render(r.Trigger)
+	}
+	if r.DryRun {
+		line += "  " + theme.StyleChipDim.Render("dry-run")
+	}
+	return line
 }

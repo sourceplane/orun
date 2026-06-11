@@ -360,6 +360,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 		}
 		m.syncComponentPage()
+		m.syncCatalogContext()
 		m.refreshInspectorSelection()
 		return m, listRunsCmd(m.svc)
 
@@ -420,6 +421,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.browse.Workspace = msg.Snapshot
 		m.ensureSelectedEnv()
 		m.syncComponentPage()
+		m.syncCatalogContext()
 		m.refreshInspectorSelection()
 		return m, nil
 
@@ -428,6 +430,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.history.Runs = msg.Runs
 			m.refreshActivityRuns()
 			m.syncComponentPage()
+			m.syncCatalogContext()
 		}
 		return m, nil
 
@@ -877,7 +880,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.switchMode(ModeLogExplorer), nil
 	case key.Matches(msg, m.keys.GoHistory):
 		return m.switchMode(ModeHistory), nil
-	case msg.String() == "e" && (m.activeMode == ModeBrowse || m.activeMode == ModeComponent):
+	case msg.String() == "e" && (m.activeMode == ModeBrowse || m.activeMode == ModeComponent || m.activeMode == ModeCatalog):
 		// Cycle the selected environment (environments.md §1). Scoped to the
 		// catalog/component surfaces; Plan Studio keeps its own `e` via forwardKey.
 		m.cycleEnv()
@@ -1129,6 +1132,23 @@ func (m *Model) syncComponentPage() {
 	}
 	m.componentPage = m.componentPage.SetComponent(updated, m.history.Runs)
 	m.componentPage.Env = m.selectedEnv
+}
+
+// syncCatalogContext refreshes the Catalog surface's Component work-surface
+// context (change overlay, last-run status, recent executions) from the
+// latest workspace + run history, so catalog component rows stay live without
+// re-reading the object store.
+func (m *Model) syncCatalogContext() {
+	if m.workspace == nil {
+		return
+	}
+	runsBy := make(map[string][]services.RunSummary, len(m.workspace.Components))
+	for _, c := range m.workspace.Components {
+		if recent := recentRunsForComponent(c.Name, m.history.Runs, 10); len(recent) > 0 {
+			runsBy[c.Name] = recent
+		}
+	}
+	m.catalog = m.catalog.SetComponentContext(m.workspace.Components, runsBy)
 }
 
 // envContains reports whether envs holds the (non-empty) name.
@@ -1888,6 +1908,16 @@ func (m Model) contextualKeys() []key.Binding {
 		out = append(out,
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "open")),
 			key.NewBinding(key.WithKeys("[", "]"), key.WithHelp("[ ]", "kind")),
+		)
+		if sel := m.catalog.Selected(); sel != nil && sel.Kind == "Component" {
+			out = append(out,
+				key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "run")),
+				key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "compose")),
+				key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "env")),
+			)
+		}
+		out = append(out,
+			key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "changed-only")),
 			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 			m.keys.Search,
 		)
@@ -1961,7 +1991,8 @@ func (m Model) renderHelpModal() string {
 		{"Component", "enter open run", "r run (selected env)", "g compose", "esc back"},
 		{"Compose", "g generate", "d dry-run", "R real run", "s save", "e/t/C cycle"},
 		{"Activity", "tab cycle pane", "↑/↓ move", "enter tail logs", "r runs · l logs"},
-		{"Catalog", "[ ] cycle kind", "enter open entity", "enter follow connection", "esc back", "/ filter"},
+		{"Catalog", "[ ] cycle kind", "enter open entity / follow / open run",
+			"r run component", "g compose", "o component page", "c changed-only", "e cycle env", "esc back", "/ filter"},
 	}
 	var b strings.Builder
 	b.WriteString(theme.StyleModalTitle.Render("Cockpit · Help"))

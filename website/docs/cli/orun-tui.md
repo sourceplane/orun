@@ -189,18 +189,29 @@ graph. The list level shows kind tabs with per-kind counts; the detail level
 shows one entity's envelope (identity, ownership, lifecycle) plus its
 **Connections** — members and typed relation edges, each navigable.
 
+Component entities also carry the full work surface: the Component tab adds
+**LAST** (last-run status) and **CHG** (changed/affected overlay) columns, the
+detail page adds the live change state and an **Executions** section, and the
+same action keys as the Component page work on any selected component.
+
 | Key | Action |
 | --- | --- |
 | `[` / `]` (or `←` / `→`) | Cycle kind tab (All → Component → API → …) |
 | `↑` / `↓` | Move selection |
-| `⏎` | Open entity / follow a connection |
+| `⏎` | Open entity / follow a connection / open an execution |
+| `r` | Run the selected component for the selected environment (confirms first) |
+| `g` | Compose the selected component in Plan Studio |
+| `o` | Open the classic Component page |
+| `e` | Cycle the selected environment |
+| `c` | Toggle changed-only (changed/affected components) |
 | `esc` | Pop back one entity (or pop mode at the list) |
 | `/` | Filter by name, kind, key, or owner |
 
 Connections marked `◂` are incoming edges (e.g. `◂ deployedTo` on an
 Environment lists the components deployed to it). A `⤴` suffix marks an
 endpoint outside the loaded catalog (e.g. a cross-repo dependency) — shown but
-not followable.
+not followable. On a Component's detail page, `⏎` on an **Executions** row
+jumps straight into that run's Activity drilldown (run → jobs → steps → logs).
 
 ## Catalog freshness
 
