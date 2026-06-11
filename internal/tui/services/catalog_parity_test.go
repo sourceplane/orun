@@ -168,6 +168,19 @@ func assertComponentParity(t *testing.T, name string, graph, intent ComponentSum
 // serves it) and returns the component summaries the cockpit reads.
 func buildFreshCatalogAndRead(t *testing.T, ctx context.Context, ws, om string) []ComponentSummary {
 	t.Helper()
+	assembleFreshTestCatalog(t, ctx, ws, om)
+	s := NewLiveOrunService(LiveServiceConfig{ObjectModelRoot: om})
+	comps, ok := s.freshCatalogComponents(ctx, ws)
+	if !ok {
+		t.Fatal("freshly-resolved catalog must be served by the gate (ok=false)")
+	}
+	return comps
+}
+
+// assembleFreshTestCatalog resolves ws into a catalog at catalogs/current in
+// om's object model, stamped with the workspace's current SourceID.
+func assembleFreshTestCatalog(t *testing.T, ctx context.Context, ws, om string) {
+	t.Helper()
 	inputs := catalogresolve.ResolverInputs{
 		OrunVersion:       "0.0.0-test",
 		SchemaVersion:     "orun.io/v1alpha1",
@@ -218,13 +231,6 @@ func buildFreshCatalogAndRead(t *testing.T, ctx context.Context, ws, om string) 
 	if err := refs.Update(ctx, "catalogs/current", "", string(id)); err != nil {
 		t.Fatalf("ref: %v", err)
 	}
-
-	s := NewLiveOrunService(LiveServiceConfig{ObjectModelRoot: om})
-	comps, ok := s.freshCatalogComponents(ctx, ws)
-	if !ok {
-		t.Fatal("freshly-resolved catalog must be served by the gate (ok=false)")
-	}
-	return comps
 }
 
 // --- helpers ---

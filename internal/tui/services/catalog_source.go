@@ -166,6 +166,13 @@ func catalogComponentSummaries(comps []objcatalog.CatalogComponentView) []Compon
 			Profile:   firstProfile(c.Environments),
 			DependsOn: dependencyNames(c.DependsOn, keyToName),
 			Watches:   specWatches(c.Spec),
+			// Envelope enrichment (SC1/SC1b) — catalog-path only; the live
+			// intent loader has no ownership/lifecycle resolution.
+			Owner:       c.Owner,
+			OwnerSource: c.OwnerSource,
+			System:      c.System,
+			Stage:       c.Stage,
+			Tier:        c.Tier,
 		})
 	}
 	return out
