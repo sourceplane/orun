@@ -3,37 +3,58 @@
 > `SecretPolicy` is a versioned, portable document (apiVersion `orun.io/v1`) that
 > binds GitHub identities to secret scopes under conditions on four axes — who,
 > which component, where (environment/trigger), and how (execution platform). It
-> ships in the Stack alongside the compositions it protects, is deny-by-default,
-> and is enforced at compile time (visible in `orun plan`) and fetch time
-> (authoritative in `orun-api`). This doc fixes the subject model, the condition
+> attaches at three tiers — composition-attached, stack-wide, intent overlay —
+> each lower tier narrow-only; it is deny-by-default and enforced at compile
+> time (visible in `orun plan`) and fetch time (authoritative in `orun-api`).
+> This doc fixes the placement tiers, the subject model, the condition
 > vocabulary, evaluation, and provenance. The document schema is in
 > `data-model.md` §4.
 
-## 1. Why a document, and why in the Stack
+## 1. Three placement tiers — policy lives next to what it governs (SD-10)
 
 orun's portable unit of platform truth is the **Stack** — composition types
 packaged with metadata and distributed over a directory, archive, or OCI ref
-(`website/docs/concepts/stacks.md`). A platform team authors a golden Stack once
-and publishes it; consumers adopt it across many repos and orgs.
-
-`SecretPolicy` rides that same rail. A Stack may carry a `policies/` directory:
+(`website/docs/concepts/stacks.md`, layout in
+`internal/model/composition.go:201-238`). A platform team authors a golden
+Stack once and publishes it; consumers adopt it across many repos and orgs.
+`SecretPolicy` rides that same rail, at three tiers:
 
 ```text
 acme-platform/                      ← published once, adopted everywhere
 ├── stack.yaml
 ├── compositions/
-│   ├── terraform/…                 ← contracts (existing)
+│   ├── terraform/
+│   │   ├── composition.yaml                ← contract (existing)
+│   │   ├── profiles/…                      ← secretBindings + materialize (data-model.md §2)
+│   │   └── secret-policy.yaml              ← TIER 1: composition-attached defaults
+│   │                                          auto-scoped to component.type == "terraform";
+│   │                                          CANNOT grant beyond its own composition
 │   └── cloudflare-worker/…
 └── policies/
-    ├── prod-secrets.SecretPolicy.yaml      ← who/where/how may read prod secrets
-    └── pr-secrets.SecretPolicy.yaml        ← what a PR run may read (almost nothing)
+    ├── prod-secrets.SecretPolicy.yaml      ← TIER 2: stack-wide rules
+    └── pr-secrets.SecretPolicy.yaml           (prod lockdown, laptop denial, shared groups)
+
+acme-api/  (an adopting repo)
+└── intent.yaml / policies/                 ← TIER 3: intent overlays — tightening only
 ```
 
-Adopting the Stack pulls in **both** the compositions and their access rules,
-versioned together. A repo's `intent.yaml` may *additionally* layer org-specific
-`SecretPolicy` documents (tightening only — see §5 precedence). This is the
-concrete form of the design goal: **policy is portable and lives next to the
-compositions it governs.**
+- **Tier 1 — composition-attached.** The composition author ships sane access
+  defaults *with the composition*: "the terraform `release` profile may read
+  `AWS_*` only on a declared push to `main` from CI OIDC." The fragment is
+  constitutionally scoped — the loader injects
+  `component.type == "<composition>"` into every rule — so a composition can
+  never grant outside itself. This is "policy closer to the compositions" made
+  literal: the golden path carries its own access rules in the same directory
+  as its contract.
+- **Tier 2 — stack-wide.** Cross-cutting rules in `policies/`: environment
+  lockdowns, platform denials, `_shared/<group>` grants.
+- **Tier 3 — intent overlay.** The adopting repo may add conditions or denials,
+  never widen (see §5).
+
+Adopting the Stack pulls in the compositions, their attached defaults, and the
+platform rules, versioned together over OCI. This is the concrete form of the
+design goal: **policy is portable and lives next to the compositions it
+governs.**
 
 ## 2. Subjects — GitHub-native, portable (ties to `design.md` §5)
 
@@ -54,7 +75,7 @@ to **stable numeric GitHub ids** at decision time via the `gh_identity_map`
 and refreshes on `membership`/`team` webhooks. A policy authored against
 `@acme/platform-admins` therefore means "whoever is in that team *now*", and the
 same document yields the same decision in any backend that has the map — the
-portability invariant (Invariant 8, `design.md` §10).
+portability invariant (Invariant 8, `design.md` §11).
 
 ## 3. Scope — what a rule targets
 
@@ -62,10 +83,14 @@ A rule targets a **secret scope**, matching the `secret://` reference grammar
 (`data-model.md` §1) with wildcards:
 
 ```
-namespace : <gh-org-or-repo>          # e.g. acme/api  (the orun namespace)
-env       : prod | staging | * | {list}
+namespace : <org>/<repo> | <org>/_shared/<group>   # repo default; shared groups explicit (SD-12)
+env       : prod | staging | base | * | {list}
 key       : DATABASE_URL | STRIPE_* | *
 ```
+
+A `*` in `namespace` never matches across the `_shared/` boundary: granting
+`acme/*` grants repo namespaces only; a shared group must be named
+(`acme/_shared/observability`).
 
 Scopes compose most-specific-wins, mirroring orun's existing parameter/env merge
 precedence (`internal/expand/expander.go:182-187`) so it feels native to authors.
@@ -103,7 +128,8 @@ CI OIDC or an Orun Cloud runner."
 
 ```
 decision(request) :=
-  rules ← all SecretPolicy rules in scope, ordered: Stack base → intent overlays
+  rules ← all SecretPolicy rules in scope,
+          ordered: composition-attached → stack policies/ → intent overlays   (SD-10)
   applicable ← { r ∈ rules | scopeMatches(r, request.ref) ∧ conditionsMatch(r, request.facts) }
   if ∃ r ∈ applicable with effect=deny            → DENY  (reason: r.id)
   else if ∃ r ∈ applicable with effect=allow      → ALLOW (grant: most-specific r)
@@ -113,10 +139,22 @@ decision(request) :=
 - **Deny-by-default** (SD-6), matching the `multi-tenant-saas` constitution
   (`apps/policy-worker`, `specs/components/03-policy-authorization.md`).
 - **Explicit deny wins** over allow at the same or broader specificity.
-- **Overlay precedence:** intent overlays may only *narrow* a Stack grant (add
-  conditions / deny), never *widen* it — so adopting a Stack cannot be loosened by
-  a downstream repo without the platform team's grant. (Enforced by rejecting an
-  intent `allow` whose scope/conditions are broader than any Stack `allow`.)
+- **Narrow-only downward (SD-10):**
+  - A **composition-attached** fragment is force-scoped to
+    `component.type == "<its composition>"` at load; it cannot reference other
+    components, `_shared` groups outside its declared bindings, or `*` component
+    scopes. (Structurally cannot widen.)
+  - An **intent** `allow` whose scope/conditions are broader than any
+    Stack-or-composition `allow` is rejected at load — adopting a Stack cannot
+    be loosened by a downstream repo. Intent `deny` rules are always accepted.
+  - `orun policy lint` enforces both statically (`cli-surface.md` §2).
+- **Personal overlays (SD-11):** a resolve that would return a *personal* value
+  additionally requires `subject.id == owner(personal config)` and
+  `platform == "local-cli"` — evaluated as built-in facts, not authorable rules,
+  so no policy can ever route a personal value to CI (Invariant 9).
+- **Shared groups (SD-12):** a ref into `org/_shared/<group>` matches only rules
+  whose scope names that group explicitly — there is no wildcard that crosses
+  the `_shared` boundary by accident.
 - **Determinism:** every decision is a pure function of (rules, facts); no I/O
   beyond the identity-map lookup, which is itself a snapshot at decision time.
 
@@ -167,7 +205,27 @@ operations/audit.
 
 ## 9. Worked example
 
-`acme-platform` Stack ships `prod-secrets.SecretPolicy.yaml`:
+The `terraform` composition ships its own defaults (tier 1,
+`compositions/terraform/secret-policy.yaml` — `component.type == "terraform"`
+is injected automatically):
+
+```yaml
+apiVersion: orun.io/v1
+kind: SecretPolicy
+metadata: { name: terraform-defaults }
+spec:
+  rules:
+    # The release profile's bindings are readable only on a declared main push from CI.
+    - effect: allow
+      subjects: ["*authenticated"]
+      scope: { env: "*", key: "AWS_ROLE_ARN" }
+      when:
+        - trigger.declared
+        - trigger.branch == "main"
+        - platform == "github-actions-oidc"
+```
+
+The `acme-platform` Stack ships `prod-secrets.SecretPolicy.yaml` (tier 2):
 
 ```yaml
 apiVersion: orun.io/v1
