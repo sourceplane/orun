@@ -162,12 +162,25 @@ func (m CatalogModel) SetSnapshot(snap *services.CatalogSnapshot) CatalogModel {
 	if rows := m.filtered(); m.Cursor >= len(rows) {
 		m.Cursor = 0
 	}
-	// Drop drilled entities that no longer resolve in the new snapshot.
-	for len(m.stack) > 0 {
-		if _, ok := m.byRef[m.stack[len(m.stack)-1]]; ok {
-			break
+	// Drop drilled entities that no longer resolve in the new snapshot — a
+	// refresh can delete any entry in the walk path, not just the tip, and a
+	// dead middle entry would strand esc on a "no longer in catalog" page.
+	if len(m.stack) > 0 {
+		kept := make([]entityRef, 0, len(m.stack))
+		for _, ref := range m.stack {
+			if _, ok := m.byRef[ref]; ok {
+				kept = append(kept, ref)
+			}
 		}
-		m.stack = m.stack[:len(m.stack)-1]
+		if len(kept) != len(m.stack) {
+			m.detailCursor = 0
+		}
+		m.stack = kept
+	}
+	// Clamp the detail cursor: the surviving tip's connections list can shrink
+	// across a refresh, and a cursor past the end would scroll the viewport
+	// beyond the rows (an empty CONNECTIONS pane).
+	if links := m.detailLinks(); m.detailCursor >= len(links) {
 		m.detailCursor = 0
 	}
 	return m

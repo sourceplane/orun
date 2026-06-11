@@ -212,6 +212,68 @@ func TestCatalog_SnapshotRefreshPreservesDrill(t *testing.T) {
 	}
 }
 
+// A refresh that deletes an entity in the *middle* of the walk path must drop
+// it from the stack (not just the tip), so esc never lands on a dead page.
+func TestCatalog_RefreshDropsDeadMiddleOfStack(t *testing.T) {
+	m := NewCatalogModel().SetSnapshot(testCatalogSnapshot())
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // drill api
+	m, _ = m.Update(keyRunes("j"))                  // → partOf checkout
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // drill checkout
+	if got := strings.Join(m.Breadcrumb(), ">"); got != "api>checkout" {
+		t.Fatalf("breadcrumb = %q, want api>checkout", got)
+	}
+	// Delete api (the middle of the path); checkout survives.
+	snap := testCatalogSnapshot()
+	kept := snap.Entities[:0]
+	for _, e := range snap.Entities {
+		if e.Name != "api" {
+			kept = append(kept, e)
+		}
+	}
+	snap.Entities = kept
+	m = m.SetSnapshot(snap)
+	if got := strings.Join(m.Breadcrumb(), ">"); got != "checkout" {
+		t.Fatalf("breadcrumb after refresh = %q, want checkout", got)
+	}
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if !m.AtRoot() {
+		t.Fatal("esc from the surviving tip should reach the list, not a dead page")
+	}
+}
+
+// A refresh that shrinks the drilled entity's connections must clamp the
+// detail cursor — a stale cursor would scroll the viewport past every row.
+func TestCatalog_RefreshClampsDetailCursor(t *testing.T) {
+	m := NewCatalogModel().SetSnapshot(testCatalogSnapshot())
+	// Drill checkout (System): 2 links after member dedupe.
+	m, _ = m.Update(keyRunes("]")) // Component tab
+	m, _ = m.Update(keyRunes("]")) // System tab
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = m.Update(keyRunes("G")) // cursor to last link
+	if m.detailCursor == 0 {
+		t.Fatal("setup: expected a non-zero detail cursor")
+	}
+	// Refresh with all relations gone and only web as member.
+	snap := testCatalogSnapshot()
+	snap.Relations = nil
+	for i := range snap.Entities {
+		if snap.Entities[i].Name == "checkout" {
+			snap.Entities[i].Members = []string{"ns/repo/web"}
+			snap.Entities[i].MemberCount = 1
+		}
+	}
+	m = m.SetSnapshot(snap)
+	links := m.detailLinks()
+	if m.detailCursor >= len(links) {
+		t.Fatalf("detail cursor %d not clamped to %d links", m.detailCursor, len(links))
+	}
+	// The single remaining link must actually render.
+	out := m.SetSize(100, 30).View()
+	if !strings.Contains(out, "web") {
+		t.Errorf("connections viewport empty after shrink: %s", out)
+	}
+}
+
 // pad/padStyled/truncate must be rune- and width-safe: clipping a multi-byte
 // name must never produce invalid UTF-8 or a wrong visible width.
 func TestPadAndTruncate_RuneSafe(t *testing.T) {
