@@ -261,6 +261,22 @@ func roundTripInto(src, dst any) {
 	_ = json.Unmarshal(b, dst)
 }
 
+// compositionLabel renders the composition binding as "source@version (lifecycle)"
+// when those are known, else just the source.
+func compositionLabel(c catalogmodel.CompositionRef) string {
+	if c.Source == "" {
+		return ""
+	}
+	out := c.Source
+	if c.Version != "" {
+		out += "@" + c.Version
+	}
+	if c.Lifecycle != "" {
+		out += " (" + c.Lifecycle + ")"
+	}
+	return out
+}
+
 func renderCatalogDescribeText(m catalogmodel.ComponentManifest, execs []catalogmodel.ComponentExecutionRow, deployments []objread.Deployment) error {
 	color := ui.ColorEnabledForWriter(os.Stdout)
 	out := os.Stdout
@@ -278,7 +294,7 @@ func renderCatalogDescribeText(m catalogmodel.ComponentManifest, execs []catalog
 	kv("Key", m.Identity.ComponentKey)
 	kv("Name", m.Identity.Name)
 	kv("Type", m.Spec.Type)
-	kv("Composition", m.Spec.Composition.Source) // the golden path backing this component (SC7)
+	kv("Composition", compositionLabel(m.Spec.Composition)) // the golden path backing this component (SC7)
 	kv("Lifecycle", m.Spec.Lifecycle)
 	kv("Title", m.Metadata.Title)
 	kv("Description", m.Metadata.Description)

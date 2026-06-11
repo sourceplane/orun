@@ -41,6 +41,8 @@ type catalogListEntityRow struct {
 	EntityKey   string `json:"entityKey"`
 	Name        string `json:"name"`
 	MemberCount int    `json:"memberCount"`
+	Version     string `json:"version,omitempty"`
+	Lifecycle   string `json:"lifecycle,omitempty"`
 }
 
 // catalogListRow is one row of the CatalogListResult envelope `data` array.
@@ -169,7 +171,7 @@ func runCatalogListKind(ctx context.Context, kind string) error {
 		if e.Kind != kind {
 			continue
 		}
-		rows = append(rows, catalogListEntityRow{Kind: e.Kind, EntityKey: e.EntityKey, Name: e.Name, MemberCount: e.MemberCount})
+		rows = append(rows, catalogListEntityRow{Kind: e.Kind, EntityKey: e.EntityKey, Name: e.Name, MemberCount: e.MemberCount, Version: e.Version, Lifecycle: e.Lifecycle})
 	}
 	if catalogJSONFlag {
 		return writeCatalogEnvelope(kindCatalogListResult, rows, nil)
@@ -180,11 +182,25 @@ func runCatalogListKind(ctx context.Context, kind string) error {
 		fmt.Println("(none)")
 		return nil
 	}
+	if kind == catalogmodel.EntityKindComposition {
+		fmt.Printf("%-28s %-30s %-8s %-10s %s\n", "ENTITY", "KEY", "VERSION", "LIFECYCLE", "MEMBERS")
+		for _, r := range rows {
+			fmt.Printf("%-28s %-30s %-8s %-10s %d\n", r.Name, r.EntityKey, dashIfEmpty(r.Version), dashIfEmpty(r.Lifecycle), r.MemberCount)
+		}
+		return nil
+	}
 	fmt.Printf("%-32s %-36s %s\n", "ENTITY", "KEY", "MEMBERS")
 	for _, r := range rows {
 		fmt.Printf("%-32s %-36s %d\n", r.Name, r.EntityKey, r.MemberCount)
 	}
 	return nil
+}
+
+func dashIfEmpty(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 // catalogListRowMatches applies the §3 filter flags. domain is matched against

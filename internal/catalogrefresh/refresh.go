@@ -52,10 +52,12 @@ import (
 // group:/user:; System/Domain/Environment/Composition/API/Resource keys are
 // qualified to <ns>/<repo>/<name>), and 10→11 for derived-entity membership
 // enrichment (each Group/User/System/Domain/Environment/Composition/API/Resource
-// entity carries spec.members + memberCount — the inverse-edge membership).
-// Every catalog id moves once per bump, the resolve memo misses once, and
-// content addressing re-stabilizes (S-1).
-const ResolverVersion = 11
+// entity carries spec.members + memberCount — the inverse-edge membership), and
+// 11→12 for composition version/lifecycle carried from the composition manifest
+// into spec.composition + the Composition entity. Every catalog id moves once
+// per bump, the resolve memo misses once, and content addressing re-stabilizes
+// (S-1).
+const ResolverVersion = 12
 
 // lockTTL bounds how long a refresh lock is honored before it is treated as
 // stale (a crashed holder) and reclaimed. A resolve+write is sub-second; this

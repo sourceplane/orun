@@ -5,6 +5,8 @@ metadata:
 spec:
   type: cloudflare-worker-turbo
   description: Cloudflare Worker with Turborepo build, verify, and deploy pipeline
+  version: 2.3.0
+  lifecycle: stable
 
   schemaRef:
     name: cloudflare-worker-turbo-component

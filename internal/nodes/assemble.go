@@ -238,6 +238,17 @@ func deriveEntities(manifests []ComponentManifest) []Entity {
 		if e, ok := seen[kk]; ok {
 			if e.Spec == nil && spec != nil { // enrich a previously-minimal entity
 				e.Spec = spec
+			} else if e.Spec != nil && spec != nil {
+				// Prefer a non-empty version/lifecycle when a later contributor
+				// (a different backed component/type) carries one — a source that
+				// exports a versioned type should surface that version on its entity.
+				for _, k := range []string{"version", "lifecycle", "digest"} {
+					if cur, _ := e.Spec[k].(string); cur == "" {
+						if v, ok := spec[k].(string); ok && v != "" {
+							e.Spec[k] = v
+						}
+					}
+				}
 			}
 			return
 		}
@@ -338,7 +349,7 @@ func compositionSpec(spec map[string]any) map[string]any {
 		return nil
 	}
 	out := map[string]any{}
-	for _, k := range []string{"source", "digest", "sourceKind", "sourceRef", "sourcePath"} {
+	for _, k := range []string{"source", "digest", "version", "lifecycle", "sourceKind", "sourceRef", "sourcePath"} {
 		if v, ok := c[k].(string); ok && v != "" {
 			out[k] = v
 		}

@@ -430,6 +430,24 @@ func TestMapEntity_CompositionEffects(t *testing.T) {
 	}
 }
 
+// TestMapEntity_CompositionVersion asserts Step 4: a composition's
+// version/lifecycle are carried onto the component's spec.composition.
+func TestMapEntity_CompositionVersion(t *testing.T) {
+	t.Parallel()
+	resolver := CompositionResolver(func(typ string) *CompositionMeta {
+		return &CompositionMeta{Name: "plat", Digest: "sha256:d", Version: "2.3.0", Lifecycle: "stable"}
+	})
+	cm := &catalogmodel.ComponentManifest{
+		Identity: catalogmodel.ComponentIdentity{ComponentKey: "ns/repo/w", Name: "w", Namespace: "ns", Repo: "repo"},
+		Spec:     catalogmodel.ComponentSpec{Type: "worker"},
+	}
+	m := mapEntity(cm, 12, nil, resolver)
+	comp, _ := m.Spec["composition"].(map[string]any)
+	if comp == nil || comp["version"] != "2.3.0" || comp["lifecycle"] != "stable" {
+		t.Fatalf("spec.composition = %v", m.Spec["composition"])
+	}
+}
+
 // TestCompositionResolver_ReadsEffectsFromManifest asserts SC8: the resolver
 // reads per-type effects from the composition manifests under a dir source.
 func TestCompositionResolver_ReadsEffectsFromManifest(t *testing.T) {
