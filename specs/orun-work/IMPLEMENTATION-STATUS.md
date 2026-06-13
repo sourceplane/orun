@@ -9,7 +9,7 @@
 |----|-----------|--------|
 | W0 | Work model, event log, mutators | ✅ Shipped — orun `internal/work` (#354) + orun-cloud `@saas/db/work` (#34) merged |
 | W1 | Sync: Durable Object protocol + client contract | 🏗️ In progress — transport-agnostic core landed (orun-cloud); DO/WebSocket adapter pending |
-| W2 | Delivery bridge I: component links + auto-linking | 🏗️ In progress — auto-linker core (orun-cloud) + producer bridge (orun `internal/workbridge`) landed; live PR-webhook ingestion pending |
+| W2 | Delivery bridge I: component links + auto-linking | 🏗️ In progress — auto-linker core + PR-webhook ingestion (orun-cloud) + producer bridge (orun `internal/workbridge`) landed; integrations-worker HTTP handler pending |
 | W2 | Delivery bridge I: component links + auto-linking | 🗓️ Not started |
 | W3 | Delivery bridge II: gate-verified Done, Released, drift inbox | 🗓️ Not started |
 | W4 | Sealing + `orun spec pull` | 🗓️ Not started |
@@ -101,6 +101,12 @@ contract (orun) have landed:
   `materializeAffects` degrades unresolved component keys visibly (Q-5);
   `applyAutoLinkPlan` drives the plan through the W0 one write path (WD-3).
 
-**Still open for W2:** live PR-webhook ingestion (the path that runs
-`internal/affected` for a real diff and feeds `AffectedSet` to the cloud
-auto-linker), and the blast-radius read API surface.
+The **PR-webhook ingestion** path has since landed (orun-cloud): `webhook.ts`
+maps a GitHub `pull_request` event → `PullRequestContext`; `ingest.ts`
+orchestrates parse → `listOpenTasks` → `computeAutoLinkPlan` →
+`applyAutoLinkPlan`, consuming the affected set as the workbridge `AffectedSet`
+(end-to-end tested against an in-memory repository).
+
+**Still open for W2:** the thin HTTP handler in the integrations worker that
+receives the GitHub delivery and calls `ingestPullRequest` with the
+`AffectedSet` (produced by orun/CI), and the blast-radius read API surface.
