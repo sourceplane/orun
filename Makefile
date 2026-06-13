@@ -198,4 +198,10 @@ verify-generated:
 	  git --no-pager diff -- internal/catalogmodel/schema/; \
 	  exit 1; \
 	fi
+	@go generate ./internal/work/...
+	@if ! git diff --exit-code -- internal/work/schema/ >/dev/null 2>&1; then \
+	  echo "❌ generated schema is stale; run 'go generate ./internal/work/...' and commit"; \
+	  git --no-pager diff -- internal/work/schema/; \
+	  exit 1; \
+	fi
 	@echo "✅ generated artifacts up-to-date"
