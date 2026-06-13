@@ -10,8 +10,7 @@
 | W0 | Work model, event log, mutators | ✅ Shipped — orun `internal/work` (#354) + orun-cloud `@saas/db/work` (#34) merged |
 | W1 | Sync: Durable Object protocol + client contract | 🏗️ In progress — transport-agnostic core landed (orun-cloud); DO/WebSocket adapter pending |
 | W2 | Delivery bridge I: component links + auto-linking | 🏗️ In progress — auto-linker core + PR-webhook ingestion (orun-cloud) + producer bridge (orun `internal/workbridge`) landed; integrations-worker HTTP handler pending |
-| W2 | Delivery bridge I: component links + auto-linking | 🗓️ Not started |
-| W3 | Delivery bridge II: gate-verified Done, Released, drift inbox | 🗓️ Not started |
+| W3 | Delivery bridge II: gate-verified Done, Released, drift inbox | 🏗️ In progress — decision core (gate-verified Done, overlay-only Released, drift inbox) landed (orun-cloud); execution-truth/Deployment-overlay feed + apply orchestration pending |
 | W4 | Sealing + `orun spec pull` | 🗓️ Not started |
 | W5 | The orun MCP | 🗓️ Not started |
 | W6 | `specs/` import (dogfood) | 🗓️ Not started |
@@ -110,3 +109,24 @@ orchestrates parse → `listOpenTasks` → `computeAutoLinkPlan` →
 **Still open for W2:** the thin HTTP handler in the integrations worker that
 receives the GitHub delivery and calls `ingestPullRequest` with the
 `AffectedSet` (produced by orun/CI), and the blast-radius read API surface.
+
+## W3 — as-built (in progress)
+
+The "status that cannot rot" decision core landed (orun-cloud `@saas/db/work`
+`delivery.ts`), all pure and `actor: automation`:
+
+- **`decideDone`** — a merged task reaches Done only when every contract gate
+  verifies green from execution truth (Q-3); a failed/pending/missing gate parks
+  it in `in_review` with the blocking gate surfaced; a task with no gates parks
+  for a human. `automationDoneAllowed` keeps automation from ever moving a
+  red-gated task to Done (a human override stays human-attributed, invariant 4).
+- **`decideReleased`** — derives Released only from a Deployment-overlay
+  observation of live state; a deploy *attempt* releases nothing (invariant 5).
+- **`detectDrift`** — a merged PR whose affected components no open task claims
+  raises exactly one drift item naming the components.
+
+The full `in_review → done → released` walk is proven from delivery events.
+
+**Still open for W3:** the producer feed of execution truth (run/check → gate
+mapping and the Deployment-overlay events from orun) and the apply orchestration
+that drives these decisions through the W0 mutators on merge/deploy webhooks.
