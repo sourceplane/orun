@@ -9,6 +9,7 @@
 |----|-----------|--------|
 | W0 | Work model, event log, mutators | ✅ Shipped — orun `internal/work` (#354) + orun-cloud `@saas/db/work` (#34) merged |
 | W1 | Sync: Durable Object protocol + client contract | 🏗️ In progress — transport-agnostic core landed (orun-cloud); DO/WebSocket adapter pending |
+| W2 | Delivery bridge I: component links + auto-linking | 🏗️ In progress — auto-linker core (orun-cloud) + producer bridge (orun `internal/workbridge`) landed; live PR-webhook ingestion pending |
 | W2 | Delivery bridge I: component links + auto-linking | 🗓️ Not started |
 | W3 | Delivery bridge II: gate-verified Done, Released, drift inbox | 🗓️ Not started |
 | W4 | Sealing + `orun spec pull` | 🗓️ Not started |
@@ -81,3 +82,25 @@ optimism, reject rollback, cursor replay).
 **Still open for W1:** the Cloudflare Durable Object + WebSocket transport
 adapter wrapping `WorkSyncServer`, and the soak-rig latency numbers (p95 server
 echo < 150 ms).
+
+## W2 — as-built (in progress)
+
+The delivery bridge's auto-linker core (orun-cloud) and the producer-side wire
+contract (orun) have landed:
+
+- **orun (`internal/workbridge`)** — projects an `internal/affected.Result` into
+  the `AffectedSet` DTO the cloud consumes. `Components` is, by construction,
+  the engine's blast radius (`Result.Affected`), so the cloud's component
+  matching has **parity with `orun catalog affected`** without a second closure
+  (the W2 parity requirement). Parity + wire-shape tests included.
+- **orun-cloud (`@saas/db/work` autolink)** — `computeAutoLinkPlan`: given the
+  affected set + PR context, decides which open tasks to link (`implementedBy`)
+  and transition, matched by `contract.affects` overlap **or** `PREFIX-n` key
+  parse from the branch/title. Transitions are forward-only and never touch
+  closed tasks; everything is `actor: automation` (invariant 4).
+  `materializeAffects` degrades unresolved component keys visibly (Q-5);
+  `applyAutoLinkPlan` drives the plan through the W0 one write path (WD-3).
+
+**Still open for W2:** live PR-webhook ingestion (the path that runs
+`internal/affected` for a real diff and feeds `AffectedSet` to the cloud
+auto-linker), and the blast-radius read API surface.
