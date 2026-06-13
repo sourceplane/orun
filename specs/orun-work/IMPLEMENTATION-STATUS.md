@@ -7,8 +7,8 @@
 
 | ID | Milestone | Status |
 |----|-----------|--------|
-| W0 | Work model, event log, mutators | 🏗️ In progress — orun-side `internal/work` landed; backend Worker (D1 + DO) pending |
-| W1 | Sync: Durable Object protocol + client contract | 🗓️ Not started |
+| W0 | Work model, event log, mutators | ✅ Shipped — orun `internal/work` (#354) + orun-cloud `@saas/db/work` (#34) merged |
+| W1 | Sync: Durable Object protocol + client contract | 🏗️ In progress — transport-agnostic core landed (orun-cloud); DO/WebSocket adapter pending |
 | W2 | Delivery bridge I: component links + auto-linking | 🗓️ Not started |
 | W3 | Delivery bridge II: gate-verified Done, Released, drift inbox | 🗓️ Not started |
 | W4 | Sealing + `orun spec pull` | 🗓️ Not started |
@@ -52,8 +52,32 @@ yields a byte-for-byte identical projection; the actor-rejection guard across
 every mutator; the closed-event-kind coverage assertion; mutator argument/
 not-found/conflict error paths. Package coverage ~92%.
 
-**Still open for W0 (backend Worker, `orun-cloud`):** the D1 migration
-(`work_items`/`work_events`/`work_links`/`work_status`/`work_cursors`), the
-Worker mutators mirroring `internal/work`, and the per-project Durable Object
-skeleton that allocates `seq` + the `PREFIX-seq` human key. Tracked in the
-`orun-cloud` companion PR.
+**W0 backend (`orun-cloud`, #34, shipped):** the Postgres migration
+(`200_work_foundation`: `work.items`/`events`/`links`/`status`/`cursors` +
+the `sequences` allocator), the `@saas/db/work` mutators mirroring
+`internal/work`, and the per-project sequence allocator (the Postgres
+equivalent of the spec's Durable Object — the real backend is Supabase/Postgres,
+not Cloudflare D1). The invariant-2 replay is proven on both sides.
+
+## W1 — as-built (in progress)
+
+The **transport-agnostic core** has landed in `orun-cloud` (`@saas/db/work`,
+PR #35), honoring the engine-agnostic seam (Q-2 — no DO/WebSocket types in the
+contract):
+
+- **`sync.ts`** — the protocol (subscribe/mutate/event/verdict/replay), the
+  `Mutation` intent, the accept/reject `Verdict` shape (shared with the W5 MCP),
+  and `dispatch` (the single apply path for client *and* server).
+- **`WorkSyncServer`** — the per-project ordering authority modeled purely:
+  total-order `seq` assignment, event fan-out, cursor replay on (re)subscribe.
+  The production Cloudflare Durable Object is a thin transport adapter over it.
+- **`WorkSyncClient`** — the reference optimistic store (the console's contract):
+  optimistic apply, retire-on-confirm, rebase, reject rollback with verdict
+  surfaced, and gap/out-of-order replay losing nothing.
+
+Conformance fixtures both sides replay (2-client convergence under interleaved
+optimism, reject rollback, cursor replay).
+
+**Still open for W1:** the Cloudflare Durable Object + WebSocket transport
+adapter wrapping `WorkSyncServer`, and the soak-rig latency numbers (p95 server
+echo < 150 ms).
