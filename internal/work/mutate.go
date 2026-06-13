@@ -322,6 +322,16 @@ func (s *State) Import(item Item, source string, by Actor, at time.Time) (WorkEv
 	if !Kinds[item.Kind] {
 		return WorkEvent{}, fmt.Errorf("%w: imported item kind %q is invalid", ErrInvalidArgument, item.Kind)
 	}
+	// The key shape is validated by kind, mirroring the create mutators: Tasks
+	// carry PREFIX-seq human keys, Epics/Initiatives carry slugs (data-model.md
+	// §1). An import must not smuggle a malformed key past the create-path checks.
+	if item.Kind == KindTask {
+		if err := ValidateTaskKey(item.Key); err != nil {
+			return WorkEvent{}, err
+		}
+	} else if err := ValidateSlug(item.Key); err != nil {
+		return WorkEvent{}, err
+	}
 	if _, exists := s.Items[item.Key]; exists {
 		return WorkEvent{}, fmt.Errorf("%w: %q already exists in %s", ErrConflict, item.Key, s.Project)
 	}
