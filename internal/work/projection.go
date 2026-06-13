@@ -189,11 +189,12 @@ func (s *State) applyEvent(ev WorkEvent) error {
 			it.Parent = *p.Parent
 		}
 		if p.BoardOrder != nil {
-			row := s.Status[ev.Subject]
-			if row != nil {
-				row.BoardOrder = *p.BoardOrder
-				row.UpdatedSeq = ev.Seq
+			row, err := s.requireStatus(ev.Subject)
+			if err != nil {
+				return err
 			}
+			row.BoardOrder = *p.BoardOrder
+			row.UpdatedSeq = ev.Seq
 		}
 		return nil
 
