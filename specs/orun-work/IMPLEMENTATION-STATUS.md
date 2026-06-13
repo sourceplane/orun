@@ -11,7 +11,7 @@
 | W1 | Sync: Durable Object protocol + client contract | 🏗️ In progress — transport-agnostic core landed (orun-cloud); DO/WebSocket adapter pending |
 | W2 | Delivery bridge I: component links + auto-linking | 🏗️ In progress — auto-linker core + PR-webhook ingestion (orun-cloud) + producer bridge (orun `internal/workbridge`) landed; integrations-worker HTTP handler pending |
 | W3 | Delivery bridge II: gate-verified Done, Released, drift inbox | 🏗️ In progress — decision core (gate-verified Done, overlay-only Released, drift inbox) landed (orun-cloud); execution-truth/Deployment-overlay feed + apply orchestration pending |
-| W4 | Sealing + `orun spec pull` | 🗓️ Not started |
+| W4 | Sealing + `orun spec pull` | 🏗️ In progress — sealing core (content-addressed `SpecSnapshot`/`WorkLedgerSegment`) landed in `internal/work`; remote push + `orun spec pull` CLI pending |
 | W5 | The orun MCP | 🗓️ Not started |
 | W6 | `specs/` import (dogfood) | 🗓️ Not started |
 
@@ -130,3 +130,24 @@ The full `in_review → done → released` walk is proven from delivery events.
 **Still open for W3:** the producer feed of execution truth (run/check → gate
 mapping and the Deployment-overlay events from orun) and the apply orchestration
 that drives these decisions through the W0 mutators on merge/deploy webhooks.
+
+## W4 — as-built (in progress)
+
+The sealing core — the *system of proof* — landed in `internal/work` (`seal.go`),
+building on the W0 types + canonical encoder:
+
+- **`SpecSnapshot`** (§8.1): the frozen epic — epic doc + task envelopes +
+  contracts + links, pinned to the resolving catalog id and the ledger seq. By
+  type it carries **no hot state** (status/assignees/ordering live in the
+  `StatusRow` projection, never in the envelope — invariant 1, asserted).
+- **`WorkLedgerSegment`** (§8.2): a sealed event range with a `prev` chain that
+  makes the audit log tamper-evident.
+- **`ContentID`** = `sha256:` + hex(sha256(canonical bytes)): the same object
+  has the same id on every machine. Resealing identical inputs is byte-identical
+  (**invariant 6**, asserted); changing any input — or a segment's `prev` —
+  shifts the id. Both sealed shapes are in the generated JSON Schema.
+
+**Still open for W4:** pushing sealed objects to the remote object store via
+`internal/objremote` (the org/project-routed `refs/work/…`), and the `orun spec
+pull` / `orun work list/view/status` CLI surface (set-difference fetch,
+read-only materialization).

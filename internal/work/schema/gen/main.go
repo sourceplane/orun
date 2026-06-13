@@ -38,12 +38,14 @@ func main() {
 	out := os.Args[1]
 
 	defs := map[string]any{
-		"Item":      schemaForType(reflect.TypeOf(work.Item{})),
-		"Contract":  schemaForType(reflect.TypeOf(work.Contract{})),
-		"WorkEvent": schemaForType(reflect.TypeOf(work.WorkEvent{})),
-		"Principal": schemaForType(reflect.TypeOf(work.Principal{})),
-		"Link":      schemaForType(reflect.TypeOf(work.Link{})),
-		"StatusRow": schemaForType(reflect.TypeOf(work.StatusRow{})),
+		"Item":              schemaForType(reflect.TypeOf(work.Item{})),
+		"SpecSnapshot":      schemaForType(reflect.TypeOf(work.SpecSnapshot{})),
+		"WorkLedgerSegment": schemaForType(reflect.TypeOf(work.WorkLedgerSegment{})),
+		"Contract":          schemaForType(reflect.TypeOf(work.Contract{})),
+		"WorkEvent":         schemaForType(reflect.TypeOf(work.WorkEvent{})),
+		"Principal":         schemaForType(reflect.TypeOf(work.Principal{})),
+		"Link":              schemaForType(reflect.TypeOf(work.Link{})),
+		"StatusRow":         schemaForType(reflect.TypeOf(work.StatusRow{})),
 	}
 	root := map[string]any{
 		"$schema":     "http://json-schema.org/draft-07/schema#",
