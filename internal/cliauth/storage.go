@@ -423,6 +423,24 @@ func (s *fileCredentialStore) Load() (*Credentials, error) {
 	if err != nil {
 		return nil, err
 	}
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, os.ErrNotExist
+		}
+		return nil, fmt.Errorf("stat %s: %w", path, err)
+	}
+	// Refuse to read credentials that are group/other-readable: a 0600 file is
+	// enforced on write, so looser permissions mean the file was tampered with
+	// or copied insecurely. Surface a fix-it message rather than silently
+	// trusting it. (No-op on Windows, where Unix perm bits are not meaningful.)
+	if runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			return nil, fmt.Errorf(
+				"%s is world/group-readable (mode %#o); refusing to read it. Fix with: chmod 600 %s",
+				path, perm, path)
+		}
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

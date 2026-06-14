@@ -5,6 +5,7 @@ package remotestate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -111,7 +112,12 @@ type SessionTokenSource struct {
 	Version    string
 }
 
-// Token returns the current access token, refreshing it if needed.
+// Token returns the current access token, refreshing it if needed. The refresh
+// token is rotating and single-use: RefreshSession persists the new one. If the
+// platform reports the token family revoked (single-use reuse, or a console-side
+// revoke), RefreshSession clears the local session and returns
+// cliauth.ErrSessionRevoked; this surfaces it as a single actionable error
+// ("run `orun auth login`") rather than per-call spam.
 func (s *SessionTokenSource) Token(ctx context.Context) (string, error) {
 	creds, err := cliauth.LoadSession()
 	if err != nil {
@@ -124,17 +130,22 @@ func (s *SessionTokenSource) Token(ctx context.Context) (string, error) {
 		return creds.AccessToken, nil
 	}
 	if strings.TrimSpace(creds.RefreshToken) == "" {
-		return "", fmt.Errorf("stored Orun login has expired; run `orun auth login` again")
+		return "", cliauth.ErrSessionRevoked
 	}
 	refreshed, err := cliauth.RefreshSession(ctx, s.BackendURL, s.Version, creds)
 	if err != nil {
+		if errors.Is(err, cliauth.ErrSessionRevoked) {
+			// Session already cleared by RefreshSession; do not wrap so the
+			// caller sees the single actionable message.
+			return "", cliauth.ErrSessionRevoked
+		}
 		return "", fmt.Errorf("refresh Orun login: %w", err)
 	}
 	if refreshed.AccessToken == "" {
 		return "", fmt.Errorf("refreshed Orun login did not return an access token")
 	}
 	return refreshed.AccessToken, nil
-	}
+}
 
 // ResolveOptions controls token and namespace resolution.
 type ResolveOptions struct {

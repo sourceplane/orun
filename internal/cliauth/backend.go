@@ -2,16 +2,12 @@ package cliauth
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -21,17 +17,79 @@ import (
 
 const browserLoginTimeout = 10 * time.Minute
 
-// APIError is the backend auth error envelope.
+// browserPollInterval is the poll cadence for the browser login flow while
+// waiting for the console to approve the cliCode (platform OP1: the CLI polls
+// /token until the grant is approved; there is no loopback callback).
+const browserPollInterval = 2 * time.Second
+
+// Platform auth endpoint paths (state-api-contract.md §1). Browser-loopback
+// login polls cli/token with grantType "cli_code" until the console approves
+// the grant; the device flow polls device/poll. Refresh reuses cli/token with
+// grantType "refresh_token" (rotating, single-use).
+const (
+	cliStartPath       = "/v1/auth/cli/start"
+	cliTokenPath       = "/v1/auth/cli/token"
+	cliRevokePath      = "/v1/auth/cli/revoke"
+	cliDeviceStartPath = "/v1/auth/cli/device/start"
+	cliDevicePollPath  = "/v1/auth/cli/device/poll"
+)
+
+// CLI token grant-type discriminators for POST /v1/auth/cli/token (OP1).
+const (
+	grantTypeCLICode      = "cli_code"
+	grantTypeRefreshToken = "refresh_token"
+)
+
+// ErrSessionRevoked is returned when the platform reports that a refresh token
+// family has been revoked (rotating-refresh reuse, or a console-side revoke).
+// Callers surface a single "run `orun auth login`" message and clear the
+// session rather than retrying.
+var ErrSessionRevoked = errors.New("Orun session revoked; run `orun auth login`")
+
+// APIError is the backend auth error envelope. It accommodates both the
+// platform's nested envelope ({ error: { code, message, details?, requestId } })
+// and the OSS backend's flat envelope ({ error, code }). Status carries the HTTP
+// status code so callers can distinguish 401 from other failures.
 type APIError struct {
-	Code    string `json:"code"`
-	Message string `json:"error"`
+	Code      string `json:"code"`
+	Message   string `json:"error"`
+	RequestID string `json:"-"`
+	Status    int    `json:"-"`
 }
 
 func (e *APIError) Error() string {
-	if e.Code == "" {
-		return e.Message
+	msg := e.Message
+	if e.Code != "" {
+		msg = fmt.Sprintf("%s (%s)", msg, e.Code)
 	}
-	return fmt.Sprintf("%s (%s)", e.Message, e.Code)
+	if e.RequestID != "" {
+		msg = fmt.Sprintf("%s [requestId: %s]", msg, e.RequestID)
+	}
+	return msg
+}
+
+// isSessionRevoked reports whether an error from the auth API means the stored
+// CLI session is no longer usable and the user must re-login. The platform
+// (OP1) maps refresh-token reuse/family-revoke and unknown/invalid tokens to
+// HTTP 401 code "unauthenticated" (its service-level "not_found"), and an aged
+// refresh to HTTP 410 code "expired". The OSS-era aliases are kept for
+// back-compat. Any 401/404/410 on a refresh/revoke call is treated as a dead
+// session.
+func isSessionRevoked(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(apiErr.Code)) {
+	case "unauthenticated", "expired", "not_found",
+		"family_revoked", "invalid_grant", "session_revoked", "token_reused":
+		return true
+	}
+	switch apiErr.Status {
+	case http.StatusUnauthorized, http.StatusNotFound, http.StatusGone:
+		return true
+	}
+	return false
 }
 
 // BackendClient talks to the Orun backend auth/account routes.
@@ -41,20 +99,80 @@ type BackendClient struct {
 	httpClient *http.Client
 }
 
-// DeviceStartResponse is returned by POST /v1/auth/cli/device/start.
+// CLIStartResponse is the unwrapped data payload of POST /v1/auth/cli/start
+// (OP1). The CLI opens AuthorizeURL in a browser; the console approves the
+// request keyed by CLICode; the CLI then polls cli/token with grantType
+// "cli_code" + cliCode until the grant is approved and a session is minted
+// (state-api-contract.md §1).
+type CLIStartResponse struct {
+	AuthorizeURL string `json:"authorizeUrl"`
+	CLICode      string `json:"cliCode"`
+	ExpiresAt    string `json:"expiresAt"`
+}
+
+// deadline returns the start-grant expiry parsed from ExpiresAt (RFC3339),
+// falling back to a 10-minute window from now.
+func (s *CLIStartResponse) deadline(now time.Time) time.Time {
+	if s.ExpiresAt != "" {
+		if t, err := time.Parse(time.RFC3339, s.ExpiresAt); err == nil {
+			return t
+		}
+	}
+	return now.Add(10 * time.Minute)
+}
+
+// DeviceStartResponse is returned by POST /v1/auth/cli/device/start (RFC-8628).
+// VerificationURIComplete and ExpiresIn are accepted as fallbacks for the OSS
+// backend's older field names.
 type DeviceStartResponse struct {
 	DeviceCode              string `json:"deviceCode"`
 	UserCode                string `json:"userCode"`
-	VerificationURI         string `json:"verificationUri"`
-	VerificationURIComplete string `json:"verificationUriComplete"`
-	ExpiresIn               int    `json:"expiresIn"`
+	VerificationURL         string `json:"verificationUrl"`
+	VerificationURI         string `json:"verificationUri,omitempty"`
+	VerificationURIComplete string `json:"verificationUriComplete,omitempty"`
+	ExpiresAt               string `json:"expiresAt,omitempty"`
+	ExpiresIn               int    `json:"expiresIn,omitempty"`
 	Interval                int    `json:"interval"`
 }
 
-// DevicePollPendingResponse is returned while device auth is pending.
+// verificationTarget returns the best URL to show the user for device approval.
+func (d *DeviceStartResponse) verificationTarget() string {
+	if d.VerificationURIComplete != "" {
+		return d.VerificationURIComplete
+	}
+	if d.VerificationURL != "" {
+		return d.VerificationURL
+	}
+	return d.VerificationURI
+}
+
+// deadline returns the device-flow expiry, from expiresAt (RFC3339) or
+// expiresIn (seconds from now), or a 10-minute default.
+func (d *DeviceStartResponse) deadline(now time.Time) time.Time {
+	if d.ExpiresAt != "" {
+		if t, err := time.Parse(time.RFC3339, d.ExpiresAt); err == nil {
+			return t
+		}
+	}
+	if d.ExpiresIn > 0 {
+		return now.Add(time.Duration(d.ExpiresIn) * time.Second)
+	}
+	return now.Add(10 * time.Minute)
+}
+
+// DevicePollPendingResponse is the unwrapped data payload returned while device
+// auth is pending (OP1: { status: "pending", error: "authorization_pending" }).
 type DevicePollPendingResponse struct {
-	Status   string `json:"status"`
-	Interval int    `json:"interval"`
+	Status string `json:"status"`
+	Error  string `json:"error"`
+}
+
+// SessionUser is the authenticated user in a session payload
+// (state-api-contract.md §1: user: { id, email, displayName }).
+type SessionUser struct {
+	ID          string `json:"id,omitempty"`
+	Email       string `json:"email,omitempty"`
+	DisplayName string `json:"displayName,omitempty"`
 }
 
 // SessionResponse is returned by the CLI auth routes.
@@ -63,13 +181,14 @@ type DevicePollPendingResponse struct {
 // AllowedNamespaceIDs is kept for back-compat with the OSS backend, which still
 // returns it (retired in OC6); orgs[].id serves the same purpose.
 type SessionResponse struct {
-	AccessToken         string   `json:"accessToken"`
-	ExpiresAt           string   `json:"expiresAt"`
-	RefreshToken        string   `json:"refreshToken,omitempty"`
-	RefreshExpiresAt    string   `json:"refreshExpiresAt,omitempty"`
-	GitHubLogin         string   `json:"githubLogin"`
-	Orgs                []OrgRef `json:"orgs,omitempty"`
-	AllowedNamespaceIDs []string `json:"allowedNamespaceIds,omitempty"`
+	AccessToken         string      `json:"accessToken"`
+	ExpiresAt           string      `json:"expiresAt"`
+	RefreshToken        string      `json:"refreshToken,omitempty"`
+	RefreshExpiresAt    string      `json:"refreshExpiresAt,omitempty"`
+	User                SessionUser `json:"user"`
+	GitHubLogin         string      `json:"githubLogin,omitempty"`
+	Orgs                []OrgRef    `json:"orgs,omitempty"`
+	AllowedNamespaceIDs []string    `json:"allowedNamespaceIds,omitempty"`
 }
 
 // LinkedRepo is returned by GET /v1/accounts/repos.
@@ -111,62 +230,173 @@ func NewBackendClient(baseURL, version string) *BackendClient {
 	}
 }
 
-// BrowserLoginURL returns the CLI browser-login URL.
-func (c *BackendClient) BrowserLoginURL(returnTo string) string {
-	v := url.Values{}
-	v.Set("client", "cli")
-	v.Set("returnTo", returnTo)
-	return c.baseURL + "/v1/auth/github?" + v.Encode()
-}
-
-// StartDeviceFlow starts the backend-mediated GitHub device flow.
-func (c *BackendClient) StartDeviceFlow(ctx context.Context) (*DeviceStartResponse, error) {
-	var resp DeviceStartResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/v1/auth/cli/device/start", nil, nil, &resp); err != nil {
+// StartCLILogin begins the browser login (POST /v1/auth/cli/start, OP1). The
+// body is just the CLI host label shown on the console approval page; the
+// platform accepts NO redirect-uri/port and never calls back a loopback
+// listener. The CLI opens the returned authorizeUrl and polls cli/token.
+func (c *BackendClient) StartCLILogin(ctx context.Context) (*CLIStartResponse, error) {
+	body := map[string]string{"host": cliHost()}
+	var resp CLIStartResponse
+	if err := c.doJSONData(ctx, http.MethodPost, cliStartPath, nil, body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
 }
 
-// PollDeviceFlow polls the backend device-flow endpoint.
+// RedeemCLILogin redeems the console-approved cliCode for a session (POST
+// /v1/auth/cli/token with grantType "cli_code", OP1). While the grant is still
+// pending the platform returns HTTP 400 code "validation_failed" with message
+// "Not yet approved"; callers detect that via cliCodePending and keep polling.
+// Terminal failures (not_found / expired) surface as an *APIError.
+func (c *BackendClient) RedeemCLILogin(ctx context.Context, cliCode string) (*SessionResponse, error) {
+	body := map[string]string{
+		"grantType": grantTypeCLICode,
+		"cliCode":   cliCode,
+	}
+	data, _, err := c.do(ctx, http.MethodPost, cliTokenPath, nil, body)
+	if err != nil {
+		return nil, err
+	}
+	return decodeSessionData(data)
+}
+
+// cliCodePending reports whether an error from RedeemCLILogin means the grant
+// has not yet been approved (keep polling) rather than a terminal failure. The
+// platform returns the pending state as HTTP 400 invalid_request / "Not yet
+// approved" (mapped by api-edge to code "validation_failed"). not_found and
+// expired are terminal and are excluded here.
+func cliCodePending(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	if apiErr.Status != http.StatusBadRequest {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(apiErr.Code)) {
+	case "not_found", "expired", "unauthenticated", "internal_error":
+		return false
+	}
+	// 400 validation_failed / invalid_request: not yet approved (still pending).
+	return true
+}
+
+// StartDeviceFlow starts the platform device flow (POST /v1/auth/cli/device/start,
+// RFC-8628, OP1).
+func (c *BackendClient) StartDeviceFlow(ctx context.Context) (*DeviceStartResponse, error) {
+	var resp DeviceStartResponse
+	if err := c.doJSONData(ctx, http.MethodPost, cliDeviceStartPath, nil, map[string]string{"host": cliHost()}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// PollDeviceFlow polls the platform device-flow endpoint (OP1). The body of a
+// pending/complete response is the {data,meta} success envelope:
+//   - data.status == "pending"  → still waiting (keep polling at interval).
+//   - data.status == "complete" → data.session carries the minted session.
+//
+// Terminal denials are HTTP errors: 403 access_denied (denied) and 410 expired,
+// returned to the caller as *APIError.
 func (c *BackendClient) PollDeviceFlow(ctx context.Context, deviceCode string) (*SessionResponse, *DevicePollPendingResponse, error) {
 	body := map[string]string{"deviceCode": deviceCode}
-	data, status, err := c.do(ctx, http.MethodPost, "/v1/auth/cli/device/poll", nil, body)
+	data, _, err := c.do(ctx, http.MethodPost, cliDevicePollPath, nil, body)
 	if err != nil {
 		return nil, nil, err
 	}
-	if status == http.StatusAccepted {
-		var pending DevicePollPendingResponse
-		if err := json.Unmarshal(data, &pending); err != nil {
-			return nil, nil, err
-		}
-		return nil, &pending, nil
-	}
-	var session SessionResponse
-	if err := json.Unmarshal(data, &session); err != nil {
+	payload, err := unwrapData(data)
+	if err != nil {
 		return nil, nil, err
 	}
-	return &session, nil, nil
+	var marker struct {
+		Status string `json:"status"`
+	}
+	_ = json.Unmarshal(payload, &marker)
+	if strings.EqualFold(marker.Status, "complete") {
+		session, err := decodeNestedSession(payload)
+		if err != nil {
+			return nil, nil, err
+		}
+		return session, nil, nil
+	}
+	// Anything that is not an explicit "complete" is treated as pending.
+	return nil, decodePending(payload), nil
 }
 
-// Refresh exchanges a refresh token for a new access token.
-func (c *BackendClient) Refresh(ctx context.Context, refreshToken string) (*SessionResponse, error) {
-	var resp SessionResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/v1/auth/cli/token", nil, map[string]string{"refreshToken": refreshToken}, &resp); err != nil {
+// decodePending parses a device-poll pending payload, defaulting Status to
+// "pending".
+func decodePending(payload []byte) *DevicePollPendingResponse {
+	pending := &DevicePollPendingResponse{Status: "pending"}
+	_ = json.Unmarshal(payload, pending)
+	if pending.Status == "" {
+		pending.Status = "pending"
+	}
+	return pending
+}
+
+// decodeNestedSession parses the device-poll complete payload, where the session
+// is nested under "session" ({ status: "complete", session: {…} }).
+func decodeNestedSession(payload []byte) (*SessionResponse, error) {
+	var wrapped struct {
+		Session *SessionResponse `json:"session"`
+	}
+	if err := json.Unmarshal(payload, &wrapped); err != nil {
+		return nil, fmt.Errorf("decode device session payload: %w", err)
+	}
+	if wrapped.Session == nil || wrapped.Session.AccessToken == "" {
+		return nil, fmt.Errorf("device poll completed without a session")
+	}
+	return wrapped.Session, nil
+}
+
+// decodeSessionData unwraps the {data,meta} success envelope and parses the
+// session that sits directly under data (cli/token responses).
+func decodeSessionData(data []byte) (*SessionResponse, error) {
+	payload, err := unwrapData(data)
+	if err != nil {
 		return nil, err
 	}
-	return &resp, nil
+	var session SessionResponse
+	if err := json.Unmarshal(payload, &session); err != nil {
+		return nil, fmt.Errorf("decode session payload: %w", err)
+	}
+	return &session, nil
 }
 
-// Logout revokes the refresh token.
+// Refresh exchanges a (rotating, single-use) refresh token for a new access
+// token and a new refresh token (POST /v1/auth/cli/token, grantType
+// "refresh_token", OP1). A revoked/expired/reused token (401/404/410, or a
+// revoke/expired code) is returned as ErrSessionRevoked.
+func (c *BackendClient) Refresh(ctx context.Context, refreshToken string) (*SessionResponse, error) {
+	body := map[string]string{
+		"grantType":    grantTypeRefreshToken,
+		"refreshToken": refreshToken,
+	}
+	data, _, err := c.do(ctx, http.MethodPost, cliTokenPath, nil, body)
+	if err != nil {
+		if isSessionRevoked(err) {
+			return nil, ErrSessionRevoked
+		}
+		return nil, err
+	}
+	return decodeSessionData(data)
+}
+
+// Logout revokes the session (POST /v1/auth/cli/revoke, OP1). An
+// already-revoked/expired session (401/404/410) is treated as success — the
+// session is already gone.
 func (c *BackendClient) Logout(ctx context.Context, refreshToken string) error {
-	return c.doJSON(ctx, http.MethodPost, "/v1/auth/cli/logout", nil, map[string]string{"refreshToken": refreshToken}, nil)
+	_, _, err := c.do(ctx, http.MethodPost, cliRevokePath, nil, map[string]string{"refreshToken": refreshToken})
+	if err != nil && isSessionRevoked(err) {
+		return nil
+	}
+	return err
 }
 
 // GetAccount returns the current backend account.
 func (c *BackendClient) GetAccount(ctx context.Context, accessToken string) (*Account, error) {
 	var resp Account
-	if err := c.doJSON(ctx, http.MethodGet, "/v1/accounts/me", map[string]string{"Authorization": "Bearer " + accessToken}, nil, &resp); err != nil {
+	if err := c.doJSONData(ctx, http.MethodGet, "/v1/accounts/me", map[string]string{"Authorization": "Bearer " + accessToken}, nil, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -177,7 +407,7 @@ func (c *BackendClient) ListLinkedRepos(ctx context.Context, accessToken string)
 	var resp struct {
 		Repos []LinkedRepo `json:"repos"`
 	}
-	if err := c.doJSON(ctx, http.MethodGet, "/v1/accounts/repos", map[string]string{"Authorization": "Bearer " + accessToken}, nil, &resp); err != nil {
+	if err := c.doJSONData(ctx, http.MethodGet, "/v1/accounts/repos", map[string]string{"Authorization": "Bearer " + accessToken}, nil, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Repos, nil
@@ -188,7 +418,7 @@ func (c *BackendClient) ListLinkedRepos(ctx context.Context, accessToken string)
 // guards against older backend versions that may return canonical repo namespaces.
 func (c *BackendClient) LinkRepoFromSession(ctx context.Context, accessToken, repoFullName string) (*LinkRepoFromSessionResponse, error) {
 	var resp LinkRepoFromSessionResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/v1/accounts/repos/link",
+	if err := c.doJSONData(ctx, http.MethodPost, "/v1/accounts/repos/link",
 		map[string]string{"Authorization": "Bearer " + accessToken},
 		map[string]string{"repoFullName": repoFullName},
 		&resp,
@@ -204,82 +434,69 @@ func (c *BackendClient) LinkRepoFromSession(ctx context.Context, accessToken, re
 	return &resp, nil
 }
 
-// BrowserLogin performs the CLI loopback OAuth flow and stores the resulting session.
+// BrowserLogin performs the platform browser login (POST /v1/auth/cli/start,
+// OP1). It opens the returned authorizeUrl, then POLLS cli/token (grantType
+// "cli_code" + cliCode) until the console approves the grant and a session is
+// minted, or the grant's expiresAt deadline passes. The platform never calls
+// back a loopback listener — approval happens entirely in the browser/console
+// and completion is determined by polling, not by a loopback callback.
 func BrowserLogin(ctx context.Context, backendURL, version string, out io.Writer, openBrowser BrowserOpener) (*Credentials, error) {
 	client := NewBackendClient(backendURL, version)
 	if openBrowser == nil {
 		openBrowser = OpenBrowser
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+
+	start, err := client.StartCLILogin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("start loopback listener: %w", err)
+		return nil, fmt.Errorf("begin Orun login: %w", err)
 	}
-	defer ln.Close()
-
-	nonce, err := randomNonce(12)
-	if err != nil {
-		return nil, err
+	if strings.TrimSpace(start.AuthorizeURL) == "" {
+		return nil, fmt.Errorf("backend did not return an authorize URL")
 	}
-	callbackPath := "/callback/" + nonce
-	callbackURL := "http://" + ln.Addr().String() + callbackPath
-	loginURL := client.BrowserLoginURL(callbackURL)
-
-	type loginResult struct {
-		creds *Credentials
-		err   error
+	if strings.TrimSpace(start.CLICode) == "" {
+		return nil, fmt.Errorf("backend did not return a CLI code")
 	}
-	resultCh := make(chan loginResult, 1)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc(callbackPath, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = io.WriteString(w, `<!doctype html><html><body>Completing Orun login...<script>
-fetch(location.pathname + "/complete", {method:"POST", headers:{"Content-Type":"text/plain"}, body:location.hash.replace(/^#/,"")})
-  .then(() => { document.body.textContent = "Orun login complete. You can close this window."; })
-  .catch(() => { document.body.textContent = "Orun login failed. Return to the terminal."; });
-</script></body></html>`)
-	})
-	mux.HandleFunc(callbackPath+"/complete", func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		body, _ := io.ReadAll(r.Body)
-		creds, parseErr := credentialsFromFragment(string(body), backendURL)
-		if parseErr == nil {
-			parseErr = SaveSession(creds)
-		}
-		select {
-		case resultCh <- loginResult{creds: creds, err: parseErr}:
-		default:
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
-
-	server := &http.Server{Handler: mux}
-	go func() {
-		_ = server.Serve(ln)
-	}()
-	defer server.Shutdown(context.Background())
 
 	if out != nil {
-		fmt.Fprintf(out, "Open the browser to authenticate with Orun:\n%s\n\n", loginURL)
+		fmt.Fprintf(out, "Open the browser to authenticate with Orun:\n%s\n\n", start.AuthorizeURL)
+		fmt.Fprintf(out, "Waiting for approval...\n")
 	}
-	if err := openBrowser(loginURL); err != nil && out != nil {
+	if err := openBrowser(start.AuthorizeURL); err != nil && out != nil {
 		fmt.Fprintf(out, "Browser open failed: %v\nContinue with the URL above.\n\n", err)
 	}
 
 	loginCtx, cancel := context.WithTimeout(ctx, browserLoginTimeout)
 	defer cancel()
-	select {
-	case <-loginCtx.Done():
-		return nil, fmt.Errorf("browser login timed out")
-	case result := <-resultCh:
-		if result.err != nil {
-			return nil, result.err
+	deadline := start.deadline(time.Now())
+
+	for {
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("browser login expired before approval")
 		}
-		return result.creds, nil
+		session, err := client.RedeemCLILogin(loginCtx, start.CLICode)
+		if err == nil {
+			creds := sessionResponseToCredentials(session, backendURL)
+			if err := SaveSession(creds); err != nil {
+				return nil, err
+			}
+			return creds, nil
+		}
+		if cliCodePending(err) {
+			if !sleepCtx(loginCtx, browserPollInterval) {
+				if errors.Is(loginCtx.Err(), context.DeadlineExceeded) {
+					return nil, fmt.Errorf("browser login timed out")
+				}
+				return nil, loginCtx.Err()
+			}
+			continue
+		}
+		return nil, fmt.Errorf("redeem Orun login: %w", err)
 	}
 }
 
-// DeviceLogin performs the backend-mediated device flow and stores the session.
+// DeviceLogin performs the platform device flow (RFC-8628) and stores the
+// session. The platform owns the grant; GitHub identity is just one of its
+// login methods.
 func DeviceLogin(ctx context.Context, backendURL, version string, out io.Writer) (*Credentials, error) {
 	client := NewBackendClient(backendURL, version)
 	start, err := client.StartDeviceFlow(ctx)
@@ -287,15 +504,15 @@ func DeviceLogin(ctx context.Context, backendURL, version string, out io.Writer)
 		return nil, err
 	}
 	if out != nil {
-		fmt.Fprintf(out, "Complete GitHub device login:\n")
+		fmt.Fprintf(out, "To authenticate, visit the verification page and enter the code:\n")
 		fmt.Fprintf(out, "Code: %s\n", start.UserCode)
-		fmt.Fprintf(out, "Verify: %s\n\n", start.VerificationURIComplete)
+		fmt.Fprintf(out, "Verify: %s\n\n", start.verificationTarget())
 	}
 	interval := start.Interval
 	if interval <= 0 {
 		interval = 5
 	}
-	deadline := time.Now().Add(time.Duration(start.ExpiresIn) * time.Second)
+	deadline := start.deadline(time.Now())
 	for {
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("device login expired")
@@ -303,18 +520,27 @@ func DeviceLogin(ctx context.Context, backendURL, version string, out io.Writer)
 		session, pending, err := client.PollDeviceFlow(ctx, start.DeviceCode)
 		if err != nil {
 			var apiErr *APIError
-			if errors.As(err, &apiErr) && apiErr.Code == "RATE_LIMITED" {
-				interval += 5
-				time.Sleep(time.Duration(interval) * time.Second)
-				continue
+			if errors.As(err, &apiErr) {
+				// Terminal denials (OP1): 403 access_denied, 410 expired.
+				switch {
+				case apiErr.Status == http.StatusForbidden ||
+					strings.EqualFold(apiErr.Code, "access_denied"):
+					return nil, fmt.Errorf("device login denied")
+				case apiErr.Status == http.StatusGone ||
+					strings.EqualFold(apiErr.Code, "expired"):
+					return nil, fmt.Errorf("device login expired")
+				}
 			}
 			return nil, err
 		}
 		if pending != nil {
-			if pending.Interval > 0 {
-				interval = pending.Interval
+			// RFC-8628 slow_down: back off the poll interval.
+			if strings.EqualFold(pending.Error, "slow_down") {
+				interval += 5
 			}
-			time.Sleep(time.Duration(interval) * time.Second)
+			if !sleepCtx(ctx, time.Duration(interval)*time.Second) {
+				return nil, ctx.Err()
+			}
 			continue
 		}
 		creds := sessionResponseToCredentials(session, backendURL)
@@ -325,7 +551,12 @@ func DeviceLogin(ctx context.Context, backendURL, version string, out io.Writer)
 	}
 }
 
-// RefreshSession refreshes the local CLI session if needed.
+// RefreshSession refreshes the local CLI session using the rotating,
+// single-use refresh token. On success it persists the NEW refresh token
+// returned by the platform (the old one is now spent). When the platform
+// reports the refresh-token family revoked (reuse, or a console-side revoke),
+// it clears the local session and returns ErrSessionRevoked so the caller can
+// surface a single "run `orun auth login`" message rather than retrying.
 func RefreshSession(ctx context.Context, backendURL, version string, creds *Credentials) (*Credentials, error) {
 	if creds == nil {
 		return nil, os.ErrNotExist
@@ -333,16 +564,35 @@ func RefreshSession(ctx context.Context, backendURL, version string, creds *Cred
 	if strings.TrimSpace(creds.BackendURL) != "" && !sameURL(creds.BackendURL, backendURL) {
 		return nil, fmt.Errorf("stored login is for %s; run `orun auth login --backend-url %s`", creds.BackendURL, backendURL)
 	}
+	if strings.TrimSpace(creds.RefreshToken) == "" {
+		return nil, ErrSessionRevoked
+	}
 	client := NewBackendClient(backendURL, version)
 	resp, err := client.Refresh(ctx, creds.RefreshToken)
 	if err != nil {
+		if errors.Is(err, ErrSessionRevoked) {
+			// Single-use reuse / family revoked: the stored session is dead.
+			_ = ClearSession()
+			return nil, ErrSessionRevoked
+		}
 		return nil, err
 	}
 	updated := sessionResponseToCredentials(resp, backendURL)
-	updated.RefreshToken = creds.RefreshToken
-	updated.RefreshTokenExpiry = creds.RefreshTokenExpiry
-	// A refresh response may omit the org spine (it only mints a new access
-	// token); carry the prior org/namespace info forward so it is not lost.
+	// Rotating refresh: keep the NEW refresh token if the server rotated it;
+	// fall back to the prior one only if the response omitted it (some servers
+	// return access-token-only refreshes).
+	if strings.TrimSpace(updated.RefreshToken) == "" {
+		updated.RefreshToken = creds.RefreshToken
+		updated.RefreshTokenExpiry = creds.RefreshTokenExpiry
+	}
+	// A refresh response may omit the identity/org spine (it only mints a new
+	// access token); carry the prior info forward so it is not lost.
+	if updated.GitHubLogin == "" {
+		updated.GitHubLogin = creds.GitHubLogin
+	}
+	if updated.User == (SessionUser{}) {
+		updated.User = creds.User
+	}
 	if len(updated.Orgs) == 0 {
 		updated.Orgs = append([]OrgRef(nil), creds.Orgs...)
 	}
@@ -353,6 +603,18 @@ func RefreshSession(ctx context.Context, backendURL, version string, creds *Cred
 		return nil, err
 	}
 	return updated, nil
+}
+
+// sleepCtx sleeps for d or until ctx is cancelled. Returns false if cancelled.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
 }
 
 // OpenBrowser opens the system browser.
@@ -369,7 +631,10 @@ func OpenBrowser(target string) error {
 	return cmd.Start()
 }
 
-func (c *BackendClient) doJSON(ctx context.Context, method, path string, headers map[string]string, body interface{}, out interface{}) error {
+// doJSONData performs a request and decodes the unwrapped `data` payload of the
+// platform's `{ data, meta }` success envelope (OP1) into out. All platform
+// success responses are enveloped; this is the standard decode path.
+func (c *BackendClient) doJSONData(ctx context.Context, method, path string, headers map[string]string, body interface{}, out interface{}) error {
 	data, _, err := c.do(ctx, method, path, headers, body)
 	if err != nil {
 		return err
@@ -377,10 +642,45 @@ func (c *BackendClient) doJSON(ctx context.Context, method, path string, headers
 	if out == nil || len(data) == 0 {
 		return nil
 	}
-	if err := json.Unmarshal(data, out); err != nil {
+	payload, err := unwrapData(data)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(payload, out); err != nil {
 		return fmt.Errorf("decode backend response: %w", err)
 	}
 	return nil
+}
+
+// unwrapData extracts the `data` field from the platform's `{ data, meta }`
+// success envelope (OP1). api-edge forwards the identity-worker body verbatim,
+// so every 2xx auth/account response is enveloped. If the body has no `data`
+// key (e.g. an OSS backend that does not envelope), the raw body is returned so
+// callers still parse the legacy flat shape.
+func unwrapData(data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return data, nil
+	}
+	var env struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(data, &env); err != nil {
+		return nil, fmt.Errorf("decode backend envelope: %w", err)
+	}
+	if len(env.Data) > 0 && string(env.Data) != "null" {
+		return env.Data, nil
+	}
+	// No envelope present (or data:null): fall back to the raw body.
+	return data, nil
+}
+
+// cliHost returns the host label sent on cli/start and device/start; the console
+// shows it on the approval page. Best-effort: an empty label is acceptable.
+func cliHost() string {
+	if h, err := os.Hostname(); err == nil && strings.TrimSpace(h) != "" {
+		return h
+	}
+	return "orun-cli"
 }
 
 func (c *BackendClient) do(ctx context.Context, method, path string, headers map[string]string, body interface{}) ([]byte, int, error) {
@@ -411,13 +711,56 @@ func (c *BackendClient) do(ctx context.Context, method, path string, headers map
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		var apiErr APIError
-		if json.Unmarshal(data, &apiErr) == nil && apiErr.Message != "" {
-			return nil, resp.StatusCode, &apiErr
-		}
-		return nil, resp.StatusCode, &APIError{Code: fmt.Sprintf("HTTP_%d", resp.StatusCode), Message: strings.TrimSpace(string(data))}
+		return nil, resp.StatusCode, decodeAuthError(data, resp.StatusCode)
 	}
 	return data, resp.StatusCode, nil
+}
+
+// decodeAuthError parses both the platform's nested error envelope
+// ({ error: { code, message, requestId } }) and the OSS backend's flat envelope
+// ({ error, code }), falling back to a status-derived message.
+func decodeAuthError(data []byte, status int) *APIError {
+	// Platform nested shape.
+	var nested struct {
+		Error *struct {
+			Code      string `json:"code"`
+			Message   string `json:"message"`
+			RequestID string `json:"requestId"`
+		} `json:"error"`
+		RequestID string `json:"requestId"`
+	}
+	if json.Unmarshal(data, &nested) == nil && nested.Error != nil &&
+		(nested.Error.Message != "" || nested.Error.Code != "") {
+		reqID := nested.Error.RequestID
+		if reqID == "" {
+			reqID = nested.RequestID
+		}
+		return &APIError{
+			Code:      nested.Error.Code,
+			Message:   nested.Error.Message,
+			RequestID: reqID,
+			Status:    status,
+		}
+	}
+	// Flat OSS shape: { "error": "msg", "code": "CODE", "requestId": "…" }.
+	var flat struct {
+		Error     string `json:"error"`
+		Code      string `json:"code"`
+		RequestID string `json:"requestId"`
+	}
+	if json.Unmarshal(data, &flat) == nil && flat.Error != "" {
+		return &APIError{
+			Code:      flat.Code,
+			Message:   flat.Error,
+			RequestID: flat.RequestID,
+			Status:    status,
+		}
+	}
+	return &APIError{
+		Code:    fmt.Sprintf("HTTP_%d", status),
+		Message: strings.TrimSpace(string(data)),
+		Status:  status,
+	}
 }
 
 func sessionResponseToCredentials(resp *SessionResponse, backendURL string) *Credentials {
@@ -431,60 +774,30 @@ func sessionResponseToCredentials(resp *SessionResponse, backendURL string) *Cre
 			}
 		}
 	}
+	expiry := resp.ExpiresAt
+	if strings.TrimSpace(expiry) == "" {
+		expiry = jwtExpiry(resp.AccessToken)
+	}
+	// Keep the legacy githubLogin display field populated from the platform's
+	// user payload so existing surfaces that read it still show something.
+	display := resp.GitHubLogin
+	if display == "" {
+		display = resp.User.DisplayName
+	}
+	if display == "" {
+		display = resp.User.Email
+	}
 	return &Credentials{
 		AccessToken:         resp.AccessToken,
-		AccessTokenExpiry:   resp.ExpiresAt,
+		AccessTokenExpiry:   expiry,
 		RefreshToken:        resp.RefreshToken,
 		RefreshTokenExpiry:  resp.RefreshExpiresAt,
-		GitHubLogin:         resp.GitHubLogin,
+		User:                resp.User,
+		GitHubLogin:         display,
 		Orgs:                orgs,
 		AllowedNamespaceIDs: append([]string(nil), resp.AllowedNamespaceIDs...),
 		BackendURL:          backendURL,
 	}
-}
-
-func credentialsFromFragment(fragment, backendURL string) (*Credentials, error) {
-	values, err := url.ParseQuery(strings.TrimPrefix(fragment, "#"))
-	if err != nil {
-		return nil, fmt.Errorf("parse loopback callback: %w", err)
-	}
-	allowedRaw := values.Get("allowedNamespaceIds")
-	allowed := []string{}
-	if strings.TrimSpace(allowedRaw) != "" {
-		if err := json.Unmarshal([]byte(allowedRaw), &allowed); err != nil {
-			return nil, fmt.Errorf("parse allowed namespace IDs: %w", err)
-		}
-	}
-	accessToken := values.Get("sessionToken")
-	if accessToken == "" {
-		return nil, fmt.Errorf("missing session token in loopback callback")
-	}
-	// Synthesize the org spine from the legacy allowed-namespace list until the
-	// platform callback (OC1) carries orgs[] directly.
-	orgs := make([]OrgRef, 0, len(allowed))
-	for _, id := range allowed {
-		if id = strings.TrimSpace(id); id != "" {
-			orgs = append(orgs, OrgRef{ID: id})
-		}
-	}
-	return &Credentials{
-		AccessToken:         accessToken,
-		AccessTokenExpiry:   jwtExpiry(accessToken),
-		RefreshToken:        values.Get("refreshToken"),
-		RefreshTokenExpiry:  values.Get("refreshExpiresAt"),
-		GitHubLogin:         values.Get("githubLogin"),
-		Orgs:                orgs,
-		AllowedNamespaceIDs: allowed,
-		BackendURL:          backendURL,
-	}, nil
-}
-
-func randomNonce(size int) (string, error) {
-	b := make([]byte, size)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("generate nonce: %w", err)
-	}
-	return hex.EncodeToString(b), nil
 }
 
 func jwtExpiry(token string) string {
