@@ -2,7 +2,7 @@
 
 Status: Draft. The platform-side model (tenancy, auth doors, the two state
 planes, secrets, console surfaces) is specified in
-`multi-tenant-saas/specs/epics/saas-orun-platform/design.md`; the wire contract
+`orun-cloud/specs/epics/saas-orun-platform/design.md`; the wire contract
 in `state-api-contract.md` there is normative. This doc covers what changes
 *in this codebase* and the principles that keep cloud integration seamless.
 

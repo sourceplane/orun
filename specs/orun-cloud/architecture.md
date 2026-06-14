@@ -3,7 +3,7 @@
 Status: Draft. The at-a-glance companion to `design.md` — the diagram, the
 load-bearing decisions, and *why* each was taken, from the CLI's side. The
 platform-side twin is
-`multi-tenant-saas/specs/epics/saas-orun-platform/architecture.md`.
+`orun-cloud/specs/epics/saas-orun-platform/architecture.md`.
 
 ## The shape
 

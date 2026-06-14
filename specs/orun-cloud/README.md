@@ -7,7 +7,7 @@ snapshots in it, resolves secrets from it at execution time — and stays fully
 functional offline, because cloud is additive, never required.
 
 Paired epic on the platform side:
-`multi-tenant-saas/specs/epics/saas-orun-platform/` (cluster **OP**). The two
+`orun-cloud/specs/epics/saas-orun-platform/` (cluster **OP**). The two
 share one wire contract — the platform owns the normative copy
 (`state-api-contract.md` there); this repo vendors it and CI diffs the vendored
 copy (OC0). Neither repo may break the contract unilaterally.
@@ -19,7 +19,7 @@ copy (OC0). Neither repo may break the contract unilaterally.
 | Status | **Draft → Ready for review** |
 | Cluster | **OC** (OC0–OC6) |
 | Builds on | `internal/statebackend` (the `Backend` interface), `internal/remotestate` (HTTP client + the three `TokenSource`s), `internal/cliauth` (loopback + device flows, session storage), `specs/orun-object-model/` (content-addressed store — remote sync pushes the same digests), `specs/orun-service-catalog/` (the snapshot envelope the catalog push ships) |
-| Pairs with | `multi-tenant-saas/specs/epics/saas-orun-platform/` — server-side epic (**OP**) |
+| Pairs with | `orun-cloud/specs/epics/saas-orun-platform/` — server-side epic (**OP**) |
 | Decisions locked | local-first forever (every command works with no account; cloud failures degrade, never block); one wire contract, two server implementations (Orun Cloud + the OSS `orun backend` single-tenant server — a URL change, not a migration); tenancy is the platform's org → project → environment spine (the "namespace" wording retires); all cloud behavior stays behind the existing `statebackend.Backend` and `bridge.Source` interfaces — the runner, cockpit, and compiler do not learn about HTTP; secrets resolved at run time are never written to local state or unredacted logs |
 
 ## The one-paragraph thesis
