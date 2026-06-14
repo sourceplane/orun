@@ -36,7 +36,7 @@ func registerAuthCommand(root *cobra.Command) {
 			return runAuthLogin()
 		},
 	}
-	loginCmd.Flags().BoolVar(&authDevice, "device", false, "Use backend-mediated GitHub device login")
+	loginCmd.Flags().BoolVar(&authDevice, "device", false, "Use the platform device login flow (RFC-8628)")
 
 	statusCmd := &cobra.Command{
 		Use:   "status",
@@ -82,8 +82,11 @@ func runAuthLogin() error {
 		return err
 	}
 	color := ui.ColorEnabledForWriter(os.Stdout)
-	fmt.Printf("%s logged in as %s\n", ui.Green(color, "✓"), creds.GitHubLogin)
+	fmt.Printf("%s logged in as %s\n", ui.Green(color, "✓"), valueOrUnknown(creds.DisplayUser()))
 	fmt.Printf("  backend: %s\n", backendURL)
+	if len(creds.Orgs) > 0 {
+		fmt.Printf("  orgs: %s\n", formatOrgs(creds.Orgs))
+	}
 	if exp := creds.AccessExpiryTime(); !exp.IsZero() {
 		fmt.Printf("  access token expires: %s\n", exp.Format(time.RFC3339))
 	}
@@ -104,8 +107,19 @@ func runAuthStatus() error {
 	if resolvedBackend == "" {
 		resolvedBackend = creds.BackendURL
 	}
-	fmt.Printf("GitHub login: %s\n", valueOrUnknown(creds.GitHubLogin))
+	fmt.Printf("User: %s\n", valueOrUnknown(creds.DisplayUser()))
+	if creds.User.Email != "" && creds.User.Email != creds.DisplayUser() {
+		fmt.Printf("Email: %s\n", creds.User.Email)
+	}
 	fmt.Printf("Backend URL: %s\n", valueOrUnknown(resolvedBackend))
+	if len(creds.Orgs) > 0 {
+		fmt.Printf("Orgs:\n")
+		for _, org := range creds.Orgs {
+			fmt.Printf("  - %s\n", formatOrg(org))
+		}
+	} else {
+		fmt.Printf("Orgs: (none)\n")
+	}
 	if exp := creds.AccessExpiryTime(); !exp.IsZero() {
 		state := "valid"
 		if time.Now().After(exp) {
@@ -116,7 +130,9 @@ func runAuthStatus() error {
 	repo, repoErr := resolveRepoContext(resolvedBackend)
 	if repoErr == nil && repo != nil && repo.RepoFullName != "" {
 		status := ui.Yellow(color, "not linked")
-		if repo.NamespaceID != "" {
+		if repo.OrgID != "" && repo.ProjectID != "" {
+			status = ui.Green(color, "linked")
+		} else if repo.NamespaceID != "" {
 			status = ui.Green(color, "linked")
 		}
 		fmt.Printf("Current Git remote: %s (%s)\n", repo.RepoFullName, status)
@@ -133,6 +149,8 @@ func runAuthLogout() error {
 		backendURL, backendErr := requireBackendURL(nil, authBackendURL)
 		if backendErr == nil {
 			client := cliauth.NewBackendClient(backendURL, version)
+			// Best-effort revoke (POST /v1/auth/cli/revoke); local creds are
+			// cleared regardless so logout always succeeds locally.
 			_ = client.Logout(context.Background(), creds.RefreshToken)
 		}
 	}
@@ -160,11 +178,42 @@ func runAuthToken() error {
 	}
 	token, err := tokenSrc.Token(context.Background())
 	if err != nil {
+		// A revoked/expired session surfaces a single actionable message.
+		if errors.Is(err, cliauth.ErrSessionRevoked) {
+			return cliauth.ErrSessionRevoked
+		}
 		return err
 	}
 	_ = authAudience
 	fmt.Println(token)
 	return nil
+}
+
+// formatOrg renders an org with its role: "name (slug) — role" where present.
+func formatOrg(org cliauth.OrgRef) string {
+	label := org.Name
+	if label == "" {
+		label = org.Slug
+	}
+	if label == "" {
+		label = org.ID
+	}
+	if org.Slug != "" && org.Slug != label {
+		label = fmt.Sprintf("%s (%s)", label, org.Slug)
+	}
+	if org.Role != "" {
+		label = fmt.Sprintf("%s — %s", label, org.Role)
+	}
+	return label
+}
+
+// formatOrgs renders a compact one-line list of org labels.
+func formatOrgs(orgs []cliauth.OrgRef) string {
+	parts := make([]string, 0, len(orgs))
+	for _, org := range orgs {
+		parts = append(parts, formatOrg(org))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func valueOrUnknown(value string) string {

@@ -19,14 +19,30 @@ type OrgRef struct {
 // still returns it and is not migrated until OC6. LoadSession migrates an old
 // credentials file (only allowedNamespaceIds) to Orgs once on read.
 type Credentials struct {
-	AccessToken         string   `json:"accessToken,omitempty"`
-	AccessTokenExpiry   string   `json:"accessTokenExpiry,omitempty"`
-	RefreshToken        string   `json:"refreshToken,omitempty"`
-	RefreshTokenExpiry  string   `json:"refreshTokenExpiry,omitempty"`
-	GitHubLogin         string   `json:"githubLogin,omitempty"`
-	Orgs                []OrgRef `json:"orgs,omitempty"`
-	AllowedNamespaceIDs []string `json:"allowedNamespaceIds,omitempty"`
-	BackendURL          string   `json:"backendUrl,omitempty"`
+	AccessToken         string      `json:"accessToken,omitempty"`
+	AccessTokenExpiry   string      `json:"accessTokenExpiry,omitempty"`
+	RefreshToken        string      `json:"refreshToken,omitempty"`
+	RefreshTokenExpiry  string      `json:"refreshTokenExpiry,omitempty"`
+	User                SessionUser `json:"user,omitempty"`
+	GitHubLogin         string      `json:"githubLogin,omitempty"`
+	Orgs                []OrgRef    `json:"orgs,omitempty"`
+	AllowedNamespaceIDs []string    `json:"allowedNamespaceIds,omitempty"`
+	BackendURL          string      `json:"backendUrl,omitempty"`
+}
+
+// DisplayUser returns a human label for the session user, preferring display
+// name, then email, then the legacy githubLogin field.
+func (c *Credentials) DisplayUser() string {
+	if c == nil {
+		return ""
+	}
+	if c.User.DisplayName != "" {
+		return c.User.DisplayName
+	}
+	if c.User.Email != "" {
+		return c.User.Email
+	}
+	return c.GitHubLogin
 }
 
 // BackendConfig holds the default backend URL. Deprecated in favor of the
