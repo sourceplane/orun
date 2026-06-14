@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -166,23 +165,27 @@ func parseGitHubRepoFullName(remoteURL string) string {
 	}
 }
 
-func persistRepoLink(backendURL string, repo *repoContext, resp *cliauth.LinkRepoFromSessionResponse) error {
-	if repo == nil || resp == nil || strings.TrimSpace(resp.NamespaceID) == "" {
-		return nil
+// errRepoNotLinked is the fail-fast error for an unlinked repo on a
+// --remote-state entry point (design §7 row 3).
+func errRepoNotLinked(backendURL string) error {
+	cmd := "orun cloud link"
+	if strings.TrimSpace(backendURL) != "" {
+		cmd = fmt.Sprintf("orun cloud link --backend-url %s", backendURL)
 	}
-	repoFullName := resp.RepoFullName
-	if repoFullName == "" && repo != nil {
-		repoFullName = repo.RepoFullName
+	return fmt.Errorf("this repo is not linked to an Orun Cloud org/project; run `%s`", cmd)
+}
+
+// isNoLoginErr reports whether an auth-resolution error means there is no usable
+// local session (so the caller should surface the single "run `orun auth login`"
+// message per design §7 row 2).
+func isNoLoginErr(err error) bool {
+	if err == nil {
+		return false
 	}
-	return cliauth.UpsertRepoLink(cliauth.RepoLink{
-		BackendURL:    backendURL,
-		GitRemote:     repo.GitRemote,
-		RepoFullName:  repoFullName,
-		NamespaceID:   resp.NamespaceID,
-		NamespaceKind: resp.NamespaceKind,
-		RepoID:        resp.RepoID,
-		LinkedAt:      timeNowRFC3339(),
-	})
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, cliauth.ErrSessionRevoked) {
+		return true
+	}
+	return strings.Contains(err.Error(), "no local Orun login")
 }
 
 func timeNowRFC3339() string {
@@ -191,51 +194,100 @@ func timeNowRFC3339() string {
 
 var nowFunc = func() time.Time { return time.Now().UTC() }
 
-// autoResolveNamespace calls the backend session repo link endpoint to resolve
-// repoFullName to a local namespace. Returns the full link response so the caller
-// can persist namespace kind, repo ID, and other metadata.
-//
-// Must only be called outside GitHub Actions and when ORUN_TOKEN is not set.
-func autoResolveNamespace(ctx context.Context, backendURL, repoFullName string) (*cliauth.LinkRepoFromSessionResponse, error) {
-	tokenSrc := &remotestate.SessionTokenSource{
-		BackendURL: backendURL,
-		Version:    version,
+// persistWorkspaceLink caches a platform WorkspaceLink (org/project IDs+slugs +
+// the server's normalized remoteUrl) as a RepoLink in ~/.orun/config.yaml.
+func persistWorkspaceLink(backendURL string, repo *repoContext, link *cliauth.WorkspaceLink) error {
+	if repo == nil || link == nil {
+		return nil
 	}
-	accessToken, err := tokenSrc.Token(ctx)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			if termIsInteractive() {
-				return nil, fmt.Errorf("no local Orun login; run `orun auth login` to authenticate and auto-resolve the repo namespace")
-			}
-			return nil, fmt.Errorf("no local Orun login; run `orun auth login --device` or pre-link the namespace with `orun cloud link`")
-		}
-		return nil, fmt.Errorf("auth for namespace resolution: %w", err)
-	}
-	client := cliauth.NewBackendClient(backendURL, version)
-	linked, err := client.LinkRepoFromSession(ctx, accessToken, repoFullName)
-	if err != nil {
-		return nil, translateLinkError(err, repoFullName)
-	}
-	return linked, nil
+	return cliauth.UpsertRepoLink(cliauth.RepoLink{
+		BackendURL:   backendURL,
+		GitRemote:    repo.GitRemote,
+		RepoFullName: repo.RepoFullName,
+		OrgID:        link.OrgID,
+		OrgSlug:      link.OrgSlug,
+		ProjectID:    link.ProjectID,
+		ProjectSlug:  link.ProjectSlug,
+		// Cache the SERVER's canonical normalized remote (lowercase
+		// host/owner/repo, no scheme/.git); never the client's own form.
+		RepoID:   strings.TrimSpace(link.RemoteURL),
+		LinkedAt: timeNowRFC3339(),
+	})
 }
 
-// translateLinkError converts backend API errors from the repo link endpoint
-// into user-friendly messages.
-func translateLinkError(err error, repoFullName string) error {
+// persistLocalLink caches the OSS single-tenant _local/_local scope for the
+// current repo without calling the platform link API (the OSS backend has no
+// /cli/links route — design §1 "one contract, two servers").
+func persistLocalLink(backendURL string, repo *repoContext) error {
+	if repo == nil {
+		return nil
+	}
+	return cliauth.UpsertRepoLink(cliauth.RepoLink{
+		BackendURL:    backendURL,
+		GitRemote:     repo.GitRemote,
+		RepoFullName:  repo.RepoFullName,
+		OrgID:         localScopeSegment,
+		ProjectID:     localScopeSegment,
+		NamespaceID:   "local:_local",
+		NamespaceKind: "local",
+		LinkedAt:      timeNowRFC3339(),
+	})
+}
+
+// localScopeSegment is the OSS single-tenant org/project scope segment; it
+// mirrors remotestate's defaultScopeSegment.
+const localScopeSegment = "_local"
+
+// isOSSBackend reports whether backendURL is the OSS `orun backend` server this
+// machine provisioned via `orun backend init` (its bootstrap metadata is in
+// ~/.orun/config.yaml and its URL matches). For that server, `cloud link`
+// short-circuits to _local/_local instead of calling /cli/links, which it does
+// not serve.
+func isOSSBackend(backendURL string) bool {
+	cfg, err := cliauth.LoadConfig()
+	if err != nil || cfg == nil || cfg.BackendBootstrap == nil {
+		return false
+	}
+	if strings.TrimSpace(cfg.BackendBootstrap.ManagedBy) != "orun-backend-init" {
+		return false
+	}
+	return sameBackendURL(cfg.ResolvedBackendURL(), backendURL)
+}
+
+func sameBackendURL(a, b string) bool {
+	norm := func(s string) string {
+		return strings.ToLower(strings.TrimRight(strings.TrimSpace(s), "/"))
+	}
+	return norm(a) != "" && norm(a) == norm(b)
+}
+
+// translateLinkAPIError converts a platform link/resolve error envelope into an
+// actionable message. Per resource-hiding, 404 (policy/membership denial) reads
+// as unauthorized-or-not-found; 412 limit_reached is the entitlement message;
+// 409 is already-linked; 422 is a bad remote. The platform requestId is
+// preserved by the underlying *APIError when present.
+func translateLinkAPIError(err error, remoteURL string) error {
 	var apiErr *cliauth.APIError
 	if !errors.As(err, &apiErr) {
-		return fmt.Errorf("resolve namespace for %s: %w", repoFullName, err)
+		return fmt.Errorf("link %s: %w", remoteURL, err)
 	}
-	switch apiErr.Code {
-	case "NOT_FOUND":
-		return fmt.Errorf("repo %s is not known to your Orun session; run `orun auth login` again to refresh namespace access", repoFullName)
-	case "FORBIDDEN":
-		return fmt.Errorf("repo %s is not authorized in your Orun session; re-authenticate with `orun auth login` or verify GitHub admin access", repoFullName)
-	case "UNAUTHORIZED":
-		return fmt.Errorf("Orun session token invalid or expired; run `orun auth login`")
-	case "HTTP_404":
-		return fmt.Errorf("backend does not support session repo linking; ensure the backend is updated to Task 0012.2")
+	reqIDSuffix := ""
+	if apiErr.RequestID != "" {
+		reqIDSuffix = fmt.Sprintf(" [requestId: %s]", apiErr.RequestID)
+	}
+	switch apiErr.Status {
+	case 404:
+		return fmt.Errorf("not authorized to link %s, or the org/project does not exist; check your org membership or run `orun auth login` again%s", remoteURL, reqIDSuffix)
+	case 412:
+		if apiErr.DetailReason() == "limit_reached" {
+			return fmt.Errorf("project limit reached for this org; upgrade the plan or pick an existing project, then retry `orun cloud link`%s", reqIDSuffix)
+		}
+		return fmt.Errorf("link precondition failed for %s: %s%s", remoteURL, apiErr.Message, reqIDSuffix)
+	case 409:
+		return fmt.Errorf("%s is already linked to an active org/project; run `orun cloud status` to inspect or `orun cloud unlink` first%s", remoteURL, reqIDSuffix)
+	case 422:
+		return fmt.Errorf("%q is not a recognized git remote; link requires a valid remote URL%s", remoteURL, reqIDSuffix)
 	default:
-		return fmt.Errorf("resolve namespace for %s: %w", repoFullName, err)
+		return fmt.Errorf("link %s: %w", remoteURL, err)
 	}
 }

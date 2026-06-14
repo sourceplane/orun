@@ -1,13 +1,8 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -37,146 +32,111 @@ func TestParseGitHubRepoFullNameVariants(t *testing.T) {
 	}
 }
 
-func TestTranslateLinkError_NotFound(t *testing.T) {
-	err := translateLinkError(&cliauth.APIError{Code: "NOT_FOUND", Message: "slug not found"}, "owner/repo")
-	if !strings.Contains(err.Error(), "orun auth login") {
-		t.Errorf("expected re-login hint, got: %v", err)
+func TestTranslateLinkAPIError(t *testing.T) {
+	cases := []struct {
+		name    string
+		err     error
+		wantSub string
+	}{
+		{"404 denial", &cliauth.APIError{Status: 404, Code: "not_found", Message: "nope"}, "not authorized"},
+		{"412 limit", &cliauth.APIError{Status: 412, Code: "precondition_failed", Details: json.RawMessage(`{"reason":"limit_reached"}`)}, "project limit reached"},
+		{"412 other", &cliauth.APIError{Status: 412, Code: "precondition_failed", Message: "nope"}, "precondition failed"},
+		{"409 conflict", &cliauth.APIError{Status: 409, Code: "conflict"}, "already linked"},
+		{"422 bad remote", &cliauth.APIError{Status: 422, Code: "validation_failed"}, "not a recognized git remote"},
+		{"non-api", errors.New("network down"), "network down"},
 	}
-}
-
-func TestTranslateLinkError_Forbidden(t *testing.T) {
-	err := translateLinkError(&cliauth.APIError{Code: "FORBIDDEN", Message: "forbidden"}, "owner/repo")
-	if !strings.Contains(err.Error(), "orun auth login") {
-		t.Errorf("expected re-auth hint, got: %v", err)
-	}
-}
-
-func TestTranslateLinkError_Unauthorized(t *testing.T) {
-	err := translateLinkError(&cliauth.APIError{Code: "UNAUTHORIZED", Message: "unauthorized"}, "owner/repo")
-	if !strings.Contains(err.Error(), "orun auth login") {
-		t.Errorf("expected login hint, got: %v", err)
-	}
-}
-
-func TestTranslateLinkError_HTTP404RouteNotFound(t *testing.T) {
-	err := translateLinkError(&cliauth.APIError{Code: "HTTP_404", Message: "not found"}, "owner/repo")
-	if !strings.Contains(err.Error(), "backend") {
-		t.Errorf("expected backend update hint, got: %v", err)
-	}
-}
-
-func TestTranslateLinkError_UnknownError(t *testing.T) {
-	err := translateLinkError(errors.New("network error"), "owner/repo")
-	if !strings.Contains(err.Error(), "owner/repo") {
-		t.Errorf("expected repo name in error, got: %v", err)
-	}
-}
-
-func TestAutoResolveNamespace_NoSession(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	os.Unsetenv("ORUN_TOKEN")
-	os.Unsetenv("GITHUB_ACTIONS")
-	os.Unsetenv("ACTIONS_ID_TOKEN_REQUEST_URL")
-	os.Unsetenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
-
-	_, err := autoResolveNamespace(context.Background(), "https://api.example.com", "owner/repo")
-	if err == nil {
-		t.Fatal("expected error when no session exists")
-	}
-}
-
-func TestAutoResolveNamespace_Success(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	os.Unsetenv("ORUN_TOKEN")
-	os.Unsetenv("GITHUB_ACTIONS")
-	os.Unsetenv("ACTIONS_ID_TOKEN_REQUEST_URL")
-	os.Unsetenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/accounts/repos/link" && r.Method == http.MethodPost {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{
-				"namespaceKind": "local",
-				"namespaceId":   "local:user:12345:repo:67890",
-				"namespaceSlug": "local:octocat/owner/repo",
-				"repoId":        "67890",
-				"repoFullName":  "owner/repo",
-				"linkedAt":      "2026-05-07T10:00:00Z",
-			})
-			return
-		}
-		// Refresh token endpoint.
-		if r.URL.Path == "/v1/auth/cli/token" {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"accessToken": "fresh-token",
-				"expiresAt":   "2099-01-01T00:00:00Z",
-				"githubLogin": "testuser",
-			})
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	defer srv.Close()
-
-	// Write credentials directly to bypass macOS keychain prompts in tests.
-	writeTestCredentials(t, tmp, &cliauth.Credentials{
-		AccessToken:       "valid-token",
-		AccessTokenExpiry: "2099-01-01T00:00:00Z",
-		RefreshToken:      "refresh-tok",
-		GitHubLogin:       "testuser",
-		BackendURL:        srv.URL,
-	})
-
-	resp, err := autoResolveNamespace(context.Background(), srv.URL, "owner/repo")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.NamespaceID != "local:user:12345:repo:67890" {
-		t.Errorf("NamespaceID = %q, want local:user:12345:repo:67890", resp.NamespaceID)
-	}
-	if resp.NamespaceKind != "local" {
-		t.Errorf("NamespaceKind = %q, want local", resp.NamespaceKind)
-	}
-	if resp.RepoID != "67890" {
-		t.Errorf("RepoID = %q, want 67890", resp.RepoID)
-	}
-}
-
-func TestAutoResolveNamespace_NotFound(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	os.Unsetenv("ORUN_TOKEN")
-	os.Unsetenv("GITHUB_ACTIONS")
-	os.Unsetenv("ACTIONS_ID_TOKEN_REQUEST_URL")
-	os.Unsetenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(404)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "slug not found; re-run orun auth login",
-			"code":  "NOT_FOUND",
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := translateLinkAPIError(tc.err, "git@github.com:acme/platform.git")
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Errorf("translateLinkAPIError() = %q, want substring %q", err.Error(), tc.wantSub)
+			}
 		})
-	}))
-	defer srv.Close()
-
-	writeTestCredentials(t, tmp, &cliauth.Credentials{
-		AccessToken:       "valid-token",
-		AccessTokenExpiry: "2099-01-01T00:00:00Z",
-		RefreshToken:      "refresh-tok",
-		GitHubLogin:       "testuser",
-		BackendURL:        srv.URL,
-	})
-
-	_, err := autoResolveNamespace(context.Background(), srv.URL, "owner/repo")
-	if err == nil {
-		t.Fatal("expected error for NOT_FOUND")
 	}
-	if !strings.Contains(err.Error(), "orun auth login") {
-		t.Errorf("expected re-login hint, got: %v", err)
+}
+
+func TestTranslateLinkAPIError_PreservesRequestID(t *testing.T) {
+	err := translateLinkAPIError(&cliauth.APIError{Status: 404, Code: "not_found", RequestID: "req_abc"}, "git@github.com:acme/platform.git")
+	if !strings.Contains(err.Error(), "req_abc") {
+		t.Errorf("expected requestId in message, got: %v", err)
+	}
+}
+
+func TestPersistWorkspaceLink_CachesNormalizedRemote(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	repo := &repoContext{
+		GitRemote:    "git@github.com:acme/platform.git",
+		RepoFullName: "acme/platform",
+	}
+	link := &cliauth.WorkspaceLink{
+		ID:          "wsl_1",
+		OrgID:       "org_a",
+		OrgSlug:     "acme",
+		ProjectID:   "prj_1",
+		ProjectSlug: "platform",
+		RemoteURL:   "github.com/acme/platform", // server-normalized form
+	}
+
+	if err := persistWorkspaceLink("https://api.orun.cloud", repo, link); err != nil {
+		t.Fatalf("persistWorkspaceLink() error: %v", err)
+	}
+
+	cached, err := cliauth.FindRepoLink("https://api.orun.cloud", repo.GitRemote, repo.RepoFullName)
+	if err != nil {
+		t.Fatalf("FindRepoLink() error: %v", err)
+	}
+	if cached == nil {
+		t.Fatal("expected a cached link")
+	}
+	if cached.OrgID != "org_a" || cached.OrgSlug != "acme" || cached.ProjectID != "prj_1" || cached.ProjectSlug != "platform" {
+		t.Errorf("cached scope = %+v, want org_a/acme prj_1/platform", cached)
+	}
+	if cached.RepoID != "github.com/acme/platform" {
+		t.Errorf("cached normalized remote = %q, want server form github.com/acme/platform", cached.RepoID)
+	}
+}
+
+func TestPersistLocalLink_UsesLocalScope(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	repo := &repoContext{GitRemote: "git@github.com:acme/platform.git", RepoFullName: "acme/platform"}
+	if err := persistLocalLink("https://orun-api.example.workers.dev", repo); err != nil {
+		t.Fatalf("persistLocalLink() error: %v", err)
+	}
+	cached, err := cliauth.FindRepoLink("https://orun-api.example.workers.dev", repo.GitRemote, repo.RepoFullName)
+	if err != nil {
+		t.Fatalf("FindRepoLink() error: %v", err)
+	}
+	if cached == nil || cached.OrgID != "_local" || cached.ProjectID != "_local" {
+		t.Fatalf("expected _local/_local scope, got %+v", cached)
+	}
+}
+
+func TestIsOSSBackend(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	const ossURL = "https://orun-api.example.workers.dev"
+	if err := cliauth.SaveBootstrapMetadata(cliauth.BackendBootstrap{
+		ManagedBy: "orun-backend-init",
+	}, ossURL); err != nil {
+		t.Fatalf("SaveBootstrapMetadata() error: %v", err)
+	}
+	if !isOSSBackend(ossURL) {
+		t.Errorf("isOSSBackend(%q) = false, want true", ossURL)
+	}
+	if isOSSBackend("https://api.orun.cloud") {
+		t.Errorf("isOSSBackend(cloud URL) = true, want false")
+	}
+}
+
+func TestErrRepoNotLinked(t *testing.T) {
+	err := errRepoNotLinked("https://api.orun.cloud")
+	if !strings.Contains(err.Error(), "orun cloud link") {
+		t.Errorf("expected `orun cloud link` hint, got: %v", err)
 	}
 }
 
@@ -212,58 +172,28 @@ func TestInvalidateCanonicalCachedNamespace(t *testing.T) {
 	}
 }
 
-func TestPersistRepoLinkStoresLocalMetadata(t *testing.T) {
+func TestRemoveRepoLink(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
-	repo := &repoContext{
-		GitRemote:    "https://github.com/owner/repo.git",
-		RepoFullName: "owner/repo",
+	if err := cliauth.UpsertRepoLink(cliauth.RepoLink{
+		BackendURL:   "https://api.orun.cloud",
+		GitRemote:    "git@github.com:acme/platform.git",
+		RepoFullName: "acme/platform",
+		OrgID:        "org_a",
+		ProjectID:    "prj_1",
+		LinkedAt:     "2026-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("UpsertRepoLink() error: %v", err)
 	}
-	resp := &cliauth.LinkRepoFromSessionResponse{
-		NamespaceKind: "local",
-		NamespaceID:   "local:user:12345:repo:67890",
-		NamespaceSlug: "local:octocat/owner/repo",
-		RepoID:        "67890",
-		RepoFullName:  "owner/repo",
-		LinkedAt:      "2026-05-07T10:00:00Z",
+	if err := cliauth.RemoveRepoLink("https://api.orun.cloud", "git@github.com:acme/platform.git", "acme/platform"); err != nil {
+		t.Fatalf("RemoveRepoLink() error: %v", err)
 	}
-
-	if err := persistRepoLink("https://api.example.com", repo, resp); err != nil {
-		t.Fatalf("persistRepoLink() error: %v", err)
-	}
-
-	link, err := cliauth.FindRepoLink("https://api.example.com", "", "owner/repo")
+	cached, err := cliauth.FindRepoLink("https://api.orun.cloud", "git@github.com:acme/platform.git", "acme/platform")
 	if err != nil {
 		t.Fatalf("FindRepoLink() error: %v", err)
 	}
-	if link == nil {
-		t.Fatal("expected a stored link")
-	}
-	if link.NamespaceID != "local:user:12345:repo:67890" {
-		t.Errorf("NamespaceID = %q, want local:user:12345:repo:67890", link.NamespaceID)
-	}
-	if link.NamespaceKind != "local" {
-		t.Errorf("NamespaceKind = %q, want local", link.NamespaceKind)
-	}
-	if link.RepoID != "67890" {
-		t.Errorf("RepoID = %q, want 67890", link.RepoID)
-	}
-}
-
-// writeTestCredentials writes credentials directly to the file store in tmp,
-// bypassing the macOS keychain which prompts for auth and hangs in tests.
-func writeTestCredentials(t *testing.T, homeDir string, creds *cliauth.Credentials) {
-	t.Helper()
-	data, err := json.Marshal(creds)
-	if err != nil {
-		t.Fatalf("marshal credentials: %v", err)
-	}
-	dir := filepath.Join(homeDir, ".orun")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("MkdirAll %s: %v", dir, err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "credentials.json"), data, 0o600); err != nil {
-		t.Fatalf("write credentials.json: %v", err)
+	if cached != nil {
+		t.Errorf("expected link removed, got %+v", cached)
 	}
 }

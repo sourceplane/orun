@@ -398,30 +398,13 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		namespaceID = repo.NamespaceID
 	}
 
-	// Outside GitHub Actions, auto-resolve namespace ID from the CLI session when
-	// no cached link exists. ORUN_TOKEN is not a CLI session token, so it cannot
-	// call the session link endpoint — require a pre-cached namespace link instead.
-	if namespaceID == "" && os.Getenv("GITHUB_ACTIONS") != "true" {
-		if os.Getenv("ORUN_TOKEN") != "" {
-			return fmt.Errorf(
-				"local remote-state with ORUN_TOKEN requires a pre-linked namespace; "+
-					"run `orun cloud link --backend-url %s` first to cache the namespace ID",
-				backendURL,
-			)
-		}
-		if repo == nil || repo.RepoFullName == "" {
-			return fmt.Errorf(
-				"local remote-state requires a GitHub remote to resolve the namespace; " +
-					"no GitHub remote detected in this workspace",
-			)
-		}
-		resolved, resolveErr := autoResolveNamespace(ctx, backendURL, repo.RepoFullName)
-		if resolveErr != nil {
-			return resolveErr
-		}
-		namespaceID = resolved.NamespaceID
-		_ = persistRepoLink(backendURL, repo, resolved)
+	// Resolve the org/project scope (flag > env > cached link). Empty fields
+	// default to the OSS single-tenant _local scope inside the client.
+	linkOrg, linkProject := "", ""
+	if repo != nil {
+		linkOrg, linkProject = repo.OrgID, repo.ProjectID
 	}
+	scope := resolveScope(runOrg, runProject, linkOrg, linkProject)
 
 	tokenSrc, resolvedNamespaceID, githubLogin, err := remotestate.ResolveTokenSource(ctx, remotestate.ResolveOptions{
 		BackendURL:   backendURL,
@@ -431,19 +414,28 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		NamespaceID:  namespaceID,
 	})
 	if err != nil {
+		// An unauthenticated --remote-state run fails fast with the re-login
+		// command first (design §7 row 2) — a fresh clone goes `auth login` →
+		// `cloud link` → run; you cannot link without a session.
+		if isNoLoginErr(err) {
+			return errNotLoggedIn()
+		}
 		return fmt.Errorf("remote state auth: %w", err)
+	}
+
+	// With a usable session, fail-fast on an obviously unlinked repo before any
+	// backend state call (design §7 row 3): outside CI, with no explicit/linked
+	// scope and no legacy local link, surface the exact next command instead of
+	// a 404 from the server. The OSS single-tenant backend (fixed _local/_local)
+	// is always "linked".
+	if os.Getenv("GITHUB_ACTIONS") != "true" &&
+		scope.OrgID == "" && scope.ProjectID == "" &&
+		namespaceID == "" && !isOSSBackend(backendURL) {
+		return errRepoNotLinked(backendURL)
 	}
 	if namespaceID == "" {
 		namespaceID = resolvedNamespaceID
 	}
-
-	// Resolve the org/project scope (flag > env > cached link). Empty fields
-	// default to the OSS single-tenant _local scope inside the client.
-	linkOrg, linkProject := "", ""
-	if repo != nil {
-		linkOrg, linkProject = repo.OrgID, repo.ProjectID
-	}
-	scope := resolveScope(runOrg, runProject, linkOrg, linkProject)
 	client := remotestate.NewClientWithScope(backendURL, version, tokenSrc, scope)
 	runnerID := statebackend.DeriveRunnerID()
 	backend := statebackend.NewRemoteStateBackend(client, runnerID)
@@ -466,8 +458,17 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	})
 	if err != nil {
 		var apiErr *remotestate.APIError
-		if errors.As(err, &apiErr) && apiErr.Code == "INVALID_REQUEST" && strings.Contains(apiErr.Message, "namespace") {
-			return fmt.Errorf("initializing remote run: namespace not resolved; run `orun auth login` and retry, or `orun cloud link --backend-url %s`", backendURL)
+		if errors.As(err, &apiErr) {
+			// Resource-hiding: a 404 (or a legacy unresolved-scope INVALID_REQUEST)
+			// means the org/project is not linked or not authorized — surface the
+			// exact next command rather than leaking the server status.
+			if apiErr.Status == 404 ||
+				(apiErr.Code == "INVALID_REQUEST" && strings.Contains(apiErr.Message, "namespace")) {
+				return errRepoNotLinked(backendURL)
+			}
+			if apiErr.IsAuth() {
+				return errNotLoggedIn()
+			}
 		}
 		return fmt.Errorf("initializing remote run: %w", err)
 	}
