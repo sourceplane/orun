@@ -131,13 +131,85 @@ func SaveSession(creds *Credentials) error {
 	if err != nil {
 		return err
 	}
-	cfg.Backend.URL = strings.TrimSpace(creds.BackendURL)
+	setConfigBackendURL(cfg, strings.TrimSpace(creds.BackendURL))
 	return SaveConfig(cfg)
 }
 
-// LoadSession reads stored CLI session credentials.
+// setConfigBackendURL writes the backend URL to the preferred cloud.url field
+// and keeps the deprecated backend.url alias in sync when it was already set,
+// so existing tooling that reads backend.url keeps working for one release.
+func setConfigBackendURL(cfg *Config, url string) {
+	if cfg == nil || strings.TrimSpace(url) == "" {
+		return
+	}
+	url = strings.TrimSpace(url)
+	cfg.Cloud.URL = url
+	if strings.TrimSpace(cfg.Backend.URL) != "" {
+		cfg.Backend.URL = url
+	}
+}
+
+// ResolvedBackendURL returns the configured backend URL, preferring the cloud
+// block and falling back to the deprecated backend.url alias.
+func (c *Config) ResolvedBackendURL() string {
+	if c == nil {
+		return ""
+	}
+	if u := strings.TrimSpace(c.Cloud.URL); u != "" {
+		return u
+	}
+	return strings.TrimSpace(c.Backend.URL)
+}
+
+// UsesDeprecatedBackendURL reports whether the resolved backend URL came only
+// from the deprecated backend.url alias (cloud.url unset). Callers can use this
+// to emit the one-line deprecation warning (design §8).
+func (c *Config) UsesDeprecatedBackendURL() bool {
+	if c == nil {
+		return false
+	}
+	return strings.TrimSpace(c.Cloud.URL) == "" && strings.TrimSpace(c.Backend.URL) != ""
+}
+
+// LoadSession reads stored CLI session credentials, applying the one-time
+// org-model migration (allowedNamespaceIds → orgs) on read.
 func LoadSession() (*Credentials, error) {
-	return DefaultCredentialStore().Load()
+	creds, err := DefaultCredentialStore().Load()
+	if err != nil {
+		return nil, err
+	}
+	if creds == nil {
+		return nil, nil
+	}
+	if migrateCredentialsOrgs(creds) {
+		// Best-effort rewrite so the migration runs once; ignore write errors
+		// (the in-memory creds are already migrated for this process).
+		_ = DefaultCredentialStore().Save(creds)
+	}
+	return creds, nil
+}
+
+// migrateCredentialsOrgs populates Orgs from a legacy credentials file that
+// carries only allowedNamespaceIds. Returns true when it mutated creds (and a
+// rewrite is warranted). AllowedNamespaceIDs is kept for back-compat with the
+// OSS backend (retired in OC6).
+func migrateCredentialsOrgs(creds *Credentials) bool {
+	if creds == nil || len(creds.Orgs) > 0 || len(creds.AllowedNamespaceIDs) == 0 {
+		return false
+	}
+	orgs := make([]OrgRef, 0, len(creds.AllowedNamespaceIDs))
+	for _, id := range creds.AllowedNamespaceIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		orgs = append(orgs, OrgRef{ID: id})
+	}
+	if len(orgs) == 0 {
+		return false
+	}
+	creds.Orgs = orgs
+	return true
 }
 
 // ClearSession removes stored CLI session credentials.
@@ -162,9 +234,7 @@ func UpsertRepoLink(link RepoLink) error {
 	if !updated {
 		cfg.Repos = append(cfg.Repos, link)
 	}
-	if strings.TrimSpace(link.BackendURL) != "" {
-		cfg.Backend.URL = strings.TrimSpace(link.BackendURL)
-	}
+	setConfigBackendURL(cfg, strings.TrimSpace(link.BackendURL))
 	return SaveConfig(cfg)
 }
 
@@ -201,9 +271,7 @@ func SaveBootstrapMetadata(meta BackendBootstrap, backendURL string) error {
 		return err
 	}
 	cfg.BackendBootstrap = &meta
-	if strings.TrimSpace(backendURL) != "" {
-		cfg.Backend.URL = strings.TrimSpace(backendURL)
-	}
+	setConfigBackendURL(cfg, strings.TrimSpace(backendURL))
 	return SaveConfig(cfg)
 }
 

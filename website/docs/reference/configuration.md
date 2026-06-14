@@ -180,18 +180,29 @@ execution:
 
 The `backendUrl` can also be supplied via `--backend-url` or `ORUN_BACKEND_URL`; those take priority over the intent file.
 
-When neither the flag, environment variable, nor intent file sets a backend URL, `orun` falls back to `~/.orun/config.yaml`:
+When neither the flag, environment variable, nor intent file sets a backend URL, `orun` falls back to `~/.orun/config.yaml`. The preferred form is the `cloud` block:
 
 ```yaml
-backend:
-  url: https://orun-api.example.workers.dev
+cloud:
+  url: https://api.orun.cloud        # Orun Cloud, or a self-hosted backend URL
+  catalog:
+    autopush: false                  # off by default; publishing the catalog is team-visible
 
 repos:
-  - backendUrl: https://orun-api.example.workers.dev
+  - backendUrl: https://api.orun.cloud
     repoFullName: sourceplane/orun
-    namespaceId: "123456789"
+    orgId: "org_123"
+    orgSlug: acme
+    projectId: "proj_456"
+    projectSlug: platform
 ```
 
+The legacy `backend.url` key is still honored as a **deprecated alias** for `cloud.url` for one release; `orun` prints a one-line warning and prefers `cloud.url` when both are set.
+
 `orun cloud link` writes the `repos` entries used for local session-authenticated remote-state runs.
+
+### Org/project scope
+
+State calls are scoped to an org/project (path `/v1/organizations/{orgId}/projects/{projectId}/state/…`). The scope is resolved with the precedence `--org`/`--project` flags > `ORUN_ORG`/`ORUN_PROJECT` env > the cached `RepoLink`. The OSS single-tenant backend uses a fixed `_local/_local` scope, so a workspace with no org/project keeps working.
 
 When `mode: remote` is set, all three commands that read execution state (`run`, `status`, `logs`) automatically use the backend without requiring `--remote-state` on the command line.

@@ -48,6 +48,8 @@ var (
 	// Remote state flags
 	runRemoteState bool
 	runBackendURL  string
+	runOrg         string
+	runProject     string
 )
 
 var runCmd = &cobra.Command{
@@ -99,8 +101,10 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().BoolVar(&runKeepWorkspaces, "keep-workspaces", false, "Don't delete per-job staged workspaces after the run (debug)")
 	runCmd.Flags().BoolVar(&runBackground, "background", false, "Run the plan detached and return immediately. Track via 'orun status --watch'")
 
-	runCmd.Flags().BoolVar(&runRemoteState, "remote-state", false, "Use orun-backend for distributed run coordination (sets ORUN_REMOTE_STATE=true)")
-	runCmd.Flags().StringVar(&runBackendURL, "backend-url", "", "orun-backend URL for remote state (or set ORUN_BACKEND_URL)")
+	runCmd.Flags().BoolVar(&runRemoteState, "remote-state", false, "Use the Orun Cloud backend for distributed run coordination (sets ORUN_REMOTE_STATE=true)")
+	runCmd.Flags().StringVar(&runBackendURL, "backend-url", "", "Backend URL for remote state (or set ORUN_BACKEND_URL)")
+	runCmd.Flags().StringVar(&runOrg, "org", "", "Org scope for remote state (overrides the linked org; or set ORUN_ORG)")
+	runCmd.Flags().StringVar(&runProject, "project", "", "Project scope for remote state (overrides the linked project; or set ORUN_PROJECT)")
 
 	// --revision short-circuits the seven-branch resolver in
 	// internal/revision.ResolveRevision (cli-surface.md §2.3). When set,
@@ -433,7 +437,14 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		namespaceID = resolvedNamespaceID
 	}
 
-	client := remotestate.NewClient(backendURL, version, tokenSrc)
+	// Resolve the org/project scope (flag > env > cached link). Empty fields
+	// default to the OSS single-tenant _local scope inside the client.
+	linkOrg, linkProject := "", ""
+	if repo != nil {
+		linkOrg, linkProject = repo.OrgID, repo.ProjectID
+	}
+	scope := resolveScope(runOrg, runProject, linkOrg, linkProject)
+	client := remotestate.NewClientWithScope(backendURL, version, tokenSrc, scope)
 	runnerID := statebackend.DeriveRunnerID()
 	backend := statebackend.NewRemoteStateBackend(client, runnerID)
 

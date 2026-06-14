@@ -30,6 +30,9 @@ const (
 	remoteStateEnvVar = "ORUN_REMOTE_STATE"
 	backendURLEnvVar  = "ORUN_BACKEND_URL"
 	tokenEnvVar       = "ORUN_TOKEN"
+	// Org/project scope env vars (CI scoping; design §8 precedence).
+	orgEnvVar     = "ORUN_ORG"
+	projectEnvVar = "ORUN_PROJECT"
 )
 
 var version = "dev"
@@ -178,6 +181,9 @@ func storeDir() string {
 }
 
 // newRemoteBackend creates a RemoteStateBackend using the resolved token source.
+// The org/project scope is resolved from ORUN_ORG/ORUN_PROJECT and the cached
+// RepoLink (these read paths expose no --org/--project flags yet); empty fields
+// default to the OSS single-tenant _local scope inside the client.
 func newRemoteBackend(backendURL string) (statebackend.Backend, error) {
 	tokenSrc, _, _, err := remotestate.ResolveTokenSource(context.Background(), remotestate.ResolveOptions{
 		BackendURL:  backendURL,
@@ -187,7 +193,12 @@ func newRemoteBackend(backendURL string) (statebackend.Backend, error) {
 	if err != nil {
 		return nil, fmt.Errorf("remote state auth: %w", err)
 	}
-	client := remotestate.NewClient(backendURL, version, tokenSrc)
+	linkOrg, linkProject := "", ""
+	if repo, repoErr := resolveRepoContext(backendURL); repoErr == nil && repo != nil {
+		linkOrg, linkProject = repo.OrgID, repo.ProjectID
+	}
+	scope := resolveScope("", "", linkOrg, linkProject)
+	client := remotestate.NewClientWithScope(backendURL, version, tokenSrc, scope)
 	runnerID := statebackend.DeriveRunnerID()
 	return statebackend.NewRemoteStateBackend(client, runnerID), nil
 }
