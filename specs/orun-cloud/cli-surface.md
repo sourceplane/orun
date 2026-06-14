@@ -10,7 +10,7 @@ Naming follows the existing command tree (`auth`, `cloud`, `catalog`,
 orun auth login                # browser loopback against the platform (OC1)
 orun auth login --device       # platform device flow (replaces GitHub device flow)
 orun auth status               # user, orgs + roles, session expiry, backend URL
-orun auth logout               # POST /v1/auth/cli/revoke + clear ~/.orun/session.json
+orun auth logout               # POST /v1/auth/cli/revoke + clear ~/.orun/credentials.json
 orun auth token                # print a fresh short-lived access token (CI escape hatch)
 ```
 

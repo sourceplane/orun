@@ -52,11 +52,12 @@ Mitigation: redactor handles exact + line-split occurrences; documented
 residual risk (mirrors platform R6); secrets never touch disk locally, which
 bounds the blast radius to live log streams the user's own step produced.
 
-### R5 — `~/.orun/session.json` theft
+### R5 — `~/.orun/credentials.json` theft
 A copied session file is a working credential until revoke. Mitigation now:
 0600 enforcement, short access tokens, rotating refresh with reuse detection
 (theft + parallel use revokes the family), console session list + revoke.
-Follow-up (not this epic): OS-keychain storage behind a build tag.
+Follow-up (not this epic): broader OS-keychain coverage (macOS already stores in
+the `io.sourceplane.orun` keychain today; Linux/Windows are the gap).
 
 ### R6 — Plan-digest-first InitRun ordering
 Run create requires the plan object to exist; a crash between object PUT and
