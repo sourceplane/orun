@@ -21,29 +21,99 @@ const (
 	maxRetryAttempts   = 3
 	retryBaseDelay     = 2 * time.Second
 	retryMaxDelay      = 10 * time.Second
+
+	// ContractVersion is the wire-contract major this client speaks. It is
+	// sent as the Orun-Contract-Version header on every request; the server
+	// rejects unknown majors with 409 contract_version_unsupported (see the
+	// vendored state-api-contract.md §0).
+	ContractVersion = "1"
+
+	// contractVersionHeader is the request header carrying ContractVersion.
+	contractVersionHeader = "Orun-Contract-Version"
+
+	// defaultScopeSegment is the single-tenant scope used by the OSS
+	// `orun backend` server. The contract serves the same scoped paths with a
+	// fixed _local/_local org/project, so one client codepath drives both.
+	defaultScopeSegment = "_local"
+
+	// contractVersionUnsupportedCode is the platform error code returned when
+	// the server cannot satisfy the requested contract major.
+	contractVersionUnsupportedCode = "contract_version_unsupported"
 )
 
-// APIError represents a decoded backend error envelope.
+// Scope is the org/project tenancy scope for state API calls. Both fields
+// default to the OSS single-tenant "_local" segment when empty, so existing
+// single-tenant flows keep working without an org/project.
+type Scope struct {
+	OrgID     string
+	ProjectID string
+}
+
+// orgSegment returns the org path segment, defaulting to the single-tenant
+// scope when unset.
+func (s Scope) orgSegment() string {
+	if v := strings.TrimSpace(s.OrgID); v != "" {
+		return v
+	}
+	return defaultScopeSegment
+}
+
+// projectSegment returns the project path segment, defaulting to the
+// single-tenant scope when unset.
+func (s Scope) projectSegment() string {
+	if v := strings.TrimSpace(s.ProjectID); v != "" {
+		return v
+	}
+	return defaultScopeSegment
+}
+
+// APIError represents a decoded backend error envelope. It accommodates both
+// the platform's nested envelope ({ error: { code, message, details?,
+// requestId } }) and the OSS backend's flat envelope ({ error, code }).
 type APIError struct {
-	Message string `json:"error"`
-	Code    string `json:"code"`
+	Message   string `json:"-"`
+	Code      string `json:"-"`
+	RequestID string `json:"-"`
+	// Details carries optional structured detail from the platform envelope.
+	Details json.RawMessage `json:"-"`
+	// Status is the HTTP status code, when known.
+	Status int `json:"-"`
 }
 
 func (e *APIError) Error() string {
+	parts := e.Message
 	if e.Code != "" {
-		return fmt.Sprintf("%s (code: %s)", e.Message, e.Code)
+		parts = fmt.Sprintf("%s (code: %s)", parts, e.Code)
 	}
-	return e.Message
+	if e.RequestID != "" {
+		parts = fmt.Sprintf("%s [requestId: %s]", parts, e.RequestID)
+	}
+	return parts
 }
 
 // IsAuth reports whether the error is an authentication/authorization failure.
+// It recognises both the legacy uppercase OSS codes and the platform's
+// lowercase codes.
 func (e *APIError) IsAuth() bool {
-	return e.Code == "UNAUTHORIZED" || e.Code == "FORBIDDEN"
+	switch strings.ToLower(e.Code) {
+	case "unauthorized", "forbidden":
+		return true
+	default:
+		return false
+	}
 }
 
-// Client is an HTTP client for the orun-backend REST API.
+// IsContractVersionUnsupported reports whether the server rejected this
+// client's contract major (409 contract_version_unsupported per the contract).
+func (e *APIError) IsContractVersionUnsupported() bool {
+	return strings.EqualFold(e.Code, contractVersionUnsupportedCode)
+}
+
+// Client is an HTTP client for the orun state API (Orun Cloud and the OSS
+// single-tenant backend speak the same contract).
 type Client struct {
 	baseURL    string
+	scope      Scope
 	tokenSrc   TokenSource
 	userAgent  string
 	httpClient *http.Client
@@ -51,8 +121,16 @@ type Client struct {
 	logClient *http.Client
 }
 
-// NewClient creates a Client for baseURL using the given TokenSource and CLI version.
+// NewClient creates a Client for baseURL using the given TokenSource and CLI
+// version, with the default single-tenant (_local/_local) scope.
 func NewClient(baseURL, version string, tokenSrc TokenSource) *Client {
+	return NewClientWithScope(baseURL, version, tokenSrc, Scope{})
+}
+
+// NewClientWithScope creates a Client bound to a specific org/project scope.
+// An empty Scope (or empty fields) defaults to the OSS single-tenant
+// _local/_local scope.
+func NewClientWithScope(baseURL, version string, tokenSrc TokenSource, scope Scope) *Client {
 	transport := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   connectTimeout,
@@ -61,6 +139,7 @@ func NewClient(baseURL, version string, tokenSrc TokenSource) *Client {
 	}
 	return &Client{
 		baseURL:   strings.TrimRight(baseURL, "/"),
+		scope:     scope,
 		tokenSrc:  tokenSrc,
 		userAgent: "orun-cli/" + version,
 		httpClient: &http.Client{
@@ -72,6 +151,18 @@ func NewClient(baseURL, version string, tokenSrc TokenSource) *Client {
 			Transport: transport,
 		},
 	}
+}
+
+// Scope returns the org/project scope this client is bound to.
+func (c *Client) Scope() Scope { return c.scope }
+
+// statePath builds a scoped state path. The suffix is appended verbatim after
+// the contract base path /v1/organizations/{orgId}/projects/{projectId}/state.
+// suffix must begin with "/" (e.g. "/runs/abc").
+func (c *Client) statePath(suffix string) string {
+	return "/v1/organizations/" + urlSegment(c.scope.orgSegment()) +
+		"/projects/" + urlSegment(c.scope.projectSegment()) +
+		"/state" + suffix
 }
 
 // ── API request/response types ────────────────────────────────────────────────
@@ -167,69 +258,69 @@ type LogUploadResponse struct {
 
 // ── API methods ───────────────────────────────────────────────────────────────
 
-// CreateRun calls POST /v1/runs. Idempotent: if the run already exists the
+// CreateRun calls POST …/state/runs. Idempotent: if the run already exists the
 // backend verifies the plan checksum and returns the existing run.
 func (c *Client) CreateRun(ctx context.Context, req CreateRunRequest) (*RunResponse, error) {
 	var resp RunResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/v1/runs", req, &resp, true); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, c.statePath("/runs"), req, &resp, true); err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
 	}
 	return &resp, nil
 }
 
-// GetRun calls GET /v1/runs/{runID}.
+// GetRun calls GET …/state/runs/{runID}.
 func (c *Client) GetRun(ctx context.Context, runID string) (*RunResponse, error) {
 	var resp RunResponse
-	if err := c.doJSON(ctx, http.MethodGet, "/v1/runs/"+urlSegment(runID), nil, &resp, true); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, c.statePath("/runs/"+urlSegment(runID)), nil, &resp, true); err != nil {
 		return nil, fmt.Errorf("get run: %w", err)
 	}
 	return &resp, nil
 }
 
-// ListJobs calls GET /v1/runs/{runID}/jobs.
+// ListJobs calls GET …/state/runs/{runID}/jobs.
 func (c *Client) ListJobs(ctx context.Context, runID string) ([]JobResponse, error) {
 	var resp ListJobsResponse
-	if err := c.doJSON(ctx, http.MethodGet, "/v1/runs/"+urlSegment(runID)+"/jobs", nil, &resp, true); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, c.statePath("/runs/"+urlSegment(runID)+"/jobs"), nil, &resp, true); err != nil {
 		return nil, fmt.Errorf("list jobs: %w", err)
 	}
 	return resp.Jobs, nil
 }
 
-// GetRunnable calls GET /v1/runs/{runID}/runnable.
+// GetRunnable calls GET …/state/runs/{runID}/runnable.
 func (c *Client) GetRunnable(ctx context.Context, runID string) ([]string, error) {
 	var resp RunnableResponse
-	if err := c.doJSON(ctx, http.MethodGet, "/v1/runs/"+urlSegment(runID)+"/runnable", nil, &resp, true); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, c.statePath("/runs/"+urlSegment(runID)+"/runnable"), nil, &resp, true); err != nil {
 		return nil, fmt.Errorf("get runnable: %w", err)
 	}
 	return resp.JobIDs, nil
 }
 
-// ClaimJob calls POST /v1/runs/{runID}/jobs/{jobID}/claim.
+// ClaimJob calls POST …/state/runs/{runID}/jobs/{jobID}/claim.
 // This operation is not retried on 5xx because partial state may exist.
 func (c *Client) ClaimJob(ctx context.Context, runID, jobID, runnerID string) (*ClaimJobResponse, error) {
 	var resp ClaimJobResponse
-	path := "/v1/runs/" + urlSegment(runID) + "/jobs/" + urlSegment(jobID) + "/claim"
+	path := c.statePath("/runs/" + urlSegment(runID) + "/jobs/" + urlSegment(jobID) + "/claim")
 	if err := c.doJSON(ctx, http.MethodPost, path, ClaimJobRequest{RunnerID: runnerID}, &resp, false); err != nil {
 		return nil, fmt.Errorf("claim job %s: %w", jobID, err)
 	}
 	return &resp, nil
 }
 
-// Heartbeat calls POST /v1/runs/{runID}/jobs/{jobID}/heartbeat.
+// Heartbeat calls POST …/state/runs/{runID}/jobs/{jobID}/heartbeat.
 func (c *Client) Heartbeat(ctx context.Context, runID, jobID, runnerID string) error {
 	var resp HeartbeatResponse
-	path := "/v1/runs/" + urlSegment(runID) + "/jobs/" + urlSegment(jobID) + "/heartbeat"
+	path := c.statePath("/runs/" + urlSegment(runID) + "/jobs/" + urlSegment(jobID) + "/heartbeat")
 	if err := c.doJSON(ctx, http.MethodPost, path, HeartbeatRequest{RunnerID: runnerID}, &resp, false); err != nil {
 		return fmt.Errorf("heartbeat job %s: %w", jobID, err)
 	}
 	return nil
 }
 
-// UpdateJob calls POST /v1/runs/{runID}/jobs/{jobID}/update.
+// UpdateJob calls POST …/state/runs/{runID}/jobs/{jobID}/update.
 // Not retried because the backend is idempotent by run+job+runner identity
 // and a duplicate terminal update is harmless.
 func (c *Client) UpdateJob(ctx context.Context, runID, jobID, runnerID, status, errText string) error {
-	path := "/v1/runs/" + urlSegment(runID) + "/jobs/" + urlSegment(jobID) + "/update"
+	path := c.statePath("/runs/" + urlSegment(runID) + "/jobs/" + urlSegment(jobID) + "/update")
 	req := UpdateJobRequest{RunnerID: runnerID, Status: status}
 	if errText != "" {
 		req.Error = errText
@@ -240,10 +331,10 @@ func (c *Client) UpdateJob(ctx context.Context, runID, jobID, runnerID, status, 
 	return nil
 }
 
-// UploadLog calls POST /v1/runs/{runID}/logs/{jobID} with the log content as
-// plain text. Uses the longer log upload timeout.
+// UploadLog calls POST …/state/runs/{runID}/logs/{jobID} with the log content
+// as plain text. Uses the longer log upload timeout.
 func (c *Client) UploadLog(ctx context.Context, runID, jobID, content string) error {
-	path := "/v1/runs/" + urlSegment(runID) + "/logs/" + urlSegment(jobID)
+	path := c.statePath("/runs/" + urlSegment(runID) + "/logs/" + urlSegment(jobID))
 	token, err := c.tokenSrc.Token(ctx)
 	if err != nil {
 		return fmt.Errorf("resolving auth token: %w", err)
@@ -255,6 +346,7 @@ func (c *Client) UploadLog(ctx context.Context, runID, jobID, content string) er
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set(contractVersionHeader, ContractVersion)
 	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
 
 	resp, err := c.logClient.Do(req)
@@ -268,9 +360,9 @@ func (c *Client) UploadLog(ctx context.Context, runID, jobID, content string) er
 	return nil
 }
 
-// GetLog calls GET /v1/runs/{runID}/logs/{jobID} and returns the log as a string.
+// GetLog calls GET …/state/runs/{runID}/logs/{jobID} and returns the log as a string.
 func (c *Client) GetLog(ctx context.Context, runID, jobID string) (string, error) {
-	path := "/v1/runs/" + urlSegment(runID) + "/logs/" + urlSegment(jobID)
+	path := c.statePath("/runs/" + urlSegment(runID) + "/logs/" + urlSegment(jobID))
 	token, err := c.tokenSrc.Token(ctx)
 	if err != nil {
 		return "", fmt.Errorf("resolving auth token: %w", err)
@@ -281,6 +373,7 @@ func (c *Client) GetLog(ctx context.Context, runID, jobID string) (string, error
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set(contractVersionHeader, ContractVersion)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -325,6 +418,9 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body, out inte
 			return nil
 		}
 		apiErr, isAPI := err.(*APIError)
+		if isAPI && apiErr.IsContractVersionUnsupported() {
+			return renderContractVersionError(apiErr)
+		}
 		if isAPI && apiErr.IsAuth() {
 			return fmt.Errorf("authentication failed: %w\n"+
 				"hint: in GitHub Actions add `id-token: write` to workflow permissions; "+
@@ -337,6 +433,47 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body, out inte
 		lastErr = err
 	}
 	return lastErr
+}
+
+// renderContractVersionError turns a 409 contract_version_unsupported response
+// into an actionable CLI error. The platform includes the supported range in
+// the envelope details/message; this surfaces it so version skew fails loud.
+func renderContractVersionError(apiErr *APIError) error {
+	detail := strings.TrimSpace(apiErr.Message)
+	supported := ""
+	if len(apiErr.Details) > 0 {
+		var d struct {
+			Supported    string   `json:"supported"`
+			SupportedMin string   `json:"supportedMin"`
+			SupportedMax string   `json:"supportedMax"`
+			Versions     []string `json:"versions"`
+		}
+		if json.Unmarshal(apiErr.Details, &d) == nil {
+			switch {
+			case d.Supported != "":
+				supported = d.Supported
+			case d.SupportedMin != "" || d.SupportedMax != "":
+				supported = strings.TrimSpace(d.SupportedMin + "–" + d.SupportedMax)
+			case len(d.Versions) > 0:
+				supported = strings.Join(d.Versions, ", ")
+			}
+		}
+	}
+	msg := fmt.Sprintf(
+		"this orun is too old or too new for the backend: it speaks contract version %s",
+		ContractVersion,
+	)
+	if supported != "" {
+		msg += fmt.Sprintf(", but the backend supports %s", supported)
+	}
+	if detail != "" && !strings.EqualFold(detail, "contract_version_unsupported") {
+		msg += fmt.Sprintf(" (%s)", detail)
+	}
+	msg += "; upgrade or downgrade orun to match the backend"
+	if apiErr.RequestID != "" {
+		msg += fmt.Sprintf(" [requestId: %s]", apiErr.RequestID)
+	}
+	return fmt.Errorf("%s: %w", msg, apiErr)
 }
 
 func (c *Client) doJSONOnce(ctx context.Context, method, path string, body, out interface{}) error {
@@ -360,6 +497,7 @@ func (c *Client) doJSONOnce(ctx context.Context, method, path string, body, out 
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set(contractVersionHeader, ContractVersion)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -385,16 +523,66 @@ func (c *Client) doJSONOnce(ctx context.Context, method, path string, body, out 
 
 func (c *Client) parseError(resp *http.Response) error {
 	data, _ := io.ReadAll(resp.Body)
-	var apiErr APIError
-	if len(data) > 0 {
-		if err := json.Unmarshal(data, &apiErr); err == nil && apiErr.Message != "" {
-			return &apiErr
-		}
+	if apiErr := decodeErrorEnvelope(data, resp.StatusCode); apiErr != nil {
+		return apiErr
 	}
 	return &APIError{
 		Message: fmt.Sprintf("server returned status %d", resp.StatusCode),
 		Code:    httpStatusCode(resp.StatusCode),
+		Status:  resp.StatusCode,
 	}
+}
+
+// decodeErrorEnvelope parses both the platform's nested envelope
+// ({ error: { code, message, details?, requestId } }) and the OSS backend's
+// flat envelope ({ error, code }). It returns nil if the body carries no
+// recognizable error so the caller can fall back to a status-derived message.
+func decodeErrorEnvelope(data []byte, status int) *APIError {
+	if len(data) == 0 {
+		return nil
+	}
+
+	// Nested platform shape first: { "error": { ... } }.
+	var nested struct {
+		Error *struct {
+			Code      string          `json:"code"`
+			Message   string          `json:"message"`
+			Details   json.RawMessage `json:"details"`
+			RequestID string          `json:"requestId"`
+		} `json:"error"`
+		// requestId may also appear at the top level depending on the edge.
+		RequestID string `json:"requestId"`
+	}
+	if json.Unmarshal(data, &nested) == nil && nested.Error != nil &&
+		(nested.Error.Message != "" || nested.Error.Code != "") {
+		reqID := nested.Error.RequestID
+		if reqID == "" {
+			reqID = nested.RequestID
+		}
+		return &APIError{
+			Message:   nested.Error.Message,
+			Code:      nested.Error.Code,
+			RequestID: reqID,
+			Details:   nested.Error.Details,
+			Status:    status,
+		}
+	}
+
+	// Flat OSS shape: { "error": "msg", "code": "CODE", "requestId": "…" }.
+	var flat struct {
+		Error     string `json:"error"`
+		Code      string `json:"code"`
+		RequestID string `json:"requestId"`
+	}
+	if json.Unmarshal(data, &flat) == nil && flat.Error != "" {
+		return &APIError{
+			Message:   flat.Error,
+			Code:      flat.Code,
+			RequestID: flat.RequestID,
+			Status:    status,
+		}
+	}
+	return nil
 }
 
 func httpStatusCode(status int) string {
@@ -423,7 +611,12 @@ func isRetryable(err error) bool {
 	}
 	apiErr, ok := err.(*APIError)
 	if ok {
-		return apiErr.Code == "INTERNAL_ERROR" || apiErr.Code == "RATE_LIMITED"
+		// Retry on the legacy OSS codes and on any 5xx / 429 status. A 409
+		// contract_version_unsupported is never retried (handled before this).
+		if apiErr.Code == "INTERNAL_ERROR" || apiErr.Code == "RATE_LIMITED" {
+			return true
+		}
+		return apiErr.Status >= 500 || apiErr.Status == http.StatusTooManyRequests
 	}
 	// Network-level errors are retryable.
 	return true

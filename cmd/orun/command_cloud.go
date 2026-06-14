@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/sourceplane/orun/internal/cliauth"
@@ -19,14 +20,14 @@ var (
 
 func registerCloudCommand(root *cobra.Command) {
 	root.AddCommand(cloudCmd)
-	cloudCmd.PersistentFlags().StringVar(&cloudBackendURL, "backend-url", "", "orun-backend URL")
+	cloudCmd.PersistentFlags().StringVar(&cloudBackendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
 	cloudCmd.AddCommand(&cobra.Command{
 		Use:   "link",
-		Short: "Link the current GitHub repo to the local Orun config via the active CLI session",
+		Short: "Link the current GitHub repo to an Orun Cloud org/project via the active CLI session",
 		Long: `Link the current GitHub repo to the local Orun config.
 
-Detects the git remote, resolves the repo namespace through the Orun backend
-CLI session endpoint, and persists the namespace ID in ~/.orun/config.yaml.
+Detects the git remote, resolves the repo's org/project through the Orun
+backend CLI session endpoint, and caches the link in ~/.orun/config.yaml.
 
 No GitHub PAT or OAuth token is required — the Orun CLI session established
 by 'orun auth login' is sufficient.`,
@@ -77,7 +78,11 @@ func runCloudLink() error {
 	}
 	color := ui.ColorEnabledForWriter(os.Stdout)
 	fmt.Printf("%s linked %s (local remote-state)\n", ui.Green(color, "✓"), repo.RepoFullName)
-	fmt.Printf("  backend:   %s\n", backendURL)
-	fmt.Printf("  namespace: %s\n", linked.NamespaceID)
+	fmt.Printf("  backend:  %s\n", backendURL)
+	if id := strings.TrimSpace(linked.NamespaceID); id != "" {
+		// The OSS single-tenant backend returns a scope id here; the
+		// org/project picker arrives in OC2.
+		fmt.Printf("  scope:    %s\n", id)
+	}
 	return nil
 }

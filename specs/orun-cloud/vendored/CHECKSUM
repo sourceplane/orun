@@ -1,0 +1,12 @@
+# Drift guard for the vendored State API contract.
+#
+# This records the sha256 of state-api-contract.md as vendored from the
+# platform repo (orun-cloud/specs/epics/saas-orun-platform/state-api-contract.md).
+#
+# The Go test TestVendoredContractChecksum (internal/remotestate/contract_vendor_test.go)
+# fails if specs/orun-cloud/vendored/state-api-contract.md no longer matches this
+# digest. When that happens, re-vendor from orun-cloud or renegotiate the contract
+# (see README.md in this directory for the procedure).
+#
+# Format: <sha256>  state-api-contract.md
+6f41fa488aaa4d79a3c899663dc9b1e6da1aaf8342e21b33620b4a428a419eef  state-api-contract.md

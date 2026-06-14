@@ -19,8 +19,20 @@ type repoContext struct {
 	GitRemote    string
 	RepoFullName string
 	NamespaceID  string
+	OrgID        string
+	OrgSlug      string
+	ProjectID    string
+	ProjectSlug  string
 }
 
+// backendURLDeprecationWarned guards the one-line deprecation notice so it is
+// emitted at most once per process.
+var backendURLDeprecationWarned bool
+
+// resolveBackendURLWithConfig resolves the backend URL with the precedence in
+// design §8: flag > env > repo intent > user config. The user-config layer
+// prefers cloud.url and falls back to the deprecated backend.url alias (with a
+// one-line warning).
 func resolveBackendURLWithConfig(intent *model.Intent, explicit string) string {
 	if u := strings.TrimSpace(explicit); u != "" {
 		return u
@@ -33,9 +45,47 @@ func resolveBackendURLWithConfig(intent *model.Intent, explicit string) string {
 	}
 	cfg, err := cliauth.LoadConfig()
 	if err == nil && cfg != nil {
-		return strings.TrimSpace(cfg.Backend.URL)
+		if cfg.UsesDeprecatedBackendURL() {
+			warnBackendURLDeprecated()
+		}
+		return cfg.ResolvedBackendURL()
 	}
 	return ""
+}
+
+// warnBackendURLDeprecated prints the one-line deprecation notice for the
+// backend.url config alias (design §8), at most once.
+func warnBackendURLDeprecated() {
+	if backendURLDeprecationWarned {
+		return
+	}
+	backendURLDeprecationWarned = true
+	fmt.Fprintln(os.Stderr, "warning: ~/.orun/config.yaml `backend.url` is deprecated; rename it to `cloud.url`")
+}
+
+// resolveScope resolves the org/project scope for a remote-state call with the
+// design §8 precedence: --org/--project flags > ORUN_ORG/ORUN_PROJECT env >
+// the cached RepoLink's org/project. Empty fields are filled from the next
+// source; the remotestate client defaults any still-empty field to the OSS
+// _local scope.
+func resolveScope(flagOrg, flagProject, linkOrg, linkProject string) remotestate.Scope {
+	scope := remotestate.Scope{
+		OrgID:     strings.TrimSpace(flagOrg),
+		ProjectID: strings.TrimSpace(flagProject),
+	}
+	if scope.OrgID == "" {
+		scope.OrgID = strings.TrimSpace(os.Getenv(orgEnvVar))
+	}
+	if scope.ProjectID == "" {
+		scope.ProjectID = strings.TrimSpace(os.Getenv(projectEnvVar))
+	}
+	if scope.OrgID == "" {
+		scope.OrgID = strings.TrimSpace(linkOrg)
+	}
+	if scope.ProjectID == "" {
+		scope.ProjectID = strings.TrimSpace(linkProject)
+	}
+	return scope
 }
 
 func requireBackendURL(intent *model.Intent, explicit string) (string, error) {
@@ -71,6 +121,11 @@ func resolveRepoContext(backendURL string) (*repoContext, error) {
 			nsID = ""
 		}
 		ctx.NamespaceID = nsID
+		// Org/project spine (additive; empty for legacy links).
+		ctx.OrgID = strings.TrimSpace(link.OrgID)
+		ctx.OrgSlug = strings.TrimSpace(link.OrgSlug)
+		ctx.ProjectID = strings.TrimSpace(link.ProjectID)
+		ctx.ProjectSlug = strings.TrimSpace(link.ProjectSlug)
 	}
 	return ctx, nil
 }

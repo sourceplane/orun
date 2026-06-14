@@ -58,13 +58,18 @@ type DevicePollPendingResponse struct {
 }
 
 // SessionResponse is returned by the CLI auth routes.
+//
+// Org model (OC0): Orgs is the platform's org/project-spine field (contract §1).
+// AllowedNamespaceIDs is kept for back-compat with the OSS backend, which still
+// returns it (retired in OC6); orgs[].id serves the same purpose.
 type SessionResponse struct {
 	AccessToken         string   `json:"accessToken"`
 	ExpiresAt           string   `json:"expiresAt"`
 	RefreshToken        string   `json:"refreshToken,omitempty"`
 	RefreshExpiresAt    string   `json:"refreshExpiresAt,omitempty"`
 	GitHubLogin         string   `json:"githubLogin"`
-	AllowedNamespaceIDs []string `json:"allowedNamespaceIds"`
+	Orgs                []OrgRef `json:"orgs,omitempty"`
+	AllowedNamespaceIDs []string `json:"allowedNamespaceIds,omitempty"`
 }
 
 // LinkedRepo is returned by GET /v1/accounts/repos.
@@ -336,6 +341,14 @@ func RefreshSession(ctx context.Context, backendURL, version string, creds *Cred
 	updated := sessionResponseToCredentials(resp, backendURL)
 	updated.RefreshToken = creds.RefreshToken
 	updated.RefreshTokenExpiry = creds.RefreshTokenExpiry
+	// A refresh response may omit the org spine (it only mints a new access
+	// token); carry the prior org/namespace info forward so it is not lost.
+	if len(updated.Orgs) == 0 {
+		updated.Orgs = append([]OrgRef(nil), creds.Orgs...)
+	}
+	if len(updated.AllowedNamespaceIDs) == 0 {
+		updated.AllowedNamespaceIDs = append([]string(nil), creds.AllowedNamespaceIDs...)
+	}
 	if err := SaveSession(updated); err != nil {
 		return nil, err
 	}
@@ -408,12 +421,23 @@ func (c *BackendClient) do(ctx context.Context, method, path string, headers map
 }
 
 func sessionResponseToCredentials(resp *SessionResponse, backendURL string) *Credentials {
+	orgs := append([]OrgRef(nil), resp.Orgs...)
+	// Back-compat: if the server only sent allowedNamespaceIds (OSS backend),
+	// synthesize Orgs from them so the rest of the CLI sees the org spine.
+	if len(orgs) == 0 {
+		for _, id := range resp.AllowedNamespaceIDs {
+			if id = strings.TrimSpace(id); id != "" {
+				orgs = append(orgs, OrgRef{ID: id})
+			}
+		}
+	}
 	return &Credentials{
 		AccessToken:         resp.AccessToken,
 		AccessTokenExpiry:   resp.ExpiresAt,
 		RefreshToken:        resp.RefreshToken,
 		RefreshTokenExpiry:  resp.RefreshExpiresAt,
 		GitHubLogin:         resp.GitHubLogin,
+		Orgs:                orgs,
 		AllowedNamespaceIDs: append([]string(nil), resp.AllowedNamespaceIDs...),
 		BackendURL:          backendURL,
 	}
@@ -435,12 +459,21 @@ func credentialsFromFragment(fragment, backendURL string) (*Credentials, error) 
 	if accessToken == "" {
 		return nil, fmt.Errorf("missing session token in loopback callback")
 	}
+	// Synthesize the org spine from the legacy allowed-namespace list until the
+	// platform callback (OC1) carries orgs[] directly.
+	orgs := make([]OrgRef, 0, len(allowed))
+	for _, id := range allowed {
+		if id = strings.TrimSpace(id); id != "" {
+			orgs = append(orgs, OrgRef{ID: id})
+		}
+	}
 	return &Credentials{
 		AccessToken:         accessToken,
 		AccessTokenExpiry:   jwtExpiry(accessToken),
 		RefreshToken:        values.Get("refreshToken"),
 		RefreshTokenExpiry:  values.Get("refreshExpiresAt"),
 		GitHubLogin:         values.Get("githubLogin"),
+		Orgs:                orgs,
 		AllowedNamespaceIDs: allowed,
 		BackendURL:          backendURL,
 	}, nil
