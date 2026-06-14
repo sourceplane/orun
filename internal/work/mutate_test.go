@@ -145,6 +145,17 @@ func TestImportValidation(t *testing.T) {
 	if _, err := st.Import(Item{Kind: "Widget", Key: "ORN-5", Title: "t"}, "specs/", auto, at0); !errors.Is(err, ErrInvalidArgument) {
 		t.Errorf("bad kind: err = %v", err)
 	}
+	// Key shape is validated by kind, just like the create mutators: a Task key
+	// must be PREFIX-seq, an Epic/Initiative key must be a slug.
+	if _, err := st.Import(Item{Kind: KindTask, Key: "not a key!", Title: "t"}, "specs/", auto, at0); !errors.Is(err, ErrInvalidKey) {
+		t.Errorf("malformed task key: err = %v, want ErrInvalidKey", err)
+	}
+	if _, err := st.Import(Item{Kind: KindTask, Key: "imported-epic", Title: "t"}, "specs/", auto, at0); !errors.Is(err, ErrInvalidKey) {
+		t.Errorf("slug as task key: err = %v, want ErrInvalidKey", err)
+	}
+	if _, err := st.Import(Item{Kind: KindEpic, Key: "Bad Slug", Title: "t"}, "specs/", auto, at0); !errors.Is(err, ErrInvalidKey) {
+		t.Errorf("malformed epic slug: err = %v, want ErrInvalidKey", err)
+	}
 	ev, err := st.Import(Item{Kind: KindEpic, Key: "imported-epic", Title: "Imported"}, "specs/", auto, at0)
 	if err != nil {
 		t.Fatalf("valid import: %v", err)

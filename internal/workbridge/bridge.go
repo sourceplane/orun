@@ -29,9 +29,11 @@ func FromResult(pr string, r affected.Result) AffectedSet {
 	}
 }
 
+// nonNil returns a defensive copy of s (nil → empty), so the engine's
+// already-sorted slice is never aliased into the wire DTO — a consumer mutating
+// AffectedSet.Components/Dependents cannot reach back into the affected.Result.
 func nonNil(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
+	out := make([]string, len(s))
+	copy(out, s)
+	return out
 }
