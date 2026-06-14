@@ -238,6 +238,30 @@ func UpsertRepoLink(link RepoLink) error {
 	return SaveConfig(cfg)
 }
 
+// RemoveRepoLink drops a stored repo link for the backend/remote/repo tuple
+// from ~/.orun/config.yaml. It is a no-op (returns nil) when no link matches.
+func RemoveRepoLink(backendURL, gitRemote, repoFullName string) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	target := RepoLink{BackendURL: backendURL, GitRemote: gitRemote, RepoFullName: repoFullName}
+	kept := cfg.Repos[:0]
+	removed := false
+	for _, link := range cfg.Repos {
+		if sameRepoLink(link, target) {
+			removed = true
+			continue
+		}
+		kept = append(kept, link)
+	}
+	if !removed {
+		return nil
+	}
+	cfg.Repos = kept
+	return SaveConfig(cfg)
+}
+
 // FindRepoLink returns a stored repo link for the backend/remote/repo tuple.
 func FindRepoLink(backendURL, gitRemote, repoFullName string) (*RepoLink, error) {
 	cfg, err := LoadConfig()

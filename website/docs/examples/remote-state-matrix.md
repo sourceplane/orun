@@ -37,13 +37,13 @@ When your workflow has `permissions: id-token: write`, orun requests a GitHub Ac
 
 Outside GitHub Actions, orun uses the credentials stored by `orun auth login` or `orun auth login --device`.  These are Orun-issued OAuth session tokens (not GitHub PATs).  The access token is refreshed automatically when it expires.
 
-On the first `orun run --remote-state` outside GitHub Actions, the CLI auto-resolves the repo namespace from the current Git remote by calling `POST /v1/accounts/repos/link` with the active CLI session, then caches the result in `~/.orun/config.yaml`.  Subsequent runs use the cached namespace ID.
+Outside GitHub Actions, link the repo to an org/project once with `orun cloud link` (it resolves the current Git remote against the platform and caches the org/project scope in `~/.orun/config.yaml`).  Subsequent `orun run --remote-state` invocations run under the cached scope.  An unlinked repo fails fast with `run `orun cloud link``.
 
 Token resolution order (for `orun run --remote-state`):
 
 1. GitHub Actions OIDC (when `ACTIONS_ID_TOKEN_REQUEST_URL` is set)
-2. `ORUN_TOKEN` environment variable (short-lived machine token, explicit fallback — requires pre-cached namespace link)
-3. Stored Orun CLI session from `orun auth login` (auto-resolves namespace on first run)
+2. `ORUN_TOKEN` environment variable (short-lived machine token, explicit fallback — requires a pre-cached org/project link)
+3. Stored Orun CLI session from `orun auth login`
 
 **GitHub PATs are not the normal local auth path.**  They are never stored by the Orun CLI.  Use `orun auth login` for interactive machines and `orun auth login --device` for headless environments.
 

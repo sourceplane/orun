@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -55,6 +56,24 @@ type APIError struct {
 	Message   string `json:"error"`
 	RequestID string `json:"-"`
 	Status    int    `json:"-"`
+	// Details carries the platform error envelope's optional structured detail
+	// (e.g. 412 entitlement denials carry { reason: "limit_reached" }).
+	Details json.RawMessage `json:"-"`
+}
+
+// DetailReason extracts the "reason" field from the error envelope details, if
+// present (e.g. "limit_reached" on a 412 entitlement denial).
+func (e *APIError) DetailReason() string {
+	if e == nil || len(e.Details) == 0 {
+		return ""
+	}
+	var d struct {
+		Reason string `json:"reason"`
+	}
+	if json.Unmarshal(e.Details, &d) != nil {
+		return ""
+	}
+	return d.Reason
 }
 
 func (e *APIError) Error() string {
@@ -191,29 +210,36 @@ type SessionResponse struct {
 	AllowedNamespaceIDs []string    `json:"allowedNamespaceIds,omitempty"`
 }
 
-// LinkedRepo is returned by GET /v1/accounts/repos.
-type LinkedRepo struct {
-	NamespaceID   string `json:"namespaceId"`
-	NamespaceSlug string `json:"namespaceSlug"`
-	LinkedAt      string `json:"linkedAt"`
+// WorkspaceLink is a single org/project ↔ remote binding (platform OP4). It is
+// returned by POST /v1/organizations/{orgId}/cli/links (create) and by GET
+// /v1/cli/links/resolve (candidates/links). RemoteURL is the server's canonical
+// normalized form (lowercase host/owner/repo, no scheme/.git) — the CLI caches
+// THAT, never its own normalization.
+type WorkspaceLink struct {
+	ID          string          `json:"id,omitempty"`
+	OrgID       string          `json:"orgId,omitempty"`
+	OrgSlug     string          `json:"orgSlug,omitempty"`
+	ProjectID   string          `json:"projectId,omitempty"`
+	ProjectSlug string          `json:"projectSlug,omitempty"`
+	RemoteURL   string          `json:"remoteUrl,omitempty"`
+	CreatedBy   *LinkActor      `json:"createdBy,omitempty"`
+	CreatedAt   string          `json:"createdAt,omitempty"`
+	LastSeenAt  json.RawMessage `json:"lastSeenAt,omitempty"`
 }
 
-// Account is returned by GET /v1/accounts/me.
-type Account struct {
-	AccountID   string `json:"accountId"`
-	GitHubLogin string `json:"githubLogin"`
-	CreatedAt   string `json:"createdAt"`
+// LinkActor identifies who created a workspace link (createdBy in the OP4
+// payload).
+type LinkActor struct {
+	ID   string `json:"id,omitempty"`
+	Kind string `json:"kind,omitempty"`
 }
 
-// LinkRepoFromSessionResponse is returned by POST /v1/accounts/repos/link.
-// The backend always returns namespaceKind: "local" for CLI session links.
-type LinkRepoFromSessionResponse struct {
-	NamespaceKind string `json:"namespaceKind"`
-	NamespaceID   string `json:"namespaceId"`
-	NamespaceSlug string `json:"namespaceSlug"`
-	RepoID        string `json:"repoId"`
-	RepoFullName  string `json:"repoFullName"`
-	LinkedAt      string `json:"linkedAt"`
+// ResolveLinksResponse is the unwrapped data payload of GET
+// /v1/cli/links/resolve?remoteUrl=… (OP4). Candidates are the orgs/projects the
+// actor may link/use for the remote; Links are existing active links for it.
+type ResolveLinksResponse struct {
+	Candidates []WorkspaceLink `json:"candidates"`
+	Links      []WorkspaceLink `json:"links"`
 }
 
 // BrowserOpener opens the system browser.
@@ -393,45 +419,41 @@ func (c *BackendClient) Logout(ctx context.Context, refreshToken string) error {
 	return err
 }
 
-// GetAccount returns the current backend account.
-func (c *BackendClient) GetAccount(ctx context.Context, accessToken string) (*Account, error) {
-	var resp Account
-	if err := c.doJSONData(ctx, http.MethodGet, "/v1/accounts/me", map[string]string{"Authorization": "Bearer " + accessToken}, nil, &resp); err != nil {
+// ResolveLinks calls GET /v1/cli/links/resolve?remoteUrl=… (OP4). The raw git
+// remote is sent verbatim; the server normalizes it and restricts candidates to
+// the actor's orgs. A bad remote surfaces as a 422 *APIError.
+func (c *BackendClient) ResolveLinks(ctx context.Context, accessToken, remoteURL string) (*ResolveLinksResponse, error) {
+	path := "/v1/cli/links/resolve?remoteUrl=" + url.QueryEscape(remoteURL)
+	var resp ResolveLinksResponse
+	if err := c.doJSONData(ctx, http.MethodGet, path,
+		map[string]string{"Authorization": "Bearer " + accessToken}, nil, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
 }
 
-// ListLinkedRepos returns repos linked to the current account.
-func (c *BackendClient) ListLinkedRepos(ctx context.Context, accessToken string) ([]LinkedRepo, error) {
-	var resp struct {
-		Repos []LinkedRepo `json:"repos"`
+// CreateLink calls POST /v1/organizations/{orgId}/cli/links (OP4). projectSlug
+// is optional; the server creates the project on demand. The returned link
+// carries the server's canonical normalized remoteUrl — the caller caches that.
+// Errors map to: 422 bad remote, 404 policy/membership denial, 412
+// limit_reached (entitlement), 409 already-linked.
+func (c *BackendClient) CreateLink(ctx context.Context, accessToken, orgID, remoteURL, projectSlug string) (*WorkspaceLink, error) {
+	body := map[string]string{"remoteUrl": remoteURL}
+	if s := strings.TrimSpace(projectSlug); s != "" {
+		body["projectSlug"] = s
 	}
-	if err := c.doJSONData(ctx, http.MethodGet, "/v1/accounts/repos", map[string]string{"Authorization": "Bearer " + accessToken}, nil, &resp); err != nil {
+	var wrapped struct {
+		Link *WorkspaceLink `json:"link"`
+	}
+	if err := c.doJSONData(ctx, http.MethodPost,
+		"/v1/organizations/"+url.PathEscape(strings.TrimSpace(orgID))+"/cli/links",
+		map[string]string{"Authorization": "Bearer " + accessToken}, body, &wrapped); err != nil {
 		return nil, err
 	}
-	return resp.Repos, nil
-}
-
-// LinkRepoFromSession calls POST /v1/accounts/repos/link with a CLI session token.
-// Returns an error if the response does not contain namespaceKind: "local" — this
-// guards against older backend versions that may return canonical repo namespaces.
-func (c *BackendClient) LinkRepoFromSession(ctx context.Context, accessToken, repoFullName string) (*LinkRepoFromSessionResponse, error) {
-	var resp LinkRepoFromSessionResponse
-	if err := c.doJSONData(ctx, http.MethodPost, "/v1/accounts/repos/link",
-		map[string]string{"Authorization": "Bearer " + accessToken},
-		map[string]string{"repoFullName": repoFullName},
-		&resp,
-	); err != nil {
-		return nil, err
+	if wrapped.Link == nil {
+		return nil, &APIError{Code: "INVALID_RESPONSE", Message: "link create returned no link object"}
 	}
-	if resp.NamespaceKind != "local" {
-		return nil, &APIError{
-			Code:    "INVALID_RESPONSE",
-			Message: fmt.Sprintf("link endpoint returned namespaceKind %q, expected \"local\"; ensure the backend includes Task 0012.2.1", resp.NamespaceKind),
-		}
-	}
-	return &resp, nil
+	return wrapped.Link, nil
 }
 
 // BrowserLogin performs the platform browser login (POST /v1/auth/cli/start,
@@ -723,9 +745,10 @@ func decodeAuthError(data []byte, status int) *APIError {
 	// Platform nested shape.
 	var nested struct {
 		Error *struct {
-			Code      string `json:"code"`
-			Message   string `json:"message"`
-			RequestID string `json:"requestId"`
+			Code      string          `json:"code"`
+			Message   string          `json:"message"`
+			Details   json.RawMessage `json:"details"`
+			RequestID string          `json:"requestId"`
 		} `json:"error"`
 		RequestID string `json:"requestId"`
 	}
@@ -738,6 +761,7 @@ func decodeAuthError(data []byte, status int) *APIError {
 		return &APIError{
 			Code:      nested.Error.Code,
 			Message:   nested.Error.Message,
+			Details:   nested.Error.Details,
 			RequestID: reqID,
 			Status:    status,
 		}
