@@ -2,7 +2,7 @@
 
 Status: Draft. Platform-side decisions (naming, free tier, secret custody,
 BYO-KMS, conformance commitment) live in
-`multi-tenant-saas/specs/epics/saas-orun-platform/risks-and-open-questions.md`
+`orun-cloud/specs/epics/saas-orun-platform/risks-and-open-questions.md`
 (D1–D6); this doc carries only the client-side items.
 
 ## Decisions needed (human)
