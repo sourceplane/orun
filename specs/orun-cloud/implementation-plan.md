@@ -17,11 +17,14 @@ Pairs with OP0 (contracts exist server-side, even dormant).
   `contract_version_unsupported` rendered actionably; platform error envelope
   parsed everywhere (`code`, `requestId` surfaced).
 - Retire "namespace": `SessionResponse.allowedNamespaceIds` →
-  `orgs []OrgRef{ID, Slug, Name, Role}` (storage migration reads old
-  session.json once, rewrites); `RepoLink` gains org/project IDs + slugs.
+  `orgs []OrgRef{ID, Slug, Name, Role}` (storage migration reads the old
+  `credentials.json`/keychain entry once, rewrites); `RepoLink` (today carrying
+  `NamespaceID`/`NamespaceKind`) gains org/project IDs + slugs. This retirement
+  also spans the embedded OSS server (`orun backend`'s Worker bundle + its D1
+  `namespaces` schema), not just the client.
 - Config: `cloud.url` block in user config + `execution.state` intent wiring;
-  `backendUrl` honored as deprecated alias with a one-line warning; precedence
-  per design §8, with tests.
+  the existing `backend.url` key honored as deprecated alias with a one-line
+  warning; precedence per design §8, with tests.
 
 **Done when:** unit tests cover path construction, version-header rejection
 rendering, error-envelope parsing, config precedence, and session-file
@@ -37,8 +40,9 @@ Pairs with OP1.
   (GitHub's device flow removed); rotating-refresh handling in
   `SessionTokenSource` (single-use refresh, `family_revoked` → clear session +
   one actionable error).
-- Session storage: enforce 0600 on write, refuse 0644 reads with a fix-it
-  message; `auth status` shows user, orgs + roles, expiry, backend URL.
+- Session storage: 0600 writes are already enforced (and macOS already uses the
+  `io.sourceplane.orun` keychain) — add refusal of world-readable (0644) reads
+  with a fix-it message; `auth status` shows user, orgs + roles, expiry, backend URL.
 - `auth token` prints a fresh access token (refreshing if needed).
 
 **Done when:** against stage, `auth login`, `auth login --device`,
@@ -67,16 +71,18 @@ form works headless.
 
 Pairs with OP2 + OP3. The core milestone.
 
-- `statebackend.RemoteStateBackend` over the v1 contract: InitRun = ensure
-  plan object (via OC4's `objsync`, landed minimally here for plans) + create
-  run with client ULID + digest; structured claim outcomes; `lease_lost` stops
-  the job silently; server-supplied lease/heartbeat intervals.
+- `statebackend.RemoteStateBackend` over the v1 contract (the type exists today
+  but sends the whole plan **inline** in CreateRun): InitRun = ensure plan object
+  (via OC4's `objsync`, landed minimally here for plans) + create run with client
+  ULID + digest; structured claim outcomes; `lease_lost` stops the job silently;
+  server-supplied lease/heartbeat intervals.
 - Log pipeline: chunked `AppendStepLog` (≤1 MiB), bounded buffering with
   spill-to-file when the backend is unreachable mid-run, drain-on-recover,
   non-zero exit + warning when undrained (design §7 row 5).
-- Reads: run list on the client; `bridge.FromBackend` wired so `status`,
-  `logs --follow` (fromSeq tail), and the cockpit render cloud runs through
-  the existing viewmodels.
+- Reads: run list on the client (today `backendSource.ListRuns` returns an
+  "unsupported" error — this implements it); `bridge.FromBackend` wired so
+  `status`, `logs --follow` (fromSeq tail), and the cockpit render cloud runs
+  through the existing viewmodels.
 - `run --local` escape hatch; no silent fallback.
 
 **Done when:** against stage, a multi-job DAG runs to completion under
@@ -127,7 +133,8 @@ Pairs with OP5; closes D5 (conformance) from the platform risks doc.
 
 - `OIDCTokenSource` → `POST /v1/auth/oidc/exchange` (audience `orun-cloud`),
   selected automatically in GHA (design §3 selection order); `ORUN_ORG`/
-  `ORUN_PROJECT` env scoping for CI.
+  `ORUN_PROJECT` env scoping for CI. (Today `OIDCTokenSource` sends the raw GHA
+  token straight to the backend; this inserts the exchange step.)
 - Generated/documented GHA workflow: `permissions: id-token: write` +
   `orun run --remote-state` with zero stored secrets; docs page with the
   trust-binding setup pointer.
@@ -136,7 +143,9 @@ Pairs with OP5; closes D5 (conformance) from the platform risks doc.
   against the OSS `orun backend` server; the platform repo runs the same suite
   against state-worker on stage. The suite is the contract's executable form.
 - `orun backend` (OSS server) updated to the v1 contract with fixed
-  `_local/_local` scope.
+  `_local/_local` scope. (Today `orun backend init` provisions an embedded
+  Cloudflare Worker + D1 on a single-tenant *namespace* model; this migrates it
+  to org/project `_local/_local`.)
 
 **Done when:** a public example repo's GHA run executes against stage via OIDC
 with no stored secret; an unbound repo's exchange is denied (OP5 gate); the

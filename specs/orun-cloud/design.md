@@ -62,8 +62,9 @@ backend/GitHub device flow to the platform:
   shape). This replaces driving *GitHub's* device flow — the platform owns the
   grant; GitHub identity is just one of its login methods.
 - **Session**: access JWT (~15 min) + rotating refresh (~30 d), stored at
-  `~/.orun/session.json` (0600 enforced; OS-keychain storage is a documented
-  follow-up, risks R5). `SessionTokenSource` keeps its refresh-loop contract:
+  `~/.orun/credentials.json` (0600 enforced; macOS already uses the
+  `io.sourceplane.orun` keychain — broader keychain coverage is the follow-up,
+  risks R5). `SessionTokenSource` keeps its refresh-loop contract:
   refresh via `POST /v1/auth/cli/token`; a `family_revoked`/401 response clears
   the session and surfaces "run `orun auth login`" once, not per call.
 - **Token sources** stay exactly three, now with real servers behind each:
@@ -151,7 +152,7 @@ secret-sourced. At execution time, per claimed job:
 ## 8. Configuration
 
 `~/.orun/config.yaml` (user) and `intent.yaml` `execution.state` (repo) gain a
-single `cloud` block; `backendUrl` remains as a deprecated alias one release:
+single `cloud` block; the existing `backend.url` key remains as a deprecated alias one release:
 
 ```yaml
 cloud:
