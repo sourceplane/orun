@@ -17,12 +17,18 @@ const (
 
 // InitRunOptions carries options for InitRun.
 type InitRunOptions struct {
-	RunID        string
-	NamespaceID  string
-	RepoFullName string
-	DryRun       bool
-	Actor        string
-	TriggerType  string
+	// RunID is the CLI execution id (an explicit --exec-id, the GitHub
+	// gha_<runId>_<attempt> form, or the local fallback). The remote backend
+	// maps it deterministically to a contract-valid run ULID, so the same execId
+	// resumes the same run (idempotent create / crash recovery).
+	RunID       string
+	Source      string // "cli" | "ci"
+	Environment string // optional environment slug
+	GitCommit   string
+	GitRef      string
+	GitDirty    bool
+	Labels      map[string]string
+	DryRun      bool
 }
 
 // RunHandle is returned by InitRun.
@@ -37,11 +43,24 @@ type ClaimResult struct {
 	CurrentStatus string // backend job status when not claimed
 	DepsWaiting   bool
 	DepsBlocked   bool
+
+	// Server-supplied lease tunables, populated on a successful claim so the
+	// runner never hardcodes the heartbeat cadence (contract §2.2).
+	LeaseExpiresAt           string
+	LeaseSeconds             int
+	HeartbeatIntervalSeconds int
 }
 
 // HeartbeatResult is returned by Heartbeat.
 type HeartbeatResult struct {
 	OK bool
+	// LeaseLost is true when the server rejected the heartbeat with 409
+	// lease_lost: the lease lapsed or was reassigned and the runner should stop
+	// the job. The extended lease fields are populated when OK.
+	LeaseLost                bool
+	LeaseExpiresAt           string
+	LeaseSeconds             int
+	HeartbeatIntervalSeconds int
 }
 
 // Backend is the state backend seam. Local filesystem state and remote HTTP

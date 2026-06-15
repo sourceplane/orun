@@ -91,25 +91,35 @@ func backendStepID(step model.PlanStep) string {
 	return "unnamed-step"
 }
 
-// BackendJobStatusToLocal converts a backend job status string to the local
-// status string used by execmodel.JobState.
+// BackendJobStatusToLocal converts a v1 contract job status to the local status
+// string used by execmodel.JobState. The v1 vocabulary is
+// queued|claimed|running|succeeded|failed|timed_out|canceled; the local
+// vocabulary the cockpit/status viewmodels and the dep-wait logic understand is
+// pending|running|completed|failed|canceled.
 func BackendJobStatusToLocal(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "success":
+	case "queued":
+		return "pending"
+	case "claimed", "running":
+		return "running"
+	case "succeeded", "success", "skipped":
 		return "completed"
-	case "skipped":
-		return "completed"
+	case "failed", "timed_out":
+		return "failed"
+	case "canceled", "cancelled":
+		return "canceled"
 	default:
 		return strings.ToLower(strings.TrimSpace(s))
 	}
 }
 
-// LocalJobStatusToBackend converts a local job status to a backend status value.
+// LocalJobStatusToBackend converts a local terminal job status to the v1
+// contract update status ("succeeded" | "failed").
 func LocalJobStatusToBackend(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "completed":
-		return "success"
+	case "completed", "success", "succeeded":
+		return "succeeded"
 	default:
-		return strings.ToLower(strings.TrimSpace(s))
+		return "failed"
 	}
 }

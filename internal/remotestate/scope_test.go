@@ -101,15 +101,15 @@ func TestScopedPath_ClaimAndLogsAndUpload(t *testing.T) {
 		t.Errorf("claim path = %q, want %q", *gotPath, wantClaim)
 	}
 
-	if err := c.UploadLog(context.Background(), "run-1", "job-1", "out"); err != nil {
-		t.Fatalf("UploadLog error: %v", err)
+	if _, err := c.AppendLog(context.Background(), "run-1", "job-1", "runner-1", "out"); err != nil {
+		t.Fatalf("AppendLog error: %v", err)
 	}
 	wantLog := "/v1/organizations/o/projects/p/state/runs/run-1/logs/job-1"
 	if *gotPath != wantLog {
 		t.Errorf("log path = %q, want %q", *gotPath, wantLog)
 	}
 	if *gotVersion != "1" {
-		t.Errorf("UploadLog Orun-Contract-Version = %q, want 1", *gotVersion)
+		t.Errorf("AppendLog Orun-Contract-Version = %q, want 1", *gotVersion)
 	}
 }
 
