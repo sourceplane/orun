@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/sourceplane/orun/internal/cockpit/render"
 	"github.com/sourceplane/orun/internal/cockpit/viewmodel"
@@ -25,6 +27,7 @@ var (
 	logsFailed      bool
 	logsRaw         bool
 	logsRemoteState bool
+	logsFollow      bool
 	logsBackendURL  string
 )
 
@@ -62,6 +65,7 @@ func registerLogsCommand(root *cobra.Command) {
 	logsCmd.Flags().BoolVar(&logsFailed, "failed", false, "Show only failed jobs or steps")
 	logsCmd.Flags().BoolVar(&logsRaw, "raw", false, "Show full raw logs instead of compact excerpts")
 	logsCmd.Flags().BoolVar(&logsRemoteState, "remote-state", false, "Fetch logs from orun-backend")
+	logsCmd.Flags().BoolVar(&logsFollow, "follow", false, "Live-tail a job's log (requires --remote-state and --job); polls until the job completes")
 	logsCmd.Flags().StringVar(&logsBackendURL, "backend-url", "", "orun-backend URL for remote state (or set ORUN_BACKEND_URL)")
 }
 
@@ -112,7 +116,14 @@ func showLogs() error {
 			return err
 		}
 		defer backend.Close(context.Background())
+		if logsFollow {
+			return followRemoteLog(runID, backend, color)
+		}
 		return showRemoteLogs(runID, backend, color)
+	}
+
+	if logsFollow {
+		return fmt.Errorf("--follow requires --remote-state (live tail reads from the Orun Cloud backend)")
 	}
 
 	// Read logs from the content-addressed object graph.
@@ -169,6 +180,52 @@ func showRemoteLogs(runID string, backend statebackend.Backend, color bool) erro
 	counts := executionCountsFromState(meta, st)
 	renderLogEntries(runID, meta, counts, entries, color)
 	return nil
+}
+
+// followRemoteLog live-tails a single job's log via the fromSeq cursor until the
+// job completes (or the user interrupts with Ctrl-C). Requires --job; multi-job
+// follow is a later increment.
+func followRemoteLog(runID string, backend statebackend.Backend, color bool) error {
+	jobID := strings.TrimSpace(logsJob)
+	if jobID == "" {
+		return fmt.Errorf("--follow requires --job <jobId> (the job to tail)")
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	const pollInterval = 1500 * time.Millisecond
+	const maxConsecutiveErrors = 5
+	fromSeq := 0
+	errCount := 0
+	fmt.Fprintf(os.Stdout, "%s tailing %s (Ctrl-C to stop)\n", ui.Dim(color, "○"), jobID)
+	for {
+		content, nextSeq, complete, err := backend.TailJobLog(ctx, runID, jobID, fromSeq)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil // interrupted
+			}
+			errCount++
+			if errCount >= maxConsecutiveErrors {
+				return fmt.Errorf("tailing logs for %s: %w", jobID, err)
+			}
+			fmt.Fprintf(os.Stderr, "%s tail reconnecting (%v)\n", ui.Yellow(color, "↻"), err)
+		} else {
+			errCount = 0
+			if content != "" {
+				fmt.Fprint(os.Stdout, content)
+				fromSeq = nextSeq
+			}
+			if complete {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(pollInterval):
+		}
+	}
 }
 
 func collectRemoteLogEntries(ctx context.Context, backend statebackend.Backend, runID string, st *execmodel.ExecState) ([]logEntry, error) {

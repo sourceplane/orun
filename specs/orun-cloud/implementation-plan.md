@@ -125,14 +125,20 @@ Pairs with OP2 + OP3. The core milestone, landing in increments.
   and `orun logs --remote-state` render a completed cloud run (state, progress,
   per-job step logs) indistinguishably from a local one.
 
+- ✅ **Increment 5 (PR #371) — `orun logs --follow` (fromSeq live tail).**
+  Stage-verified. A new `statebackend.Backend.TailJobLog(runId, jobId, fromSeq)`
+  (over `client.ReadLog`) powers `orun logs --follow --job <id> --remote-state`,
+  which polls the cursor and prints new chunks until the job is complete (Ctrl-C
+  to stop; bounded reconnect on transient errors). Verified against stage by
+  tailing a live job's output as its steps landed.
+
 Remaining OC3 increments (unstarted):
 
 - Log pipeline hardening: bounded buffering with spill-to-file when the backend
   is unreachable mid-run, drain-on-recover, non-zero exit + warning when
   undrained (design §7 row 5).
-- Live tail + cockpit: `orun logs --follow` (fromSeq tail) and the cockpit TUI
-  over cloud runs (`ListRuns` on the client exists; `logs --follow` and the TUI
-  bridge wiring do not yet).
+- Cockpit TUI over cloud runs (`ListRuns` on the client exists; the TUI bridge
+  wiring does not yet). Multi-job `logs --follow` (currently single `--job`).
 - Full kill -9 lease-recovery timing gate run live (the pieces — atomic claim,
   heartbeat, server sweep re-queue — are each verified; the end-to-end ~60 s
   lapse+resume was not run).

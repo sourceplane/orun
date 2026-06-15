@@ -92,6 +92,11 @@ type Backend interface {
 	// ReadJobLog retrieves the combined log for a job.
 	ReadJobLog(ctx context.Context, runID string, jobID string) (string, error)
 
+	// TailJobLog reads a job's log from fromSeq onward, returning the new
+	// content, the next-sequence cursor, and whether the job is complete (no more
+	// chunks coming). It is the live-tail primitive behind `orun logs --follow`.
+	TailJobLog(ctx context.Context, runID string, jobID string, fromSeq int) (content string, nextSeq int, complete bool, err error)
+
 	// Close releases any resources held by the backend.
 	Close(ctx context.Context) error
 }
