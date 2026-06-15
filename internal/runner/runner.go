@@ -44,6 +44,12 @@ type RunnerHooks struct {
 	// is treated as already complete and execution is skipped. An error cancels
 	// the run.
 	BeforeJob func(jobID string) (skipExec bool, err error)
+	// OnJobStart is called once a job begins executing, with the per-job
+	// execution context and its cancel func. Remote state uses this to drive a
+	// heartbeat keyed to the job's lifetime and to abort the job (cancel) when
+	// the server reports the lease was lost — stopping work another runner has
+	// taken over. jobCtx is cancelled automatically when the job finishes.
+	OnJobStart func(jobID string, jobCtx context.Context, jobCancel context.CancelFunc)
 	// AfterStateUpdate is called after the runner updates its in-memory
 	// ExecState on a job/step tick. The object-model working tree uses it to
 	// project live state into the content-addressed graph (objrun). The hook
@@ -454,6 +460,16 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 }
 
 func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, execState *execmodel.ExecState, baseExecContext executor.ExecContext, persistState, failFast bool, summary *runSummary) bool {
+	// Per-job cancellable context: steps run under it, and OnJobStart hands the
+	// cancel to remote state so a lost lease aborts just this job (not the run).
+	// Cancelled on return so the job's heartbeat goroutine stops (no leak).
+	jobCtx, jobCancel := context.WithCancel(baseExecContext.Context)
+	defer jobCancel()
+	baseExecContext.Context = jobCtx
+	if r.Hooks != nil && r.Hooks.OnJobStart != nil {
+		r.Hooks.OnJobStart(job.ID, jobCtx, jobCancel)
+	}
+
 	r.updateState(persistState, execState, func() {
 		jobState.Status = "running"
 		jobState.FinishedAt = ""
