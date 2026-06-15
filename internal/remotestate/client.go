@@ -514,11 +514,37 @@ func (c *Client) doJSONOnce(ctx context.Context, method, path string, body, out 
 	}
 
 	if out != nil && resp.StatusCode != http.StatusNoContent {
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		data, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("reading response: %w", readErr)
+		}
+		if err := decodeSuccessBody(data, out); err != nil {
 			return fmt.Errorf("decoding response: %w", err)
 		}
 	}
 	return nil
+}
+
+// decodeSuccessBody decodes a 2xx response body into out, unwrapping the
+// platform success envelope ({ "data": <payload>, "meta": {...} }) when
+// present. The platform always wraps; the OSS single-tenant backend (OC6)
+// returns flat bodies with no "data" key, so a missing envelope is tolerated
+// by falling back to a flat decode. This is the fix for the OC0 latent bug
+// where wrapped run/object responses decoded to zero-values.
+func decodeSuccessBody(data []byte, out interface{}) error {
+	if len(data) == 0 || out == nil {
+		return nil
+	}
+	// Peek for a top-level "data" key. We unwrap only when the envelope is an
+	// object carrying "data"; a bare array/scalar body or a flat OSS object is
+	// decoded as-is.
+	var env struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(data, &env) == nil && len(env.Data) > 0 {
+		return json.Unmarshal(env.Data, out)
+	}
+	return json.Unmarshal(data, out)
 }
 
 func (c *Client) parseError(resp *http.Response) error {
