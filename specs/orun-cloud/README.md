@@ -16,7 +16,7 @@ copy (OC0). Neither repo may break the contract unilaterally.
 
 | Field | Value |
 |-------|-------|
-| Status | **Draft → Ready for review** |
+| Status | **In progress** — OC0–OC2 shipped (OC1 refresh hardening done); OC3 underway; OC4–OC6 planned |
 | Cluster | **OC** (OC0–OC6) |
 | Builds on | `internal/statebackend` (the `Backend` interface), `internal/remotestate` (HTTP client + the three `TokenSource`s), `internal/cliauth` (loopback + device flows, session storage), `specs/orun-object-model/` (content-addressed store — remote sync pushes the same digests), `specs/orun-service-catalog/` (the snapshot envelope the catalog push ships) |
 | Pairs with | `orun-cloud/specs/epics/saas-orun-platform/` — server-side epic (**OP**) |
@@ -49,10 +49,10 @@ cockpit, `status`, and `logs` render cloud runs through the same
 
 | ID | Milestone | Status |
 |----|-----------|--------|
-| OC0 | Contract alignment (vendored contract, version header, scoped paths, config schema) | 🗓️ Planned |
-| OC1 | Auth completion (platform login flows, session lifecycle, storage hardening) | 🗓️ Planned |
-| OC2 | Cloud link & scope resolution (repo → org/project, overrides, unlinked UX) | 🗓️ Planned |
-| OC3 | Remote state v1 (coordination client, idempotency, degradation, status/logs/cockpit) | 🗓️ Planned |
+| OC0 | Contract alignment (vendored contract, version header, scoped paths, config schema) | ✅ Done |
+| OC1 | Auth completion (platform login flows, session lifecycle, storage hardening) | ✅ Done — concurrency-safe refresh shipped (PR #366) |
+| OC2 | Cloud link & scope resolution (repo → org/project, overrides, unlinked UX) | ✅ Done |
+| OC3 | Remote state v1 (coordination client, idempotency, degradation, status/logs/cockpit) | 🚧 In progress — success-envelope unwrap fragment in draft (PR #367) |
 | OC4 | Object & catalog push (digest negotiation, plan/snapshot sync, heads) | 🗓️ Planned |
 | OC5 | Secrets in the runner (resolve grants, env injection, redaction) | 🗓️ Planned |
 | OC6 | CI golden path (OIDC exchange default in GHA) + OSS backend conformance | 🗓️ Planned |
