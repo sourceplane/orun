@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sourceplane/orun/internal/execmodel"
@@ -473,19 +474,38 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	// Use the run ID returned by the backend (idempotent join may return existing ID).
 	r.ExecID = handle.RunID
 
+	// Per-job lease state: the server-supplied heartbeat interval (from the claim)
+	// and a "preempted" flag set when the heartbeat observes the lease was lost.
+	// Jobs run in parallel, so access is mutex-guarded.
+	var leaseMu sync.Mutex
+	leases := map[string]*jobLease{}
+	lease := func(jobID string) *jobLease {
+		leaseMu.Lock()
+		defer leaseMu.Unlock()
+		l := leases[jobID]
+		if l == nil {
+			l = &jobLease{}
+			leases[jobID] = l
+		}
+		return l
+	}
+
 	// For remote --job mode, perform the claim loop before the runner executes
-	// and disable the local dependency check.
+	// and disable the local dependency check. The claim returns the lease
+	// tunables; stash the heartbeat interval for OnJobStart.
 	if r.JobID != "" {
-		if err := performRemoteJobClaim(ctx, backend, handle.RunID, plan, r.JobID, runnerID, r.Stdout, r.Color); err != nil {
+		interval, err := performRemoteJobClaim(ctx, backend, handle.RunID, plan, r.JobID, runnerID, r.Stdout, r.Color)
+		if err != nil {
 			return err
 		}
+		lease(r.JobID).heartbeatInterval = interval
 		r.SkipLocalDepsForJob = true
 	}
 
 	r.Hooks = &runner.RunnerHooks{
 		BeforeJob: func(jobID string) (bool, error) {
 			if r.JobID != "" {
-				// Already claimed by the explicit job flow above.
+				// Already claimed by the explicit --job flow above.
 				return false, nil
 			}
 			result, claimErr := backend.ClaimJob(ctx, handle.RunID, findJobByIDInPlan(plan, jobID), runnerID)
@@ -504,9 +524,25 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 				}
 				return true, nil // skip — running elsewhere or unknown
 			}
-			// Start heartbeat goroutine for claimed job.
-			go runHeartbeat(ctx, backend, handle.RunID, jobID, runnerID)
+			// Stash the server-supplied heartbeat interval; OnJobStart starts the
+			// beat once the job begins executing.
+			lease(jobID).heartbeatInterval = heartbeatIntervalFromClaim(result)
 			return false, nil
+		},
+		OnJobStart: func(jobID string, jobCtx context.Context, jobCancel context.CancelFunc) {
+			l := lease(jobID)
+			// Heartbeat at the server-supplied interval for the job's lifetime
+			// (jobCtx is cancelled when the job ends, stopping the goroutine). On
+			// lease_lost, mark the job preempted and cancel it: another runner has
+			// taken it over (design §4 — stop work silently).
+			go runHeartbeat(jobCtx, backend, handle.RunID, jobID, runnerID, l.heartbeatInterval, func() {
+				leaseMu.Lock()
+				l.preempted = true
+				leaseMu.Unlock()
+				fmt.Fprintf(r.Stderr, "  %s lease lost on %s — another runner has taken it over; stopping\n",
+					ui.Yellow(r.Color, "↻"), jobID)
+				jobCancel()
+			})
 		},
 		AfterStepLog: func(jobID, stepID, output string) {
 			// v1 logs are append-only chunks: upload only this step's block. The
@@ -520,6 +556,15 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 			_ = backend.AppendStepLog(ctx, handle.RunID, jobID, chunk)
 		},
 		AfterJobTerminal: func(jobID string, success bool, errText string) {
+			leaseMu.Lock()
+			preempted := leases[jobID] != nil && leases[jobID].preempted
+			leaseMu.Unlock()
+			if preempted {
+				// Lease lost mid-job: another runner owns it now. Stop silently —
+				// sending a terminal update would be rejected (409 lease_lost) and
+				// must not race the new owner's result.
+				return
+			}
 			status := statebackend.JobStatusSuccess
 			if !success {
 				status = statebackend.JobStatusFailed
@@ -528,25 +573,26 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		},
 	}
 
-	// For explicit --job mode, the BeforeJob hook is not used; the claim was
-	// already performed. Wire only heartbeat + terminal hooks.
-	if r.JobID != "" {
-		jobID := r.JobID
-		go runHeartbeat(ctx, backend, handle.RunID, jobID, runnerID)
-		origAfterTerminal := r.Hooks.AfterJobTerminal
-		r.Hooks.AfterJobTerminal = func(jid string, success bool, errText string) {
-			if jid == jobID {
-				// AfterJobTerminal is already wired above; no-op here since the
-				// general hook handles it.
-			}
-			if origAfterTerminal != nil {
-				origAfterTerminal(jid, success, errText)
-			}
-		}
-		r.Hooks.BeforeJob = nil
-	}
-
 	return nil
+}
+
+// jobLease holds per-job remote-state lease bookkeeping.
+type jobLease struct {
+	// heartbeatInterval is the cadence the server granted on claim (never a
+	// client-hardcoded value); zero falls back to defaultHeartbeatInterval.
+	heartbeatInterval time.Duration
+	// preempted is set when a heartbeat observes the lease was lost.
+	preempted bool
+}
+
+// heartbeatIntervalFromClaim returns the server-supplied heartbeat cadence from
+// a claim, or the default when the server did not specify one (e.g. the OSS
+// backend).
+func heartbeatIntervalFromClaim(result *statebackend.ClaimResult) time.Duration {
+	if result != nil && result.HeartbeatIntervalSeconds > 0 {
+		return time.Duration(result.HeartbeatIntervalSeconds) * time.Second
+	}
+	return defaultHeartbeatInterval
 }
 
 // setupLocalStateHooks wires BeforeJob and AfterJobTerminal hooks that use
@@ -562,10 +608,10 @@ func performRemoteJobClaim(
 	runnerID string,
 	stdout interface{ Write([]byte) (int, error) },
 	color bool,
-) error {
+) (time.Duration, error) {
 	job := findJobByIDInPlan(plan, jobID)
 	if job.ID == "" {
-		return fmt.Errorf("job %q not found in plan", jobID)
+		return 0, fmt.Errorf("job %q not found in plan", jobID)
 	}
 
 	const (
@@ -579,7 +625,7 @@ func performRemoteJobClaim(
 	for {
 		result, err := backend.ClaimJob(ctx, runID, job, runnerID)
 		if err != nil {
-			return fmt.Errorf("claiming job %s: %w", jobID, err)
+			return 0, fmt.Errorf("claiming job %s: %w", jobID, err)
 		}
 
 		if result.Claimed {
@@ -587,47 +633,48 @@ func performRemoteJobClaim(
 				fmt.Fprintf(stdout, "  %s taking over job %s from a previous runner\n",
 					ui.Yellow(color, "↻"), jobID)
 			}
-			return nil
+			// Return the server-supplied heartbeat cadence for this lease.
+			return heartbeatIntervalFromClaim(result), nil
 		}
 
 		switch {
 		case result.DepsBlocked:
-			return fmt.Errorf("job %s: upstream dependencies are blocked or failed; cannot proceed", jobID)
+			return 0, fmt.Errorf("job %s: upstream dependencies are blocked or failed; cannot proceed", jobID)
 		case strings.EqualFold(result.CurrentStatus, "success"):
 			fmt.Fprintf(stdout, "  %s job %s already completed by another runner\n",
 				ui.Green(color, "✓"), jobID)
 			// Signal the caller that we should exit 0.
-			return &jobAlreadyCompleteError{jobID: jobID}
+			return 0, &jobAlreadyCompleteError{jobID: jobID}
 		case strings.EqualFold(result.CurrentStatus, "failed"):
-			return fmt.Errorf("job %s: already failed on another runner", jobID)
+			return 0, fmt.Errorf("job %s: already failed on another runner", jobID)
 		case result.DepsWaiting:
 			// Poll /runnable until our job appears, then retry claim.
 			if time.Now().After(deadline) {
-				return fmt.Errorf("job %s: dependency wait timeout (%s) exceeded", jobID, depWaitTimeout)
+				return 0, fmt.Errorf("job %s: dependency wait timeout (%s) exceeded", jobID, depWaitTimeout)
 			}
 			fmt.Fprintf(stdout, "  %s waiting for dependencies of %s...\n",
 				ui.Dim(color, "○"), jobID)
 			waitErr := waitForJobRunnable(ctx, backend, runID, jobID, job.DependsOn, plan, delay, deadline)
 			if waitErr != nil && !errors.Is(waitErr, errDepHeartbeatStale) {
-				return waitErr
+				return 0, waitErr
 			}
 			// errDepHeartbeatStale: a dep's heartbeat expired — retry the claim
 			// so the coordinator can sweep the stale dep and return depsBlocked.
 		case strings.EqualFold(result.CurrentStatus, "running"):
 			if time.Now().After(deadline) {
-				return fmt.Errorf("job %s: wait timeout exceeded while another runner holds the job", jobID)
+				return 0, fmt.Errorf("job %s: wait timeout exceeded while another runner holds the job", jobID)
 			}
 			fmt.Fprintf(stdout, "  %s job %s is running on another runner, waiting...\n",
 				ui.Cyan(color, "●"), jobID)
 			if waitErr := sleepOrDone(ctx, delay); waitErr != nil {
-				return waitErr
+				return 0, waitErr
 			}
 		default:
 			if time.Now().After(deadline) {
-				return fmt.Errorf("job %s: claim timeout exceeded", jobID)
+				return 0, fmt.Errorf("job %s: claim timeout exceeded", jobID)
 			}
 			if waitErr := sleepOrDone(ctx, delay); waitErr != nil {
-				return waitErr
+				return 0, waitErr
 			}
 		}
 
@@ -754,17 +801,35 @@ func updateJobWithRetry(ctx context.Context, backend statebackend.Backend, runID
 	}
 }
 
-// runHeartbeat sends heartbeats every 30 seconds until the context is cancelled.
-func runHeartbeat(ctx context.Context, backend statebackend.Backend, runID, jobID, runnerID string) {
-	ticker := time.NewTicker(30 * time.Second)
+// defaultHeartbeatInterval is the fallback heartbeat cadence when the server
+// (or the OSS backend) does not return one on claim. Comfortably under a typical
+// 60s lease so a single missed beat does not lapse the lease.
+const defaultHeartbeatInterval = 20 * time.Second
+
+// runHeartbeat sends heartbeats at the given interval until jobCtx is cancelled
+// (the job finished). If the server reports the lease was lost — the sweep
+// re-queued this job and another runner now owns it — it invokes onLeaseLost
+// (which preempts and cancels the job) and stops. Transient errors are ignored
+// so a brief network blip doesn't abandon a still-owned job.
+func runHeartbeat(jobCtx context.Context, backend statebackend.Backend, runID, jobID, runnerID string, interval time.Duration, onLeaseLost func()) {
+	if interval <= 0 {
+		interval = defaultHeartbeatInterval
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-ctx.Done():
+		case <-jobCtx.Done():
 			return
 		case <-ticker.C:
-			// Best-effort; ignore errors.
-			_, _ = backend.Heartbeat(ctx, runID, jobID, runnerID)
+			res, err := backend.Heartbeat(jobCtx, runID, jobID, runnerID)
+			if res != nil && res.LeaseLost {
+				if onLeaseLost != nil {
+					onLeaseLost()
+				}
+				return
+			}
+			_ = err // transient errors are best-effort; keep beating
 		}
 	}
 }

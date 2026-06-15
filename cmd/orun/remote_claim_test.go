@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,6 +23,8 @@ type fakeBackend struct {
 	claimCalls    int
 	runnableCalls int
 	runState      *execmodel.ExecState
+	// heartbeatLeaseLost makes Heartbeat report a lost lease (409 lease_lost).
+	heartbeatLeaseLost bool
 }
 
 func (f *fakeBackend) InitRun(_ context.Context, _ *model.Plan, opts statebackend.InitRunOptions) (*statebackend.RunHandle, error) {
@@ -49,6 +52,9 @@ func (f *fakeBackend) RunnableJobs(_ context.Context, _ string) ([]string, error
 }
 
 func (f *fakeBackend) Heartbeat(_ context.Context, _, _, _ string) (*statebackend.HeartbeatResult, error) {
+	if f.heartbeatLeaseLost {
+		return &statebackend.HeartbeatResult{OK: false, LeaseLost: true}, nil
+	}
 	return &statebackend.HeartbeatResult{OK: true}, nil
 }
 
@@ -80,7 +86,7 @@ func TestPerformRemoteJobClaim_AlreadyComplete(t *testing.T) {
 		Jobs: []model.PlanJob{{ID: "job-1"}},
 	}
 
-	err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false)
+	_, err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false)
 
 	var alreadyDone *jobAlreadyCompleteError
 	if !errors.As(err, &alreadyDone) {
@@ -107,7 +113,7 @@ func TestPerformRemoteJobClaim_OtherClaimErrorsFail(t *testing.T) {
 		Jobs: []model.PlanJob{{ID: "job-1"}},
 	}
 
-	err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false)
+	_, err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false)
 	if err == nil {
 		t.Fatal("expected error for depsBlocked")
 	}
@@ -132,7 +138,7 @@ func TestPerformRemoteJobClaim_DepsWaitingCallsRunnable(t *testing.T) {
 		Jobs: []model.PlanJob{{ID: "job-1"}},
 	}
 
-	err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false)
+	_, err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -258,12 +264,73 @@ func TestPerformRemoteJobClaim_DepsWaiting_DepFailsDuringPoll(t *testing.T) {
 		},
 	}
 
-	err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false)
+	_, err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false)
 	if err == nil {
 		t.Fatal("expected error when dependency fails during polling")
 	}
 	if contains(err.Error(), "timeout") {
 		t.Fatalf("should not timeout when dep failed, got: %v", err)
+	}
+}
+
+func TestRunHeartbeat_LeaseLostPreemptsAndStops(t *testing.T) {
+	backend := &fakeBackend{heartbeatLeaseLost: true}
+	var preempted int32
+	jobCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		runHeartbeat(jobCtx, backend, "run-1", "job-1", "runner-1", 5*time.Millisecond, func() {
+			atomic.StoreInt32(&preempted, 1)
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runHeartbeat did not return after lease_lost")
+	}
+	if atomic.LoadInt32(&preempted) != 1 {
+		t.Error("expected onLeaseLost to be invoked on lease_lost")
+	}
+}
+
+func TestRunHeartbeat_StopsWhenJobContextCancelled(t *testing.T) {
+	// A healthy lease must not leak the heartbeat goroutine: it stops when the
+	// job's context is cancelled (the job finished).
+	backend := &fakeBackend{}
+	jobCtx, cancel := context.WithCancel(context.Background())
+	called := int32(0)
+	done := make(chan struct{})
+	go func() {
+		runHeartbeat(jobCtx, backend, "r", "j", "runner", 5*time.Millisecond, func() {
+			atomic.StoreInt32(&called, 1)
+		})
+		close(done)
+	}()
+	time.Sleep(25 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runHeartbeat did not stop after jobCtx cancel")
+	}
+	if atomic.LoadInt32(&called) != 0 {
+		t.Error("onLeaseLost must not fire on a healthy lease")
+	}
+}
+
+func TestHeartbeatIntervalFromClaim(t *testing.T) {
+	if got := heartbeatIntervalFromClaim(&statebackend.ClaimResult{HeartbeatIntervalSeconds: 20}); got != 20*time.Second {
+		t.Errorf("server interval = %v, want 20s", got)
+	}
+	if got := heartbeatIntervalFromClaim(&statebackend.ClaimResult{}); got != defaultHeartbeatInterval {
+		t.Errorf("missing interval = %v, want default %v", got, defaultHeartbeatInterval)
+	}
+	if got := heartbeatIntervalFromClaim(nil); got != defaultHeartbeatInterval {
+		t.Errorf("nil claim = %v, want default", got)
 	}
 }
 

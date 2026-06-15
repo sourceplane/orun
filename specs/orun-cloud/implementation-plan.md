@@ -103,10 +103,24 @@ Pairs with OP2 + OP3. The core milestone, landing in increments.
     (orun-cloud #58), claim/runnable correlated-SRF deps guard (#60), and
     deps/labels stored as a jsonb scalar string (#61).
 
+- ✅ **Increment 3 (PR #369) — lease handling.** Stage-verified.
+  - Heartbeats run at the **server-supplied interval** (from the claim), keyed to
+    a per-job context so they stop when the job ends (fixing a goroutine leak
+    where the old beat ran against `context.Background()` forever).
+  - `lease_lost` (heartbeat 409) **preempts the job**: a new `runner.OnJobStart`
+    hook hands the per-job cancel to the heartbeat, which cancels the job and
+    suppresses the terminal update — work another runner has taken over stops
+    silently (design §4). Unit-tested (forcing a live partition is impractical).
+  - Verified on stage: the DAG completes unchanged (regression); a 36 s job's
+    lease stays alive across the 20 s interval (heartbeat observed in the
+    state-worker tail, zero `lease_lost`); two runners on one job → exactly one
+    executes, the other waits and exits clean (no double-claim).
+
 Remaining OC3 increments (unstarted):
 
-- `lease_lost` "stop the job silently" runner wiring + server-supplied interval
-  scheduling; the OP2 contention + kill -9 lease-recovery gates.
+- Full kill -9 lease-recovery timing gate run live (the pieces — atomic claim,
+  heartbeat, server sweep re-queue — are each verified; the end-to-end ~60 s
+  lapse+resume was not run).
 - Log pipeline hardening: bounded buffering with spill-to-file when the backend
   is unreachable mid-run, drain-on-recover, non-zero exit + warning when
   undrained (design §7 row 5).
