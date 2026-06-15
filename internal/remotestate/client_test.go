@@ -308,6 +308,29 @@ func TestClient_ObjectsMissingAndPut(t *testing.T) {
 	}
 }
 
+func TestClient_PutObject_RawDigestColonInPath(t *testing.T) {
+	// Regression: the digest's "sha256:" colon is path-legal and the server
+	// matches it raw; percent-encoding it ("%3A") makes the state-worker router
+	// 404 "Route not found". The object path must carry the raw colon.
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		writeJSON(w, 201, data(map[string]interface{}{"created": true}))
+	}))
+	defer srv.Close()
+
+	digest := remotestate.Digest([]byte("x"))
+	if err := newTestClient(srv).PutObject(context.Background(), digest, remotestate.ObjectKindPlan, []byte("x")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(gotPath, "%3A") {
+		t.Errorf("digest colon was percent-encoded in path: %q", gotPath)
+	}
+	if !strings.HasSuffix(gotPath, "/objects/"+digest) {
+		t.Errorf("path %q does not end with raw /objects/%s", gotPath, digest)
+	}
+}
+
 func TestClient_EnsureObject_SkipsWhenPresent(t *testing.T) {
 	putCalled := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

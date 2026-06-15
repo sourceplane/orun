@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // objectKindHeader names the content-addressed object kind on object PUTs
@@ -27,6 +28,16 @@ type ObjectsMissingRequest struct {
 // ObjectsMissingResponse is returned by the digest-negotiation endpoint.
 type ObjectsMissingResponse struct {
 	Missing []string `json:"missing"`
+}
+
+// digestSegment renders a digest for an object path. A digest is
+// "sha256:<hex>"; the colon is a legal URL path-segment character (RFC 3986)
+// and the server matches the raw form, so it must NOT be percent-encoded — the
+// generic urlSegment escapes ":" to "%3A", which the state-worker router does
+// not match (it 404s "Route not found"). Only a stray "/" would need escaping,
+// which a valid digest never contains; we escape it defensively.
+func digestSegment(digest string) string {
+	return strings.ReplaceAll(digest, "/", "%2F")
 }
 
 // Digest computes the content address ("sha256:<hex>") of a blob, matching the
@@ -58,7 +69,7 @@ func (c *Client) PutObject(ctx context.Context, digest, kind string, blob []byte
 	if err != nil {
 		return fmt.Errorf("resolving auth token: %w", err)
 	}
-	path := c.statePath("/objects/" + urlSegment(digest))
+	path := c.statePath("/objects/" + digestSegment(digest))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+path, bytes.NewReader(blob))
 	if err != nil {
 		return fmt.Errorf("building object put request: %w", err)
@@ -88,7 +99,7 @@ func (c *Client) GetObject(ctx context.Context, digest string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolving auth token: %w", err)
 	}
-	path := c.statePath("/objects/" + urlSegment(digest))
+	path := c.statePath("/objects/" + digestSegment(digest))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("building object get request: %w", err)
