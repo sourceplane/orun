@@ -2,11 +2,43 @@ package remotestate_test
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/sourceplane/orun/internal/remotestate"
 )
+
+// ulidRE mirrors the platform's run-ULID validator (isRunUlid): Crockford
+// base32, 26 chars, uppercase.
+var ulidRE = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
+
+func TestRunULID_ContractValidAndDeterministic(t *testing.T) {
+	for _, execID := range []string{
+		"local_18f3a_ab12cd",
+		"gha_99887766_2",
+		"my-explicit-id",
+		"", // empty still yields a valid id
+	} {
+		id := remotestate.RunULID(execID)
+		if !ulidRE.MatchString(id) {
+			t.Errorf("RunULID(%q)=%q is not a contract-valid ULID", execID, id)
+		}
+		// Deterministic: the same execId always maps to the same wire id, which
+		// is what makes idempotent create / crash resume work.
+		if again := remotestate.RunULID(execID); again != id {
+			t.Errorf("RunULID(%q) not deterministic: %q vs %q", execID, id, again)
+		}
+	}
+}
+
+func TestRunULID_DistinctExecIDsDiffer(t *testing.T) {
+	a := remotestate.RunULID("local_aaa_111")
+	b := remotestate.RunULID("local_bbb_222")
+	if a == b {
+		t.Errorf("distinct execIds collided: both %q", a)
+	}
+}
 
 func TestDeriveRunID_Explicit(t *testing.T) {
 	id := remotestate.DeriveRunID("my-explicit-id")

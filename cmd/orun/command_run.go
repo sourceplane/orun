@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sourceplane/orun/internal/execmodel"
@@ -17,6 +16,7 @@ import (
 	"github.com/sourceplane/orun/internal/objrun"
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/runner"
+	"github.com/sourceplane/orun/internal/sourcectx"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
@@ -406,7 +406,7 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	}
 	scope := resolveScope(runOrg, runProject, linkOrg, linkProject)
 
-	tokenSrc, resolvedNamespaceID, githubLogin, err := remotestate.ResolveTokenSource(ctx, remotestate.ResolveOptions{
+	tokenSrc, resolvedNamespaceID, _, err := remotestate.ResolveTokenSource(ctx, remotestate.ResolveOptions{
 		BackendURL:   backendURL,
 		Version:      version,
 		Interactive:  termIsInteractive(),
@@ -440,21 +440,19 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	runnerID := statebackend.DeriveRunnerID()
 	backend := statebackend.NewRemoteStateBackend(client, runnerID)
 
-	actor := os.Getenv("GITHUB_ACTOR")
-	if actor == "" {
-		actor = githubLogin
+	source := "cli"
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		source = "ci"
 	}
-	repoFullName := ""
-	if os.Getenv("GITHUB_ACTIONS") != "true" && repo != nil {
-		repoFullName = repo.RepoFullName
-	}
+	gitCommit, gitRef, gitDirty := gitProvenanceForRun(ctx, runWorkDir)
 	handle, err := backend.InitRun(ctx, plan, statebackend.InitRunOptions{
-		RunID:        execID,
-		NamespaceID:  namespaceID,
-		RepoFullName: repoFullName,
-		DryRun:       r.DryRun,
-		Actor:        actor,
-		TriggerType:  triggerTypeForRemoteRun(),
+		RunID:       execID,
+		Source:      source,
+		Environment: singleEnvironment(runEnv),
+		GitCommit:   gitCommit,
+		GitRef:      gitRef,
+		GitDirty:    gitDirty,
+		DryRun:      r.DryRun,
 	})
 	if err != nil {
 		var apiErr *remotestate.APIError
@@ -484,10 +482,6 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		r.SkipLocalDepsForJob = true
 	}
 
-	// Accumulate step logs per job so they can be uploaded as a single request.
-	var logMu sync.Mutex
-	jobLogs := map[string]string{}
-
 	r.Hooks = &runner.RunnerHooks{
 		BeforeJob: func(jobID string) (bool, error) {
 			if r.JobID != "" {
@@ -515,17 +509,15 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 			return false, nil
 		},
 		AfterStepLog: func(jobID, stepID, output string) {
-			logMu.Lock()
-			prev := jobLogs[jobID]
-			sep := ""
-			if prev != "" {
-				sep = "\n"
+			// v1 logs are append-only chunks: upload only this step's block. The
+			// old cumulative upload would re-append every prior step on each call
+			// and corrupt the assembled log.
+			chunk := "=== " + stepID + " ===\n" + output
+			if !strings.HasSuffix(chunk, "\n") {
+				chunk += "\n"
 			}
-			jobLogs[jobID] = prev + sep + "=== " + stepID + " ===\n" + output
-			content := jobLogs[jobID]
-			logMu.Unlock()
 			// Best-effort upload; ignore errors to not interrupt execution.
-			_ = backend.AppendStepLog(ctx, handle.RunID, jobID, content)
+			_ = backend.AppendStepLog(ctx, handle.RunID, jobID, chunk)
 		},
 		AfterJobTerminal: func(jobID string, success bool, errText string) {
 			status := statebackend.JobStatusSuccess
@@ -946,6 +938,44 @@ func triggerTypeForRemoteRun() string {
 		return "ci"
 	}
 	return "local"
+}
+
+// singleEnvironment returns the run's environment slug for the create call. The
+// --env flag is a comma-separated job filter; only an unambiguous single value
+// is a meaningful run environment, so a multi-env filter resolves to "" (the
+// server treats environment as optional and registers it on first use).
+func singleEnvironment(envFilter string) string {
+	v := strings.TrimSpace(envFilter)
+	if v == "" || strings.Contains(v, ",") {
+		return ""
+	}
+	return v
+}
+
+// gitProvenanceForRun captures the git context recorded on a remote run. In CI
+// it trusts the runner-provided GITHUB_SHA/GITHUB_REF; locally it probes the
+// working tree (commit, symbolic ref, and whether the tree is dirty). All
+// fields are best-effort — a missing repo yields empty provenance, never an
+// error.
+func gitProvenanceForRun(ctx context.Context, workDir string) (commit, ref string, dirty bool) {
+	if sha := strings.TrimSpace(os.Getenv("GITHUB_SHA")); sha != "" {
+		return sha, strings.TrimSpace(os.Getenv("GITHUB_REF")), false
+	}
+	if workDir == "" {
+		workDir = "."
+	}
+	g := sourcectx.DefaultGit()
+	if ok, _ := g.HasRepo(ctx, workDir); !ok {
+		return "", "", false
+	}
+	commit, _ = g.HeadRevision(ctx, workDir)
+	ref, _ = g.Ref(ctx, workDir)
+	if tree, err := g.TreeHash(ctx, workDir); err == nil {
+		if paths, err := g.DiffTreePaths(ctx, workDir, tree); err == nil && len(paths) > 0 {
+			dirty = true
+		}
+	}
+	return commit, ref, dirty
 }
 
 func loadPlan(path string) (*model.Plan, error) {

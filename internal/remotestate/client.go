@@ -10,6 +10,8 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -109,6 +111,13 @@ func (e *APIError) IsContractVersionUnsupported() bool {
 	return strings.EqualFold(e.Code, contractVersionUnsupportedCode)
 }
 
+// IsLeaseLost reports whether the server rejected a heartbeat/update/log-append
+// because the runner's lease lapsed or was reassigned (409 lease_lost). The
+// runner treats this as "stop work on this job — someone else owns it now".
+func (e *APIError) IsLeaseLost() bool {
+	return strings.EqualFold(e.Code, "lease_lost")
+}
+
 // Client is an HTTP client for the orun state API (Orun Cloud and the OSS
 // single-tenant backend speak the same contract).
 type Client struct {
@@ -165,232 +174,303 @@ func (c *Client) statePath(suffix string) string {
 		"/state" + suffix
 }
 
-// ── API request/response types ────────────────────────────────────────────────
+// ── API request/response types (v1 contract §2) ────────────────────────────────
 
-// CreateRunRequest is the body for POST /v1/runs.
+// GitProvenance is the git context captured at run-create time.
+type GitProvenance struct {
+	Commit string `json:"commit"`
+	Ref    string `json:"ref"`
+	Dirty  bool   `json:"dirty"`
+}
+
+// PlanJobInput is one node of the plan DAG sent in the create body. The plan
+// blob itself lives in the object plane (referenced by planDigest); these light
+// nodes let the platform persist run_jobs.
+type PlanJobInput struct {
+	JobID     string   `json:"jobId"`
+	Component string   `json:"component,omitempty"`
+	Deps      []string `json:"deps"`
+}
+
+// CreateRunRequest is the body for POST …/state/runs (contract §2.1). The plan
+// is referenced by digest (the blob is uploaded to the object plane first), not
+// sent inline.
 type CreateRunRequest struct {
-	Plan         *BackendPlan `json:"plan"`
-	RunID        string       `json:"runId,omitempty"`
-	NamespaceID  string       `json:"namespaceId,omitempty"`
-	RepoFullName string       `json:"repoFullName,omitempty"`
-	DryRun       bool         `json:"dryRun,omitempty"`
-	TriggerType  string       `json:"triggerType,omitempty"`
-	Actor        string       `json:"actor,omitempty"`
+	RunID       string            `json:"runId"`
+	PlanDigest  string            `json:"planDigest"`
+	Source      string            `json:"source"` // "cli" | "ci"
+	Environment string            `json:"environment,omitempty"`
+	Git         GitProvenance     `json:"git"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Jobs        []PlanJobInput    `json:"jobs,omitempty"`
 }
 
-// RunResponse is the backend Run object returned by /v1/runs/*.
-type RunResponse struct {
-	RunID        string  `json:"runId"`
-	Status       string  `json:"status"`
-	PlanChecksum string  `json:"planChecksum"`
-	TriggerType  string  `json:"triggerType"`
-	Actor        *string `json:"actor"`
-	CreatedAt    string  `json:"createdAt"`
-	UpdatedAt    string  `json:"updatedAt"`
-	FinishedAt   *string `json:"finishedAt"`
-	JobTotal     int     `json:"jobTotal"`
-	JobDone      int     `json:"jobDone"`
-	JobFailed    int     `json:"jobFailed"`
-	DryRun       bool    `json:"dryRun"`
+// ActorRef is the projected actor that created a run/job.
+type ActorRef struct {
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	DisplayName string `json:"displayName,omitempty"`
 }
 
-// JobResponse is the backend Job object.
-type JobResponse struct {
-	JobID       string   `json:"jobId"`
-	RunID       string   `json:"runId"`
-	Component   string   `json:"component"`
-	Status      string   `json:"status"`
-	Deps        []string `json:"deps"`
-	RunnerID    *string  `json:"runnerId"`
-	StartedAt   *string  `json:"startedAt"`
-	FinishedAt  *string  `json:"finishedAt"`
-	LastError   *string  `json:"lastError"`
-	HeartbeatAt *string  `json:"heartbeatAt"`
-	LogRef      *string  `json:"logRef"`
+// RunJobCounts are the per-status job tallies on a run projection.
+type RunJobCounts struct {
+	Queued    int `json:"queued"`
+	Running   int `json:"running"`
+	Succeeded int `json:"succeeded"`
+	Failed    int `json:"failed"`
 }
 
-// ListJobsResponse wraps the job list from GET /v1/runs/{runID}/jobs.
-type ListJobsResponse struct {
-	Jobs []JobResponse `json:"jobs"`
+// Run is the safe run projection (contract §2.1).
+type Run struct {
+	RunID       string        `json:"runId"`
+	OrgID       string        `json:"orgId"`
+	ProjectID   string        `json:"projectId"`
+	Environment *string       `json:"environment"`
+	Status      string        `json:"status"`
+	PlanDigest  string        `json:"planDigest"`
+	Source      string        `json:"source"`
+	Git         GitProvenance `json:"git"`
+	CreatedBy   ActorRef      `json:"createdBy"`
+	CreatedAt   string        `json:"createdAt"`
+	StartedAt   *string       `json:"startedAt"`
+	FinishedAt  *string       `json:"finishedAt"`
+	JobCounts   RunJobCounts  `json:"jobCounts"`
 }
 
-// RunnableResponse is from GET /v1/runs/{runID}/runnable.
-type RunnableResponse struct {
-	JobIDs []string `json:"jobs"`
+// RunJob is the safe projection of a job in a run's plan DAG (contract §2).
+type RunJob struct {
+	RunID          string   `json:"runId"`
+	JobID          string   `json:"jobId"`
+	OrgID          string   `json:"orgId"`
+	ProjectID      string   `json:"projectId"`
+	Component      *string  `json:"component"`
+	Deps           []string `json:"deps"`
+	Status         string   `json:"status"`
+	RunnerID       *string  `json:"runnerId"`
+	LeaseExpiresAt *string  `json:"leaseExpiresAt"`
+	Attempt        int      `json:"attempt"`
+	ErrorText      *string  `json:"errorText"`
+	StartedAt      *string  `json:"startedAt"`
+	FinishedAt     *string  `json:"finishedAt"`
 }
 
-// ClaimJobRequest is the body for POST /v1/runs/{runID}/jobs/{jobID}/claim.
+// StateCursor is the opaque list-pagination cursor (createdAt|id).
+type StateCursor struct {
+	CreatedAt string `json:"createdAt"`
+	ID        string `json:"id"`
+}
+
+// ── Response envelopes (the {data,meta} wrapper is unwrapped first) ─────────────
+
+type runEnvelope struct {
+	Run Run `json:"run"`
+}
+
+type listRunsResponse struct {
+	Runs       []Run        `json:"runs"`
+	NextCursor *StateCursor `json:"nextCursor"`
+}
+
+type listJobsResponse struct {
+	Jobs []RunJob `json:"jobs"`
+}
+
+// ClaimJobRequest is the body for the claim endpoint.
 type ClaimJobRequest struct {
 	RunnerID string `json:"runnerId"`
 }
 
-// ClaimJobResponse represents the extended coordinator claim result.
-type ClaimJobResponse struct {
-	Claimed       bool   `json:"claimed"`
-	Takeover      bool   `json:"takeover,omitempty"`
-	CurrentStatus string `json:"currentStatus,omitempty"`
-	DepsWaiting   bool   `json:"depsWaiting,omitempty"`
-	DepsBlocked   bool   `json:"depsBlocked,omitempty"`
+// JobClaim is the structured claim outcome (contract §2.2). Exactly one runner
+// wins; the loser learns why via Reason.
+type JobClaim struct {
+	Claimed                  bool   `json:"claimed"`
+	LeaseExpiresAt           string `json:"leaseExpiresAt,omitempty"`
+	Attempt                  int    `json:"attempt,omitempty"`
+	LeaseSeconds             int    `json:"leaseSeconds,omitempty"`
+	HeartbeatIntervalSeconds int    `json:"heartbeatIntervalSeconds,omitempty"`
+	Reason                   string `json:"reason,omitempty"` // already_claimed | deps_not_ready | terminal
 }
 
-// HeartbeatRequest is the body for POST /v1/runs/{runID}/jobs/{jobID}/heartbeat.
+type claimJobResponse struct {
+	Claim JobClaim `json:"claim"`
+}
+
+// HeartbeatRequest is the body for the heartbeat endpoint.
 type HeartbeatRequest struct {
 	RunnerID string `json:"runnerId"`
 }
 
-// HeartbeatResponse is returned by the heartbeat endpoint.
-type HeartbeatResponse struct {
-	OK bool `json:"ok"`
+// HeartbeatInfo carries the extended lease and the server-supplied tunables; the
+// client never hardcodes the lease/heartbeat intervals (contract §2.2).
+type HeartbeatInfo struct {
+	LeaseExpiresAt           string `json:"leaseExpiresAt"`
+	LeaseSeconds             int    `json:"leaseSeconds,omitempty"`
+	HeartbeatIntervalSeconds int    `json:"heartbeatIntervalSeconds,omitempty"`
 }
 
-// UpdateJobRequest is the body for POST /v1/runs/{runID}/jobs/{jobID}/update.
+// UpdateJobRequest is the body for the update endpoint.
 type UpdateJobRequest struct {
+	RunnerID  string `json:"runnerId"`
+	Status    string `json:"status"` // "succeeded" | "failed"
+	ErrorText string `json:"errorText,omitempty"`
+}
+
+// AppendLogRequest is the body for a log-chunk append.
+type AppendLogRequest struct {
 	RunnerID string `json:"runnerId"`
-	Status   string `json:"status"`
-	Error    string `json:"error,omitempty"`
+	Content  string `json:"content"`
 }
 
-// LogUploadResponse is returned by POST /v1/runs/{runID}/logs/{jobID}.
-type LogUploadResponse struct {
-	OK     bool   `json:"ok"`
-	LogRef string `json:"logRef"`
+type appendLogResponse struct {
+	Seq int `json:"seq"`
 }
 
-// ── API methods ───────────────────────────────────────────────────────────────
+// ReadLogResult is the assembled-read response with the live-tail cursor.
+type ReadLogResult struct {
+	Content  string `json:"content"`
+	NextSeq  int    `json:"nextSeq"`
+	Complete bool   `json:"complete"`
+}
 
-// CreateRun calls POST …/state/runs. Idempotent: if the run already exists the
-// backend verifies the plan checksum and returns the existing run.
-func (c *Client) CreateRun(ctx context.Context, req CreateRunRequest) (*RunResponse, error) {
-	var resp RunResponse
+// ── API methods (v1 contract §2) ───────────────────────────────────────────────
+
+// CreateRun calls POST …/state/runs. Idempotent on the client-minted run ULID:
+// a replayed runId returns the existing run (200) rather than a conflict. The
+// plan blob must already exist in the object plane (referenced by planDigest);
+// the server returns 412 object_missing otherwise.
+func (c *Client) CreateRun(ctx context.Context, req CreateRunRequest) (*Run, error) {
+	var resp runEnvelope
 	if err := c.doJSON(ctx, http.MethodPost, c.statePath("/runs"), req, &resp, true); err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
 	}
-	return &resp, nil
+	return &resp.Run, nil
 }
 
 // GetRun calls GET …/state/runs/{runID}.
-func (c *Client) GetRun(ctx context.Context, runID string) (*RunResponse, error) {
-	var resp RunResponse
+func (c *Client) GetRun(ctx context.Context, runID string) (*Run, error) {
+	var resp runEnvelope
 	if err := c.doJSON(ctx, http.MethodGet, c.statePath("/runs/"+urlSegment(runID)), nil, &resp, true); err != nil {
 		return nil, fmt.Errorf("get run: %w", err)
 	}
-	return &resp, nil
+	return &resp.Run, nil
+}
+
+// ListRunsOptions filters a run listing. Empty fields are omitted.
+type ListRunsOptions struct {
+	Environment string
+	Status      string
+	Cursor      string
+}
+
+// ListRuns calls GET …/state/runs with optional environment/status/cursor
+// filters, returning the page of runs and the next-page cursor (empty when
+// exhausted).
+func (c *Client) ListRuns(ctx context.Context, opts ListRunsOptions) ([]Run, string, error) {
+	q := url.Values{}
+	if opts.Environment != "" {
+		q.Set("environment", opts.Environment)
+	}
+	if opts.Status != "" {
+		q.Set("status", opts.Status)
+	}
+	if opts.Cursor != "" {
+		q.Set("cursor", opts.Cursor)
+	}
+	path := c.statePath("/runs")
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var resp listRunsResponse
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, "", fmt.Errorf("list runs: %w", err)
+	}
+	cursor := ""
+	if resp.NextCursor != nil {
+		cursor = resp.NextCursor.CreatedAt + "|" + resp.NextCursor.ID
+	}
+	return resp.Runs, cursor, nil
 }
 
 // ListJobs calls GET …/state/runs/{runID}/jobs.
-func (c *Client) ListJobs(ctx context.Context, runID string) ([]JobResponse, error) {
-	var resp ListJobsResponse
+func (c *Client) ListJobs(ctx context.Context, runID string) ([]RunJob, error) {
+	var resp listJobsResponse
 	if err := c.doJSON(ctx, http.MethodGet, c.statePath("/runs/"+urlSegment(runID)+"/jobs"), nil, &resp, true); err != nil {
 		return nil, fmt.Errorf("list jobs: %w", err)
 	}
 	return resp.Jobs, nil
 }
 
-// GetRunnable calls GET …/state/runs/{runID}/runnable.
-func (c *Client) GetRunnable(ctx context.Context, runID string) ([]string, error) {
-	var resp RunnableResponse
+// ListRunnable calls GET …/state/runs/{runID}/runnable, the queued frontier
+// (jobs whose deps are all succeeded). The server returns full job objects.
+func (c *Client) ListRunnable(ctx context.Context, runID string) ([]RunJob, error) {
+	var resp listJobsResponse
 	if err := c.doJSON(ctx, http.MethodGet, c.statePath("/runs/"+urlSegment(runID)+"/runnable"), nil, &resp, true); err != nil {
 		return nil, fmt.Errorf("get runnable: %w", err)
 	}
-	return resp.JobIDs, nil
+	return resp.Jobs, nil
 }
 
-// ClaimJob calls POST …/state/runs/{runID}/jobs/{jobID}/claim.
-// This operation is not retried on 5xx because partial state may exist.
-func (c *Client) ClaimJob(ctx context.Context, runID, jobID, runnerID string) (*ClaimJobResponse, error) {
-	var resp ClaimJobResponse
+// ClaimJob calls POST …/state/runs/{runID}/jobs/{jobID}/claim and returns the
+// structured claim outcome. Not retried on 5xx because partial state may exist.
+func (c *Client) ClaimJob(ctx context.Context, runID, jobID, runnerID string) (*JobClaim, error) {
+	var resp claimJobResponse
 	path := c.statePath("/runs/" + urlSegment(runID) + "/jobs/" + urlSegment(jobID) + "/claim")
 	if err := c.doJSON(ctx, http.MethodPost, path, ClaimJobRequest{RunnerID: runnerID}, &resp, false); err != nil {
 		return nil, fmt.Errorf("claim job %s: %w", jobID, err)
 	}
+	return &resp.Claim, nil
+}
+
+// Heartbeat calls POST …/state/runs/{runID}/jobs/{jobID}/heartbeat. A
+// 409 lease_lost is returned as an *APIError (IsLeaseLost) so the runner can
+// stop the job: someone else owns it now.
+func (c *Client) Heartbeat(ctx context.Context, runID, jobID, runnerID string) (*HeartbeatInfo, error) {
+	var resp HeartbeatInfo
+	path := c.statePath("/runs/" + urlSegment(runID) + "/jobs/" + urlSegment(jobID) + "/heartbeat")
+	if err := c.doJSON(ctx, http.MethodPost, path, HeartbeatRequest{RunnerID: runnerID}, &resp, false); err != nil {
+		return nil, fmt.Errorf("heartbeat job %s: %w", jobID, err)
+	}
 	return &resp, nil
 }
 
-// Heartbeat calls POST …/state/runs/{runID}/jobs/{jobID}/heartbeat.
-func (c *Client) Heartbeat(ctx context.Context, runID, jobID, runnerID string) error {
-	var resp HeartbeatResponse
-	path := c.statePath("/runs/" + urlSegment(runID) + "/jobs/" + urlSegment(jobID) + "/heartbeat")
-	if err := c.doJSON(ctx, http.MethodPost, path, HeartbeatRequest{RunnerID: runnerID}, &resp, false); err != nil {
-		return fmt.Errorf("heartbeat job %s: %w", jobID, err)
-	}
-	return nil
-}
-
-// UpdateJob calls POST …/state/runs/{runID}/jobs/{jobID}/update.
-// Not retried because the backend is idempotent by run+job+runner identity
-// and a duplicate terminal update is harmless.
+// UpdateJob calls POST …/state/runs/{runID}/jobs/{jobID}/update with a terminal
+// status ("succeeded" | "failed"). Idempotent and terminal-sticky server-side;
+// a 409 lease_lost surfaces as an *APIError. Not retried at this layer.
 func (c *Client) UpdateJob(ctx context.Context, runID, jobID, runnerID, status, errText string) error {
 	path := c.statePath("/runs/" + urlSegment(runID) + "/jobs/" + urlSegment(jobID) + "/update")
-	req := UpdateJobRequest{RunnerID: runnerID, Status: status}
-	if errText != "" {
-		req.Error = errText
-	}
+	req := UpdateJobRequest{RunnerID: runnerID, Status: status, ErrorText: errText}
 	if err := c.doJSON(ctx, http.MethodPost, path, req, nil, false); err != nil {
 		return fmt.Errorf("update job %s: %w", jobID, err)
 	}
 	return nil
 }
 
-// UploadLog calls POST …/state/runs/{runID}/logs/{jobID} with the log content
-// as plain text. Uses the longer log upload timeout.
-func (c *Client) UploadLog(ctx context.Context, runID, jobID, content string) error {
+// AppendLog calls POST …/state/runs/{runID}/logs/{jobID} with a single log
+// chunk (≤ 1 MiB) under the runner's live lease, returning the assigned seq.
+// A 409 lease_lost surfaces as an *APIError. Uses the longer log timeout.
+func (c *Client) AppendLog(ctx context.Context, runID, jobID, runnerID, content string) (int, error) {
 	path := c.statePath("/runs/" + urlSegment(runID) + "/logs/" + urlSegment(jobID))
-	token, err := c.tokenSrc.Token(ctx)
-	if err != nil {
-		return fmt.Errorf("resolving auth token: %w", err)
+	var resp appendLogResponse
+	if err := c.doJSONWith(ctx, c.logClient, http.MethodPost, path,
+		AppendLogRequest{RunnerID: runnerID, Content: content}, &resp); err != nil {
+		return 0, fmt.Errorf("append log %s: %w", jobID, err)
 	}
-	body := strings.NewReader(content)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, body)
-	if err != nil {
-		return fmt.Errorf("building log upload request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", c.userAgent)
-	req.Header.Set(contractVersionHeader, ContractVersion)
-	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
-
-	resp, err := c.logClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("log upload request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return c.parseError(resp)
-	}
-	return nil
+	return resp.Seq, nil
 }
 
-// GetLog calls GET …/state/runs/{runID}/logs/{jobID} and returns the log as a string.
-func (c *Client) GetLog(ctx context.Context, runID, jobID string) (string, error) {
+// ReadLog calls GET …/state/runs/{runID}/logs/{jobID}?fromSeq= and returns the
+// assembled content from fromSeq onward plus the live-tail cursor (nextSeq) and
+// whether the job is complete (no more chunks coming).
+func (c *Client) ReadLog(ctx context.Context, runID, jobID string, fromSeq int) (*ReadLogResult, error) {
 	path := c.statePath("/runs/" + urlSegment(runID) + "/logs/" + urlSegment(jobID))
-	token, err := c.tokenSrc.Token(ctx)
-	if err != nil {
-		return "", fmt.Errorf("resolving auth token: %w", err)
+	if fromSeq > 0 {
+		path += "?fromSeq=" + strconv.Itoa(fromSeq)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
-	if err != nil {
-		return "", fmt.Errorf("building log fetch request: %w", err)
+	var resp ReadLogResult
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, fmt.Errorf("read log %s: %w", jobID, err)
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", c.userAgent)
-	req.Header.Set(contractVersionHeader, ContractVersion)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("log fetch request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return "", nil
-	}
-	if resp.StatusCode >= 400 {
-		return "", c.parseError(resp)
-	}
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("reading log response: %w", err)
-	}
-	return string(data), nil
+	return &resp, nil
 }
 
 // ── internal helpers ──────────────────────────────────────────────────────────
@@ -413,18 +493,12 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body, out inte
 			}
 		}
 
-		err := c.doJSONOnce(ctx, method, path, body, out)
+		err := c.doJSONOnce(ctx, c.httpClient, method, path, body, out)
 		if err == nil {
 			return nil
 		}
-		apiErr, isAPI := err.(*APIError)
-		if isAPI && apiErr.IsContractVersionUnsupported() {
-			return renderContractVersionError(apiErr)
-		}
-		if isAPI && apiErr.IsAuth() {
-			return fmt.Errorf("authentication failed: %w\n"+
-				"hint: in GitHub Actions add `id-token: write` to workflow permissions; "+
-				"outside GitHub Actions set ORUN_TOKEN", err)
+		if mapped := c.mapAPIError(err); mapped != err {
+			return mapped
 		}
 		// Only retry on server errors (5xx), not on client errors (4xx).
 		if !isRetryable(err) {
@@ -433,6 +507,32 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body, out inte
 		lastErr = err
 	}
 	return lastErr
+}
+
+// doJSONWith executes a single (non-retried) JSON call using a specific HTTP
+// client — e.g. the longer-timeout log client — while applying the same
+// contract-/auth-error rendering as doJSON.
+func (c *Client) doJSONWith(ctx context.Context, httpClient *http.Client, method, path string, body, out interface{}) error {
+	if err := c.doJSONOnce(ctx, httpClient, method, path, body, out); err != nil {
+		return c.mapAPIError(err)
+	}
+	return nil
+}
+
+// mapAPIError renders the two errors that must fail loud and actionable
+// regardless of the call: an unsupported contract major and an auth failure.
+// Any other error is returned unchanged (and may be retried by the caller).
+func (c *Client) mapAPIError(err error) error {
+	apiErr, isAPI := err.(*APIError)
+	if isAPI && apiErr.IsContractVersionUnsupported() {
+		return renderContractVersionError(apiErr)
+	}
+	if isAPI && apiErr.IsAuth() {
+		return fmt.Errorf("authentication failed: %w\n"+
+			"hint: in GitHub Actions add `id-token: write` to workflow permissions; "+
+			"outside GitHub Actions set ORUN_TOKEN", err)
+	}
+	return err
 }
 
 // renderContractVersionError turns a 409 contract_version_unsupported response
@@ -476,7 +576,7 @@ func renderContractVersionError(apiErr *APIError) error {
 	return fmt.Errorf("%s: %w", msg, apiErr)
 }
 
-func (c *Client) doJSONOnce(ctx context.Context, method, path string, body, out interface{}) error {
+func (c *Client) doJSONOnce(ctx context.Context, httpClient *http.Client, method, path string, body, out interface{}) error {
 	token, err := c.tokenSrc.Token(ctx)
 	if err != nil {
 		return fmt.Errorf("resolving auth token: %w", err)
@@ -503,7 +603,7 @@ func (c *Client) doJSONOnce(ctx context.Context, method, path string, body, out 
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}

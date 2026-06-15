@@ -78,25 +78,41 @@ Pairs with OP4.
 in a repo with multiple candidate orgs presents the picker; non-interactive
 form works headless.
 
-## OC3 — Remote state v1 — 🚧 In progress
+## OC3 — Remote state v1 — 🚧 In progress (core landed)
 
-Pairs with OP2 + OP3. The core milestone. First fragment in draft (PR #367):
-`doJSONOnce` now unwraps the platform `{data,meta}` success envelope (the OC0
-latent bug where wrapped run/object responses decoded to zero-values). Remaining
-units below are unstarted.
+Pairs with OP2 + OP3. The core milestone, landing in increments.
 
-- `statebackend.RemoteStateBackend` over the v1 contract (the type exists today
-  but sends the whole plan **inline** in CreateRun): InitRun = ensure plan object
-  (via OC4's `objsync`, landed minimally here for plans) + create run with client
-  ULID + digest; structured claim outcomes; `lease_lost` stops the job silently;
-  server-supplied lease/heartbeat intervals.
-- Log pipeline: chunked `AppendStepLog` (≤1 MiB), bounded buffering with
-  spill-to-file when the backend is unreachable mid-run, drain-on-recover,
-  non-zero exit + warning when undrained (design §7 row 5).
-- Reads: run list on the client (today `backendSource.ListRuns` returns an
-  "unsupported" error — this implements it); `bridge.FromBackend` wired so
-  `status`, `logs --follow` (fromSeq tail), and the cockpit render cloud runs
-  through the existing viewmodels.
+- ✅ **Increment 1 (PR #367):** `doJSONOnce` unwraps the platform `{data,meta}`
+  success envelope (the OC0 latent bug where wrapped run/object responses decoded
+  to zero-values).
+- ✅ **Increment 2 (PR #368) — the v1 client + plan objsync.** Stage-verified:
+  the `foundation→api→web` 6-job DAG runs to completion under `--remote-state`.
+  - `internal/remotestate/objsync.go`: `objects/missing` → `PUT objects/{digest}`
+    (single-shot, kind=plan). `statebackend.RemoteStateBackend.InitRun` now
+    serializes the plan, ensures it in the object plane, and creates the run by
+    **digest** (no inline plan).
+  - Run id ↔ ULID: the CLI execId maps deterministically to a contract-valid
+    Crockford ULID (`RunULID`), so the wire id passes `isRunUlid` and the same
+    execId resumes the same run (idempotent create — stage-verified).
+  - v1 run create/get/list, structured claim outcomes (`already_claimed` /
+    `deps_not_ready` / `terminal`, mapped to the runner's `ClaimResult`),
+    server-supplied lease/heartbeat tunables surfaced, `lease_lost` as a typed
+    `APIError`. Append-only chunked logs (delta per step, ≤1 MiB) + `fromSeq` read.
+  - Surfaced (and fixed, platform-side) three latent server bugs only a real
+    Postgres exercise catches: objects/missing array-param bind
+    (orun-cloud #58), claim/runnable correlated-SRF deps guard (#60), and
+    deps/labels stored as a jsonb scalar string (#61).
+
+Remaining OC3 increments (unstarted):
+
+- `lease_lost` "stop the job silently" runner wiring + server-supplied interval
+  scheduling; the OP2 contention + kill -9 lease-recovery gates.
+- Log pipeline hardening: bounded buffering with spill-to-file when the backend
+  is unreachable mid-run, drain-on-recover, non-zero exit + warning when
+  undrained (design §7 row 5).
+- Reads parity: `bridge.FromBackend` wired so `status`, `logs --follow` (fromSeq
+  tail), and the cockpit render cloud runs through the existing viewmodels
+  (`ListRuns` on the client now exists; the bridge wiring does not yet).
 - `run --local` escape hatch; no silent fallback.
 
 **Done when:** against stage, a multi-job DAG runs to completion under
