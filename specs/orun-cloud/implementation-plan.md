@@ -5,7 +5,7 @@ Status: Draft. Each milestone pairs with a platform milestone
 deployment with a real binary from this branch. OC0 is human-independent and
 safe to land first.
 
-## OC0 — Contract alignment — 🗓️ Planned
+## OC0 — Contract alignment — ✅ Done
 
 Pairs with OP0 (contracts exist server-side, even dormant).
 
@@ -31,7 +31,7 @@ rendering, error-envelope parsing, config precedence, and session-file
 migration; the vendored-contract CI check is live; existing local-mode tests
 still pass untouched (no behavior change without `--remote-state`).
 
-## OC1 — Auth completion — 🗓️ Planned
+## OC1 — Auth completion — ✅ Done (refresh hardening shipped)
 
 Pairs with OP1.
 
@@ -50,7 +50,18 @@ Pairs with OP1.
 expiry mid-`run` refreshes transparently; console-side revoke makes the next
 CLI call fail with the re-login message; recorded in the paired OP1 gate.
 
-## OC2 — Cloud link & scope resolution — 🗓️ Planned
+**Hardening shipped (PR #366):** real usage exposed the rotating-refresh-token
+race — concurrent invocations (two terminals, a script, or one `run` firing
+parallel state requests) each redeemed the single-use refresh token, the losers
+tripped reuse-detection, and the family was revoked, forcing a re-login that
+read as "the token expires instantly." `SessionTokenSource` now serializes
+refresh across goroutines (singleflight) and processes (advisory file lock in
+`internal/cliauth`), re-checks the stored token after winning the lock
+(double-checked reload → siblings reuse the freshly rotated token), and refreshes
+proactively at 60 s before expiry. Pairs with the platform's sliding idle window
+(OP1 hardening). Tracked platform follow-up: reuse grace interval (needs review).
+
+## OC2 — Cloud link & scope resolution — ✅ Done
 
 Pairs with OP4.
 
@@ -67,9 +78,12 @@ Pairs with OP4.
 in a repo with multiple candidate orgs presents the picker; non-interactive
 form works headless.
 
-## OC3 — Remote state v1 — 🗓️ Planned
+## OC3 — Remote state v1 — 🚧 In progress
 
-Pairs with OP2 + OP3. The core milestone.
+Pairs with OP2 + OP3. The core milestone. First fragment in draft (PR #367):
+`doJSONOnce` now unwraps the platform `{data,meta}` success envelope (the OC0
+latent bug where wrapped run/object responses decoded to zero-values). Remaining
+units below are unstarted.
 
 - `statebackend.RemoteStateBackend` over the v1 contract (the type exists today
   but sends the whole plan **inline** in CreateRun): InitRun = ensure plan object
