@@ -48,6 +48,7 @@ var (
 	runBackground           bool
 	// Remote state flags
 	runRemoteState bool
+	runLocal       bool
 	runBackendURL  string
 	runOrg         string
 	runProject     string
@@ -103,6 +104,7 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().BoolVar(&runBackground, "background", false, "Run the plan detached and return immediately. Track via 'orun status --watch'")
 
 	runCmd.Flags().BoolVar(&runRemoteState, "remote-state", false, "Use the Orun Cloud backend for distributed run coordination (sets ORUN_REMOTE_STATE=true)")
+	runCmd.Flags().BoolVar(&runLocal, "local", false, "Force local filesystem state for this run, overriding remote-state config/flags (the escape hatch when the backend is down)")
 	runCmd.Flags().StringVar(&runBackendURL, "backend-url", "", "Backend URL for remote state (or set ORUN_BACKEND_URL)")
 	runCmd.Flags().StringVar(&runOrg, "org", "", "Org scope for remote state (overrides the linked org; or set ORUN_ORG)")
 	runCmd.Flags().StringVar(&runProject, "project", "", "Project scope for remote state (overrides the linked project; or set ORUN_PROJECT)")
@@ -145,6 +147,19 @@ func resolveEffectiveWorkDir(useOverride bool, workDir, intentRootDir string) st
 // isRemoteStateActive returns true when remote state should be used based on
 // flag > ORUN_REMOTE_STATE > intent.execution.state.mode resolution.
 func isRemoteStateActive(intent *model.Intent) bool {
+	// --local is the explicit escape hatch: force local state for this run even
+	// when remote is configured/requested. No silent fallback ever happens — the
+	// user must ask for local.
+	if runLocal {
+		return false
+	}
+	return remoteStateRequested(intent)
+}
+
+// remoteStateRequested reports whether remote state was asked for (flag, env, or
+// intent), ignoring the --local override. Used to decide whether --local is
+// actually bypassing anything.
+func remoteStateRequested(intent *model.Intent) bool {
 	if runRemoteState {
 		return true
 	}
@@ -182,6 +197,12 @@ func runPlan() error {
 	}
 
 	remoteActive := isRemoteStateActive(loadedIntent)
+	// Surface the escape hatch when --local is overriding an otherwise-remote run,
+	// so it's clear shared state is intentionally bypassed (not silently lost).
+	if runLocal && remoteStateRequested(loadedIntent) {
+		fmt.Fprintf(os.Stderr, "%s --local: bypassing remote state; this run uses local filesystem state only\n",
+			ui.Yellow(ui.ColorEnabledForWriter(os.Stderr), "○"))
+	}
 	backendURL := resolveBackendURL(loadedIntent)
 
 	if remoteActive && backendURL == "" {
@@ -468,8 +489,18 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 			if apiErr.IsAuth() {
 				return errNotLoggedIn()
 			}
+			// A 5xx at run start means the backend is up but failing — same escape
+			// hatch as an unreachable backend (design §7 row 4).
+			if apiErr.Status >= 500 {
+				return errBackendUnreachable(backendURL, err)
+			}
+			return fmt.Errorf("initializing remote run: %w", err)
 		}
-		return fmt.Errorf("initializing remote run: %w", err)
+		// Not an API error → a transport failure (DNS, refused, timeout) after the
+		// client's retries: the backend is unreachable at run start. Fail fast with
+		// the --local escape hatch; never silently fall back to local state (a team
+		// expecting shared state must notice).
+		return errBackendUnreachable(backendURL, err)
 	}
 	// Use the run ID returned by the backend (idempotent join may return existing ID).
 	r.ExecID = handle.RunID
