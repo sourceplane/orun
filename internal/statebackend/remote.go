@@ -308,6 +308,14 @@ func (r *RemoteStateBackend) ReadJobLog(ctx context.Context, runID string, jobID
 	return res.Content, nil
 }
 
+func (r *RemoteStateBackend) TailJobLog(ctx context.Context, runID string, jobID string, fromSeq int) (string, int, bool, error) {
+	res, err := r.client.ReadLog(ctx, wireRunID(runID), jobID, fromSeq)
+	if err != nil {
+		return "", fromSeq, false, err
+	}
+	return res.Content, res.NextSeq, res.Complete, nil
+}
+
 func (r *RemoteStateBackend) Close(_ context.Context) error { return nil }
 
 // chunkUTF8 splits s into chunks no larger than max bytes, never splitting a

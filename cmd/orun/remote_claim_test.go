@@ -74,6 +74,10 @@ func (f *fakeBackend) ReadJobLog(_ context.Context, _, _ string) (string, error)
 	return "", nil
 }
 
+func (f *fakeBackend) TailJobLog(_ context.Context, _, _ string, fromSeq int) (string, int, bool, error) {
+	return "", fromSeq, true, nil
+}
+
 func (f *fakeBackend) Close(_ context.Context) error { return nil }
 
 func TestPerformRemoteJobClaim_AlreadyComplete(t *testing.T) {
@@ -319,6 +323,26 @@ func TestRunHeartbeat_StopsWhenJobContextCancelled(t *testing.T) {
 	}
 	if atomic.LoadInt32(&called) != 0 {
 		t.Error("onLeaseLost must not fire on a healthy lease")
+	}
+}
+
+func TestFollowRemoteLog_RequiresJob(t *testing.T) {
+	orig := logsJob
+	logsJob = ""
+	defer func() { logsJob = orig }()
+	if err := followRemoteLog("run-1", &fakeBackend{}, false); err == nil {
+		t.Fatal("expected --follow to require --job")
+	}
+}
+
+func TestFollowRemoteLog_StopsWhenComplete(t *testing.T) {
+	orig := logsJob
+	logsJob = "job-1"
+	defer func() { logsJob = orig }()
+	// fakeBackend.TailJobLog reports complete on the first poll, so follow returns
+	// immediately without sleeping.
+	if err := followRemoteLog("run-1", &fakeBackend{}, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
