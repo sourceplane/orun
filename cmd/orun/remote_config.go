@@ -175,6 +175,19 @@ func errRepoNotLinked(backendURL string) error {
 	return fmt.Errorf("this repo is not linked to an Orun Cloud org/project; run `%s`", cmd)
 }
 
+// errBackendUnreachable is the fail-fast error when the Orun Cloud backend
+// cannot be reached (or is failing) at run start (design §7 row 4). It points at
+// the --local escape hatch; there is never a silent fallback to local state.
+func errBackendUnreachable(backendURL string, cause error) error {
+	target := strings.TrimSpace(backendURL)
+	if target == "" {
+		target = "the configured backend"
+	}
+	return fmt.Errorf("Orun Cloud backend unreachable at %s: %w\n"+
+		"hint: re-run with `--local` to use local filesystem state for this run, "+
+		"or retry once connectivity returns (orun never silently falls back to local)", target, cause)
+}
+
 // isNoLoginErr reports whether an auth-resolution error means there is no usable
 // local session (so the caller should surface the single "run `orun auth login`"
 // message per design §7 row 2).

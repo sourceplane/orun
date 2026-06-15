@@ -116,18 +116,26 @@ Pairs with OP2 + OP3. The core milestone, landing in increments.
     state-worker tail, zero `lease_lost`); two runners on one job → exactly one
     executes, the other waits and exits clean (no double-claim).
 
+- ✅ **Increment 4 (PR #370) — `--local` escape hatch + run-start degradation.**
+  Stage-verified. `orun run --local` forces local filesystem state, overriding
+  remote config/flags (with a one-line bypass note); when the backend is
+  unreachable (or 5xx) at run start, the run fails fast with an actionable error
+  that points at `--local` — never a silent fallback to local (design §7 row 4).
+  Point reads were already working from increment 2: `orun status --remote-state`
+  and `orun logs --remote-state` render a completed cloud run (state, progress,
+  per-job step logs) indistinguishably from a local one.
+
 Remaining OC3 increments (unstarted):
 
-- Full kill -9 lease-recovery timing gate run live (the pieces — atomic claim,
-  heartbeat, server sweep re-queue — are each verified; the end-to-end ~60 s
-  lapse+resume was not run).
 - Log pipeline hardening: bounded buffering with spill-to-file when the backend
   is unreachable mid-run, drain-on-recover, non-zero exit + warning when
   undrained (design §7 row 5).
-- Reads parity: `bridge.FromBackend` wired so `status`, `logs --follow` (fromSeq
-  tail), and the cockpit render cloud runs through the existing viewmodels
-  (`ListRuns` on the client now exists; the bridge wiring does not yet).
-- `run --local` escape hatch; no silent fallback.
+- Live tail + cockpit: `orun logs --follow` (fromSeq tail) and the cockpit TUI
+  over cloud runs (`ListRuns` on the client exists; `logs --follow` and the TUI
+  bridge wiring do not yet).
+- Full kill -9 lease-recovery timing gate run live (the pieces — atomic claim,
+  heartbeat, server sweep re-queue — are each verified; the end-to-end ~60 s
+  lapse+resume was not run).
 
 **Done when:** against stage, a multi-job DAG runs to completion under
 `--remote-state`; kill -9 of the runner mid-job → a second invocation resumes
