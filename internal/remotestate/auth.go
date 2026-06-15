@@ -13,7 +13,22 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/sourceplane/orun/internal/cliauth"
+)
+
+const (
+	// refreshSkew refreshes the access token this long before its expiry, so a
+	// command (or a long-running `run`) doesn't start work with a token that
+	// expires mid-flight. The access token is ~15m; a 60s skew refreshes in the
+	// final ~7% of its life — frequent enough to avoid mid-request expiry,
+	// infrequent enough not to churn the rotating refresh token.
+	refreshSkew = 60 * time.Second
+
+	// refreshLockTimeout bounds how long we wait for the cross-process refresh
+	// lock when the caller's context has no deadline of its own.
+	refreshLockTimeout = 30 * time.Second
 )
 
 // TokenSource resolves the bearer token for backend requests.
@@ -112,12 +127,26 @@ type SessionTokenSource struct {
 	Version    string
 }
 
+// refreshGroup coalesces concurrent refreshes within a single process: when
+// many goroutines (e.g. a `run` firing parallel state requests) hit an expired
+// access token at once, exactly one performs the rotating-refresh redemption
+// and the rest share its result. Keyed by backend URL. The cross-process race
+// (two orun invocations) is handled by the file lock in refreshOnce.
+var refreshGroup singleflight.Group
+
 // Token returns the current access token, refreshing it if needed. The refresh
 // token is rotating and single-use: RefreshSession persists the new one. If the
 // platform reports the token family revoked (single-use reuse, or a console-side
 // revoke), RefreshSession clears the local session and returns
 // cliauth.ErrSessionRevoked; this surfaces it as a single actionable error
 // ("run `orun auth login`") rather than per-call spam.
+//
+// Concurrency: a rotating, single-use refresh token MUST be redeemed exactly
+// once. Token serializes refresh across goroutines (singleflight) and across
+// processes (an advisory file lock in refreshOnce), and re-checks the stored
+// token after winning the lock, so siblings reuse a freshly rotated token
+// instead of replaying a spent one (which would trip reuse-detection and revoke
+// the whole session).
 func (s *SessionTokenSource) Token(ctx context.Context) (string, error) {
 	creds, err := cliauth.LoadSession()
 	if err != nil {
@@ -132,6 +161,48 @@ func (s *SessionTokenSource) Token(ctx context.Context) (string, error) {
 	if strings.TrimSpace(creds.RefreshToken) == "" {
 		return "", cliauth.ErrSessionRevoked
 	}
+
+	token, err, _ := refreshGroup.Do(s.BackendURL, func() (interface{}, error) {
+		return s.refreshOnce(ctx)
+	})
+	if err != nil {
+		return "", err
+	}
+	return token.(string), nil
+}
+
+// refreshOnce performs a single, serialized refresh. It takes the cross-process
+// lock, then re-loads the session and re-checks expiry: a sibling process may
+// have rotated the token while we waited, in which case we return its fresh
+// access token without redeeming our (now-spent) refresh token. The lock is
+// best-effort — if it cannot be acquired we still refresh, just unserialized.
+func (s *SessionTokenSource) refreshOnce(ctx context.Context) (string, error) {
+	lockCtx := ctx
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		lockCtx, cancel = context.WithTimeout(ctx, refreshLockTimeout)
+		defer cancel()
+	}
+	if lock, lockErr := cliauth.AcquireRefreshLock(lockCtx); lockErr == nil {
+		defer func() { _ = lock.Release() }()
+	}
+
+	// Double-checked reload under the lock: a sibling may have refreshed while
+	// we waited. Reuse its token rather than replaying our spent refresh token.
+	creds, err := cliauth.LoadSession()
+	if err != nil {
+		return "", err
+	}
+	if creds == nil {
+		return "", os.ErrNotExist
+	}
+	if creds.AccessToken != "" && !tokenExpired(creds.AccessExpiryTime()) {
+		return creds.AccessToken, nil
+	}
+	if strings.TrimSpace(creds.RefreshToken) == "" {
+		return "", cliauth.ErrSessionRevoked
+	}
+
 	refreshed, err := cliauth.RefreshSession(ctx, s.BackendURL, s.Version, creds)
 	if err != nil {
 		if errors.Is(err, cliauth.ErrSessionRevoked) {
@@ -238,7 +309,7 @@ func tokenExpired(exp time.Time) bool {
 	if exp.IsZero() {
 		return false
 	}
-	return time.Now().Add(30 * time.Second).After(exp)
+	return time.Now().Add(refreshSkew).After(exp)
 }
 
 func containsString(values []string, target string) bool {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -113,6 +114,130 @@ func TestSessionTokenSource_RefreshesExpiredAndRotates(t *testing.T) {
 	}
 	if loaded.RefreshToken != "r2" {
 		t.Errorf("persisted refresh = %q, want r2 (rotated)", loaded.RefreshToken)
+	}
+}
+
+// TestSessionTokenSource_RefreshesWithinSkewWindow proves the proactive skew:
+// a token that is still technically valid but expires inside the skew window is
+// refreshed ahead of time, so a command never starts work with a token about to
+// expire mid-flight.
+func TestSessionTokenSource_RefreshesWithinSkewWindow(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"accessToken":  "fresh-access",
+				"expiresAt":    time.Now().Add(15 * time.Minute).Format(time.RFC3339),
+				"refreshToken": "r2",
+			},
+			"meta": map[string]any{"requestId": "req-test", "cursor": nil},
+		})
+	}))
+	defer srv.Close()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// Access token expires in 20s — still valid, but inside the 60s skew window.
+	writeSession(t, home, cliauth.Credentials{
+		AccessToken:       "about-to-expire",
+		AccessTokenExpiry: time.Now().Add(20 * time.Second).Format(time.RFC3339),
+		RefreshToken:      "r1",
+		BackendURL:        srv.URL,
+	})
+
+	src := &remotestate.SessionTokenSource{BackendURL: srv.URL, Version: "test"}
+	tok, err := src.Token(context.Background())
+	if err != nil {
+		t.Fatalf("Token error: %v", err)
+	}
+	if tok != "fresh-access" {
+		t.Errorf("token = %q, want fresh-access (proactive refresh within skew)", tok)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("server called %d times, want 1 (refreshed ahead of expiry)", got)
+	}
+}
+
+// TestSessionTokenSource_ConcurrentRefreshRedeemsOnce is the core regression
+// for "the token expires seconds after login". Many concurrent callers hit an
+// expired access token at once; the rotating, single-use refresh token must be
+// redeemed EXACTLY once (otherwise the losers replay a spent token, trip
+// reuse-detection, and the platform revokes the whole family). All callers must
+// receive the one freshly minted access token.
+func TestSessionTokenSource_ConcurrentRefreshRedeemsOnce(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&calls, 1)
+		// A second redemption means a sibling replayed the spent token — that is
+		// exactly the bug under test. Fail loudly by returning the reuse error so
+		// the assertion below catches it deterministically.
+		if n > 1 {
+			w.WriteHeader(401)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"code": "unauthenticated", "message": "Refresh token reuse detected; session revoked", "details": map[string]any{}, "requestId": "req-reuse"},
+			})
+			return
+		}
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["refreshToken"] != "r1" {
+			t.Errorf("redeemed refreshToken = %q, want r1", body["refreshToken"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"accessToken":  "fresh-access",
+				"expiresAt":    time.Now().Add(15 * time.Minute).Format(time.RFC3339),
+				"refreshToken": "r2",
+			},
+			"meta": map[string]any{"requestId": "req-test", "cursor": nil},
+		})
+	}))
+	defer srv.Close()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeSession(t, home, cliauth.Credentials{
+		AccessToken:       "expired",
+		AccessTokenExpiry: time.Now().Add(-time.Minute).Format(time.RFC3339),
+		RefreshToken:      "r1",
+		BackendURL:        srv.URL,
+	})
+
+	src := &remotestate.SessionTokenSource{BackendURL: srv.URL, Version: "test"}
+
+	const n = 12
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	toks := make([]string, n)
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start // release all goroutines together to maximize the race
+			toks[i], errs[i] = src.Token(context.Background())
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i := 0; i < n; i++ {
+		if errs[i] != nil {
+			t.Fatalf("goroutine %d: Token error: %v", i, errs[i])
+		}
+		if toks[i] != "fresh-access" {
+			t.Errorf("goroutine %d: token = %q, want fresh-access", i, toks[i])
+		}
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("refresh token redeemed %d times, want exactly 1 (concurrent refresh must coalesce)", got)
+	}
+	loaded, err := cliauth.LoadSession()
+	if err != nil || loaded == nil || loaded.RefreshToken != "r2" {
+		t.Fatalf("persisted refresh = %v (err %v), want r2", loaded, err)
 	}
 }
 
