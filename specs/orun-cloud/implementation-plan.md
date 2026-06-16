@@ -163,16 +163,21 @@ with this client; `status --watch` and the cockpit show a cloud run
 indistinguishably from a local one; mid-run network cut follows row 5 of the
 degradation table in a scripted test.
 
-## OC4 — Object & catalog push — 🗓️ Planned
+## OC4 — Object & catalog push — 🚧 In progress (objsync landed)
 
 Pairs with OP3 + OP7.
 
-- `internal/remotestate/objsync`: digest negotiation, single-shot PUT ≤25 MiB,
-  multipart above, kind headers; reused by OC3's plan sync.
-- `orun catalog push` / `catalog refresh --push` / `cloud.catalog.autopush`:
+- ✅ `internal/remotestate/objsync`: digest negotiation, single-shot PUT ≤25 MiB,
+  and the **chunked multipart sub-protocol above the budget** (start → per-part
+  PUT → complete; the server reassembles from its own part records and verifies
+  the assembled digest, so the client sends only the kind header at complete),
+  kind headers throughout. `EnsureObject` dispatches by size; reused by OC3's
+  plan sync. Unit-tested (start/parts/complete in order + reassembly, size
+  dispatch). **Stage gate:** the live 100 MiB multipart round-trip remains.
+- 🗓️ `orun catalog push` / `catalog refresh --push` / `cloud.catalog.autopush`:
   snapshot sync + head advance with source commit; output shows missing-blob
-  count and head transition.
-- Environment-scoped heads (`--environment`).
+  count and head transition. (Pairs with OP7; not started.)
+- 🗓️ Environment-scoped heads (`--environment`).
 
 **Done when:** against stage, first push uploads, second push transfers ~zero
 bytes (negotiation verified); the pushed catalog renders in the console (OP7
