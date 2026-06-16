@@ -122,6 +122,14 @@ Sync(ctx, digests []Digest) error   // POST objects/missing → PUT the gaps (�
 
 ## 6. Secrets in the runner
 
+> **Canonical design: `specs/orun-secrets/`.** The full secret store — policy
+> model, identity, materialization, catalog facet — lives there and supersedes
+> this section, which is now the **runner-resolve + redaction slice** (milestone
+> OC5) of that design. This section stays normative for *how the runner
+> resolves*; `orun-secrets/runner-integration.md` is the same flow in full
+> detail, and `orun-secrets/policy-model.md` specifies the `secret.value.use`
+> decision the resolve endpoint runs.
+
 Steps already declare the env they need; compositions mark which keys are
 secret-sourced. At execution time, per claimed job:
 

@@ -25,10 +25,11 @@
   added to `internal/backendbundle`.
 - KEK as a Worker secret; per-namespace DEK wrap/unwrap; AES-256-GCM envelope
   reusing the `config-worker` adapter shape.
-- Routes: `POST /v1/secrets` (put, incl. `--personal`), `GET /v1/secrets`
-  (metadata), `POST /v1/secrets/import`, `rotate`, `revoke`. **Write-only — no
+- Routes (contract §4): `PUT …/secrets/{key}` (create/rotate, incl.
+  `--personal`), `GET …/secrets` (metadata), `DELETE …/secrets/{key}`
+  (`revoke`/`rm`), plus extension `POST …/secrets/import`. **Write-only — no
   resolve/reveal yet.**
-- `orun secret set/import/list/rotate/revoke/versions` with `--chain` view
+- `orun secrets set/import/list/rotate/revoke/versions` with `--chain` view
   (`cli-surface.md` §1).
 - Outcome: secrets (shared, base, personal) can be stored encrypted, bulk
   imported, and listed by metadata; nothing can read a value.
@@ -40,14 +41,15 @@
   composition-attached fragments (auto-scoped `component.type` injection),
   stack `policies/` discovery, intent overlays with the narrow-only check
   (`policy-model.md` §1, §5).
-- Routes: `POST /v1/policies` (put, with `source` tier), `POST
-  /v1/policies/evaluate` (dry-run).
+- Routes: `POST …/policies` (put, with `source` tier), `POST
+  …/policies/evaluate` (dry-run).
 - `orun policy list/show/test/lint` (`cli-surface.md` §2).
 - Outcome: full decision engine, testable via `orun policy test`, **still no
   value resolution**.
 
 ## SEC3 — Resolve path + runner injection + redaction (the value finally flows)
-- `POST /v1/secrets/resolve`: four-axis decision → env-chain walk
+- `POST …/state/runs/{runId}/secrets/resolve` (lease-bound, contract §4;
+  authorizes `secret.value.use`): four-axis decision → env-chain walk
   (`personal → env → base`, SD-11) → DEK unwrap → decrypt → audit → plaintext
   over TLS.
 - `internal/secretclient` over the existing remote client; `Resolve` in
@@ -71,7 +73,7 @@
   execution tree (Invariant 6, `runner-integration.md` §8).
 - **Catalog facet (SD-14):** register the `x-orun-secrets` extension schema;
   resolver derives `requirements`/`groups` statically and joins
-  `bindings`/`rotation` from `GET /v1/secrets` metadata as live-plane data
+  `bindings`/`rotation` from `GET …/secrets` metadata as live-plane data
   (`platform-integration.md` §1).
 - Outcome: portable, component-aware requirements ride the Stack; runs are
   audit-complete; the catalog shows secret health per component.
@@ -89,15 +91,15 @@
 - Adapter registry with v1 adapter `cloudflare-worker` (over `SetWorkerSecret`,
   `internal/cloudflare/client.go:437`); target binding derived from the
   provisioned entity.
-- `secret_syncs` table + `POST/GET /v1/secrets/syncs`; stamp the provisioned
+- `secret_syncs` table + `POST/GET …/secrets/syncs`; stamp the provisioned
   entity facet; `superseded`/`orphaned` lifecycle (Invariant 10).
-- `orun secret rotate` raises `onRotate` system triggers; `orun secret syncs`
+- `orun secrets rotate` raises `onRotate` system triggers; `orun secrets syncs`
   CLI; convergence view in operations.
 - Outcome: deployed applications receive secrets through one governed,
   recorded, rotation-aware door.
 
 ## SEC7 — Break-glass + dashboard + scorecards + rotation UX
-- `POST /v1/secrets/reveal` (elevated, alerted) + `orun secret reveal`.
+- `POST …/secrets/{key}/reveal` (elevated, alerted) + `orun secrets reveal`.
 - Orun Cloud console: secrets/env-chain, three-tier policies + test matrix,
   per-entity facet, audit, GitHub App surfaces (`platform-integration.md` §4).
 - `secret-hygiene` scorecard rules over the facet (`platform-integration.md`

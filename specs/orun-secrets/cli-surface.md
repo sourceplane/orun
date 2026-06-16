@@ -5,18 +5,26 @@
 > place (`cmd/orun/command_auth.go`, `cmd/orun/remote_config.go`). The guiding
 > principle: **set is easy, read is rare, references are declarative.**
 
-## 1. `orun secret` — manage values (write-only + metadata)
+## 1. `orun secrets` — manage values (write-only + metadata)
+
+This is the **shipping `orun secrets` group** (orun-cloud cli-surface §5). OC5
+ships the `set` / `list` / `rm` subset; orun-secrets extends the *same* group
+with the commands below. `rm` is retained as the alias for `revoke` (SD-16).
 
 ```
-orun secret set     <KEY> --env <env> [--namespace <ns>] [--personal] [--value-stdin | --value <v>] [--rotation <policy>]
-orun secret import  --from-dotenv <file> --env <env> [--namespace <ns>]      # bulk onboarding, write-only
-orun secret list    [--env <env>] [--namespace <ns>] [--chain] [--json]      # metadata only — never values
-orun secret rotate  <KEY> --env <env> [--value-stdin]                        # new version; raises onRotate redeploys (SD-13)
-orun secret revoke  <KEY> --env <env> [--version <n>]                        # tombstone a version (or all)
-orun secret reveal  <KEY> --env <env> --break-glass [--reason <s>]           # SINGLE audited human reveal (SD-3)
-orun secret versions <KEY> --env <env>                                       # version history (metadata)
-orun secret syncs   [--env <env>] [--entity <ref>]                           # materialization state (SD-13)
+orun secrets set     <KEY> --env <env> [--namespace <ns>] [--personal] [--value-stdin | --value <v>] [--rotation <policy>]
+orun secrets import  --from-dotenv <file> --env <env> [--namespace <ns>]      # bulk onboarding, write-only
+orun secrets list    [--env <env>] [--namespace <ns>] [--chain] [--json]      # metadata only — never values  (OC5)
+orun secrets rotate  <KEY> --env <env> [--value-stdin]                        # new version; raises onRotate redeploys (SD-13)
+orun secrets revoke  <KEY> --env <env> [--version <n>]                        # tombstone a version (or all); alias: rm
+orun secrets reveal  <KEY> --env <env> --break-glass [--reason <s>]           # SINGLE audited human reveal (SD-3)
+orun secrets versions <KEY> --env <env>                                       # version history (metadata)
+orun secrets syncs   [--env <env>] [--entity <ref>]                           # materialization state (SD-13)
 ```
+
+(`set` / `list` / `rm` are the OC5-shipped baseline; everything else is an
+orun-secrets extension of the same command group and the same write-only
+contract.)
 
 - **`set`** reads the value from stdin by default (`--value-stdin`) so it never
   lands in shell history; `--value` is discouraged and warns. The value goes to
@@ -24,7 +32,7 @@ orun secret syncs   [--env <env>] [--entity <ref>]                           # m
   metadata only.
   - **`--personal`** (SD-11) stores a personal overlay for the calling GitHub
     user — resolvable only by them, only on `local-cli`. The daily-dev flow:
-    `orun secret set DB_URL --env dev --personal`.
+    `orun secrets set DB_URL --env dev --personal`.
   - `--env base` writes org-shared defaults every environment inherits.
 - **`import`** onboards an existing `.env` in one command — parses, uploads
   write-only, prints a per-key summary, and (with `--write-refs`) offers the
@@ -49,7 +57,7 @@ orun secret syncs   [--env <env>] [--entity <ref>]                           # m
 ```
 orun policy list   [--namespace <ns>]            # documents in scope, by tier: composition → stack → intent
 orun policy show   <name>
-orun policy test   --ref secret://ns/prod/DB_URL \          # dry-run a decision (calls /v1/policies/evaluate)
+orun policy test   --ref secret://ns/prod/DB_URL \          # dry-run a decision (calls …/policies/evaluate)
                    --as gh:user:@octocat --env prod \
                    --component-type terraform --platform github-actions-oidc
 orun policy lint                                 # predicate vocabulary + narrow-only overlay checks (SD-10)

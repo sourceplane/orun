@@ -55,7 +55,7 @@
   Cloud backend (D1, envelope-encrypted) and transiently in the runner's memory
   and the child process. The object graph, refs, plan, and logs carry only
   references and resolved-version provenance.
-- **G2 — Doppler-grade ergonomics.** `orun secret set`, declarative references,
+- **G2 — Doppler-grade ergonomics.** `orun secrets set`, declarative references,
   automatic env injection, environment inheritance with personal dev overlays,
   versioning and rotation, dotenv import — the value is delivered to the
   workload without the author touching ciphertext.
@@ -111,11 +111,12 @@ PLAN TIME  (orun plan — references only, value-free, reviewable)
   materialize steps rendered as explicit plan steps ("sync 2 secrets → worker:api")
 
 RUN TIME  (orun run — value lives only here)
-  runner authenticates (OIDC | session | ORUN_TOKEN)  →  POST orun-api /v1/secrets/resolve
-     orun-api:  policy decision (deny-by-default, four axes)
+  runner authenticates (OIDC | session | ORUN_TOKEN)
+     → POST …/state/runs/{runId}/secrets/resolve  (contract §4; live lease; secret.value.use)
+     orun-api:  policy decision (deny-by-default, four axes — the secret.value.use engine)
                 → env-chain resolution per key: personal(env,user) → env → base   (SD-11)
                 → unwrap namespace DEK → AES-256-GCM decrypt
-                → plaintext over TLS + key-name-only audit event
+                → { secrets, ttlSeconds } over TLS + secret.accessed audit event
   runner: inject plaintext as top, non-persisted env layer in stepExecContext
           register every value in the per-run redactor
           materialize step: push values into the target platform store, record sync (SD-13)
@@ -209,7 +210,7 @@ personal(env, gh_user_id)   →   env   →   base
   defined in `dev` shadows the same key in `base`.
 - **Environments** are the environments intent already declares
   (`internal/model/intent.go:59-71`); the secret store does not invent a second
-  environment concept. First `orun secret set --env <e>` for an env
+  environment concept. First `orun secrets set --env <e>` for an env
   auto-creates its config.
 - **Personal configs** are per-`(env, GitHub user id)` overlays: `orun secret
   set DB_URL --env dev --personal` stores a value only its owner can resolve,
@@ -321,9 +322,9 @@ The runner resolves references to plaintext in `stepExecContext`
 **highest-precedence, non-persisted** env layer for the child process only.
 Plaintext never reaches `PlanJob.Env`, the plan, refs, or any L0 object.
 
-**Write-only API + break-glass reveal (SD-3).** `orun secret set` accepts a
+**Write-only API + break-glass reveal (SD-3).** `orun secrets set` accepts a
 value and returns metadata; there is **no routine reveal**. A single audited
-`orun secret reveal --break-glass` exists for incident recovery, gated by an
+`orun secrets reveal --break-glass` exists for incident recovery, gated by an
 elevated policy action and always emitting an alert event.
 
 **Redaction (SD-8).** All step output funnels through one hook (`AfterStepLog`,
@@ -356,7 +357,7 @@ rather than a dumb sync:
    entity** the catalog already derives from composition effects
    (`internal/model/composition.go:75-90`, commit f35d537) — so the catalog
    answers "is the running Worker on the latest rotation of `STRIPE_KEY`?".
-3. **Rotation re-materializes.** `orun secret rotate` raises a system trigger
+3. **Rotation re-materializes.** `orun secrets rotate` raises a system trigger
    for every deploy profile whose materialization includes that key, so the
    running app converges on the new version through the normal, audited deploy
    path — no out-of-band push.
@@ -402,6 +403,8 @@ edges so the dataflow is visible in `orun plan`:
 | **SD-12** | Namespace = repo by default; org sharing via explicit `_shared/<group>` bind + grant | Bounded blast radius; sharing is visible, never ambient (closes Q-6) |
 | **SD-13** | Runtime delivery = materialization into the platform's native store; plan-visible, provenance-tracked, rotation-driven | No runtime SDK / availability coupling; one governed door for values leaving custody |
 | **SD-14** | Secrets project onto the Component entity as `extensions.x-orun-secrets`; scorecards grade it | Secret health is catalog data, not a side dashboard; reuses the entity extension seam (`entity_envelope.go:36`) |
+| **SD-15** | The orun-cloud wire contract (§4 secrets, §6 policy map) is normative; orun-secrets elaborates it; `SecretPolicy` is the engine behind `secret.value.use` | One contract, not two; supersedes the orun-cloud placeholder design without forking its API or its already-shipping resolve discipline (README "Relationship to orun-cloud") |
+| **SD-16** | CLI is the shipping `orun secrets` group; OC5 ships `set`/`list`/`rm`, orun-secrets extends it; `rm` aliases `revoke` | One CLI surface on main; the fuller command set is additive to what OC5 ships |
 
 ## 11. Invariants (regression-tested)
 

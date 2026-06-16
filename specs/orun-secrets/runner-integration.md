@@ -14,18 +14,32 @@ The runner builds each step's environment in `stepExecContext`
 a **resolve-then-inject** stage that runs *after* the plan is loaded and *only* in
 the runner — never in expand/plan/render:
 
+Resolution goes through the **orun-cloud contract's run-scoped, lease-bound
+resolve endpoint** — `POST …/state/runs/{runId}/secrets/resolve` with the job's
+live lease (`data-model.md` §8) — not a bespoke route. This is the OC5 slice of
+the secret store; orun-secrets specifies what that endpoint resolves.
+
 ```
 stepExecContext(job, step):
   base ← OS + job.Env + injected ORUN_* + step.Env          # existing, all non-secret
-  refs ← job.secretRefs ∩ (step scope)                       # from plan.json (references only)
-  if refs non-empty:
-      resolved ← secretclient.Resolve(refs, triggerContext, authToken)   # POST /v1/secrets/resolve
+  keys ← job.secretRefs ∩ (step scope)                       # from plan.json (references only)
+  if keys non-empty:
+      # POST …/state/runs/{runId}/secrets/resolve { runnerId, jobId, keys } (live lease, secret.value.use)
+      resolved ← secretclient.Resolve(runId, jobId, keys, triggerContext)   # → { secrets, ttlSeconds }
       redactor.Add(resolved.values)                          # seed the log masker BEFORE any output
       env ← merge(base, resolved.asEnv)                      # secret env is highest precedence, NON-persisted
   return execContext{ Env: env }                             # env lives only in this child process
 ```
 
 Key properties:
+- **Lease-bound + fail-closed (contract discipline).** The resolve requires the
+  job's live lease and the `secret.value.use` action; a failed resolve fails the
+  dependent job *before its step starts*, with the platform error surfaced
+  verbatim (`orun-cloud/design.md` §6–7). Independent jobs continue.
+- **TTL'd values.** The response carries `ttlSeconds` (contract default 300);
+  the in-memory cache honors it and re-resolves on expiry within a long job.
+  Each allow emits a `secret.accessed` event server-side (the contract's audit
+  hook, joined to orun-secrets' `secret_audit`, `policy-model.md` §8).
 - `resolved.asEnv` is merged into the child process environment **only**. It is
   never written back to `PlanJob.Env`, the plan, refs, or any L0 object
   (Invariant 1, `design.md` §11).
@@ -51,14 +65,17 @@ service principals. It adds:
 
 ```go
 type Resolver interface {
-    Resolve(ctx, refs []SecretRef, tc TriggerContext) (Resolved, error) // POST /v1/secrets/resolve
+    // POST …/state/runs/{runId}/secrets/resolve (lease-bound, contract §4)
+    Resolve(ctx, runID, jobID string, keys []string, tc TriggerContext) (Resolved, error)
 }
 ```
 
-The request carries the references, the `TriggerOccurrence` facts
-(`internal/triggerctx/context.go:61-76`), and the bearer token; the response is
-`{ asEnv: map[string]string }` on allow or a typed `denials[]` on deny. Transport,
-timeouts, and retry reuse `client.go` (5s connect / 30s read).
+The request carries the run/job ids (which scope the live lease), the declared
+keys, the `TriggerOccurrence` facts (`internal/triggerctx/context.go:61-76`),
+and the bearer token; the response is `{ secrets: map[string]string,
+ttlSeconds }` on allow or a typed `denials[]` on deny. Transport, timeouts, and
+retry reuse `client.go` (5s connect / 30s read). The same `TokenSource` decides
+the server-derived `platform` fact (§3), so the runner never self-reports it.
 
 ## 3. Execution-platform awareness
 
@@ -114,7 +131,7 @@ redactor.Filter(output) :=
     in `artifacts/`; the DEK is destroyed when the run is GC'd. Redacted like any
     secret.
 - Downstream resolution of a sensitive output goes through the same
-  `/v1/secrets/resolve` path, so the same policy + audit + redaction apply.
+  run-scoped `…/secrets/resolve` path, so the same policy + audit + redaction apply.
 
 ## 6. Materialization — the deploy job carries the last mile (SD-13)
 
@@ -128,7 +145,7 @@ materializeStep(job):
   adapter ← adapters[job.materialize.target]                    # typed, versioned with the composition
   for each (key, value):
       adapter.Put(targetBinding(job), key, value)               # e.g. SetWorkerSecret (client.go:437)
-  POST /v1/secrets/syncs { key, version, target, entityRef, execId }   # provenance (Invariant 10)
+  POST …/secrets/syncs { key, version, target, entityRef, execId }   # provenance (Invariant 10)
 ```
 
 Properties:
@@ -146,7 +163,7 @@ Properties:
   deferred per Q-7.
 - **Provenance, then catalog.** The sync rows stamp the provisioned entity's
   facet (`platform-integration.md` §1) and flip prior rows to `superseded`;
-  `orun secret rotate` raises the profile's `onRotate` trigger so convergence
+  `orun secrets rotate` raises the profile's `onRotate` trigger so convergence
   happens through the normal, plan-visible deploy path.
 - **Failure is loud.** A partial sync (some keys written, then failure) is
   recorded per-key; the step fails, the run is unsealed-red, and operations

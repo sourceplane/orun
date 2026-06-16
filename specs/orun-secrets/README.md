@@ -33,7 +33,8 @@ jobs that provision its infrastructure deliver its secrets to it.
 | Field | Value |
 |-------|-------|
 | Status | **Draft (v2) — for review, not scheduled** |
-| Builds on | `specs/orun-object-model/` (objects/refs/remote), the Orun Cloud backend (`cmd/orun/command_backend.go`), the Stack/composition model (`website/docs/concepts/stacks.md`), the service catalog (`specs/orun-service-catalog/`, entity envelope + `extensions`), scorecards (`specs/orun-scorecards/`) |
+| Supersedes | the placeholder secret-store *design* in `specs/orun-cloud/` (design §6 "secrets in the runner", cli-surface §5 `orun secrets`, milestone OC5) and the contract's §4 "Secrets (config-worker)" sketch. orun-secrets is the canonical, full secret-store design; orun-cloud's secret sections now point here. **OC5 stays the implementation milestone** that builds the runner-resolve + redaction slice of this design (see "Relationship to orun-cloud" below). |
+| Builds on | `specs/orun-object-model/` (objects/refs/remote), the Orun Cloud backend (`cmd/orun/command_backend.go`), the **orun-cloud wire contract** (`specs/orun-cloud/vendored/state-api-contract.md` §4 secrets + §6 policy map — normative for the API shape), the Stack/composition model (`website/docs/concepts/stacks.md`), the service catalog (`specs/orun-service-catalog/`, entity envelope + `extensions`), scorecards (`specs/orun-scorecards/`) |
 | Depends on | The content-addressed store + refs (L0/L2); the CLI auth stack (`internal/cliauth`, `internal/remotestate/auth.go`); the trigger model (`internal/model/trigger.go`, `internal/triggerctx`); composition effects → provisioned entities (`internal/model/composition.go:75-90`) |
 | Prior art | `multi-tenant-saas/apps/config-worker` (shipped AES-256-GCM envelope secret store) and `apps/policy-worker` (shipped deny-by-default RBAC) — orun converges on these patterns rather than reinventing them; Doppler (config inheritance, personal configs, syncs) for the experience bar |
 | apiVersion | `orun.io/v1` (`SecretPolicy`, composition `secretBindings` + `materialize`, the GitHub identity map) |
@@ -57,6 +58,29 @@ jobs that provision its infrastructure deliver its secrets to it.
 | SD-12 | **Namespace = repo by default**; org-shared secrets live in explicit `_shared/<group>` namespaces a component must bind and a policy must grant |
 | SD-13 | **Runtime delivery is materialization**: a deploy profile may sync resolved secrets into the target platform's native store under the same policy + audit; rotation re-materializes; no runtime SDK, no runtime dependency on orun-api |
 | SD-14 | **Secrets are a catalog facet**: requirements, binding status, rotation age, and sync state project onto the Component entity (`extensions.x-orun-secrets`) and are scorecard-checkable |
+| SD-15 | **The orun-cloud wire contract is normative**: the write/list/delete + run-scoped resolve API is the contract's §4; orun-secrets *elaborates* it (policy, materialization, syncs, reveal) rather than defining a second API. `SecretPolicy` is the evaluation behind the contract's deny-by-default `secret.value.use` action |
+| SD-16 | **CLI is the shipping `orun secrets` group** (plural, write-only); OC5 ships the `set`/`list`/`rm` subset and orun-secrets extends the same group (`rotate`/`revoke`(`rm`)/`reveal`/`import`/`versions`/`syncs`) |
+
+## Relationship to orun-cloud (supersession + honored decisions)
+
+A secret store was already sketched inside the **orun-cloud** epic (cluster
+**OC**, partly shipped: OC0–OC4 landed, OC5 planned) and in the shared wire
+contract. orun-secrets **supersedes that design** — it is the canonical,
+complete secret-store spec — but it is *reconciled to*, not in conflict with,
+the decisions orun-cloud has already locked and is shipping:
+
+| Surface | orun-cloud (already shipping) | orun-secrets reconciliation |
+|---|---|---|
+| **Wire API** | contract §4: write-only `PUT/GET/DELETE …/secrets/{key}`; run-scoped `POST …/state/runs/{runId}/secrets/resolve` (live lease, `{secrets, ttlSeconds}`) | **Adopted verbatim as normative** (SD-15). orun-secrets adds `policies`, `syncs`, and `reveal` routes as extensions of the *same* contract, not a parallel API (`data-model.md` §8). |
+| **CLI** | `orun secrets` (plural): `set` / `list` / `rm` | **Adopted** (SD-16). orun-secrets extends the same group; `rm` is the alias for `revoke` (`cli-surface.md` §1). |
+| **Policy** | contract §6 policy map: deny-by-default `secret.read` / `secret.write` / `secret.value.use` | `SecretPolicy` **is the evaluation engine behind `secret.value.use`** — the four-axis decision that makes the contract's deny-by-default action real (`policy-model.md`). |
+| **Resolve discipline** | live job lease, fail-closed, TTL'd values, redactor before upload, never persisted locally | **Adopted verbatim** (`runner-integration.md` §1–4); orun-secrets' env-chain + personal overlays resolve *inside* that same lease-bound call. |
+| **Tenancy** | org → project → environment; the "namespace" wording **retires** | orun-secrets **keeps `namespace`** in v2 with an explicit mapping note (`namespace` ↔ `org/project`, env unchanged); the rename to the org/project spine is a tracked **follow-up** (`risks-and-open-questions.md`, Deferred), not done here. *This is the one known, deliberately-deferred inconsistency.* |
+| **OC5 milestone** | "Secrets in the runner (resolve grants, env injection, redaction)" — planned | Stays as the **implementation milestone** for the runner-resolve + redaction slice; it now implements `runner-integration.md` of this design. |
+
+Net: orun-cloud's secret sections become pointers to here; orun-secrets owns the
+*design*, the contract owns the *wire shape*, and OC5 owns the *first
+implementation slice*.
 
 ## What changed in v2
 
@@ -82,7 +106,7 @@ the catalog. v2 keeps SD-1..SD-9 verbatim and adds the product half:
 - **Namespace granularity decided (SD-12).** Repo-scoped by default, with
   explicit org-`_shared` groups for the one-Datadog-key-thirty-services case —
   closes v1's Q-6.
-- **Onboarding.** `orun secret import --from-dotenv` and a first-ten-minutes
+- **Onboarding.** `orun secrets import --from-dotenv` and a first-ten-minutes
   flow, because adoption is a product feature (`cli-surface.md` §1).
 
 ## The one-paragraph thesis
@@ -137,7 +161,7 @@ never enter the immutable graph) than the systems it draws from.
    sealed-run provenance.
 5. **`platform-integration.md`** — how secrets surface across Orun Cloud: the
    catalog facet, scorecard checks, operations/audit, the dashboard.
-6. **`cli-surface.md`** — `orun secret …`, `orun policy …`, import/onboarding.
+6. **`cli-surface.md`** — `orun secrets …`, `orun policy …`, import/onboarding.
 7. **`implementation-plan.md`** — milestones `SEC0 → SEC7`.
 8. **`risks-and-open-questions.md`** — decisions, open questions, risks,
    deferred register.

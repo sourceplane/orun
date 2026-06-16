@@ -18,6 +18,8 @@
 | SD-12 | Namespace = repo by default; org sharing via explicit `_shared/<group>` (closes v1's Q-6) |
 | SD-13 | Runtime delivery = materialization into the platform's native store; plan-visible, provenance-tracked, rotation-driven |
 | SD-14 | Secrets project onto the Component entity as `extensions.x-orun-secrets`; scorecards grade it |
+| SD-15 | The orun-cloud wire contract (§4 secrets, §6 policy map) is normative; orun-secrets elaborates it and `SecretPolicy` is the engine behind `secret.value.use` (supersedes the orun-cloud placeholder design) |
+| SD-16 | CLI is the shipping `orun secrets` group; OC5 ships `set`/`list`/`rm`, orun-secrets extends it; `rm` aliases `revoke` |
 
 ## Open questions (need product/business intent — not inferable from code)
 
@@ -25,7 +27,7 @@
 |---|----------|------|------------|
 | **Q-1** | **Fully-offline dev.** Personal overlays (SD-11) cover the daily local case but require connectivity. Is the `ORUN_SECRET_<KEY>` env override (local-cli + policy-gated, never prod) the right airplane-mode fallback, or should resolved non-prod values be cached encrypted on disk with a TTL? | Env override only; no on-disk cache in v1 (a cache is a new leak surface with marginal benefit). | SEC3 |
 | **Q-2** | **Self-hosted-backend KEK custody.** `orun backend init` lets anyone provision their own Cloudflare backend. For self-hosted, who holds the KEK and what are the custody/HSM guarantees? Is the secret store **hosted-only (Orun Cloud)** or fully self-hostable with customer-held keys? | v1: hosted-only for the managed KEK; self-hosted backends get the store with a customer-provided KEK (bring-your-own, documented sharp edges). | Before SEC1 GA |
-| **Q-3** | **Convergence with the SaaS `config-worker`.** Should orun's secret store and `multi-tenant-saas/apps/config-worker` become **one service**, or stay separate (different tenancy roots: namespace vs org/project)? They share crypto + authz patterns. | Converge the *crypto + audit contract*; keep orun's namespace tenancy. One library, two deployments. | Before SEC1 |
+| **Q-3** | ~~Convergence with the SaaS `config-worker` / orun-cloud secret store.~~ — **decided (SD-15/SD-16)**: orun-secrets **supersedes** the orun-cloud placeholder design and reconciles to it — the wire contract (§4/§6) is normative, the `orun secrets` CLI group and run-scoped lease resolve are adopted verbatim, `SecretPolicy` is the engine behind `secret.value.use`. One contract, one CLI, one design. | — | closed |
 | **Q-4** | **Reveal policy.** Is a human `reveal` ever acceptable (break-glass), or is delivery strictly machine-to-workload? `config-worker` ships **no** reveal by design. | Single audited, alerted, elevated-action break-glass reveal (SD-3). | SEC7 |
 | **Q-5** | **Team-grant blast radius.** A `gh:team` grant resolves to live membership; adding someone to a GitHub team silently grants secret access. Acceptable, or require an explicit orun confirmation step on team changes? | Acceptable + audited (the GitHub org *is* the access model, SD-4); surface team→grant diffs in the console on membership webhooks. | SEC2 |
 | **Q-6** | ~~Namespace granularity~~ — **decided as SD-12**: repo namespace by default; explicit `_shared/<group>` org namespaces requiring a bind + a named grant. | — | closed |
@@ -46,8 +48,18 @@
 | R-7 | **Cryptoshred incompleteness** — a DEK destroy misses a cached copy. | DEK unwrapped only in Worker memory per-resolve, never persisted; `keyId` generations let a namespace rotate+shred atomically. |
 | R-8 | **Compile-time/fetch-time drift** — `orun plan` says grantable, fetch denies. | Expected and safe (plan is existential, fetch is concrete); surface the distinction in plan output so it is not a surprise. |
 | R-9 | **Materialized values live outside orun custody** — the target store (Worker bindings, SSM) is governed by the cloud's IAM, not orun policy, and orun cannot verify its contents. | Inherent to running applications; the goal is *one governed door*: typed adapters only (target derived from the provisioned entity, no free-form endpoints), full sync provenance (Invariant 10), rotation re-materializes, drift surfaces in operations + scorecards. Document that target-store read access is the customer's IAM responsibility. |
-| R-10 | **Personal-overlay shadowing confusion** — "works on my machine" because a personal value silently differs from the shared one. | Resolve response flags personal serves; runner prints the overridden keys; `orun plan` marks shadowable refs; `orun secret list --chain` shows the full chain; structural denial outside `local-cli` (Invariant 9). |
+| R-10 | **Personal-overlay shadowing confusion** — "works on my machine" because a personal value silently differs from the shared one. | Resolve response flags personal serves; runner prints the overridden keys; `orun plan` marks shadowable refs; `orun secrets list --chain` shows the full chain; structural denial outside `local-cli` (Invariant 9). |
 | R-11 | **Shared-group blast radius** — one `_shared` group key leaking affects every bound component. | Groups are explicit binds + named grants (no wildcard across `_shared`, SD-12); per-group DEK generation enables targeted cryptoshred; the catalog facet lists every component bound to a group, so impact analysis is one query. |
+
+## Deferred (tracked follow-ups, not done in v2)
+
+| # | Follow-up | Why deferred |
+|---|-----------|--------------|
+| **D-1** | **Rename `namespace` → the org/project spine** across this spec, to fully match the orun-cloud locked decision that "the namespace wording retires" (`orun-cloud/architecture.md` §4). v2 keeps `namespace` with the mapping note in `data-model.md` §1. | The rename touches every doc + the grammar + D1 columns; doing it in the reconciliation pass would balloon the diff and risk inconsistency mid-flight. Tracked as the single known, deliberate divergence from the locked decision. |
+| **D-2** | Additional materialization adapters beyond `cloudflare-worker` (Q-7). | Demand-driven; each is a custody surface. |
+| **D-3** | Inbound external-provider sync (pull from AWS/Cloudflare stores) via the envelope `provider` seam. | Post-v1; the seam is reserved. |
+| **D-4** | Dynamic / leased secrets (Vault-style). | Post-v1; the reference model admits them. |
+| **D-5** | CEL `expr` predicates behind a capability flag (SD-7), shared with scorecards. | Locked vocabulary covers v1. |
 
 ## Compatibility
 
@@ -55,7 +67,7 @@
   `materialize`/`outputs` are new optional fields; existing plans without them
   are unaffected. Plaintext `env` is unchanged.
 - **No migration of existing data.** Secrets are net-new; there is no legacy
-  secret store to migrate. `orun secret import` eases dotenv onboarding.
+  secret store to migrate. `orun secrets import` eases dotenv onboarding.
 - **Backend.** Additive D1 migrations + Worker routes via the existing
   `orun backend init` bundle; `orun backend status` reports new health.
 - **Catalog.** `x-orun-secrets` rides the existing entity extension seam

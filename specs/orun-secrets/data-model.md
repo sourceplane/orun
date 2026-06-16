@@ -23,6 +23,15 @@ Examples: `secret://acme/api/prod/DATABASE_URL`,
 `secret://acme/api/prod/STRIPE_KEY@7`,
 `secret://acme/_shared/observability/DATADOG_API_KEY`.
 
+> **Tenancy mapping note (SD-15/SD-16, reconciles with orun-cloud).** The
+> orun-cloud contract retires the "namespace" wording in favor of the platform's
+> **org → project → environment** spine. v2 keeps `namespace` here for
+> continuity; it maps as `<org>/<repo>` → `org/project` and the trailing `env`
+> is the contract's `environment` unchanged. The rename of the `namespace` term
+> to `org/project` across this spec is a tracked follow-up
+> (`risks-and-open-questions.md`, Deferred), not done in v2 — the single known,
+> deliberate inconsistency with the locked orun-cloud decision.
+
 A reference is opaque content: it is safe in `intent.yaml`, `component.yaml`,
 `plan.json`, refs, and logs. It carries **no value** and **no identity** —
 personal overlays (SD-11) are a resolve-time concern and never appear in the
@@ -323,27 +332,50 @@ of performed deploys respectively) — rebuildable, never the source of truth;
 consistent with the object-model rule that databases are derived and rebuildable
 (`specs/orun-object-model/remote-and-consumers.md:55-62`).
 
-## 8. API surface (`orun-api` Worker — additive routes)
+## 8. API surface (reconciled to the orun-cloud wire contract — SD-15)
+
+The orun-cloud wire contract (`specs/orun-cloud/vendored/state-api-contract.md`
+§4 "Secrets", §6 policy map) is **normative** for the secret API shape.
+orun-secrets does **not** define a parallel API; it *adopts* the contract's
+routes and *extends* the same contract with the routes its added capabilities
+need. The contract owns the wire shape; this spec owns the design behind it.
+
+**Contract routes (normative — already in the contract, do not redefine):**
 
 ```
-POST /v1/secrets                      putSecret(ns,env,key,value[,personal])     → metadata (write-only)
-GET  /v1/secrets                      listSecretMetadata(scope)                  → metadata[] (no values)
-POST /v1/secrets/import               importDotenv(ns,env,entries)               → metadata[] (write-only bulk)
-POST /v1/secrets/rotate               rotateSecret(id,value)                     → new version + raises onRotate triggers (SD-13)
-POST /v1/secrets/revoke               revokeSecret(id|version)                   → tombstone
-POST /v1/secrets/resolve              resolve(refs[], triggerContext, token)     → { values | denials }   ← runner path
-POST /v1/secrets/reveal               reveal(id, breakGlass=true)                → value (elevated, alerted)
-POST /v1/secrets/syncs                recordSync(entries[])                      → provenance rows (runner, post-materialize)
-GET  /v1/secrets/syncs                listSyncs(scope|entityRef)                 → sync state (catalog resolver, dashboard)
-POST /v1/policies                     putPolicy(SecretPolicy, source)            → version
-POST /v1/policies/evaluate            dryRun(refs, facts)                        → decisions (for `orun plan` + UI)
+PUT    …/secrets/{key}                { value, environment }       write-only; create or rotate (version+1)   [secret.write]
+GET    …/secrets?environment=                                      metadata only (key, version, scope, rotatedAt, lastUsedAt)  [secret.read]
+DELETE …/secrets/{key}?environment=                                tombstone                                   [secret.write]
+POST   …/state/runs/{runId}/secrets/resolve                        runner path — live job lease required       [secret.value.use]
+       { runnerId, jobId, keys[] } → { secrets, ttlSeconds }       emits secret.accessed per key
 ```
 
-`/v1/secrets/resolve` is the only route that returns plaintext to a machine; it
-runs the four-axis decision (`policy-model.md`), walks the env chain (§1.1),
-unwraps the DEK, decrypts, audits, and responds over TLS. `/reveal` is the
-single human break-glass path (SD-3), behind an elevated policy action and
-always alerted.
+The runner resolve is **lease-bound, TTL'd, and fail-closed** exactly as the
+contract specifies (`runner-integration.md` §1). orun-secrets' four-axis
+`SecretPolicy` decision, env-chain walk (§1.1), and personal-overlay rules are
+**what the server runs to authorize the `secret.value.use` action** before
+unwrapping the DEK and decrypting — they make the contract's deny-by-default
+policy real, they do not replace the endpoint.
+
+**orun-secrets extension routes (additive to the same contract):**
+
+```
+POST   …/secrets/import               importDotenv(environment, entries)    write-only bulk onboarding  [secret.write]
+POST   …/secrets/{key}/reveal         reveal(breakGlass=true)               elevated, alerted human break-glass (SD-3)  [secret.value.reveal]
+POST   …/secrets/syncs                recordSync(entries[])                 materialization provenance (runner, post-materialize, SD-13)  [secret.write]
+GET    …/secrets/syncs?scope|entityRef                                      sync state (catalog resolver, dashboard)  [secret.read]
+POST   …/policies                     putPolicy(SecretPolicy, source)       publish a policy tier (SD-10)  [secret.policy.write]
+POST   …/policies/evaluate            dryRun(refs, facts) → decisions       compile-time + `orun plan` + UI  [secret.read]
+```
+
+Notes:
+- **Rotate** is not a separate route — it is `PUT …/secrets/{key}` with a new
+  value (version+1), per the contract; the `onRotate` re-materialization
+  triggers (SD-13) fire server-side on that write.
+- **`secret.value.reveal`** and **`secret.policy.write`** are new actions added
+  to the contract's §6 policy map (deny-by-default like the rest).
+- The run-scoped resolve is **the only route that returns plaintext to a
+  machine**; `reveal` is the single human path (SD-3).
 
 ## 9. Identity resolution inputs
 

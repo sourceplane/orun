@@ -43,7 +43,7 @@ Derivation follows the catalog's static/live split:
   the same composition documents the resolver already reads (declared truth,
   offline-computable).
 - **`bindings` / `rotation` / `syncs`** are the **live plane**: the catalog
-  resolver queries `GET /v1/secrets` and `GET /v1/secrets/syncs` metadata
+  resolver queries `GET …/secrets` and `GET …/secrets/syncs` metadata
   (never values) and joins per `(namespace, env, key)`. Offline or
   unauthenticated, these report `unknown` — which scorecards render distinctly
   rather than as failures (the scorecards anti-drift property,
@@ -106,7 +106,7 @@ part of the same maturity ladder as docs, ownership, and deployment health.
   decisionId}` per step (`runner-integration.md` §8). The cockpit renders
   "this run read DATABASE_URL@7, STRIPE_KEY@3 under rule `admins-prod`" — from
   the graph plus `secret_audit`, no value anywhere.
-- **Rotation as an operation.** `orun secret rotate` writes the new version and
+- **Rotation as an operation.** `orun secrets rotate` writes the new version and
   raises an `onRotate` system trigger for every deploy profile that
   materializes the key (`data-model.md` §2.4). The resulting deploys are
   ordinary, plan-visible, audited runs; the `secret_syncs` rows flip prior
@@ -152,8 +152,8 @@ orun backend init                       # already provisions Worker + D1 + R2 (e
 orun auth login                         # GitHub OAuth (existing)
 # install the Orun Cloud GitHub App → gh_identity_map populates
 
-orun secret import --from-dotenv .env --env dev      # bulk onboard, write-only
-orun secret set DATABASE_URL --env prod              # value from stdin
+orun secrets import --from-dotenv .env --env dev      # bulk onboard, write-only
+orun secrets set DATABASE_URL --env prod              # value from stdin
 
 # adopt the golden Stack — compositions + their policy arrive together
 #   intent.yaml: extends acme-platform@1.4.0

@@ -178,9 +178,18 @@ This is auditable, statically checkable at `orun plan`, and safe to evaluate in
 the Worker. **CEL** is the named upgrade if customers need richer logic — the
 `SecretPolicy` schema reserves `expr` for it, gated behind a capability flag.
 
+> **`SecretPolicy` is the engine behind the contract's `secret.value.use`
+> action (SD-15).** The orun-cloud wire contract (§6 policy map) already defines
+> `secret.read` / `secret.write` / `secret.value.use` as **server-enforced,
+> deny-by-default** actions. orun-secrets does not add a second authorization
+> layer — the four-axis evaluation in this document *is* what the server runs to
+> decide `secret.value.use` on the run-scoped resolve call, plus
+> `secret.value.reveal` and `secret.policy.write` for the extension routes
+> (`data-model.md` §8). The contract names the action; `SecretPolicy` decides it.
+
 ## 7. Compile-time vs fetch-time (the two enforcement points)
 
-| | Compile time (`orun plan`) | Fetch time (`orun-api /v1/secrets/resolve`) |
+| | Compile time (`orun plan`) | Fetch time (`…/runs/{runId}/secrets/resolve`) |
 |---|---|---|
 | Facts available | component, env, trigger, platform-intent; **subject often unknown** | **all four axes**, subject from the presented token |
 | Question answered | "is this reference *grantable in principle* here?" | "is *this caller* allowed *now*?" |
@@ -195,9 +204,11 @@ universal/authoritative for the concrete caller.
 ## 8. Decision provenance
 
 Every fetch-time decision produces a `SecretDecision{decisionId, allow, ruleId,
-reason, subjectId, key, version, ts}` written to `secret_audit` (D1) and emitted
-as a `secret.resolved` / `secret.denied` event (key-name-only payload, like
-`config-worker`'s `secrets.updated`, `apps/config-worker/src/handlers/create-secret.ts`).
+reason, subjectId, key, version, ts}` written to `secret_audit` (D1). An allow
+emits the contract's **`secret.accessed`** event per key (the audit hook the
+contract already specifies for the resolve route, `data-model.md` §8); a denial
+emits `secret.denied` with the reason code. Both payloads are key-name-only
+(never the value), matching `config-worker`'s metadata-only event stance.
 The sealed `ExecutionRun` records the `decisionId` + `{key, version}` (never the
 value), so operations can answer "what did prod deploy #4821 read, and under which
 rule?" directly from the object graph — closing the loop with Orun Cloud
