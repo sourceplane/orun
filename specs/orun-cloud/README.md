@@ -53,7 +53,7 @@ cockpit, `status`, and `logs` render cloud runs through the same
 | OC1 | Auth completion (platform login flows, session lifecycle, storage hardening) | ✅ Done — concurrency-safe refresh shipped (PR #366) |
 | OC2 | Cloud link & scope resolution (repo → org/project, overrides, unlinked UX) | ✅ Done |
 | OC3 | Remote state v1 (coordination client, idempotency, degradation, status/logs/cockpit) | 🚧 In progress — incr 1–6 landed (v1 client+objsync, lease handling, `--local`, `logs --follow`, log spill-to-file); remaining: cockpit TUI bridge + multi-job follow, and the stage-only kill-9 / network-cut gates |
-| OC4 | Object & catalog push (digest negotiation, plan/snapshot sync, heads) | 🗓️ Planned |
+| OC4 | Object & catalog push (digest negotiation, plan/snapshot sync, heads) | 🚧 In progress — objsync multipart sub-protocol landed; `catalog push` + heads remain (pair with OP7) |
 | OC5 | Secrets in the runner (resolve grants, env injection, redaction) | 🗓️ Planned |
 | OC6 | CI golden path (OIDC exchange default in GHA); conformance suite vs stage. **`orun backend init` OSS self-host dropped (D5).** | 🗓️ Planned (narrowed) |
 
