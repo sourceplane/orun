@@ -59,7 +59,11 @@ refresh across goroutines (singleflight) and processes (advisory file lock in
 `internal/cliauth`), re-checks the stored token after winning the lock
 (double-checked reload → siblings reuse the freshly rotated token), and refreshes
 proactively at 60 s before expiry. Pairs with the platform's sliding idle window
-(OP1 hardening). Tracked platform follow-up: reuse grace interval (needs review).
+(OP1 hardening). The paired platform-side reuse-grace interval (R11, Option A)
+shipped in orun-cloud PR #62: a refresh-token replay within ~10 s of its
+rotation is re-served the same successor idempotently instead of revoking the
+family, absorbing the lost-response / concurrent-redemption races the client
+lock cannot fully prevent.
 
 ## OC2 — Cloud link & scope resolution — ✅ Done
 
