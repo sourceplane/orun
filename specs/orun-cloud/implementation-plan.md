@@ -136,16 +136,25 @@ Pairs with OP2 + OP3. The core milestone, landing in increments.
   to stop; bounded reconnect on transient errors). Verified against stage by
   tailing a live job's output as its steps landed.
 
+- ✅ **Increment 6 — log pipeline spill-to-file.** `internal/remotestate/logpipe`:
+  the runner's per-step log upload now goes through a bounded buffer that spills
+  to an ndjson file (`$TMPDIR/orun-logspill-<execId>.ndjson`) when the backend is
+  unreachable mid-run, re-drains oldest-first (with a retry backoff) on recovery,
+  and at run end exits non-zero with "state may be stale on the server" (pointing
+  at the spill file) if anything is still undelivered (design §7 row 5). Append
+  is non-blocking — a down backend never interrupts execution. Unit-tested
+  (happy path, buffer-while-down → drain-on-recover in order, memory-bound spill
+  to file, undrained-at-close persistence + report, backoff suppression).
+
 Remaining OC3 increments (unstarted):
 
-- Log pipeline hardening: bounded buffering with spill-to-file when the backend
-  is unreachable mid-run, drain-on-recover, non-zero exit + warning when
-  undrained (design §7 row 5).
 - Cockpit TUI over cloud runs (`ListRuns` on the client exists; the TUI bridge
   wiring does not yet). Multi-job `logs --follow` (currently single `--job`).
 - Full kill -9 lease-recovery timing gate run live (the pieces — atomic claim,
   heartbeat, server sweep re-queue — are each verified; the end-to-end ~60 s
-  lapse+resume was not run).
+  lapse+resume was not run). **Stage-only gate.**
+- Live mid-run network-cut scripted test exercising increment 6 against stage
+  (the spill/drain logic is unit-verified; the live row-5 walkthrough remains).
 
 **Done when:** against stage, a multi-job DAG runs to completion under
 `--remote-state`; kill -9 of the runner mid-job → a second invocation resumes
