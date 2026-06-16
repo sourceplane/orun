@@ -20,7 +20,7 @@ copy (OC0). Neither repo may break the contract unilaterally.
 | Cluster | **OC** (OC0–OC6) |
 | Builds on | `internal/statebackend` (the `Backend` interface), `internal/remotestate` (HTTP client + the three `TokenSource`s), `internal/cliauth` (loopback + device flows, session storage), `specs/orun-object-model/` (content-addressed store — remote sync pushes the same digests), `specs/orun-service-catalog/` (the snapshot envelope the catalog push ships) |
 | Pairs with | `orun-cloud/specs/epics/saas-orun-platform/` — server-side epic (**OP**) |
-| Decisions locked | local-first forever (every command works with no account; cloud failures degrade, never block); one wire contract, two server implementations (Orun Cloud + the OSS `orun backend` single-tenant server — a URL change, not a migration); tenancy is the platform's org → project → environment spine (the "namespace" wording retires); all cloud behavior stays behind the existing `statebackend.Backend` and `bridge.Source` interfaces — the runner, cockpit, and compiler do not learn about HTTP; secrets resolved at run time are never written to local state or unredacted logs |
+| Decisions locked | local-first forever (every command works with no account; cloud failures degrade, never block); one wire contract (the OSS `orun backend` second implementation is **parked — D5**, so for now the contract has one live server, Orun Cloud); tenancy is the platform's org → project → environment spine (the "namespace" wording retires); all cloud behavior stays behind the existing `statebackend.Backend` and `bridge.Source` interfaces — the runner, cockpit, and compiler do not learn about HTTP; secrets resolved at run time are never written to local state or unredacted logs |
 
 ## The one-paragraph thesis
 
@@ -55,7 +55,7 @@ cockpit, `status`, and `logs` render cloud runs through the same
 | OC3 | Remote state v1 (coordination client, idempotency, degradation, status/logs/cockpit) | 🚧 In progress — v1 client + plan objsync landed & stage-verified (incr 1–2, PRs #367/#368); degradation/reads/`--local` remain |
 | OC4 | Object & catalog push (digest negotiation, plan/snapshot sync, heads) | 🗓️ Planned |
 | OC5 | Secrets in the runner (resolve grants, env injection, redaction) | 🗓️ Planned |
-| OC6 | CI golden path (OIDC exchange default in GHA) + OSS backend conformance | 🗓️ Planned |
+| OC6 | CI golden path (OIDC exchange default in GHA); conformance suite vs stage. **`orun backend init` OSS self-host dropped (D5).** | 🗓️ Planned (narrowed) |
 
 ## Cross-repo dependency map
 
@@ -72,4 +72,4 @@ cockpit, `status`, and `logs` render cloud runs through the same
 
 | In scope | Out of scope |
 |----------|--------------|
-| Auth/session against the platform, repo→org/project resolution, the v1 state client (runs/objects/logs), catalog snapshot push, runtime secret injection + redaction, CI OIDC golden path, OSS-backend conformance suite, cockpit/status/logs parity over cloud runs | The server (→ `saas-orun-platform`), the catalog model itself (→ `orun-service-catalog`), platform-hosted runners, the console |
+| Auth/session against the platform, repo→org/project resolution, the v1 state client (runs/objects/logs), catalog snapshot push, runtime secret injection + redaction, CI OIDC golden path, conformance suite (vs stage), cockpit/status/logs parity over cloud runs | The server (→ `saas-orun-platform`), the catalog model itself (→ `orun-service-catalog`), platform-hosted runners, the console, **`orun backend init` OSS self-host (parked — D5)** |

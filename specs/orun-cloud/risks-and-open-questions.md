@@ -3,7 +3,10 @@
 Status: Draft. Platform-side decisions (naming, free tier, secret custody,
 BYO-KMS, conformance commitment) live in
 `orun-cloud/specs/epics/saas-orun-platform/risks-and-open-questions.md`
-(D1–D6); this doc carries only the client-side items.
+(D1–D6, all resolved 2026-06-16); this doc carries only the client-side items.
+**D5 directly affects this repo:** `orun backend init` (OSS single-tenant
+self-host) is dropped for now, so OC6 narrows to the OIDC golden path +
+conformance-vs-stage (see implementation-plan OC6).
 
 ## Decisions needed (human)
 

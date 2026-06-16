@@ -189,9 +189,17 @@ Pairs with OP8.
 (policy) and resolve-missing (key) both fail the job with the platform error;
 OP8's rotation-grace gate passes with this client.
 
-## OC6 — CI golden path + conformance — 🗓️ Planned
+## OC6 — CI golden path + conformance — 🗓️ Planned (scope narrowed, D5)
 
-Pairs with OP5; closes D5 (conformance) from the platform risks doc.
+Pairs with OP5.
+
+> **D5 (decided 2026-06-16): drop `orun backend init` (OSS single-tenant
+> self-host) for now.** The embedded Cloudflare-Worker + D1 backend is NOT
+> migrated to the v1 `_local/_local` contract, and the "one API, two
+> implementations" promise is parked (revivable later). OC6 therefore narrows to
+> the OIDC CI golden path; the conformance suite is retained as the executable
+> contract but runs against **stage only** — no dual-server / OSS target, and no
+> "switch backend by URL change" demo gate.
 
 - `OIDCTokenSource` → `POST /v1/auth/oidc/exchange` (audience `orun-cloud`),
   selected automatically in GHA (design §3 selection order); `ORUN_ORG`/
@@ -201,18 +209,15 @@ Pairs with OP5; closes D5 (conformance) from the platform risks doc.
   `orun run --remote-state` with zero stored secrets; docs page with the
   trust-binding setup pointer.
 - **Conformance suite**: a Go test package driving the full `Backend`
-  interface + objects + secrets-resolve against any base URL; CI runs it
-  against the OSS `orun backend` server; the platform repo runs the same suite
-  against state-worker on stage. The suite is the contract's executable form.
-- `orun backend` (OSS server) updated to the v1 contract with fixed
-  `_local/_local` scope. (Today `orun backend init` provisions an embedded
-  Cloudflare Worker + D1 on a single-tenant *namespace* model; this migrates it
-  to org/project `_local/_local`.)
+  interface + objects + secrets-resolve against any base URL; run against
+  **state-worker on stage** as the contract's executable form. (The dual-server
+  run against an OSS `orun backend` is dropped with D5; the suite is written
+  base-URL-agnostic so a future OSS target can be re-added if D5 is revived.)
+- ~~`orun backend` (OSS server) updated to the v1 contract~~ — **dropped (D5).**
 
 **Done when:** a public example repo's GHA run executes against stage via OIDC
 with no stored secret; an unbound repo's exchange is denied (OP5 gate); the
-conformance suite passes against both servers in both repos' CI; switching a
-workspace between OSS backend and stage is demonstrated as a URL change.
+conformance suite passes against state-worker on stage in CI.
 
 ## Sequencing
 
