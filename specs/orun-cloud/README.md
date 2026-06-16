@@ -16,7 +16,7 @@ copy (OC0). Neither repo may break the contract unilaterally.
 
 | Field | Value |
 |-------|-------|
-| Status | **In progress** — OC0–OC2 shipped (OC1 refresh hardening done); OC3 underway; OC4–OC6 planned |
+| Status | **In progress** — OC0–OC2 shipped (OC1 refresh hardening done); OC3 underway; OC4–OC6 planned. **v2 proposed** ([`design-v2.md`](./design-v2.md)) re-anchors the client on the object-model `ModelReader` seam (cloud = hosted `ObjectStore`+`RefStore`+index), declares tenancy in `intent.yaml`, and completes credential-agnostic CI auth; v2 milestones **OCv2-1..3**. |
 | Cluster | **OC** (OC0–OC6) |
 | Builds on | `internal/statebackend` (the `Backend` interface), `internal/remotestate` (HTTP client + the three `TokenSource`s), `internal/cliauth` (loopback + device flows, session storage), `specs/orun-object-model/` (content-addressed store — remote sync pushes the same digests), `specs/orun-service-catalog/` (the snapshot envelope the catalog push ships) |
 | Pairs with | `orun-cloud/specs/epics/saas-orun-platform/` — server-side epic (**OP**) |
