@@ -76,3 +76,29 @@ case self-heals.
 - Artifact upload through the object plane (`artifact-manifest` kind is
   reserved in the contract; runner integration is a future spec).
 - Hosted-runner handshake — out of scope until the platform epic exists.
+
+## v2 (proposed — see `design-v2.md`)
+
+Client-side counterpart to the platform v2 decisions (DV1–DV7,
+`orun-cloud/specs/epics/saas-orun-platform/risks-and-open-questions.md`).
+OC0–OC4 stay the shipped substrate.
+
+### CV1 — `bridge.Source` widening vs. the coordination path
+v2 widens `internal/cockpit/bridge.Source` from `LoadRun`/`ListRuns` to the
+full object-model `ModelReader`. Decision: keep `statebackend.Backend`
+(Claim/Heartbeat/Update) for the runner's distributed-execution path; its
+results seal into execution objects so reads stay uniform. The widening is
+additive to the cockpit, not a rewrite. Lands in OCv2-1 (pairs OV1).
+
+### CV2 — intent.yaml `org` reverses "tenancy never in intent"
+v2 adds `execution.state.org` as a *checked claim* (⊆ link/installation),
+reversing the `design.md` §8 line that org/project come only from the RepoLink.
+Precedence stays `--org` → `ORUN_ORG` → `intent.execution.state.org` → RepoLink.
+Lands in OCv2-2 (pairs OV2/OV3).
+
+### CV3 — `OIDCTokenSource` audience + exchange
+The default audience changes `orun` → `orun-cloud` (`internal/remotestate/
+auth.go`) and the source gains the real `/v1/auth/oidc/exchange` call (today it
+forwards GitHub's raw JWT). Frozen identifiers (audience `orun-cloud`, issuer
+`https://api.orun.dev`) must not churn. Live validation needs the platform's
+OV3 + IG D1 (App registration). Lands in OCv2-2.
