@@ -61,6 +61,11 @@ orun secrets rm KEY [--environment prod]
 Write-only by design — there is no `orun secrets get`. Values in argv are
 rejected (shell-history hazard); stdin/prompt only.
 
+> OC5 ships this `set`/`list`/`rm` subset. The full command group (`rotate`,
+> `revoke` — `rm`'s alias, `reveal`, `import`, `versions`, `syncs`) and the
+> `orun policy` companion are specified in `specs/orun-secrets/cli-surface.md`,
+> which extends this same group on the same write-only contract.
+
 ## 6. Exit & error conventions
 
 - Cloud-related failures always print the platform `requestId` when one exists.
