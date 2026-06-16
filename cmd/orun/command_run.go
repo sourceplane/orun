@@ -16,6 +16,7 @@ import (
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/objrun"
 	"github.com/sourceplane/orun/internal/remotestate"
+	"github.com/sourceplane/orun/internal/remotestate/logpipe"
 	"github.com/sourceplane/orun/internal/runner"
 	"github.com/sourceplane/orun/internal/sourcectx"
 	"github.com/sourceplane/orun/internal/statebackend"
@@ -320,8 +321,9 @@ func runPlan() error {
 	r.KeepWorkspaces = runKeepWorkspaces
 	r.ComponentConcurrency = runComponentConcurrency
 
+	var logPipeline *logpipe.Pipeline
 	if remoteActive {
-		if err := setupRemoteStateHooks(r, plan, planID, execID, backendURL); err != nil {
+		if err := setupRemoteStateHooks(r, plan, planID, execID, backendURL, &logPipeline); err != nil {
 			var alreadyDone *jobAlreadyCompleteError
 			if errors.As(err, &alreadyDone) {
 				return nil
@@ -377,6 +379,24 @@ func runPlan() error {
 		printRunSummary(plan, execID, runErr)
 	}
 
+	// Final log drain (design §7 row 5): flush any buffered/spilled chunks now
+	// that the run is done. If some can't be delivered, the run exits non-zero
+	// ("state may be stale on the server") — a team expecting shared state must
+	// notice rather than silently lose logs.
+	if logPipeline != nil {
+		if rep := logPipeline.Close(context.Background()); rep.Undrained > 0 {
+			msg := fmt.Sprintf("%d remote log chunk(s) could not be delivered — state may be stale on the server", rep.Undrained)
+			if rep.SpillPath != "" {
+				msg += fmt.Sprintf(" (buffered at %s)", rep.SpillPath)
+			}
+			if runErr == nil {
+				runErr = errors.New(msg)
+			} else {
+				fmt.Fprintf(os.Stderr, "warning: %s\n", msg)
+			}
+		}
+	}
+
 	return runErr
 }
 
@@ -407,8 +427,10 @@ func printRunSummary(plan *model.Plan, execID string, runErr error) {
 // for all terminal jobs. The upload is best-effort — errors warn but do not
 // change the job conclusion.
 // setupRemoteStateHooks initialises the backend, performs InitRun, and wires
-// hooks for per-job claim, heartbeat, log upload, and terminal update.
-func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, backendURL string) error {
+// hooks for per-job claim, heartbeat, log upload, and terminal update. On
+// success it stores the log pipeline (which buffers/spills log uploads, design
+// §7 row 5) through outPipe so the caller can drain + report it after the run.
+func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, backendURL string, outPipe **logpipe.Pipeline) error {
 	ctx := context.Background()
 
 	repo, err := resolveRepoContext(backendURL)
@@ -533,6 +555,15 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		r.SkipLocalDepsForJob = true
 	}
 
+	// Buffer log uploads so a backend that goes unreachable mid-run never strands
+	// the runner (design §7 row 5): chunks accumulate in memory, overflow to a
+	// spill file, and re-drain (oldest-first) on recovery. Undelivered chunks at
+	// run end are surfaced by the caller as a non-zero exit.
+	logPipeline := logpipe.New(backend.AppendStepLog, logpipe.Options{SpillPath: logSpillPath(execID)})
+	if outPipe != nil {
+		*outPipe = logPipeline
+	}
+
 	r.Hooks = &runner.RunnerHooks{
 		BeforeJob: func(jobID string) (bool, error) {
 			if r.JobID != "" {
@@ -583,8 +614,9 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 			if !strings.HasSuffix(chunk, "\n") {
 				chunk += "\n"
 			}
-			// Best-effort upload; ignore errors to not interrupt execution.
-			_ = backend.AppendStepLog(ctx, handle.RunID, jobID, chunk)
+			// Buffered, non-blocking: the pipeline absorbs transport errors
+			// (spill + retry); undelivered chunks are reported at run end.
+			logPipeline.Append(ctx, handle.RunID, jobID, chunk)
 		},
 		AfterJobTerminal: func(jobID string, success bool, errText string) {
 			leaseMu.Lock()
@@ -619,6 +651,22 @@ type jobLease struct {
 // heartbeatIntervalFromClaim returns the server-supplied heartbeat cadence from
 // a claim, or the default when the server did not specify one (e.g. the OSS
 // backend).
+// logSpillPath is where the remote log pipeline overflows when the backend is
+// unreachable mid-run (design §7 row 5). Keyed by exec id (sanitized for a
+// filename) under the temp dir so a crashed run leaves the buffered logs behind
+// for inspection.
+func logSpillPath(execID string) string {
+	safe := strings.Map(func(c rune) rune {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
+			return c
+		default:
+			return '-'
+		}
+	}, execID)
+	return filepath.Join(os.TempDir(), "orun-logspill-"+safe+".ndjson")
+}
+
 func heartbeatIntervalFromClaim(result *statebackend.ClaimResult) time.Duration {
 	if result != nil && result.HeartbeatIntervalSeconds > 0 {
 		return time.Duration(result.HeartbeatIntervalSeconds) * time.Second
