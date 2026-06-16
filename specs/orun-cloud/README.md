@@ -16,7 +16,7 @@ copy (OC0). Neither repo may break the contract unilaterally.
 
 | Field | Value |
 |-------|-------|
-| Status | **In progress** — OC0–OC2 shipped (OC1 refresh hardening done); OC3 underway; OC4–OC6 planned |
+| Status | **In progress** — OC0–OC2 shipped (OC1 refresh hardening done); OC3 underway; OC4–OC6 planned. **v2 proposed** ([`design-v2.md`](./design-v2.md)) re-anchors the client on the object-model `ModelReader` seam (cloud = hosted `ObjectStore`+`RefStore`+index), declares tenancy in `intent.yaml`, and completes credential-agnostic CI auth; v2 milestones **OCv2-1..3**. |
 | Cluster | **OC** (OC0–OC6) |
 | Builds on | `internal/statebackend` (the `Backend` interface), `internal/remotestate` (HTTP client + the three `TokenSource`s), `internal/cliauth` (loopback + device flows, session storage), `specs/orun-object-model/` (content-addressed store — remote sync pushes the same digests), `specs/orun-service-catalog/` (the snapshot envelope the catalog push ships) |
 | Pairs with | `orun-cloud/specs/epics/saas-orun-platform/` — server-side epic (**OP**) |
@@ -56,6 +56,17 @@ cockpit, `status`, and `logs` render cloud runs through the same
 | OC4 | Object & catalog push (digest negotiation, plan/snapshot sync, heads) | 🚧 In progress — objsync multipart sub-protocol landed; `catalog push` + heads remain (pair with OP7) |
 | OC5 | Secrets in the runner (resolve grants, env injection, redaction) — runner-resolve slice of the canonical design in `specs/orun-secrets/` | 🗓️ Planned |
 | OC6 | CI golden path (OIDC exchange default in GHA); conformance suite vs stage. **`orun backend init` OSS self-host dropped (D5).** | 🗓️ Planned (narrowed) |
+
+### v2 milestones (proposed)
+
+Re-anchor the client on the object-model `ModelReader` seam; see
+[`design-v2.md`](./design-v2.md). OC0–OC4 stay the shipped substrate.
+
+| ID | Milestone | Status |
+|----|-----------|--------|
+| OCv2-1 | Widen `bridge.Source` → `ModelReader` (+ `FromRemoteModel`); cloud source/head selection, catalog, history via shared viewmodels | 🗓️ Proposed (pairs OV1) |
+| OCv2-2 | intent.yaml `org`/`env` claim; `OIDCTokenSource` audience `orun`→`orun-cloud` + real `/v1/auth/oidc/exchange` call | 🗓️ Proposed (pairs OV2/OV3) |
+| OCv2-3 | Object/catalog push into the hosted object graph feeding the org-global catalog | 🗓️ Proposed (pairs OV4/OV6) |
 
 ## Cross-repo dependency map
 
