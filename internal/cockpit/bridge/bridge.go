@@ -10,6 +10,8 @@ import (
 
 	"github.com/sourceplane/orun/internal/cockpit/viewmodel"
 	"github.com/sourceplane/orun/internal/execmodel"
+	"github.com/sourceplane/orun/internal/objectstore"
+	"github.com/sourceplane/orun/internal/objectstore/refstore"
 	"github.com/sourceplane/orun/internal/objmodel"
 	"github.com/sourceplane/orun/internal/objread"
 	"github.com/sourceplane/orun/internal/objview"
@@ -37,6 +39,23 @@ func FromObjectReader(r *objread.Reader) Source { return &objReaderSource{r: r} 
 // ModelReader is backed by a local store or a hosted (remote) store
 // interchangeably.
 func FromModel(m objmodel.ModelReader) Source { return &modelSource{m: m} }
+
+// FromRemoteModel builds a Source over a hosted (remote-backed) object + ref
+// store pair: the cloud is the same object model, so `orun tui --remote` and the
+// console read source → catalog → execution history off the same ModelReader as
+// the local TUI, with no second render path. There is no working tree, so live
+// runs resolve only from the hosted refs.
+func FromRemoteModel(store objectstore.ObjectStore, refs refstore.RefStore) Source {
+	return &modelSource{m: objmodel.NewReader(store, refs, "")}
+}
+
+// RemoteModel returns the full ModelReader over a hosted store pair, for callers
+// (the console, `orun catalog --remote`, the source/head picker) that need the
+// catalog / revision / component-history surface beyond the run slice a Source
+// exposes.
+func RemoteModel(store objectstore.ObjectStore, refs refstore.RefStore) objmodel.ModelReader {
+	return objmodel.NewReader(store, refs, "")
+}
 
 // LoadRunView fetches metadata + state for execID and builds the cockpit
 // view-model in one call.
