@@ -89,8 +89,11 @@ pushed it" the same objects — dedup is global.
 | **OCv2-2** | intent.yaml `org`/`env`; `OIDCTokenSource` audience fix + real exchange call; intent-claim scope resolution | OV2/OV3 |
 | **OCv2-3** | Object/catalog push into the hosted object graph (digest negotiation, heads) feeding the org-global catalog | OV4/OV6 |
 
-OC5 (secrets) and OC6 (CI golden path) from v1 fold into OCv2-2/3 plus the
-server bridge; `orun backend init` OSS self-host stays parked (D5).
+OC6 (CI golden path) from v1 folds into OCv2-2 plus the server bridge. **OC5
+(secrets) stays as-is** — the runner-resolve + redaction implementation slice of
+the canonical `orun-secrets` epic (`specs/orun-secrets/`), which supersedes the
+old OC5/§6 secret-store sketch. `orun backend init` OSS self-host stays parked
+(D5).
 
 ## 7. Unchanged
 
