@@ -6,9 +6,11 @@ package bridge
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/sourceplane/orun/internal/cockpit/viewmodel"
 	"github.com/sourceplane/orun/internal/execmodel"
+	"github.com/sourceplane/orun/internal/objmodel"
 	"github.com/sourceplane/orun/internal/objread"
 	"github.com/sourceplane/orun/internal/objview"
 	"github.com/sourceplane/orun/internal/statebackend"
@@ -27,6 +29,14 @@ func FromBackend(b statebackend.Backend) Source { return &backendSource{b: b} }
 // FromObjectReader wraps the object-model read layer as a Source, adapting its
 // native views into the execmodel shapes the view-models render.
 func FromObjectReader(r *objread.Reader) Source { return &objReaderSource{r: r} }
+
+// FromModel wraps the unified objmodel.ModelReader seam as a Source, so the
+// cockpit run list/detail render off the same read path — local or remote —
+// that serves catalog, revision, and component-history views. This is the v2
+// widening: a Source is a projection of a ModelReader (its run slice), and a
+// ModelReader is backed by a local store or a hosted (remote) store
+// interchangeably.
+func FromModel(m objmodel.ModelReader) Source { return &modelSource{m: m} }
 
 // LoadRunView fetches metadata + state for execID and builds the cockpit
 // view-model in one call.
@@ -81,6 +91,58 @@ func (a *objReaderSource) ListRuns(ctx context.Context) ([]execmodel.ExecEntry, 
 		return nil, err
 	}
 	return objview.ToEntries(views), nil
+}
+
+type modelSource struct{ m objmodel.ModelReader }
+
+func (a *modelSource) LoadRun(ctx context.Context, execID string) (*execmodel.ExecMetadata, *execmodel.ExecState, error) {
+	if a.m == nil {
+		return nil, nil, fmt.Errorf("nil model reader")
+	}
+	ref := execID
+	if ref == "" {
+		ref = "executions/latest"
+	}
+	v, err := a.m.Execution(ctx, ref)
+	if err != nil {
+		return nil, nil, err
+	}
+	return objview.ToMeta(v), objview.ToState(v), nil
+}
+
+func (a *modelSource) ListRuns(ctx context.Context) ([]execmodel.ExecEntry, error) {
+	if a.m == nil {
+		return nil, fmt.Errorf("nil model reader")
+	}
+	sums, err := a.m.ListExecutions(ctx, objmodel.Filter{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]execmodel.ExecEntry, 0, len(sums))
+	for _, s := range sums {
+		out = append(out, summaryToEntry(s))
+	}
+	return out, nil
+}
+
+// summaryToEntry projects a lean objmodel.ExecSummary into the cockpit list
+// entry. PlanName is left to the detail view (the summary is a header); the
+// counts come straight from the sealed/live summary.
+func summaryToEntry(s objmodel.ExecSummary) execmodel.ExecEntry {
+	e := execmodel.ExecEntry{
+		ID:        s.ExecutionID,
+		Status:    objview.NodeStatusToLegacy(s.Status),
+		JobTotal:  s.Summary.JobsTotal,
+		JobDone:   s.Summary.JobsSucceeded,
+		JobFailed: s.Summary.JobsFailed,
+	}
+	if !s.StartedAt.IsZero() {
+		e.StartedAt = s.StartedAt.UTC().Format(time.RFC3339)
+	}
+	if s.FinishedAt != nil && !s.FinishedAt.IsZero() {
+		e.FinishedAt = s.FinishedAt.UTC().Format(time.RFC3339)
+	}
+	return e
 }
 
 type backendSource struct{ b statebackend.Backend }
