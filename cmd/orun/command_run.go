@@ -456,6 +456,9 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		Interactive:  termIsInteractive(),
 		RequireLogin: true,
 		NamespaceID:  namespaceID,
+		// The claimed org (flag/env/link) disambiguates a repo linked across
+		// orgs in the OIDC exchange (OCv2-2/DV5).
+		Org: scope.OrgID,
 	})
 	if err != nil {
 		// An unauthenticated --remote-state run fails fast with the re-login
@@ -479,6 +482,22 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	}
 	if namespaceID == "" {
 		namespaceID = resolvedNamespaceID
+	}
+	// Credential-agnostic CI (OCv2-2): the OIDC exchange resolves the repo's
+	// bound (org, project) server-side. Trigger it now and adopt the resolved
+	// scope where the local scope is empty (a fresh CI checkout has no link),
+	// so state paths target the org/project the workflow token authorizes.
+	if oidcSrc, ok := tokenSrc.(*remotestate.OIDCTokenSource); ok {
+		if _, terr := oidcSrc.Token(ctx); terr != nil {
+			return fmt.Errorf("remote state auth (oidc exchange): %w", terr)
+		}
+		exOrg, exProject := oidcSrc.ResolvedScope()
+		if scope.OrgID == "" {
+			scope.OrgID = exOrg
+		}
+		if scope.ProjectID == "" {
+			scope.ProjectID = exProject
+		}
 	}
 	client := remotestate.NewClientWithScope(backendURL, version, tokenSrc, scope)
 	runnerID := statebackend.DeriveRunnerID()

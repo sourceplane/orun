@@ -173,3 +173,102 @@ func TestOrunTokenPathNamespacePassThrough(t *testing.T) {
 		t.Errorf("token = %q, want static-machine-token", token)
 	}
 }
+
+func TestOIDCExchangeSource_Success(t *testing.T) {
+	var oidcHits, exchangeHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token": // GitHub Actions OIDC endpoint
+			oidcHits++
+			if r.URL.Query().Get("audience") != "orun-cloud" {
+				http.Error(w, "wrong audience", 400)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"value": "gh-oidc-jwt"})
+		case "/v1/auth/oidc/exchange": // platform OV3 exchange
+			exchangeHits++
+			var body struct{ Token, Org string }
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.Token != "gh-oidc-jwt" {
+				http.Error(w, "wrong token", 400)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]string{
+				"accessToken": "sk_workflow_token",
+				"tokenType":   "Bearer",
+				"expiresAt":   "2099-01-01T00:00:00Z",
+				"orgId":       body.Org,
+				"projectId":   "prj_resolved",
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", srv.URL+"/token")
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "req-token")
+
+	src := remotestate.NewOIDCExchangeSource("", srv.URL, "org_claimed")
+
+	token, err := src.Token(context.Background())
+	if err != nil {
+		t.Fatalf("Token: %v", err)
+	}
+	if token != "sk_workflow_token" {
+		t.Fatalf("token = %q, want the minted workflow token", token)
+	}
+	org, project := src.ResolvedScope()
+	if org != "org_claimed" || project != "prj_resolved" {
+		t.Fatalf("resolved scope = (%q, %q)", org, project)
+	}
+
+	// A second call is served from cache — no second OIDC fetch / exchange.
+	if _, err := src.Token(context.Background()); err != nil {
+		t.Fatalf("second Token: %v", err)
+	}
+	if oidcHits != 1 || exchangeHits != 1 {
+		t.Fatalf("expected exactly one OIDC fetch + exchange, got %d/%d", oidcHits, exchangeHits)
+	}
+}
+
+func TestOIDCExchangeSource_Denied(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			_ = json.NewEncoder(w).Encode(map[string]string{"value": "gh-oidc-jwt"})
+			return
+		}
+		w.WriteHeader(403)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{
+			"code": "forbidden", "message": "Repository is not linked to an Orun org",
+		}})
+	}))
+	defer srv.Close()
+
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", srv.URL+"/token")
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "req-token")
+
+	src := remotestate.NewOIDCExchangeSource("", srv.URL, "")
+	if _, err := src.Token(context.Background()); err == nil {
+		t.Fatal("expected exchange rejection to surface as an error")
+	}
+}
+
+func TestOIDCSource_NoBackendReturnsRawToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"value": "raw-gh-jwt"})
+	}))
+	defer srv.Close()
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", srv.URL+"/token")
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "req-token")
+
+	// Default audience is the frozen orun-cloud identifier.
+	src := remotestate.NewOIDCTokenSource("")
+	if got := src.Audience; got != remotestate.DefaultOIDCAudience {
+		t.Fatalf("default audience = %q, want %q", got, remotestate.DefaultOIDCAudience)
+	}
+	token, err := src.Token(context.Background())
+	if err != nil || token != "raw-gh-jwt" {
+		t.Fatalf("no-backend Token = %q, %v (want raw GitHub token)", token, err)
+	}
+}
