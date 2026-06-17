@@ -15,6 +15,7 @@ import (
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
 	"github.com/sourceplane/orun/internal/objplan"
+	"github.com/sourceplane/orun/internal/objremote"
 	"github.com/sourceplane/orun/internal/sourcectx"
 )
 
@@ -300,4 +301,131 @@ func TestComponentHistory(t *testing.T) {
 
 func TestReaderImplementsModelReader(t *testing.T) {
 	var _ ModelReader = NewReader(nil, nil, "")
+}
+
+// --- substitutability: the SAME ModelReader over a remote-backed store ---
+
+// memObjectTransport / memRefTransport are in-process fakes for the exported
+// remote transports, backed by maps. They stand in for the hosted object bucket
+// and ref KV so the integration test can prove the read seam is identical local
+// vs remote without any HTTP.
+type memObjectTransport struct{ objs map[string][]byte }
+
+func (f *memObjectTransport) HasObject(_ context.Context, d string) (bool, error) {
+	_, ok := f.objs[d]
+	return ok, nil
+}
+func (f *memObjectTransport) GetObject(_ context.Context, d string) ([]byte, bool, error) {
+	b, ok := f.objs[d]
+	if !ok {
+		return nil, false, nil
+	}
+	return append([]byte(nil), b...), true, nil
+}
+func (f *memObjectTransport) PutObject(_ context.Context, d, _ string, framed []byte) error {
+	if _, ok := f.objs[d]; !ok {
+		f.objs[d] = append([]byte(nil), framed...)
+	}
+	return nil
+}
+
+type memRefTransport struct{ refs map[string]string }
+
+func (f *memRefTransport) ReadRef(_ context.Context, name string) (refstore.Ref, bool, error) {
+	t, ok := f.refs[name]
+	if !ok {
+		return refstore.Ref{}, false, nil
+	}
+	return refstore.Ref{Kind: "Ref", Target: t, Writer: "saas"}, true, nil
+}
+func (f *memRefTransport) UpdateRef(_ context.Context, name, old, nw string) error {
+	if f.refs[name] != old {
+		return refstore.ErrConflict
+	}
+	if nw == "" {
+		delete(f.refs, name)
+		return nil
+	}
+	f.refs[name] = nw
+	return nil
+}
+func (f *memRefTransport) ListRefs(_ context.Context, prefix string) ([]string, error) {
+	var out []string
+	for name := range f.refs {
+		if len(name) >= len(prefix) && name[:len(prefix)] == prefix {
+			out = append(out, name)
+		}
+	}
+	return out, nil
+}
+func (f *memRefTransport) DeleteRef(_ context.Context, name string) error {
+	delete(f.refs, name)
+	return nil
+}
+
+func TestModelReaderOverRemoteStore(t *testing.T) {
+	ctx := context.Background()
+	g := newGraph(t)
+
+	// A remote endpoint backed by in-memory transports.
+	remoteStore := objectstore.NewRemoteStore(&memObjectTransport{objs: map[string][]byte{}}, "", "")
+	remoteRefs := refstore.NewRemoteRefStore(&memRefTransport{refs: map[string]string{}})
+	local := objremote.Endpoint{Objects: g.store, Refs: g.refs}
+	remote := objremote.Endpoint{Objects: remoteStore, Refs: remoteRefs}
+
+	// Push every published ref's closure into the remote — set-difference sync
+	// over content addressing, exactly as `orun push` does.
+	names, err := g.refs.List(ctx, "")
+	if err != nil {
+		t.Fatalf("list local refs: %v", err)
+	}
+	for _, name := range names {
+		if _, err := objremote.Push(ctx, local, remote, name); err != nil {
+			t.Fatalf("push %s: %v", name, err)
+		}
+	}
+
+	// The SAME objmodel.Reader type, now over the remote pair with no working
+	// tree (root ""), serves the identical views.
+	rr := NewReader(remoteStore, remoteRefs, "")
+
+	cat, err := rr.Catalog(ctx, "")
+	if err != nil {
+		t.Fatalf("remote Catalog: %v", err)
+	}
+	if cat.ObjectID != g.catID || len(cat.Components) != 2 {
+		t.Fatalf("remote catalog = %s / %d components", cat.ObjectID, len(cat.Components))
+	}
+
+	rev, err := rr.Revision(ctx, "")
+	if err != nil {
+		t.Fatalf("remote Revision: %v", err)
+	}
+	if rev.ObjectID != g.revID || rev.PlanName != "deploy-all" {
+		t.Fatalf("remote revision = %s / %q", rev.ObjectID, rev.PlanName)
+	}
+
+	execs, err := rr.ListExecutions(ctx, Filter{})
+	if err != nil {
+		t.Fatalf("remote ListExecutions: %v", err)
+	}
+	if len(execs) != 2 || execs[0].ExecutionID != "exec_01" {
+		t.Fatalf("remote executions = %+v", execs)
+	}
+
+	one, err := rr.Execution(ctx, "executions/by-id/exec_00")
+	if err != nil {
+		t.Fatalf("remote Execution: %v", err)
+	}
+	if one.Status != nodes.StatusSucceeded || len(one.Jobs) != 1 {
+		t.Fatalf("remote execution detail = %+v", one)
+	}
+
+	hist, err := rr.ComponentHistory(ctx, "ns/repo/api")
+	if err != nil {
+		t.Fatalf("remote ComponentHistory: %v", err)
+	}
+	if len(hist.Executions) != 2 {
+		t.Fatalf("remote history = %d execs", len(hist.Executions))
+	}
 }

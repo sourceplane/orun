@@ -25,4 +25,10 @@ var (
 	// ErrCorrupt is returned by Get when a stored object's bytes do not hash to
 	// the id under which they were requested — on-disk corruption or tampering.
 	ErrCorrupt = errors.New("objectstore: object corrupt (hash mismatch)")
+
+	// ErrUnsupported is returned by a driver that cannot satisfy an operation —
+	// e.g. a RemoteStore has no cheap whole-store enumeration (Iterate) or
+	// single-object Delete; those belong to GC, which runs against the
+	// authoritative local/hosted store, not over the read transport.
+	ErrUnsupported = errors.New("objectstore: operation not supported by this driver")
 )
