@@ -3,14 +3,17 @@
 package remotestate
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -36,18 +39,40 @@ type TokenSource interface {
 	Token(ctx context.Context) (string, error)
 }
 
-// OIDCTokenSource requests a GitHub Actions OIDC token from the GitHub
-// Actions token endpoint with the configured audience.
+// DefaultOIDCAudience is the frozen OIDC audience the CLI requests and the
+// platform exchange endpoint requires (design §8 / DV5). It MUST NOT churn.
+const DefaultOIDCAudience = "orun-cloud"
+
+// OIDCTokenSource resolves a platform bearer for CI by exchanging a GitHub
+// Actions OIDC token for a short-lived workflow access token at
+// POST /v1/auth/oidc/exchange (OV3). The exchange also resolves the repo's
+// bound (org, project); ResolvedScope exposes it so the caller can scope the
+// state client. The minted token is cached until shortly before its expiry.
+//
+// When BackendURL is empty the source degrades to returning GitHub's raw OIDC
+// token (the pre-OV3 behavior) — kept so unit tests and a self-hosted backend
+// without the exchange endpoint still function.
 type OIDCTokenSource struct {
 	Audience   string
+	BackendURL string
+	// Org is the optional claimed org (slug or org_…) from intent.yaml/--org,
+	// sent to disambiguate a repo linked across multiple orgs.
+	Org        string
 	httpClient *http.Client
+
+	mu        sync.Mutex
+	token     string
+	expiry    time.Time
+	orgID     string
+	projectID string
 }
 
 // NewOIDCTokenSource returns an OIDCTokenSource using the given audience
-// (default "orun" if empty).
+// (DefaultOIDCAudience when empty). No backend exchange is configured; use
+// NewOIDCExchangeSource for the CI golden path.
 func NewOIDCTokenSource(audience string) *OIDCTokenSource {
 	if audience == "" {
-		audience = "orun"
+		audience = DefaultOIDCAudience
 	}
 	return &OIDCTokenSource{
 		Audience:   audience,
@@ -55,8 +80,112 @@ func NewOIDCTokenSource(audience string) *OIDCTokenSource {
 	}
 }
 
-// Token fetches a fresh OIDC token from the GitHub Actions token endpoint.
+// NewOIDCExchangeSource returns an OIDCTokenSource that exchanges the GitHub
+// OIDC token (audience defaulted to DefaultOIDCAudience) at backendURL, claiming
+// org when set.
+func NewOIDCExchangeSource(audience, backendURL, org string) *OIDCTokenSource {
+	s := NewOIDCTokenSource(audience)
+	s.BackendURL = strings.TrimRight(strings.TrimSpace(backendURL), "/")
+	s.Org = strings.TrimSpace(org)
+	return s
+}
+
+// Token returns a platform workflow access token, performing (and caching) the
+// OIDC exchange as needed. With no BackendURL it returns the raw GitHub OIDC
+// token.
 func (o *OIDCTokenSource) Token(ctx context.Context) (string, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.token != "" && !tokenExpired(o.expiry) {
+		return o.token, nil
+	}
+
+	ghJWT, err := o.githubOIDCToken(ctx)
+	if err != nil {
+		return "", err
+	}
+	if o.BackendURL == "" {
+		// No exchange endpoint configured — surface the raw OIDC token.
+		return ghJWT, nil
+	}
+
+	exch, err := o.exchange(ctx, ghJWT)
+	if err != nil {
+		return "", err
+	}
+	o.token = exch.AccessToken
+	o.orgID = exch.OrgID
+	o.projectID = exch.ProjectID
+	if exp, perr := time.Parse(time.RFC3339, exch.ExpiresAt); perr == nil {
+		o.expiry = exp
+	} else {
+		o.expiry = time.Time{}
+	}
+	return o.token, nil
+}
+
+// ResolvedScope returns the (org, project) the exchange bound this token to.
+// Both are empty until a successful exchange.
+func (o *OIDCTokenSource) ResolvedScope() (orgID, projectID string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.orgID, o.projectID
+}
+
+// oidcExchangeResponse mirrors the platform OV3 exchange envelope.
+type oidcExchangeResponse struct {
+	AccessToken string `json:"accessToken"`
+	TokenType   string `json:"tokenType"`
+	ExpiresAt   string `json:"expiresAt"`
+	OrgID       string `json:"orgId"`
+	ProjectID   string `json:"projectId"`
+}
+
+// exchange POSTs the GitHub OIDC token to /v1/auth/oidc/exchange and returns the
+// minted workflow token + resolved scope.
+func (o *OIDCTokenSource) exchange(ctx context.Context, ghJWT string) (*oidcExchangeResponse, error) {
+	body, _ := json.Marshal(struct {
+		Token string `json:"token"`
+		Org   string `json:"org,omitempty"`
+	}{Token: ghJWT, Org: o.Org})
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.BackendURL+"/v1/auth/oidc/exchange", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("building OIDC exchange request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set(contractVersionHeader, ContractVersion)
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("requesting OIDC exchange: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(resp.Body)
+		if apiErr := decodeErrorEnvelope(data, resp.StatusCode); apiErr != nil {
+			return nil, fmt.Errorf("OIDC exchange rejected: %w", apiErr)
+		}
+		return nil, fmt.Errorf("OIDC exchange returned status %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading OIDC exchange response: %w", err)
+	}
+	var out oidcExchangeResponse
+	if err := decodeSuccessBody(data, &out); err != nil {
+		return nil, fmt.Errorf("decoding OIDC exchange response: %w", err)
+	}
+	if out.AccessToken == "" {
+		return nil, fmt.Errorf("OIDC exchange response missing accessToken")
+	}
+	return &out, nil
+}
+
+// githubOIDCToken fetches a fresh OIDC token from the GitHub Actions token
+// endpoint for the configured audience.
+func (o *OIDCTokenSource) githubOIDCToken(ctx context.Context) (string, error) {
 	requestURL := os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL")
 	requestToken := os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
 	if requestURL == "" || requestToken == "" {
@@ -225,6 +354,9 @@ type ResolveOptions struct {
 	Interactive  bool
 	RequireLogin bool
 	NamespaceID  string
+	// Org is the claimed org (slug or org_…) from --org/ORUN_ORG/intent.yaml,
+	// passed to the OIDC exchange to disambiguate a repo linked across orgs.
+	Org string
 }
 
 // ResolvedAuth describes the selected auth source and optional local namespace.
@@ -239,7 +371,7 @@ type ResolvedAuth struct {
 func ResolveAuth(ctx context.Context, opts ResolveOptions) (*ResolvedAuth, error) {
 	if isGitHubActionsOIDC() {
 		return &ResolvedAuth{
-			TokenSource:  NewOIDCTokenSource("orun"),
+			TokenSource:  NewOIDCExchangeSource(DefaultOIDCAudience, opts.BackendURL, opts.Org),
 			ResolvedMode: "oidc",
 		}, nil
 	}
