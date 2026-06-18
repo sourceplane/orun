@@ -25,10 +25,12 @@ type fakeCloud struct {
 	mu      sync.Mutex
 	objects map[string][]byte
 	refs    map[string]string
+	// catalog head digest keyed by environment ("" = project-wide head).
+	catalog map[string]string
 }
 
 func newFakeCloud() *fakeCloud {
-	return &fakeCloud{objects: map[string][]byte{}, refs: map[string]string{}}
+	return &fakeCloud{objects: map[string][]byte{}, refs: map[string]string{}, catalog: map[string]string{}}
 }
 
 func (f *fakeCloud) data(w http.ResponseWriter, payload any) {
@@ -122,6 +124,25 @@ func (f *fakeCloud) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
+
+	case suffix == "/catalog/head" && r.Method == http.MethodPut:
+		var req advanceCatalogHeadRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		// Mirror the worker: the digest must exist in the object plane first.
+		if _, ok := f.objects[req.Digest]; !ok {
+			f.apiError(w, http.StatusPreconditionFailed, "object_missing")
+			return
+		}
+		prevDigest, had := f.catalog[req.Environment]
+		f.catalog[req.Environment] = req.Digest
+		var previous *CatalogHeadRecord
+		if had {
+			previous = &CatalogHeadRecord{Environment: req.Environment, Digest: prevDigest}
+		}
+		f.data(w, advanceCatalogHeadResponse{
+			Head:     CatalogHeadRecord{Environment: req.Environment, Digest: req.Digest, Commit: req.Commit},
+			Previous: previous,
+		})
 
 	default:
 		http.NotFound(w, r)
