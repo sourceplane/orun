@@ -28,7 +28,7 @@ var updateHelpFixtures = flag.Bool("update", false, "regenerate catalog help gol
 // catalogSubcommandNames is the closed set of subcommands the §12 index must
 // expose. A drift here (added/removed subcommand) fails the index test below.
 var catalogSubcommandNames = []string{
-	"refresh", "list", "describe", "tree", "history", "validate", "diff", "refs", "affected", "migrate",
+	"refresh", "push", "list", "describe", "tree", "history", "validate", "diff", "refs", "affected", "migrate",
 }
 
 func findCatalogCommand(t *testing.T) *cobra.Command {

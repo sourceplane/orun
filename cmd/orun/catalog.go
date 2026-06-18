@@ -109,6 +109,7 @@ and persists a snapshot; the read subcommands inspect what has been persisted.
 
 Subcommands:
   refresh   Resolve the current workspace and persist a catalog snapshot
+  push      Sync the resolved catalog snapshot to Orun Cloud and advance the head
   list      List the components in the selected catalog
   describe  Show the full resolved manifest for one component
   tree      Render the catalog relationship graphs
@@ -125,6 +126,7 @@ Run 'orun catalog <subcommand> --help' for details on each.`,
 	}
 
 	registerCatalogRefreshCommand(catalogCmd)
+	registerCatalogPushCommand(catalogCmd)
 	registerCatalogListCommand(catalogCmd)
 	registerCatalogDescribeCommand(catalogCmd)
 	registerCatalogTreeCommand(catalogCmd)
