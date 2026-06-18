@@ -64,7 +64,15 @@ func runCatalogPush() error {
 	if err != nil {
 		return err
 	}
+	return pushResolvedCatalog(ctx, backendURL, catalogPushOrg, catalogPushProject, catalogPushEnvironment)
+}
 
+// pushResolvedCatalog uploads the local catalogs/current closure to the backend
+// and advances the (project, environment) catalog head. Shared by `catalog push`
+// and `catalog refresh --push`; the caller resolves backendURL (so each command
+// honors its own --backend-url), and org/project may be "" to fall back to env +
+// the cached link (or the OIDC-resolved scope in CI).
+func pushResolvedCatalog(ctx context.Context, backendURL, orgFlag, projectFlag, environment string) error {
 	// Open the local object-model store + the catalogs/current ref it resolved.
 	store, refs, _, err := openObjectModel()
 	if err != nil {
@@ -85,7 +93,7 @@ func runCatalogPush() error {
 	if repo != nil {
 		linkOrg, linkProject = repo.OrgID, repo.ProjectID
 	}
-	scope := resolveScope(catalogPushOrg, catalogPushProject, linkOrg, linkProject)
+	scope := resolveScope(orgFlag, projectFlag, linkOrg, linkProject)
 	if scope.OrgID == "" && scope.ProjectID == "" && !isOSSBackend(backendURL) {
 		return errRepoNotLinked(backendURL)
 	}
@@ -131,7 +139,7 @@ func runCatalogPush() error {
 
 	// Step 2 — advance the catalog head (the org-global projection trigger).
 	commit, _, _ := gitProvenanceForRun(ctx, storeDir())
-	head, previous, err := client.AdvanceCatalogHead(ctx, rootDigest, catalogPushEnvironment, commit)
+	head, previous, err := client.AdvanceCatalogHead(ctx, rootDigest, environment, commit)
 	if err != nil {
 		return err
 	}
@@ -140,8 +148,8 @@ func runCatalogPush() error {
 	fmt.Printf("%s pushed catalog %s\n", ui.Green(color, "✓"), rootDigest)
 	fmt.Printf("  objects: %d in closure, %d uploaded, %d already present\n", res.Closure, res.Copied, res.Skipped)
 	scopeLabel := "project-wide head"
-	if strings.TrimSpace(catalogPushEnvironment) != "" {
-		scopeLabel = catalogPushEnvironment + " head"
+	if strings.TrimSpace(environment) != "" {
+		scopeLabel = environment + " head"
 	}
 	if previous != nil && strings.TrimSpace(previous.Digest) != "" {
 		fmt.Printf("  %s: %s → %s\n", scopeLabel, previous.Digest, head.Digest)

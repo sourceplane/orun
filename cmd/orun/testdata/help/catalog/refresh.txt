@@ -19,11 +19,14 @@ Usage:
   orun catalog refresh [flags]
 
 Flags:
+      --backend-url string        With --push: backend URL (Orun Cloud or self-hosted)
       --catalog-snapshot string   Bypass refs; pin to an explicit catalogSnapshotKey
       --catalog-source string     Resolve catalog by ref selector (current|main|latest|branches/<name>|prs/<n>|cat-<key>)
       --catalog-strict            Promote validation warnings to errors
+      --environment string        With --push: target a named environment head (default: the project-wide head)
       --json                      Stable machine-readable output
       --no-infer                  Disable the inference layer (stage 6)
+      --push                      After refreshing, push the snapshot to Orun Cloud and advance the head
       --source string             Alias for --catalog-source
       --strict                    Alias for --catalog-strict
 
