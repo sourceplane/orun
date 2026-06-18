@@ -75,7 +75,19 @@ Exit codes:
   3  StateStore conflict / persistence failure.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCatalogRefresh(cmd.Context())
+			if err := runCatalogRefresh(cmd.Context()); err != nil {
+				return err
+			}
+			// --push: after a successful refresh, sync the snapshot to Orun Cloud
+			// and advance the head (OCv2-3). Reuses the `catalog push` flow.
+			if catalogRefreshPush {
+				backendURL, err := requireBackendURL(nil, catalogRefreshBackendURL)
+				if err != nil {
+					return err
+				}
+				return pushResolvedCatalog(cmd.Context(), backendURL, "", "", catalogRefreshEnvironment)
+			}
+			return nil
 		},
 	}
 
@@ -84,9 +96,18 @@ Exit codes:
 	cmd.Flags().BoolVar(&catalogStrictFlag, "strict", false, "Alias for --catalog-strict")
 	cmd.Flags().BoolVar(&catalogNoInferFlag, "no-infer", false, "Disable the inference layer (stage 6)")
 	cmd.Flags().BoolVar(&catalogJSONFlag, "json", false, "Stable machine-readable output")
+	cmd.Flags().BoolVar(&catalogRefreshPush, "push", false, "After refreshing, push the snapshot to Orun Cloud and advance the head")
+	cmd.Flags().StringVar(&catalogRefreshEnvironment, "environment", "", "With --push: target a named environment head (default: the project-wide head)")
+	cmd.Flags().StringVar(&catalogRefreshBackendURL, "backend-url", "", "With --push: backend URL (Orun Cloud or self-hosted)")
 
 	parent.AddCommand(cmd)
 }
+
+var (
+	catalogRefreshPush        bool
+	catalogRefreshEnvironment string
+	catalogRefreshBackendURL  string
+)
 
 func runCatalogRefresh(ctx context.Context) error {
 	if ctx == nil {
@@ -290,4 +311,3 @@ func isValidationError(err error) bool {
 func hasAnyIssue(issues []catalogresolve.ValidationIssue) bool {
 	return len(issues) > 0
 }
-
