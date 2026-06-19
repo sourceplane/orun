@@ -1,9 +1,10 @@
 # orun-native-coordination — Implementation Plan (NC0–NC4)
 
-Status: Draft. Milestones pair with the platform's **BM** cluster; each NC
-milestone verifies against the BM milestone that serves it on stage. The spine is
-**NC0 → NC2 → NC3**; NC1 (results) can land alongside NC2; NC4 (OIDC golden path)
-trails.
+Status: **Ready for implementation** — client decisions locked
+(`risks-and-open-questions.md`); contract vendored + checksum-guarded.
+Milestones pair with the platform's **BM** cluster; each NC milestone verifies
+against the BM milestone that serves it on stage. The spine is **NC0 → NC2 →
+NC3**; NC1 (results) can land alongside NC2; NC4 (OIDC golden path) trails.
 
 ## NC0 — Vendor contract + shared fold — 🗓️ Planned (pairs BM0)
 

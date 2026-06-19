@@ -26,7 +26,7 @@ the contract unilaterally.
 
 | Field | Value |
 |-------|-------|
-| Status | **Draft** (not started) |
+| Status | **Ready for implementation** — decisions locked (this repo's `risks-and-open-questions.md`; platform register G0/C1–C10/D1–D5/O1–O3 in `saas-orun-backend-merge`); contract frozen + vendored; not yet started |
 | Cluster | **NC** (NC0–NC4) |
 | Builds on | `internal/statebackend` (the `Backend` interface — reshaped here), `internal/remotestate` (HTTP client + the three `TokenSource`s), `specs/orun-object-model/` (content-addressed store — `job-result`/`log` are new kinds), `internal/cockpit` (`bridge.Source` folds the stream) |
 | Pairs with | `orun-cloud/specs/epics/saas-orun-backend-merge/` (cluster **BM**) |

@@ -144,3 +144,58 @@ this path and rejects event kinds a client may not author.
   correctness.
 - The contract is implementation-agnostic: a DO-sharded server and a
   plain-Postgres conditional-append server are indistinguishable on the wire.
+
+## 8. Normative addenda (frozen at BM0)
+
+### 8.1 Event envelope (C1)
+
+Every event in a run stream is:
+
+```jsonc
+{ "seq": 13,                         // gap-free monotonic per run, assigned by the single writer
+  "kind": "JobClaimed",
+  "runId": "01J…",
+  "jobId": "build@prod",             // omitted for run-level events
+  "actor": { "id":"…", "type":"user|service_principal|workflow|system" },
+  "at": "2026-…Z",
+  "idempotencyKey": "build@prod:JobClaimed:1",   // (jobId,kind,leaseEpoch) | client ULID for RunCreated
+  "v": 1,                            // per-kind schema version; additive-only
+  "payload": { … } }
+```
+
+Appends are additive forever; readers MUST tolerate unknown future fields and
+unknown future event kinds (skip in the fold). A breaking shape change is a
+contract major bump, never a silent edit.
+
+### 8.2 Fold (C2)
+
+Authoritative state is a deterministic **left fold by `seq`**; the latest event
+for a job is its highest-`seq` event (last-writer-by-seq). The fold is a single
+pure function owned in `packages/contracts` (`reduce()`), ported to Go in the
+CLI, and pinned by a **shared golden-vector suite** run in both repos' CIs (the
+vectors, not the prose, are the source of truth).
+
+### 8.3 `runId` binding & idempotency (C3)
+
+`runId` (client ULID) is bound to its `planDigest` at `RunCreated`. Replay of the
+same `(runId, planDigest)` returns the existing run (`200`); the same `runId`
+with a different `planDigest` ⇒ `409`. Coordination appends are idempotent by
+`(jobId, kind, leaseEpoch)`; a within-stream replay returns the existing `seq`.
+
+### 8.4 `jobInputHash` (C5)
+
+`sha256` over the canonicalized tuple: **resolved step definitions + declared
+input object digests + declared environment-variable keys (not values) + the
+composition-lock digest**. It explicitly **excludes** wall-clock, secret values,
+and runner identity. The **client is the sole hasher**; the server stores and
+looks up by it, never recomputes. The definition is pinned by a shared golden
+vector — a wrong hash is a correctness bug (false reuse), not a perf miss. Only a
+job the plan marks `hermetic: true` is ever memoized; default off.
+
+### 8.5 Consistency & delivery (C7)
+
+The only strongly-consistent operations are run-create/quota (§2) and the
+conditional `:claim` append (§3). Projections are fed by a per-run **outbox**
+consumed into Postgres read models + metering, **idempotent by `(runId, seq)`**
+(at-least-once delivery + idempotent apply ⇒ effectively exactly-once); they MAY
+lag seconds. No projection write sits on the synchronous claim path.
