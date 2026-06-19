@@ -2,11 +2,49 @@ package statebackend
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+// tokenFunc adapts a function to the TokenSource interface.
+type tokenFunc func(ctx context.Context) (string, error)
+
+func (f tokenFunc) Token(ctx context.Context) (string, error) { return f(ctx) }
+
+func TestCoordClientTokenSourceAuth(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"claimed":true,"leaseEpoch":1,"leaseExpiresAt":"t"}`))
+	}))
+	defer srv.Close()
+
+	// TokenSource takes precedence over the static Token (CI OIDC path).
+	c := &CoordClient{
+		BaseURL:     srv.URL,
+		Token:       "static",
+		TokenSource: tokenFunc(func(context.Context) (string, error) { return "oidc-exchanged", nil }),
+	}
+	if _, err := c.Claim(context.Background(), "r", "j", "runner"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if gotAuth != "Bearer oidc-exchanged" {
+		t.Fatalf("Authorization = %q, want the resolved OIDC token", gotAuth)
+	}
+
+	// A token-resolution failure aborts the request (no unauthenticated call).
+	bad := &CoordClient{
+		BaseURL:     srv.URL,
+		TokenSource: tokenFunc(func(context.Context) (string, error) { return "", errors.New("exchange failed") }),
+	}
+	if _, err := bad.Claim(context.Background(), "r", "j", "runner"); err == nil {
+		t.Fatal("expected a token-resolution error to propagate")
+	}
+}
 
 // jobFromPath extracts the jobId from /runs/{run}/jobs/{job}:{verb}.
 func jobFromPath(path string) (job, verb string) {

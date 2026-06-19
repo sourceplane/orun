@@ -16,12 +16,23 @@ import (
 // a thin, well-typed round-trip the runner loop drives via ActionForClaim /
 // ActionForHeartbeat.
 
+// TokenSource resolves the bearer for each request. It mirrors
+// remotestate.TokenSource so the CI OIDC-exchange source (and any other source)
+// can authenticate coordination verbs without this package importing remotestate.
+type TokenSource interface {
+	Token(ctx context.Context) (string, error)
+}
+
 // CoordClient talks the coordination verbs against a scoped base URL, e.g.
 // https://host/v1/organizations/{org}/projects/{proj}/state.
 type CoordClient struct {
 	HTTP    *http.Client
 	BaseURL string // scoped base, no trailing slash
-	Token   string // optional bearer
+	Token   string // static bearer (used when TokenSource is nil)
+	// TokenSource, when set, resolves the bearer per request (takes precedence
+	// over Token). This is how the CI golden path authenticates: an OIDC token
+	// exchanged for a short-lived workflow token.
+	TokenSource TokenSource
 }
 
 func (c *CoordClient) do(ctx context.Context, method, path string, body any) (*http.Response, error) {
@@ -41,8 +52,16 @@ func (c *CoordClient) do(ctx context.Context, method, path string, body any) (*h
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Orun-Contract-Version", "2")
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
+	bearer := c.Token
+	if c.TokenSource != nil {
+		t, err := c.TokenSource.Token(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("resolve auth token: %w", err)
+		}
+		bearer = t
+	}
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
 	hc := c.HTTP
 	if hc == nil {
