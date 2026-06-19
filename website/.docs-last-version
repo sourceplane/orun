@@ -1,6 +1,6 @@
 # Docs last updated for version
 
-v2.16.0
+v2.17.0
 
 ## How to use this file
 
@@ -8,25 +8,34 @@ When updating docs next time, run:
 
 ```bash
 # Get all changes since docs were last updated
-git log v2.16.0..HEAD --oneline
+git log v2.17.0..HEAD --oneline
 ```
 
 Then update this file to the new version after the docs PR is merged.
 
 ## What was covered in this update
 
-- Docs redesign: new philosophy-first "Overview" section
-  - New: overview/what-is-orun.md (positioning, what orun is/is not, ecosystem fit)
-  - New: overview/how-orun-works.md (the declare → compile → execute → record mental model)
-  - New: overview/resource-model.md (the typed apiVersion/kind document model; authored/compiled/recorded classes)
-  - New: overview/glossary.md (full vocabulary with links)
-  - Moved 'principles' into the Overview sidebar category (URL unchanged)
-  - intro.mdx: added catalog pillar, re-pointed reading paths at the Overview
-  - docusaurus.config.js: Overview navbar entry, footer links, Releases navbar link un-staled (was v2.9.0)
-- Service catalog (v2.16.0 epic, SC0–SC11)
-  - New: concepts/service-catalog.md (entity kinds, orun.io/v1 envelope, CODEOWNERS ownership
-    provenance, relations.json, composition effects, live plane, catalog migrate)
-  - Updated: cli/orun-catalog.md (migrate subcommand, list --kind, describe envelope, see-also)
-  - Updated: concepts/compositions.md (version, lifecycle, effects section)
-- Release notes: release-notes/v2.16.0.md; sidebars.js updated
-- README.md: stale v1.12.3 references bumped to v2.16.0
+- Orun Cloud client (v2.17.0 epic, OC0–OC6): the remote state backend graduated
+  to the Orun Platform client
+  - Wired the existing (previously orphaned) CLI references into the sidebar:
+    cli/orun-auth.md (CLI session login/status/token) and cli/orun-cloud.md
+    (repo ↔ org/project link + scope)
+  - Updated: cli/orun-catalog.md — new `push` subcommand (sync the snapshot +
+    advance the catalog head) and `refresh --push`; see-also to cloud/auth
+  - Updated: cli/orun-run.md — `--local` escape hatch (force local state when the
+    backend is down)
+  - Updated: cli/orun-logs.md — `--follow` live tail (fromSeq cursor)
+- Cockpit Catalog surface (covered in the release notes): Catalog replaces the
+  Components surface; two-line header with source context + animated brand mark;
+  stabilized live step-log view
+- Release notes: release-notes/v2.17.0.md; sidebars.js updated; docusaurus
+  navbar "Releases" link bumped to v2.17.0
+- README.md: install/version references bumped v2.16.0 → v2.17.0
+
+## Deferred / not yet documented
+
+- Work plane (orun-work, W0–W4) is internal-only (system of record, PR-webhook
+  ingestion, delivery-decision core, content-addressed sealing). No user-facing
+  CLI surface yet, so no CLI reference page — mentioned in the release notes only.
+- objgolden cross-language golden vectors (developer/contributor tooling).
+</content>

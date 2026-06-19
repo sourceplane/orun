@@ -20,6 +20,7 @@ orun catalog <sub> --help
 | Subcommand | Purpose |
 | --- | --- |
 | `refresh` | Resolve the current workspace and persist a catalog snapshot |
+| `push` | Sync the resolved snapshot to Orun Cloud and advance the catalog head |
 | `affected` | Compute the components affected by a change (the change-detection engine) |
 | `list` | List the components in the selected catalog |
 | `describe` | Show the full resolved manifest for one component |
@@ -58,6 +59,40 @@ orun catalog refresh --json
 
 Exit codes: `0` created or reused · `1` validation error (or any warning under
 `--strict`) · `2` resolver internal error · `3` object-store ref conflict.
+
+| Flag | Purpose |
+| --- | --- |
+| `--push` | After refreshing, push the snapshot to Orun Cloud and advance the head |
+| `--environment <name>` | With `--push`: target a named environment head (default: the project-wide head) |
+| `--backend-url <url>` | With `--push`: backend URL (Orun Cloud or self-hosted) |
+
+## `orun catalog push`
+
+Syncs the locally resolved `catalogs/current` snapshot to Orun Cloud and advances
+the catalog head, recording the source git commit — which lights up the
+org-global catalog browser within seconds. It runs in two ordered steps: the
+object closure is uploaded as a **content set-difference** (only the blobs the
+server is missing), then the `(project, environment)` head is advanced to the
+snapshot digest. The head advance fails closed if the closure was not uploaded
+first, and because the model is content-addressed a re-push transfers ~zero
+bytes.
+
+Run `orun catalog refresh` first to (re)resolve the workspace; push uploads
+whatever `catalogs/current` points at. Scope and credentials resolve the same way
+as every remote-state call (flag → env → cached link → CI OIDC), so push requires
+either `orun auth login` + `orun cloud link` locally, or the OIDC exchange in CI.
+
+```bash
+orun catalog push                          # upload the closure + advance the head
+orun catalog push --environment staging    # advance a named environment head
+orun catalog refresh --push                # refresh then push in one step
+```
+
+| Flag | Purpose |
+| --- | --- |
+| `--backend-url <url>` | Backend URL (Orun Cloud or self-hosted) |
+| `--org <slug>` / `--project <slug>` | Override the cached link scope |
+| `--environment <name>` | Target a named environment head (default: the project-wide head) |
 
 ## `orun catalog affected`
 
@@ -156,6 +191,8 @@ orun catalog migrate --json   # the CatalogMigrateResult envelope, for CI
 
 - [Service catalog](../concepts/service-catalog.md) — the entity model, the
   relation graph, ownership provenance, and the live plane.
+- [`orun cloud`](orun-cloud.md) / [`orun auth`](orun-auth.md) — the repo ↔
+  org/project link and CLI session that `orun catalog push` runs under.
 - [Change detection](../concepts/change-detection.md) — `--changed` on
   `plan`/`run`/`component`, powered by this engine.
 - [Change watches](../concepts/change-watches.md) — `spec.change.watches`, read

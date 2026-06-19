@@ -183,6 +183,7 @@ orun run --changed --explain
 | `--artifact` | Artifact backend for uploading job shard from CI (`github`) |
 | `--remote-state` | Use orun-backend for distributed run coordination (enables remote state) |
 | `--backend-url` | orun-backend URL for remote state (or set `ORUN_BACKEND_URL`) |
+| `--local` | Force local filesystem state for this run, overriding remote-state config/flags (the escape hatch when the backend is down) |
 
 ### Plan selection flags
 
@@ -330,6 +331,16 @@ orun auth login --device --backend-url https://orun-api.example.workers.dev
 ```
 
 `orun cloud link` is available for explicit pre-caching or diagnostics but is no longer required before `orun run --remote-state`.
+
+### Local escape hatch
+
+When the backend is unreachable, `orun run --local` forces local filesystem state
+for that run, overriding any `--remote-state` flag or configured remote state. It
+is the safe fallback that keeps a run from being blocked on the platform.
+
+```bash
+orun run --local -i examples/intent.yaml
+```
 
 ### Run ID derivation
 
