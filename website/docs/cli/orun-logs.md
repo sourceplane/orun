@@ -88,6 +88,7 @@ on the renderer); pass `--raw` to print every line.
 | `--raw` | Show full raw logs instead of compact 8-line excerpts |
 | `--remote-state` | Fetch logs from orun-backend instead of local state |
 | `--backend-url` | orun-backend URL for remote state (or set `ORUN_BACKEND_URL`) |
+| `--follow` | Live-tail a job's log (requires `--remote-state` and `--job`); polls until the job completes |
 
 ## Remote logs
 
@@ -102,6 +103,19 @@ orun logs \
 ```
 
 Omit `--job` to fetch logs for all jobs in the run.
+
+Add `--follow` to live-tail a single job's log as it runs. The CLI polls the
+backend from a sequence cursor and streams new lines until the job completes:
+
+```bash
+orun logs \
+  --remote-state \
+  --job api@dev.deploy \
+  --follow
+```
+
+`--follow` requires both `--remote-state` and `--job` (the live tail reads one
+job's stream from the backend).
 
 Outside GitHub Actions, remote logs use the local Orun CLI session from `orun auth login` and the backend URL from `--backend-url`, `ORUN_BACKEND_URL`, `intent.yaml`, or `~/.orun/config.yaml`.
 
