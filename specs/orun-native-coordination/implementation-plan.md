@@ -1,12 +1,18 @@
 # orun-native-coordination — Implementation Plan (NC0–NC4)
 
-Status: **Ready for implementation** — client decisions locked
-(`risks-and-open-questions.md`); contract vendored + checksum-guarded.
+Status (audited **2026-06-20**): **In progress** — NC0 ✅; NC1/NC2/NC4/NC5 🟡;
+NC3 ⛔. The pure cores + `CoordClient` are built and Go-test-green, but the new
+stack is **unwired** (`cmd/orun` still uses the legacy `remotestate` client) and
+`statebackend.Backend` was never reshaped. Per-milestone reality is in each
+heading below; full evidence:
+`orun-cloud/specs/epics/saas-orun-backend-merge/GAPS.md`. Original plan text is
+preserved for the "Done when" criteria.
+
 Milestones pair with the platform's **BM** cluster; each NC milestone verifies
 against the BM milestone that serves it on stage. The spine is **NC0 → NC2 →
 NC3**; NC1 (results) can land alongside NC2; NC4 (OIDC golden path) trails.
 
-## NC0 — Vendor contract + shared fold — 🗓️ Planned (pairs BM0)
+## NC0 — Vendor contract + shared fold — ✅ Done (pairs BM0)
 
 - Vendor `coordination-api.md` into `specs/orun-native-coordination/vendored/` +
   `CHECKSUM` + a `TestVendoredCoordinationChecksum` drift guard (mirror of
@@ -18,7 +24,7 @@ NC3**; NC1 (results) can land alongside NC2; NC4 (OIDC golden path) trails.
 **Done when:** `go test ./...` green; the vendored copy matches the checksum; the
 fold passes the shared golden vectors; no transport change yet.
 
-## NC1 — Result plane + cache-aware claim — 🗓️ Planned (pairs BM1)
+## NC1 — Result plane + cache-aware claim — 🟡 Partial — hash/memo gate done; no result push/`--no-cache`/`hermetic`; unwired (pairs BM1)
 
 - Compute `jobInputHash` for `hermetic` jobs (contract D2); push `job-result` and
   `log` objects via the existing object-model digest negotiation.
@@ -29,7 +35,7 @@ fold passes the shared golden vectors; no transport change yet.
 cockpit marks it memoized; a non-hermetic job is never skipped; `--no-cache`
 forces execution.
 
-## NC2 — Event-log client — 🗓️ Planned (pairs BM2)
+## NC2 — Event-log client — 🟡 Partial — action core + `CoordClient` done; `Backend` NOT reshaped; `remotestate` still legacy verbs; no heartbeat; unwired (pairs BM2)
 
 - Reshape `statebackend.Backend` to `Claim/Heartbeat/Complete` (conditional-append
   semantics + the result mapping) and `ReadLog(from)`.
@@ -42,7 +48,7 @@ forces execution.
 complete-with-result, takeover), with exactly-one-runner-per-job under a
 two-runner race; `lease_lost` halts the losing runner cleanly.
 
-## NC3 — Read-the-log UX + offline log — 🗓️ Planned (pairs BM3)
+## NC3 — Read-the-log UX + offline log — ⛔ Missing — still row-read + poll; no stream fold/SSE/offline log (pairs BM3)
 
 - `bridge.Source` folds the run stream; `status`/cockpit live-tail active runs via
   SSE/long-poll, read the projection snapshot for finished runs.
@@ -54,7 +60,7 @@ two-runner race; `lease_lost` halts the losing runner cleanly.
 on stage; an offline run then synced to cloud reconciles with no double-apply; a
 network blip mid-run recovers on retry.
 
-## NC4 — CI OIDC golden path + conformance — 🗓️ Planned (pairs BM5)
+## NC4 — CI OIDC golden path + conformance — 🟡 Partial — `OIDCTokenSource` wired to the legacy client; no stage conformance suite (pairs BM5)
 
 - GitHub Actions OIDC exchange (`OIDCTokenSource`, audience `orun-cloud`) as the
   default CI auth on the new surface.

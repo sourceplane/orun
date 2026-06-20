@@ -26,7 +26,7 @@ the contract unilaterally.
 
 | Field | Value |
 |-------|-------|
-| Status | **Ready for implementation** — decisions locked (this repo's `risks-and-open-questions.md`; platform register G0/C1–C10/D1–D5/O1–O3 in `saas-orun-backend-merge`); contract frozen + vendored; not yet started |
+| Status | **In progress (cores landed, not wired)** — audited 2026-06-20. NC0 ✅; NC1/NC2/NC4/NC5 🟡 partial; NC3 ⛔. Pure `Fold`, `jobInputHash`/memo gate, the claim/heartbeat→action core, `CoordClient`, and `RunLoop` are built and Go-test-green — **but the entire new stack is a dead-code island**: `cmd/orun/command_run.go:502-504` still constructs `remotestate.NewClientWithScope` → `NewRemoteStateBackend` (legacy relational `/claim`,`/update`,`/runnable`), and `statebackend.Backend` was never reshaped. Gaps + evidence: `orun-cloud/specs/epics/saas-orun-backend-merge/GAPS.md`. |
 | Cluster | **NC** (NC0–NC4) |
 | Builds on | `internal/statebackend` (the `Backend` interface — reshaped here), `internal/remotestate` (HTTP client + the three `TokenSource`s), `specs/orun-object-model/` (content-addressed store — `job-result`/`log` are new kinds), `internal/cockpit` (`bridge.Source` folds the stream) |
 | Pairs with | `orun-cloud/specs/epics/saas-orun-backend-merge/` (cluster **BM**) |
@@ -59,11 +59,11 @@ online or off.
 
 | ID | Milestone | Status |
 |----|-----------|--------|
-| NC0 | Vendor `coordination-api.md` + checksum guard; port the shared **fold** (events → run/jobs/frontier) into `internal/statebackend` | 🗓️ Planned (pairs **BM0**) |
-| NC1 | Result plane: push `job-result`/`log` objects; cache-aware claim (skip exec on `cached`) | 🗓️ Planned (pairs **BM1**) |
-| NC2 | Event-log client: `AppendClaim/Heartbeat/Complete`, conditional-append semantics, `ReadLog(from)` + local fold; reshape `statebackend.Backend` | 🗓️ Planned (pairs **BM2**) |
-| NC3 | Cockpit/`status`/`logs` over the folded stream (SSE/long-poll `--follow`); offline local event log + cloud sync | 🗓️ Planned (pairs **BM3**) |
-| NC4 | CI OIDC golden path on the new surface + conformance suite vs stage | 🗓️ Planned (pairs **BM5**) |
+| NC0 | Vendor `coordination-api.md` + checksum guard; port the shared **fold** (events → run/jobs/frontier) into `internal/statebackend` | ✅ Done (pairs **BM0**) |
+| NC1 | Result plane: push `job-result`/`log` objects; cache-aware claim (skip exec on `cached`) | 🟡 Partial — hash/memo gate done; no result push, no `--no-cache`, no `hermetic` field, unwired (pairs **BM1**) |
+| NC2 | Event-log client: `AppendClaim/Heartbeat/Complete`, conditional-append semantics, `ReadLog(from)` + local fold; reshape `statebackend.Backend` | 🟡 Partial — action core + `CoordClient` done; `Backend` NOT reshaped; no heartbeat; unwired (pairs **BM2**) |
+| NC3 | Cockpit/`status`/`logs` over the folded stream (SSE/long-poll `--follow`); offline local event log + cloud sync | ⛔ Missing — still row-read + poll; no stream fold, SSE, or offline log (pairs **BM3**) |
+| NC4 | CI OIDC golden path on the new surface + conformance suite vs stage | 🟡 Partial — `OIDCTokenSource` wired to the **legacy** client; no stage conformance suite (pairs **BM5**) |
 
 ## Cross-repo dependency map
 
