@@ -35,7 +35,7 @@ fold passes the shared golden vectors; no transport change yet.
 cockpit marks it memoized; a non-hermetic job is never skipped; `--no-cache`
 forces execution.
 
-## NC2 — Event-log client — 🟡 Partial — action core + `CoordClient` done; `Backend` NOT reshaped; `remotestate` still legacy verbs; no heartbeat; unwired (pairs BM2)
+## NC2 — Event-log client — 🟡 Partial — **`CoordBackend` wired** (claim/heartbeat/complete + frontier over §3, lease-epoch threaded; opt-in `ORUN_COORDINATION=v2`); async heartbeat goroutine + log/create on §3 still pending (pairs BM2)
 
 - Reshape `statebackend.Backend` to `Claim/Heartbeat/Complete` (conditional-append
   semantics + the result mapping) and `ReadLog(from)`.

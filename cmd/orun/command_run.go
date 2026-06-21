@@ -501,7 +501,16 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	}
 	client := remotestate.NewClientWithScope(backendURL, version, tokenSrc, scope)
 	runnerID := statebackend.DeriveRunnerID()
-	backend := statebackend.NewRemoteStateBackend(client, runnerID)
+	remoteBackend := statebackend.NewRemoteStateBackend(client, runnerID)
+	var backend statebackend.Backend = remoteBackend
+	// Opt-in (NC): drive coordination over the native v2 event-sourced wire —
+	// claim/heartbeat/complete and the runnable frontier become conditional
+	// appends/reads against the per-run shard (coordination-api.md §2/§3). Run
+	// create, logs, and read-model loads still delegate to the v1 client.
+	if os.Getenv("ORUN_COORDINATION") == "v2" {
+		coord := &statebackend.CoordClient{BaseURL: client.ScopedStateBaseURL(), TokenSource: tokenSrc}
+		backend = statebackend.NewCoordBackend(coord, remoteBackend, runnerID)
+	}
 
 	source := "cli"
 	if os.Getenv("GITHUB_ACTIONS") == "true" {

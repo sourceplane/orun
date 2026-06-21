@@ -11,18 +11,23 @@ package statebackend
 type ClaimOutcomeKind int
 
 const (
-	OutcomeClaimed ClaimOutcomeKind = iota // we won the job — execute it
-	OutcomeCached                          // memoized hit — adopt the result, skip execution
-	OutcomeRejected                        // not claimed — see Reason
+	OutcomeClaimed  ClaimOutcomeKind = iota // we won the job — execute it
+	OutcomeCached                           // memoized hit — adopt the result, skip execution
+	OutcomeRejected                         // not claimed — see Reason
 )
 
 // ClaimOutcome is the decoded result of a :claim append attempt.
 type ClaimOutcome struct {
 	Kind           ClaimOutcomeKind
-	Reason         string // when Rejected: deps_not_ready | job_held | terminal | not_found
+	Reason         string // when Rejected: deps_not_ready | job_held | run_terminal
 	LeaseEpoch     int
 	LeaseExpiresAt string
-	ResultDigest   string // when Cached
+	Attempt        int // claim attempt count; >1 means a takeover of a lapsed lease
+	// Server-supplied lease tunables (contract §3 claim response), so the runner
+	// never hardcodes the heartbeat cadence.
+	LeaseSeconds             int
+	HeartbeatIntervalSeconds int
+	ResultDigest             string // when Cached
 }
 
 // RunnerAction is what the runner loop should do next for a job.
