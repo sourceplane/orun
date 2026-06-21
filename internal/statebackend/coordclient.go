@@ -71,12 +71,15 @@ func (c *CoordClient) do(ctx context.Context, method, path string, body any) (*h
 }
 
 type claimResponse struct {
-	Claimed        bool   `json:"claimed"`
-	Reason         string `json:"reason"`
-	Cached         bool   `json:"cached"`
-	LeaseEpoch     int    `json:"leaseEpoch"`
-	LeaseExpiresAt string `json:"leaseExpiresAt"`
-	Result         struct {
+	Claimed                  bool   `json:"claimed"`
+	Reason                   string `json:"reason"`
+	Cached                   bool   `json:"cached"`
+	LeaseEpoch               int    `json:"leaseEpoch"`
+	LeaseExpiresAt           string `json:"leaseExpiresAt"`
+	Attempt                  int    `json:"attempt"`
+	LeaseSeconds             int    `json:"leaseSeconds"`
+	HeartbeatIntervalSeconds int    `json:"heartbeatIntervalSeconds"`
+	Result                   struct {
 		Digest string `json:"digest"`
 	} `json:"result"`
 }
@@ -101,10 +104,40 @@ func (c *CoordClient) Claim(ctx context.Context, runID, jobID, runnerID string) 
 	case cr.Cached:
 		return ClaimOutcome{Kind: OutcomeCached, ResultDigest: cr.Result.Digest}, nil
 	case cr.Claimed:
-		return ClaimOutcome{Kind: OutcomeClaimed, LeaseEpoch: cr.LeaseEpoch, LeaseExpiresAt: cr.LeaseExpiresAt}, nil
+		return ClaimOutcome{
+			Kind:                     OutcomeClaimed,
+			LeaseEpoch:               cr.LeaseEpoch,
+			LeaseExpiresAt:           cr.LeaseExpiresAt,
+			Attempt:                  cr.Attempt,
+			LeaseSeconds:             cr.LeaseSeconds,
+			HeartbeatIntervalSeconds: cr.HeartbeatIntervalSeconds,
+		}, nil
 	default:
 		return ClaimOutcome{Kind: OutcomeRejected, Reason: cr.Reason}, nil
 	}
+}
+
+type frontierResponse struct {
+	Jobs []string `json:"jobs"`
+}
+
+// Frontier reads GET …/runs/{runId}/frontier — the currently-runnable job ids
+// (the server's projection of the fold's frontier). The runner uses it as the
+// local schedule; the conditional :claim remains the authority.
+func (c *CoordClient) Frontier(ctx context.Context, runID string) ([]string, error) {
+	resp, err := c.do(ctx, http.MethodGet, fmt.Sprintf("/runs/%s/frontier", runID), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("frontier %s: unexpected status %d", runID, resp.StatusCode)
+	}
+	var fr frontierResponse
+	if err := json.NewDecoder(resp.Body).Decode(&fr); err != nil {
+		return nil, err
+	}
+	return fr.Jobs, nil
 }
 
 // Heartbeat posts a :heartbeat. A 409 means the lease was lost (stop the job).

@@ -165,6 +165,12 @@ func NewClientWithScope(baseURL, version string, tokenSrc TokenSource, scope Sco
 // Scope returns the org/project scope this client is bound to.
 func (c *Client) Scope() Scope { return c.scope }
 
+// ScopedStateBaseURL returns the absolute base URL of this client's scoped state
+// plane: {baseURL}/v1/organizations/{org}/projects/{proj}/state. Adapters that
+// speak additional verbs against the same scope (e.g. the native coordination
+// CoordClient) build their requests relative to this.
+func (c *Client) ScopedStateBaseURL() string { return c.baseURL + c.statePath("") }
+
 // statePath builds a scoped state path. The suffix is appended verbatim after
 // the contract base path /v1/organizations/{orgId}/projects/{projectId}/state.
 // suffix must begin with "/" (e.g. "/runs/abc").

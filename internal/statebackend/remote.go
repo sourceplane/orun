@@ -153,6 +153,15 @@ func (r *RemoteStateBackend) ClaimJob(ctx context.Context, runID string, job mod
 // completed — caller may skip) or "failed" (the job failed, or the run ended
 // without it). Defaults to "failed" when ambiguous so the caller stops rather
 // than hangs.
+// ClassifyTerminal returns "success" or "failed" for a terminal job, reading the
+// job back from the read model. Exposed for adapters that wrap this backend
+// (CoordBackend) and need to distinguish a completed job from a failed one when
+// the native :claim reports run_terminal. Takes the CLI run id (mapped to the
+// run ULID internally).
+func (r *RemoteStateBackend) ClassifyTerminal(ctx context.Context, runID, jobID string) string {
+	return r.classifyTerminal(ctx, wireRunID(runID), jobID)
+}
+
 func (r *RemoteStateBackend) classifyTerminal(ctx context.Context, ulid, jobID string) string {
 	jobs, err := r.client.ListJobs(ctx, ulid)
 	if err != nil {
