@@ -29,7 +29,7 @@ func TestCoordClientTokenSourceAuth(t *testing.T) {
 		Token:       "static",
 		TokenSource: tokenFunc(func(context.Context) (string, error) { return "oidc-exchanged", nil }),
 	}
-	if _, err := c.Claim(context.Background(), "r", "j", "runner"); err != nil {
+	if _, err := c.Claim(context.Background(), "r", "j", ClaimRequest{RunnerID: "runner"}); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if gotAuth != "Bearer oidc-exchanged" {
@@ -41,7 +41,7 @@ func TestCoordClientTokenSourceAuth(t *testing.T) {
 		BaseURL:     srv.URL,
 		TokenSource: tokenFunc(func(context.Context) (string, error) { return "", errors.New("exchange failed") }),
 	}
-	if _, err := bad.Claim(context.Background(), "r", "j", "runner"); err == nil {
+	if _, err := bad.Claim(context.Background(), "r", "j", ClaimRequest{RunnerID: "runner"}); err == nil {
 		t.Fatal("expected a token-resolution error to propagate")
 	}
 }
@@ -112,7 +112,7 @@ func TestCoordClientClaim(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.job, func(t *testing.T) {
-			o, err := c.Claim(ctx, "r1", tc.job, "runner-1")
+			o, err := c.Claim(ctx, "r1", tc.job, ClaimRequest{RunnerID: "runner-1"})
 			if err != nil {
 				t.Fatalf("claim: %v", err)
 			}
@@ -126,12 +126,12 @@ func TestCoordClientClaim(t *testing.T) {
 	}
 
 	// the claimed case carries the lease tunables through
-	o, _ := c.Claim(ctx, "r1", "jclaimed", "runner-1")
+	o, _ := c.Claim(ctx, "r1", "jclaimed", ClaimRequest{RunnerID: "runner-1"})
 	if o.LeaseEpoch != 3 || o.LeaseExpiresAt == "" {
 		t.Fatalf("lease not decoded: %+v", o)
 	}
 	// the cached case carries the result digest
-	o, _ = c.Claim(ctx, "r1", "jcached", "runner-1")
+	o, _ = c.Claim(ctx, "r1", "jcached", ClaimRequest{RunnerID: "runner-1"})
 	if o.ResultDigest != "sha256:c" {
 		t.Fatalf("cached digest = %q", o.ResultDigest)
 	}
@@ -163,7 +163,7 @@ func TestCoordClientContractVersionRequired(t *testing.T) {
 	srv := coordTestServer()
 	defer srv.Close()
 	c := &CoordClient{BaseURL: srv.URL}
-	if _, err := c.Claim(context.Background(), "r1", "jclaimed", "runner-1"); err != nil {
+	if _, err := c.Claim(context.Background(), "r1", "jclaimed", ClaimRequest{RunnerID: "runner-1"}); err != nil {
 		t.Fatalf("client must send Orun-Contract-Version: %v", err)
 	}
 }

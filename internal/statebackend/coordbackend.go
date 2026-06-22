@@ -2,11 +2,39 @@ package statebackend
 
 import (
 	"context"
+	"encoding/json"
+	"sort"
 	"sync"
 
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
 )
+
+// HermeticLabel opts a job into memoization (coordination-api.md §1: hermetic is
+// opt-in, never required for correctness). A job carrying this label asserts its
+// result is a pure function of its declared inputs, so a later run with the same
+// jobInputHash may adopt the prior result and skip execution.
+const HermeticLabel = "orun.dev/hermetic"
+
+// objectKindJobResult is the CAS kind for a completed job's result object.
+const objectKindJobResult = "job-result"
+
+func isHermetic(job model.PlanJob) bool { return job.Labels[HermeticLabel] == "true" }
+
+// jobInputHashFor derives the memo key for a job from the inputs the contract
+// admits (C5): the resolved steps and the declared env-var KEYS (never values).
+// It excludes wall-clock, secrets, and runner identity, so it is stable across
+// runs of the same job. (Input-artifact digests and the composition-lock digest
+// are not yet threaded through the plan; this is a deterministic subset, and the
+// server treats the hash as an opaque key.)
+func jobInputHashFor(job model.PlanJob) string {
+	envKeys := make([]string, 0, len(job.Env))
+	for k := range job.Env {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(envKeys)
+	return JobInputHash(JobInputHashInput{Steps: job.Steps, EnvKeys: envKeys})
+}
 
 // CoordBackend implements Backend over the native v2 coordination wire
 // (coordination-api.md §2/§3). The coordination cycle — claim, heartbeat,
@@ -26,7 +54,8 @@ type CoordBackend struct {
 	runnerID string
 
 	mu     sync.Mutex
-	leases map[string]int // jobID -> leaseEpoch
+	leases map[string]int    // jobID -> leaseEpoch
+	hashes map[string]string // jobID -> jobInputHash (set when a hermetic job is claimed)
 }
 
 var _ Backend = (*CoordBackend)(nil)
@@ -34,7 +63,7 @@ var _ Backend = (*CoordBackend)(nil)
 // NewCoordBackend wires the native coordination client over an inner backend
 // (used for InitRun, logs, and read-model loads).
 func NewCoordBackend(coord *CoordClient, inner *RemoteStateBackend, runnerID string) *CoordBackend {
-	return &CoordBackend{coord: coord, inner: inner, runnerID: runnerID, leases: map[string]int{}}
+	return &CoordBackend{coord: coord, inner: inner, runnerID: runnerID, leases: map[string]int{}, hashes: map[string]string{}}
 }
 
 // InitRun creates/joins the run via the inner backend. When the server runs the
@@ -50,7 +79,17 @@ func (b *CoordBackend) ClaimJob(ctx context.Context, runID string, job model.Pla
 	if runnerID == "" {
 		runnerID = b.runnerID
 	}
-	out, err := b.coord.Claim(ctx, wireRunID(runID), job.ID, runnerID)
+	req := ClaimRequest{RunnerID: runnerID}
+	if isHermetic(job) {
+		// Memoizable: send the input-hash KEY so the server can resolve a prior
+		// result (the digest is the server's to choose, never the client's), and
+		// remember it for the result push at completion.
+		h := jobInputHashFor(job)
+		b.setHash(job.ID, h)
+		req.Hermetic = true
+		req.JobInputHash = h
+	}
+	out, err := b.coord.Claim(ctx, wireRunID(runID), job.ID, req)
 	if err != nil {
 		return nil, err
 	}
@@ -64,9 +103,9 @@ func (b *CoordBackend) ClaimJob(ctx context.Context, runID string, job model.Pla
 		res.LeaseSeconds = out.LeaseSeconds
 		res.HeartbeatIntervalSeconds = out.HeartbeatIntervalSeconds
 	case OutcomeCached:
-		// Memoized hit (opt-in hermetic jobs only; the CLI does not yet request
-		// memoization, so this is not reached today): treat as already-complete
-		// so the loop skips execution.
+		// Memoized hit: the server resolved a prior result for this job's inputs.
+		// Adopt-by-skip — report it as already-complete so the run loop treats it
+		// exactly like a job finished elsewhere and does not execute it.
 		res.CurrentStatus = "success"
 	case OutcomeRejected:
 		switch out.Reason {
@@ -105,12 +144,27 @@ func (b *CoordBackend) UpdateJob(ctx context.Context, runID, jobID, runnerID str
 	if status == JobStatusFailed {
 		outcome = "failed"
 	}
-	if _, err := b.coord.Complete(ctx, wireRunID(runID), jobID, CompleteRequest{
+	req := CompleteRequest{
 		RunnerID:   runnerID,
 		LeaseEpoch: b.lease(jobID),
 		Outcome:    outcome,
 		ErrorText:  errText,
-	}); err != nil {
+	}
+	// For a hermetic success, push a `job-result` object and report its digest +
+	// the input-hash key so the server indexes jobInputHash → resultDigest and a
+	// later run with the same inputs is served from cache.
+	if hash := b.hash(jobID); hash != "" && status == JobStatusSuccess {
+		result := JobResult{JobInputHash: hash, Outputs: []string{}, Exit: 0}
+		if blob, mErr := json.Marshal(result); mErr == nil {
+			if digest, oErr := b.inner.EnsureObject(ctx, objectKindJobResult, blob); oErr == nil {
+				req.JobInputHash = hash
+				req.ResultDigest = digest
+			}
+			// A push failure is non-fatal: the completion still records; the job
+			// simply won't be memoized for the next run.
+		}
+	}
+	if _, err := b.coord.Complete(ctx, wireRunID(runID), jobID, req); err != nil {
 		return err
 	}
 	return nil
@@ -151,4 +205,16 @@ func (b *CoordBackend) lease(jobID string) int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.leases[jobID]
+}
+
+func (b *CoordBackend) setHash(jobID, hash string) {
+	b.mu.Lock()
+	b.hashes[jobID] = hash
+	b.mu.Unlock()
+}
+
+func (b *CoordBackend) hash(jobID string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.hashes[jobID]
 }
