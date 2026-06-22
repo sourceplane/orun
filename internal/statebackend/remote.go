@@ -153,6 +153,13 @@ func (r *RemoteStateBackend) ClaimJob(ctx context.Context, runID string, job mod
 // completed — caller may skip) or "failed" (the job failed, or the run ended
 // without it). Defaults to "failed" when ambiguous so the caller stops rather
 // than hangs.
+// EnsureObject uploads a CAS object (idempotent, digest-negotiated) and returns
+// its content digest. Exposed for adapters that wrap this backend (CoordBackend)
+// and need to push a `job-result` before reporting a memoizable completion.
+func (r *RemoteStateBackend) EnsureObject(ctx context.Context, kind string, blob []byte) (string, error) {
+	return r.client.EnsureObject(ctx, kind, blob)
+}
+
 // ClassifyTerminal returns "success" or "failed" for a terminal job, reading the
 // job back from the read model. Exposed for adapters that wrap this backend
 // (CoordBackend) and need to distinguish a completed job from a failed one when

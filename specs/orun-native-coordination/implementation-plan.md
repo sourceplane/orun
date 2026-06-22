@@ -24,7 +24,7 @@ NC3**; NC1 (results) can land alongside NC2; NC4 (OIDC golden path) trails.
 **Done when:** `go test ./...` green; the vendored copy matches the checksum; the
 fold passes the shared golden vectors; no transport change yet.
 
-## NC1 — Result plane + cache-aware claim — 🟡 Partial — hash/memo gate done; no result push/`--no-cache`/`hermetic`; unwired (pairs BM1)
+## NC1 — Result plane + cache-aware claim — 🟡 Partial — **wired** (hermetic-label opt-in: `jobInputHash` sent on `:claim`, `cached`→skip, `job-result` pushed + memo key on `:complete`); remaining: output adoption, real input-artifact digests, `--no-cache`, cockpit "memoized", `log` sealing (pairs BM1)
 
 - Compute `jobInputHash` for `hermetic` jobs (contract D2); push `job-result` and
   `log` objects via the existing object-model digest negotiation.

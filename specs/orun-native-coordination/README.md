@@ -60,7 +60,7 @@ online or off.
 | ID | Milestone | Status |
 |----|-----------|--------|
 | NC0 | Vendor `coordination-api.md` + checksum guard; port the shared **fold** (events → run/jobs/frontier) into `internal/statebackend` | ✅ Done (pairs **BM0**) |
-| NC1 | Result plane: push `job-result`/`log` objects; cache-aware claim (skip exec on `cached`) | 🟡 Partial — hash/memo gate done; no result push, no `--no-cache`, no `hermetic` field, unwired (pairs **BM1**) |
+| NC1 | Result plane: push `job-result`/`log` objects; cache-aware claim (skip exec on `cached`) | 🟡 Partial — **wired** on the v2 path: a `hermetic`-labelled job (`orun.dev/hermetic`) sends its `jobInputHash` on `:claim`, a `cached` hit skips execution (adopt-by-skip), and a hermetic success pushes a `job-result` + reports the memo key so the server indexes it. Remaining: output adoption (download artifacts), real input-artifact digests in the hash, `--no-cache`, cockpit "memoized", `log` object sealing (pairs **BM1**) |
 | NC2 | Event-log client: `AppendClaim/Heartbeat/Complete`, conditional-append semantics, `ReadLog(from)` + local fold; reshape `statebackend.Backend` | 🟡 Partial — **`CoordBackend` wired** (claim/heartbeat/complete + frontier over §3, lease-epoch threaded) behind `ORUN_COORDINATION=v2`; `Backend` not reshaped (adapter satisfies it); no async heartbeat goroutine yet (pairs **BM2**) |
 | NC3 | Cockpit/`status`/`logs` over the folded stream (SSE/long-poll `--follow`); offline local event log + cloud sync | ⛔ Missing — still row-read + poll; no stream fold, SSE, or offline log (pairs **BM3**) |
 | NC4 | CI OIDC golden path on the new surface + conformance suite vs stage | 🟡 Partial — `OIDCTokenSource` wired to the **legacy** client; no stage conformance suite (pairs **BM5**) |

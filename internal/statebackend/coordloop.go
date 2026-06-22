@@ -52,7 +52,7 @@ func (c *CoordClient) RunLoop(ctx context.Context, opts RunLoopOptions) error {
 
 		progressed := false
 		for _, jobID := range ClaimableJobs(state) {
-			outcome, err := c.Claim(ctx, opts.RunID, jobID, opts.RunnerID)
+			outcome, err := c.Claim(ctx, opts.RunID, jobID, ClaimRequest{RunnerID: opts.RunnerID})
 			if err != nil {
 				return err
 			}

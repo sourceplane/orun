@@ -146,3 +146,133 @@ func TestCoordBackendCompleteFailed(t *testing.T) {
 		t.Fatalf("got outcome=%q errText=%q, want failed/boom", gotOutcome, gotErrText)
 	}
 }
+
+type stubToken struct{}
+
+func (stubToken) Token(context.Context) (string, error) { return "test-token", nil }
+
+// A hermetic job claims with its input-hash key and, on success, pushes a
+// job-result and reports the memo key + digest so the server can index it.
+func TestCoordBackendMemoizationProducer(t *testing.T) {
+	var claimBody, completeBody map[string]any
+	var putKind string
+	var putResult JobResult
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		path := r.URL.Path
+		switch {
+		case strings.HasSuffix(path, ":claim"):
+			_ = json.NewDecoder(r.Body).Decode(&claimBody)
+			_, _ = w.Write([]byte(`{"claimed":true,"leaseEpoch":1,"leaseExpiresAt":"t","attempt":1,"leaseSeconds":60,"heartbeatIntervalSeconds":20}`))
+		case strings.HasSuffix(path, "/objects/missing"):
+			var req struct {
+				Digests []string `json:"digests"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			_ = json.NewEncoder(w).Encode(map[string][]string{"missing": req.Digests}) // all missing → force the PUT
+		case r.Method == http.MethodPut && strings.Contains(path, "/objects/"):
+			putKind = r.Header.Get("Orun-Object-Kind")
+			_ = json.NewDecoder(r.Body).Decode(&putResult)
+			w.WriteHeader(http.StatusCreated)
+		case strings.HasSuffix(path, ":complete"):
+			_ = json.NewDecoder(r.Body).Decode(&completeBody)
+			_, _ = w.Write([]byte(`{"seq":2}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	coord := &CoordClient{HTTP: srv.Client(), BaseURL: srv.URL + "/v1/organizations/o/projects/p/state"}
+	inner := NewRemoteStateBackend(
+		remotestate.NewClientWithScope(srv.URL, "test", stubToken{}, remotestate.Scope{OrgID: "o", ProjectID: "p"}), "r1")
+	b := NewCoordBackend(coord, inner, "r1")
+	ctx := context.Background()
+
+	job := model.PlanJob{
+		ID:     "h",
+		Labels: map[string]string{HermeticLabel: "true"},
+		Steps:  []model.PlanStep{{ID: "s1", Run: "echo hi"}},
+		Env:    map[string]any{"FOO": "bar"},
+	}
+
+	res, err := b.ClaimJob(ctx, "run-1", job, "r1")
+	if err != nil || !res.Claimed {
+		t.Fatalf("claim hermetic: res=%+v err=%v", res, err)
+	}
+	if claimBody["hermetic"] != true {
+		t.Fatalf("claim did not carry hermetic: %+v", claimBody)
+	}
+	hash, _ := claimBody["jobInputHash"].(string)
+	if hash != jobInputHashFor(job) || hash == "" {
+		t.Fatalf("claim jobInputHash %q != recomputed %q", hash, jobInputHashFor(job))
+	}
+
+	if err := b.UpdateJob(ctx, "run-1", "h", "r1", JobStatusSuccess, ""); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if putKind != objectKindJobResult {
+		t.Fatalf("job-result pushed with kind %q, want %q", putKind, objectKindJobResult)
+	}
+	if putResult.JobInputHash != hash {
+		t.Fatalf("pushed job-result hash %q != claim hash %q", putResult.JobInputHash, hash)
+	}
+	if completeBody["jobInputHash"] != hash {
+		t.Fatalf("complete jobInputHash %v != claim hash %q", completeBody["jobInputHash"], hash)
+	}
+	if d, _ := completeBody["resultDigest"].(string); !strings.HasPrefix(d, "sha256:") {
+		t.Fatalf("complete resultDigest missing/malformed: %v", completeBody["resultDigest"])
+	}
+}
+
+// A non-hermetic job sends no memo hints and pushes no result object.
+func TestCoordBackendNonHermeticNoMemo(t *testing.T) {
+	var claimBody, completeBody map[string]any
+	objectCalls := 0
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		path := r.URL.Path
+		switch {
+		case strings.HasSuffix(path, ":claim"):
+			_ = json.NewDecoder(r.Body).Decode(&claimBody)
+			_, _ = w.Write([]byte(`{"claimed":true,"leaseEpoch":1,"leaseExpiresAt":"t","attempt":1,"leaseSeconds":60,"heartbeatIntervalSeconds":20}`))
+		case strings.Contains(path, "/objects/"):
+			objectCalls++
+			_, _ = w.Write([]byte(`{"missing":[]}`))
+		case strings.HasSuffix(path, ":complete"):
+			_ = json.NewDecoder(r.Body).Decode(&completeBody)
+			_, _ = w.Write([]byte(`{"seq":2}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	coord := &CoordClient{HTTP: srv.Client(), BaseURL: srv.URL + "/v1/organizations/o/projects/p/state"}
+	inner := NewRemoteStateBackend(
+		remotestate.NewClientWithScope(srv.URL, "test", stubToken{}, remotestate.Scope{OrgID: "o", ProjectID: "p"}), "r1")
+	b := NewCoordBackend(coord, inner, "r1")
+	ctx := context.Background()
+
+	job := model.PlanJob{ID: "n", Steps: []model.PlanStep{{ID: "s1", Run: "echo hi"}}}
+	if _, err := b.ClaimJob(ctx, "run-1", job, "r1"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if _, ok := claimBody["hermetic"]; ok {
+		t.Fatalf("non-hermetic claim leaked hermetic: %+v", claimBody)
+	}
+	if _, ok := claimBody["jobInputHash"]; ok {
+		t.Fatalf("non-hermetic claim leaked jobInputHash: %+v", claimBody)
+	}
+	if err := b.UpdateJob(ctx, "run-1", "n", "r1", JobStatusSuccess, ""); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if objectCalls != 0 {
+		t.Fatalf("non-hermetic completion pushed an object (%d calls)", objectCalls)
+	}
+	if _, ok := completeBody["jobInputHash"]; ok {
+		t.Fatalf("non-hermetic complete leaked jobInputHash: %+v", completeBody)
+	}
+}

@@ -84,11 +84,27 @@ type claimResponse struct {
 	} `json:"result"`
 }
 
+// ClaimRequest carries the runner id and the optional memoization hints. The
+// client supplies only the key — hermetic marks the job memoizable and
+// jobInputHash is the content key the server resolves a prior result by; the
+// server (not the client) decides the cache hit and its digest.
+type ClaimRequest struct {
+	RunnerID     string
+	Hermetic     bool
+	JobInputHash string
+}
+
 // Claim posts a :claim and decodes the outcome into the driver's ClaimOutcome.
-func (c *CoordClient) Claim(ctx context.Context, runID, jobID, runnerID string) (ClaimOutcome, error) {
+func (c *CoordClient) Claim(ctx context.Context, runID, jobID string, req ClaimRequest) (ClaimOutcome, error) {
+	body := map[string]any{"runnerId": req.RunnerID}
+	if req.Hermetic {
+		body["hermetic"] = true
+	}
+	if req.JobInputHash != "" {
+		body["jobInputHash"] = req.JobInputHash
+	}
 	resp, err := c.do(ctx, http.MethodPost,
-		fmt.Sprintf("/runs/%s/jobs/%s:claim", runID, jobID),
-		map[string]string{"runnerId": runnerID})
+		fmt.Sprintf("/runs/%s/jobs/%s:claim", runID, jobID), body)
 	if err != nil {
 		return ClaimOutcome{}, err
 	}
@@ -165,6 +181,9 @@ type CompleteRequest struct {
 	LeaseEpoch   int    `json:"leaseEpoch"`
 	Outcome      string `json:"outcome"` // "succeeded" | "failed"
 	ResultDigest string `json:"resultDigest,omitempty"`
+	// JobInputHash, set on a hermetic success, is the memo key the server indexes
+	// (jobInputHash → resultDigest) so a later run with the same inputs is cached.
+	JobInputHash string `json:"jobInputHash,omitempty"`
 	ErrorText    string `json:"errorText,omitempty"`
 }
 
