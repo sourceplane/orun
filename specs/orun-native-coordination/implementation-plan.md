@@ -56,8 +56,12 @@ two-runner race; `lease_lost` halts the losing runner cleanly.
   the two, and recovers per-job + run timestamps from event `At` stamps. A run
   with no native events falls back to the inner backend. (`Fold`/`ReadLog` were
   built+golden-tested but unwired; this connects them.)
-- ⛔ Still: `status --watch`/cockpit live-tail via SSE/long-poll (read the
-  projection snapshot for finished runs), `logs --follow` tailing the sealed log.
+- ✅ `status --watch` is now **event-driven**: `ReadLog(wait=)` long-polls the run
+  stream so the watcher blocks until an event lands (or a 15s liveness refresh)
+  rather than re-polling on a fixed timer. Backends without the stream (legacy
+  OP2) fall back to interval polling via an optional `runEventWaiter` seam.
+- ⛔ Still: `logs --follow` event-driven tail (per-job chunk stream), cockpit
+  live-tail, offline `.orun/` event log + cloud sync.
 - `logs --follow` tails `LogChunk`/sealed `log` objects.
 - Offline: a local event log in `.orun/`; cloud sync ships/pulls appends and
   re-folds; `--local` escape hatch.
