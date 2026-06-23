@@ -44,6 +44,12 @@ type ClaimResult struct {
 	DepsWaiting   bool
 	DepsBlocked   bool
 
+	// Cached is true when the claim resolved a memoized result: the job's inputs
+	// matched a prior run, so the runner adopts the result and skips execution.
+	// ResultDigest is the content address of the adopted result (for display).
+	Cached       bool
+	ResultDigest string
+
 	// Server-supplied lease tunables, populated on a successful claim so the
 	// runner never hardcodes the heartbeat cadence (contract §2.2).
 	LeaseExpiresAt           string

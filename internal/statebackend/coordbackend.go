@@ -106,7 +106,10 @@ func (b *CoordBackend) ClaimJob(ctx context.Context, runID string, job model.Pla
 	case OutcomeCached:
 		// Memoized hit: the server resolved a prior result for this job's inputs.
 		// Adopt-by-skip — report it as already-complete so the run loop treats it
-		// exactly like a job finished elsewhere and does not execute it.
+		// exactly like a job finished elsewhere and does not execute it. Cached +
+		// ResultDigest let the caller surface the hit (it is otherwise silent).
+		res.Cached = true
+		res.ResultDigest = out.ResultDigest
 		res.CurrentStatus = "success"
 	case OutcomeRejected:
 		switch out.Reason {
