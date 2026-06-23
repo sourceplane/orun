@@ -226,6 +226,40 @@ func TestCoordBackendMemoizationProducer(t *testing.T) {
 	}
 }
 
+// A cached claim (server-resolved memo hit) surfaces Cached + ResultDigest and is
+// reported as already-complete, so the run loop adopts it without executing.
+func TestCoordBackendCachedClaimAdopts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, ":claim") {
+			_, _ = w.Write([]byte(`{"cached":true,"result":{"digest":"sha256:deadbeefcafe0000"}}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	coord := &CoordClient{HTTP: srv.Client(), BaseURL: srv.URL + "/v1/organizations/o/projects/p/state"}
+	inner := NewRemoteStateBackend(
+		remotestate.NewClientWithScope(srv.URL, "test", stubToken{}, remotestate.Scope{OrgID: "o", ProjectID: "p"}), "r1")
+	b := NewCoordBackend(coord, inner, "r1")
+
+	job := model.PlanJob{ID: "h", Labels: map[string]string{HermeticLabel: "true"}, Steps: []model.PlanStep{{ID: "s1", Run: "echo hi"}}}
+	res, err := b.ClaimJob(context.Background(), "run-1", job, "r1")
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if !res.Cached || res.Claimed {
+		t.Fatalf("cached claim: got Cached=%v Claimed=%v, want Cached=true Claimed=false", res.Cached, res.Claimed)
+	}
+	if res.ResultDigest != "sha256:deadbeefcafe0000" {
+		t.Fatalf("cached ResultDigest = %q, want sha256:deadbeefcafe0000", res.ResultDigest)
+	}
+	if res.CurrentStatus != "success" {
+		t.Fatalf("cached CurrentStatus = %q, want success (adopt-by-skip)", res.CurrentStatus)
+	}
+}
+
 // A non-hermetic job sends no memo hints and pushes no result object.
 func TestCoordBackendNonHermeticNoMemo(t *testing.T) {
 	var claimBody, completeBody map[string]any

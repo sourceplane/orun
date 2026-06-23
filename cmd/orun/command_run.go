@@ -605,6 +605,20 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 			if result.DepsBlocked {
 				return false, fmt.Errorf("job %s: upstream dependencies are blocked or failed", jobID)
 			}
+			if result.Cached {
+				// Memoized hit: the server resolved a prior result for this job's
+				// inputs, so there is nothing to execute. Surface it (the adoption
+				// is otherwise silent) and skip — the job is already terminal.
+				line := fmt.Sprintf("  %s memoized %s — cache hit, skipped execution", ui.Green(r.Color, "✓"), jobID)
+				if d := strings.TrimPrefix(result.ResultDigest, "sha256:"); d != "" {
+					if len(d) > 12 {
+						d = d[:12]
+					}
+					line += " (" + d + ")"
+				}
+				fmt.Fprintln(r.Stderr, line)
+				return true, nil
+			}
 			if !result.Claimed {
 				if strings.EqualFold(result.CurrentStatus, "success") {
 					return true, nil // already done by another runner
