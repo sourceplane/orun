@@ -276,3 +276,93 @@ func TestCoordBackendNonHermeticNoMemo(t *testing.T) {
 		t.Fatalf("non-hermetic complete leaked jobInputHash: %+v", completeBody)
 	}
 }
+
+// LoadRunState folds the native …/log stream (not the OP2 read model): it pulls
+// the event log, fetches the plan object for the DAG, and reduces both into
+// ExecState/ExecMetadata — recovering per-job timestamps from event stamps.
+func TestCoordBackendLoadRunStateFoldsNativeLog(t *testing.T) {
+	planDigest := "sha256:" + strings.Repeat("a", 64)
+	planJSON := `{"version":"sourceplane.io/v1","jobs":[{"jobId":"a","deps":[]},{"jobId":"b","deps":["a"]}]}`
+	eventsJSON := `{"events":[
+		{"seq":1,"kind":"state.run.created","runId":"R","actor":{"id":"u1","type":"user"},"at":"2026-01-01T00:00:00Z","payload":{"planDigest":"` + planDigest + `","sourceHash":"sha256:s"}},
+		{"seq":2,"kind":"state.job.ready","runId":"R","jobId":"a","actor":{"id":"sys","type":"system"},"at":"2026-01-01T00:00:10Z","payload":{"attempt":1}},
+		{"seq":3,"kind":"state.job.claimed","runId":"R","jobId":"a","actor":{"id":"r1","type":"workflow"},"at":"2026-01-01T00:01:00Z","payload":{"runnerId":"r1","leaseEpoch":1,"leaseExpiresAt":"2026-01-01T00:02:00Z","attempt":1}},
+		{"seq":4,"kind":"state.job.succeeded","runId":"R","jobId":"a","actor":{"id":"r1","type":"workflow"},"at":"2026-01-01T00:01:30Z","payload":{"runnerId":"r1","leaseEpoch":1,"resultDigest":"sha256:ra"}},
+		{"seq":5,"kind":"state.job.ready","runId":"R","jobId":"b","actor":{"id":"sys","type":"system"},"at":"2026-01-01T00:01:31Z","payload":{"attempt":1}}
+	]}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/log"):
+			_, _ = w.Write([]byte(eventsJSON))
+		case strings.Contains(r.URL.Path, "/objects/"):
+			_, _ = w.Write([]byte(planJSON))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	coord := &CoordClient{HTTP: srv.Client(), BaseURL: srv.URL + "/v1/organizations/o/projects/p/state"}
+	inner := NewRemoteStateBackend(
+		remotestate.NewClientWithScope(srv.URL, "test", stubToken{}, remotestate.Scope{OrgID: "o", ProjectID: "p"}), "r1")
+	b := NewCoordBackend(coord, inner, "r1")
+
+	st, meta, err := b.LoadRunState(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(st.Jobs) != 2 {
+		t.Fatalf("jobs: got %d, want 2 (plan DAG recovered)", len(st.Jobs))
+	}
+	if st.PlanChecksum != planDigest {
+		t.Fatalf("planChecksum: got %q, want %q", st.PlanChecksum, planDigest)
+	}
+	a := st.Jobs["a"]
+	if a == nil || a.Status != "completed" {
+		t.Fatalf("job a: %+v, want completed", a)
+	}
+	if a.StartedAt != "2026-01-01T00:01:00Z" || a.FinishedAt != "2026-01-01T00:01:30Z" {
+		t.Fatalf("job a timestamps recovered wrong: started=%q finished=%q", a.StartedAt, a.FinishedAt)
+	}
+	if b2 := st.Jobs["b"]; b2 == nil || b2.Status != "pending" {
+		t.Fatalf("job b: %+v, want pending (in plan, not yet claimed)", b2)
+	}
+	if meta.JobTotal != 2 || meta.JobDone != 1 || meta.JobFailed != 0 {
+		t.Fatalf("counts: total=%d done=%d failed=%d, want 2/1/0", meta.JobTotal, meta.JobDone, meta.JobFailed)
+	}
+	if meta.Status != "running" {
+		t.Fatalf("run status: got %q, want running", meta.Status)
+	}
+	if meta.User != "u1" || meta.StartedAt != "2026-01-01T00:00:00Z" {
+		t.Fatalf("meta header: user=%q startedAt=%q", meta.User, meta.StartedAt)
+	}
+}
+
+// With no native events (legacy/OP2-only run), LoadRunState falls back to inner.
+func TestCoordBackendLoadRunStateFallsBackWhenNoEvents(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/log") {
+			_, _ = w.Write([]byte(`{"events":[]}`))
+			return
+		}
+		// inner GetRun → minimal run so the fallback path returns without error.
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	coord := &CoordClient{HTTP: srv.Client(), BaseURL: srv.URL + "/v1/organizations/o/projects/p/state"}
+	inner := NewRemoteStateBackend(
+		remotestate.NewClientWithScope(srv.URL, "test", stubToken{}, remotestate.Scope{OrgID: "o", ProjectID: "p"}), "r1")
+	b := NewCoordBackend(coord, inner, "r1")
+
+	// The inner fallback hits GetRun (404 here) → an error, proving the fallback
+	// path was taken rather than the native fold (which would have panicked on a
+	// nil plan / empty events).
+	_, _, err := b.LoadRunState(context.Background(), "run-1")
+	if err == nil {
+		t.Fatalf("expected the inner fallback to surface its GetRun error on an empty native log")
+	}
+}

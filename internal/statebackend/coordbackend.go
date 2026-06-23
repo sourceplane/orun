@@ -8,6 +8,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/remotestate"
 )
 
 // HermeticLabel opts a job into memoization (coordination-api.md §1: hermetic is
@@ -181,8 +182,102 @@ func (b *CoordBackend) AppendStepLog(ctx context.Context, runID, jobID, content 
 	return b.inner.AppendStepLog(ctx, runID, jobID, content)
 }
 
+// LoadRunState reads run state from the authoritative native event log: it folds
+// the run's `…/log` stream (the same reduction the server runs) into ExecState +
+// ExecMetadata. The fold needs the job DAG, which events don't carry, so the plan
+// object is fetched by its planDigest and parsed for deps. A run with no native
+// events (e.g. a legacy/OP2-only run) falls back to the inner backend.
 func (b *CoordBackend) LoadRunState(ctx context.Context, runID string) (*execmodel.ExecState, *execmodel.ExecMetadata, error) {
-	return b.inner.LoadRunState(ctx, runID)
+	events, err := b.coord.ReadLog(ctx, wireRunID(runID), 0)
+	if err != nil || len(events) == 0 {
+		return b.inner.LoadRunState(ctx, runID)
+	}
+
+	// Recover the job DAG from the plan object referenced by RunCreated.
+	plan := CoordinationPlan{Jobs: map[string]PlanNode{}}
+	for _, e := range events {
+		if e.Kind == EventRunCreated && e.PlanDigest != "" {
+			if blob, gErr := b.inner.GetObject(ctx, e.PlanDigest); gErr == nil && blob != nil {
+				var bp remotestate.BackendPlan
+				if json.Unmarshal(blob, &bp) == nil {
+					for _, j := range bp.Jobs {
+						plan.Jobs[j.JobID] = PlanNode{Deps: j.Deps}
+					}
+				}
+			}
+			break
+		}
+	}
+
+	fold := Fold(events, plan)
+	st, meta := foldToExec(runID, fold, events)
+	return st, meta, nil
+}
+
+// foldToExec maps an authoritative fold into the presenter's ExecState/
+// ExecMetadata. Per-job and run timestamps are recovered from event `At` stamps
+// (the fold tracks phase, not time); Trigger is absent from the event log.
+func foldToExec(runID string, fold RunFoldState, events []CoordinationEvent) (*execmodel.ExecState, *execmodel.ExecMetadata) {
+	type times struct{ started, finished string }
+	jobTimes := map[string]*times{}
+	at := func(id string) *times {
+		t := jobTimes[id]
+		if t == nil {
+			t = &times{}
+			jobTimes[id] = t
+		}
+		return t
+	}
+	var runStarted, runFinished, user string
+	for _, e := range events {
+		switch e.Kind {
+		case EventRunCreated:
+			runStarted, user = e.At, e.Actor.ID
+		case EventRunCompleted, EventRunFailed, EventRunCanceled:
+			runFinished = e.At
+		case EventJobClaimed:
+			if t := at(e.JobID); t.started == "" {
+				t.started = e.At
+			}
+		case EventJobSucceeded, EventJobFailed, EventJobMemoized:
+			at(e.JobID).finished = e.At
+		}
+	}
+
+	st := &execmodel.ExecState{ExecID: runID, PlanChecksum: fold.PlanDigest, Jobs: make(map[string]*execmodel.JobState, len(fold.Jobs))}
+	done, failed := 0, 0
+	for id, j := range fold.Jobs {
+		phase := j.Phase
+		if phase == "memoized" {
+			phase = "succeeded" // a memoized job reads as completed
+		}
+		js := &execmodel.JobState{Status: remotestate.BackendJobStatusToLocal(phase), Steps: map[string]string{}, LastError: j.ErrorText}
+		if t := jobTimes[id]; t != nil {
+			js.StartedAt, js.FinishedAt = t.started, t.finished
+		}
+		// The lease expiry is the liveness/heartbeat proxy (mirrors the OP2 path).
+		js.HeartbeatAt = j.LeaseExpiresAt
+		st.Jobs[id] = js
+		switch j.Phase {
+		case "succeeded", "memoized":
+			done++
+		case "failed", "timed_out", "canceled":
+			failed++
+		}
+	}
+
+	meta := &execmodel.ExecMetadata{
+		ExecID:     runID,
+		PlanID:     fold.PlanDigest,
+		StartedAt:  runStarted,
+		FinishedAt: runFinished,
+		Status:     localRunStatus(fold.Phase),
+		User:       user,
+		JobTotal:   len(fold.Jobs),
+		JobDone:    done,
+		JobFailed:  failed,
+	}
+	return st, meta
 }
 
 func (b *CoordBackend) ReadJobLog(ctx context.Context, runID, jobID string) (string, error) {

@@ -160,6 +160,13 @@ func (r *RemoteStateBackend) EnsureObject(ctx context.Context, kind string, blob
 	return r.client.EnsureObject(ctx, kind, blob)
 }
 
+// GetObject fetches a CAS object's bytes by digest (nil, nil when absent).
+// Exposed so CoordBackend can fetch a run's plan object to recover the job DAG
+// the event-sourced fold needs (events carry only the planDigest).
+func (r *RemoteStateBackend) GetObject(ctx context.Context, digest string) ([]byte, error) {
+	return r.client.GetObject(ctx, digest)
+}
+
 // ClassifyTerminal returns "success" or "failed" for a terminal job, reading the
 // job back from the read model. Exposed for adapters that wrap this backend
 // (CoordBackend) and need to distinguish a completed job from a failed one when
