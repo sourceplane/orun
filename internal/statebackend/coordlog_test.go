@@ -39,7 +39,7 @@ func TestReadLogFoldsToState(t *testing.T) {
 	defer srv.Close()
 	c := &CoordClient{BaseURL: srv.URL}
 
-	events, err := c.ReadLog(context.Background(), "r", 0)
+	events, err := c.ReadLog(context.Background(), "r", 0, 0)
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestReadLogRespectsFromSeq(t *testing.T) {
 	defer srv.Close()
 	c := &CoordClient{BaseURL: srv.URL}
 
-	events, err := c.ReadLog(context.Background(), "r", 2)
+	events, err := c.ReadLog(context.Background(), "r", 2, 0)
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}

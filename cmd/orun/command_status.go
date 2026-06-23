@@ -189,6 +189,17 @@ func showRemoteExecution(runID string, backend statebackend.Backend, color bool)
 	return renderExecution(runID, meta, st, color)
 }
 
+// runEventWaiter is the optional, event-driven refresh seam: a backend that can
+// long-poll its run event stream (the native v2 CoordBackend) lets `--watch`
+// block until something actually changes instead of re-polling on a timer.
+type runEventWaiter interface {
+	WaitForRunEvents(ctx context.Context, runID string, sinceSeq, waitSeconds int) (int, error)
+}
+
+// watchLongPollSeconds is how long a single event-driven wait blocks before
+// looping to refresh — well under the server's 25s cap and typical edge timeouts.
+const watchLongPollSeconds = 15
+
 func watchRemoteExecution(runID string, backend statebackend.Backend, color bool) error {
 	interval := statusInterval
 	if interval < 200*time.Millisecond {
@@ -197,6 +208,16 @@ func watchRemoteExecution(runID string, backend statebackend.Backend, color bool
 	ctx := context.Background()
 	fmt.Print("\x1b[?25l")
 	defer fmt.Print("\x1b[?25h\n")
+
+	// Prefer event-driven refresh: block on the run's log stream until an event
+	// is appended. Backends without the stream (legacy OP2) fall back to polling.
+	waiter, _ := backend.(runEventWaiter)
+	sinceSeq := 0
+	if waiter != nil {
+		if hd, err := waiter.WaitForRunEvents(ctx, runID, 0, 0); err == nil {
+			sinceSeq = hd
+		}
+	}
 
 	for {
 		st, meta, err := backend.LoadRunState(ctx, runID)
@@ -209,9 +230,17 @@ func watchRemoteExecution(runID string, backend statebackend.Backend, color bool
 			}
 			if meta != nil {
 				s := strings.ToLower(strings.TrimSpace(meta.Status))
-				if s == "completed" || s == "failed" {
+				if s == "completed" || s == "failed" || s == "canceled" {
 					return nil
 				}
+			}
+		}
+		if waiter != nil {
+			// Block until the next event (or the long-poll lapses, which refreshes
+			// anyway as a liveness heartbeat). On error, fall back to a timed wait.
+			if newSeq, waitErr := waiter.WaitForRunEvents(ctx, runID, sinceSeq, watchLongPollSeconds); waitErr == nil {
+				sinceSeq = newSeq
+				continue
 			}
 		}
 		time.Sleep(interval)

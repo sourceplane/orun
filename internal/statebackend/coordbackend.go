@@ -176,6 +176,24 @@ func (b *CoordBackend) RunnableJobs(ctx context.Context, runID string) ([]string
 	return b.coord.Frontier(ctx, wireRunID(runID))
 }
 
+// WaitForRunEvents long-polls the run's event stream for any event past sinceSeq,
+// returning the new head seq (or sinceSeq unchanged when the wait lapses with no
+// new event). It powers an event-driven `status --watch` — the watcher blocks
+// here instead of re-polling on a fixed interval.
+func (b *CoordBackend) WaitForRunEvents(ctx context.Context, runID string, sinceSeq, waitSeconds int) (int, error) {
+	events, err := b.coord.ReadLog(ctx, wireRunID(runID), sinceSeq, waitSeconds)
+	if err != nil {
+		return sinceSeq, err
+	}
+	head := sinceSeq
+	for _, e := range events {
+		if e.Seq > head {
+			head = e.Seq
+		}
+	}
+	return head, nil
+}
+
 // ── Delegated to the inner backend (native surface does not yet own these) ──
 
 func (b *CoordBackend) AppendStepLog(ctx context.Context, runID, jobID, content string) error {
@@ -188,7 +206,7 @@ func (b *CoordBackend) AppendStepLog(ctx context.Context, runID, jobID, content 
 // object is fetched by its planDigest and parsed for deps. A run with no native
 // events (e.g. a legacy/OP2-only run) falls back to the inner backend.
 func (b *CoordBackend) LoadRunState(ctx context.Context, runID string) (*execmodel.ExecState, *execmodel.ExecMetadata, error) {
-	events, err := b.coord.ReadLog(ctx, wireRunID(runID), 0)
+	events, err := b.coord.ReadLog(ctx, wireRunID(runID), 0, 0)
 	if err != nil || len(events) == 0 {
 		return b.inner.LoadRunState(ctx, runID)
 	}

@@ -99,9 +99,15 @@ func (w wireEvent) toEvent() CoordinationEvent {
 
 // ReadLog fetches the run's event stream from fromSeq (exclusive) onward and
 // decodes it into fold-ready events. Fold(events, plan) yields authoritative
-// run state on the client side — the same reduction the server uses.
-func (c *CoordClient) ReadLog(ctx context.Context, runID string, fromSeq int) ([]CoordinationEvent, error) {
-	resp, err := c.do(ctx, http.MethodGet, fmt.Sprintf("/runs/%s/log?from=%d", runID, fromSeq), nil)
+// run state on the client side — the same reduction the server uses. A positive
+// waitSeconds turns the read into a long-poll: the server holds the request until
+// an event lands past the cursor or the wait lapses (live-tail without busy poll).
+func (c *CoordClient) ReadLog(ctx context.Context, runID string, fromSeq, waitSeconds int) ([]CoordinationEvent, error) {
+	path := fmt.Sprintf("/runs/%s/log?from=%d", runID, fromSeq)
+	if waitSeconds > 0 {
+		path += fmt.Sprintf("&wait=%d", waitSeconds)
+	}
+	resp, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}

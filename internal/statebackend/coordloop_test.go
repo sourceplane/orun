@@ -172,7 +172,7 @@ func TestRunLoopDrivesDiamondToCompletion(t *testing.T) {
 		t.Fatalf("execution order violates deps: %v", order)
 	}
 	// the run folds to succeeded
-	events, _ := c.ReadLog(context.Background(), "r", 0)
+	events, _ := c.ReadLog(context.Background(), "r", 0, 0)
 	if st := Fold(events, diamondPlan()); st.Phase != "succeeded" {
 		t.Fatalf("final phase = %s, want succeeded", st.Phase)
 	}
@@ -218,7 +218,7 @@ func TestRunLoopTerminatesOnJobFailure(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("run loop: %v", err)
 	}
-	events, _ := c.ReadLog(context.Background(), "r", 0)
+	events, _ := c.ReadLog(context.Background(), "r", 0, 0)
 	if st := Fold(events, diamondPlan()); st.Phase != "failed" {
 		t.Fatalf("final phase = %s, want failed", st.Phase)
 	}

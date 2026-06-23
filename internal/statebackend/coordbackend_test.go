@@ -366,3 +366,50 @@ func TestCoordBackendLoadRunStateFallsBackWhenNoEvents(t *testing.T) {
 		t.Fatalf("expected the inner fallback to surface its GetRun error on an empty native log")
 	}
 }
+
+// WaitForRunEvents long-polls the event stream and returns the advanced head.
+func TestCoordBackendWaitForRunEvents(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.RawQuery, "wait=") {
+			_, _ = w.Write([]byte(`{"events":[{"seq":3,"kind":"state.job.claimed","runId":"R","jobId":"a"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"events":[]}`))
+	}))
+	defer srv.Close()
+	coord := &CoordClient{HTTP: srv.Client(), BaseURL: srv.URL + "/v1/organizations/o/projects/p/state"}
+	b := NewCoordBackend(coord, nil, "r1")
+
+	head, err := b.WaitForRunEvents(context.Background(), "run-1", 2, 15)
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if head != 3 {
+		t.Fatalf("head: got %d, want 3 (advanced past the appended event)", head)
+	}
+	if !strings.Contains(gotQuery, "from=2") || !strings.Contains(gotQuery, "wait=15") {
+		t.Fatalf("long-poll query missing from/wait: %q", gotQuery)
+	}
+}
+
+// On a lapsed wait (no new event) the head is returned unchanged.
+func TestCoordBackendWaitForRunEventsTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"events":[]}`))
+	}))
+	defer srv.Close()
+	coord := &CoordClient{HTTP: srv.Client(), BaseURL: srv.URL + "/v1/organizations/o/projects/p/state"}
+	b := NewCoordBackend(coord, nil, "r1")
+
+	head, err := b.WaitForRunEvents(context.Background(), "run-1", 5, 1)
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if head != 5 {
+		t.Fatalf("head on timeout: got %d, want 5 (unchanged)", head)
+	}
+}

@@ -41,7 +41,7 @@ func (c *CoordClient) RunLoop(ctx context.Context, opts RunLoopOptions) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		events, err := c.ReadLog(ctx, opts.RunID, 0)
+		events, err := c.ReadLog(ctx, opts.RunID, 0, 0)
 		if err != nil {
 			return err
 		}
