@@ -48,10 +48,16 @@ forces execution.
 complete-with-result, takeover), with exactly-one-runner-per-job under a
 two-runner race; `lease_lost` halts the losing runner cleanly.
 
-## NC3 — Read-the-log UX + offline log — ⛔ Missing — still row-read + poll; no stream fold/SSE/offline log (pairs BM3)
+## NC3 — Read-the-log UX + offline log — 🟡 Partial — `status` now folds the native event log; no SSE/long-poll live-tail or offline log yet (pairs BM3)
 
-- `bridge.Source` folds the run stream; `status`/cockpit live-tail active runs via
-  SSE/long-poll, read the projection snapshot for finished runs.
+- ✅ `CoordBackend.LoadRunState` folds the run's native `…/log` stream into
+  ExecState/ExecMetadata (the same reduction the server runs): it reads the event
+  log, fetches the plan object by `planDigest` to recover the job DAG, `Fold()`s
+  the two, and recovers per-job + run timestamps from event `At` stamps. A run
+  with no native events falls back to the inner backend. (`Fold`/`ReadLog` were
+  built+golden-tested but unwired; this connects them.)
+- ⛔ Still: `status --watch`/cockpit live-tail via SSE/long-poll (read the
+  projection snapshot for finished runs), `logs --follow` tailing the sealed log.
 - `logs --follow` tails `LogChunk`/sealed `log` objects.
 - Offline: a local event log in `.orun/`; cloud sync ships/pulls appends and
   re-folds; `--local` escape hatch.
