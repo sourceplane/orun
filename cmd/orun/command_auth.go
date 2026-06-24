@@ -18,6 +18,8 @@ var (
 	authBackendURL string
 	authDevice     bool
 	authAudience   string
+	authLinkOrg    string
+	authNoLink     bool
 )
 
 var authCmd = &cobra.Command{
@@ -31,12 +33,14 @@ func registerAuthCommand(root *cobra.Command) {
 
 	loginCmd := &cobra.Command{
 		Use:   "login",
-		Short: "Authenticate this CLI with Orun",
+		Short: "Authenticate this CLI with Orun and link this repo",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAuthLogin()
 		},
 	}
 	loginCmd.Flags().BoolVar(&authDevice, "device", false, "Use the platform device login flow (RFC-8628)")
+	loginCmd.Flags().StringVar(&authLinkOrg, "org", "", "Org slug to link this repo under (when you belong to several)")
+	loginCmd.Flags().BoolVar(&authNoLink, "no-link", false, "Authenticate only; don't auto-link this repo")
 
 	statusCmd := &cobra.Command{
 		Use:   "status",
@@ -66,31 +70,10 @@ func registerAuthCommand(root *cobra.Command) {
 	authCmd.AddCommand(loginCmd, statusCmd, logoutCmd, tokenCmd)
 }
 
+// runAuthLogin authenticates and auto-links the current repo, sharing its
+// engine with the top-level `orun login`.
 func runAuthLogin() error {
-	backendURL, err := requireBackendURL(loadIntentForCloudConfig(), authBackendURL)
-	if err != nil {
-		return err
-	}
-	ctx := context.Background()
-	var creds *cliauth.Credentials
-	if authDevice {
-		creds, err = cliauth.DeviceLogin(ctx, backendURL, version, os.Stdout)
-	} else {
-		creds, err = cliauth.BrowserLogin(ctx, backendURL, version, os.Stdout, nil)
-	}
-	if err != nil {
-		return err
-	}
-	color := ui.ColorEnabledForWriter(os.Stdout)
-	fmt.Printf("%s logged in as %s\n", ui.Green(color, "✓"), valueOrUnknown(creds.DisplayUser()))
-	fmt.Printf("  backend: %s\n", backendURL)
-	if len(creds.Orgs) > 0 {
-		fmt.Printf("  orgs: %s\n", formatOrgs(creds.Orgs))
-	}
-	if exp := creds.AccessExpiryTime(); !exp.IsZero() {
-		fmt.Printf("  access token expires: %s\n", exp.Format(time.RFC3339))
-	}
-	return nil
+	return runConnect(authBackendURL, authDevice, authLinkOrg, authNoLink)
 }
 
 func runAuthStatus() error {

@@ -157,31 +157,41 @@ func runCloudLink() error {
 	return nil
 }
 
-// resolveOrCreateLink runs the OC2 scope-resolution flow against the platform:
-// resolve the remote, then 0 candidates → org picker + create, 1 → use it,
-// >1 → org/project picker. The non-interactive --org/--project form resolves or
-// creates directly with no prompts.
+// resolveOrCreateLink is the `orun cloud link` entrypoint: it runs the
+// scope-resolution flow using the --org/--project flags. The auto-link path
+// (`orun login`/`orun run`) calls resolveOrCreateLinkFor directly with explicit
+// org/project args.
 func resolveOrCreateLink(ctx context.Context, client *cliauth.BackendClient, token, remoteURL string) (*cliauth.WorkspaceLink, error) {
+	return resolveOrCreateLinkFor(ctx, client, token, remoteURL, cloudLinkOrg, cloudLinkProj)
+}
+
+// resolveOrCreateLinkFor runs the OC2 scope-resolution flow against the
+// platform: resolve the remote, then 0 candidates → org picker + create, 1 →
+// use it, >1 → org/project picker. A non-empty orgSlug (and optional
+// projectSlug) resolves or creates directly with no prompts. The created
+// project is always named after the repo (empty projectSlug ⇒ the server
+// derives it from the remote — "a project is a repo").
+func resolveOrCreateLinkFor(ctx context.Context, client *cliauth.BackendClient, token, remoteURL, orgSlug, projectSlug string) (*cliauth.WorkspaceLink, error) {
 	resolved, err := client.ResolveLinks(ctx, token, remoteURL)
 	if err != nil {
 		return nil, translateLinkAPIError(err, remoteURL)
 	}
 
-	// Non-interactive form: --org [--project] resolves/creates directly.
-	if strings.TrimSpace(cloudLinkOrg) != "" {
-		if link := matchExistingLink(resolved.Links, cloudLinkOrg, cloudLinkProj); link != nil {
+	// Non-interactive form: orgSlug [+ projectSlug] resolves/creates directly.
+	if strings.TrimSpace(orgSlug) != "" {
+		if link := matchExistingLink(resolved.Links, orgSlug, projectSlug); link != nil {
 			return link, nil
 		}
-		orgID := orgIDForSlug(resolved, cloudLinkOrg)
+		orgID := orgIDForSlug(resolved, orgSlug)
 		if orgID == "" {
 			// Fall back to the session orgs (resolve only returns candidates the
-			// actor may link for that remote; --org may name a broader org).
-			orgID = sessionOrgIDForSlug(cloudLinkOrg)
+			// actor may link for that remote; orgSlug may name a broader org).
+			orgID = sessionOrgIDForSlug(orgSlug)
 		}
 		if orgID == "" {
-			orgID = cloudLinkOrg // let the server resolve a slug it accepts
+			orgID = orgSlug // let the server resolve a slug it accepts
 		}
-		link, err := client.CreateLink(ctx, token, orgID, remoteURL, cloudLinkProj)
+		link, err := client.CreateLink(ctx, token, orgID, remoteURL, projectSlug)
 		if err != nil {
 			return nil, translateLinkAPIError(err, remoteURL)
 		}

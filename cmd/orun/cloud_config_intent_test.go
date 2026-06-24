@@ -57,8 +57,9 @@ func TestLoadIntentForCloudConfigMissingReturnsNil(t *testing.T) {
 }
 
 // TestCommandResolvesCloudConfig pins which command groups opt into
-// intent-based backend-URL discovery: auth/cloud (and the login/logout
-// aliases) yes; catalog/run no (so the catalog auto-refresh hook is unaffected).
+// intent-based backend-URL discovery: the auth and cloud groups yes; run and
+// the OCI-registry `login` no (so the catalog auto-refresh hook and registry
+// login are unaffected).
 func TestCommandResolvesCloudConfig(t *testing.T) {
 	root := &cobra.Command{Use: "orun"}
 	auth := &cobra.Command{Use: "auth"}
@@ -67,16 +68,18 @@ func TestCommandResolvesCloudConfig(t *testing.T) {
 	cloud := &cobra.Command{Use: "cloud"}
 	cloudLink := &cobra.Command{Use: "link"}
 	cloud.AddCommand(cloudLink)
-	login := &cobra.Command{Use: "login"}
+	registryLogin := &cobra.Command{Use: "login"} // OCI registry login (command_publish.go)
 	run := &cobra.Command{Use: "run"}
-	root.AddCommand(auth, cloud, login, run)
+	root.AddCommand(auth, cloud, registryLogin, run)
 
-	for _, c := range []*cobra.Command{auth, authLogin, cloud, cloudLink, login} {
+	for _, c := range []*cobra.Command{auth, authLogin, cloud, cloudLink} {
 		if !commandResolvesCloudConfig(c) {
 			t.Errorf("commandResolvesCloudConfig(%q) = false, want true", c.Name())
 		}
 	}
-	if commandResolvesCloudConfig(run) {
-		t.Error("commandResolvesCloudConfig(run) = true, want false")
+	for _, c := range []*cobra.Command{registryLogin, run} {
+		if commandResolvesCloudConfig(c) {
+			t.Errorf("commandResolvesCloudConfig(%q) = true, want false", c.Name())
+		}
 	}
 }
