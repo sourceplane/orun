@@ -13,7 +13,10 @@ permissions:
 
 env:
   GITHUB_TOKEN: ${{ github.token }}
-  ORUN_BACKEND_URL: https://api-edge-prod.oruncloud.workers.dev
+  # Keep CI on the backend that trusts this repo's GitHub-OIDC CI identity.
+  # Moving to api-edge-prod is blocked until that OIDC CI trust is configured on
+  # api-edge's identity worker (else create-run resource-hides as 404).
+  ORUN_BACKEND_URL: https://orun-api.sourceplane.ai
   ORUN_ARTIFACT_BACKEND: github
   ORUN_ARTIFACT_UPLOAD: "true"
 
