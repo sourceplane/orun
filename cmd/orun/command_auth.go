@@ -112,7 +112,7 @@ func runAuthStatus() error {
 	}
 	repo, repoErr := resolveRepoContext(resolvedBackend)
 	if repoErr == nil && repo != nil && repo.RepoFullName != "" {
-		status := ui.Yellow(color, "not linked")
+		status := ui.Yellow(color, "not connected")
 		if repo.OrgID != "" && repo.ProjectID != "" {
 			status = ui.Green(color, "linked")
 		} else if repo.NamespaceID != "" {

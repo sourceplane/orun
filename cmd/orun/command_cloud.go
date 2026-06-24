@@ -33,15 +33,18 @@ func registerCloudCommand(root *cobra.Command) {
 
 	linkCmd := &cobra.Command{
 		Use:   "link",
-		Short: "Link the current repo to an Orun Cloud org/project",
-		Long: `Link the current repo to an Orun Cloud org/project.
+		Short: "Link this repo to an Orun Cloud org (advanced; auth login auto-links)",
+		Long: `Link the current repo to an Orun Cloud org.
 
-Detects the git remote, resolves it against the platform, and caches the
-org/project link in ~/.orun/config.yaml. With no candidate links it presents an
-org picker (creating the project on demand); with several it presents an
-org/project picker. The non-interactive form skips all prompts:
+Most users never need this: 'orun auth login' already connects and links this
+repo automatically — the repo is the project, named after the git repo. Use
+'orun cloud link' to choose a specific org when you belong to several, to
+re-link, or to override the name.
 
-  orun cloud link --org acme --project platform
+Detects the git remote, resolves it against the platform, and caches the link
+in ~/.orun/config.yaml. The non-interactive form skips all prompts:
+
+  orun cloud link --org acme
 
 The Orun CLI session from 'orun auth login' is used for authorization; no
 GitHub PAT or OAuth token is required.`,
@@ -49,12 +52,12 @@ GitHub PAT or OAuth token is required.`,
 			return runCloudLink()
 		},
 	}
-	linkCmd.Flags().StringVar(&cloudLinkOrg, "org", "", "Org slug to link to (non-interactive)")
-	linkCmd.Flags().StringVar(&cloudLinkProj, "project", "", "Project slug to link to (non-interactive; created on demand)")
+	linkCmd.Flags().StringVar(&cloudLinkOrg, "org", "", "Org slug to link this repo under (non-interactive)")
+	linkCmd.Flags().StringVar(&cloudLinkProj, "project", "", "Repo name to link under (advanced; defaults to the git repo name)")
 
 	unlinkCmd := &cobra.Command{
 		Use:   "unlink",
-		Short: "Drop the local org/project link for the current repo",
+		Short: "Drop the local Orun Cloud link for the current repo",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCloudUnlink()
 		},
@@ -62,7 +65,7 @@ GitHub PAT or OAuth token is required.`,
 
 	statusCmd := &cobra.Command{
 		Use:   "status",
-		Short: "Show the active org/project link for the current repo",
+		Short: "Show the active Orun Cloud link for the current repo",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCloudStatus()
 		},
@@ -70,7 +73,7 @@ GitHub PAT or OAuth token is required.`,
 
 	openCmd := &cobra.Command{
 		Use:   "open",
-		Short: "Open the project's Orun Cloud console page in the browser",
+		Short: "Open this repo's Orun Cloud console page in the browser",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCloudOpen()
 		},
@@ -208,7 +211,7 @@ func resolveOrCreateLinkFor(ctx context.Context, client *cliauth.BackendClient, 
 		return pickOrgAndCreate(ctx, client, token, remoteURL, resolved)
 	default:
 		// Multiple existing links: pick which org/project to use.
-		idx, err := pickFromLinks("This repo has multiple linked org/projects. Choose one:", resolved.Links)
+		idx, err := pickFromLinks("This repo is linked in multiple orgs. Choose one:", resolved.Links)
 		if err != nil {
 			return nil, err
 		}
@@ -422,12 +425,12 @@ func runCloudStatus() error {
 	fmt.Printf("Remote:      %s\n", valueOrUnknown(repo.GitRemote))
 	fmt.Printf("Backend URL: %s\n", valueOrUnknown(backendURL))
 	if link == nil || (strings.TrimSpace(link.OrgID) == "" && strings.TrimSpace(link.ProjectID) == "") {
-		fmt.Printf("Link:        %s — run `orun cloud link`\n", ui.Yellow(color, "not linked"))
+		fmt.Printf("Link:        %s — run `orun auth login`\n", ui.Yellow(color, "not connected"))
 		return nil
 	}
 	fmt.Printf("Link:        %s\n", ui.Green(color, "linked"))
 	fmt.Printf("Org:         %s\n", valueOrUnknown(linkOrgLabel(link)))
-	fmt.Printf("Project:     %s\n", valueOrUnknown(linkProjectLabel(link)))
+	fmt.Printf("Repo:        %s\n", valueOrUnknown(linkProjectLabel(link)))
 	if normalized := strings.TrimSpace(link.RepoID); normalized != "" && link.OrgID != localScopeSegment {
 		fmt.Printf("Normalized:  %s\n", normalized)
 	}
@@ -451,7 +454,7 @@ func runCloudOpen() error {
 		return err
 	}
 	if link == nil || strings.TrimSpace(link.OrgSlug) == "" || strings.TrimSpace(link.ProjectSlug) == "" {
-		return fmt.Errorf("repo is not linked to an Orun Cloud org/project; run `orun cloud link` first")
+		return fmt.Errorf("this repo isn't connected to Orun Cloud yet; run `orun auth login` first")
 	}
 	consoleURL, err := consoleProjectURL(backendURL, link.OrgSlug, link.ProjectSlug)
 	if err != nil {
