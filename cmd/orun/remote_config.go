@@ -187,13 +187,15 @@ func parseGitHubRepoFullName(remoteURL string) string {
 }
 
 // errRepoNotLinked is the fail-fast error for an unlinked repo on a
-// --remote-state entry point (design §7 row 3).
+// --remote-state entry point (design §7 row 3). Since `orun auth login` now
+// authenticates and auto-links in one step (UO1), it is the next command we
+// point at; `orun cloud link` remains available to choose a specific org.
 func errRepoNotLinked(backendURL string) error {
-	cmd := "orun cloud link"
+	cmd := "orun auth login"
 	if strings.TrimSpace(backendURL) != "" {
-		cmd = fmt.Sprintf("orun cloud link --backend-url %s", backendURL)
+		cmd = fmt.Sprintf("orun auth login --backend-url %s", backendURL)
 	}
-	return fmt.Errorf("this repo is not linked to an Orun Cloud org/project; run `%s`", cmd)
+	return fmt.Errorf("this repo isn't connected to Orun Cloud yet; run `%s` to link it (or `orun cloud link --org <slug>` to pick the org)", cmd)
 }
 
 // errBackendUnreachable is the fail-fast error when the Orun Cloud backend
