@@ -196,10 +196,12 @@ Key points:
   (`deriveSlugFromRemote`). The CLI never invents or asks for a project name.
 - **Ask about org at most once.** The chosen org is cached in the `RepoLink`
   (`~/.orun/config.yaml`), so subsequent commands never re-prompt.
-- **Zero-org actors.** If the actor belongs to no org and none can be created
-  for the remote, the platform's per-owner default-org materialization (epic
-  OV2) applies; until that ships, fail with: *"no org available to link this
-  repo; create one at <console> or pass `--org`."*
+- **Zero-org actors (UO2, shipped).** If the actor belongs to no org, the CLI
+  materializes a personal org — named/slugged after the session handle (GitHub
+  login, else email local-part, else display name) — via
+  `POST /v1/organizations` and links the repo under it, so a brand-new user's
+  first `orun auth login` lands a working `org/repo`. A slug collision retries
+  once with a short random suffix. (`materializePersonalOrg`, `command_cloud.go`.)
 - **CI keeps working.** GitHub Actions OIDC already resolves scope server-side
   (`OIDCTokenSource.ResolvedScope`); auto-link is a no-op there and the existing
   CI path is untouched.

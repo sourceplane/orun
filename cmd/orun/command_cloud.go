@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -273,7 +275,15 @@ func pickOrgAndCreate(ctx context.Context, client *cliauth.BackendClient, token,
 		orgs = sessionOrgs()
 	}
 	if len(orgs) == 0 {
-		return nil, fmt.Errorf("no orgs available to link %s; run `orun auth login` again to refresh org access", remoteURL)
+		// UO2: a brand-new user belongs to no org. Rather than dead-ending,
+		// materialize a personal org so their first login lands a working
+		// org/repo, then link under it (no prompt — there's exactly one org).
+		org, err := materializePersonalOrg(ctx, client, token)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(os.Stderr, "%s created your personal org %s\n", ui.Green(ui.ColorEnabledForWriter(os.Stderr), "✓"), valueOrUnknown(org.Label))
+		orgs = []orgChoice{org}
 	}
 	if !termIsInteractive() {
 		return nil, fmt.Errorf("repo %s is not linked and no candidate is selected; re-run with `orun cloud link --org <slug> [--project <slug>]`", remoteURL)
@@ -338,6 +348,77 @@ func orgChoiceLabel(slug, id string) string {
 		return slug
 	}
 	return id
+}
+
+// materializePersonalOrg creates a personal org for the actor when they belong
+// to none (UO2). On a slug collision (e.g. another user shares the handle) it
+// retries once with a short random suffix.
+func materializePersonalOrg(ctx context.Context, client *cliauth.BackendClient, token string) (orgChoice, error) {
+	name, slug := personalOrgIdentity()
+	org, err := client.CreateOrg(ctx, token, name, slug)
+	if err != nil {
+		var apiErr *cliauth.APIError
+		if errors.As(err, &apiErr) && apiErr.Status == 409 {
+			org, err = client.CreateOrg(ctx, token, name, slug+"-"+shortToken())
+		}
+		if err != nil {
+			return orgChoice{}, fmt.Errorf("could not create a personal org to link this repo: %w", err)
+		}
+	}
+	return orgChoice{ID: org.ID, Slug: org.Slug, Label: orgChoiceLabel(org.Slug, org.ID)}, nil
+}
+
+// personalOrgIdentity derives a display name and slug for the actor's personal
+// org from the cached session: GitHub login, else email local-part, else
+// display name, else "my".
+func personalOrgIdentity() (name, slug string) {
+	handle := "my"
+	if creds, err := cliauth.LoadSession(); err == nil && creds != nil {
+		switch {
+		case strings.TrimSpace(creds.GitHubLogin) != "":
+			handle = strings.TrimSpace(creds.GitHubLogin)
+		case strings.TrimSpace(creds.User.Email) != "":
+			handle = strings.SplitN(strings.TrimSpace(creds.User.Email), "@", 2)[0]
+		case strings.TrimSpace(creds.User.DisplayName) != "":
+			handle = strings.TrimSpace(creds.User.DisplayName)
+		}
+	}
+	return handle, slugifyOrg(handle)
+}
+
+// slugifyOrg renders s as a valid org slug (lowercase alnum collapsed by single
+// hyphens, 2..63 chars), falling back to a random slug when nothing usable
+// remains. Mirrors the server's slug rules so the first create attempt is
+// accepted without a round-trip.
+func slugifyOrg(s string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	slug := strings.Trim(b.String(), "-")
+	if len(slug) < 2 {
+		slug = "org-" + shortToken()
+	}
+	if len(slug) > 63 {
+		slug = strings.Trim(slug[:63], "-")
+	}
+	return slug
+}
+
+// shortToken returns a short random hex token for slug disambiguation.
+func shortToken() string {
+	buf := make([]byte, 3)
+	if _, err := cryptorand.Read(buf); err != nil {
+		return "x1y2"
+	}
+	return hex.EncodeToString(buf)
 }
 
 // pickFromOrgs prompts the user to select an org by number.
