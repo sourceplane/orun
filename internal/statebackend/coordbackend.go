@@ -46,9 +46,11 @@ func jobInputHashFor(job model.PlanJob) string {
 // (tracked as the §5 /events primitive, log sealing, and a §2-native create).
 //
 // This is how `orun run` adopts the event-sourced coordination plane without a
-// full client rewrite, selected with ORUN_COORDINATION=v2. The lease epoch that
-// :claim returns is the conditional-append key for :heartbeat/:complete, so it
-// is threaded across calls — kept per job for the single run this backend drives.
+// full client rewrite — it is the default backend (the legacy OP2 relational
+// path is decommissioned; ORUN_COORDINATION=legacy is a temporary escape hatch).
+// The lease epoch that :claim returns is the conditional-append key for
+// :heartbeat/:complete, so it is threaded across calls — kept per job for the
+// single run this backend drives.
 type CoordBackend struct {
 	coord    *CoordClient
 	inner    *RemoteStateBackend

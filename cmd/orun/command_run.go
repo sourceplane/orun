@@ -503,11 +503,13 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	runnerID := statebackend.DeriveRunnerID()
 	remoteBackend := statebackend.NewRemoteStateBackend(client, runnerID)
 	var backend statebackend.Backend = remoteBackend
-	// Opt-in (NC): drive coordination over the native v2 event-sourced wire —
-	// claim/heartbeat/complete and the runnable frontier become conditional
-	// appends/reads against the per-run shard (coordination-api.md §2/§3). Run
-	// create, logs, and read-model loads still delegate to the v1 client.
-	if os.Getenv("ORUN_COORDINATION") == "v2" {
+	// Coordination runs over the native v2 event-sourced wire by default
+	// (coordination-api.md §2/§3): claim/heartbeat/complete and the runnable
+	// frontier are conditional appends/reads against the per-run shard. The
+	// legacy OP2 relational path is decommissioned; set ORUN_COORDINATION=legacy
+	// only as a temporary escape hatch. Run create, logs, and read-model loads
+	// still delegate to the inner REST client (same backend, not the old plane).
+	if !strings.EqualFold(os.Getenv("ORUN_COORDINATION"), "legacy") {
 		coord := &statebackend.CoordClient{BaseURL: client.ScopedStateBaseURL(), TokenSource: tokenSrc}
 		backend = statebackend.NewCoordBackend(coord, remoteBackend, runnerID)
 	}
