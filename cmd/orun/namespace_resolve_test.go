@@ -135,8 +135,13 @@ func TestIsOSSBackend(t *testing.T) {
 
 func TestErrRepoNotLinked(t *testing.T) {
 	err := errRepoNotLinked("https://api.orun.cloud")
+	// Primary next step is the unified auth-login (it auto-links since UO1);
+	// `orun cloud link` is offered as the org-picking alternative.
+	if !strings.Contains(err.Error(), "orun auth login") {
+		t.Errorf("expected `orun auth login` hint, got: %v", err)
+	}
 	if !strings.Contains(err.Error(), "orun cloud link") {
-		t.Errorf("expected `orun cloud link` hint, got: %v", err)
+		t.Errorf("expected `orun cloud link` alternative, got: %v", err)
 	}
 }
 

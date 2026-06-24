@@ -470,15 +470,35 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		return fmt.Errorf("remote state auth: %w", err)
 	}
 
-	// With a usable session, fail-fast on an obviously unlinked repo before any
-	// backend state call (design §7 row 3): outside CI, with no explicit/linked
-	// scope and no legacy local link, surface the exact next command instead of
-	// a 404 from the server. The OSS single-tenant backend (fixed _local/_local)
-	// is always "linked".
+	// With a usable session but no resolved scope, self-heal by linking this
+	// repo now rather than dead-ending (UO3, design §7 row 3 delta): outside CI,
+	// with no explicit/linked scope and no legacy local link, auto-link and adopt
+	// the resulting org/project. autoLinkRepo auto-picks the org when unambiguous,
+	// prompts once when interactive, or errors (naming --org) when ambiguous and
+	// non-interactive. The OSS single-tenant backend (fixed _local/_local) is
+	// always "linked" and skips this. A missing git remote falls back to the
+	// fail-fast unlinked error.
 	if os.Getenv("GITHUB_ACTIONS") != "true" &&
 		scope.OrgID == "" && scope.ProjectID == "" &&
 		namespaceID == "" && !isOSSBackend(backendURL) {
-		return errRepoNotLinked(backendURL)
+		_, link, created, linkErr := autoLinkRepo(ctx, backendURL, runOrg, runProject)
+		if linkErr != nil {
+			if isNoGitRemoteErr(linkErr) {
+				return errRepoNotLinked(backendURL)
+			}
+			return linkErr
+		}
+		if link == nil {
+			return errRepoNotLinked(backendURL)
+		}
+		scope = resolveScope(runOrg, runProject, link.OrgID, link.ProjectID)
+		if strings.TrimSpace(namespaceID) == "" {
+			namespaceID = strings.TrimSpace(link.NamespaceID)
+		}
+		if created {
+			fmt.Fprintf(os.Stderr, "%s linked this repo → %s\n",
+				ui.Green(ui.ColorEnabledForWriter(os.Stderr), "✓"), repoLinkLabel(link))
+		}
 	}
 	if namespaceID == "" {
 		namespaceID = resolvedNamespaceID
