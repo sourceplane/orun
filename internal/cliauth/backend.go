@@ -456,6 +456,37 @@ func (c *BackendClient) CreateLink(ctx context.Context, accessToken, orgID, remo
 	return wrapped.Link, nil
 }
 
+// CreateOrg creates an organization the actor owns (POST /v1/organizations) and
+// returns it as an OrgRef. Used by the zero-org auto-link path (UO2) to
+// materialize a personal org on first login. A 409 (slug already taken)
+// surfaces as an *APIError so the caller can retry with a different slug.
+func (c *BackendClient) CreateOrg(ctx context.Context, accessToken, name, slug string) (*OrgRef, error) {
+	body := map[string]string{"name": name}
+	if s := strings.TrimSpace(slug); s != "" {
+		body["slug"] = s
+	}
+	var wrapped struct {
+		Organization struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			Slug string `json:"slug"`
+		} `json:"organization"`
+	}
+	if err := c.doJSONData(ctx, http.MethodPost, "/v1/organizations",
+		map[string]string{"Authorization": "Bearer " + accessToken}, body, &wrapped); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(wrapped.Organization.ID) == "" {
+		return nil, &APIError{Code: "INVALID_RESPONSE", Message: "org create returned no organization"}
+	}
+	return &OrgRef{
+		ID:   wrapped.Organization.ID,
+		Slug: wrapped.Organization.Slug,
+		Name: wrapped.Organization.Name,
+		Role: "owner",
+	}, nil
+}
+
 // BrowserLogin performs the platform browser login (POST /v1/auth/cli/start,
 // OP1). It opens the returned authorizeUrl, then POLLS cli/token (grantType
 // "cli_code" + cliCode) until the console approves the grant and a session is
