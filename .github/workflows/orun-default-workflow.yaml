@@ -13,7 +13,7 @@ permissions:
 
 env:
   GITHUB_TOKEN: ${{ github.token }}
-  ORUN_BACKEND_URL: https://orun-api.sourceplane.ai
+  ORUN_BACKEND_URL: https://api-edge-prod.oruncloud.workers.dev
   ORUN_ARTIFACT_BACKEND: github
   ORUN_ARTIFACT_UPLOAD: "true"
 
