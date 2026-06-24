@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sourceplane/orun/internal/cliauth"
+	"github.com/sourceplane/orun/internal/loader"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/remotestate"
 )
@@ -85,6 +86,26 @@ func resolveScope(flagOrg, flagProject, linkOrg, linkProject string) remotestate
 		scope.ProjectID = strings.TrimSpace(linkProject)
 	}
 	return scope
+}
+
+// loadIntentForCloudConfig reads execution.state (backend URL / mode) from the
+// discovered intent.yaml for the auth and cloud command groups, which do not
+// otherwise compile the intent. It is a raw best-effort parse
+// (loader.LoadIntent, not a full component resolve) so that a repo whose
+// components don't fully resolve can still contribute its declared backendUrl;
+// execution.state is read identically either way. Any read/parse error yields
+// nil and backend-URL resolution falls through to the flag/env/user-config
+// layers (preserving prior behavior outside a repo).
+func loadIntentForCloudConfig() *model.Intent {
+	path := strings.TrimSpace(intentFile)
+	if path == "" {
+		return nil
+	}
+	intent, err := loader.LoadIntent(path)
+	if err != nil {
+		return nil
+	}
+	return intent
 }
 
 func requireBackendURL(intent *model.Intent, explicit string) (string, error) {
