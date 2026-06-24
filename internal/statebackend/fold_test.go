@@ -63,6 +63,16 @@ func evCanceled(seq int) CoordinationEvent {
 	}
 }
 
+// Run-terminal *signals* the server now emits (coordination-api.md §3). The fold
+// derives run phase from job phases, so these must be tolerated as no-ops.
+func evRunCompleted(seq int) CoordinationEvent {
+	return CoordinationEvent{Seq: seq, Kind: EventRunCompleted, RunID: "r", Actor: vecActor, At: vecAT, V: 1}
+}
+
+func evRunFailed(seq int, reason string) CoordinationEvent {
+	return CoordinationEvent{Seq: seq, Kind: EventRunFailed, RunID: "r", Actor: vecActor, At: vecAT, V: 1, Reason: reason}
+}
+
 func job(jobID string, mut func(*JobFoldState)) *JobFoldState {
 	j := &JobFoldState{JobID: jobID, Phase: "queued", Attempt: 1}
 	if mut != nil {
@@ -166,6 +176,39 @@ func foldGoldenVectors() []foldVector {
 					"d": job("d", func(j *JobFoldState) { j.Phase = "succeeded"; j.ResultDigest = "sha256:res-d" }),
 				},
 				Frontier: []string{}, LastSeq: 9,
+			},
+		},
+		{
+			name: "explicit run.completed signal is a no-op (phase still derived from jobs)",
+			plan: linearPlan(),
+			events: []CoordinationEvent{
+				evCreated(1), evClaimed(2, "a"), evSucceeded(3, "a", "sha256:res-a"),
+				evClaimed(4, "b"), evSucceeded(5, "b", "sha256:res-b"),
+				evRunCompleted(6), // the server's run-terminal signal — fold must tolerate it
+			},
+			expected: RunFoldState{
+				RunID: "r", PlanDigest: "sha256:plan", SourceHash: "sha256:src", Phase: "succeeded",
+				Jobs: map[string]*JobFoldState{
+					"a": job("a", func(j *JobFoldState) { j.Phase = "succeeded"; j.ResultDigest = "sha256:res-a" }),
+					"b": job("b", func(j *JobFoldState) { j.Phase = "succeeded"; j.ResultDigest = "sha256:res-b" }),
+				},
+				Frontier: []string{}, LastSeq: 6,
+			},
+		},
+		{
+			name: "explicit run.failed signal is a no-op (phase still derived from jobs)",
+			plan: linearPlan(),
+			events: []CoordinationEvent{
+				evCreated(1), evClaimed(2, "a"), evFailed(3, "a", "step_failed", "boom"),
+				evRunFailed(4, "job_failed"),
+			},
+			expected: RunFoldState{
+				RunID: "r", PlanDigest: "sha256:plan", SourceHash: "sha256:src", Phase: "failed",
+				Jobs: map[string]*JobFoldState{
+					"a": job("a", func(j *JobFoldState) { j.Phase = "failed"; j.ErrorText = "boom" }),
+					"b": job("b", nil),
+				},
+				Frontier: []string{}, LastSeq: 4,
 			},
 		},
 		{
