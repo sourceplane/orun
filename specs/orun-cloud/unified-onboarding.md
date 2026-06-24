@@ -107,7 +107,7 @@ one contract, two servers; same digests everywhere).
 ### 2.1 First run, happy path
 
 ```console
-➜  multi-tenant-saas orun login
+➜  multi-tenant-saas orun auth login
 → opening https://app-edge-stage.oruncloud.workers.dev/cli/approve?… in your browser
 ✓ logged in as rahul@sourceplane.ai
 ✓ linked this repo → acme/multi-tenant-saas        (backend: api-edge-stage.oruncloud.workers.dev)
@@ -115,7 +115,13 @@ one contract, two servers; same digests everywhere).
 ➜  multi-tenant-saas orun run                       # just works
 ```
 
-`orun login`:
+> Naming note (as-built, UO1): the unified verb is `orun auth login` (the
+> command the user asked to unify around). There is **no** top-level
+> `orun login` — that name is already the OCI registry login
+> (`orun login <registry>`, used by `orun publish`). `orun auth logout`
+> remains the logout verb.
+
+`orun auth login`:
 1. Resolves the backend URL from `intent.yaml execution.state.backendUrl`
    (flag/env still override). **No `--backend-url` needed.**
 2. Runs the existing browser (or `--device`) auth flow against it.
@@ -140,27 +146,28 @@ override (`--org`/`ORUN_ORG`), never a generic 404.
 
 | Command | Behavior |
 |---|---|
-| `orun login` | **New top-level verb.** Auth + auto-link in one step. Alias of an enhanced `orun auth login`. `--device`, `--org <slug>`, `--backend-url`. |
-| `orun logout` | **New top-level alias** for `orun auth logout`. |
-| `orun auth login` | Now also auto-links after authenticating (same engine as `orun login`). `--no-link` opts out. |
+| `orun auth login` | **The unified verb.** Auth + auto-link in one step. `--device`, `--org <slug>`, `--backend-url`, `--no-link` (auth only). |
+| `orun auth logout` | Unchanged. |
 | `orun auth status` | Unchanged surface; "Current Git remote: … (linked)" line now reads `repo` vocabulary. |
 | `orun status` | Cloud-aware: logged-in user, backend, and **this repo → org/repo**. |
 | `orun cloud link` | **Demoted to advanced/override**, not a required setup step. Used only to *re-link*, switch org (`--org`), or force a different name. No longer referenced by any "do this next" error. |
 | `orun cloud unlink` / `status` / `open` | Unchanged. |
 
-`orun auth login` stays the canonical, documented entry (the user asked to
-"unify with `orun auth`"); `orun login`/`orun logout` are the friendly
-top-level aliases modern CLIs expose. Both run the identical engine.
+`orun auth login` is the canonical, documented entry (the user asked to "unify
+with `orun auth`"). A top-level `orun login` was considered but **rejected**:
+that name is already the OCI registry login (`orun login <registry>`, used by
+`orun publish`), so shadowing it would be ambiguous. The auth + auto-link engine
+(`runConnect` / `autoLinkRepo`) is factored to be reused by `orun run` (§5).
 
 ---
 
 ## 3. Auto-link algorithm
 
-A single helper — call it `autoLinkRepo(ctx, backendURL, opts)` in a new
-`cmd/orun/cloud_autolink.go` — is shared by `login`, enhanced `auth login`, and
-`run`. It is the existing `resolveOrCreateLink` logic
-(`cmd/orun/command_cloud.go:164`) repackaged as a non-interactive-first,
-self-healing primitive:
+A single helper — `autoLinkRepo(ctx, backendURL, orgSlug, projectSlug,
+interactive)` in `cmd/orun/command_login.go` (as-built, UO1) — is shared by
+`auth login` and (UO3) `run`. It wraps the existing scope-resolution logic
+(`resolveOrCreateLinkFor`, refactored out of `resolveOrCreateLink` in
+`cmd/orun/command_cloud.go`) as a non-interactive-first, self-healing primitive:
 
 ```
 autoLinkRepo(backendURL, {org, interactive}):
@@ -299,9 +306,9 @@ UO4–UO5 finish the vocabulary and docs.
 
 ## 9. Open questions
 
-1. **Top-level verb naming.** `orun login` (recommended) vs only enhancing
-   `orun auth login`. Recommendation: ship both; `auth login` canonical, `login`
-   alias.
+1. ~~**Top-level verb naming.**~~ **Resolved (UO1):** `orun auth login` is the
+   unified verb. No top-level `orun login` — it collides with the existing OCI
+   registry login (`orun login <registry>`).
 2. **Auto-link in `run` by default.** Recommended **on** for interactive
    sessions, **off** (fail-with-`--org`) for non-interactive, never silent in
    CI. Could be gated behind `execution.state.autolink: true` if teams want it

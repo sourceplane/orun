@@ -221,15 +221,14 @@ func commandUsesIntent(cmd *cobra.Command) bool {
 }
 
 // commandResolvesCloudConfig reports whether cmd resolves the backend/auth
-// endpoint from intent.yaml execution.state: the auth and cloud command groups
-// (plus the top-level login/logout aliases). It is deliberately separate from
-// commandUsesIntent so these commands get intent-based backend-URL discovery
-// without being treated as object-catalog commands (which would trigger the
-// universal auto-refresh hook).
+// endpoint from intent.yaml execution.state: the auth and cloud command groups.
+// It is deliberately separate from commandUsesIntent so these commands get
+// intent-based backend-URL discovery without being treated as object-catalog
+// commands (which would trigger the universal auto-refresh hook).
 func commandResolvesCloudConfig(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "auth", "cloud", "login", "logout":
+		case "auth", "cloud":
 			return true
 		}
 	}
