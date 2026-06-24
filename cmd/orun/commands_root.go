@@ -91,8 +91,11 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
-		// Intent auto-discovery: walk up directory tree to find intent.yaml
-		if !cmd.Flags().Changed("intent") && commandUsesIntent(cmd) {
+		// Intent auto-discovery: walk up directory tree to find intent.yaml.
+		// The auth/cloud groups also resolve the backend URL from
+		// intent.yaml execution.state, so they opt in via
+		// commandResolvesCloudConfig without being treated as catalog commands.
+		if !cmd.Flags().Changed("intent") && (commandUsesIntent(cmd) || commandResolvesCloudConfig(cmd)) {
 			cwd, err := os.Getwd()
 			if err != nil {
 				return nil
@@ -213,6 +216,22 @@ func commandUsesIntent(cmd *cobra.Command) bool {
 	}
 	if parent := cmd.Parent(); parent != nil {
 		return commandUsesIntent(parent)
+	}
+	return false
+}
+
+// commandResolvesCloudConfig reports whether cmd resolves the backend/auth
+// endpoint from intent.yaml execution.state: the auth and cloud command groups
+// (plus the top-level login/logout aliases). It is deliberately separate from
+// commandUsesIntent so these commands get intent-based backend-URL discovery
+// without being treated as object-catalog commands (which would trigger the
+// universal auto-refresh hook).
+func commandResolvesCloudConfig(cmd *cobra.Command) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		switch c.Name() {
+		case "auth", "cloud", "login", "logout":
+			return true
+		}
 	}
 	return false
 }

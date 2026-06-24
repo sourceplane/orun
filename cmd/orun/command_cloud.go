@@ -112,7 +112,7 @@ func errNotLoggedIn() error {
 }
 
 func runCloudLink() error {
-	backendURL, err := requireBackendURL(nil, cloudBackendURL)
+	backendURL, err := requireBackendURL(loadIntentForCloudConfig(), cloudBackendURL)
 	if err != nil {
 		return err
 	}
@@ -369,7 +369,7 @@ func promptChoice(prompt string, labels []string) (int, error) {
 }
 
 func runCloudUnlink() error {
-	backendURL, err := requireBackendURL(nil, cloudBackendURL)
+	backendURL, err := requireBackendURL(loadIntentForCloudConfig(), cloudBackendURL)
 	if err != nil {
 		return err
 	}
@@ -396,7 +396,7 @@ func runCloudUnlink() error {
 }
 
 func runCloudStatus() error {
-	backendURL, _ := requireBackendURL(nil, cloudBackendURL)
+	backendURL, _ := requireBackendURL(loadIntentForCloudConfig(), cloudBackendURL)
 	repo, err := resolveRepoContext(backendURL)
 	if err != nil {
 		return err
@@ -425,7 +425,7 @@ func runCloudStatus() error {
 }
 
 func runCloudOpen() error {
-	backendURL, err := requireBackendURL(nil, cloudBackendURL)
+	backendURL, err := requireBackendURL(loadIntentForCloudConfig(), cloudBackendURL)
 	if err != nil {
 		return err
 	}

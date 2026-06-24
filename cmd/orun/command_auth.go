@@ -67,7 +67,7 @@ func registerAuthCommand(root *cobra.Command) {
 }
 
 func runAuthLogin() error {
-	backendURL, err := requireBackendURL(nil, authBackendURL)
+	backendURL, err := requireBackendURL(loadIntentForCloudConfig(), authBackendURL)
 	if err != nil {
 		return err
 	}
@@ -94,7 +94,7 @@ func runAuthLogin() error {
 }
 
 func runAuthStatus() error {
-	backendURL, _ := requireBackendURL(nil, authBackendURL)
+	backendURL, _ := requireBackendURL(loadIntentForCloudConfig(), authBackendURL)
 	creds, err := cliauth.LoadSession()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -146,7 +146,7 @@ func runAuthLogout() error {
 		return err
 	}
 	if creds != nil && strings.TrimSpace(creds.RefreshToken) != "" {
-		backendURL, backendErr := requireBackendURL(nil, authBackendURL)
+		backendURL, backendErr := requireBackendURL(loadIntentForCloudConfig(), authBackendURL)
 		if backendErr == nil {
 			client := cliauth.NewBackendClient(backendURL, version)
 			// Best-effort revoke (POST /v1/auth/cli/revoke); local creds are
@@ -163,7 +163,7 @@ func runAuthLogout() error {
 }
 
 func runAuthToken() error {
-	backendURL, err := requireBackendURL(nil, authBackendURL)
+	backendURL, err := requireBackendURL(loadIntentForCloudConfig(), authBackendURL)
 	if err != nil {
 		return err
 	}
