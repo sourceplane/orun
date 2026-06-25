@@ -2,6 +2,7 @@ package objremote
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -236,6 +237,41 @@ func TestSyncShortCircuitsWhenRefMatches(t *testing.T) {
 	if cd.missingCalls != before {
 		t.Fatalf("missingCalls = %d, want %d (short-circuit skips the scan)", cd.missingCalls, before)
 	}
+}
+
+func TestPushParallelUploadsWholeClosure(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	local, remote := endpoint(t), endpoint(t)
+
+	// A tree whose leaf count exceeds uploadConcurrency, so the bounded parallel
+	// uploader copies in several waves; every object must still land.
+	const leaves = 50
+	entries := make([]objectstore.TreeEntry, 0, leaves)
+	for i := 0; i < leaves; i++ {
+		leaf, err := local.Objects.PutBlob(ctx, []byte(fmt.Sprintf("leaf-%d", i)))
+		if err != nil {
+			t.Fatalf("PutBlob %d: %v", i, err)
+		}
+		entries = append(entries, objectstore.TreeEntry{Name: fmt.Sprintf("f-%02d", i), Kind: objectstore.KindBlob, ID: leaf})
+	}
+	root, err := local.Objects.PutTree(ctx, entries)
+	if err != nil {
+		t.Fatalf("PutTree: %v", err)
+	}
+	if err := local.Refs.Update(ctx, "trees/big", "", string(root)); err != nil {
+		t.Fatalf("ref update: %v", err)
+	}
+
+	res, err := Push(ctx, local, remote, "trees/big")
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if res.Closure != leaves+1 || res.Copied != leaves+1 || !res.RefMoved {
+		t.Fatalf("push result = %+v, want %d closure/copied", res, leaves+1)
+	}
+	// The remote holds the full closure reachable from the moved ref.
+	reachable(t, remote, "trees/big")
 }
 
 func TestVerifyCopied(t *testing.T) {

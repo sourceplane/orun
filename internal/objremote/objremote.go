@@ -11,10 +11,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/objectstore/refstore"
+	"golang.org/x/sync/errgroup"
 )
+
+// uploadConcurrency bounds how many objects are copied to the destination at
+// once. Uploads are independent and idempotent, so the only reason to cap them
+// is to avoid opening an unbounded number of connections for a large delta; 8 is
+// enough to hide per-request latency without flooding the host.
+const uploadConcurrency = 8
 
 // Endpoint bundles an object store with its ref store.
 type Endpoint struct {
@@ -68,12 +76,30 @@ func Sync(ctx context.Context, from, to Endpoint, refName string) (Result, error
 	}
 	res.Skipped = len(ids) - len(missing)
 
-	// Copy only what the destination lacks.
-	for _, id := range missing {
-		if err := copyObject(ctx, from.Objects, to.Objects, id); err != nil {
+	// Copy what the destination lacks, in parallel. Each object is
+	// content-addressed and its put is idempotent, so the copies are independent
+	// and order-free; the ref is not advanced until every copy lands, so a
+	// partial failure never leaves a reachable-but-incomplete closure. Bounded by
+	// uploadConcurrency. On the first error the group cancels the rest and Sync
+	// reports however many copies had already completed.
+	if len(missing) > 0 {
+		var copied atomic.Int64
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(uploadConcurrency)
+		for _, id := range missing {
+			g.Go(func() error {
+				if err := copyObject(gctx, from.Objects, to.Objects, id); err != nil {
+					return err
+				}
+				copied.Add(1)
+				return nil
+			})
+		}
+		err := g.Wait()
+		res.Copied = int(copied.Load())
+		if err != nil {
 			return res, err
 		}
-		res.Copied++
 	}
 
 	// Advance the destination ref (CAS, bounded retry on a lost race). A no-op
