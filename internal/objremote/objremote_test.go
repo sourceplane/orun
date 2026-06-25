@@ -144,6 +144,100 @@ func TestSyncSourceRefMissing(t *testing.T) {
 	}
 }
 
+// countingDest wraps a real ObjectStore and implements objectstore.MissingFilter,
+// counting batch MissingObjects calls and per-object Has calls so a test can
+// assert Sync negotiates a closure's presence in one batch rather than one
+// Has per object. Its MissingObjects delegates to the embedded store's Has, so
+// the wrapper's own Has counter stays at zero on the batch path.
+type countingDest struct {
+	objectstore.ObjectStore
+	hasCalls     int
+	missingCalls int
+}
+
+func (c *countingDest) Has(ctx context.Context, id objectstore.ObjectID) (bool, error) {
+	c.hasCalls++
+	return c.ObjectStore.Has(ctx, id)
+}
+
+func (c *countingDest) MissingObjects(ctx context.Context, ids []objectstore.ObjectID) ([]objectstore.ObjectID, error) {
+	c.missingCalls++
+	var missing []objectstore.ObjectID
+	for _, id := range ids {
+		has, err := c.ObjectStore.Has(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if !has {
+			missing = append(missing, id)
+		}
+	}
+	return missing, nil
+}
+
+func countingEndpoint(t *testing.T) (Endpoint, *countingDest) {
+	t.Helper()
+	root := t.TempDir()
+	store, err := objectstore.NewLocalStore(objectstore.LocalConfig{Root: root})
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	refs, err := refstore.NewLocalRefStore(refstore.LocalConfig{Root: root, Clock: clock.Fixed{}})
+	if err != nil {
+		t.Fatalf("refs: %v", err)
+	}
+	cd := &countingDest{ObjectStore: store}
+	return Endpoint{Objects: cd, Refs: refs}, cd
+}
+
+func TestSyncUsesBatchMissingFilter(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	local := endpoint(t)
+	remote, cd := countingEndpoint(t)
+	seal(t, local, "exec_001")
+
+	res, err := Push(ctx, local, remote, "executions/latest")
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if res.Closure == 0 || res.Copied != res.Closure || !res.RefMoved {
+		t.Fatalf("push result = %+v", res)
+	}
+	// The whole closure's presence is negotiated in a single batch call, and the
+	// per-object Has path is never taken.
+	if cd.missingCalls != 1 {
+		t.Fatalf("missingCalls = %d, want 1 (whole closure in one batch)", cd.missingCalls)
+	}
+	if cd.hasCalls != 0 {
+		t.Fatalf("hasCalls = %d, want 0 (batch path must not probe per-object)", cd.hasCalls)
+	}
+}
+
+func TestSyncShortCircuitsWhenRefMatches(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	local := endpoint(t)
+	remote, cd := countingEndpoint(t)
+	seal(t, local, "exec_001")
+
+	if _, err := Push(ctx, local, remote, "executions/latest"); err != nil {
+		t.Fatalf("Push 1: %v", err)
+	}
+	before := cd.missingCalls
+	res, err := Push(ctx, local, remote, "executions/latest")
+	if err != nil {
+		t.Fatalf("Push 2: %v", err)
+	}
+	if res.Copied != 0 || res.Skipped != res.Closure || res.RefMoved {
+		t.Fatalf("second push should short-circuit: %+v", res)
+	}
+	// A matching destination ref returns before any presence negotiation.
+	if cd.missingCalls != before {
+		t.Fatalf("missingCalls = %d, want %d (short-circuit skips the scan)", cd.missingCalls, before)
+	}
+}
+
 func TestVerifyCopied(t *testing.T) {
 	t.Parallel()
 	if err := verifyCopied("sha256:a", "sha256:a"); err != nil {
