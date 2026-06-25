@@ -26,6 +26,16 @@ type ObjectTransport interface {
 	PutObject(ctx context.Context, digest, kind string, framed []byte) error
 }
 
+// BatchMissingTransport is an OPTIONAL ObjectTransport capability: answer a
+// digest-negotiation for many digests in a single call, returning the absent
+// subset. A RemoteStore uses it when present to satisfy MissingObjects in one
+// round-trip (chunked by the transport); otherwise it falls back to a per-digest
+// HasObject scan. The hosted object plane implements it over the batch
+// /objects/missing endpoint.
+type BatchMissingTransport interface {
+	MissingObjects(ctx context.Context, digests []string) (missing []string, err error)
+}
+
 // RemoteStore is an ObjectStore backed by a remote object plane (R2/S3/Orun
 // Cloud) over an ObjectTransport. It is the SAME interface as LocalStore plus a
 // transport; the ModelReader read seam (objmodel) and the sync engine
@@ -123,6 +133,45 @@ func (r *RemoteStore) Has(ctx context.Context, id ObjectID) (bool, error) {
 	return r.t.HasObject(ctx, string(id))
 }
 
+// MissingObjects reports which ids are absent remotely. When the transport
+// supports batch digest negotiation (BatchMissingTransport) it answers the whole
+// set in one round-trip — the seam objremote.Sync relies on to avoid an
+// O(closure) burst of presence requests on push. Otherwise it falls back to a
+// per-id HasObject scan, matching Has. Satisfies objectstore.MissingFilter.
+func (r *RemoteStore) MissingObjects(ctx context.Context, ids []ObjectID) ([]ObjectID, error) {
+	for _, id := range ids {
+		if _, _, err := parseID(id); err != nil {
+			return nil, err
+		}
+	}
+	if bt, ok := r.t.(BatchMissingTransport); ok {
+		digests := make([]string, len(ids))
+		for i, id := range ids {
+			digests[i] = string(id)
+		}
+		missing, err := bt.MissingObjects(ctx, digests)
+		if err != nil {
+			return nil, fmt.Errorf("objectstore: remote missing scan: %w", err)
+		}
+		out := make([]ObjectID, 0, len(missing))
+		for _, d := range missing {
+			out = append(out, ObjectID(d))
+		}
+		return out, nil
+	}
+	var out []ObjectID
+	for _, id := range ids {
+		has, err := r.t.HasObject(ctx, string(id))
+		if err != nil {
+			return nil, fmt.Errorf("objectstore: remote has %s: %w", id, err)
+		}
+		if !has {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
 // Walk visits every object reachable from root depth-first, fetching each tree
 // to recurse. It drives the same shared DFS as the local stores; for the read
 // path (objmodel) this is rarely needed, but it lets objremote.Pull mirror a
@@ -144,4 +193,7 @@ func (r *RemoteStore) Delete(_ context.Context, _ ObjectID) error {
 	return fmt.Errorf("%w: Delete", ErrUnsupported)
 }
 
-var _ ObjectStore = (*RemoteStore)(nil)
+var (
+	_ ObjectStore   = (*RemoteStore)(nil)
+	_ MissingFilter = (*RemoteStore)(nil)
+)

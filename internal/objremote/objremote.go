@@ -40,7 +40,7 @@ func Sync(ctx context.Context, from, to Endpoint, refName string) (Result, error
 	}
 	target := objectstore.ObjectID(ref.Target)
 
-	// Collect the closure from the source (children + parents).
+	// Collect the closure from the source (a local walk: cheap disk reads).
 	var ids []objectstore.ObjectID
 	if err := from.Objects.Walk(ctx, target, func(id objectstore.ObjectID, _ objectstore.Kind) error {
 		ids = append(ids, id)
@@ -50,16 +50,26 @@ func Sync(ctx context.Context, from, to Endpoint, refName string) (Result, error
 	}
 	res.Closure = len(ids)
 
+	// Fast path: the destination ref already names this target. Its closure was
+	// fully copied before the ref advanced (moveRef runs last, below), so every
+	// object is guaranteed present — skip the network presence scan entirely.
+	// This is what makes an unchanged re-push near-instant.
+	if cur, err := to.Refs.Read(ctx, refName); err == nil && cur.Target == ref.Target {
+		res.Skipped = len(ids)
+		return res, nil
+	}
+
+	// Resolve the destination's absent subset. A batch-capable destination (the
+	// hosted object plane) answers in one round-trip; a plain store falls back to
+	// a per-object Has scan inside missingObjects.
+	missing, err := missingObjects(ctx, to.Objects, ids)
+	if err != nil {
+		return res, err
+	}
+	res.Skipped = len(ids) - len(missing)
+
 	// Copy only what the destination lacks.
-	for _, id := range ids {
-		has, err := to.Objects.Has(ctx, id)
-		if err != nil {
-			return res, fmt.Errorf("objremote: dest has %s: %w", id, err)
-		}
-		if has {
-			res.Skipped++
-			continue
-		}
+	for _, id := range missing {
 		if err := copyObject(ctx, from.Objects, to.Objects, id); err != nil {
 			return res, err
 		}
@@ -74,6 +84,32 @@ func Sync(ctx context.Context, from, to Endpoint, refName string) (Result, error
 	}
 	res.RefMoved = moved
 	return res, nil
+}
+
+// missingObjects returns the subset of ids absent from dst. A destination that
+// implements objectstore.MissingFilter (the hosted object plane) answers the
+// whole closure in one batched round-trip; any other store is probed per object
+// with Has — cheap for a local file:// destination, where a "round-trip" is a
+// disk stat.
+func missingObjects(ctx context.Context, dst objectstore.ObjectStore, ids []objectstore.ObjectID) ([]objectstore.ObjectID, error) {
+	if bf, ok := dst.(objectstore.MissingFilter); ok {
+		missing, err := bf.MissingObjects(ctx, ids)
+		if err != nil {
+			return nil, fmt.Errorf("objremote: missing scan: %w", err)
+		}
+		return missing, nil
+	}
+	var missing []objectstore.ObjectID
+	for _, id := range ids {
+		has, err := dst.Has(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("objremote: dest has %s: %w", id, err)
+		}
+		if !has {
+			missing = append(missing, id)
+		}
+	}
+	return missing, nil
 }
 
 // Push copies local's ref closure to the remote and advances the remote ref.

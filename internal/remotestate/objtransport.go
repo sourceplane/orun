@@ -29,6 +29,37 @@ func (t objectTransport) HasObject(ctx context.Context, digest string) (bool, er
 	return true, nil
 }
 
+// objectsMissingChunk bounds how many digests ride in one /objects/missing
+// negotiation. A closure larger than this is split across requests so the JSON
+// body stays well under the platform's request budget; in practice a catalog
+// closure is a single chunk, so a push negotiates presence in one round-trip
+// instead of one per object.
+const objectsMissingChunk = 1000
+
+// MissingObjects reports which of digests the object plane lacks, batching the
+// digest negotiation (chunked) rather than probing one digest at a time. This is
+// the capability objectstore.RemoteStore.MissingObjects / objremote.Sync use to
+// collapse a push's set-difference scan from O(closure) round-trips to ~1.
+// Implements objectstore.BatchMissingTransport.
+func (t objectTransport) MissingObjects(ctx context.Context, digests []string) ([]string, error) {
+	if len(digests) == 0 {
+		return nil, nil
+	}
+	var missing []string
+	for start := 0; start < len(digests); start += objectsMissingChunk {
+		end := start + objectsMissingChunk
+		if end > len(digests) {
+			end = len(digests)
+		}
+		got, err := t.c.ObjectsMissing(ctx, digests[start:end])
+		if err != nil {
+			return nil, err
+		}
+		missing = append(missing, got...)
+	}
+	return missing, nil
+}
+
 // GetObject downloads the framed bytes; a 404 maps to ok=false.
 func (t objectTransport) GetObject(ctx context.Context, digest string) ([]byte, bool, error) {
 	body, err := t.c.GetObject(ctx, digest)
@@ -87,6 +118,7 @@ func (c *Client) RemoteStores() (objectstore.ObjectStore, refstore.RefStore) {
 
 // Interface conformance — these adapt the objectstore/refstore transport seams.
 var (
-	_ objectstore.ObjectTransport = objectTransport{}
-	_ refstore.RefTransport       = refTransport{}
+	_ objectstore.ObjectTransport       = objectTransport{}
+	_ objectstore.BatchMissingTransport = objectTransport{}
+	_ refstore.RefTransport             = refTransport{}
 )

@@ -44,6 +44,82 @@ func (f *fakeObjectTransport) PutObject(_ context.Context, digest, _ string, fra
 	return nil
 }
 
+// batchObjectTransport is a fakeObjectTransport that also answers the batch
+// digest negotiation, counting how many MissingObjects calls it served so a test
+// can assert the whole closure was negotiated in one round-trip.
+type batchObjectTransport struct {
+	*fakeObjectTransport
+	batchCalls int
+}
+
+func newBatchObjectTransport() *batchObjectTransport {
+	return &batchObjectTransport{fakeObjectTransport: newFakeObjectTransport()}
+}
+
+func (f *batchObjectTransport) MissingObjects(_ context.Context, digests []string) ([]string, error) {
+	f.batchCalls++
+	var missing []string
+	for _, d := range digests {
+		if _, ok := f.objs[d]; !ok {
+			missing = append(missing, d)
+		}
+	}
+	return missing, nil
+}
+
+func TestRemoteStoreMissingObjectsBatch(t *testing.T) {
+	ctx := context.Background()
+	bt := newBatchObjectTransport()
+	r := NewRemoteStore(bt, "", "")
+
+	present, err := r.PutBlob(ctx, []byte("present"))
+	if err != nil {
+		t.Fatalf("PutBlob: %v", err)
+	}
+	absent := ObjectID("sha256:" + "00000000000000000000000000000000000000000000000000000000000000ab")
+
+	missing, err := r.MissingObjects(ctx, []ObjectID{present, absent})
+	if err != nil {
+		t.Fatalf("MissingObjects: %v", err)
+	}
+	if len(missing) != 1 || missing[0] != absent {
+		t.Fatalf("missing = %v, want [%s]", missing, absent)
+	}
+	// The whole set must be negotiated in a single batch round-trip.
+	if bt.batchCalls != 1 {
+		t.Fatalf("batchCalls = %d, want 1", bt.batchCalls)
+	}
+}
+
+func TestRemoteStoreMissingObjectsFallback(t *testing.T) {
+	ctx := context.Background()
+	// fakeObjectTransport does NOT implement BatchMissingTransport, so the store
+	// falls back to a per-id HasObject scan.
+	r := NewRemoteStore(newFakeObjectTransport(), "", "")
+
+	present, err := r.PutBlob(ctx, []byte("present"))
+	if err != nil {
+		t.Fatalf("PutBlob: %v", err)
+	}
+	absent := ObjectID("sha256:" + "00000000000000000000000000000000000000000000000000000000000000ab")
+
+	missing, err := r.MissingObjects(ctx, []ObjectID{present, absent})
+	if err != nil {
+		t.Fatalf("MissingObjects: %v", err)
+	}
+	if len(missing) != 1 || missing[0] != absent {
+		t.Fatalf("missing = %v, want [%s]", missing, absent)
+	}
+}
+
+func TestRemoteStoreMissingObjectsRejectsBadID(t *testing.T) {
+	ctx := context.Background()
+	r := NewRemoteStore(newBatchObjectTransport(), "", "")
+	if _, err := r.MissingObjects(ctx, []ObjectID{"not-a-digest"}); err == nil {
+		t.Fatalf("MissingObjects(bad id) = nil, want error")
+	}
+}
+
 func TestRemoteStoreBlobRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	r := NewRemoteStore(newFakeObjectTransport(), "", "")

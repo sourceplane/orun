@@ -61,6 +61,18 @@ type ObjectStore interface {
 	Delete(ctx context.Context, id ObjectID) error
 }
 
+// MissingFilter is an OPTIONAL ObjectStore capability: report, in a single
+// operation, which of many ids are absent. Stores backed by a network plane
+// implement it so a presence scan over a whole closure collapses into one (or a
+// few chunked) round-trip(s) instead of one round-trip per object. Callers MUST
+// fall back to per-id Has when a store does not implement it — a local store has
+// no reason to (its Has is a cheap disk stat).
+type MissingFilter interface {
+	// MissingObjects returns the subset of ids the store does not have. The
+	// result order is unspecified; each absent id appears at most once.
+	MissingObjects(ctx context.Context, ids []ObjectID) ([]ObjectID, error)
+}
+
 // computeBlobID frames data as a blob and returns (serialized, id) under algo.
 func computeBlobID(algo Algo, data []byte) ([]byte, ObjectID, error) {
 	serialized := frame(KindBlob, data)
