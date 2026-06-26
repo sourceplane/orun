@@ -58,6 +58,25 @@ named environment head instead of the project-wide head.`,
 	parent.AddCommand(cmd)
 }
 
+// validatePushToken eagerly resolves a session/static token before any object
+// sync. ResolveTokenSource only constructs a SessionTokenSource from whatever
+// session file is present — it does not prove a token can be minted — so a
+// logged-out or expired/revoked session otherwise slips through and surfaces as
+// a raw token error from deep inside objremote.Sync (after a refresh
+// round-trip's delay), and only deterministically as the actionable login
+// message on the *next* run once the stale session is cleared. Resolving here
+// maps the failure to the clean message on every run and skips the wasted sync.
+// (OIDC sources are exchanged + validated by the caller, so they skip this.)
+func validatePushToken(ctx context.Context, tokenSrc remotestate.TokenSource) error {
+	if _, err := tokenSrc.Token(ctx); err != nil {
+		if isNoLoginErr(err) {
+			return errNotLoggedIn()
+		}
+		return fmt.Errorf("remote state auth: %w", err)
+	}
+	return nil
+}
+
 func runCatalogPush() error {
 	ctx := context.Background()
 	backendURL, err := requireBackendURL(nil, catalogPushBackendURL)
@@ -123,6 +142,8 @@ func pushResolvedCatalog(ctx context.Context, backendURL, orgFlag, projectFlag, 
 		if scope.ProjectID == "" {
 			scope.ProjectID = exProject
 		}
+	} else if err := validatePushToken(ctx, tokenSrc); err != nil {
+		return err
 	}
 	client := remotestate.NewClientWithScope(backendURL, version, tokenSrc, scope)
 	remoteStore, remoteRefs := client.RemoteStores()
