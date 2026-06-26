@@ -177,6 +177,7 @@ execution:
 | --- | --- | --- |
 | `mode` | `local` (default) or `remote` | Where execution state is stored |
 | `backendUrl` | URI | URL of the orun-backend instance (required when `mode: remote`) |
+| `autopushCatalog` | bool (default `false`) | When `true`, a successful `orun plan` best-effort publishes the resolved catalog and advances the head — but only on the **clean default branch**, debounced so an unchanged catalog is a no-op, and never failing the plan (silent unless `ORUN_VERBOSE`). Equivalent to the user-level `cloud.catalog.autopush`; either being set enables it. For explicit, fail-loud publishing use `orun plan --push-catalog` or `orun catalog refresh --push`. |
 
 The `backendUrl` can also be supplied via `--backend-url` or `ORUN_BACKEND_URL`; those take priority over the intent file.
 
