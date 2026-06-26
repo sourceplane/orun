@@ -141,6 +141,7 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | `--untracked` | Scope to untracked files |
 | `--explain` | Print how `--changed` resolved its base and head refs |
 | `--no-catalog-refresh` | Skip the pre-plan catalog refresh; plan without catalog context |
+| `--push-catalog` | After planning, sync the resolved catalog snapshot to the configured backend and advance the head (like `catalog refresh --push`). Requires a configured backend; conflicts with `--no-catalog-refresh` |
 | `--catalog-strict` | Fail the plan on catalog resolution errors |
 | `--trigger` | Named trigger binding for environment activation |
 | `--from-ci` | CI provider for event normalization (e.g. `github`) |
