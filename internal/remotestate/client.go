@@ -24,6 +24,13 @@ const (
 	retryBaseDelay     = 2 * time.Second
 	retryMaxDelay      = 10 * time.Second
 
+	// maxIdleConnsPerHost caps idle keep-alive connections kept per backend host.
+	// The default (2) would force the parallel object uploader (objremote, 8
+	// concurrent PUTs to the single state host) to re-dial — a fresh TCP+TLS
+	// handshake — for every connection beyond the second. Sized above that
+	// fan-out so a push reuses warm connections instead.
+	maxIdleConnsPerHost = 16
+
 	// ContractVersion is the wire-contract major this client speaks. It is
 	// sent as the Orun-Contract-Version header on every request; the server
 	// rejects unknown majors with 409 contract_version_unsupported (see the
@@ -140,11 +147,25 @@ func NewClient(baseURL, version string, tokenSrc TokenSource) *Client {
 // An empty Scope (or empty fields) defaults to the OSS single-tenant
 // _local/_local scope.
 func NewClientWithScope(baseURL, version string, tokenSrc TokenSource, scope Scope) *Client {
+	// A custom DialContext conservatively disables HTTP/2 auto-negotiation, so
+	// ForceAttemptHTTP2 is required to let a single multiplexed connection carry
+	// the push's batched-missing call, parallel PUTs, and head advance. Proxy +
+	// the idle-pool/handshake timeouts mirror http.DefaultTransport (which a
+	// hand-rolled transport otherwise loses): without Proxy the client would
+	// silently bypass HTTPS_PROXY, and a too-small idle pool re-dials under the
+	// parallel uploader.
 	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   connectTimeout,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   maxIdleConnsPerHost,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
 	}
 	return &Client{
 		baseURL:   strings.TrimRight(baseURL, "/"),
