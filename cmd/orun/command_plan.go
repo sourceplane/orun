@@ -1,6 +1,10 @@
 package main
 
-import "github.com/spf13/cobra"
+import (
+	"context"
+
+	"github.com/spf13/cobra"
+)
 
 var (
 	planName             string
@@ -10,6 +14,7 @@ var (
 	githubOutput         bool
 	planNoCatalogRefresh bool
 	planCatalogStrict    bool
+	planPushCatalog      bool
 )
 
 var planCmd = &cobra.Command{
@@ -21,8 +26,32 @@ var planCmd = &cobra.Command{
 		if len(args) > 0 {
 			planComponents = append(planComponents, args[0])
 		}
-		return generatePlan()
+		if err := generatePlan(); err != nil {
+			return err
+		}
+		// --push-catalog: plan already refreshed the object-model catalog and
+		// repointed catalogs/current, so the snapshot is ready to publish. Reuse
+		// the `catalog push` flow to sync it and advance the head. Explicit opt-in
+		// → fail loud (mirrors `catalog refresh --push`); the config-driven
+		// best-effort auto-sync is a separate, quieter path.
+		if planPushCatalog {
+			return pushCatalogAfterPlan(cmd.Context())
+		}
+		return nil
 	},
+}
+
+// pushCatalogAfterPlan publishes the just-resolved catalog to the configured
+// backend after a successful `plan --push-catalog`. The backend is resolved from
+// --backend-url/ORUN_BACKEND_URL/intent.yaml; the head is the project-wide head
+// (a dirty worktree still yields a local-only snapshot, which pushResolvedCatalog
+// surfaces).
+func pushCatalogAfterPlan(ctx context.Context) error {
+	backendURL, err := requireBackendURL(loadIntentForCloudConfig(), "")
+	if err != nil {
+		return err
+	}
+	return pushResolvedCatalog(ctx, backendURL, "", "", "")
 }
 
 func registerPlanCommand(root *cobra.Command) {
@@ -52,8 +81,12 @@ func registerPlanCommand(root *cobra.Command) {
 	planCmd.Flags().BoolVar(&githubOutput, "github-output", false, "Write matrix/plan_id/exec_id to $GITHUB_OUTPUT")
 
 	planCmd.Flags().BoolVar(&planNoCatalogRefresh, "no-catalog-refresh", false, "Skip catalog refresh; plan proceeds without catalog context")
+	planCmd.Flags().BoolVar(&planPushCatalog, "push-catalog", false, "After planning, sync the resolved catalog snapshot to the configured backend and advance the head")
 	planCmd.Flags().BoolVar(&planCatalogStrict, "catalog-strict", false, "Fail plan on catalog resolution errors")
 
 	// env-scoping (Z model): --env and --all-envs are mutually exclusive.
 	planCmd.MarkFlagsMutuallyExclusive("env", "all-envs")
+	// --push-catalog publishes the catalog this run resolved, so it cannot be
+	// combined with skipping the refresh (there would be nothing fresh to push).
+	planCmd.MarkFlagsMutuallyExclusive("push-catalog", "no-catalog-refresh")
 }
