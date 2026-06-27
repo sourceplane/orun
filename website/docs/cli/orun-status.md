@@ -77,9 +77,15 @@ Default view — single execution:
   ✗ my-plan-20240530-7a8b9c   my-plan         12/38    1m05s     2d
 ```
 
-`--watch` re-renders this exact frame on a poll loop driven by
-`internal/cockpit/watch` — the same loop the TUI subscribes to — and
-exits cleanly on a terminal status (`completed` / `failed`).
+`--watch` re-renders this exact frame and exits cleanly on a terminal
+status (`completed` / `failed` / `canceled`). Against the native v2
+backend it is **event-driven**: each refresh long-polls the run's event
+stream (up to 15s) and re-renders the instant a new event lands, rather
+than spinning on a fixed timer. A lapsed long-poll still refreshes as a
+liveness heartbeat. Backends without an event stream (local state, the
+legacy path) fall back to interval polling on `--interval` (default
+`1s`), driven by the same `internal/cockpit/watch` loop the TUI
+subscribes to.
 
 ## Status icons
 
@@ -105,8 +111,8 @@ be stripped; the iconography stays.
 | `--all` | List all stored executions |
 | `--detailed` | Include step-level status in the output |
 | `--json` | Output in JSON format |
-| `--watch`, `-w` | Continuously refresh until the run reaches a terminal state |
-| `--interval` | Refresh interval for `--watch` (default `1s`) |
+| `--watch`, `-w` | Continuously refresh until the run reaches a terminal state. Event-driven (long-poll) against the native v2 backend; interval-polled otherwise |
+| `--interval` | Refresh interval for `--watch` when interval-polling (default `1s`) |
 | `--remote-state` | Fetch status from orun-backend instead of local state |
 | `--backend-url` | orun-backend URL for remote state (or set `ORUN_BACKEND_URL`) |
 
@@ -121,7 +127,7 @@ orun status \
   --exec-id gh-12345678-1-a1b2c3
 ```
 
-The same rendering is used for local and remote state.  `--watch` polls the backend until the run reaches a terminal state (completed or failed).  `--json` returns machine-readable output.
+The same rendering is used for local and remote state.  `--watch` follows the backend until the run reaches a terminal state (completed, failed, or canceled) — long-polling the run's event stream on the native v2 backend, or interval-polling otherwise.  `--json` returns machine-readable output.
 
 Outside GitHub Actions, remote status uses the local Orun CLI session from `orun auth login` and the backend URL from `--backend-url`, `ORUN_BACKEND_URL`, `intent.yaml`, or `~/.orun/config.yaml`.
 

@@ -35,6 +35,22 @@ detection and the cockpit see current component data. Use `--no-catalog-refresh`
 to skip that step, or `--catalog-strict` to fail the plan when the catalog cannot
 be resolved.
 
+### Publishing the catalog after a plan
+
+A successful plan can also publish the resolved catalog to the configured backend:
+
+- **`--push-catalog`** — explicit and **fail-loud**. Publishes the just-resolved
+  catalog and advances the head (like `orun catalog refresh --push`). Requires a
+  configured backend and conflicts with `--no-catalog-refresh`.
+- **Auto-sync** — opt in with `execution.state.autopushCatalog: true` in
+  `intent.yaml` (team-wide) or `cloud.catalog.autopush: true` in
+  `~/.orun/config.yaml` (personal), and a successful plan **best-effort** publishes
+  for you. Auto-sync only fires on the **clean default branch**, is debounced by
+  catalog digest (an unchanged catalog is a no-op), never fails the plan, and is
+  silent unless it actually pushes (or `ORUN_VERBOSE` is set).
+
+See [configuration → remote state](../reference/configuration.md#remote-state-configuration).
+
 ## Common examples
 
 Generate a plan (auto-discovers intent):

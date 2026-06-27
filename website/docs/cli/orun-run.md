@@ -183,6 +183,8 @@ orun run --changed --explain
 | `--artifact` | Artifact backend for uploading job shard from CI (`github`) |
 | `--remote-state` | Use orun-backend for distributed run coordination (enables remote state) |
 | `--backend-url` | orun-backend URL for remote state (or set `ORUN_BACKEND_URL`) |
+| `--org` | Org scope for remote state, overriding the linked org (or set `ORUN_ORG`). Disambiguates auto-link when you belong to several orgs |
+| `--project` | Project scope for remote state, overriding the linked project (or set `ORUN_PROJECT`) |
 | `--local` | Force local filesystem state for this run, overriding remote-state config/flags (the escape hatch when the backend is down) |
 
 ### Plan selection flags
@@ -287,6 +289,28 @@ See [context-aware discovery](../concepts/context-discovery.md) for full details
 
 `orun run --remote-state` delegates execution coordination to an [orun-backend](https://github.com/sourceplane/orun-backend) instance.  Each GitHub Actions matrix job runs `orun run --remote-state --job <id>`, and the backend enforces DAG ordering — a job polls until its dependencies complete before claiming work.
 
+### Native event-sourced coordination
+
+Coordination flows over a **native, event-sourced wire**: claim, heartbeat,
+complete, and the runnable-frontier read are reduced from the run's event log (the
+same fold the server runs), while run creation, logs, and read-model loads use the
+existing REST endpoints. This is the **default** — the legacy OP2 relational
+coordination path is decommissioned. Set `ORUN_COORDINATION=legacy` as a temporary
+escape hatch back to the old path.
+
+### Memoized cache hits
+
+When the backend already has a result for a job whose inputs match a prior run,
+the run **adopts that result instead of re-executing**, and surfaces it:
+
+```
+✓ memoized api@prod.build — cache hit, skipped execution (a1b2c3d4e5f6)
+```
+
+The digest in parentheses is the resolved result's content hash. A memoized job is
+already terminal, so it's skipped — this line distinguishes it from a job skipped
+because it was filtered out of the run.
+
 ### Enabling remote state
 
 Three equivalent ways, in priority order:
@@ -315,14 +339,19 @@ Normal local remote-state usage does not require a GitHub PAT.
 
 ### Local setup
 
-The happy path requires only two steps:
+The happy path is two steps:
 
 ```bash
 orun auth login --backend-url https://orun-api.example.workers.dev
 orun run --remote-state -i examples/intent.yaml --dry-run
 ```
 
-On the first `orun run --remote-state` outside GitHub Actions, the CLI auto-resolves the repo namespace from the current Git remote and caches it in `~/.orun/config.yaml`. Subsequent runs use the cached value.
+`orun auth login` already auto-links the repo (see [`orun auth`](./orun-auth.md)),
+so the scope is cached in `~/.orun/config.yaml` before your first run. Even if it
+isn't, `orun run --remote-state` **self-heals**: a logged-in run against an
+unlinked repo links it on the fly and proceeds, rather than dead-ending with "repo
+not linked". When you belong to several orgs and the shell is non-interactive,
+disambiguate with `--org` / `--project` (or `ORUN_ORG` / `ORUN_PROJECT`).
 
 For headless terminals:
 
@@ -358,7 +387,8 @@ When running with remote state, each step receives:
 | --- | --- |
 | `ORUN_PLAN_ID` | Plan checksum short-hash |
 | `ORUN_JOB_ID` | Job ID (e.g. `api@dev.deploy`) |
-| `ORUN_JOB_RUN_ID` | `{planID}:{execID}:{jobID}` — stable cross-job identifier |
+| `ORUN_JOB_UID` | Content-addressed job UID (stable while the job's inputs are unchanged) |
+| `ORUN_JOB_RUN_ID` | `{execID}/{jobUID}` — stable per-job identifier |
 
 ### GitHub Actions matrix example
 

@@ -16,6 +16,13 @@ title: Environment variables
 | `ORUN_REMOTE_STATE` | Set to `true` to enable remote state coordination via orun-backend |
 | `ORUN_BACKEND_URL` | URL of the orun-backend instance (required when `ORUN_REMOTE_STATE=true`) |
 | `ORUN_TOKEN` | Explicit short-lived Orun machine token fallback for CI or automation. Normal local remote-state usage should use `orun auth login`, not a GitHub PAT |
+| `ORUN_ORG` | Org scope (slug or ID) for remote state — overrides the linked org and disambiguates auto-link when you belong to several. Equivalent to `--org` |
+| `ORUN_PROJECT` | Project scope for remote state — overrides the linked project. Equivalent to `--project` |
+| `ORUN_COORDINATION` | Set to `legacy` to fall back to the decommissioned OP2 relational coordination path. Native v2 event-sourced coordination is the default for `orun run --remote-state` |
+| `ORUN_NO_TUI` | When truthy, a bare `orun` prints help instead of opening the Cockpit TUI (subcommands are unaffected) |
+| `ORUN_NO_AUTO_REFRESH` | When truthy, disables the universal pre-command object-model catalog refresh hook |
+| `ORUN_VERBOSE` | When truthy, surfaces best-effort outcomes that are otherwise silent — the pre-command catalog refresh and `autopushCatalog` auto-sync skips |
+| `ORUN_OBJECT_ZSTD_LEVEL` | Advanced: zstd compression level for objects written to the local object store (default `3`) |
 | `GITHUB_ACTIONS` | Causes `run` to auto-select the GitHub Actions backend when set to `true` |
 | `GITHUB_WORKSPACE` | Used as the default workdir for the GitHub Actions backend when `--workdir` is not set |
 
@@ -59,7 +66,8 @@ No GitHub PAT is required for `orun backend` commands.
 | `ORUN_RUNNER` | Resolved runner name for the current step |
 | `ORUN_PLAN_ID` | Plan checksum short-hash (injected into every step environment) |
 | `ORUN_JOB_ID` | Job ID of the currently running job (e.g. `api@dev.deploy`) |
-| `ORUN_JOB_RUN_ID` | Stable cross-job identifier: `{planID}:{execID}:{jobID}` |
+| `ORUN_JOB_UID` | Content-addressed UID of the current job — stable across runs while the job's inputs are unchanged (derived from the plan short-hash, job ID, and a digest) |
+| `ORUN_JOB_RUN_ID` | Stable per-job identifier: `{execID}/{jobUID}` |
 | `ORUN_ENVIRONMENT` | Environment name for the current job (e.g. `dev`, `production`) |
 | `ORUN_COMPONENT` | Component name for the current job (e.g. `api-platform`) |
 | `ORUN_ENV` | Path to the env file for persisting environment variables across steps (alias for `GITHUB_ENV`) |
