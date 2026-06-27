@@ -9,12 +9,17 @@ title: orun auth
 ```bash
 orun auth login
 orun auth login --device
+orun auth login --org acme
+orun auth login --no-link
 orun auth status
 orun auth logout
 orun auth token --audience orun-backend
 ```
 
 ## Login
+
+`orun auth login` is the single front door to Orun Cloud: it authenticates **and
+auto-links the current repo** in one step (no separate `orun cloud link` first).
 
 Interactive browser login:
 
@@ -29,6 +34,42 @@ orun auth login --device --backend-url https://orun-api.example.workers.dev
 ```
 
 The CLI stores only Orun-issued access and refresh tokens. It does not store GitHub OAuth access tokens or GitHub PATs.
+
+The backend URL is resolved from `--backend-url` → `ORUN_BACKEND_URL` →
+`execution.state.backendUrl` in `intent.yaml` → `~/.orun/config.yaml`, so inside a
+repo that already declares its backend you can usually drop the flag.
+
+### Auto-link
+
+After a successful login, `orun auth login` links the current repo and prints the
+result inline:
+
+```
+✓ linked this repo → acme/my-service
+```
+
+How it resolves the link:
+
+| Situation | Behavior |
+| --- | --- |
+| No git remote | No-op — prints `no git remote here — run orun auth login inside a repo to link it` |
+| Already linked | Reuses the cached link (`✓ already linked this repo → …`) |
+| One org, unambiguous | Links automatically |
+| Several orgs, interactive | Prompts once |
+| Several orgs, non-interactive | Errors and asks for `--org <slug>` |
+| No orgs at all | Materializes a **personal org** (`✓ created your personal org <slug>`) and links |
+| OSS / local backend | Short-circuits to the fixed `_local/_local` scope |
+
+If login succeeds but linking can't complete automatically, the command still
+exits 0 and tells you how to finish (`orun auth login --org <slug>` or
+`orun cloud link`).
+
+| Flag | Meaning |
+| --- | --- |
+| `--device` | Use the platform device login flow (RFC-8628) for headless terminals |
+| `--org <slug>` | Org to link this repo under, when you belong to several |
+| `--no-link` | Authenticate only; don't auto-link the repo |
+| `--backend-url <url>` | Backend URL (or set `ORUN_BACKEND_URL` / declare it in `intent.yaml`) |
 
 ## Status
 

@@ -6,6 +6,13 @@ title: orun cloud
 org/project (the tenancy spine). The link is resolved once and cached in
 `~/.orun/config.yaml`; every `--remote-state` call then runs under that scope.
 
+:::tip Most teams don't run `orun cloud link` directly
+[`orun auth login`](./orun-auth.md) already authenticates **and auto-links** the
+current repo in one step, and `orun run --remote-state` self-heals an unlinked
+repo on the fly. Reach for `orun cloud link` for explicit, scripted, or CI
+bootstrap linking, or to inspect / change an existing link.
+:::
+
 ## Commands
 
 ```bash
@@ -30,7 +37,9 @@ orun cloud link --backend-url https://api.orun.cloud
 4. Resolves the scope:
    - **One existing link** → uses it.
    - **No link** → presents an org picker (the project is created on demand) and
-     calls `POST /v1/organizations/{orgId}/cli/links`.
+     calls `POST /v1/organizations/{orgId}/cli/links`. When the account has **no
+     orgs at all**, a **personal org is materialized** on first link instead of
+     dead-ending.
    - **Several links** → presents an org/project picker.
 5. Caches the resulting org/project IDs + slugs and the server's normalized
    `remoteUrl` in `~/.orun/config.yaml`.
@@ -58,8 +67,12 @@ with a fixed `_local/_local` scope), `orun cloud link` short-circuits to
 
 ## Fail-fast on `--remote-state`
 
-`orun run --remote-state` fails fast before any backend call when the local
-state is obviously missing (no 404 from the server):
+`orun run --remote-state` self-heals an unlinked repo when you're logged in — it
+auto-links and proceeds (disambiguate with `--org` / `--project` when you belong
+to several). It only fails fast before a backend call when it genuinely can't
+proceed:
 
-- **Not logged in** → `run `orun auth login``.
-- **Repo not linked** → `run `orun cloud link``.
+- **Not logged in** → run `orun auth login`.
+- **Repo not linked and can't auto-link** (e.g. no git remote, or an ambiguous
+  org in a non-interactive shell) → run `orun auth login` (which links), or
+  `orun cloud link --org <slug>`.
