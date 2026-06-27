@@ -112,7 +112,16 @@ func pushResolvedCatalog(ctx context.Context, backendURL, orgFlag, projectFlag, 
 	if repo != nil {
 		linkOrg, linkProject = repo.OrgID, repo.ProjectID
 	}
-	scope := resolveScope(orgFlag, projectFlag, linkOrg, linkProject)
+	// Scope precedence flag > env > intent > cached link (specs/oidc-ci-tenancy
+	// §4.1). The declared org is sent on the OIDC exchange / API-key request so
+	// the server can enforce claim ⊆ authorized.
+	intentOrg, intentProject, requireOrg := intentScope(loadIntentForCloudConfig())
+	scope := resolveScope(orgFlag, projectFlag, intentOrg, intentProject, linkOrg, linkProject)
+	if !termIsInteractive() {
+		if err := enforceRequireOrg(requireOrg, scope.OrgID); err != nil {
+			return err
+		}
+	}
 	if scope.OrgID == "" && scope.ProjectID == "" && !isOSSBackend(backendURL) {
 		return errRepoNotLinked(backendURL)
 	}

@@ -200,7 +200,10 @@ func newRemoteBackend(backendURL string) (statebackend.Backend, error) {
 	if repo, repoErr := resolveRepoContext(backendURL); repoErr == nil && repo != nil {
 		linkOrg, linkProject = repo.OrgID, repo.ProjectID
 	}
-	scope := resolveScope("", "", linkOrg, linkProject)
+	// Honor the declared intent org/project (flag/env unavailable on read paths;
+	// intent sits above the cached link — specs/oidc-ci-tenancy §4.1).
+	intentOrg, intentProject, _ := intentScope(loadIntentForCloudConfig())
+	scope := resolveScope("", "", intentOrg, intentProject, linkOrg, linkProject)
 	client := remotestate.NewClientWithScope(backendURL, version, tokenSrc, scope)
 	runnerID := statebackend.DeriveRunnerID()
 	return statebackend.NewRemoteStateBackend(client, runnerID), nil

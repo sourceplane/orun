@@ -82,6 +82,7 @@ GitHub PAT or OAuth token is required.`,
 	}
 
 	cloudCmd.AddCommand(linkCmd, unlinkCmd, statusCmd, openCmd)
+	registerCloudCheck(cloudCmd)
 }
 
 // cloudSessionToken loads the CLI session and returns a fresh access token,

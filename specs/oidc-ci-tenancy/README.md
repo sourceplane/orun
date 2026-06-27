@@ -160,25 +160,36 @@ remote.
 ## 6. Work breakdown
 
 ### orun (CLI) — this repo's half
-- [ ] Add `org`, `project`, `requireOrg` to `IntentExecutionState`
+- [x] Add `org`, `project`, `requireOrg` to `IntentExecutionState`
       (`internal/model/intent.go`).
-- [ ] Wire `resolveScope` / `ResolveOptions.Org` to read the intent org/project
+- [x] Wire `resolveScope` / `ResolveOptions.Org` to read the intent org/project
       at the right precedence (`cmd/orun/remote_config.go`).
-- [ ] Populate `OIDCTokenSource.Org` from the resolved org on every remote path
-      (run, catalog push, plan --push-catalog).
-- [ ] Strict/`requireOrg` enforcement with an actionable fail-fast error.
-- [ ] Consume `GET …/cli/links`; map a workflow/remote `404` to the
-      "add your repo" message (with the resource-hiding caveat).
-- [ ] `orun cloud check` pre-flight command.
-- [ ] Demote `--project` to advanced; update CLI + configuration docs.
+- [x] Populate `OIDCTokenSource.Org` from the resolved org on every remote path
+      (run, catalog push, plan --push-catalog) — the resolved `scope.OrgID` now
+      includes the intent layer and is passed to `ResolveOptions.Org`.
+- [x] Strict/`requireOrg` enforcement with an actionable fail-fast error
+      (`enforceRequireOrg`; implied strict when `org` is declared — decision D2).
+- [x] Consume `GET …/cli/links` (`cliauth.ListOrgLinks`); map a workflow/remote
+      `404` to the "add your repo" message via `disambiguateRepoDenial` (only when
+      a session listing confirms the repo is genuinely absent — never over-claims).
+- [x] `orun cloud check` pre-flight command.
+- [x] Demote `--project` to advanced; update CLI + configuration docs.
 
 ### orun-cloud (platform) — mostly shipped
 - [x] Allow-list gate at mint + push (#184).
 - [x] `GET …/cli/links` allow-list listing (#185).
 - [x] Console add-from-GitHub (#186).
-- [ ] Confirm/document the stable exchange denial shape the CLI relies on
-      (remains `404` resource-hiding).
-- [ ] Confirm the exchange does **not** auto-create on the workflow path (D1).
+- [x] Confirm/document the stable exchange denial shape the CLI relies on.
+      The exchange now returns `404 not_found` (resource-hiding) for *not linked*
+      and *declared-org-matches-no-link* — the same shape as the state-worker
+      push gate (`requireWorkflowRepoAllowed`) and the link APIs, so the CLI keys
+      on one stable denial code. `409` (multi-org, needs the org hint) and
+      `403 + details.reason` (per-link CI gate on a known link) stay deliberately
+      distinct, documented inline in `oidc-exchange.ts` and pinned by
+      `tests/identity-worker/src/oidc-exchange.test.ts`.
+- [x] Confirm the exchange does **not** auto-create on the workflow path (D1).
+      The handler is read-only w.r.t. links/projects; a contract test asserts no
+      mutating SQL runs on the unlinked path before the `404`.
 
 ## 7. Open decisions
 

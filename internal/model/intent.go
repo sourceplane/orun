@@ -34,6 +34,22 @@ type IntentExecutionState struct {
 	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 	// BackendURL is the URL of the orun-backend instance for remote mode.
 	BackendURL string `yaml:"backendUrl,omitempty" json:"backendUrl,omitempty"`
+	// Org is the declared, enforced tenancy for this repo: an org slug or an
+	// org_… id. It is the committed, reviewable home for the org claim sent on
+	// every remote op (the OIDC exchange body and the API-key request), so
+	// enforcement does not depend on a per-invocation --org flag that one CI job
+	// of twenty can forget. Precedence: --org → ORUN_ORG → execution.state.org →
+	// cached link (specs/oidc-ci-tenancy §4.1).
+	Org string `yaml:"org,omitempty" json:"org,omitempty"`
+	// Project is an advanced override for the project (repo) scope. The default
+	// is project = repo, derived from the git remote server-side; declare this
+	// only for a rename or a monorepo split (specs/oidc-ci-tenancy §4.3).
+	Project string `yaml:"project,omitempty" json:"project,omitempty"`
+	// RequireOrg turns on strict mode: a non-interactive remote op with no
+	// resolvable org fails fast (pointing at execution.state.org) instead of
+	// silently exchanging an empty claim and landing in an ambiguous scope. It is
+	// implied true whenever Org is set (specs/oidc-ci-tenancy §4.1, decision D2).
+	RequireOrg bool `yaml:"requireOrg,omitempty" json:"requireOrg,omitempty"`
 	// AutopushCatalog, when true, makes `orun plan` best-effort publish the
 	// resolved catalog to the configured backend after a successful plan on the
 	// default branch (clean tree) — keeping the org-global catalog head fresh

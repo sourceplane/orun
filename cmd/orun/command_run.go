@@ -108,7 +108,7 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().BoolVar(&runLocal, "local", false, "Force local filesystem state for this run, overriding remote-state config/flags (the escape hatch when the backend is down)")
 	runCmd.Flags().StringVar(&runBackendURL, "backend-url", "", "Backend URL for remote state (or set ORUN_BACKEND_URL)")
 	runCmd.Flags().StringVar(&runOrg, "org", "", "Org scope for remote state (overrides the linked org; or set ORUN_ORG)")
-	runCmd.Flags().StringVar(&runProject, "project", "", "Project scope for remote state (overrides the linked project; or set ORUN_PROJECT)")
+	runCmd.Flags().StringVar(&runProject, "project", "", "Advanced: override the project scope (default project = repo; or set ORUN_PROJECT)")
 
 	// --revision short-circuits the seven-branch resolver in
 	// internal/revision.ResolveRevision (cli-surface.md §2.3). When set,
@@ -323,7 +323,7 @@ func runPlan() error {
 
 	var logPipeline *logpipe.Pipeline
 	if remoteActive {
-		if err := setupRemoteStateHooks(r, plan, planID, execID, backendURL, &logPipeline); err != nil {
+		if err := setupRemoteStateHooks(r, plan, planID, execID, backendURL, loadedIntent, &logPipeline); err != nil {
 			var alreadyDone *jobAlreadyCompleteError
 			if errors.As(err, &alreadyDone) {
 				return nil
@@ -430,7 +430,7 @@ func printRunSummary(plan *model.Plan, execID string, runErr error) {
 // hooks for per-job claim, heartbeat, log upload, and terminal update. On
 // success it stores the log pipeline (which buffers/spills log uploads, design
 // §7 row 5) through outPipe so the caller can drain + report it after the run.
-func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, backendURL string, outPipe **logpipe.Pipeline) error {
+func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, backendURL string, intent *model.Intent, outPipe **logpipe.Pipeline) error {
 	ctx := context.Background()
 
 	repo, err := resolveRepoContext(backendURL)
@@ -442,13 +442,23 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		namespaceID = repo.NamespaceID
 	}
 
-	// Resolve the org/project scope (flag > env > cached link). Empty fields
-	// default to the OSS single-tenant _local scope inside the client.
+	// Resolve the org/project scope (flag > env > intent > cached link). Empty
+	// fields default to the OSS single-tenant _local scope inside the client.
 	linkOrg, linkProject := "", ""
 	if repo != nil {
 		linkOrg, linkProject = repo.OrgID, repo.ProjectID
 	}
-	scope := resolveScope(runOrg, runProject, linkOrg, linkProject)
+	intentOrg, intentProject, requireOrg := intentScope(intent)
+	scope := resolveScope(runOrg, runProject, intentOrg, intentProject, linkOrg, linkProject)
+
+	// Strict mode (specs/oidc-ci-tenancy §4.1): when org enforcement is on
+	// (intent declared an org or set requireOrg) and nothing resolved an org,
+	// fail fast in non-interactive use rather than exchanging an empty claim.
+	if !termIsInteractive() {
+		if err := enforceRequireOrg(requireOrg, scope.OrgID); err != nil {
+			return err
+		}
+	}
 
 	tokenSrc, resolvedNamespaceID, _, err := remotestate.ResolveTokenSource(ctx, remotestate.ResolveOptions{
 		BackendURL:   backendURL,
@@ -491,7 +501,7 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		if link == nil {
 			return errRepoNotLinked(backendURL)
 		}
-		scope = resolveScope(runOrg, runProject, link.OrgID, link.ProjectID)
+		scope = resolveScope(runOrg, runProject, intentOrg, intentProject, link.OrgID, link.ProjectID)
 		if strings.TrimSpace(namespaceID) == "" {
 			namespaceID = strings.TrimSpace(link.NamespaceID)
 		}
@@ -556,7 +566,12 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 			// exact next command rather than leaking the server status.
 			if apiErr.Status == 404 ||
 				(apiErr.Code == "INVALID_REQUEST" && strings.Contains(apiErr.Message, "namespace")) {
-				return errRepoNotLinked(backendURL)
+				// Resource-hiding: a 404 collapses "not linked" and "not
+				// allow-listed". When a session can consult the org allow-list,
+				// upgrade to the actionable "add your repo" message only if the
+				// repo is genuinely absent; otherwise keep the generic not-linked
+				// message (specs/oidc-ci-tenancy §4.2).
+				return disambiguateRepoDenial(ctx, backendURL, repo, scope.OrgID, errRepoNotLinked(backendURL))
 			}
 			if apiErr.IsAuth() {
 				return errNotLoggedIn()

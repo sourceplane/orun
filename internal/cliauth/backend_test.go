@@ -140,6 +140,69 @@ func TestCreateLink_Success(t *testing.T) {
 	}
 }
 
+func TestListOrgLinks_Paginates(t *testing.T) {
+	type cursor struct {
+		CreatedAt string `json:"createdAt"`
+		ID        string `json:"id"`
+	}
+	type page struct {
+		Links      []WorkspaceLink `json:"links"`
+		NextCursor *cursor         `json:"nextCursor"`
+	}
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/organizations/org_a/cli/links" {
+			http.Error(w, "unexpected request", 400)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer tok" {
+			http.Error(w, "missing auth", 401)
+			return
+		}
+		calls++
+		if c := r.URL.Query().Get("cursor"); c == "" {
+			writeData(w, 200, page{
+				Links:      []WorkspaceLink{{OrgSlug: "acme", ProjectSlug: "platform", RemoteURL: "github.com/acme/platform"}},
+				NextCursor: &cursor{CreatedAt: "2024-01-01T00:00:00Z", ID: "lnk_1"},
+			})
+		} else {
+			writeData(w, 200, page{
+				Links:      []WorkspaceLink{{OrgSlug: "acme", ProjectSlug: "infra", RemoteURL: "github.com/acme/infra"}},
+				NextCursor: nil,
+			})
+		}
+	}))
+	defer srv.Close()
+
+	c := NewBackendClient(srv.URL, "test")
+	links, err := c.ListOrgLinks(context.Background(), "tok", "org_a")
+	if err != nil {
+		t.Fatalf("ListOrgLinks() error: %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("expected 2 paged calls, got %d", calls)
+	}
+	if len(links) != 2 || links[0].ProjectSlug != "platform" || links[1].ProjectSlug != "infra" {
+		t.Fatalf("links = %+v, want platform+infra across pages", links)
+	}
+}
+
+func TestListOrgLinks_Denied404(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeErrDetails(w, 404, "not_found", "Not found", nil)
+	}))
+	defer srv.Close()
+	c := NewBackendClient(srv.URL, "test")
+	_, err := c.ListOrgLinks(context.Background(), "tok", "org_a")
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected *APIError, got %T: %v", err, err)
+	}
+	if apiErr.Status != 404 {
+		t.Errorf("Status = %d, want 404", apiErr.Status)
+	}
+}
+
 func TestCreateLink_Errors(t *testing.T) {
 	cases := []struct {
 		name       string
