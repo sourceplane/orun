@@ -31,9 +31,16 @@ type IntentExecution struct {
 // IntentExecutionState configures where execution state is stored.
 type IntentExecutionState struct {
 	// Mode is "local" (default) or "remote".
-	Mode       string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 	// BackendURL is the URL of the orun-backend instance for remote mode.
 	BackendURL string `yaml:"backendUrl,omitempty" json:"backendUrl,omitempty"`
+	// AutopushCatalog, when true, makes `orun plan` best-effort publish the
+	// resolved catalog to the configured backend after a successful plan on the
+	// default branch (clean tree) — keeping the org-global catalog head fresh
+	// without an explicit `--push-catalog`. Off by default; never fails the plan
+	// (warn-only, and silent unless ORUN_VERBOSE). The spec calls this
+	// `cloud.catalog.autopush` (specs/orun-cloud/design.md §5).
+	AutopushCatalog bool `yaml:"autopushCatalog,omitempty" json:"autopushCatalog,omitempty"`
 }
 
 // Discovery limits repository scanning for external component manifests.
@@ -123,22 +130,22 @@ type ComponentChange struct {
 
 // Component is execution-agnostic declaration
 type Component struct {
-	Name           string                   `yaml:"name" json:"name"`
-	Type           string                   `yaml:"type" json:"type"`
-	Domain         string                   `yaml:"domain" json:"domain"`
-	Enabled        bool                     `yaml:"enabled" json:"enabled"`
-	Path           string                   `yaml:"path" json:"path"`
-	Subscribe      ComponentSubscribe       `yaml:"subscribe" json:"subscribe"`
-	CompositionRef *ComponentCompositionRef `yaml:"compositionRef,omitempty" json:"compositionRef,omitempty"`
-	Parameters     map[string]interface{}   `yaml:"parameters" json:"parameters"`
-	Overrides      ComponentOverrides       `yaml:"overrides" json:"overrides"`
-	Labels         map[string]string        `yaml:"labels" json:"labels"`
-	DependsOn      []Dependency             `yaml:"dependsOn" json:"dependsOn"`
-	Env            map[string]string        `yaml:"env,omitempty" json:"env,omitempty"`
-	Change         ComponentChange          `yaml:"change,omitempty" json:"change,omitempty"`
-	ResolvedComposition       string        `yaml:"-" json:"-"`
-	ResolvedCompositionSource string        `yaml:"-" json:"-"`
-	SourcePath     string                   `yaml:"-" json:"-"`
+	Name                      string                   `yaml:"name" json:"name"`
+	Type                      string                   `yaml:"type" json:"type"`
+	Domain                    string                   `yaml:"domain" json:"domain"`
+	Enabled                   bool                     `yaml:"enabled" json:"enabled"`
+	Path                      string                   `yaml:"path" json:"path"`
+	Subscribe                 ComponentSubscribe       `yaml:"subscribe" json:"subscribe"`
+	CompositionRef            *ComponentCompositionRef `yaml:"compositionRef,omitempty" json:"compositionRef,omitempty"`
+	Parameters                map[string]interface{}   `yaml:"parameters" json:"parameters"`
+	Overrides                 ComponentOverrides       `yaml:"overrides" json:"overrides"`
+	Labels                    map[string]string        `yaml:"labels" json:"labels"`
+	DependsOn                 []Dependency             `yaml:"dependsOn" json:"dependsOn"`
+	Env                       map[string]string        `yaml:"env,omitempty" json:"env,omitempty"`
+	Change                    ComponentChange          `yaml:"change,omitempty" json:"change,omitempty"`
+	ResolvedComposition       string                   `yaml:"-" json:"-"`
+	ResolvedCompositionSource string                   `yaml:"-" json:"-"`
+	SourcePath                string                   `yaml:"-" json:"-"`
 }
 
 // ComponentSubscribe declares which environments a component participates in.
@@ -148,9 +155,9 @@ type ComponentSubscribe struct {
 
 // EnvironmentSubscription specifies an environment binding with optional profile selection.
 type EnvironmentSubscription struct {
-	Name         string                 `yaml:"name" json:"name"`
-	Profile      string                 `yaml:"profile,omitempty" json:"profile,omitempty"`
-	ProfileRules []ProfileRule          `yaml:"profileRules,omitempty" json:"profileRules,omitempty"`
+	Name         string        `yaml:"name" json:"name"`
+	Profile      string        `yaml:"profile,omitempty" json:"profile,omitempty"`
+	ProfileRules []ProfileRule `yaml:"profileRules,omitempty" json:"profileRules,omitempty"`
 	// DependencyMode optionally overrides the environment's dependency mode
 	// for this single component. When unset, the environment default applies.
 	DependencyMode string `yaml:"dependencyMode,omitempty" json:"dependencyMode,omitempty"`
@@ -296,25 +303,25 @@ type NormalizedIntent struct {
 
 // ComponentInstance is the expanded form of Component for a specific environment
 type ComponentInstance struct {
-	ComponentName string
-	Environment   string
-	Type          string
+	ComponentName             string
+	Environment               string
+	Type                      string
 	ResolvedComposition       string
 	ResolvedCompositionSource string
-	Domain        string
-	Path          string
-	SourcePath    string
-	Labels        map[string]string
-	Parameters    map[string]interface{}
-	Env           map[string]string
-	StepOverrides []Step
-	Policies      map[string]interface{}
-	DependsOn     []ResolvedDependency
-	Enabled       bool
-	ProfileRef    string
-	ProfileName   string
-	ProfileSource string
-	ProfileRuleTriggerRef string
+	Domain                    string
+	Path                      string
+	SourcePath                string
+	Labels                    map[string]string
+	Parameters                map[string]interface{}
+	Env                       map[string]string
+	StepOverrides             []Step
+	Policies                  map[string]interface{}
+	DependsOn                 []ResolvedDependency
+	Enabled                   bool
+	ProfileRef                string
+	ProfileName               string
+	ProfileSource             string
+	ProfileRuleTriggerRef     string
 	// DependencyMode is the resolved enforcement policy for this instance's
 	// dependsOn edges (enforced | advisory | disabled). Default enforced.
 	DependencyMode string

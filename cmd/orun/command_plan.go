@@ -37,6 +37,10 @@ var planCmd = &cobra.Command{
 		if planPushCatalog {
 			return pushCatalogAfterPlan(cmd.Context())
 		}
+		// Config-driven best-effort auto-sync (execution.state.autopushCatalog).
+		// Never fails the plan; a no-op unless enabled + on the clean default
+		// branch + the catalog changed since the last publish.
+		maybeAutoPushCatalog(cmd.Context())
 		return nil
 	},
 }
