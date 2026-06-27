@@ -4,8 +4,8 @@
 //
 // # Authority
 //
-// Authoritative spec source: specs/orun-component-catalog/data-model.md and
-// specs/orun-component-catalog/identity-and-keys.md. Field tags on every
+// Authoritative spec source: specs/archive/orun-component-catalog/data-model.md and
+// specs/archive/orun-component-catalog/identity-and-keys.md. Field tags on every
 // struct in this package match data-model.md byte-for-byte (lowerCamelCase
 // JSON keys, RFC 3339 / Z timestamps, ULID IDs with `src_` / `cat_` / `cmp_`
 // prefixes).
