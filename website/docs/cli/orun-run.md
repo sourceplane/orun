@@ -387,7 +387,8 @@ When running with remote state, each step receives:
 | --- | --- |
 | `ORUN_PLAN_ID` | Plan checksum short-hash |
 | `ORUN_JOB_ID` | Job ID (e.g. `api@dev.deploy`) |
-| `ORUN_JOB_RUN_ID` | `{planID}:{execID}:{jobID}` — stable cross-job identifier |
+| `ORUN_JOB_UID` | Content-addressed job UID (stable while the job's inputs are unchanged) |
+| `ORUN_JOB_RUN_ID` | `{execID}/{jobUID}` — stable per-job identifier |
 
 ### GitHub Actions matrix example
 
