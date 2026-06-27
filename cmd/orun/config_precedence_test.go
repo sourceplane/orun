@@ -70,30 +70,65 @@ func TestResolveBackendURL_DeprecatedBackendAliasHonored(t *testing.T) {
 }
 
 func TestResolveScopePrecedence(t *testing.T) {
-	// flag > env > link.
+	// flag > env > intent > link (specs/oidc-ci-tenancy §4.1).
 	t.Setenv(orgEnvVar, "env-org")
 	t.Setenv(projectEnvVar, "env-project")
 
-	// Flags win over env and link.
-	s := resolveScope("flag-org", "flag-project", "link-org", "link-project")
+	// Flags win over env, intent, and link.
+	s := resolveScope("flag-org", "flag-project", "intent-org", "intent-project", "link-org", "link-project")
 	if s.OrgID != "flag-org" || s.ProjectID != "flag-project" {
 		t.Errorf("flag precedence: got %+v", s)
 	}
-	// Env wins over link when flags empty.
-	s = resolveScope("", "", "link-org", "link-project")
+	// Env wins over intent + link when flags empty.
+	s = resolveScope("", "", "intent-org", "intent-project", "link-org", "link-project")
 	if s.OrgID != "env-org" || s.ProjectID != "env-project" {
 		t.Errorf("env precedence: got %+v", s)
 	}
-	// Link is the floor when flags + env empty.
+	// Intent wins over link when flags + env empty.
 	t.Setenv(orgEnvVar, "")
 	t.Setenv(projectEnvVar, "")
-	s = resolveScope("", "", "link-org", "link-project")
+	s = resolveScope("", "", "intent-org", "intent-project", "link-org", "link-project")
+	if s.OrgID != "intent-org" || s.ProjectID != "intent-project" {
+		t.Errorf("intent precedence: got %+v", s)
+	}
+	// Link is the floor when flags + env + intent empty.
+	s = resolveScope("", "", "", "", "link-org", "link-project")
 	if s.OrgID != "link-org" || s.ProjectID != "link-project" {
 		t.Errorf("link precedence: got %+v", s)
 	}
 	// All empty leaves the scope empty (client defaults to _local).
-	s = resolveScope("", "", "", "")
+	s = resolveScope("", "", "", "", "", "")
 	if s.OrgID != "" || s.ProjectID != "" {
 		t.Errorf("expected empty scope, got %+v", s)
+	}
+}
+
+func TestIntentScopeAndStrictMode(t *testing.T) {
+	// No intent: enforcement off.
+	if org, proj, req := intentScope(nil); org != "" || proj != "" || req {
+		t.Errorf("nil intent: got %q/%q/%v", org, proj, req)
+	}
+	// Declaring an org implies strict mode (decision D2).
+	in := &model.Intent{}
+	in.Execution.State.Org = "org_abc"
+	if org, _, req := intentScope(in); org != "org_abc" || !req {
+		t.Errorf("declared org should imply requireOrg: got %q/%v", org, req)
+	}
+	// requireOrg without a declared org is honored.
+	in2 := &model.Intent{}
+	in2.Execution.State.RequireOrg = true
+	if _, _, req := intentScope(in2); !req {
+		t.Errorf("explicit requireOrg should be honored")
+	}
+
+	// Strict fail-fast only fires when enforcement is on AND no org resolved.
+	if err := enforceRequireOrg(true, ""); err == nil {
+		t.Errorf("expected fail-fast when requireOrg and no org")
+	}
+	if err := enforceRequireOrg(true, "org_abc"); err != nil {
+		t.Errorf("resolved org should pass strict mode: %v", err)
+	}
+	if err := enforceRequireOrg(false, ""); err != nil {
+		t.Errorf("enforcement off should never fail: %v", err)
 	}
 }

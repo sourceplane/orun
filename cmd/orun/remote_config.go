@@ -64,11 +64,11 @@ func warnBackendURLDeprecated() {
 }
 
 // resolveScope resolves the org/project scope for a remote-state call with the
-// design §8 precedence: --org/--project flags > ORUN_ORG/ORUN_PROJECT env >
-// the cached RepoLink's org/project. Empty fields are filled from the next
-// source; the remotestate client defaults any still-empty field to the OSS
-// _local scope.
-func resolveScope(flagOrg, flagProject, linkOrg, linkProject string) remotestate.Scope {
+// precedence in specs/oidc-ci-tenancy §4.1: --org/--project flags >
+// ORUN_ORG/ORUN_PROJECT env > intent execution.state.org/project > the cached
+// RepoLink's org/project. Empty fields are filled from the next source; the
+// remotestate client defaults any still-empty field to the OSS _local scope.
+func resolveScope(flagOrg, flagProject, intentOrg, intentProject, linkOrg, linkProject string) remotestate.Scope {
 	scope := remotestate.Scope{
 		OrgID:     strings.TrimSpace(flagOrg),
 		ProjectID: strings.TrimSpace(flagProject),
@@ -80,12 +80,53 @@ func resolveScope(flagOrg, flagProject, linkOrg, linkProject string) remotestate
 		scope.ProjectID = strings.TrimSpace(os.Getenv(projectEnvVar))
 	}
 	if scope.OrgID == "" {
+		scope.OrgID = strings.TrimSpace(intentOrg)
+	}
+	if scope.ProjectID == "" {
+		scope.ProjectID = strings.TrimSpace(intentProject)
+	}
+	if scope.OrgID == "" {
 		scope.OrgID = strings.TrimSpace(linkOrg)
 	}
 	if scope.ProjectID == "" {
 		scope.ProjectID = strings.TrimSpace(linkProject)
 	}
 	return scope
+}
+
+// intentScope extracts the declared org/project and the strict-mode flag from a
+// loaded intent's execution.state. requireOrg is implied true whenever org is
+// declared (specs/oidc-ci-tenancy §4.1, decision D2): declaring the tenancy IS
+// the request to enforce it.
+func intentScope(intent *model.Intent) (org, project string, requireOrg bool) {
+	if intent == nil {
+		return "", "", false
+	}
+	s := intent.Execution.State
+	org = strings.TrimSpace(s.Org)
+	project = strings.TrimSpace(s.Project)
+	requireOrg = s.RequireOrg || org != ""
+	return org, project, requireOrg
+}
+
+// errOrgRequired is the strict-mode fail-fast for a non-interactive remote op
+// that resolved no org while org enforcement is on (intent declared an org or
+// set requireOrg: true). It points at the committed knob rather than silently
+// exchanging an empty claim into an ambiguous scope (specs/oidc-ci-tenancy
+// §4.1).
+func errOrgRequired() error {
+	return fmt.Errorf("no org resolved but org enforcement is on; declare `execution.state.org` in intent.yaml (or pass --org / set ORUN_ORG)")
+}
+
+// enforceRequireOrg applies strict mode: when requireOrg is on and no org
+// resolved, return the actionable fail-fast error. It is a no-op when an org
+// resolved or enforcement is off, so the OIDC/exchange path (which resolves the
+// org server-side from a declared, non-empty scope) is never blocked.
+func enforceRequireOrg(requireOrg bool, resolvedOrg string) error {
+	if requireOrg && strings.TrimSpace(resolvedOrg) == "" {
+		return errOrgRequired()
+	}
+	return nil
 }
 
 // loadIntentForCloudConfig reads execution.state (backend URL / mode) from the

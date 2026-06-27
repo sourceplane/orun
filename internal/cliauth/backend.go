@@ -456,6 +456,43 @@ func (c *BackendClient) CreateLink(ctx context.Context, accessToken, orgID, remo
 	return wrapped.Link, nil
 }
 
+// ListOrgLinks calls GET /v1/organizations/{orgId}/cli/links (#185) and returns
+// the org's full allow-list of active workspace links, following pagination
+// cursors. It powers `orun cloud check` and the 404 denial disambiguation:
+// because the server hides denials as 404 (resource-hiding), the CLI must not
+// infer "not allow-listed" from a status code alone — it consults this listing
+// and only claims "not allow-listed" when the repo is genuinely absent. A
+// policy/membership denial surfaces as a 404 *APIError.
+func (c *BackendClient) ListOrgLinks(ctx context.Context, accessToken, orgID string) ([]WorkspaceLink, error) {
+	base := "/v1/organizations/" + url.PathEscape(strings.TrimSpace(orgID)) + "/cli/links"
+	headers := map[string]string{"Authorization": "Bearer " + accessToken}
+	all := []WorkspaceLink{}
+	cursor := ""
+	// Bound the walk so a misbehaving server can never spin us forever.
+	for page := 0; page < 100; page++ {
+		path := base
+		if cursor != "" {
+			path += "?cursor=" + url.QueryEscape(cursor)
+		}
+		var resp struct {
+			Links      []WorkspaceLink `json:"links"`
+			NextCursor *struct {
+				CreatedAt string `json:"createdAt"`
+				ID        string `json:"id"`
+			} `json:"nextCursor"`
+		}
+		if err := c.doJSONData(ctx, http.MethodGet, path, headers, nil, &resp); err != nil {
+			return nil, err
+		}
+		all = append(all, resp.Links...)
+		if resp.NextCursor == nil || strings.TrimSpace(resp.NextCursor.ID) == "" {
+			break
+		}
+		cursor = resp.NextCursor.CreatedAt + "|" + resp.NextCursor.ID
+	}
+	return all, nil
+}
+
 // CreateOrg creates an organization the actor owns (POST /v1/organizations) and
 // returns it as an OrgRef. Used by the zero-org auto-link path (UO2) to
 // materialize a personal org on first login. A 409 (slug already taken)
