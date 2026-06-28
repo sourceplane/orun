@@ -38,8 +38,13 @@ import (
 )
 
 // autoPushCatalogTimeout bounds the best-effort publish so an unreachable
-// backend never stalls the plan it rides on.
-const autoPushCatalogTimeout = 15 * time.Second
+// backend never stalls the plan it rides on. It covers the whole publish — the
+// OIDC exchange, the object-closure upload, and the head advance — so it must be
+// generous enough for a cold first sync (a fresh CI runner uploading the full
+// catalog closure to a remote that has none of it yet), while still failing
+// within a couple of minutes when the backend is genuinely unreachable. 15s was
+// too tight for a cold full upload and silently dropped the very first publish.
+const autoPushCatalogTimeout = 120 * time.Second
 
 // autopushMarkerName is the debounce record (last auto-published catalog id)
 // under the object-model cache dir — derived state, safe to delete.
