@@ -3,6 +3,7 @@ package objmodel
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -309,13 +310,24 @@ func TestReaderImplementsModelReader(t *testing.T) {
 // remote transports, backed by maps. They stand in for the hosted object bucket
 // and ref KV so the integration test can prove the read seam is identical local
 // vs remote without any HTTP.
-type memObjectTransport struct{ objs map[string][]byte }
+// memObjectTransport's map is touched concurrently: objremote.Sync uploads the
+// closure with parallel goroutines (errgroup), so HasObject/GetObject/PutObject
+// race on objs without this mutex. The real hosted bucket is already
+// concurrency-safe; the fake must be too.
+type memObjectTransport struct {
+	mu   sync.Mutex
+	objs map[string][]byte
+}
 
 func (f *memObjectTransport) HasObject(_ context.Context, d string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	_, ok := f.objs[d]
 	return ok, nil
 }
 func (f *memObjectTransport) GetObject(_ context.Context, d string) ([]byte, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	b, ok := f.objs[d]
 	if !ok {
 		return nil, false, nil
@@ -323,6 +335,8 @@ func (f *memObjectTransport) GetObject(_ context.Context, d string) ([]byte, boo
 	return append([]byte(nil), b...), true, nil
 }
 func (f *memObjectTransport) PutObject(_ context.Context, d, _ string, framed []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if _, ok := f.objs[d]; !ok {
 		f.objs[d] = append([]byte(nil), framed...)
 	}
