@@ -53,7 +53,7 @@ const config = {
         { to: '/principles', label: 'Principles', position: 'left' },
         { to: '/cockpit/overview', label: 'Cockpit', position: 'left' },
         { to: '/cli/orun', label: 'CLI', position: 'left' },
-        { to: '/release-notes/v2.17.0', label: 'Releases', position: 'right' },
+        { to: '/release-notes/v2.19.0', label: 'Releases', position: 'right' },
         {
           href: 'https://github.com/sourceplane/orun',
           label: 'GitHub',

@@ -20,8 +20,35 @@ orun cloud link                                   # resolve git remote → pick/
 orun cloud link --org acme --project platform     # non-interactive (CI/bootstrap)
 orun cloud unlink                                 # drop the local link (the server-side link is untouched)
 orun cloud status                                 # show the linked org/project, remote, and backend URL
+orun cloud check                                  # is this repo allow-listed for the resolved org?
 orun cloud open                                   # open the project's console page in the browser
 ```
+
+## Check allow-listing (`orun cloud check`)
+
+A pre-flight for the credential-free CI path. Before you wire up a workflow,
+`orun cloud check` answers **"is this repo allow-listed for the org a run would
+use?"** — turning a mysterious CI `404` into a one-command local diagnosis.
+
+```bash
+orun cloud check                 # use the resolved org (intent / link)
+orun cloud check --org acme      # check against a specific org
+```
+
+It resolves the org exactly the way a run does — `--org` > `ORUN_ORG` >
+`intent.yaml` `execution.state.org` > the cached link — lists the org's
+allow-list (`GET /v1/organizations/{orgId}/cli/links`), and reports whether the
+current repo is on it:
+
+```
+✓ sourceplane/lumen is allow-listed for org acme
+  project: lumen
+```
+
+A repo that is **not** allow-listed exits non-zero and prints exactly how to add
+it (console **Git Repos → add from GitHub**, or `orun cloud link`). Because the
+platform hides denials as `404` (resource-hiding), `check` consults the listing
+and never over-claims "not allow-listed" from a status code alone.
 
 ## Link the current repo
 
