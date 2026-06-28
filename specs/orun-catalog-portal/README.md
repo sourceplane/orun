@@ -14,7 +14,7 @@ The design these fields feed:
 
 | Field | Value |
 |-------|-------|
-| Status | **In progress** — CPF0 (field convention + projection) → CPF1 (push wire) |
+| Status | **✅ Shipped** — CPF0 merged (PR #422): `description`/`language`/`tags` project from the component source through `objcatalog`. CPF1 (push wire) is satisfied by the existing snapshot format — the component manifest blob already carries the `spec`/`metadata`/`docs` blocks these fields read from, so the pushed snapshot carries them and the platform projection reads them directly (orun-cloud CP4, PR #194). |
 | Cluster | **CPF** (catalog portal fields) |
 | Target branch | `claude/orun-cloud-catalog-2ailwz` |
 | Builds on | `internal/objcatalog` (the catalog read views — already carries `System`, `Owner`, `Domain`, `Stage`, `Tier`, `Metadata`, `Docs`, `Links`, `Relations`), `specs/orun-service-catalog/` (the catalog data-model + push), `specs/orun-cloud/` (OC4 catalog push / heads — the snapshot envelope this ships in) |
@@ -50,8 +50,8 @@ them. Where a component omits them, they project as empty and the UI degrades.
 
 | ID | Milestone | Status |
 |----|-----------|--------|
-| CPF0 | **Field convention + projection** — define how `description` / `language` / `tags` are read from the component spec/metadata in `internal/objcatalog`, project them onto the catalog views (alongside the existing `System`/`Owner`), with tolerant defaults for older catalogs. | 🚧 |
-| CPF1 | **Push wire** — ensure the fields are carried in the catalog snapshot envelope that `orun catalog push` ships (pairs `orun-cloud` OC4 / `saas-orun-platform` OV6), so the platform projection can map them to `OrgCatalogEntity.{description,system,language,tags}`. | 🗓️ |
+| CPF0 | **Field convention + projection** — define how `description` / `language` / `tags` are read from the component spec/metadata in `internal/objcatalog`, project them onto the catalog views (alongside the existing `System`/`Owner`), with tolerant defaults for older catalogs. | ✅ (PR #422) |
+| CPF1 | **Push wire** — the fields ride the component manifest blob's existing `spec`/`metadata`/`docs` blocks already serialized into the pushed snapshot, so no envelope change was needed; the platform projection (orun-cloud CP4) reads them directly with the same precedence. | ✅ (satisfied by existing snapshot format) |
 
 ## Scope boundary
 
