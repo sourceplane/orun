@@ -355,6 +355,25 @@ deviation detection (`--changed`) and the cockpit. `orun catalog affected`
 reports the directly-changed, dependent, affected, and selected component
 sets — the same engine `orun plan/run --changed` use.
 
+### `orun cloud`
+
+```sh
+orun cloud status                          # show the active org/project link
+orun cloud link --org acme                 # link this repo to an Orun Cloud org
+orun cloud check                           # is this repo allow-listed for the resolved org?
+orun cloud open                            # open this repo's console page
+```
+
+Manages the link between this repo and an Orun Cloud org/project for remote
+state. `orun auth login` already links automatically (the project is the repo);
+`orun cloud link` is the advanced path for choosing a specific org.
+
+`orun cloud check` is a pre-flight for the credential-free CI path: it resolves
+the org the way a run does (`--org` > `ORUN_ORG` > `intent.yaml`
+`execution.state.org` > the cached link), lists the org's allow-list, and reports
+whether **this** repo is on it — turning a mysterious CI `404` into a one-command
+local diagnosis. A repo that is not allow-listed prints exactly how to add it.
+
 ### Flags
 
 | Flag | Short | Description |
@@ -462,6 +481,38 @@ components:
 ```
 
 Component intents can also declare themselves in a `component.yaml` next to their code; `orun` discovers them from the configured roots.
+
+#### Remote state & tenancy (`execution.state`)
+
+A repo using Orun Cloud for remote state declares it in `intent.yaml` — the
+committed, reviewable home for the backend and the enforced org:
+
+```yaml
+execution:
+  state:
+    mode: remote
+    backendUrl: https://api.orun.cloud
+    org: acme            # slug or org_… — the declared, enforced tenancy
+    # project: <repo>    # advanced override only; default is the repo
+    requireOrg: true     # strict mode (implied whenever org is set)
+    autopushCatalog: true # publish the resolved catalog after a clean default-branch plan
+```
+
+- **`org`** is sent on every remote op — including the credential-free GitHub
+  Actions OIDC exchange — so the server can enforce `claim ⊆ authorized`.
+  Precedence: `--org` > `ORUN_ORG` > `execution.state.org` > the cached link.
+- **`requireOrg`** turns on strict mode: a non-interactive remote op that
+  resolves no org fails fast, pointing at `execution.state.org`, instead of
+  exchanging an empty claim into an ambiguous scope. Implied whenever `org` is
+  set.
+- **`project`** defaults to the repo (`project = repo`); declare it only for a
+  rename or a monorepo split.
+- **`autopushCatalog`** best-effort publishes the resolved catalog to the
+  backend after a successful default-branch plan, keeping the org-global catalog
+  head fresh without an explicit `--push-catalog`.
+
+Run `orun cloud check` from a dev machine to confirm a repo is allow-listed for
+the resolved org before wiring up CI.
 
 ### Golden-path intent (composition)
 
