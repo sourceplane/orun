@@ -776,13 +776,30 @@ func performRemoteJobClaim(
 		depWaitTimeout = 30 * time.Minute
 		initDelay      = 2 * time.Second
 		maxDelay       = 60 * time.Second
+		// initReadyTimeout bounds how long we retry a claim that 404s because the
+		// run isn't yet visible to coordination. In the distributed-matrix pattern
+		// each job InitRuns the shared run (via the REST store) then claims (via
+		// the native coordination shard); the first concurrent claimers can race
+		// that run becoming visible, so a 404 here is transient, not "missing job".
+		initReadyTimeout = 2 * time.Minute
 	)
 	deadline := time.Now().Add(depWaitTimeout)
+	initDeadline := time.Now().Add(initReadyTimeout)
 	delay := initDelay
 
 	for {
 		result, err := backend.ClaimJob(ctx, runID, job, runnerID)
 		if err != nil {
+			if errors.Is(err, statebackend.ErrClaimTargetNotFound) && time.Now().Before(initDeadline) {
+				// Sibling matrix jobs are still initializing the run; back off and
+				// retry rather than failing this job on a transient 404.
+				fmt.Fprintf(stdout, "  %s waiting for run %s to be ready for claims...\n",
+					ui.Dim(color, "○"), runID)
+				if waitErr := sleepOrDone(ctx, initDelay); waitErr != nil {
+					return 0, waitErr
+				}
+				continue
+			}
 			return 0, fmt.Errorf("claiming job %s: %w", jobID, err)
 		}
 

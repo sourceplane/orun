@@ -4,10 +4,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 )
+
+// ErrClaimTargetNotFound is returned by Claim when the coordination endpoint
+// reports 404 for the run/job. In the distributed-matrix pattern every job
+// independently InitRuns the shared run and then claims; InitRun lands via the
+// REST run store while the claim hits the native coordination shard, so the
+// first concurrent claimers can race the run becoming visible to coordination
+// (read-after-write gap on the hosted backend). The caller treats this as a
+// transient "run not ready yet" and retries with backoff rather than failing
+// the job (coordination-api.md §3).
+var ErrClaimTargetNotFound = errors.New("coordination run/job not found")
 
 // Coordination HTTP client (NC3 — coordination-api.md §3). The CLI's transport
 // for the conditional-append verbs: it posts claim/heartbeat/complete to the
@@ -109,6 +120,11 @@ func (c *CoordClient) Claim(ctx context.Context, runID, jobID string, req ClaimR
 		return ClaimOutcome{}, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		// The run isn't visible to coordination yet (sibling matrix jobs are
+		// still initializing it). Transient — let the caller retry.
+		return ClaimOutcome{}, ErrClaimTargetNotFound
+	}
 	if resp.StatusCode != http.StatusOK {
 		return ClaimOutcome{}, fmt.Errorf("claim %s: unexpected status %d", jobID, resp.StatusCode)
 	}

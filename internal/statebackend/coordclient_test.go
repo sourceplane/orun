@@ -14,6 +14,33 @@ type tokenFunc func(ctx context.Context) (string, error)
 
 func (f tokenFunc) Token(ctx context.Context) (string, error) { return f(ctx) }
 
+func TestCoordClientClaim404IsRetryableSentinel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Run not yet visible to coordination (sibling matrix jobs initializing).
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := &CoordClient{BaseURL: srv.URL}
+	_, err := c.Claim(context.Background(), "run_1", "job_a", ClaimRequest{RunnerID: "r1"})
+	if !errors.Is(err, ErrClaimTargetNotFound) {
+		t.Fatalf("claim 404 should map to ErrClaimTargetNotFound (retryable), got %v", err)
+	}
+}
+
+func TestCoordClientClaimOtherStatusIsHardError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := &CoordClient{BaseURL: srv.URL}
+	_, err := c.Claim(context.Background(), "run_1", "job_a", ClaimRequest{RunnerID: "r1"})
+	if err == nil || errors.Is(err, ErrClaimTargetNotFound) {
+		t.Fatalf("non-404 should be a hard error, got %v", err)
+	}
+}
+
 func TestCoordClientTokenSourceAuth(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
