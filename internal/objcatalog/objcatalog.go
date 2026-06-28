@@ -61,6 +61,7 @@ type EntityView struct {
 	Members     []string // the referencing component keys, sorted
 	Version     string   // Composition semver (Step 4); "" for other kinds
 	Lifecycle   string   // Composition lifecycle stage (Step 4)
+	Description string   // git-authored one-line summary (catalog-portal CPF)
 }
 
 // RelationEdgeView is one forward edge of the catalog-wide relation graph
@@ -104,6 +105,9 @@ type CatalogComponentView struct {
 	OwnerSource  string
 	Stage        string
 	Tier         string
+	Description  string   // git-authored one-line summary (catalog-portal CPF)
+	Language     string   // implementation language / runtime (catalog-portal CPF)
+	Tags         []string // free-form tags from the component source (CPF)
 	Environments map[string]EnvView
 	DependsOn    []string
 	Metadata     map[string]any
@@ -351,6 +355,7 @@ func (r *Reader) readEntities(ctx context.Context, treeID objectstore.ObjectID) 
 			ev.Members = stringSliceField(e.Spec, "members")
 			ev.Version = stringField(e.Spec, "version")
 			ev.Lifecycle = stringField(e.Spec, "lifecycle")
+			ev.Description = stringField(e.Spec, "description")
 			out = append(out, ev)
 		}
 	}
@@ -533,7 +538,38 @@ func componentView(m nodes.ComponentManifest) CatalogComponentView {
 	v.Environments = environmentViews(m.Spec)
 	v.DependsOn = dependsOn(m.Spec)
 	v.Relations = relationViews(m.Relations)
+	// Git-authored portal fields (CPF): read from the lossless spec/metadata/docs
+	// blocks with a tolerant fallback chain; empty when the source declares none.
+	v.Description = firstString(m.Spec, m.Metadata, m.Docs, []string{"description", "description", "summary"})
+	v.Language = stringField(m.Spec, "language")
+	if v.Language == "" {
+		v.Language = stringField(m.Metadata, "language")
+	}
+	if v.Language == "" {
+		if langs := stringSliceField(m.Spec, "languages"); len(langs) > 0 {
+			v.Language = langs[0]
+		}
+	}
+	v.Tags = stringSliceField(m.Spec, "tags")
+	if len(v.Tags) == 0 {
+		v.Tags = stringSliceField(m.Metadata, "tags")
+	}
 	return v
+}
+
+// firstString returns the first non-empty value of keys[i] read from maps[i],
+// in order — the tolerant precedence chain for git-authored portal fields.
+func firstString(m1, m2, m3 map[string]any, keys []string) string {
+	maps := []map[string]any{m1, m2, m3}
+	for i, m := range maps {
+		if i >= len(keys) {
+			break
+		}
+		if s := stringField(m, keys[i]); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // relationViews carries the typed envelope relations into the read view for

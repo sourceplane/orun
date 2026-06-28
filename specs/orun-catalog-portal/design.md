@@ -24,7 +24,7 @@ spec/metadata blocks; they are simply not projected as first-class fields.
 |---|---|---|
 | `description` | `spec.description` → `metadata.description` → `docs.summary` | `CatalogComponentView.Description` (new) + `EntityView` projection |
 | `language` | `spec.language` → `metadata.language` → first of `spec.languages[]` | `CatalogComponentView.Language` (new) |
-| `tags` | `metadata.tags[]` → `spec.tags[]` | `CatalogComponentView.Tags` (new, `[]string`) |
+| `tags` | `spec.tags[]` → `metadata.tags[]` | `CatalogComponentView.Tags` (new, `[]string`) |
 
 Reading is tolerant: each falls back through its chain and defaults to empty
 (`""` / `nil`) when absent. No schema bump is required to *read* them (they ride
