@@ -74,7 +74,9 @@ func resolveScope(flagOrg, flagProject, intentOrg, intentProject, linkOrg, linkP
 		ProjectID: strings.TrimSpace(flagProject),
 	}
 	if scope.OrgID == "" {
-		scope.OrgID = strings.TrimSpace(os.Getenv(orgEnvVar))
+		// ORUN_WORKSPACE is the leading spelling; ORUN_ORG is the retained alias
+		// (read either, prefer workspace — saas-workspaces A4).
+		scope.OrgID = preferWorkspace(os.Getenv(workspaceEnvVar), os.Getenv(orgEnvVar))
 	}
 	if scope.ProjectID == "" {
 		scope.ProjectID = strings.TrimSpace(os.Getenv(projectEnvVar))
@@ -103,10 +105,23 @@ func intentScope(intent *model.Intent) (org, project string, requireOrg bool) {
 		return "", "", false
 	}
 	s := intent.Execution.State
-	org = strings.TrimSpace(s.Org)
+	// execution.state.workspace is the leading spelling; execution.state.org is
+	// the retained alias (read either, prefer workspace — saas-workspaces A4).
+	org = preferWorkspace(s.Workspace, s.Org)
 	project = strings.TrimSpace(s.Project)
 	requireOrg = s.RequireOrg || org != ""
 	return org, project, requireOrg
+}
+
+// preferWorkspace returns the first non-blank of the Workspace-spelled and the
+// legacy org-spelled value, trimmed, preferring the Workspace spelling when both
+// are set (saas-workspaces A4: read either, prefer workspace). The two are
+// aliases for one underlying tenancy value, so a sane config sets at most one.
+func preferWorkspace(workspace, org string) string {
+	if w := strings.TrimSpace(workspace); w != "" {
+		return w
+	}
+	return strings.TrimSpace(org)
 }
 
 // errOrgRequired is the strict-mode fail-fast for a non-interactive remote op
@@ -115,7 +130,7 @@ func intentScope(intent *model.Intent) (org, project string, requireOrg bool) {
 // exchanging an empty claim into an ambiguous scope (specs/oidc-ci-tenancy
 // §4.1).
 func errOrgRequired() error {
-	return fmt.Errorf("no org resolved but org enforcement is on; declare `execution.state.org` in intent.yaml (or pass --org / set ORUN_ORG)")
+	return fmt.Errorf("no workspace resolved but tenancy enforcement is on; declare `execution.state.workspace` in intent.yaml (or pass --workspace / set ORUN_WORKSPACE)")
 }
 
 // enforceRequireOrg applies strict mode: when requireOrg is on and no org

@@ -107,7 +107,8 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().BoolVar(&runRemoteState, "remote-state", false, "Use the Orun Cloud backend for distributed run coordination (sets ORUN_REMOTE_STATE=true)")
 	runCmd.Flags().BoolVar(&runLocal, "local", false, "Force local filesystem state for this run, overriding remote-state config/flags (the escape hatch when the backend is down)")
 	runCmd.Flags().StringVar(&runBackendURL, "backend-url", "", "Backend URL for remote state (or set ORUN_BACKEND_URL)")
-	runCmd.Flags().StringVar(&runOrg, "org", "", "Org scope for remote state (overrides the linked org; or set ORUN_ORG)")
+	runCmd.Flags().StringVar(&runOrg, "workspace", "", "Workspace scope for remote state (overrides the linked workspace; or set ORUN_WORKSPACE)")
+	runCmd.Flags().StringVar(&runOrg, "org", "", "Alias of --workspace (legacy spelling; or set ORUN_ORG)")
 	runCmd.Flags().StringVar(&runProject, "project", "", "Advanced: override the project scope (default project = repo; or set ORUN_PROJECT)")
 
 	// --revision short-circuits the seven-branch resolver in

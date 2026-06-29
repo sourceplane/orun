@@ -54,7 +54,8 @@ GitHub PAT or OAuth token is required.`,
 			return runCloudLink()
 		},
 	}
-	linkCmd.Flags().StringVar(&cloudLinkOrg, "org", "", "Org slug to link this repo under (non-interactive)")
+	linkCmd.Flags().StringVar(&cloudLinkOrg, "workspace", "", "Workspace slug to link this repo under (non-interactive)")
+	linkCmd.Flags().StringVar(&cloudLinkOrg, "org", "", "Alias of --workspace (legacy spelling)")
 	linkCmd.Flags().StringVar(&cloudLinkProj, "project", "", "Repo name to link under (advanced; defaults to the git repo name)")
 
 	unlinkCmd := &cobra.Command{

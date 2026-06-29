@@ -31,8 +31,11 @@ const (
 	backendURLEnvVar  = "ORUN_BACKEND_URL"
 	tokenEnvVar       = "ORUN_TOKEN"
 	// Org/project scope env vars (CI scoping; design §8 precedence).
-	orgEnvVar     = "ORUN_ORG"
-	projectEnvVar = "ORUN_PROJECT"
+	// workspaceEnvVar is the leading spelling; orgEnvVar is the retained alias
+	// (read either, prefer workspace — saas-workspaces A4).
+	workspaceEnvVar = "ORUN_WORKSPACE"
+	orgEnvVar       = "ORUN_ORG"
+	projectEnvVar   = "ORUN_PROJECT"
 )
 
 var version = "dev"

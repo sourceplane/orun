@@ -14,8 +14,9 @@ Usage:
 Flags:
       --backend-url string   Backend URL (Orun Cloud or self-hosted)
       --environment string   Target a named environment head (default: the project-wide head)
-      --org string           Org id/slug (overrides the cached link)
+      --org string           Alias of --workspace (legacy spelling)
       --project string       Project id/slug (overrides the cached link)
+      --workspace string     Workspace slug/id (overrides the cached link)
 
 Global Flags:
       --all                 Disable CWD-based component scoping; process all components

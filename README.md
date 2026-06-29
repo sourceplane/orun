@@ -358,21 +358,23 @@ sets — the same engine `orun plan/run --changed` use.
 ### `orun cloud`
 
 ```sh
-orun cloud status                          # show the active org/project link
-orun cloud link --org acme                 # link this repo to an Orun Cloud org
-orun cloud check                           # is this repo allow-listed for the resolved org?
+orun cloud status                          # show the active workspace/project link
+orun cloud link --workspace acme           # link this repo to an Orun Cloud workspace
+orun cloud check                           # is this repo allow-listed for the resolved workspace?
 orun cloud open                            # open this repo's console page
 ```
 
-Manages the link between this repo and an Orun Cloud org/project for remote
+Manages the link between this repo and an Orun Cloud workspace/project for remote
 state. `orun auth login` already links automatically (the project is the repo);
-`orun cloud link` is the advanced path for choosing a specific org.
+`orun cloud link` is the advanced path for choosing a specific workspace.
+(`--workspace` is the leading spelling; `--org` is still accepted as an alias.)
 
 `orun cloud check` is a pre-flight for the credential-free CI path: it resolves
-the org the way a run does (`--org` > `ORUN_ORG` > `intent.yaml`
-`execution.state.org` > the cached link), lists the org's allow-list, and reports
-whether **this** repo is on it — turning a mysterious CI `404` into a one-command
-local diagnosis. A repo that is not allow-listed prints exactly how to add it.
+the workspace the way a run does (`--workspace`/`--org` >
+`ORUN_WORKSPACE`/`ORUN_ORG` > `intent.yaml` `execution.state.workspace` > the
+cached link), lists that workspace's allow-list, and reports whether **this** repo
+is on it — turning a mysterious CI `404` into a one-command local diagnosis. A repo
+that is not allow-listed prints exactly how to add it.
 
 ### Flags
 
@@ -492,19 +494,22 @@ execution:
   state:
     mode: remote
     backendUrl: https://api.orun.cloud
-    org: acme            # slug or org_… — the declared, enforced tenancy
+    workspace: acme      # slug or org_… — the declared, enforced tenancy
     # project: <repo>    # advanced override only; default is the repo
-    requireOrg: true     # strict mode (implied whenever org is set)
+    requireOrg: true     # strict mode (implied whenever workspace is set)
     autopushCatalog: true # publish the resolved catalog after a clean default-branch plan
 ```
 
-- **`org`** is sent on every remote op — including the credential-free GitHub
-  Actions OIDC exchange — so the server can enforce `claim ⊆ authorized`.
-  Precedence: `--org` > `ORUN_ORG` > `execution.state.org` > the cached link.
+- **`workspace`** is sent on every remote op — including the credential-free
+  GitHub Actions OIDC exchange — so the server can enforce `claim ⊆ authorized`.
+  Precedence: `--workspace`/`--org` > `ORUN_WORKSPACE`/`ORUN_ORG` >
+  `execution.state.workspace` > the cached link. The legacy `org:` spelling
+  (`--org`, `ORUN_ORG`, `execution.state.org`) is still accepted as an alias;
+  when both are set, `workspace` wins.
 - **`requireOrg`** turns on strict mode: a non-interactive remote op that
-  resolves no org fails fast, pointing at `execution.state.org`, instead of
-  exchanging an empty claim into an ambiguous scope. Implied whenever `org` is
-  set.
+  resolves no workspace fails fast, pointing at `execution.state.workspace`,
+  instead of exchanging an empty claim into an ambiguous scope. Implied whenever
+  `workspace` (or the legacy `org`) is set.
 - **`project`** defaults to the repo (`project = repo`); declare it only for a
   rename or a monorepo split.
 - **`autopushCatalog`** best-effort publishes the resolved catalog to the

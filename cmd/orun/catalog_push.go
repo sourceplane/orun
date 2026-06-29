@@ -52,7 +52,8 @@ named environment head instead of the project-wide head.`,
 		},
 	}
 	cmd.Flags().StringVar(&catalogPushBackendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
-	cmd.Flags().StringVar(&catalogPushOrg, "org", "", "Org id/slug (overrides the cached link)")
+	cmd.Flags().StringVar(&catalogPushOrg, "workspace", "", "Workspace slug/id (overrides the cached link)")
+	cmd.Flags().StringVar(&catalogPushOrg, "org", "", "Alias of --workspace (legacy spelling)")
 	cmd.Flags().StringVar(&catalogPushProject, "project", "", "Project id/slug (overrides the cached link)")
 	cmd.Flags().StringVar(&catalogPushEnvironment, "environment", "", "Target a named environment head (default: the project-wide head)")
 	parent.AddCommand(cmd)

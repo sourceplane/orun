@@ -34,12 +34,19 @@ type IntentExecutionState struct {
 	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 	// BackendURL is the URL of the orun-backend instance for remote mode.
 	BackendURL string `yaml:"backendUrl,omitempty" json:"backendUrl,omitempty"`
-	// Org is the declared, enforced tenancy for this repo: an org slug or an
-	// org_… id. It is the committed, reviewable home for the org claim sent on
-	// every remote op (the OIDC exchange body and the API-key request), so
-	// enforcement does not depend on a per-invocation --org flag that one CI job
-	// of twenty can forget. Precedence: --org → ORUN_ORG → execution.state.org →
-	// cached link (specs/oidc-ci-tenancy §4.1).
+	// Workspace is the declared, enforced tenancy for this repo: a Workspace slug
+	// or an org_… id. It is the committed, reviewable home for the tenancy claim
+	// sent on every remote op (the OIDC exchange body and the API-key request), so
+	// enforcement does not depend on a per-invocation --workspace flag that one CI
+	// job of twenty can forget. This is the leading spelling of the same field as
+	// Org below; when both are present Workspace wins (orun-cloud saas-workspaces
+	// A4). A Workspace is any org in the account — the declared value is never the
+	// parent Account. Precedence: --workspace/--org → ORUN_WORKSPACE/ORUN_ORG →
+	// execution.state.workspace/org → cached link (specs/oidc-ci-tenancy §4.1).
+	Workspace string `yaml:"workspace,omitempty" json:"workspace,omitempty"`
+	// Org is the legacy spelling of Workspace, retained as an accepted alias so
+	// configs committed before the rename keep working unchanged (read either,
+	// prefer workspace — saas-workspaces A4).
 	Org string `yaml:"org,omitempty" json:"org,omitempty"`
 	// Project is an advanced override for the project (repo) scope. The default
 	// is project = repo, derived from the git remote server-side; declare this
