@@ -39,7 +39,8 @@ func registerAuthCommand(root *cobra.Command) {
 		},
 	}
 	loginCmd.Flags().BoolVar(&authDevice, "device", false, "Use the platform device login flow (RFC-8628)")
-	loginCmd.Flags().StringVar(&authLinkOrg, "org", "", "Org slug to link this repo under (when you belong to several)")
+	loginCmd.Flags().StringVar(&authLinkOrg, "workspace", "", "Workspace slug to link this repo under (when you belong to several)")
+	loginCmd.Flags().StringVar(&authLinkOrg, "org", "", "Alias of --workspace (legacy spelling)")
 	loginCmd.Flags().BoolVar(&authNoLink, "no-link", false, "Authenticate only; don't auto-link this repo")
 
 	statusCmd := &cobra.Command{

@@ -132,3 +132,49 @@ func TestIntentScopeAndStrictMode(t *testing.T) {
 		t.Errorf("enforcement off should never fail: %v", err)
 	}
 }
+
+// TestWorkspaceAliasResolution covers the saas-workspaces A4 aliasing: the
+// Workspace spelling leads, the legacy org spelling is still honored, and when
+// both are present Workspace wins — for the env layer and the intent layer.
+func TestWorkspaceAliasResolution(t *testing.T) {
+	// ORUN_WORKSPACE is honored at the env layer.
+	t.Setenv(workspaceEnvVar, "ws-env")
+	t.Setenv(orgEnvVar, "")
+	if s := resolveScope("", "", "", "", "", ""); s.OrgID != "ws-env" {
+		t.Errorf("ORUN_WORKSPACE should resolve: got %q", s.OrgID)
+	}
+	// Legacy ORUN_ORG still works when ORUN_WORKSPACE is unset.
+	t.Setenv(workspaceEnvVar, "")
+	t.Setenv(orgEnvVar, "org-env")
+	if s := resolveScope("", "", "", "", "", ""); s.OrgID != "org-env" {
+		t.Errorf("legacy ORUN_ORG should resolve: got %q", s.OrgID)
+	}
+	// Both set: Workspace wins (A4: read either, prefer workspace).
+	t.Setenv(workspaceEnvVar, "ws-env")
+	t.Setenv(orgEnvVar, "org-env")
+	if s := resolveScope("", "", "", "", "", ""); s.OrgID != "ws-env" {
+		t.Errorf("ORUN_WORKSPACE should win over ORUN_ORG: got %q", s.OrgID)
+	}
+	t.Setenv(workspaceEnvVar, "")
+	t.Setenv(orgEnvVar, "")
+
+	// Intent: execution.state.workspace is honored and implies strict mode.
+	inWS := &model.Intent{}
+	inWS.Execution.State.Workspace = "ws_intent"
+	if org, _, req := intentScope(inWS); org != "ws_intent" || !req {
+		t.Errorf("execution.state.workspace should resolve + imply strict: got %q/%v", org, req)
+	}
+	// Intent: legacy execution.state.org still works.
+	inOrg := &model.Intent{}
+	inOrg.Execution.State.Org = "org_intent"
+	if org, _, _ := intentScope(inOrg); org != "org_intent" {
+		t.Errorf("legacy execution.state.org should resolve: got %q", org)
+	}
+	// Intent: both spellings present — workspace wins.
+	inBoth := &model.Intent{}
+	inBoth.Execution.State.Workspace = "ws_intent"
+	inBoth.Execution.State.Org = "org_intent"
+	if org, _, _ := intentScope(inBoth); org != "ws_intent" {
+		t.Errorf("execution.state.workspace should win over .org: got %q", org)
+	}
+}

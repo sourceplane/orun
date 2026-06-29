@@ -26,9 +26,10 @@ func registerCloudCheck(parent *cobra.Command) {
 		Short: "Check whether this repo is allow-listed for the resolved org",
 		Long: `Pre-flight the CI credential-free path.
 
-'orun cloud check' resolves the org the way a run does (--org > ORUN_ORG >
-intent.yaml execution.state.org > the cached link), lists the org's allow-list
-(GET /v1/organizations/{org}/cli/links), and reports whether THIS repo is on it.
+'orun cloud check' resolves the workspace the way a run does (--workspace/--org >
+ORUN_WORKSPACE/ORUN_ORG > intent.yaml execution.state.workspace > the cached
+link), lists that workspace's allow-list (GET /v1/organizations/{org}/cli/links),
+and reports whether THIS repo is on it.
 
 Run it from a dev machine before wiring up CI: a repo that is not allow-listed
 will 404 on the OIDC path (resource-hiding), and this turns that into a clear,
@@ -37,7 +38,8 @@ actionable message instead of a mysterious CI failure.`,
 			return runCloudCheck()
 		},
 	}
-	checkCmd.Flags().StringVar(&cloudCheckOrg, "org", "", "Org id/slug to check against (overrides intent + cached link)")
+	checkCmd.Flags().StringVar(&cloudCheckOrg, "workspace", "", "Workspace slug/id to check against (overrides intent + cached link)")
+	checkCmd.Flags().StringVar(&cloudCheckOrg, "org", "", "Alias of --workspace (legacy spelling)")
 	parent.AddCommand(checkCmd)
 }
 
@@ -70,7 +72,7 @@ func runCloudCheck() error {
 	}
 	org := resolveCheckOrg(cloudCheckOrg, intentOrg, linkOrgID)
 	if org == "" {
-		return fmt.Errorf("no org to check against; pass --org, set ORUN_ORG, or declare `execution.state.org` in intent.yaml")
+		return fmt.Errorf("no workspace to check against; pass --workspace, set ORUN_WORKSPACE, or declare `execution.state.workspace` in intent.yaml")
 	}
 
 	ctx := context.Background()
@@ -111,7 +113,8 @@ func runCloudCheck() error {
 func resolveCheckOrg(flagOrg, intentOrg, linkOrgID string) string {
 	cand := strings.TrimSpace(flagOrg)
 	if cand == "" {
-		cand = strings.TrimSpace(os.Getenv(orgEnvVar))
+		// ORUN_WORKSPACE leads; ORUN_ORG is the retained alias (saas-workspaces A4).
+		cand = preferWorkspace(os.Getenv(workspaceEnvVar), os.Getenv(orgEnvVar))
 	}
 	if cand == "" {
 		cand = strings.TrimSpace(intentOrg)
