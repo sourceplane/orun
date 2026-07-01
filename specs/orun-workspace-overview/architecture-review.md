@@ -1,7 +1,10 @@
 # Orun Workspace Overview (CLI half) — Architecture review
 
-Status: Review (2026-07-01). **The full cross-repo review is normative in
-`orun-cloud` `specs/epics/saas-workspace-overview/architecture-review.md`.** This
+Status: Review (2026-07-01) — **ADOPTED.** The CLI half (README §3,
+`implementation-plan.md`, now milestone **WO3**) was revised to incorporate every
+finding below; this document remains as the rationale record. **The full
+cross-repo review is normative in `orun-cloud`
+`specs/epics/saas-workspace-overview/architecture-review.md`.** This
 file carries the findings that land on the **`sourceplane/orun` (CLI/engine)**
 half — WO2a — grounded against the code as it is today, not as the spec describes
 it.

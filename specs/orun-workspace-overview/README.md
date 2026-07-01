@@ -20,7 +20,7 @@
 | **Status** | Proposed (design complete; no code landed) |
 | **Repos** | `sourceplane/orun` (CLI, Go — this half) · `sourceplane/orun-cloud` (platform, TS) |
 | **Target branch** | `claude/orun-workspace-overview-design-qonyiv` |
-| **Pairs with** | orun-cloud WO2b (projection + `state.repo_facet` + `doc` object kind), `specs/orun-service-catalog` (the entity model this extends), `specs/oidc-ci-tenancy` (the org/project push scope this reuses) |
+| **Pairs with** | orun-cloud WO4 (projection + `state.repo_facet` + `doc` object kind), `specs/orun-service-catalog` (the entity model this extends), `specs/oidc-ci-tenancy` (the org/project push scope this reuses) |
 | **Normative model** | orun-cloud `specs/epics/saas-workspace-overview/model.md` |
 
 ## 1. Problem
@@ -91,10 +91,16 @@ spec:
     runbooks: [ops/runbook.md]   # existing
 ```
 
-### 3b. Declared `Repo` and `Product` kinds
+### 3b. Declared `Repo` kind (`Product` deferred)
 
-Two new **declared** top-level blocks in `internal/model/intent.go`, resolved into
-entities in the snapshot:
+> **Revised 2026-07-01** (`architecture-review.md`): ship the **`Repo`** kind
+> only; the `Repo` ref is minted from the **durable project id**, not
+> `CatalogSnapshot.Repo` (which is an un-normalized passthrough — §2, §A1 of the
+> review). **`Product` and the `products:` block are deferred** to WO6 (spec in
+> `model.md §7`) until multi-product/multi-repo workspaces are real.
+
+One new **declared** top-level block in `internal/model/intent.go`, resolved into
+an entity in the snapshot:
 
 ```yaml
 repo:                              # singular — self-describes THIS repo (one per snapshot)
@@ -103,32 +109,27 @@ repo:                              # singular — self-describes THIS repo (one 
   docs: { overview: docs/overview.md }
   links: [ { title: Runbook, url: https://… } ]
   tags: [saas, baseline]
-
-products:                          # 0..N; a product may span repos
-  lumen:
-    displayName: Lumen
-    description: The Lumen SaaS product
-    owner: group:platform
-    systems: [identity, billing, metering]
-    docs: { overview: docs/product/lumen.md }
 ```
 
 | Kind | Ref | Scope | Merges across repos? |
 |------|-----|-------|----------------------|
-| `Repo` | `repo:<remote-host>/<owner>/<name>` (from the normalized `CatalogSnapshot.Repo`, **not** a provider id) | repo-scoped, one per snapshot | No |
-| `Product` | `product:<namespace>/<name>` | namespace-scoped | **Yes** — like `System` |
+| `Repo` | `repo:<project-id>` — minted from the durable project/`ws_` id (the stable join key), **not** `CatalogSnapshot.Repo` and **not** a provider id | repo-scoped, one per snapshot | No |
+| `Product` *(WO6)* | `product:<namespace>/<name>` | namespace-scoped | **Yes** — like `System`; deferred |
 
-Add `EntityKindRepo`/`EntityKindProduct` (constants + `allEntityKinds`),
-`RepoSpec`/`ProductSpec` (`overview` ref, `owner`, `links`, `systems`, derived
-`members`), bump `CatalogSummary`, and emit `entities/Repo/*.json` +
-`entities/Product/*.json`. `IsEntityKind`/CLI `--kind` validation inherit the new
-kinds automatically (array-driven).
+Add `EntityKindRepo` (constant + `allEntityKinds`), `RepoSpec` (`overview` ref,
+`owner`, `links`, `tags`, derived `members`), bump `CatalogSummary`, and emit
+`entities/Repo/*.json`. Note the real cost: `IsEntityKind`/`--kind` validation
+*do* inherit the array, but a kind that carries relations also needs an **emit
+path** (System/Domain are *derived*, so there is nothing to reuse) and graph
+wiring in `internal/catalogresolve/graph.go` `buildGraphs()` — it is not a
+one-line array poke.
 
-### 3c. Docs travel as content-addressed `doc` objects
+### 3c. Docs travel as content-addressed `doc` objects (read at the pinned commit)
 
 During resolution, for each entity carrying `docs.overview`:
 
-1. read the file bytes at HEAD, `digest = sha256(bytes)`;
+1. read the file bytes **at the commit the head is advanced at** — a git object,
+   **not** the working tree (see the invariant below), `digest = sha256(bytes)`;
 2. add the blob to the object closure;
 3. set the entity's `docs.overview = { path, ref, sha, digest }` (a **reference**
    with the content address, not the bytes inline).
@@ -138,28 +139,39 @@ header `Orun-Object-Kind: doc`. Because the doc is in the closure the catalog he
 pins, it is **point-in-time-consistent** with the snapshot and re-pushing an
 unchanged doc is a no-op. Default: **the single `overview` file per entity**; a
 `techdocs` *tree* is opt-in and size-capped so nobody mirrors a big folder into
-state.
+state. The `doc` kind is the **quota/GC boundary** for repo prose (`model.md §0`).
+
+**Pin the bytes to the commit, not the working tree.** The resolver reads the
+working tree today; on the autopush path (clean default branch) that equals HEAD,
+but `plan --push-catalog` can run on a dirty tree. So when walking `docs.overview`
+into the closure, read the bytes from the git object at the resolved commit, or
+**refuse to attach doc objects on a dirty tree** (the autopush gate) and log why —
+otherwise the pushed bytes can diverge from the sha the provenance line advertises
+(`model.md §3a`).
 
 This preserves the **"any git remote, no GitHub App"** invariant
-(`orun-cloud/specs/components/18-state.md`): the CLI reads the working tree and
-pushes; nothing here depends on a provider API.
+(`orun-cloud/specs/components/18-state.md`): the CLI reads the repo and pushes;
+nothing here depends on a provider API.
 
 ## 4. What does NOT change
 
-- No new wire call — `Repo`/`Product` entities and `doc` blobs ride the existing
+- No new wire call — the `Repo` entity and `doc` blobs ride the existing
   `catalog-snapshot` push (`objremote.Sync` + `AdvanceCatalogHead`).
 - No change to `run` — only `plan`/`catalog push` resolve and push.
 - No change to scope resolution (`workspace|org` + `project`) or auth.
 - No provider integration — docs are pushed bytes, never fetched.
+- No console-authored content on the platform side (no `override_overview`) and no
+  `/overview` endpoint — the platform assembles the page at the read edge.
 
 ## 5. Ownership split (cross-repo)
 
 | Concern | Owner |
 |---------|-------|
-| `docs.overview` on the shared docs struct; declared `repo`/`products`; `Repo`/`Product` kinds; walking docs into the closure as `doc` objects; `doc_ref={path,ref,sha,digest}` | **`sourceplane/orun`** (this spec, WO2a) |
-| `doc` value in `state.objects.kind` CHECK; projecting `Repo`→`state.repo_facet`, `Product`→`org_catalog_entities`, `doc_ref` onto entities; `GET …/overview`; console render | **`sourceplane/orun-cloud`** (WO2b–WO5) |
+| `docs.overview` on the shared docs struct; declared `repo` block + `Repo` kind (ref from the durable project id); walking docs into the closure as `doc` objects read at the pinned commit; `doc_ref={path,ref,sha,digest}` | **`sourceplane/orun`** (this spec, WO3) |
+| Reconciling the `state.objects.kind` CHECK + adding `doc`; projecting `Repo`→`state.repo_facet`, `doc_ref` onto entities; scoped read-doc-by-digest; the read-edge-assembled Overview (no `/overview` endpoint); console render | **`sourceplane/orun-cloud`** (WO2, WO4–WO5) |
+| `Product` kind + `products:` block + explicit primary selection | **both**, **deferred** to WO6 |
 | The normative model (kinds, refs, `doc_ref` shape, state tables, push flow) | **`sourceplane/orun-cloud`** `model.md` (shared; this spec conforms) |
 
 ## 6. Implementation
 
-See `implementation-plan.md` (WO2a, step-by-step with "done when").
+See `implementation-plan.md` (WO3, step-by-step with "done when").
