@@ -6,7 +6,7 @@ finding below; this document remains as the rationale record. **The full
 cross-repo review is normative in `orun-cloud`
 `specs/epics/saas-workspace-overview/architecture-review.md`.** This
 file carries the findings that land on the **`sourceplane/orun` (CLI/engine)**
-half — WO2a — grounded against the code as it is today, not as the spec describes
+half — WO3 — grounded against the code as it is today, not as the spec describes
 it.
 
 The epic is sound and the CLI design is the right shape: `Repo`/`Product` and the
@@ -62,16 +62,18 @@ them — silent drift on the one surface whose pitch is *drift-free*.
 object at the resolved commit, or refuse to attach doc objects on a dirty tree
 (the gate the autopush path already enforces) and log why.
 
-### B — Confirm whether `doc` needs to be its own object kind
+### B — Docs ride the `blob` closure — no new object kind (RESOLVED)
 
 Snapshot constituents already travel as `blob`/`tree` closure objects (write-time
 `OBJECT_KINDS`; `objremote.Sync` walks that closure), so a `docs.overview` file is
 mechanically just another content-addressed `blob` that `doc_ref.digest` locates.
-A distinct `doc` kind is only worth the header value + the WO2a→WO2b coordination
-("server must accept `Orun-Object-Kind: doc` before the CLI pushes it") if it is
-the **quota/GC/retention boundary** for repo-authored prose. If it is, keep it and
-say so; if it is only a label, push docs as ordinary closure blobs and delete the
-coordination step. Decided in the orun-cloud review §B.
+**Resolution: push docs as ordinary `blob` closure objects** (`Orun-Object-Kind:
+blob`) — the `blob` kind is legal server-side since migration `250_state_refs`,
+and GC is closure-based (`gc-reachability.ts`), so superseded doc blobs are
+reclaimed like any other snapshot object. There is **no new object kind, no CHECK
+migration, and no WO3↔WO4 release ordering**. A distinct `doc` kind buys only
+per-kind storage attribution, which is recoverable via a `doc_ref.digest → object
+size` join or a later backfill. Decided in the orun-cloud review §B.
 
 ### Notes
 

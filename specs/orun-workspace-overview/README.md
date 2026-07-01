@@ -11,8 +11,8 @@
 > the CLI-half corrections grounded against current code — the `Repo` ref should
 > not be minted from the un-normalized `CatalogSnapshot.Repo`; "read at HEAD" is
 > really "read the working tree" (make the pin real); adding `Repo`/`Product` is
-> emit-path + graph work, not an `allEntityKinds` poke; and confirm whether `doc`
-> needs to be its own object kind. The normative pass is in orun-cloud's
+> emit-path + graph work, not an `allEntityKinds` poke; and docs ride the existing
+> `blob` closure (no new object kind). The normative pass is in orun-cloud's
 > `architecture-review.md`.
 
 | | |
@@ -20,7 +20,7 @@
 | **Status** | Proposed (design complete; no code landed) |
 | **Repos** | `sourceplane/orun` (CLI, Go — this half) · `sourceplane/orun-cloud` (platform, TS) |
 | **Target branch** | `claude/orun-workspace-overview-design-qonyiv` |
-| **Pairs with** | orun-cloud WO4 (projection + `state.repo_facet` + `doc` object kind), `specs/orun-service-catalog` (the entity model this extends), `specs/oidc-ci-tenancy` (the org/project push scope this reuses) |
+| **Pairs with** | orun-cloud WO4 (projection + `state.repo_facet` + `doc_ref`; docs ride the existing `blob` kind), `specs/orun-service-catalog` (the entity model this extends), `specs/oidc-ci-tenancy` (the org/project push scope this reuses) |
 | **Normative model** | orun-cloud `specs/epics/saas-workspace-overview/model.md` |
 
 ## 1. Problem
@@ -72,8 +72,9 @@ no provider coupling.
   Triggered from `cmd/orun/catalog_push.go` via `cmd/orun/command_plan.go`
   (`--push-catalog`) or `cmd/orun/catalog_autosync.go`
   (`execution.state.autopushCatalog`, clean default branch, digest-changed).
-- **Object kinds today** (server CHECK): `plan | catalog-snapshot |
-  composition-lock | artifact-manifest`. `doc` is net-new (owned by orun-cloud).
+- **Object kinds today** (server CHECK, since migration `250_state_refs`): `plan |
+  catalog-snapshot | composition-lock | artifact-manifest | blob | tree`. Docs ride
+  the existing `blob` kind — **nothing net-new at the object-kind layer**.
 
 ## 3. Design (the CLI changes)
 
@@ -124,7 +125,7 @@ path** (System/Domain are *derived*, so there is nothing to reuse) and graph
 wiring in `internal/catalogresolve/graph.go` `buildGraphs()` — it is not a
 one-line array poke.
 
-### 3c. Docs travel as content-addressed `doc` objects (read at the pinned commit)
+### 3c. Docs travel as content-addressed blobs (read at the pinned commit)
 
 During resolution, for each entity carrying `docs.overview`:
 
@@ -135,11 +136,13 @@ During resolution, for each entity carrying `docs.overview`:
    with the content address, not the bytes inline).
 
 The existing `objremote.Sync` then uploads the blob via set-difference with
-header `Orun-Object-Kind: doc`. Because the doc is in the closure the catalog head
+header `Orun-Object-Kind: blob`. Because the doc is in the closure the catalog head
 pins, it is **point-in-time-consistent** with the snapshot and re-pushing an
 unchanged doc is a no-op. Default: **the single `overview` file per entity**; a
 `techdocs` *tree* is opt-in and size-capped so nobody mirrors a big folder into
-state. The `doc` kind is the **quota/GC boundary** for repo prose (`model.md §0`).
+state. Docs ride the **existing `blob` kind** — no new object kind, no CHECK
+migration; reachability GC reclaims superseded doc blobs like any other snapshot
+object (`model.md §0`).
 
 **Pin the bytes to the commit, not the working tree.** The resolver reads the
 working tree today; on the autopush path (clean default branch) that equals HEAD,
@@ -167,8 +170,8 @@ nothing here depends on a provider API.
 
 | Concern | Owner |
 |---------|-------|
-| `docs.overview` on the shared docs struct; declared `repo` block + `Repo` kind (ref from the durable project id); walking docs into the closure as `doc` objects read at the pinned commit; `doc_ref={path,ref,sha,digest}` | **`sourceplane/orun`** (this spec, WO3) |
-| Reconciling the `state.objects.kind` CHECK + adding `doc`; projecting `Repo`→`state.repo_facet`, `doc_ref` onto entities; scoped read-doc-by-digest; the read-edge-assembled Overview (no `/overview` endpoint); console render | **`sourceplane/orun-cloud`** (WO2, WO4–WO5) |
+| `docs.overview` on the shared docs struct; declared `repo` block + `Repo` kind (ref from the durable project id); walking docs into the closure as content-addressed **blobs** read at the pinned commit; `doc_ref={path,ref,sha,digest}` | **`sourceplane/orun`** (this spec, WO3) |
+| Projecting `Repo`→`state.repo_facet`, `doc_ref` onto entities; scoped read-doc-by-digest; the read-edge-assembled Overview (no `/overview` endpoint); console render. **No object-kind change** — docs ride the existing `blob` kind | **`sourceplane/orun-cloud`** (WO2, WO4–WO5) |
 | `Product` kind + `products:` block + explicit primary selection | **both**, **deferred** to WO6 |
 | The normative model (kinds, refs, `doc_ref` shape, state tables, push flow) | **`sourceplane/orun-cloud`** `model.md` (shared; this spec conforms) |
 

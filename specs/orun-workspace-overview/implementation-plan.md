@@ -6,9 +6,10 @@ milestone **WO3** of the cross-repo epic (orun-cloud
 orun-cloud landing (**WO2**) ships first and needs nothing here; this milestone
 lands behind a page that is already live.
 
-Scope for WO3: the **`Repo`** kind, `docs.overview`, and `doc` objects. **`Product`
-is deferred to WO6** (`model.md §7`). The added snapshot fields are additive — an
-older orun-cloud ignores them until WO4 projects them.
+Scope for WO3: the **`Repo`** kind, `docs.overview`, and doc **blobs** (docs ride
+the existing `blob` object kind — no new kind). **`Product` is deferred to WO6**
+(`model.md §7`). The added snapshot fields are additive — an older orun-cloud
+ignores them until WO4 projects them.
 
 ## Step 1 — `docs.overview` on the shared docs struct
 
@@ -77,7 +78,7 @@ without one is unchanged (no `Repo` entity emitted).
 - Ensure the blobs are part of the closure `objremote.Sync` walks (they must be
   reachable from the snapshot root so `Walk()` discovers them — this is explicit
   linking, not automatic) so they upload via `POST …/objects/missing` →
-  `PUT …/objects/{digest}` with `Orun-Object-Kind: doc`. The 25 MiB single-shot /
+  `PUT …/objects/{digest}` with `Orun-Object-Kind: blob`. The 25 MiB single-shot /
   multipart split (`internal/remotestate/objsync.go`) already covers doc blobs.
 
 **Done when:** `orun catalog push` (or `plan --push-catalog`) on a repo with
@@ -92,7 +93,7 @@ tree does not push bytes that mismatch the pinned sha.
 - `internal/model`: parse the `repo:` block; assert `products:` is not consumed.
 - `internal/catalogresolve`: the `Repo` emit path + owner relation in the graph.
 - `cmd/orun`: an e2e mirroring `command_plan_pushcatalog_test.go` — push a repo
-  with a `repo:` block + `docs.overview`, assert the `doc` object is in the
+  with a `repo:` block + `docs.overview`, assert the doc blob is in the
   closure, the head advances, an unchanged re-push is a no-op, and a dirty-tree
   push either reads from the commit or refuses the doc object.
 
@@ -104,12 +105,12 @@ entity with its overview reference.
 - **Ships behind WO2.** The orun-cloud landing needs nothing here; this milestone
   is not on the critical path to the front-door value.
 - Additive: snapshots from this CLI against an older orun-cloud carry the extra
-  `Repo` entity + `doc` objects harmlessly (unknown kinds stored as TEXT;
-  unreferenced `doc` objects inert until WO4 adds the CHECK value + projection).
-- Coordinate the `doc` object-kind CHECK: WO4 **reconciles** the
-  `state.objects.kind` CHECK (bringing it in line with the real write-time kind
-  set) and adds `doc` **before** this CLI pushes `Orun-Object-Kind: doc` to
-  production. Until then, gate the doc-object push behind the same publish path
-  (clean default branch, best-effort) so it never fails a plan.
+  `Repo` entity + doc blobs harmlessly (an older orun-cloud already accepts `blob`
+  objects; unreferenced doc blobs are inert until WO4 projects them).
+- **No object-kind coordination:** docs ride the existing `blob` kind (legal since
+  migration `250_state_refs`), so there is no CHECK migration and no WO3↔WO4
+  ordering — this CLI can push doc blobs before WO4 lands. The doc push still rides
+  the normal publish path (clean default branch, best-effort) so it never fails a
+  plan.
 - **`Product` is out of scope** for WO3; when WO6 is scoped, `products:` +
   `EntityKindProduct` + `ProductSpec` + the `Product` emit/merge path land then.
