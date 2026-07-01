@@ -3,7 +3,9 @@ title: orun cloud
 ---
 
 `orun cloud` manages the link between the current repository and an Orun Cloud
-org/project (the tenancy spine). The link is resolved once and cached in
+workspace/project (the tenancy spine). A workspace can be named by its Workspace
+ID (`ws_…`, short and immutable), its slug, or a legacy `org_…` id — all are
+accepted wherever `--workspace`/`--org` is. The link is resolved once and cached in
 `~/.orun/config.yaml`; every `--remote-state` call then runs under that scope.
 
 :::tip Most teams don't run `orun cloud link` directly
@@ -17,7 +19,7 @@ bootstrap linking, or to inspect / change an existing link.
 
 ```bash
 orun cloud link                                   # resolve git remote → pick/create org/project → cache the link
-orun cloud link --org acme --project platform     # non-interactive (CI/bootstrap)
+orun cloud link --workspace ws_3KF9TQ2P --project platform   # non-interactive (CI/bootstrap); --org is a retained alias, a slug is also accepted
 orun cloud unlink                                 # drop the local link (the server-side link is untouched)
 orun cloud status                                 # show the linked org/project, remote, and backend URL
 orun cloud check                                  # is this repo allow-listed for the resolved org?
@@ -32,11 +34,12 @@ use?"** — turning a mysterious CI `404` into a one-command local diagnosis.
 
 ```bash
 orun cloud check                 # use the resolved org (intent / link)
-orun cloud check --org acme      # check against a specific org
+orun cloud check --workspace ws_3KF9TQ2P   # check against a specific workspace (--org is a retained alias; a slug also works)
 ```
 
-It resolves the org exactly the way a run does — `--org` > `ORUN_ORG` >
-`intent.yaml` `execution.state.org` > the cached link — lists the org's
+It resolves the workspace exactly the way a run does — `--workspace`/`--org` >
+`ORUN_WORKSPACE`/`ORUN_ORG` > `intent.yaml`
+`execution.state.workspace`/`execution.state.org` > the cached link — lists the
 allow-list (`GET /v1/organizations/{orgId}/cli/links`), and reports whether the
 current repo is on it:
 
@@ -71,8 +74,9 @@ orun cloud link --backend-url https://api.orun.cloud
 5. Caches the resulting org/project IDs + slugs and the server's normalized
    `remoteUrl` in `~/.orun/config.yaml`.
 
-The non-interactive form `--org <slug> --project <slug>` skips all prompts and is
-intended for CI and bootstrap scripts.
+The non-interactive form `--workspace <ws_…|slug> --project <slug>` (or the
+retained alias `--org <slug>`) skips all prompts and is intended for CI and
+bootstrap scripts.
 
 No GitHub PAT or OAuth token is required — the Orun CLI session from
 `orun auth login` is sufficient.
@@ -95,11 +99,11 @@ with a fixed `_local/_local` scope), `orun cloud link` short-circuits to
 ## Fail-fast on `--remote-state`
 
 `orun run --remote-state` self-heals an unlinked repo when you're logged in — it
-auto-links and proceeds (disambiguate with `--org` / `--project` when you belong
-to several). It only fails fast before a backend call when it genuinely can't
+auto-links and proceeds (disambiguate with `--workspace` / `--org` / `--project`
+when you belong to several). It only fails fast before a backend call when it genuinely can't
 proceed:
 
 - **Not logged in** → run `orun auth login`.
 - **Repo not linked and can't auto-link** (e.g. no git remote, or an ambiguous
   org in a non-interactive shell) → run `orun auth login` (which links), or
-  `orun cloud link --org <slug>`.
+  `orun cloud link --workspace <ws_…|slug>` (alias `--org <slug>`).

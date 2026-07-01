@@ -266,9 +266,10 @@ execution:
   state:
     mode: remote
     backendUrl: https://orun-api.example.workers.dev
+    workspace: ws_3KF9TQ2P   # Workspace ID (short, immutable); a slug or org_… id is also accepted
 ```
 
-With this in place, `orun run`, `orun status`, and `orun logs` automatically use the backend.
+With this in place, `orun run`, `orun status`, and `orun logs` automatically use the backend. The `workspace` field is the leading spelling of the committed tenancy claim; `org` is a retained alias.
 
 ## Monitoring
 

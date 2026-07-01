@@ -34,8 +34,9 @@ type IntentExecutionState struct {
 	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 	// BackendURL is the URL of the orun-backend instance for remote mode.
 	BackendURL string `yaml:"backendUrl,omitempty" json:"backendUrl,omitempty"`
-	// Workspace is the declared, enforced tenancy for this repo: a Workspace slug
-	// or an org_… id. It is the committed, reviewable home for the tenancy claim
+	// Workspace is the declared, enforced tenancy for this repo: a Workspace ID
+	// (ws_…), a Workspace slug, or a legacy org_… id. It is the committed,
+	// reviewable home for the tenancy claim
 	// sent on every remote op (the OIDC exchange body and the API-key request), so
 	// enforcement does not depend on a per-invocation --workspace flag that one CI
 	// job of twenty can forget. This is the leading spelling of the same field as
