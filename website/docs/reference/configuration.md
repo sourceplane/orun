@@ -202,8 +202,19 @@ The legacy `backend.url` key is still honored as a **deprecated alias** for `clo
 
 `orun cloud link` writes the `repos` entries used for local session-authenticated remote-state runs.
 
-### Org/project scope
+### Workspace/project scope
 
-State calls are scoped to an org/project (path `/v1/organizations/{orgId}/projects/{projectId}/state/…`). The scope is resolved with the precedence `--org`/`--project` flags > `ORUN_ORG`/`ORUN_PROJECT` env > the cached `RepoLink`. The OSS single-tenant backend uses a fixed `_local/_local` scope, so a workspace with no org/project keeps working.
+State calls are scoped to a workspace/project (path `/v1/organizations/{orgId}/projects/{projectId}/state/…`). The scope is resolved with the precedence `--workspace`/`--org` and `--project` flags > `ORUN_WORKSPACE`/`ORUN_ORG` and `ORUN_PROJECT` env > the cached `RepoLink`. The OSS single-tenant backend uses a fixed `_local/_local` scope, so a workspace with no explicit scope keeps working.
+
+Declare the workspace in `intent.yaml` under `execution.state`:
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `workspace` | `ws_…` id, slug, or `org_…` id | The leading, committed tenancy claim. A Workspace ID (`ws_…`) is short and immutable — safe to commit and durable across renames. The declared value is always a Workspace, never the parent Account. |
+| `org` | slug or `org_…` id | Retained alias of `workspace` (read either, prefer `workspace`) — existing `org` configs keep working unchanged. |
+| `requireOrg` | bool | Strict mode — a non-interactive remote op that resolves no workspace fails fast. Implied whenever `workspace`/`org` is set. |
+| `project` | slug or `proj_…` id | Advanced override; the default is `project = repo`, derived from the git remote server-side. |
+
+The `ws_…` / slug / `org_…` value is passed opaquely; the platform resolves it server-side.
 
 When `mode: remote` is set, all three commands that read execution state (`run`, `status`, `logs`) automatically use the backend without requiring `--remote-state` on the command line.

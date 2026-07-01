@@ -16,12 +16,14 @@ execution:
   state:
     mode: remote
     backendUrl: https://orun-api.rahulvarghesepullely.workers.dev
-    # workspace declares the enforced tenancy (slug or org_… id). It is sent on
-    # every remote op — including the credential-free CI OIDC exchange — so the
-    # server can enforce claim ⊆ authorized. Declaring it implies strict mode: a
+    # workspace declares the enforced tenancy — a Workspace ID (ws_…), a slug, or
+    # a legacy org_… id. Prefer the ws_… id: it is short, immutable, and durable
+    # across renames, so it is the safe value to commit. It is sent on every
+    # remote op — including the credential-free CI OIDC exchange — so the server
+    # can enforce claim ⊆ authorized. Declaring it implies strict mode: a
     # non-interactive run that resolves no workspace fails fast. project defaults
     # to the repo and only needs declaring for a rename/monorepo split.
-    # workspace: acme        # legacy spelling `org:` is still accepted
+    workspace: ws_3KF9TQ2P   # a slug (acme) or org_… id is also accepted; `org:` is a retained alias
     # requireOrg: true
 
 environments:

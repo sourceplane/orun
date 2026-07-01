@@ -9,7 +9,7 @@ title: orun auth
 ```bash
 orun auth login
 orun auth login --device
-orun auth login --org acme
+orun auth login --workspace ws_3KF9TQ2P   # or --org acme (alias); a slug is also accepted
 orun auth login --no-link
 orun auth status
 orun auth logout
@@ -56,18 +56,19 @@ How it resolves the link:
 | Already linked | Reuses the cached link (`✓ already linked this repo → …`) |
 | One org, unambiguous | Links automatically |
 | Several orgs, interactive | Prompts once |
-| Several orgs, non-interactive | Errors and asks for `--org <slug>` |
+| Several orgs, non-interactive | Errors and asks for `--workspace <ws_…\|slug>` (alias `--org`) |
 | No orgs at all | Materializes a **personal org** (`✓ created your personal org <slug>`) and links |
 | OSS / local backend | Short-circuits to the fixed `_local/_local` scope |
 
 If login succeeds but linking can't complete automatically, the command still
-exits 0 and tells you how to finish (`orun auth login --org <slug>` or
-`orun cloud link`).
+exits 0 and tells you how to finish (`orun auth login --workspace <ws_…|slug>`
+or `orun cloud link`).
 
 | Flag | Meaning |
 | --- | --- |
 | `--device` | Use the platform device login flow (RFC-8628) for headless terminals |
-| `--org <slug>` | Org to link this repo under, when you belong to several |
+| `--workspace <ws_…\|slug>` | Workspace to link this repo under, when you belong to several. Accepts a Workspace ID `ws_…`, a slug, or an `org_…` id |
+| `--org <slug>` | Retained alias of `--workspace` (the CLI reads either and prefers `--workspace`) |
 | `--no-link` | Authenticate only; don't auto-link the repo |
 | `--backend-url <url>` | Backend URL (or set `ORUN_BACKEND_URL` / declare it in `intent.yaml`) |
 
