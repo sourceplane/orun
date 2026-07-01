@@ -6,6 +6,14 @@
 > the `intent.yaml` surface and the catalog-snapshot changes that feed the
 > Workspace Overview. Keep it in sync with the orun-cloud epic; the ownership
 > split is in §5.
+>
+> **2026-07-01 architecture review:** see `architecture-review.md` (this dir) for
+> the CLI-half corrections grounded against current code — the `Repo` ref should
+> not be minted from the un-normalized `CatalogSnapshot.Repo`; "read at HEAD" is
+> really "read the working tree" (make the pin real); adding `Repo`/`Product` is
+> emit-path + graph work, not an `allEntityKinds` poke; and confirm whether `doc`
+> needs to be its own object kind. The normative pass is in orun-cloud's
+> `architecture-review.md`.
 
 | | |
 |---|---|
