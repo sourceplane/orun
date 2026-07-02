@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/runner"
@@ -19,8 +20,10 @@ import (
 // the lease-bound resolve against the backend (contract §4 v3), mapping the
 // response's KEY-keyed values back onto each ref's asEnv name and surfacing
 // personal-overlay serves so local behavior is never silently different
-// (specs/orun-secrets/runner-integration.md §1).
-func remoteSecretResolver(ctx context.Context, client *remotestate.Client, backend statebackend.Backend, runID, runnerID string, stderr *os.File, color bool) func(string, []model.PlanSecretRef) (map[string]string, error) {
+// (specs/orun-secrets/runner-integration.md §1). It also records the value-free
+// resolve provenance onto the runner so the sealed run captures which secret
+// versions/decisions each job used (Invariant 6).
+func remoteSecretResolver(ctx context.Context, r *runner.Runner, client *remotestate.Client, backend statebackend.Backend, runID, runnerID string, stderr *os.File, color bool) func(string, []model.PlanSecretRef) (map[string]string, error) {
 	return func(jobID string, refs []model.PlanSecretRef) (map[string]string, error) {
 		refStrings := make([]string, 0, len(refs))
 		for _, ref := range refs {
@@ -48,6 +51,21 @@ func remoteSecretResolver(ctx context.Context, client *remotestate.Client, backe
 				return nil, fmt.Errorf("backend returned no value for %s", ref.AsEnv)
 			}
 			out[ref.AsEnv] = value
+		}
+
+		// Record value-free provenance for the seal (never a value): key, version,
+		// serving scope, and the audit decision id.
+		if r != nil && len(resolved.Resolved) > 0 {
+			prov := make([]execmodel.SecretResolution, 0, len(resolved.Resolved))
+			for _, meta := range resolved.Resolved {
+				prov = append(prov, execmodel.SecretResolution{
+					Key:        meta.Key,
+					Version:    meta.Version,
+					Scope:      meta.Scope,
+					DecisionID: meta.DecisionID,
+				})
+			}
+			r.RecordSecretProvenance(jobID, prov)
 		}
 
 		var personal []string

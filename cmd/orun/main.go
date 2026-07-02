@@ -291,6 +291,17 @@ func generatePlan() error {
 		fmt.Println("□ Binding jobs and resolving dependencies...")
 	}
 	jobPlanner := planner.NewJobPlanner(compositionInfos)
+	// Tenancy scope for mapping composition secretBindings → secret:// references
+	// (orun-secrets SEC4). project defaults to the repo (OV2 bijection) when the
+	// intent does not override it.
+	bindWorkspace, bindProject, _ := intentScope(intent)
+	if bindProject == "" {
+		if wsRoot, werr := catalogWorkspaceRoot(); werr == nil {
+			bindProject = shortRepoName("", wsRoot)
+		}
+	}
+	jobPlanner.Workspace = bindWorkspace
+	jobPlanner.Project = bindProject
 	jobInstances, err := jobPlanner.PlanJobs(instances)
 	if err != nil {
 		return fmt.Errorf("failed to plan jobs: %w", err)
@@ -441,6 +452,11 @@ func generatePlan() error {
 	} else if catRes.Skipped {
 		plan.Metadata.Catalog = &model.PlanCatalogMeta{Skipped: true}
 	}
+
+	// Derive the static x-orun-secrets facet (requirements) onto the resolved
+	// component entities before the object-model catalog is persisted
+	// (orun-secrets SEC4). No-op unless a composition declares secretBindings.
+	enrichCatalogSecretsFacet(catRes.View, compositionRegistry)
 
 	// Compute planHash from the plan with metadata.revision and
 	// metadata.checksum cleared — that is the spec-canonical "plan content

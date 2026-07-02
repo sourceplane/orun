@@ -132,7 +132,21 @@ type JobInstance struct {
 	// SecretRefs maps env var names to secret:// references (never values).
 	// Resolved to plaintext only in the runner, at step launch.
 	SecretRefs map[string]string
-	Labels     map[string]string
+	// SecretBindings carries the resolved composition secretBindings for this
+	// job's profile (specs/orun-secrets/data-model.md §2.2). The planner maps
+	// each to a secret:// reference merged into SecretRefs; the list is kept for
+	// plan auditability (which logical bindings a profile declared).
+	SecretBindings []ResolvedSecretBinding
+	Labels         map[string]string
+}
+
+// ResolvedSecretBinding is a composition secretBinding resolved onto a job: the
+// logical Key, the env var it injects as (AsEnv, defaulting to Key), and whether
+// it is Required (a required binding that cannot be mapped is a compile error).
+type ResolvedSecretBinding struct {
+	Key      string
+	AsEnv    string
+	Required bool
 }
 
 // PromotionGate is an evidence check for cross-plan environment promotion.

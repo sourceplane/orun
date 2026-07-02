@@ -13,6 +13,12 @@ import (
 type JobPlanner struct {
 	compositions  map[string]*CompositionInfo // Composition -> default job info
 	templateCache map[string]*template.Template
+	// Workspace and Project are the tenancy scope composition secretBindings map
+	// against (specs/orun-secrets/data-model.md §2.2): a binding for KEY becomes
+	// secret://<workspace>/<project>/<env>/<KEY>. Empty when no cloud scope is
+	// resolvable at plan time — a required binding then fails to compile.
+	Workspace string
+	Project   string
 }
 
 // CompositionInfo holds the default job for a composition
@@ -54,8 +60,16 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 				return nil, err
 			}
 
+			// The composition secretBindings for this instance's profile are the
+			// same for every job the profile selects; resolve them once.
+			bindings := jp.resolveProfileBindings(compInst, compositionInfo)
+
 			for _, jobEntry := range jobsToRender {
 				jobID := fmt.Sprintf("%s.%s.%s", compInst.ComponentName, envName, jobEntry.job.Name)
+				secretRefs, mergeErr := mergeBindingRefs(compInst.SecretEnv, bindings, jp.Workspace, jp.Project, envName)
+				if mergeErr != nil {
+					return nil, fmt.Errorf("component %s (env %s): %w", compInst.ComponentName, envName, mergeErr)
+				}
 				jobInst := &model.JobInstance{
 					ID:                       jobID,
 					Name:                     jobEntry.job.Name,
@@ -75,7 +89,8 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 					Labels:                   compInst.Labels,
 					Parameters:               compInst.Parameters,
 					Env:                      compInst.Env,
-					SecretRefs:               compInst.SecretEnv,
+					SecretRefs:               secretRefs,
+					SecretBindings:           bindings,
 					DependsOn:                make([]string, 0),
 				}
 

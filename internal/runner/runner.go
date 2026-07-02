@@ -110,6 +110,12 @@ type Runner struct {
 	printMu sync.Mutex
 	stateMu sync.Mutex
 
+	// secretProvenance holds value-free resolve provenance keyed by jobID,
+	// recorded by the resolver (RecordSecretProvenance) and sealed onto the
+	// job's ExecState record after a successful resolve (Invariant 6).
+	secretMu         sync.Mutex
+	secretProvenance map[string][]execmodel.SecretResolution
+
 	// liveState points at the in-memory ExecState the run mutates, so observers
 	// (the object-model working tree) can snapshot live job/step progress without
 	// reading the legacy on-disk state.json. Set at the start of Run.
@@ -519,6 +525,14 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 			return true
 		}
 		jobSecretEnv = resolved
+		// Seal value-free provenance onto the job's ExecState record: which
+		// secret versions/decisions this job resolved (Invariant 6). Recorded by
+		// the resolver during the hook call above.
+		if prov := r.secretProvenanceFor(job.ID); prov != nil {
+			r.updateState(persistState, execState, func() {
+				jobState.SecretProvenance = prov
+			})
+		}
 	}
 
 	// Per-job workspace isolation. We stage the source tree into a job-private
@@ -1053,6 +1067,10 @@ func (r *Runner) SnapshotState() *execmodel.ExecState {
 				cp.Steps[k] = v
 			}
 		}
+		if js.SecretProvenance != nil {
+			cp.SecretProvenance = make([]execmodel.SecretResolution, len(js.SecretProvenance))
+			copy(cp.SecretProvenance, js.SecretProvenance)
+		}
 		out.Jobs[id] = &cp
 	}
 	return out
@@ -1376,6 +1394,39 @@ func (r *Runner) resolveTimeout(job model.PlanJob, step model.PlanStep) string {
 		return strings.TrimSpace(step.Timeout)
 	}
 	return strings.TrimSpace(job.Timeout)
+}
+
+// RecordSecretProvenance stores the value-free resolve provenance for a job so
+// the runner can seal it onto the job's ExecState record (Invariant 6). The
+// remote resolver calls this with the metadata half of the resolve response;
+// the value half never reaches here. A copy is stored so the caller may reuse
+// its slice.
+func (r *Runner) RecordSecretProvenance(jobID string, res []execmodel.SecretResolution) {
+	if jobID == "" || len(res) == 0 {
+		return
+	}
+	r.secretMu.Lock()
+	defer r.secretMu.Unlock()
+	if r.secretProvenance == nil {
+		r.secretProvenance = make(map[string][]execmodel.SecretResolution)
+	}
+	cp := make([]execmodel.SecretResolution, len(res))
+	copy(cp, res)
+	r.secretProvenance[jobID] = cp
+}
+
+// secretProvenanceFor returns a copy of the recorded provenance for a job (nil
+// when none was recorded).
+func (r *Runner) secretProvenanceFor(jobID string) []execmodel.SecretResolution {
+	r.secretMu.Lock()
+	defer r.secretMu.Unlock()
+	src := r.secretProvenance[jobID]
+	if len(src) == 0 {
+		return nil
+	}
+	cp := make([]execmodel.SecretResolution, len(src))
+	copy(cp, src)
+	return cp
 }
 
 // resolveJobSecrets resolves the job's secret references through the
