@@ -22,10 +22,14 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 		Components:     make(map[string]model.Component),
 		ComponentIndex: make(map[string]model.Component),
 		Env:            intent.Env,
+		SecretEnv:      intent.SecretEnv,
 	}
 
 	if normalized.Env == nil {
 		normalized.Env = make(map[string]string)
+	}
+	if normalized.SecretEnv == nil {
+		normalized.SecretEnv = make(map[string]string)
 	}
 
 	// Validate intent root env: ORUN_* prefix is reserved

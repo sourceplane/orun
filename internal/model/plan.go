@@ -161,8 +161,21 @@ type PlanJob struct {
 	Timeout                  string                 `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	Retries                  int                    `json:"retries,omitempty" yaml:"retries,omitempty"`
 	Env                      map[string]interface{} `json:"env,omitempty" yaml:"env,omitempty"`
-	Labels                   map[string]string      `json:"labels,omitempty" yaml:"labels,omitempty"`
-	Parameters               map[string]interface{} `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+	// SecretRefs lists the secret:// references this job will resolve at run
+	// time — references only, sorted by AsEnv. No value field exists,
+	// structurally (specs/orun-secrets/data-model.md §5).
+	SecretRefs []PlanSecretRef        `json:"secretRefs,omitempty" yaml:"secretRefs,omitempty"`
+	Labels     map[string]string      `json:"labels,omitempty" yaml:"labels,omitempty"`
+	Parameters map[string]interface{} `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+}
+
+// PlanSecretRef is one secret reference on a plan job: the env var name the
+// resolved value will be injected as, and the reference that names it. Later
+// milestones add compile-time annotations (grant, servesFrom, personalShadow)
+// — never values.
+type PlanSecretRef struct {
+	AsEnv string `json:"asEnv" yaml:"asEnv"`
+	Ref   string `json:"ref" yaml:"ref"`
 }
 
 // PlanPromotionGate is a cross-plan evidence gate in the plan output.

@@ -99,18 +99,18 @@ type JobConstraints struct {
 
 // JobInstance is a materialized job for a component in an environment
 type JobInstance struct {
-	ID            string
-	Name          string
-	Component     string
-	Environment   string
-	Composition   string
-	Profile       string
-	ProfileSource string
+	ID                    string
+	Name                  string
+	Component             string
+	Environment           string
+	Composition           string
+	Profile               string
+	ProfileSource         string
 	ProfileRuleTriggerRef string
-	RunsOn        string
-	Path          string
-	Steps         []RenderedStep
-	DependsOn     []string
+	RunsOn                string
+	Path                  string
+	Steps                 []RenderedStep
+	DependsOn             []string
 	// AdvisoryDependsOn lists dependency job IDs that exist semantically
 	// but are NOT enforced by the executor — used when DependencyMode is
 	// "advisory". Kept for plan auditability ("api normally depends on
@@ -124,12 +124,15 @@ type JobInstance struct {
 	// DependencyRuleTriggerRef: the matching triggerRef when source is
 	// "subscription-rule".
 	DependencyRuleTriggerRef string
-	Gates         []PromotionGate
-	Timeout       string
-	Retries       int
-	Parameters    map[string]interface{}
-	Env           map[string]string
-	Labels        map[string]string
+	Gates                    []PromotionGate
+	Timeout                  string
+	Retries                  int
+	Parameters               map[string]interface{}
+	Env                      map[string]string
+	// SecretRefs maps env var names to secret:// references (never values).
+	// Resolved to plaintext only in the runner, at step launch.
+	SecretRefs map[string]string
+	Labels     map[string]string
 }
 
 // PromotionGate is an evidence check for cross-plan environment promotion.
