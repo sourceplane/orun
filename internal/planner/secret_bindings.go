@@ -3,6 +3,7 @@ package planner
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/secretref"
@@ -39,6 +40,59 @@ func (jp *JobPlanner) resolveProfileBindings(compInst *model.ComponentInstance, 
 		out = append(out, model.ResolvedSecretBinding{Key: key, AsEnv: asEnv, Required: b.Required})
 	}
 	return out
+}
+
+// resolveProfileMaterialize returns the profile's materialize block for the
+// instance, or nil when the component has no profile / no materialize
+// (specs/orun-secrets/data-model.md §2.3).
+func (jp *JobPlanner) resolveProfileMaterialize(compInst *model.ComponentInstance, info *CompositionInfo) *model.MaterializeSpec {
+	if info == nil || len(info.ExecutionProfiles) == 0 {
+		return nil
+	}
+	if compInst.ProfileSource == "" || compInst.ProfileSource == "legacy-none" {
+		return nil
+	}
+	profile, exists := info.ExecutionProfiles[compInst.ProfileName]
+	if !exists {
+		return nil
+	}
+	return profile.Materialize
+}
+
+// resolveMaterialize compile-checks a profile's materialize block and resolves
+// it onto a job (specs/orun-secrets/data-model.md §2.3, Part 1). Every key in
+// materialize.secrets MUST be one of the profile's secretBindings or the
+// component's secretEnv — else a clear compile error. Each authored key is
+// translated to the env var name (AsEnv) the resolved value is keyed under, so
+// the runner delivers by that name and writes it as the target's secret name.
+// The result's Secrets are sorted for a stable, content-addressed plan.
+func resolveMaterialize(spec *model.MaterializeSpec, bindings []model.ResolvedSecretBinding, secretEnv map[string]string) (*model.ResolvedMaterialize, error) {
+	if spec == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(spec.Target) == "" {
+		return nil, fmt.Errorf("materialize block declares no target")
+	}
+
+	bindingAsEnv := make(map[string]string, len(bindings))
+	for _, b := range bindings {
+		bindingAsEnv[b.Key] = b.AsEnv
+	}
+
+	out := &model.ResolvedMaterialize{Target: spec.Target}
+	for _, key := range spec.Secrets {
+		if asEnv, ok := bindingAsEnv[key]; ok {
+			out.Secrets = append(out.Secrets, asEnv)
+			continue
+		}
+		if _, ok := secretEnv[key]; ok {
+			out.Secrets = append(out.Secrets, key)
+			continue
+		}
+		return nil, fmt.Errorf("materialize.secrets key %q is not one of the profile's secretBindings or the component's secretEnv", key)
+	}
+	sort.Strings(out.Secrets)
+	return out, nil
 }
 
 // mergeBindingRefs folds the composition secretBindings into the job's secret

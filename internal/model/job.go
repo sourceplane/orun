@@ -137,7 +137,23 @@ type JobInstance struct {
 	// each to a secret:// reference merged into SecretRefs; the list is kept for
 	// plan auditability (which logical bindings a profile declared).
 	SecretBindings []ResolvedSecretBinding
-	Labels         map[string]string
+	// Materialize carries the profile's resolved runtime-delivery block for this
+	// job (specs/orun-secrets/data-model.md §2.3). The planner subset-checks
+	// materialize.secrets against the profile's bindings/secretEnv and translates
+	// each to the env var name (AsEnv) the resolved value is keyed under, so the
+	// runner delivers by that name after the deploy step. nil when the profile
+	// declares no materialize block.
+	Materialize *ResolvedMaterialize
+	Labels      map[string]string
+}
+
+// ResolvedMaterialize is a profile's materialize block resolved onto a job:
+// the typed adapter Target and the env var names (Secrets) to sync — a subset
+// of the job's SecretRefs, value-free. The runner reads the already-resolved
+// value for each name from its per-job secret cache (no second resolve).
+type ResolvedMaterialize struct {
+	Target  string
+	Secrets []string
 }
 
 // ResolvedSecretBinding is a composition secretBinding resolved onto a job: the

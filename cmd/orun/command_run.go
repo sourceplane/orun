@@ -728,6 +728,12 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		ResolveJobSecrets: remoteSecretResolver(ctx, r, client, backend, handle.RunID, runnerID, os.Stderr, r.Color),
 	}
 
+	// Deploy-time materialization (orun-secrets SEC6): wire the CF adapter (from
+	// the deploy environment's credentials) and the sync-provenance recorder.
+	// Nil-safe — jobs with no materialize block, or a run with no cloud, are
+	// unaffected.
+	attachMaterialize(r, backendURL, tokenSrc, scope.OrgID, scope.ProjectID)
+
 	return nil
 }
 

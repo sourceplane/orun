@@ -164,9 +164,21 @@ type PlanJob struct {
 	// SecretRefs lists the secret:// references this job will resolve at run
 	// time — references only, sorted by AsEnv. No value field exists,
 	// structurally (specs/orun-secrets/data-model.md §5).
-	SecretRefs []PlanSecretRef        `json:"secretRefs,omitempty" yaml:"secretRefs,omitempty"`
-	Labels     map[string]string      `json:"labels,omitempty" yaml:"labels,omitempty"`
-	Parameters map[string]interface{} `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+	SecretRefs []PlanSecretRef `json:"secretRefs,omitempty" yaml:"secretRefs,omitempty"`
+	// Materialize renders the profile's runtime-delivery block as an explicit
+	// plan step (specs/orun-secrets/data-model.md §2.3, §5). Value-free — the
+	// target adapter id and the key names only; it folds into the plan checksum.
+	Materialize *PlanMaterialize       `json:"materialize,omitempty" yaml:"materialize,omitempty"`
+	Labels      map[string]string      `json:"labels,omitempty" yaml:"labels,omitempty"`
+	Parameters  map[string]interface{} `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+}
+
+// PlanMaterialize is the value-free materialize step in the plan: the typed
+// adapter Target and the secret key names to deliver after the deploy step.
+// No value field exists — structurally (Invariant 1).
+type PlanMaterialize struct {
+	Target  string   `json:"target" yaml:"target"`
+	Secrets []string `json:"secrets,omitempty" yaml:"secrets,omitempty"`
 }
 
 // PlanSecretRef is one secret reference on a plan job: the env var name the
