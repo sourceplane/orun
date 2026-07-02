@@ -1,71 +1,66 @@
 # CLI Surface
 
-> The work plane is SaaS-first; the CLI surface is deliberately small and
-> read-leaning: pull frozen specs for agents and humans, peek at work without
-> leaving the terminal. Mutation from the CLI goes through the same backend
-> mutators (one write path) and stays minimal in v1 — the board lives in the
-> SaaS. Output follows the cockpit conventions (`internal/cockpit`): human
-> rendering by default, `--json` falls through the same viewmodels.
+> The work plane is console-first; the CLI is deliberately small: pull frozen
+> briefs, peek at work, import the spec tree. CLI mutation goes through the
+> same mutator surface (`actor.via: cli`) and stays minimal. Output follows
+> cockpit conventions (`internal/cockpit`): human rendering by default,
+> `--json` through the same viewmodels.
 
 ## 1. `orun spec pull`
 
 Fetch a sealed `SpecSnapshot` (and its object closure) into the local store —
-the agent/human handshake for "implement against exactly this".
+the human/agent handshake for "implement against exactly this".
 
 ```sh
-# latest sealed snapshot of an epic
-orun spec pull acme/platform/epics/orun-work
-
-# frozen at a specific snapshot id (what a dispatcher hands an agent)
-orun spec pull acme/platform/epics/orun-work@sha256:9f86d0…
-
-# print the resolved snapshot id only (for scripting/dispatch)
-orun spec pull acme/platform/epics/orun-work --quiet --id-only
+orun spec pull sourceplane/specs/orun-work                     # latest sealed
+orun spec pull sourceplane/specs/orun-work@sha256:9f86d0…      # frozen (dispatch)
+orun spec pull sourceplane/specs/orun-work --quiet --id-only   # scripting
 ```
 
-Behavior:
-
-- Set-difference pull via the existing remote walk (`internal/objremote`):
-  objects the local store already has are never re-fetched.
-- Materializes a working view under `.orun/specs/<epic-slug>/` — the epic doc,
-  task contracts, and the `affects` component subgraph summary — read-only
-  (WD-7; editing a pulled snapshot is meaningless by construction).
-- `--catalog` additionally pulls the `CatalogSnapshot` the spec's component
-  keys resolved against, so `affects` keys resolve identically offline.
-- Exit codes: `0` ok; `4` unknown epic/ref; `5` auth/scope failure; `7` remote
+- Set-difference pull via `internal/objremote`; already-present objects are
+  never re-fetched.
+- Materializes a read-only view under `.orun/specs/<slug>/`: the doc, task
+  contracts, and the `affects` component-subgraph summary. Editing a pulled
+  snapshot is meaningless by construction (intent mutates through mutators;
+  facts are not in the snapshot at all).
+- `--catalog` additionally pulls the pinned `CatalogSnapshot` so `affects`
+  keys resolve identically offline.
+- Exit codes: `0` ok; `4` unknown spec/ref; `5` auth/scope; `7` remote
   unreachable (structured under `--json`).
 
 ## 2. `orun work`
 
 ```sh
-orun work list --epic orun-work --status in_progress,-released --assignee @me
-orun work view ORN-142            # envelope + contract + links + recent events
-orun work status ORN-142 in_review --note "PR up"   # minimal mutation set, v1
+orun work list --spec orun-work --lifecycle in_review,-released --assignee @me
+orun work view ORN-142        # envelope + contract + derived lifecycle w/ evidence
+orun work comment ORN-142 "parity fixture needs the WO3 corpus"
 ```
 
-- `list`/`view` read the backend query API; offline they degrade to the last
-  pulled snapshots with a staleness banner.
-- Mutation is deliberately limited to `status` + `comment` in v1; everything
-  else is SaaS/MCP. CLI mutations are events like any other
-  (`actor.via: cli`).
-- Task keys resolve in project context (`ORN-142`) or fully qualified
-  (`acme/platform/ORN-142`).
+- `list`/`view` read the fold query API; every rung prints with its evidence
+  ("In Review — PR #412 open; gate `parity` red"). Offline they degrade to
+  the last pulled snapshots with a staleness banner (intent only — no
+  lifecycle offline, honestly rendered as such).
+- CLI mutation is `comment` + `assign` only. There is no
+  `orun work status`: lifecycle is not authored (WP-3). Pins are
+  console-only, deliberately — an override should cost a click and be seen.
 
-## 3. `orun work import` (dogfood path, W6)
+## 3. `orun work import` (dogfood path, WP0)
 
 ```sh
-orun work import specs/ --project sourceplane/orun --dry-run
+orun work import specs/ --workspace sourceplane --dry-run
 ```
 
-Parses the repo's spec tree (epic READMEs, `implementation-plan.md` milestones,
-`IMPLEMENTATION-STATUS.md` tables) into epics + tasks with contracts
-(`Goal/Deps/Done when/Design refs` → `contract.*`), emits `imported` events,
-and seals an initial `SpecSnapshot` per epic. `--dry-run` prints the mapping
-without writing. Lossless: the source markdown becomes the epic `doc` verbatim
-(Q-4).
+Parses the repo's spec tree — epic `README.md`s → `Spec`s (doc bodies
+content-addressed verbatim, P-4), `implementation-plan.md` milestones →
+`Task`s with contracts (`Goal/Deps/Done when/Design refs` → `contract.*`) —
+writing ordinary `item_created`/`contract_edited` events with `via: import`.
+`--dry-run` prints the mapping without writing. `IMPLEMENTATION-STATUS.md`
+tables are **not** imported as status: lifecycle derives from real
+observations, which is the point — the first demo is the imported tree's
+lifecycle lighting up from git/GitHub history alone.
 
 ## 4. Non-goals (CLI)
 
-No board/TUI rendering of work in v1 (the cockpit may grow a work pane later —
-deferred, L-3); no contract editing from the CLI; no offline mutation queue
-(rejected mutations need the interactive verdict loop the SaaS/MCP provide).
+No board/TUI (the cockpit may grow a work pane later); no contract editing
+from the CLI; no offline mutation queue; no lifecycle mutation anywhere
+(there is none to mutate).

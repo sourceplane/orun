@@ -1,148 +1,161 @@
 # Implementation Plan
 
-> Milestone-based. Each states **goal**, **deps**, **done when**. Agents may
-> split/merge while keeping each PR reviewable. The model + event log (W0) and
-> the sync spine (W1) are the core; the delivery bridge (W2–W3) is the
-> differentiation; sealing/pull (W4) and the MCP (W5) open the agent surface;
-> the import (W6) makes orun plan orun.
+> Milestone-based; each states **goal**, **deps**, **done when**. The order is
+> half the design: dogfood first (import + derived read), coordinate second,
+> then bridge depth, seals, MCP. Every milestone ends with something the team
+> uses that week — no cores-without-a-spine (the v1 failure mode this plan
+> exists to not repeat).
 >
-> **W0–W4 gate only on what exists** (object model, Orun Cloud backend,
-> `objcatalog`/`affected`). Graph unification with the service catalog rides
-> SC2 later and is additive by construction (WD-4).
+> Split of work: the model/fold/contract types and the CLI live in orun
+> (`internal/worklens`); the logs, ingesters, query API, and console live in
+> orun-cloud (see `orun-cloud specs/epics/orun-work/`). The Go fold is the
+> conformance oracle; the TS fold must replay the same fixtures.
 
 ```
-W0 model + event log + mutators ─► W1 sync (DO + client protocol) ─► W2 bridge: links + auto-link
-                                                                          │
-                                                          W3 bridge: gates→Done, Released, drift inbox
-                                                                          │
-                                              W4 sealing + orun spec pull ─► W5 orun MCP
-                                                                          │
-                                                              W6 specs/ import (dogfood)
+WP0 import + derived read  ─►  WP1 coordination + console board
+                                        │
+                          WP2 observation ingestion (PRs) + drift inbox
+                                        │
+                          WP3 gates→Done + Released (overlay feed)
+                                        │
+                     WP4 sealing + orun spec pull  ─►  WP5 the orun MCP
 ```
 
----
+## WP0 — Import + the derived read (dogfood zero)
 
-## W0 — Work model, event log, mutators
-**Goal:** the system of record exists: entities, events, projections, one write
-path — agent-ready provenance from the first event.
-- `internal/work`: envelope/contract/event/principal types per `data-model.md`
-  §2–§4, §6; struct-generated schemas (`go generate`, never hand-edit JSON).
-- Backend Worker: D1 migration (`data-model.md` §5); mutators for create/edit/
-  status/assign/comment/link/contract; event append + projection update in one
-  transaction; `actor` mandatory on every event.
-- Human-key allocation (`PREFIX-seq`) via the project Durable Object skeleton.
+**Goal:** the two-log substrate exists and the first fold renders: both
+repos' `specs/` trees import as Specs/Tasks, and lifecycle lights up from
+git/GitHub *history* alone — the team's own stale status tables coming true
+on their own.
 
-**Deps:** existing backend (`cmd/orun/command_backend.go`). **Done when:** every
-mutator appends exactly one event; dropping `work_status` and replaying
-`work_events` reproduces it byte-for-byte (invariant 2); an event without an
-actor is rejected; ≥90% coverage on `internal/work`; mutator fixtures cover the
-closed event-kind set.
+- orun-cloud: the four tables + sequences (`work` context migration), the
+  coordination mutators (create/edit/contract/assign/comment/order/cancel —
+  no status mutator exists), the fold (lifecycle/blocked/progress/claim), a
+  minimal query API behind api-edge, and a read-only console list (plain
+  react-query — no sync engine yet).
+- orun: `internal/worklens` — envelope/contract types, the reference fold
+  (conformance oracle), fixtures both sides replay; `orun work import`
+  per `cli-surface.md` §3 (+ a one-shot GitHub history backfill producing
+  `pr_opened`/`pr_merged` observations for imported tasks' key parses).
 
-## W1 — Sync: Durable Object protocol + client contract
-**Goal:** the Linear bar is reachable: ordered events, WebSocket fan-out,
-optimistic mutations with rebase.
-- Per-project DO: `seq` assignment, WebSocket fan-out, cursor replay on
-  reconnect (design §7); mutation verdicts (accept/reject + reason) in one
-  structured shape shared with the future MCP.
-- A reference TypeScript client (the SaaS UI's contract): normalized store,
-  optimistic apply, gap replay from `seq` cursors; conformance fixtures both
-  sides replay.
+**Deps:** shipped catalog graph, membership subjects. **Done when:** import
+`--dry-run` maps both repos' spec trees losslessly (golden fixtures, P-4);
+dropping every cache and replaying both logs reproduces all reads (invariant
+1/2 assertion); an event without an actor is rejected; the imported
+`orun-work` v2 spec itself renders with derived lifecycle in the console;
+the Go and TS folds replay identical fixtures byte-for-byte.
 
-**Deps:** W0. **Done when:** a 2-client soak shows convergent state under
-interleaved optimistic mutations + disconnects; p95 server echo < 150 ms on the
-soak rig; a rejected mutation rolls back cleanly with the verdict surfaced;
-cursor replay after a dropped socket loses nothing (Q-1 throughput numbers
-recorded).
+## WP1 — Coordination + the board (daily-drivable)
 
-## W2 — Delivery bridge I: component links + auto-linking
-**Goal:** tasks are graph citizens; PRs find their tasks by themselves.
-- `contract.affects` → validated component links (`work_links`, §7 vocabulary);
-  unresolved keys degrade visibly (Q-5).
-- The auto-linker: PR webhook → `internal/affected` over the diff → open tasks
-  claiming those components (+ task-key parse from branch/PR title) →
-  `implementedBy` links + In Progress/In Review transitions, all as
-  `actor: automation` events.
-- Blast radius read API: `affects` closed over `Result.Dependents`, with owner
-  attribution for reviewer suggestions.
+**Goal:** the plane is usable for real planning: assign, comment, order,
+pin — instant.
 
-**Deps:** W1; shipped `internal/affected`/`objcatalog`. **Done when:** a fixture
-PR auto-links by component overlap and by key parse; transitions are recorded
-with automation provenance and render as such; blast radius matches
-`orun catalog affected` for the same diff (parity fixture); no automation ever
-attributes to a human (invariant 4 assertion).
+- The local-first console store: snapshot bootstrap + cursor replay over
+  both logs (SSE via LISTEN/NOTIFY), optimistic apply, structured verdicts
+  (the shape the MCP will share); board/list views as client-side queries.
+- Pins per design §5 (render-beside-truth, auto-expire, agent-forbidden);
+  the activity feed straight off the coordination log.
+- Fold performance pass: per-subject incremental folds, p95 budget recorded
+  on the dogfood corpus (P-1); pin-race property tests (P-5).
 
-## W3 — Delivery bridge II: gate-verified Done, Released, drift inbox
-**Goal:** status that cannot rot, including the status nobody else can have.
-- Done automation: merge + the contract's `gates` verified green **from orun
-  execution truth** (the exact run/check mapping fixed here — Q-3); otherwise
-  the task parks in `in_review` with the failing gate surfaced.
-- Released automation: the Deployment overlay shows the merge's revision live
-  in the target environment → `delivers` edge + Released event.
-- Drift inbox: merged PR with no claiming task → triage item naming the
-  affected components.
+**Deps:** WP0. **Done when:** the team plans this epic in it (the dogfood
+gate: `IMPLEMENTATION-STATUS.md` stops being hand-edited for orun-work);
+a 2-client convergence fixture passes under interleaved optimistic
+mutations + reconnect replay; a rejected mutation rolls back with the
+verdict surfaced; pinned rungs always render beside observed truth.
 
-**Deps:** W2. **Done when:** a fixture run-through walks a task
-In Review → Done → Released purely from delivery events; a red gate blocks Done
-(and a human override is recorded as one); an unplanned merge raises exactly one
-drift item; Released is derived only from the Deployment overlay, never from a
-deploy attempt (invariant 5).
+## WP2 — Observation ingestion: PRs + drift (the bridge, half 1)
 
-## W4 — Sealing + `orun spec pull`
-**Goal:** the system of proof: epics and ledgers seal content-addressed; agents
-pull frozen specs.
-- Seal `SpecSnapshot` on epic boundaries and `WorkLedgerSegment` on cursor
-  thresholds (`data-model.md` §8) — canonical JSON, org/project routing,
-  `refs/work/…`; the `prev` chain on segments.
-- `orun spec pull` per `cli-surface.md` §1 (set-difference, read-only
-  materialization, `--catalog`, exit codes); `orun work list/view/status` per
-  §2.
+**Goal:** the world starts writing the log live: PRs claim tasks by
+themselves; unplanned changes surface.
 
-**Deps:** W0 (model), existing `internal/objremote`. **Done when:** sealing
-twice with no intervening events is byte-identical (invariant 6); a snapshot
-contains no hot state (invariant 1 assertion); pull fetches only missing
-objects (transfer-count fixture); the ledger chain verifies end-to-end; pulled
-views are read-only (WD-7).
+- The GitHub webhook ingester (integrations-worker, riding the shipped
+  integration-tenancy install): `pr_opened/merged/closed` + `branch_seen`
+  observations with `dedupeKey` idempotency and a versioned fact contract
+  (P-2).
+- The affected-set producer: orun/CI attaches `Result.Affected` to PR
+  observations (parity with `orun catalog affected` by construction).
+- The claim join (key parse ∨ affects-overlap; ambiguity → inbox
+  suggestion), derived `implementedBy` edges, blast-radius read
+  (`affects` closed over dependents, owner attribution as available), and
+  the drift inbox as a standing query.
 
-## W5 — The orun MCP
-**Goal:** the agent surface, policy-identical to the UI.
-- The MCP server per `agents-and-mcp.md` §2–§3: reads over
-  `objcatalog`/`affected`/snapshots/query API; writes through the W0 mutators
-  with agent principals + scoped tokens.
-- Guardrails in the mutator (§4): no agent-Done, contract-propose flagging,
-  scope enforcement, structured verdicts.
+**Deps:** WP1; integration tenancy. **Done when:** a fixture PR claims by
+key parse and by component overlap; ambiguous overlap suggests, never
+links; replaying the same webhook delivery twice folds identically
+(invariant 4); an unplanned merge raises exactly one drift item; blast
+radius matches `orun catalog affected` on the same diff.
 
-**Deps:** W1 (verdict shape), W4 (spec_get). **Done when:** an end-to-end agent
-fixture pulls a spec by hash, links a PR, comments, and moves to `in_review`;
-every resulting event carries `actor: {type: agent, via: mcp}`; a
-`task_update_status(…, done)` from an agent is rejected with a structured
-verdict; tool schemas are generated from `internal/work` types (no drift).
+## WP3 — Gates → Done, overlay → Released (the bridge, half 2)
 
-## W6 — `specs/` import (dogfood)
-**Goal:** orun plans orun: the repo's spec tree becomes the first project.
-- `orun work import` per `cli-surface.md` §3: epic READMEs → epics (doc
-  verbatim, Q-4); `implementation-plan.md` milestones → tasks with contracts;
-  `IMPLEMENTATION-STATUS.md` rows → status events (`actor: automation`,
-  `via: import`); initial `SpecSnapshot` per epic.
-- Import this repo's live epics (`orun-work` itself included) into the dev
-  backend; record divergences as fixtures.
+**Goal:** the rungs nobody else can have, from execution truth only.
 
-**Deps:** W4. **Done when:** `--dry-run` over `specs/` maps every current epic
-without loss (golden fixture); imported docs round-trip byte-identical; the
-imported `orun-work` epic's own milestones render as agent-ready tasks; the
-team stops editing `IMPLEMENTATION-STATUS.md` for new epics (the projection
-replaces it — design §6.4).
+- The run-stream ingester: native-coordination run/check results →
+  `gate_result` observations; the `contract.gates` ↔ run/check identity
+  mapping fixed here against real run data (P-3).
+- The overlay ingester: `saas-resources-runtime` `liveObservation` →
+  `revision_live` observations; derived `delivers` edges.
+- Fold completion: Done (merge + all gates verified green), Released
+  (revision live in target env), unknown-to-orun rendered unknown.
+
+**Deps:** WP2; resources-runtime's liveObservation feed (coordinate — if it
+slips, Released ships dark behind the same fold with a fixture feed).
+**Done when:** a fixture walks In Review → Done → Released purely from
+observations; a gate GitHub reports green but orun has no record of renders
+unknown and the task stays In Review (P-3 fixture); a deploy *attempt*
+releases nothing (invariant 5); a human pin over a red gate renders beside
+the red gate, and expires when it greens.
+
+## WP4 — Sealing + `orun spec pull`
+
+**Goal:** the system of proof: briefs freeze content-addressed; both logs
+chain tamper-evident.
+
+- `SpecSnapshot` (intent-plane only, dual log cursors) + chained
+  coordination/observation segments per `data-model.md` §8; workspace-id
+  routing; seal on spec boundaries + cursor thresholds.
+- `orun spec pull` + `orun work list/view/comment` per `cli-surface.md`
+  (set-difference pull, read-only materialization, evidence-bearing views).
+
+**Deps:** WP0 (model), existing `internal/objremote`. **Done when:** sealing
+twice with no intervening entries is byte-identical (invariant 7); a
+snapshot contains no fold output (asserted by type + fixture); pull fetches
+only missing objects; both segment chains verify end-to-end against the
+live logs; pulled views are read-only.
+
+## WP5 — The orun MCP
+
+**Goal:** the agent surface — evidence-bearing reads, a four-tool write
+surface, and no way to lie.
+
+- The MCP per `agents-and-mcp.md`: reads over objcatalog/affected/
+  snapshots/fold-query; writes through the coordination mutators with
+  service-principal tokens; verdicts shared with WP1's shape.
+- Guardrails in the mutator: no agent pins, contract-propose flagging,
+  scope/rate limits.
+
+**Deps:** WP1 (verdict shape), WP4 (`spec_get`). **Done when:** an
+end-to-end agent fixture pulls a frozen brief, self-assigns, opens a PR
+(observed → In Review), comments — and every resulting event carries
+`actor: {type: agent, via: mcp}`; there is no status tool to call
+(asserted: the tool surface contains no lifecycle write); a
+`contract_propose` lands flagged; tool schemas are generated from
+`internal/worklens` types (no drift).
 
 ---
 
 ## Cross-cutting (every milestone)
 
-- **CR-1 complement** — no hot work state in any object blob; no object id in
-  any hot row except sealed-snapshot bookkeeping (invariant 1).
-- **One write path** — UI, MCP, CLI, automation share the W0 mutators; a second
-  write path is a rejected PR (invariant 3, WD-3).
-- **Provenance** — every event has an actor; automation never wears a human's
-  name (invariant 4).
-- **Determinism** — canonical JSON for everything sealed; struct-generated
-  schemas; `errors.Is/As`; fixtures over golden bytes.
-- **Engine-agnostic seam** — the client sync contract (W1) stays swappable
-  (Q-2): no DO-specific types leak past the protocol boundary.
+- **No stored fact** — any PR adding a lifecycle/gate/released column, or
+  any write to a read-model outside the fold, is a rejected PR (invariant 1).
+- **Two logs only** — mutators write coordination; named ingesters write
+  observations; nothing else writes anything (WP-6, invariant 4).
+- **Provenance** — every event has an actor; automation never wears a name;
+  agents never pin (invariant 3).
+- **Determinism** — canonical JSON for everything sealed; the Go fold is
+  the conformance oracle and the TS fold replays its fixtures; golden bytes
+  over import round-trips (P-4).
+- **The seam** — the mutation/verdict contract stays transport-agnostic;
+  no SSE/LISTEN-NOTIFY types leak past it (WP-9).
+- **Dogfood gate** — from WP1 on, this epic is planned in the plane itself;
+  regressions are felt before they are reported.

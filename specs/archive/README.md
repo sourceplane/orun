@@ -84,6 +84,29 @@ cockpit's changed/affected view + drill-down.
   (`internal/cockpit/catalogread`), and the `plan`/`run --changed` +
   `orun catalog affected` paths. `specs/orun-service-catalog/` builds on this.
 
+### `orun-work-v1/` — the first work-plane design
+
+The original Linear-style work plane: Initiative/Epic/Task entities with an
+event-sourced hot store (spec'd against Cloudflare D1 + per-project Durable
+Objects), status automation writing to a stored status column, a `work_links`
+side table pending SC2, and milestones W0–W6. Its cores (Go `internal/work`,
+orun-cloud `@saas/db/work`) landed test-green but were never wired to any
+product surface.
+
+- **Status:** Superseded — scrapped before any UI shipped. The platform moved
+  under the spec (Postgres backend, SC1–SC8 landed, workspace tenancy + Teams
+  RBAC), and the stored-status ontology was replaced wholesale.
+- **Superseded by:** [`specs/orun-work/`](../orun-work/) (v2) — the
+  intent/fact/coordination split: lifecycle becomes a *derived query* over two
+  append-only logs (coordination + observation), never a stored column; work
+  kinds join the shipped service-catalog graph directly.
+- **Code today:** the v1 cores (`internal/work`, `internal/workbridge`,
+  orun-cloud `packages/db/src/work/`) were deleted when this spec was archived;
+  the unused `work` schema is dropped by orun-cloud migration
+  `470_work_teardown`. The v1 invariants that survive (append-only events,
+  mandatory actor provenance, one write path, seal determinism) carry forward
+  into v2.
+
 ## The state-model arc (for context)
 
 ```
