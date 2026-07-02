@@ -132,8 +132,10 @@ type APIContract struct {
 	Stability  string `json:"stability,omitempty"`
 }
 
-// EntityDocs points at techdocs/runbooks/ADRs (§2).
+// EntityDocs points at overview/techdocs/runbooks/ADRs (§2). `overview` is the
+// single front-page md pointer, shared by every kind (saas-workspace-overview WO3).
 type EntityDocs struct {
+	Overview string   `json:"overview,omitempty"`
 	TechDocs string   `json:"techdocs,omitempty"`
 	Runbooks []string `json:"runbooks,omitempty"`
 	ADRs     []string `json:"adrs,omitempty"`

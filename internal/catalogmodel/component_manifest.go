@@ -34,8 +34,10 @@ type ComponentLink struct {
 	Icon  string `json:"icon,omitempty"`
 }
 
-// ComponentDocs points at techdocs/runbooks/ADRs (data-model.md §2).
+// ComponentDocs points at overview/techdocs/runbooks/ADRs (data-model.md §2).
+// `overview` is the single front-page md pointer (saas-workspace-overview WO3).
 type ComponentDocs struct {
+	Overview string   `json:"overview,omitempty"`
 	TechDocs string   `json:"techdocs,omitempty"`
 	Runbooks []string `json:"runbooks,omitempty"`
 	ADRs     []string `json:"adrs,omitempty"`

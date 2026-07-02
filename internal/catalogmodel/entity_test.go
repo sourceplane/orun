@@ -55,6 +55,52 @@ func TestAllEntityKindsIsCopy(t *testing.T) {
 	}
 }
 
+func TestRepoKindRegistered(t *testing.T) {
+	// The declared Repo kind (saas-workspace-overview WO3) is a first-class kind.
+	if !catalogmodel.IsEntityKind(catalogmodel.EntityKindRepo) {
+		t.Error("IsEntityKind(Repo) = false, want true")
+	}
+	found := false
+	for _, k := range catalogmodel.AllEntityKinds() {
+		if k == catalogmodel.EntityKindRepo {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("AllEntityKinds does not include Repo")
+	}
+	// The set stays sorted.
+	prev := ""
+	for _, k := range catalogmodel.AllEntityKinds() {
+		if k < prev {
+			t.Errorf("AllEntityKinds not sorted: %q before %q", prev, k)
+		}
+		prev = k
+	}
+}
+
+func TestDocsOverviewRoundTrips(t *testing.T) {
+	// `overview` survives JSON round-trip on the shared docs struct and coexists
+	// with the existing pointers (saas-workspace-overview WO3).
+	in := catalogmodel.EntityDocs{Overview: "docs/overview.md", TechDocs: "docs/", Runbooks: []string{"ops/run.md"}}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out catalogmodel.EntityDocs
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Overview != "docs/overview.md" || out.TechDocs != "docs/" || len(out.Runbooks) != 1 {
+		t.Errorf("round-trip = %+v", out)
+	}
+	// Empty overview is omitted from the wire form.
+	empty, _ := json.Marshal(catalogmodel.EntityDocs{TechDocs: "docs/"})
+	if string(empty) != `{"techdocs":"docs/"}` {
+		t.Errorf("omitempty broken: %s", empty)
+	}
+}
+
 func TestInverseRelation(t *testing.T) {
 	// Every declared forward edge has an inverse, and the inverse's inverse is
 	// the original (the relation is an involution).

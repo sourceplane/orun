@@ -94,6 +94,9 @@
               },
               "type": "array"
             },
+            "overview": {
+              "type": "string"
+            },
             "runbooks": {
               "items": {
                 "type": "string"

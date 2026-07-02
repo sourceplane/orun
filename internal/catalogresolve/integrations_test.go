@@ -20,7 +20,7 @@ func TestAuthoredToManifest_CatalogHubBlocks(t *testing.T) {
 					"datadog": map[string]any{"service": "api", "team": "edge"},
 				},
 				Links: []catalogmodel.ComponentYAMLLink{{Title: "Dash", URL: "https://x", Icon: "dashboard"}},
-				Docs:  &catalogmodel.ComponentYAMLDocs{TechDocs: "docs/", Runbooks: []string{"docs/run.md"}},
+				Docs:  &catalogmodel.ComponentYAMLDocs{Overview: "docs/overview.md", TechDocs: "docs/", Runbooks: []string{"docs/run.md"}},
 				Extensions: map[string]any{
 					"x-acme": map[string]any{"tier": "gold"}, // unknown vendor block
 				},
@@ -35,7 +35,7 @@ func TestAuthoredToManifest_CatalogHubBlocks(t *testing.T) {
 	if len(cm.Links) != 1 || cm.Links[0].Title != "Dash" || cm.Links[0].Icon != "dashboard" {
 		t.Errorf("links = %+v", cm.Links)
 	}
-	if cm.Docs == nil || cm.Docs.TechDocs != "docs/" || len(cm.Docs.Runbooks) != 1 {
+	if cm.Docs == nil || cm.Docs.Overview != "docs/overview.md" || cm.Docs.TechDocs != "docs/" || len(cm.Docs.Runbooks) != 1 {
 		t.Errorf("docs = %+v", cm.Docs)
 	}
 	// The unknown x-<vendor> extension is preserved verbatim.
