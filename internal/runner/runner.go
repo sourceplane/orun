@@ -16,6 +16,7 @@ import (
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/executor"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/redact"
 	"github.com/sourceplane/orun/internal/ui"
 )
 
@@ -57,6 +58,13 @@ type RunnerHooks struct {
 	// the runner, e.g. SnapshotState); implementations MUST be fast and
 	// non-blocking.
 	AfterStateUpdate func()
+	// ResolveJobSecrets resolves a job's secret:// references to plaintext env
+	// values, called after the job is claimed (BeforeJob) and before its first
+	// step. Fail closed: an error fails the job without starting any step. The
+	// returned map is injected as the highest-precedence, non-persisted env
+	// layer for this job only, and every value is registered with the
+	// redactor first (specs/orun-secrets/runner-integration.md §1).
+	ResolveJobSecrets func(jobID string, refs []model.PlanSecretRef) (map[string]string, error)
 }
 
 type Runner struct {
@@ -86,6 +94,12 @@ type Runner struct {
 	SkipLocalDepsForJob bool
 	// Hooks wires external lifecycle callbacks (remote state, log upload, etc.).
 	Hooks *RunnerHooks
+
+	// Redactor masks resolved secret values in step output before it reaches
+	// ANY sink — view analysis, the AfterStepLog hook (remote log upload +
+	// objrun blob write), the GHA emitter, and the console. Nil-safe; seeded
+	// with every value ResolveJobSecrets returns.
+	Redactor *redact.Redactor
 
 	// ResumeJobs seeds the run with jobs that already succeeded in a prior run
 	// of the same execution (read from the object graph). Seeded jobs are
@@ -485,6 +499,28 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 	jobStartedAt := time.Now()
 	jobReport := newJobReport(job, r.DryRun)
 
+	// Resolve secret references before any step runs (fail-closed). Values are
+	// registered with the redactor FIRST, live only in this job's memory, and
+	// are merged as the top env layer per step — never into job.Env or state.
+	var jobSecretEnv map[string]string
+	if len(job.SecretRefs) > 0 && !r.DryRun {
+		resolved, resolveErr := r.resolveJobSecrets(job)
+		if resolveErr != nil {
+			r.updateState(persistState, execState, func() {
+				jobState.Status = "failed"
+				jobState.LastError = fmt.Sprintf("secret resolution: %v", resolveErr)
+				jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+			})
+			fmt.Fprintf(r.Stderr, "  %s %s: secret resolution failed: %v\n", ui.Red(r.Color, "✗"), job.ID, resolveErr)
+			summary.addFailed()
+			if r.Hooks != nil && r.Hooks.AfterJobTerminal != nil {
+				r.Hooks.AfterJobTerminal(job.ID, false, jobState.LastError)
+			}
+			return true
+		}
+		jobSecretEnv = resolved
+	}
+
 	// Per-job workspace isolation. We stage the source tree into a job-private
 	// directory so concurrent jobs don't race on node_modules / .turbo / dist
 	// rewrites. UseWorkDirOverride means the user pinned a workdir explicitly —
@@ -565,7 +601,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				}
 			}
 
-			execContext, cancel, execErr := r.stepExecContext(baseExecContext, job, step, workingDir)
+			execContext, cancel, execErr := r.stepExecContext(baseExecContext, job, step, workingDir, jobSecretEnv)
 			if execErr != nil {
 				cancel()
 				stepErr = execErr
@@ -574,6 +610,13 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 
 			output, stepErr = r.Executor.RunStep(execContext, job, step)
 			cancel()
+
+			// The single redaction site: mask resolved secret values before the
+			// output reaches ANY sink (view analysis, AfterStepLog → remote log +
+			// objrun blob, GHA emitter, console). Hooks must not redact
+			// themselves — remote setup replaces r.Hooks while objrun chains, so
+			// hook-level redaction would be ordering-fragile (Invariant 5).
+			output = r.Redactor.Filter(output)
 
 			if r.inGHA() && attempts > 1 {
 				ghaOutput.WriteString(output)
@@ -640,8 +683,10 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 			jobExecContext.WorkDir = jobWorkingDir
 			jobExecContext.JobEnv = executor.JobEnvironment(job.Env)
 			jobExecContext.StepEnv = nil
-			jobExecContext.Env = executor.MergeEnvironment(jobExecContext.BaseEnv, jobExecContext.JobEnv)
+			jobExecContext.SecretEnv = jobSecretEnv
+			jobExecContext.Env = executor.MergeEnvironment(jobExecContext.BaseEnv, jobExecContext.JobEnv, jobSecretEnv)
 			output, finalizeErr := finalizer.FinalizeJob(jobExecContext, job)
+			output = r.Redactor.Filter(output)
 			if strings.TrimSpace(output) != "" {
 				if r.Verbose || finalizeErr != nil {
 					r.printBlock("post-job logs", splitDisplayLines(output))
@@ -1333,7 +1378,34 @@ func (r *Runner) resolveTimeout(job model.PlanJob, step model.PlanStep) string {
 	return strings.TrimSpace(job.Timeout)
 }
 
-func (r *Runner) stepExecContext(base executor.ExecContext, job model.PlanJob, step model.PlanStep, workingDir string) (executor.ExecContext, func(), error) {
+// resolveJobSecrets resolves the job's secret references through the
+// ResolveJobSecrets hook (fail-closed: no hook wired means references cannot
+// be satisfied) and registers every value with the redactor BEFORE any step
+// that could echo it runs.
+func (r *Runner) resolveJobSecrets(job model.PlanJob) (map[string]string, error) {
+	if r.Hooks == nil || r.Hooks.ResolveJobSecrets == nil {
+		return nil, fmt.Errorf("job declares %d secret reference(s) but no secret resolver is configured — run against an Orun Cloud backend (orun auth login) or provide ORUN_SECRET_<KEY> overrides for a local run", len(job.SecretRefs))
+	}
+	resolved, err := r.Hooks.ResolveJobSecrets(job.ID, job.SecretRefs)
+	if err != nil {
+		return nil, err
+	}
+	for _, ref := range job.SecretRefs {
+		if _, ok := resolved[ref.AsEnv]; !ok {
+			return nil, fmt.Errorf("secret resolver returned no value for %s", ref.AsEnv)
+		}
+	}
+	if r.Redactor != nil {
+		values := make([]string, 0, len(resolved))
+		for _, v := range resolved {
+			values = append(values, v)
+		}
+		r.Redactor.Add(values...)
+	}
+	return resolved, nil
+}
+
+func (r *Runner) stepExecContext(base executor.ExecContext, job model.PlanJob, step model.PlanStep, workingDir string, secretEnv map[string]string) (executor.ExecContext, func(), error) {
 	stepContext := base.Context
 	if stepContext == nil {
 		stepContext = context.Background()
@@ -1361,8 +1433,11 @@ func (r *Runner) stepExecContext(base executor.ExecContext, job model.PlanJob, s
 	}
 	execContext.JobEnv = executor.MergeEnvironment(execContext.JobEnv, jobRuntimeEnv)
 	execContext.StepEnv = executor.JobEnvironment(step.Env)
+	execContext.SecretEnv = secretEnv
 	execContext.WorkDir = r.resolveStepWorkingDir(workingDir, step.WorkingDirectory)
-	execContext.Env = executor.MergeEnvironment(execContext.BaseEnv, execContext.JobEnv, execContext.StepEnv)
+	// Secret env is the highest-precedence layer and lives only in this
+	// context (never in job.Env, the plan, or persisted state).
+	execContext.Env = executor.MergeEnvironment(execContext.BaseEnv, execContext.JobEnv, execContext.StepEnv, secretEnv)
 	return execContext, cancel, nil
 }
 

@@ -333,6 +333,12 @@ func (b *CoordBackend) lease(jobID string) int {
 	return b.leases[jobID]
 }
 
+// LeaseEpoch returns the lease epoch this backend holds for a claimed job —
+// the conditional key the lease-bound secret resolve carries (contract §4 v3),
+// same discipline as :heartbeat/:complete. Zero when the job was not claimed
+// through this backend.
+func (b *CoordBackend) LeaseEpoch(jobID string) int { return b.lease(jobID) }
+
 func (b *CoordBackend) setHash(jobID, hash string) {
 	b.mu.Lock()
 	b.hashes[jobID] = hash

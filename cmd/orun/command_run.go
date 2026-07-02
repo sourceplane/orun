@@ -15,6 +15,7 @@ import (
 	"github.com/sourceplane/orun/internal/executor"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/objrun"
+	"github.com/sourceplane/orun/internal/redact"
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/remotestate/logpipe"
 	"github.com/sourceplane/orun/internal/runner"
@@ -331,6 +332,14 @@ func runPlan() error {
 			}
 			return err
 		}
+	}
+
+	// Secrets (orun-secrets SEC3): the redactor is always armed — every value a
+	// resolver returns is masked in all output sinks. Non-remote runs get the
+	// local ORUN_SECRET_<KEY> override resolver (fail-closed for missing keys).
+	r.Redactor = redact.New()
+	if !remoteActive {
+		attachLocalSecretResolver(r)
 	}
 
 	// Cross-run resume (local, full-plan runs): skip jobs that already succeeded
@@ -714,6 +723,9 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 			}
 			updateJobWithRetry(ctx, backend, handle.RunID, jobID, runnerID, status, errText)
 		},
+		// Lease-bound secret resolve (orun-secrets SEC3): called after the
+		// claim, before the job's first step; fail-closed on any error.
+		ResolveJobSecrets: remoteSecretResolver(ctx, client, backend, handle.RunID, runnerID, os.Stderr, r.Color),
 	}
 
 	return nil
