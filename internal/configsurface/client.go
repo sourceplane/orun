@@ -77,6 +77,28 @@ func (s Scope) secretsPath() (string, error) {
 	}
 }
 
+// secretPoliciesPath builds the scoped …/config/secret-policies base path. The
+// SecretPolicy routes are org- or project-scoped only (data-model.md §7d): a
+// document's tenancy scope is where it is pushed, so environment scope is not a
+// valid target here.
+func (s Scope) secretPoliciesPath() (string, error) {
+	if strings.TrimSpace(s.Org) == "" {
+		return "", fmt.Errorf("configsurface: scope is missing the organization")
+	}
+	base := "/v1/organizations/" + urlSegment(s.Org)
+	switch s.Kind {
+	case ScopeWorkspace:
+		return base + "/config/secret-policies", nil
+	case ScopeProject:
+		if strings.TrimSpace(s.Project) == "" {
+			return "", fmt.Errorf("configsurface: project scope is missing the project")
+		}
+		return base + "/projects/" + urlSegment(s.Project) + "/config/secret-policies", nil
+	default:
+		return "", fmt.Errorf("configsurface: secret-policies scope must be workspace or project, got %q", string(s.Kind))
+	}
+}
+
 // APIError is the decoded platform error envelope
 // ({ error: { code, message, requestId } }).
 type APIError struct {
@@ -431,6 +453,121 @@ func (c *Client) unknownEnvError(env string, byslug map[string]string) error {
 	}
 	sort.Strings(slugs)
 	return fmt.Errorf("environment %q not found; available: %s", env, strings.Join(slugs, ", "))
+}
+
+// ── SecretPolicy surface (Layer-2 documents — data-model.md §7d/§8) ───────────
+
+// PutSecretPolicyRequest is the body for PUT …/config/secret-policies. Document
+// is the validated SecretPolicy spec ({ "rules": [...] }); the push is
+// idempotent by the server's content hash of it.
+type PutSecretPolicyRequest struct {
+	Name     string          `json:"name"`
+	Tier     string          `json:"tier"`
+	Source   string          `json:"source"`
+	Document json.RawMessage `json:"document"`
+}
+
+// SecretPolicyResult is the metadata the server returns after a policy push.
+type SecretPolicyResult struct {
+	Name         string `json:"name"`
+	Tier         string `json:"tier"`
+	Source       string `json:"source"`
+	Scope        string `json:"scope"`
+	DocumentHash string `json:"documentHash"`
+	Updated      bool   `json:"updated"`
+}
+
+// EvalSubject is the who-axis of an evaluate request (subject facts).
+type EvalSubject struct {
+	ID    string   `json:"id,omitempty"`
+	Kind  string   `json:"kind,omitempty"`
+	Teams []string `json:"teams,omitempty"`
+}
+
+// EvalComponent is the what-axis of an evaluate request.
+type EvalComponent struct {
+	Type   string `json:"type,omitempty"`
+	Domain string `json:"domain,omitempty"`
+	Name   string `json:"name,omitempty"`
+}
+
+// EvalTrigger is the where/trigger-axis of an evaluate request.
+type EvalTrigger struct {
+	Event      string `json:"event,omitempty"`
+	Action     string `json:"action,omitempty"`
+	Branch     string `json:"branch,omitempty"`
+	BaseBranch string `json:"baseBranch,omitempty"`
+	Tag        string `json:"tag,omitempty"`
+	Declared   bool   `json:"declared,omitempty"`
+	Actor      string `json:"actor,omitempty"`
+	Repository string `json:"repository,omitempty"`
+}
+
+// EvaluateSecretPolicyRequest is the body for POST …/config/secret-policies/
+// evaluate — the four-axis facts for a hypothetical resolve. The field shape
+// matches the config-worker evaluate handler (flat, not nested under `facts`).
+type EvaluateSecretPolicyRequest struct {
+	Key        string         `json:"key"`
+	Env        string         `json:"env"`
+	Platform   string         `json:"platform"`
+	Subject    EvalSubject    `json:"subject"`
+	Component  *EvalComponent `json:"component,omitempty"`
+	Trigger    *EvalTrigger   `json:"trigger,omitempty"`
+	ServesFrom string         `json:"servesFrom,omitempty"`
+}
+
+// LayerDecision is one layer's outcome in an evaluate response.
+type LayerDecision struct {
+	Action string `json:"action,omitempty"`
+	Allow  bool   `json:"allow"`
+	RuleID string `json:"ruleId,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// EvaluateResult is the two-layer decision the evaluate route returns.
+type EvaluateResult struct {
+	Layer1   LayerDecision `json:"layer1"`
+	Layer2   LayerDecision `json:"layer2"`
+	Decision struct {
+		Allow bool `json:"allow"`
+	} `json:"decision"`
+}
+
+// PutSecretPolicy calls PUT <scope>/config/secret-policies. The push is
+// idempotent by document hash; Updated reports whether the stored document
+// actually changed. Layer-1 requires secret.write.
+func (c *Client) PutSecretPolicy(ctx context.Context, scope Scope, req PutSecretPolicyRequest) (*SecretPolicyResult, error) {
+	path, err := scope.secretPoliciesPath()
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Policy *SecretPolicyResult `json:"policy"`
+		SecretPolicyResult
+	}
+	if err := c.doJSON(ctx, http.MethodPut, path, req, &resp, false); err != nil {
+		return nil, fmt.Errorf("push secret policy %s: %w", req.Name, err)
+	}
+	if resp.Policy != nil {
+		return resp.Policy, nil
+	}
+	out := resp.SecretPolicyResult
+	return &out, nil
+}
+
+// EvaluateSecretPolicy calls POST <scope>/config/secret-policies/evaluate — a
+// dry-run reporting both the Layer-1 role decision and the Layer-2 rule
+// decision. It never serves a secret value.
+func (c *Client) EvaluateSecretPolicy(ctx context.Context, scope Scope, req EvaluateSecretPolicyRequest) (*EvaluateResult, error) {
+	path, err := scope.secretPoliciesPath()
+	if err != nil {
+		return nil, err
+	}
+	var out EvaluateResult
+	if err := c.doJSON(ctx, http.MethodPost, path+"/evaluate", req, &out, false); err != nil {
+		return nil, fmt.Errorf("evaluate secret policy: %w", err)
+	}
+	return &out, nil
 }
 
 // ── internal helpers ─────────────────────────────────────────────────────────
