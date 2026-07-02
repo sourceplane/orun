@@ -308,7 +308,7 @@ func TestMapEntity_CatalogHubBlocks(t *testing.T) {
 		Spec:         catalogmodel.ComponentSpec{Type: "worker"},
 		Integrations: map[string]any{"datadog": map[string]any{"service": "api"}},
 		Links:        []catalogmodel.ComponentLink{{Title: "Dash", URL: "https://x", Icon: "dashboard"}},
-		Docs:         &catalogmodel.ComponentDocs{TechDocs: "docs/", Runbooks: []string{"docs/run.md"}, ADRs: []string{"docs/adr-1.md"}},
+		Docs:         &catalogmodel.ComponentDocs{Overview: "docs/overview.md", TechDocs: "docs/", Runbooks: []string{"docs/run.md"}, ADRs: []string{"docs/adr-1.md"}},
 		Extensions:   map[string]any{"x-acme": map[string]any{"tier": "gold"}},
 	}
 	m := mapEntity(cm, 6, nil, nil)
@@ -317,6 +317,9 @@ func TestMapEntity_CatalogHubBlocks(t *testing.T) {
 	}
 	if m.Extensions["x-acme"] == nil {
 		t.Errorf("extensions not preserved: %v", m.Extensions)
+	}
+	if m.Docs["overview"] != "docs/overview.md" {
+		t.Errorf("docs.overview = %v", m.Docs["overview"])
 	}
 	if m.Docs["techdocs"] != "docs/" {
 		t.Errorf("docs = %v", m.Docs)

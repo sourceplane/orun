@@ -290,6 +290,7 @@ func docsBlock(d *catalogmodel.ComponentDocs) map[string]any {
 		return nil
 	}
 	out := map[string]any{}
+	putNonEmpty(out, "overview", d.Overview)
 	putNonEmpty(out, "techdocs", d.TechDocs)
 	if len(d.Runbooks) > 0 {
 		out["runbooks"] = strSliceToAny(d.Runbooks)

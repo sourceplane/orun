@@ -104,8 +104,11 @@ type ComponentYAMLLink struct {
 	Icon  string `json:"icon,omitempty"`
 }
 
-// ComponentYAMLDocs points at techdocs/runbooks/ADRs (data-model.md §2).
+// ComponentYAMLDocs points at overview/techdocs/runbooks/ADRs (data-model.md §2).
+// `overview` is the single front-page md for the entity (saas-workspace-overview
+// WO3): a path pointer, resolved to a content object downstream.
 type ComponentYAMLDocs struct {
+	Overview string   `json:"overview,omitempty"`
 	TechDocs string   `json:"techdocs,omitempty"`
 	Runbooks []string `json:"runbooks,omitempty"`
 	ADRs     []string `json:"adrs,omitempty"`

@@ -30,6 +30,7 @@ const (
 	EntityKindComposition = "Composition"
 	EntityKindEnvironment = "Environment" // derived from execution (SC4)
 	EntityKindDeployment  = "Deployment"  // derived from execution (SC4/SC8)
+	EntityKindRepo        = "Repo"        // declared: the repo self-describing (saas-workspace-overview WO3)
 
 	// EntityKindOwner is the legacy spelling of EntityKindGroup. It is never
 	// emitted by the v1 resolver; readers normalize it via NormalizeEntityKind.
@@ -46,6 +47,7 @@ var allEntityKinds = []string{
 	EntityKindDomain,
 	EntityKindEnvironment,
 	EntityKindGroup,
+	EntityKindRepo,
 	EntityKindResource,
 	EntityKindSystem,
 	EntityKindUser,
