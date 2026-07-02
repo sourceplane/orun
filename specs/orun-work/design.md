@@ -1,313 +1,269 @@
 # Design
 
-> orun gains a work plane: Initiative/Epic/Task entities whose hot state is an
-> event-sourced log in Orun Cloud (D1) behind one mutator surface, synced in
-> real time through per-project Durable Objects; whose component links reuse the
-> `affected` engine for auto-linking, blast radius, and status automation
-> (including **Released**, derived from deployment truth); and whose epics seal
-> into the object graph as content-addressed snapshots that agents pull by hash.
-> This doc fixes the two-store split, the work model, the status machine, the
-> delivery bridge, the sync architecture, decisions, invariants, and the
-> sharpness register. Schemas are in `data-model.md`; the agent surface is in
-> `agents-and-mcp.md`.
+> The work plane is two append-only logs — coordination (what people intend)
+> and observation (what the world did) — and every read surface is a pure
+> function of them. Intent is authored and seals content-addressed; fact is
+> derived at read and never stored; coordination is the one small hot store.
+> This doc fixes the founding observation, the three planes, the lifecycle
+> ladder, the graph citizenship, sync-as-log-replay, decisions, invariants,
+> and what we refuse to build. Schemas are in `data-model.md`; the agent
+> surface is in `agents-and-mcp.md`.
 
-## 1. Problem
+## 1. The founding observation
 
-1. **The SaaS has every plane except planning.** Portal (catalog), Delivery
-   (runs, deployments), Platform (stacks, secrets) all render one graph; the
-   work that *drives* those planes lives in an external tracker that knows
-   nothing about components, gates, or deployments.
-2. **External trackers integrate by webhook and lose the thread.** A
-   GitHub-linked issue knows a PR merged. It cannot know which components the
-   diff touched, whether the acceptance gates ran, or whether the change is live
-   in production. Status becomes what someone remembered to drag.
-3. **The object graph is the wrong store for hot work state.** It is immutable,
-   content-addressed, and poll-based — correct for plans and history, fatal for
-   a 60 fps board where every keystroke would mint objects and churn CAS refs.
-   The complement of CR-1: fast-mutating state needs a mutable plane.
-4. **The repo already plans work in a machine-shaped format and gets no leverage
-   from it.** Every spec epic encodes milestones as
-   `Goal / Deps / Done when / Design refs` and tracks them by hand-editing
-   `IMPLEMENTATION-STATUS.md` tables. The format is a task contract in all but
-   schema; nothing consumes it.
-5. **Agents are coming and have no surface.** A coding agent needs a frozen spec
-   to implement against, the component subgraph it touches, and a governed way
-   to report status. Today that is "paste markdown into a prompt."
+Every tracker ever built — Jira, Linear, all of them — is a **ledger of human
+opinions about the state of the world**. People drag cards to simulate
+reality, and the product's quality is measured by how pleasant the simulation
+is to maintain. Linear won by making the simulation feel instant; it is still
+a simulation, because Linear cannot know the truth.
 
-## 2. Goals / non-goals
+orun owns the truth: the component graph, the diff→component engine
+(`internal/affected`), the execution record of every run and gate (native
+coordination v2), and the deployment overlay that knows what is live
+(`objread.ComponentDeployments`). So the clean design is not a better ledger
+of opinions — it is: **stop storing opinions about anything the platform can
+observe.** The tracker becomes a lens over delivery, plus the one thing
+delivery cannot tell you: intent.
 
-**Goals**
+v1 (`specs/archive/orun-work-v1/`) got 70% of the way — status *automation*
+derived from delivery truth — but kept status as a stored, authored column
+that automation wrote to, and then needed invariants to keep the column
+honest. v2 deletes the column. There is nothing to keep honest.
 
-- A **work entity model** — `Initiative → Epic → Task` (+ optional cycles) with
-  Linear-style human keys and a typed **task contract** promoted from the spec
-  milestone convention.
-- An **event-sourced system of record** in Orun Cloud: every mutation is an
-  append-only `WorkEvent` with actor provenance; board/list/timeline views are
-  projections.
-- **One write path**: a single Worker mutator surface serving the SaaS UI, the
-  MCP, and automation — the place policy, gates, and attribution are enforced.
-- A **Linear-grade sync architecture**: optimistic client mutations, per-project
-  Durable Object ordering + WebSocket fan-out, <50 ms perceived interaction.
-- The **delivery bridge**: component links as typed relations; `affected`-powered
-  PR auto-linking; status automation from delivery truth (In Progress → In
-  Review → Done → **Released**); blast radius on every task; a drift inbox for
-  unplanned changes.
-- **Sealing + pull**: epics and event-log segments seal into the object graph as
-  canonical, content-addressed `SpecSnapshot` / `WorkLedgerSegment` objects;
-  `orun spec pull` fetches a frozen `spec@hash` by set-difference.
-- An **agent-ready substrate**: humans and agents are principals; the MCP writes
-  through the mutators; agent-readiness is a derived property of a task.
-- **Dogfood from day one**: the `specs/` tree imports as the first epics.
+## 2. One principle, three planes
 
-**Non-goals**
+Everything in the work plane belongs to exactly one plane, split by **who is
+allowed to be the source of truth** (WP-1):
 
-- Building the SaaS UI here (the portal repo implements it; this spec fixes the
-  data, mutator, and sync contracts it consumes).
-- The Agents section (dispatch, fleet) — designed-for, not built (see
-  `agents-and-mcp.md` §5).
-- Replacing git-reviewed design docs. Epics *reference* design material; deep
-  prose can stay in-repo. What moves to the work plane is the *tracking*:
-  milestones, status, assignment, progress.
-- CRDT collaborative editing of epic documents (deferred, L-2).
-- External tracker adapters (Linear/Jira import) — after W6.
+| Plane | Contains | Truth source | Store |
+|---|---|---|---|
+| **Intent** | spec docs, task contracts (`goal / affects / doneWhen / gates`) | humans (agents may propose), deliberate, review-worthy | content-addressed, sealed — like everything else orun authors |
+| **Fact** | lifecycle position, PR links, gate results, released-ness, blocked-ness, progress, drift | the world, via observation | **never stored** — derived at read (the CR-1 pattern, generalized) |
+| **Coordination** | assignment, priority/ordering, comments, cancellation, pins | humans/agents/automation, instant, unreviewed | one small append-only event log in Postgres |
 
-## 3. The two-store split (system of record vs system of proof)
+The planes have different change frequencies and different trust
+requirements, which is why v1's alternatives analysis — which treated "work
+state" as one substance and rejected git-native authoring because it would
+commit-gate every drag — dissolved rather than resolved the tension. Contract
+changes are rare and *should* be deliberate. Drags and assignments are
+constant and *should* be instant. Lifecycle is not authored at all. Nothing
+slow gates anything fast, and no fact is ever stored in two places — most
+facts are never stored anywhere.
 
-The architecture extends the line the catalog drew (CR-1: nothing that changes
-without a source change enters an immutable blob) with its complement:
-
-> **Hot work state lives in Orun Cloud and is never content. The object graph
-> holds only sealed snapshots and references. The DB is authoritative for
-> mutation; sealed objects are projections; write-back never goes object-ward
-> (WD-1, WD-7).**
+## 3. The whole architecture is two logs (WP-2)
 
 ```
-            SaaS UI ─┐                          ┌─ orun CLI / cockpit
-   MCP (agents) ─────┤   one mutator surface    │
-   automation ───────┤  (Cloudflare Worker)     │ read seam
-                     ▼                          ▼
-        ┌─ Orun Cloud: SYSTEM OF RECORD ─────────────────────┐
-        │  D1: work_items · work_events (append-only) ·      │
-        │      work_links · projections                      │
-        │  DO: per-project ordering + WebSocket fan-out      │
-        └────────────┬────────────────────────────────────────┘
-                     │ seal (canonical JSON, on boundaries)
-        ┌─ Object graph: SYSTEM OF PROOF ─────────────────────┐
-        │  R2/local CAS: SpecSnapshot · WorkLedgerSegment     │
-        │  refs: orgs/<org>/projects/<project>/refs/work/…    │
-        │  ← orun spec pull (set-difference, frozen @hash)    │
-        └─────────────────────────────────────────────────────┘
+  humans / agents (one mutator surface: console, MCP, CLI)
+        │
+        ▼
+  COORDINATION LOG   work.events — create, edit, assign, comment,
+        │            order, label, cancel, pin  (mandatory actor)
+        │
+        │                            THE WORLD
+        │                (GitHub webhooks · CI · the native-coordination
+        │                  run stream · the deployment overlay feed)
+        │                                  │
+        │                                  ▼
+        │            OBSERVATION LOG  work.observations — branch_seen,
+        │              pr_opened, pr_merged, gate_result, revision_live
+        │                                  │
+        └──────────────┬───────────────────┘
+                       ▼
+            fold(observations ⊕ coordination)
+                       ▼
+     every read surface: lifecycle · board · blast radius ·
+     drift inbox · spec progress · agent brief · activity feed
 ```
 
-- **System of record (D1, event-sourced).** Every mutation appends a
-  `WorkEvent { eventId(ULID), workKey, kind, actor{type,id}, at, payload }` and
-  updates the item projection in the same transaction. Events are the truth;
-  projections (current status, board ordering, counts) are derived and
-  rebuildable. This mirrors the object model's own event pattern
-  (`TriggerOccurrence` is append-only; executions are event → sealed) and buys
-  audit, undo, activity feeds, and agent attribution structurally — not as
-  features.
-- **System of proof (CAS).** On boundaries — epic created/edited, milestone
-  closed, on demand — the Worker seals a canonical-JSON `SpecSnapshot` (epic doc
-  + task contracts + links) and periodic `WorkLedgerSegment`s (event batches)
-  into the object store under the org/project routing the remote already
-  defines. Pull is the existing set-difference walk. A snapshot is immutable,
-  verifiable, and *frozen*: an agent implementing `spec@sha256:…` cannot have
-  the ground shift under it.
-- **The carve-out is load-bearing in both directions.** Work state in the graph
-  would churn CAS refs per keystroke (and make GC reachability a UX feature);
-  authoritative work state in markdown would commit-gate every drag. Each store
-  does only what it is shaped for.
+- **The coordination log is authored.** Every event carries an actor
+  (`user | agent | automation`, never blurred — v1 invariant 4 carries
+  forward), applies optimistically on the client, and is totally ordered per
+  workspace. It is deliberately tiny: nine event kinds (`data-model.md` §4).
+- **The observation log is world-authored.** Append-only facts ingested from
+  outside: "PR #412 merged at T", "gate `parity` red for revision R",
+  "revision R live in `production`". Nobody — no human, no agent, no
+  mutator — can write an opinion into it (WP-6). Observations are facts, not
+  decisions, so ingestion is idempotent and replayable; re-deriving them from
+  the source systems must converge.
+- **Everything else is a fold.** A task's lifecycle is
+  `fold(its observations, its overrides)`. Drop every cache, replay both
+  logs, get identical state — v1's invariant-2 replay discipline, extended to
+  cover the delivery bridge instead of stopping at the mutators.
 
-## 4. The work model
+Audit, sync, undo, agent attribution, drift detection, and progress-that-
+cannot-lie stop being features and become corollaries of the two logs.
 
-### 4.1 Hierarchy and keys
+## 4. The model: two nouns (WP-4)
 
-`Initiative → Epic → Task (→ subtask via parent)`, deliberately shallow.
-Optional `Cycle` grouping. Identity: ULIDs internally; human keys are
-Linear-style `<PREFIX>-<seq>` for tasks (`ORN-142`) and slugs for epics
-(`acme/platform/epics/orun-work`). Human keys are a UX *and* automation
-feature: speakable, greppable, and parsed out of branch names / PR titles by the
-auto-linker (§6.1). Full grammar in `data-model.md` §1.
+- **`Spec`** — the grouping document of intent; what v1 called an epic. A
+  markdown body plus its tasks. It mirrors the repo's `specs/<name>/`
+  convention 1:1, seals content-addressed (`spec@sha256:…`), and is what an
+  agent pulls as a frozen brief. Authored in the console or imported verbatim
+  from git; either way the sealed object is the durable form, so
+  "prose stays PR-reviewed" is the default posture, not an accommodation.
+- **`Task`** — the atom. Title + contract + coordination state. Human key
+  `<PREFIX>-<seq>` allocated per **workspace** (WP-7): planning topology must
+  not be forced to mirror deploy topology — `affects` already says what a
+  task touches, across projects and (later) repos.
 
-### 4.2 The task contract (the keystone)
+**Initiatives are a saved view over specs. Cycles are a saved view over
+time.** Queries are cheap; entities are forever. (Linear shipped issues +
+projects years before initiatives existed; the instinct was right.) The
+closed vocabularies reserve nothing for them — adding them later is a schema
+rev, which is the correct price for a new noun.
 
-The repo's milestone convention, promoted to schema:
+**Work kinds are catalog-graph citizens from day one (WP-5).** SC1–SC8 have
+shipped; there is no side table and no "mechanical merge later".
+`Task —affects→ Component`, `Task —implementedBy→ PR`,
+`Deployment —delivers→ Task`, `Task —partOf→ Spec` are ordinary typed edges
+in the shipped relation grammar, so ⌘K, graph views, ownership attribution,
+and `internal/affected` work on work items for free.
 
-```yaml
-contract:
-  goal: "Catalog reads route through the objcatalog view"
-  affects: ["sourceplane/orun/api-edge", "sourceplane/orun/web"]   # component keys
-  doneWhen:
-    - "changed_parity_test green against legacy selection"
-    - "coverage >= 90% on internal/objcatalog"
-  gates: ["tests", "parity", "review"]
-  designRefs: ["epic://acme/platform/epics/orun-work#design"]
-```
-
-One artifact, two consumers: a human reads a crisp definition of done; an agent
-receives an executable brief. **Agent-ready** is derived, never authored: a task
-with a complete contract + resolvable `affects` keys + defined gates surfaces a
-badge (and is dispatchable, later). Contract completeness also powers honest
-epic progress (§6.4).
-
-### 4.3 The status machine
+## 5. The lifecycle: one ladder, each rung owned by a truth source (WP-3)
 
 ```
-Triage → Backlog → Todo → In Progress → In Review → Done → Released
-                                                  ↘ Canceled
+Draft ──▶ Ready ──▶ In Progress ──▶ In Review ──▶ Done ──▶ Released
+  │         │            │              │           │          │
+authored  derived:    observed:      observed:   observed:  observed:
+(exists)  contract    branch/draft   PR open     merge +    revision live in
+          complete    PR seen                    gates ✓     target env (overlay)
 ```
 
-| Transition | Driver |
-|---|---|
-| → In Progress | branch / draft PR referencing the task key (automation), or manual |
-| → In Review | PR opened (automation) |
-| → Done | PR merged **and** the contract's gates verified green (automation) |
-| → **Released** | the Deployment overlay shows the revision containing the merge live in the target environment (automation; orun-exclusive) |
-| any → any | manual move — always allowed, always an event with `actor`, rendered as an override |
+- **Ready is derived from contract completeness** — the same predicate as
+  agent-ready. One definition of "actionable" for humans and agents. This
+  deletes the Triage/Backlog/Todo taxonomy: *priority ordering* is
+  coordination (authored, per-view), *readiness* is intent (derived). v1's
+  authored statuses smeared the two together.
+- **Done requires gates verified green from orun execution truth** — a merge
+  whose contract gates are red, pending, or unknown to orun reads
+  In Review with the blocking gate surfaced. GitHub reporting green is not
+  orun knowing green (v1's Q-3 discipline carries forward).
+- **Released is derived only from the deployment overlay** observing the
+  merge's revision live in the target environment — never from a deploy
+  attempt. This remains the moat: no webhook tracker can have this status.
+- **Blocked, progress, drift, reviewer suggestions: derived.** Blocked from
+  open `blockedBy` edges; spec progress from the fold over its tasks; drift
+  from merged PRs whose affected components no open task claims; reviewers
+  from ownership edges (gated on the `teams-ownership` resolver).
+- **Pins are the escape hatch, and they are honest.** A human may pin a task
+  to any rung; the pin is a coordination event with an actor, and the UI
+  always renders *both*: "pinned **Done** by @rahul — delivery truth says
+  In Review (gate `parity` red)". The tracker never lies for you; it lets you
+  overrule it in public. Agents may never pin (WP-10). Unpinning is an event;
+  a pin also auto-expires the moment observed truth reaches the pinned rung.
+- **Canceled is authored** (the world cannot know you gave up) and terminal.
 
-`Blocked` is not a status: it is derived from open `blockedBy` edges and
-rendered as a flag, so it can never go stale by forgetting to un-set it.
-**Released is the demo**: no webhook-integrated tracker can derive it, because
-none owns execution truth. orun reads it off its own Deployment overlay.
+The column in every other tracker *is* the state; here the column is a
+**claim the platform continuously audits**.
 
-## 5. Work in the entity graph
+## 6. The delivery bridge is just ingestion
 
-Work kinds are graph citizens, not a side table (WD-4). Edges use the same
-`{from, fromKind, type, to, toKind}` grammar as the catalog relation graph:
+v1 had a "delivery bridge" with automation that wrote status. v2 has
+ingestion producers appending observations, and folds:
 
-| Edge | Meaning |
-|---|---|
-| `Task —affects→ Component` | the contract's component links; the bridge's join key |
-| `Task —partOf→ Epic`, `Epic —partOf→ Initiative` | hierarchy |
-| `Task —blockedBy→ Task` | dependency; derives the Blocked flag |
-| `Task —implementedBy→ PR/revision ref` | written by the auto-linker |
-| `Deployment —delivers→ Task` | written by the Released automation |
-| `Task —assignedTo→ Principal` | humans and agents uniformly |
+- **Auto-claim (was auto-link).** A PR observation carries the affected
+  component set (produced by orun/CI via the same `Result.Affected` the
+  `--changed` planner uses — parity by construction) plus task keys parsed
+  from branch/title. The fold joins observations to tasks by key parse or by
+  `contract.affects` ∩ affected-set; the join *is* the `implementedBy` edge,
+  materialized as a derived edge, not written by a robot actor.
+- **Gate results** ride the native-coordination run stream (the default
+  execution-truth wire); the `contract.gates` name↔check mapping is fixed in
+  WP3 against real run data, not in the abstract.
+- **Released** consumes the `liveObservation` feed owned by
+  `saas-resources-runtime` (its `DeploymentObservation` shape is already kept
+  structurally compatible on the cloud side).
+- **The drift inbox** is a standing query: merged PR observations whose
+  affected components intersect no open task's `affects` — rendered as
+  triage items in the inbox view, resolved by creating/claiming a task
+  (coordination events, like everything humans do).
 
-Until `orun-service-catalog` SC2 lands, these edges live in `work_links` (D1)
-with the same vocabulary; when the typed multi-kind relation graph ships, work
-edges merge mechanically (same grammar, additive kinds). The cross-lens payoff:
-a Component page lists its open tasks; a Task page shows the live state of what
-it shipped; everything is one ⌘K jump apart because it is one graph.
+## 7. Sync: the log is the protocol (WP-9)
 
-## 6. The delivery bridge
+No Durable Objects, no bespoke WebSocket protocol, no second stack. The
+platform is Postgres; the logs are already ordered per workspace.
 
-All four features are projections over machinery that already ships
-(`internal/affected`, the ownership map, `internal/objcatalog`):
-
-### 6.1 Auto-linking
-A PR event reaches the Worker (the backend already ingests CI triggers). The
-diff maps to component keys via the `affected` engine; components map to open
-tasks whose contracts claim them; task keys parsed from the branch/PR title
-short-circuit the match. Result: `implementedBy` links + the §4.3 transitions,
-automatic, with every automated move recorded as an `actor: automation` event.
-
-### 6.2 Blast radius
-A task's `affects` set, closed over the dependency graph
-(`Result.Dependents`), renders as: "touches `auth-svc`; 7 downstream
-components, 2 owned by other teams" — with suggested reviewers from ownership
-edges. Triage with the graph, not vibes.
-
-### 6.3 The drift inbox
-A merged PR whose affected components intersect **no** open task's `affects`
-raises a triage item: "unplanned change to `billing-worker`". The affected
-engine run in reverse, as a planning-integrity check.
-
-### 6.4 Epic progress that cannot lie
-An epic's progress derives from delivery truth: tasks Released vs Done vs open,
-gate pass-rates, scorecard deltas on affected components (when
-`orun-scorecards` lands). It replaces the hand-edited
-`IMPLEMENTATION-STATUS.md` table with a projection that is correct by
-construction.
-
-## 7. Sync architecture (the Linear bar)
-
-The feel is a sync-engine property, engineered directly (WD-8):
-
-- **Client**: a normalized in-memory store; every mutation applies optimistically
-  (<50 ms perceived) and enqueues to the Worker. Views (board/list/timeline) are
-  client-side queries over the store — instant filtering, no spinner-per-click.
-- **Server**: the mutator validates, appends the event, updates projections in
-  one D1 transaction, then publishes through the project's **Durable Object**,
-  which owns event ordering and WebSocket fan-out for that project. Per-project
-  DOs shard naturally and keep ordering local.
-- **Reconciliation**: clients carry a per-project event cursor; on reconnect they
-  replay the gap (the event log *is* the sync log). A rejected optimistic
-  mutation (policy, gate, conflict) rolls back locally with the server verdict
-  rendered — same contract for the MCP, which simply has no optimistic layer.
-- **The UX bar is part of the contract**: ⌘K over the whole graph (tasks *and*
-  components *and* deployments), keyboard-first, views as saved queries, a
-  triage inbox. Interaction latency is treated as a correctness requirement the
-  way determinism is in the compiler.
+- **Client**: a local-first store (IndexedDB), bootstrapped by snapshot,
+  advanced by cursor replay over both logs. Views — board, list, timeline,
+  cycles, initiatives — are client-side queries over the store, which is what
+  makes every interaction instant. Optimistic apply for coordination
+  mutations; structured verdicts (accept/reject + reason) in one shape shared
+  verbatim with the MCP.
+- **Transport**: SSE fanned out from Postgres LISTEN/NOTIFY. Reconnect =
+  replay from cursor. The sync protocol and the audit log are the same bytes,
+  so there is no separate sync engine to drift.
+- **The Linear bar is met where it is felt** — optimistic local apply is a
+  client property (<50 ms perceived), not a transport property. If scale ever
+  demands a fancier pipe, the mutation/verdict contract is the seam: swap the
+  pipe, keep the contract. The seam is permanent; the transport is an
+  implementation detail behind it.
 
 ## 8. Decisions (locked)
 
 | # | Decision | Rationale | Trade-offs |
 |---|----------|-----------|------------|
-| WD-1 | Hot work state in Orun Cloud (D1); never content; only sealed snapshots + `work://` refs enter the graph | The complement of CR-1; CAS is wrong for 60 fps state | Two stores to operate; sealing is the bridge |
-| WD-2 | Append-only `WorkEvent` log with `actor{type: user\|agent\|automation}`; projections derived | Audit/undo/feeds/attribution structurally; matches the object model's event pattern | Projection rebuild machinery; event schema discipline |
-| WD-3 | One write path (Worker mutators) for UI, MCP, automation | One place for policy, gates, attribution — the `bridge.Source` discipline applied to writes | Mutator API breadth grows with features |
-| WD-4 | Work entities use the catalog's edge grammar; `affected` reused, never duplicated | One graph, one change engine; SC2 merge stays mechanical | Work edges live in D1 until SC2 lands |
-| WD-5 | The task contract is the structured body; agent-readiness derived | One artifact serves humans and agents; imports the repo's own convention | Contract-less quick tasks get fewer derived features |
-| WD-6 | Status automation derived from delivery truth; manual moves are recorded overrides | Status that cannot rot; Released becomes possible | Automation must be conservative (gates verified, not inferred) |
-| WD-7 | DB authoritative; sealed objects are projections; no write-back | Kills dual-source-of-truth drift (the Backstage failure) | Agents mutate via MCP only, never by editing pulled snapshots |
-| WD-8 | Per-project Durable Object for ordering + fan-out; optimistic clients; D1 authoritative | Linear-grade feel on the backend orun already provisions; no second vendor | DO/WebSocket protocol is ours to maintain |
-| WD-9 | ULIDs internally; `PREFIX-seq` human task keys; slug epic keys | Speakable, greppable, parseable by the auto-linker | Sequence allocation is per-project state (DO-owned) |
-| WD-10 | Agents are principals; MCP is the only agent surface | Policy-identical humans and agents; Agents section becomes a feature flip | MCP ships in W5, before any dispatch exists |
+| WP-1 | Three planes by truth source: intent authored+sealed, fact derived-never-stored, coordination hot | No fact stored in two places; most facts stored nowhere; nothing to keep honest | Fold cost at read (cacheable — caches are droppable by construction) |
+| WP-2 | Two append-only logs; every read model a rebuildable fold | Audit/sync/undo/attribution/drift as corollaries, not features | Ingestion must be idempotent; observation sources need contracts |
+| WP-3 | Lifecycle is a derived query; authored acts are exist/cancel/pin; pins render beside observed truth | Status cannot rot; overrides are public, attributed, auto-expiring | Requires trustworthy observation feeds before rungs light up |
+| WP-4 | Two nouns (`Spec`, `Task`); initiatives/cycles are saved views | Ship the atom; entities are forever, queries are cheap | Teams wanting initiative *entities* wait for a schema rev |
+| WP-5 | Work kinds enter the shipped catalog graph directly; no side link table | SC1–SC8 landed; one graph, one ⌘K, `affected` works on work for free | Work-kind churn now rides catalog schema discipline |
+| WP-6 | One mutator surface (console/MCP/CLI) for coordination; observations enter only via ingestion | Policy, attribution, verdicts in one place; nobody can author a fact | Two write paths to operate (mutators + ingesters) — by design, they write different logs |
+| WP-7 | Tasks are workspace-scoped; `affects` carries delivery topology | Planning ≠ deploy topology; keys allocate per workspace (`ORN-142` expectations); cross-project work has a home | Per-workspace prefix uniqueness to manage |
+| WP-8 | Principals are membership subjects (users, service principals, teams); agents are service principals with a mandatory owner | No second identity system; Teams RBAC + effective-access shipped | Work plane depends on the membership context (it should) |
+| WP-9 | Log-native sync: snapshot + cursor replay over SSE/LISTEN-NOTIFY; engine-agnostic mutation/verdict seam | The event log is already the replication log; no transport product to own | If p95 misses under load, swap transport behind the seam (measured trigger, not vibes) |
+| WP-10 | Agents write via MCP only; may never author Done or pins; briefs are sealed `spec@hash` | The less agents can assert, the less they can hallucinate into planning state | Agent "status" expressiveness is deliberately capped |
 
 ## 9. Invariants
 
-1. **No hot state in the graph.** No object blob contains a mutable work field;
-   sealing emits snapshots whose identity is content (asserted: seal twice with
-   no events between → byte-identical objects).
-2. **Events are the truth.** Every projection is rebuildable from
-   `work_events` alone (tested: drop projections, replay, byte-equal).
-3. **One write path.** No code path mutates `work_items` without appending the
-   event in the same transaction; UI/MCP/automation share the mutators.
-4. **Every event has an actor.** `actor.type` ∈ {user, agent, automation};
-   automated transitions are never attributed to a human.
-5. **Automation is conservative.** Done requires gates *verified* green;
-   Released requires the Deployment overlay, not a deploy *attempt*.
-6. **Seal determinism.** `SpecSnapshot`/`WorkLedgerSegment` use canonical JSON;
-   same logical content → same ObjectID, push/pull is pure set-difference.
-7. **Pull is read-only.** Nothing in the CLI/MCP writes work state through a
-   pulled snapshot (WD-7).
-8. **Derived flags are never stored.** Blocked, agent-ready, progress are
-   computed at read; no stale-flag class of bugs.
+1. **No fact is stored.** No table holds lifecycle position, gate state,
+   released-ness, blocked-ness, or progress; every read is a fold. Caches
+   must be droppable: drop + replay ⇒ identical reads (asserted in CI).
+2. **Both logs are append-only.** No update, no delete; corrections are new
+   events/observations. Sealing carries the fold's cursor positions.
+3. **Every coordination event has an actor**; `automation` never wears a
+   human's or agent's name; agents never author `pin` or cancellation-of-
+   others'-work events.
+4. **Observations are world-authored only.** No mutator writes to the
+   observation log; every observation names its source and is idempotent
+   (same fact twice ⇒ same fold).
+5. **Derived truth is conservative.** Done needs gates *verified* from orun
+   execution truth; Released needs the overlay, never a deploy attempt;
+   unknown-to-orun is rendered as unknown, not green.
+6. **Pins never mask.** A pinned rung renders alongside observed truth and
+   auto-expires when truth catches up.
+7. **Seal determinism.** `SpecSnapshot` is canonical JSON; identical inputs ⇒
+   identical ObjectID; pull is set-difference; pulled views are read-only.
+8. **Intent references degrade visibly.** A contract `affects` key that no
+   longer resolves renders `unresolved`, never silently drops, and surfaces
+   in the drift inbox.
 
-## 10. Alternatives considered
+## 10. What we refuse to build
 
-- **Git-native tracking** (specs stay markdown-authoritative; the board is a
-  projection): maximal provenance, but commit-gates every interaction — fails
-  the Linear bar. Rejected as the *authoring* model; survives as the seal/pull
-  spine and the import path.
-- **Object-graph-native tasks** (work state as CAS objects + refs): one store,
-  full provenance, but per-keystroke object churn, poll-based watch, GC in the
-  hot path. Rejected; the graph keeps the proof role it is shaped for.
-- **External tracker + deep integration** (Linear/Jira + webhooks): fastest to
-  ship, but forfeits the moat (component-aware tasks, gate-verified Done,
-  Released) and re-imports the drift problem. Rejected.
-- **Postgres + off-the-shelf sync engine** (Zero/Replicache/Convex): excellent
-  feel, but adds a second backend stack beside the already-provisioned
-  Worker/D1/DO/R2 and an external dependency for the product's core feel.
-  Rejected for v1; the DO protocol is ours (Q-2 tracks revisiting if it
-  underdelivers).
+- A bespoke realtime transport (WP-9 seam; revisit on measured need only).
+- Initiative or Cycle entities (saved views).
+- CRDT collaborative editing (doc bodies are content-addressed; last-write
+  + events until a real need is proven).
+- A work-local identity system (WP-8).
+- Any write path that is not the mutator surface or a named ingester.
+- Any feature whose truth source is "someone remembered to update it" —
+  that is the disease this plane exists to cure.
 
 ## 11. Sharpness register
 
-- **Q-1 (D1 write throughput)** — a hot org's event rate vs single-DB limits;
-  mitigation: per-project DO serialization, batched appends, org sharding.
-  Measure in W1 with a synthetic board soak.
-- **Q-2 (DO sync protocol scope)** — how much of presence/conflict semantics do
-  we own before it rivals an off-the-shelf engine; the W2 client must keep the
-  mutator contract engine-agnostic so a swap stays possible.
-- **Q-3 (gate verification source)** — "gates green" must come from orun's own
-  execution truth (runs/checks recorded in the backend), not re-derived from
-  GitHub statuses; the exact mapping is fixed in W3.
-- **Q-4 (spec doc round-trip)** — epics imported from `specs/` keep their
-  markdown as the doc body; the sealed snapshot must round-trip it losslessly
-  (no normalization that breaks diffing against the source tree).
-- **Q-5 (contract `affects` validation)** — component keys are validated against
-  the *current* catalog at edit time; renamed/removed components degrade the
-  link to `unresolved` (rendered, never silently dropped).
+- **P-1 (fold performance).** Lifecycle-at-read must stay cheap on a hot
+  workspace. Folds are per-subject and incremental (cursor-cached,
+  droppable); WP1 records fold p95 on the imported dogfood corpus and locks
+  a budget before the console ships.
+- **P-2 (observation source contracts).** Each ingester (GitHub webhooks,
+  run stream, overlay feed) needs a versioned fact contract; a source that
+  changes shape must fail loudly at ingest, never silently skew folds.
+- **P-3 (gate name mapping).** `contract.gates` ↔ orun run/check identity is
+  fixed in WP3 against real run data; the fixture must include a gate GitHub
+  reports green but orun has no record of ⇒ renders unknown, task stays
+  In Review.
+- **P-4 (import round-trip).** Imported spec docs remain byte-identical
+  through import → seal → pull (golden fixtures over this repo's own
+  `specs/` tree), or diffing against the source tree breaks and trust dies.
+- **P-5 (pin semantics under races).** A pin placed while observations are
+  in flight must resolve deterministically (fold order is log order; pins
+  auto-expire on catch-up) — property-tested in WP1.
