@@ -53,6 +53,7 @@ const config = {
         { to: '/principles', label: 'Principles', position: 'left' },
         { to: '/cockpit/overview', label: 'Cockpit', position: 'left' },
         { to: '/cli/orun', label: 'CLI', position: 'left' },
+        { href: 'https://docs.orun.dev', label: 'Orun Cloud', position: 'left' },
         { to: '/release-notes/v2.19.0', label: 'Releases', position: 'right' },
         {
           href: 'https://github.com/sourceplane/orun',
@@ -91,6 +92,7 @@ const config = {
             { label: 'Runners', to: '/execute/runners' },
             { label: 'CLI', to: '/cli/orun' },
             { label: 'Reference', to: '/reference/configuration' },
+            { label: 'Orun Cloud docs', href: 'https://docs.orun.dev' },
           ],
         },
         {
