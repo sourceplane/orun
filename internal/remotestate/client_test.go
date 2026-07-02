@@ -331,6 +331,62 @@ func TestClient_PutObject_RawDigestColonInPath(t *testing.T) {
 	}
 }
 
+func TestClient_PutObject_RetriesOnRateLimit(t *testing.T) {
+	// A rate-limited (429) blob PUT must be retried — honoring Retry-After —
+	// rather than aborting, so a large catalog push rides through the
+	// per-identity limiter instead of failing the whole sync on the first 429.
+	var puts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("unexpected method %s", r.Method)
+			w.WriteHeader(500)
+			return
+		}
+		puts++
+		if puts == 1 {
+			w.Header().Set("Retry-After", "1")
+			writeJSON(w, http.StatusTooManyRequests, map[string]interface{}{
+				"error": map[string]interface{}{
+					"code":    "rate_limited",
+					"message": "Rate limit exceeded for identity scope. Retry after 1 seconds.",
+					"details": map[string]interface{}{"scope": "identity", "retryAfterSeconds": 1},
+				},
+			})
+			return
+		}
+		writeJSON(w, 201, data(map[string]interface{}{"created": true}))
+	}))
+	defer srv.Close()
+
+	blob := []byte("blob-bytes")
+	digest := remotestate.Digest(blob)
+	if err := newTestClient(srv).PutObject(context.Background(), digest, remotestate.ObjectKindPlan, blob); err != nil {
+		t.Fatalf("PutObject should succeed after a retried 429, got: %v", err)
+	}
+	if puts != 2 {
+		t.Errorf("expected 2 PUT attempts (429 then success), got %d", puts)
+	}
+}
+
+func TestClient_PutObject_RateLimitCanceledByContext(t *testing.T) {
+	// Retries must observe context cancellation: a 429 with a long Retry-After
+	// must not pin the goroutine past a canceled/expired context.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "3600")
+		writeJSON(w, http.StatusTooManyRequests, map[string]interface{}{
+			"error": map[string]interface{}{"code": "rate_limited", "message": "rate limited"},
+		})
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already canceled → first retry wait returns immediately
+	err := newTestClient(srv).PutObject(ctx, remotestate.Digest([]byte("x")), remotestate.ObjectKindPlan, []byte("x"))
+	if err == nil {
+		t.Fatal("expected an error when the context is canceled during retry backoff")
+	}
+}
+
 func TestClient_EnsureObject_SkipsWhenPresent(t *testing.T) {
 	putCalled := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
