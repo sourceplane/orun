@@ -250,6 +250,62 @@ func TestAssembleCatalogEmitsDeclaredRepoEntity(t *testing.T) {
 	}
 }
 
+func TestAssembleCatalogWritesDocBlob(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := mem()
+	manifests := []ComponentManifest{
+		{Identity: ComponentIdentity{ComponentKey: "default/orun/api", Name: "api", Namespace: "default", Repo: "orun"}},
+	}
+	body := []byte("# Overview\n")
+	repo := Entity{
+		APIVersion:  "orun.io/v1",
+		Kind:        EntityKindRepo,
+		Identity:    EntityIdentity{EntityKey: "default/orun/orun", Kind: EntityKindRepo, Name: "orun"},
+		Docs:        map[string]any{"overview": map[string]any{"path": "docs/overview.md", "sha": "abc"}},
+		PendingDocs: map[string][]byte{"overview": body},
+	}
+	catID, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 16, DeclaredEntities: []Entity{repo}}, manifests, nil, ImpactOwnership{}, nil)
+	if err != nil {
+		t.Fatalf("AssembleCatalog: %v", err)
+	}
+	// The Repo entity's doc_ref now carries the CAS digest of the doc blob.
+	entTree, _ := findEntry(t, s, catID, dirEntities)
+	repoTree, _ := s.GetTree(ctx, kindTreeID(t, s, entTree, "Repo"))
+	re, err := Decode[Entity]([]byte(blobBody(t, s, repoTree[0].ID)))
+	if err != nil {
+		t.Fatalf("decode repo entity: %v", err)
+	}
+	ref, _ := re.Docs["overview"].(map[string]any)
+	digest, _ := ref["digest"].(string)
+	if digest == "" {
+		t.Fatalf("doc_ref.digest not set: %v", re.Docs)
+	}
+	if ref["path"] != "docs/overview.md" || ref["sha"] != "abc" {
+		t.Errorf("doc_ref lost provenance: %v", ref)
+	}
+	// PendingDocs must not leak into the serialized entity.
+	if re.PendingDocs != nil {
+		t.Errorf("PendingDocs leaked: %v", re.PendingDocs)
+	}
+	// The doc blob is reachable under docs/ (so the closure sync uploads it) and
+	// its id equals the digest the entity references.
+	docsTree, kind := findEntry(t, s, catID, dirDocs)
+	if kind != objectstore.KindTree {
+		t.Fatalf("docs not a tree: %s", kind)
+	}
+	docEntries, _ := s.GetTree(ctx, docsTree)
+	if len(docEntries) != 1 {
+		t.Fatalf("docs/ = %d entries, want 1", len(docEntries))
+	}
+	if string(docEntries[0].ID) != digest {
+		t.Errorf("docs blob id %q != doc_ref.digest %q", docEntries[0].ID, digest)
+	}
+	if got := blobBody(t, s, docEntries[0].ID); got != string(body) {
+		t.Errorf("doc blob body = %q, want %q", got, body)
+	}
+}
+
 func TestAssembleCatalogDerivesMultiKindEntities(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

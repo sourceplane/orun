@@ -2,6 +2,9 @@ package catalogresolve
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
 	"path/filepath"
 	"sort"
 
@@ -112,7 +115,7 @@ func Resolve(ctx context.Context, opts Options) (*ResolvedCatalog, []ValidationI
 		Repo:         repo,
 		Excludes:     EffectiveExcludes(intentExcludes),
 		Fingerprints: computeFingerprints(opts.WorkspaceRoot, manifests, globalDigest),
-		RepoDecl:     repoDeclFromIntent(intent, namespace, repo),
+		RepoDecl:     repoDeclFromIntent(intent, namespace, repo, opts.WorkspaceRoot),
 	}
 
 	if firstErr := firstError(issues); firstErr != nil {
@@ -140,7 +143,7 @@ func loadIntentForResolve(opts Options) (*intentFile, error) {
 // repo-local (<namespace>/<repo>/<name>); no cloud project id is available at
 // resolve time (saas-workspace-overview WO3). displayName/description default
 // from metadata when omitted.
-func repoDeclFromIntent(intent *intentFile, namespace, repo string) *RepoDeclaration {
+func repoDeclFromIntent(intent *intentFile, namespace, repo, workspaceRoot string) *RepoDeclaration {
 	if intent == nil || intent.Repo == nil {
 		return nil
 	}
@@ -165,7 +168,7 @@ func repoDeclFromIntent(intent *intentFile, namespace, repo string) *RepoDeclara
 	for _, l := range rb.Links {
 		links = append(links, RepoLink{Title: l.Title, URL: l.URL, Icon: l.Icon})
 	}
-	return &RepoDeclaration{
+	d := &RepoDeclaration{
 		EntityKey:   catalogmodel.FormatEntityKey(namespace, repo, name),
 		Name:        name,
 		Namespace:   namespace,
@@ -177,6 +180,18 @@ func repoDeclFromIntent(intent *intentFile, namespace, repo string) *RepoDeclara
 		Links:       links,
 		Tags:        append([]string(nil), rb.Tags...),
 	}
+	// Read the overview bytes from the working tree (WO3b). Best-effort: a
+	// missing/unreadable file leaves the path pointer without a content blob, so
+	// the entity still records where the doc should live. The autopush publish
+	// gate requires a clean default branch, so working-tree == HEAD there.
+	if overview != "" && workspaceRoot != "" {
+		if b, err := os.ReadFile(filepath.Join(workspaceRoot, filepath.FromSlash(overview))); err == nil {
+			sum := sha256.Sum256(b)
+			d.OverviewContent = b
+			d.OverviewSHA = hex.EncodeToString(sum[:])
+		}
+	}
+	return d
 }
 
 // intentInferenceFor pulls the (optional) inference block from a parsed

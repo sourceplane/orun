@@ -110,7 +110,17 @@ func repoEntity(d *catalogresolve.RepoDeclaration) nodes.Entity {
 		e.Ownership = map[string]any{"owner": d.Owner}
 	}
 	if d.Overview != "" {
-		e.Docs = map[string]any{"overview": d.Overview}
+		if len(d.OverviewContent) > 0 {
+			// doc_ref shape (WO3b): {path, sha} now; AssembleCatalog writes the
+			// blob and fills digest. The content rides PendingDocs into the closure.
+			ref := map[string]any{"path": d.Overview}
+			putNonEmpty(ref, "sha", d.OverviewSHA)
+			e.Docs = map[string]any{"overview": ref}
+			e.PendingDocs = map[string][]byte{"overview": d.OverviewContent}
+		} else {
+			// No content read (missing/unreadable): keep the path pointer.
+			e.Docs = map[string]any{"overview": d.Overview}
+		}
 	}
 	if len(d.Links) > 0 {
 		links := make([]map[string]any, 0, len(d.Links))
