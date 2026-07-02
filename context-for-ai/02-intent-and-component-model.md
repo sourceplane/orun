@@ -20,6 +20,32 @@ Common fields:
 | `environments` | Environment defaults, policies, selectors, env vars, and trigger activation. |
 | `components` | Optional inline components. Many repos prefer discovered components. |
 | `execution` | Runtime state configuration, such as local or remote state. |
+| `repo` | Optional self-description of the repo itself (see below). |
+
+### Repo identity and `docs.overview`
+
+A top-level `repo:` block lets the repo describe *itself* rather than a
+component. It resolves to a first-class `Repo` catalog entity (one per repo,
+keyed `<namespace>/<repo>/<name>`), listable with `orun catalog list --kind Repo`.
+
+```yaml
+repo:
+  displayName: Lumen Platform
+  owner: group:platform
+  docs:
+    overview: docs/overview.md   # front-page markdown for the repo
+  links:
+    - { title: Runbook, url: https://… }
+  tags: [saas, baseline]
+```
+
+Any entity — the repo or an individual component — can point at front-page
+markdown with `docs.overview: <path>`. On `orun plan` / `orun catalog push`, the
+referenced file's bytes are read at the resolved commit and carried into the
+catalog snapshot as a content-addressed blob (deduped and set-difference synced —
+an unchanged doc is never re-uploaded). The entity records a `{path, sha, digest}`
+pointer; there is no live git-provider call. Orun Cloud's Workspace Overview
+renders these directly.
 
 ## Component manifests
 

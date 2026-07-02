@@ -187,14 +187,14 @@ The script auto-detects your OS and architecture, downloads the latest release f
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ORUN_VERSION` | `latest` | Specific version to install (e.g. `v2.19.0`) |
+| `ORUN_VERSION` | `latest` | Specific version to install (e.g. `v2.21.0`) |
 | `ORUN_INSTALL_DIR` | `~/.local/bin` | Installation directory |
 
 Example — install a specific version to `/usr/local/bin`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/sourceplane/orun/main/install.sh \
-  | ORUN_VERSION=v2.19.0 ORUN_INSTALL_DIR=/usr/local/bin sh
+  | ORUN_VERSION=v2.21.0 ORUN_INSTALL_DIR=/usr/local/bin sh
 ```
 
 ### Manual download
@@ -203,7 +203,7 @@ Download the archive for your platform from the [releases page](https://github.c
 
 ```sh
 # Example: Linux amd64
-curl -fsSL https://github.com/sourceplane/orun/releases/download/v2.19.0/orun_2.19.0_linux_amd64.tar.gz \
+curl -fsSL https://github.com/sourceplane/orun/releases/download/v2.21.0/orun_2.21.0_linux_amd64.tar.gz \
   | tar xz -C /usr/local/bin
 ```
 
@@ -223,17 +223,17 @@ Requires Go 1.25 or later.
 
 ```sh
 kiox init demo
-kiox --workspace demo add ghcr.io/sourceplane/orun:v2.19.0 as orun
+kiox --workspace demo add ghcr.io/sourceplane/orun:v2.21.0 as orun
 kiox --workspace demo exec -- orun plan --intent intent.yaml
 ```
 
 ### OCI image
 
 ```sh
-docker run ghcr.io/sourceplane/orun:v2.19.0 plan --intent intent.yaml
+docker run ghcr.io/sourceplane/orun:v2.21.0 plan --intent intent.yaml
 ```
 
-The OCI image is a kiox provider artifact. Use `oras pull ghcr.io/sourceplane/orun:v2.19.0` to pull the raw provider package.
+The OCI image is a kiox provider artifact. Use `oras pull ghcr.io/sourceplane/orun:v2.21.0` to pull the raw provider package.
 
 ## Quick start
 
@@ -348,6 +348,7 @@ orun logs --failed
 ```sh
 orun catalog refresh                       # resolve + persist the component catalog
 orun catalog affected --base main --json   # what this commit deviated
+orun catalog list --kind Repo              # entities of a kind (Component, Repo, System, …)
 ```
 
 Resolves and inspects the content-addressed component catalog that powers
@@ -483,6 +484,48 @@ components:
 ```
 
 Component intents can also declare themselves in a `component.yaml` next to their code; `orun` discovers them from the configured roots.
+
+#### Repo identity & docs (`repo`, `docs.overview`)
+
+A repo can describe **itself** — not just its components — with a top-level
+`repo:` block, and any entity can point at a front-page markdown doc via
+`docs.overview`. Both ride the existing catalog snapshot; nothing new is fetched
+from a git provider.
+
+```yaml
+metadata:
+  name: lumen
+  description: Multi-tenant SaaS baseline
+  namespace: sourceplane
+
+repo:                                   # singular — self-describes THIS repo
+  displayName: Lumen Platform
+  owner: group:platform
+  docs:
+    overview: docs/overview.md          # the repo's front-page markdown
+  links:
+    - { title: Runbook, url: https://… }
+  tags: [saas, baseline]
+
+components:
+  - name: web-api
+    type: helm
+    docs:
+      overview: docs/web-api.md         # docs.overview spans every kind
+```
+
+- The `repo:` block resolves to a first-class **`Repo`** catalog entity (one per
+  repo, keyed `<namespace>/<repo>/<name>`), alongside the existing kinds
+  (`Component, API, Resource, System, Domain, Group, …`). List it with
+  `orun catalog list --kind Repo`.
+- `docs.overview` is a **path** to a markdown file; on `orun plan`/`catalog push`
+  the referenced bytes are read at the resolved commit and carried into the
+  catalog snapshot as a **content-addressed blob** (deduped, set-difference
+  synced — an unchanged doc is never re-uploaded), with the entity recording a
+  `{path, sha, digest}` pointer. No GitHub App, no live provider call.
+- Together these feed the Orun Cloud **Workspace Overview** — the console renders
+  the repo's identity and narrative straight from what git produced. *The repo is
+  the homepage.*
 
 #### Remote state & tenancy (`execution.state`)
 
