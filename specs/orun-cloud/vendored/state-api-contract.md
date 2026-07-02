@@ -140,17 +140,40 @@ GET  …/state/catalog/heads/history?cursor=
 GET  …/state/catalog/entities?kind=&owner=&q=&cursor=     // read-model for console/CLI search
 ```
 
-## 4. Secrets (config-worker)
+## 4. Secrets (config-worker) — v3 (orun-secrets)
+
+Revised to the canonical `orun-secrets` v3 design (`orun/specs/orun-secrets/`,
+platform slice `../saas-secret-manager/`). The prior §4 sketch was never
+implemented; this revision aligns the write path with the **shipped**
+config-worker surface and makes the resolve lease-bound for real.
 
 ```jsonc
-PUT  …/secrets/{key}                 { "value": "…", "environment": "production" }   // write-only; create or rotate (version+1)
-GET  …/secrets?environment=          → metadata only (key, version, scope, rotatedAt, lastUsedAt)
-DELETE …/secrets/{key}?environment=
+// Write path — the shipped …/config/secrets surface (org/project/environment scope)
+POST   …/config/secrets                      { "secretKey": "…", "value": "…" }   // write-only; encrypted before persist
+GET    …/config/secrets[?chain=true]         → metadata only (key, version, scope, rotatedAt, lastUsedAt; chain adds servesFrom)
+POST   …/config/secrets/{id}/rotate          // append a version (history retained), bump head
+DELETE …/config/secrets/{id}                 // revoke (head or ?version=)
 
+// v3 additions
+POST   …/config/secrets/import               // dotenv bulk (write-only)
+GET    …/config/secrets/{id}/versions        // version metadata history
+PUT    …/config/secret-policies              // tier-tagged SecretPolicy documents (idempotent by hash)
+POST   …/config/secret-policies/evaluate     // dry-run decision (orun policy test)
+GET    …/config/secrets/syncs                // materialization provenance
+POST   …/config/secrets/{id}/reveal          // break-glass; elevated secret.reveal; alerted
+
+// Run-scoped resolve — state plane; the ONLY value-returning machine route
 POST …/state/runs/{runId}/secrets/resolve
-{ "runnerId": "…", "jobId": "…", "keys": ["DATABASE_URL", "API_TOKEN"] }
-→ 200 { "secrets": { "DATABASE_URL": "…" }, "ttlSeconds": 300 }
-// requires a live job lease + secret.value.use; emits secret.accessed per key
+{ "runnerId": "…", "jobId": "…", "leaseEpoch": 3, "refs": ["secret://acme/api/prod/DATABASE_URL", …] }
+→ 200 { "secrets": { "DATABASE_URL": "…" },
+        "resolved": [ { "key": "DATABASE_URL", "version": 9, "scope": "environment",
+                        "personal": false, "decisionId": "dec_…" } ],
+        "ttlSeconds": 300 }
+→ 409 lease_lost | 403 typed policy denial | 404 resource-hiding
+// Two independent checks: bearer authz AND a live job lease matching
+// (runId, jobId, runnerId, leaseEpoch) — same epoch discipline as :heartbeat/:complete.
+// Chain per key: personal(local-cli, owner) → environment → project → workspace → account.
+// Emits secret.accessed per key; stamps last_used_at; personal rung never serves CI.
 ```
 
 ## 5. Workspace links
@@ -173,6 +196,6 @@ the CLI caches in `RepoLink`.
 | objects read / write | `state.object.read` / `state.object.write` |
 | catalog head read / entities | `catalog.read` |
 | catalog head advance | `catalog.publish` |
-| secrets metadata / write / runtime resolve | `secret.read` / `secret.write` / `secret.value.use` |
+| secrets metadata / write / runtime resolve / break-glass reveal | `secret.read` / `secret.write` / `secret.value.use` / `secret.reveal` (elevated) |
 | workspace link create | `org.cli.link` |
 | OIDC trust bindings | `org.ci.trust.write` |
