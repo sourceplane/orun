@@ -112,6 +112,7 @@ func Resolve(ctx context.Context, opts Options) (*ResolvedCatalog, []ValidationI
 		Repo:         repo,
 		Excludes:     EffectiveExcludes(intentExcludes),
 		Fingerprints: computeFingerprints(opts.WorkspaceRoot, manifests, globalDigest),
+		RepoDecl:     repoDeclFromIntent(intent, namespace, repo),
 	}
 
 	if firstErr := firstError(issues); firstErr != nil {
@@ -132,6 +133,50 @@ func loadIntentForResolve(opts Options) (*intentFile, error) {
 	rel := "intent.yaml"
 	intent, _ := loadIntent(intentAbs, rel)
 	return intent, nil
+}
+
+// repoDeclFromIntent resolves the top-level `repo:` block into a
+// RepoDeclaration, or nil when the intent declares none. The entity key is
+// repo-local (<namespace>/<repo>/<name>); no cloud project id is available at
+// resolve time (saas-workspace-overview WO3). displayName/description default
+// from metadata when omitted.
+func repoDeclFromIntent(intent *intentFile, namespace, repo string) *RepoDeclaration {
+	if intent == nil || intent.Repo == nil {
+		return nil
+	}
+	rb := intent.Repo
+	name := repo
+	if intent.Metadata != nil && intent.Metadata.Name != "" {
+		name = intent.Metadata.Name
+	}
+	displayName := rb.DisplayName
+	if displayName == "" {
+		displayName = name
+	}
+	description := rb.Description
+	if description == "" && intent.Metadata != nil {
+		description = intent.Metadata.Description
+	}
+	overview := ""
+	if rb.Docs != nil {
+		overview = rb.Docs.Overview
+	}
+	links := make([]RepoLink, 0, len(rb.Links))
+	for _, l := range rb.Links {
+		links = append(links, RepoLink{Title: l.Title, URL: l.URL, Icon: l.Icon})
+	}
+	return &RepoDeclaration{
+		EntityKey:   catalogmodel.FormatEntityKey(namespace, repo, name),
+		Name:        name,
+		Namespace:   namespace,
+		Repo:        repo,
+		DisplayName: displayName,
+		Description: description,
+		Owner:       rb.Owner,
+		Overview:    overview,
+		Links:       links,
+		Tags:        append([]string(nil), rb.Tags...),
+	}
 }
 
 // intentInferenceFor pulls the (optional) inference block from a parsed

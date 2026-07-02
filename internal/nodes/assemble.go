@@ -163,6 +163,12 @@ func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifest
 	// under components/ in this milestone; the full unification to
 	// entities/Component/ is the SC3 follow-up.
 	derived := deriveEntities(manifests)
+	// Fold in resolver-declared entities (e.g. the Repo self-description, WO3):
+	// they are not implied by component relations, so deriveEntities never
+	// produces them. assembleEntities counts them into countsByKind.
+	if len(cat.DeclaredEntities) > 0 {
+		derived = append(derived, cat.DeclaredEntities...)
+	}
 	entitiesTreeID, countsByKind, err := assembleEntities(ctx, s, derived)
 	if err != nil {
 		return "", err
@@ -224,6 +230,7 @@ const (
 	EntityKindUser        = "User"
 	EntityKindEnvironment = "Environment"
 	EntityKindComposition = "Composition"
+	EntityKindRepo        = "Repo"
 )
 
 // deriveEntities builds the distinct non-Component entities implied by the

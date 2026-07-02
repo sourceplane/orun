@@ -199,6 +199,57 @@ func TestAssembleCatalogWritesRelations(t *testing.T) {
 	}
 }
 
+func TestAssembleCatalogEmitsDeclaredRepoEntity(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := mem()
+	manifests := []ComponentManifest{
+		{Identity: ComponentIdentity{ComponentKey: "default/orun/api", Name: "api", Namespace: "default", Repo: "orun"}},
+	}
+	repo := Entity{
+		APIVersion: "orun.io/v1",
+		Kind:       EntityKindRepo,
+		Identity:   EntityIdentity{EntityKey: "default/orun/orun", Kind: EntityKindRepo, Name: "orun", Namespace: "default", Repo: "orun"},
+		Metadata:   map[string]any{"displayName": "Orun Platform"},
+		Docs:       map[string]any{"overview": "docs/overview.md"},
+	}
+	catID, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 15, DeclaredEntities: []Entity{repo}}, manifests, nil, ImpactOwnership{}, nil)
+	if err != nil {
+		t.Fatalf("AssembleCatalog: %v", err)
+	}
+	// The declared Repo is counted and lands under entities/Repo/.
+	catBlob, _ := findEntry(t, s, catID, fileCatalog)
+	snap, err := Decode[CatalogSnapshot]([]byte(blobBody(t, s, catBlob)))
+	if err != nil {
+		t.Fatalf("decode catalog: %v", err)
+	}
+	if snap.CountsByKind["Repo"] != 1 {
+		t.Errorf("countsByKind[Repo] = %d, want 1 (%v)", snap.CountsByKind["Repo"], snap.CountsByKind)
+	}
+	// DeclaredEntities is transient — it must NOT serialize into catalog.json.
+	if len(snap.DeclaredEntities) != 0 {
+		t.Errorf("DeclaredEntities leaked into the record: %v", snap.DeclaredEntities)
+	}
+	entTree, _ := findEntry(t, s, catID, dirEntities)
+	repoTree, _ := s.GetTree(ctx, kindTreeID(t, s, entTree, "Repo"))
+	if len(repoTree) != 1 {
+		t.Fatalf("entities/Repo/ = %d entries, want 1", len(repoTree))
+	}
+	re, err := Decode[Entity]([]byte(blobBody(t, s, repoTree[0].ID)))
+	if err != nil {
+		t.Fatalf("decode repo entity: %v", err)
+	}
+	if re.Identity.EntityKey != "default/orun/orun" || re.Identity.Name != "orun" {
+		t.Errorf("repo identity = %+v", re.Identity)
+	}
+	if re.Docs["overview"] != "docs/overview.md" {
+		t.Errorf("repo docs.overview = %v", re.Docs)
+	}
+	if re.Metadata["displayName"] != "Orun Platform" {
+		t.Errorf("repo displayName = %v", re.Metadata)
+	}
+}
+
 func TestAssembleCatalogDerivesMultiKindEntities(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

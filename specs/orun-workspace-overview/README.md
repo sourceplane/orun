@@ -94,11 +94,14 @@ spec:
 
 ### 3b. Declared `Repo` kind (`Product` deferred)
 
-> **Revised 2026-07-01** (`architecture-review.md`): ship the **`Repo`** kind
-> only; the `Repo` ref is minted from the **durable project id**, not
-> `CatalogSnapshot.Repo` (which is an un-normalized passthrough — §2, §A1 of the
-> review). **`Product` and the `products:` block are deferred** to WO6 (spec in
-> `model.md §7`) until multi-product/multi-repo workspaces are real.
+> **Revised 2026-07-02** (implementation): ship the **`Repo`** kind only. The
+> `Repo` ref is the repo-local entity key **`<namespace>/<repo>/<name>`**
+> (`FormatEntityKey`), consistent with every other derived entity — **not** a
+> cloud project id (grep-confirmed: no project/workspace id exists at resolve
+> time; `orun plan` runs offline) and **not** the un-normalized
+> `CatalogSnapshot.Repo`. The platform joins the repo facet by `source_project_id`
+> at projection time, so the ref never needs a cloud id. **`Product` and the
+> `products:` block are deferred** to WO6 (spec in `model.md §7`).
 
 One new **declared** top-level block in `internal/model/intent.go`, resolved into
 an entity in the snapshot:
@@ -114,7 +117,7 @@ repo:                              # singular — self-describes THIS repo (one 
 
 | Kind | Ref | Scope | Merges across repos? |
 |------|-----|-------|----------------------|
-| `Repo` | `repo:<project-id>` — minted from the durable project/`ws_` id (the stable join key), **not** `CatalogSnapshot.Repo` and **not** a provider id | repo-scoped, one per snapshot | No |
+| `Repo` | `<namespace>/<repo>/<name>` (`FormatEntityKey`, repo-local) — **not** a cloud project id (none exists at resolve time) and **not** the un-normalized `CatalogSnapshot.Repo`; the platform joins by `source_project_id` | repo-scoped, one per snapshot | No |
 | `Product` *(WO6)* | `product:<namespace>/<name>` | namespace-scoped | **Yes** — like `System`; deferred |
 
 Add `EntityKindRepo` (constant + `allEntityKinds`), `RepoSpec` (`overview` ref,
@@ -170,7 +173,7 @@ nothing here depends on a provider API.
 
 | Concern | Owner |
 |---------|-------|
-| `docs.overview` on the shared docs struct; declared `repo` block + `Repo` kind (ref from the durable project id); walking docs into the closure as content-addressed **blobs** read at the pinned commit; `doc_ref={path,ref,sha,digest}` | **`sourceplane/orun`** (this spec, WO3) |
+| `docs.overview` on the shared docs struct; declared `repo` block + `Repo` kind (ref = repo-local `<namespace>/<repo>/<name>`); walking docs into the closure as content-addressed **blobs** read at the pinned commit; `doc_ref={path,ref,sha,digest}` | **`sourceplane/orun`** (this spec, WO3) |
 | Projecting `Repo`→`state.repo_facet`, `doc_ref` onto entities; scoped read-doc-by-digest; the read-edge-assembled Overview (no `/overview` endpoint); console render. **No object-kind change** — docs ride the existing `blob` kind | **`sourceplane/orun-cloud`** (WO2, WO4–WO5) |
 | `Product` kind + `products:` block + explicit primary selection | **both**, **deferred** to WO6 |
 | The normative model (kinds, refs, `doc_ref` shape, state tables, push flow) | **`sourceplane/orun-cloud`** `model.md` (shared; this spec conforms) |

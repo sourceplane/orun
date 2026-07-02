@@ -105,6 +105,35 @@ type ResolvedCatalog struct {
 	// Fingerprints is one input fingerprint per resolved component (the
 	// change-detection virtual Merkle tree leaf-set), ordered by componentKey.
 	Fingerprints []ComponentFingerprint
+
+	// RepoDecl is the resolved top-level `repo:` self-description, or nil when
+	// the intent declares no `repo:` block (saas-workspace-overview WO3). When
+	// present, objplan emits a single Repo entity from it.
+	RepoDecl *RepoDeclaration
+}
+
+// RepoDeclaration is the resolved `repo:` block: the repo self-describing.
+// Its EntityKey is repo-local (<namespace>/<repo>/<name>) — no cloud project id
+// exists at resolve time, and the platform joins the repo facet by project at
+// projection time, so the ref never needs one (model.md §2c).
+type RepoDeclaration struct {
+	EntityKey   string
+	Name        string
+	Namespace   string
+	Repo        string
+	DisplayName string
+	Description string
+	Owner       string
+	Overview    string // docs.overview path, or ""
+	Links       []RepoLink
+	Tags        []string
+}
+
+// RepoLink is one external link on a RepoDeclaration.
+type RepoLink struct {
+	Title string
+	URL   string
+	Icon  string
 }
 
 // Options configures DiscoverAndLoad and Resolve. Exactly one of

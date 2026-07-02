@@ -50,6 +50,13 @@ type CatalogSnapshot struct {
 	Components      []CatalogComponentRef `json:"components"`
 	GraphIDs        map[string]string     `json:"graphIds,omitempty"`
 	Issues          []CatalogIssue        `json:"issues,omitempty"`
+
+	// DeclaredEntities carries entities the resolver declares directly (not
+	// derived from component relations) — e.g. the single Repo self-describing
+	// the repo (saas-workspace-overview WO3). It is a transient assembly input,
+	// NOT part of the serialized catalog record (json:"-"), so it never changes
+	// the catalog.json blob id; AssembleCatalog folds it into entities/<Kind>/.
+	DeclaredEntities []Entity `json:"-"`
 }
 
 // ComponentIdentity is the identifying tuple of a component. Environment is

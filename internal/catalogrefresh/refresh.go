@@ -58,9 +58,11 @@ import (
 // inferred runtime (languages/frameworks/infra/packageManagers) on the envelope
 // spec (data-model.md §4), and 13→14 for composition effects.graph (provides →
 // derived Resource entities the backed components dependOn; exposes → derived
-// API entities they provide). Every catalog id moves once per bump, the resolve
-// memo misses once, and content addressing re-stabilizes (S-1).
-const ResolverVersion = 14
+// API entities they provide), and 14→15 for the declared Repo entity emitted
+// from the top-level `repo:` block (saas-workspace-overview WO3). Every catalog
+// id moves once per bump, the resolve memo misses once, and content addressing
+// re-stabilizes (S-1).
+const ResolverVersion = 15
 
 // lockTTL bounds how long a refresh lock is honored before it is treated as
 // stale (a crashed holder) and reclaimed. A resolve+write is sub-second; this
