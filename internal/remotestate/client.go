@@ -372,6 +372,36 @@ type ReadLogResult struct {
 	Complete bool   `json:"complete"`
 }
 
+// ResolveSecretsRequest is the body for the run-scoped secret resolve
+// (contract §4 v3, specs/orun-secrets/data-model.md §8). LeaseEpoch is the
+// conditional key from the job's claim — the same epoch discipline heartbeat
+// and complete follow; 0 on the relational (non-DO) coordination path.
+type ResolveSecretsRequest struct {
+	RunnerID   string   `json:"runnerId"`
+	JobID      string   `json:"jobId"`
+	LeaseEpoch int      `json:"leaseEpoch"`
+	Refs       []string `json:"refs"`
+}
+
+// ResolvedSecretMeta is the per-key provenance the resolve returns alongside
+// the values: which version and chain scope served the key, whether a
+// personal overlay shadowed it, and the audit decision id. Never a value.
+type ResolvedSecretMeta struct {
+	Key        string `json:"key"`
+	Version    int    `json:"version"`
+	Scope      string `json:"scope"` // personal | environment | project | workspace | account
+	Personal   bool   `json:"personal"`
+	DecisionID string `json:"decisionId"`
+}
+
+// ResolvedSecrets is the resolve response. Values live only in runner memory,
+// honor TTLSeconds, and are never persisted client-side.
+type ResolvedSecrets struct {
+	Secrets    map[string]string    `json:"secrets"`
+	Resolved   []ResolvedSecretMeta `json:"resolved,omitempty"`
+	TTLSeconds int                  `json:"ttlSeconds"`
+}
+
 // ── API methods (v1 contract §2) ───────────────────────────────────────────────
 
 // CreateRun calls POST …/state/runs. Idempotent on the client-minted run ULID:
@@ -509,6 +539,23 @@ func (c *Client) ReadLog(ctx context.Context, runID, jobID string, fromSeq int) 
 	var resp ReadLogResult
 	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
 		return nil, fmt.Errorf("read log %s: %w", jobID, err)
+	}
+	return &resp, nil
+}
+
+// ResolveRunSecrets calls POST …/state/runs/{runID}/secrets/resolve — the
+// lease-bound resolve (contract §4 v3): the server verifies bearer authz AND
+// the live lease (runID, jobID, runnerID, leaseEpoch) independently, walks the
+// scope chain per ref, decrypts, audits, and returns TTL'd plaintext. Fail
+// closed: any error (including 409 lease_lost and typed policy denials) means
+// the dependent job must not start. Not retried — a resolve is lease-bound
+// and the caller re-claims on lease loss.
+func (c *Client) ResolveRunSecrets(ctx context.Context, runID, jobID, runnerID string, leaseEpoch int, refs []string) (*ResolvedSecrets, error) {
+	path := c.statePath("/runs/" + urlSegment(runID) + "/secrets/resolve")
+	req := ResolveSecretsRequest{RunnerID: runnerID, JobID: jobID, LeaseEpoch: leaseEpoch, Refs: refs}
+	var resp ResolvedSecrets
+	if err := c.doJSON(ctx, http.MethodPost, path, req, &resp, false); err != nil {
+		return nil, fmt.Errorf("resolve secrets for job %s: %w", jobID, err)
 	}
 	return &resp, nil
 }

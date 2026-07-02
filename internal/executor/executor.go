@@ -30,11 +30,15 @@ type ExecContext struct {
 	BaseEnv            map[string]string
 	JobEnv             map[string]string
 	StepEnv            map[string]string
-	Env                map[string]string
-	Runtime            RuntimeContext
-	Stdout             io.Writer
-	Stderr             io.Writer
-	DryRun             bool
+	// SecretEnv holds resolved secret values for the current job — the
+	// highest-precedence layer in Env. In-memory only: never serialized,
+	// never written to state, redacted from all captured output.
+	SecretEnv map[string]string
+	Env       map[string]string
+	Runtime   RuntimeContext
+	Stdout    io.Writer
+	Stderr    io.Writer
+	DryRun    bool
 }
 
 // Executor runs plan steps using a specific backend.
