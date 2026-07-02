@@ -137,6 +137,13 @@ type Entity struct {
 	Links        []map[string]any `json:"links,omitempty"`
 	Provenance   map[string]any   `json:"provenance,omitempty"`
 	Extensions   map[string]any   `json:"extensions,omitempty"`
+
+	// PendingDocs is a transient assembly input (NOT serialized): doc-key →
+	// raw bytes to be written as content-addressed blobs into the catalog's
+	// docs/ subtree (saas-workspace-overview WO3b). AssembleCatalog uploads
+	// each, then fills the matching Docs[key].digest with the blob id so the
+	// entity references the doc by its content address.
+	PendingDocs map[string][]byte `json:"-"`
 }
 
 // EntityRelation is one typed forward edge owned by an Entity (data-model.md

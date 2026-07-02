@@ -169,7 +169,7 @@ func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifest
 	if len(cat.DeclaredEntities) > 0 {
 		derived = append(derived, cat.DeclaredEntities...)
 	}
-	entitiesTreeID, countsByKind, err := assembleEntities(ctx, s, derived)
+	entitiesTreeID, docBlobs, countsByKind, err := assembleEntities(ctx, s, derived)
 	if err != nil {
 		return "", err
 	}
@@ -208,9 +208,17 @@ func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifest
 	if err != nil {
 		return "", err
 	}
+	// docs/ holds the content-addressed doc blobs entities reference by digest
+	// (WO3b). Always present (possibly empty) so the catalog tree shape is
+	// uniform and the id is deterministic.
+	docsTreeID, err := s.PutTree(ctx, docBlobs)
+	if err != nil {
+		return "", err
+	}
 	return s.PutTree(ctx, []objectstore.TreeEntry{
 		blobEntry(fileCatalog, catBlobID),
 		treeEntry(dirComponents, compTreeID),
+		treeEntry(dirDocs, docsTreeID),
 		treeEntry(dirEntities, entitiesTreeID),
 		treeEntry(dirGraph, graphTreeID),
 		blobEntry(fileRelations, relationsBlobID),
@@ -419,7 +427,7 @@ func shortHexTail(id string, n int) string {
 // the colliding entries fall back to the sanitized full entityKey so the tree
 // stays valid (duplicate tree names are rejected by the store) and the naming
 // stays deterministic.
-func assembleEntities(ctx context.Context, s store, entities []Entity) (ObjectID, map[string]int, error) {
+func assembleEntities(ctx context.Context, s store, entities []Entity) (ObjectID, []objectstore.TreeEntry, map[string]int, error) {
 	// First pass: count sanitized names per kind to detect collisions.
 	nameCount := map[string]int{} // "<kind>/<sanitizedName>" → occurrences
 	keyCount := map[string]int{}  // "<kind>/<sanitizedKey>" → occurrences
@@ -430,18 +438,53 @@ func assembleEntities(ctx context.Context, s store, entities []Entity) (ObjectID
 
 	counts := map[string]int{}
 	byKind := map[string][]objectstore.TreeEntry{}
+	// docBlobs collects the content-addressed doc blobs (WO3b), deduped by id so
+	// two entities referencing the same content share one tree entry. Sorted by
+	// name before the tree is written (in AssembleCatalog) for determinism.
+	var docBlobs []objectstore.TreeEntry
+	docSeen := map[string]bool{}
 	for _, e := range entities {
 		e.APIVersion = "orun.io/v1"
+		// Write any pending doc content as content-addressed blobs, then stamp
+		// the blob id onto the entity's doc_ref.digest so it references the doc
+		// by content address (the platform reads it from R2 by that digest).
+		if len(e.PendingDocs) > 0 {
+			docKeys := make([]string, 0, len(e.PendingDocs))
+			for k := range e.PendingDocs {
+				docKeys = append(docKeys, k)
+			}
+			sort.Strings(docKeys)
+			if e.Docs == nil {
+				e.Docs = map[string]any{}
+			}
+			for _, dk := range docKeys {
+				id, err := s.PutBlob(ctx, e.PendingDocs[dk])
+				if err != nil {
+					return "", nil, nil, err
+				}
+				ref, _ := e.Docs[dk].(map[string]any)
+				if ref == nil {
+					ref = map[string]any{}
+				}
+				ref["digest"] = string(id)
+				e.Docs[dk] = ref
+				if !docSeen[string(id)] {
+					docSeen[string(id)] = true
+					docBlobs = append(docBlobs, blobEntry(sanitizeSegment(shortHexTail(string(id), 40)), id))
+				}
+			}
+			e.PendingDocs = nil
+		}
 		if err := e.Validate(); err != nil {
-			return "", nil, err
+			return "", nil, nil, err
 		}
 		b, err := Encode(e)
 		if err != nil {
-			return "", nil, err
+			return "", nil, nil, err
 		}
 		id, err := s.PutBlob(ctx, b)
 		if err != nil {
-			return "", nil, err
+			return "", nil, nil, err
 		}
 		fileBase := sanitizeSegment(e.Identity.Name)
 		if nameCount[e.Kind+"/"+fileBase] > 1 {
@@ -465,15 +508,16 @@ func assembleEntities(ctx context.Context, s store, entities []Entity) (ObjectID
 	for _, k := range kinds {
 		treeID, err := s.PutTree(ctx, byKind[k])
 		if err != nil {
-			return "", nil, err
+			return "", nil, nil, err
 		}
 		kindEntries = append(kindEntries, treeEntry(sanitizeSegment(k), treeID))
 	}
 	treeID, err := s.PutTree(ctx, kindEntries)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
-	return treeID, counts, nil
+	sort.Slice(docBlobs, func(i, j int) bool { return docBlobs[i].Name < docBlobs[j].Name })
+	return treeID, docBlobs, counts, nil
 }
 
 // assembleRelations builds the single typed relation graph (relations.json) from

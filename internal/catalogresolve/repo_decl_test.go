@@ -1,13 +1,19 @@
 package catalogresolve
 
-import "testing"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestRepoDeclFromIntent(t *testing.T) {
 	// No intent / no repo block → no declaration (the feature is opt-in).
-	if repoDeclFromIntent(nil, "default", "orun") != nil {
+	if repoDeclFromIntent(nil, "default", "orun", "") != nil {
 		t.Error("nil intent should yield nil")
 	}
-	if repoDeclFromIntent(&intentFile{}, "default", "orun") != nil {
+	if repoDeclFromIntent(&intentFile{}, "default", "orun", "") != nil {
 		t.Error("intent without a repo block should yield nil")
 	}
 
@@ -23,7 +29,7 @@ func TestRepoDeclFromIntent(t *testing.T) {
 			Tags:        []string{"saas"},
 		},
 	}
-	d := repoDeclFromIntent(in, "sourceplane", "orun")
+	d := repoDeclFromIntent(in, "sourceplane", "orun", "")
 	if d == nil {
 		t.Fatal("expected a declaration")
 	}
@@ -48,7 +54,7 @@ func TestRepoDeclFromIntent(t *testing.T) {
 
 	// Defaults: no metadata → name = repo segment, displayName = name; a block
 	// description takes precedence over metadata.
-	d2 := repoDeclFromIntent(&intentFile{Repo: &intentRepoBlock{Description: "block desc"}}, "default", "orun")
+	d2 := repoDeclFromIntent(&intentFile{Repo: &intentRepoBlock{Description: "block desc"}}, "default", "orun", "")
 	if d2.Name != "orun" || d2.EntityKey != "default/orun/orun" {
 		t.Errorf("defaulted name/key = %q/%q", d2.Name, d2.EntityKey)
 	}
@@ -57,5 +63,32 @@ func TestRepoDeclFromIntent(t *testing.T) {
 	}
 	if d2.Description != "block desc" {
 		t.Errorf("Description = %q, want block value", d2.Description)
+	}
+}
+
+func TestRepoDeclReadsOverviewContent(t *testing.T) {
+	// The overview bytes are read from the working tree and hashed (WO3b).
+	dir := t.TempDir()
+	body := []byte("# Overview\n\nHello.\n")
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "overview.md"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in := &intentFile{Repo: &intentRepoBlock{Docs: &intentRepoDocs{Overview: "docs/overview.md"}}}
+	d := repoDeclFromIntent(in, "default", "orun", dir)
+	if string(d.OverviewContent) != string(body) {
+		t.Errorf("OverviewContent = %q", d.OverviewContent)
+	}
+	sum := sha256.Sum256(body)
+	if d.OverviewSHA != hex.EncodeToString(sum[:]) {
+		t.Errorf("OverviewSHA = %q", d.OverviewSHA)
+	}
+
+	// A missing file leaves the path pointer but no content (best-effort).
+	miss := repoDeclFromIntent(&intentFile{Repo: &intentRepoBlock{Docs: &intentRepoDocs{Overview: "docs/nope.md"}}}, "default", "orun", dir)
+	if miss.Overview != "docs/nope.md" || miss.OverviewContent != nil {
+		t.Errorf("missing-file case = %+v", miss)
 	}
 }
