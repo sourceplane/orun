@@ -36,6 +36,8 @@ var (
 	secretsChain       bool
 	secretsJSONOut     bool
 	secretsFromDotenv  string
+	secretsBreakGlass  bool
+	secretsReason      string
 )
 
 func registerSecretsCommand(root *cobra.Command) {
@@ -122,8 +124,66 @@ Scope defaults to the linked project: --env <env> targets an environment rung,
 	}
 	versionsCmd.Flags().StringVar(&secretsEnvFlag, "env", "", "Target environment (slug)")
 
-	secretsCmd.AddCommand(setCmd, importCmd, listCmd, rotateCmd, revokeCmd, versionsCmd)
+	revealCmd := &cobra.Command{
+		Use:   "reveal <KEY> --env <env> --break-glass --reason <why>",
+		Short: "Break-glass: reveal a value for incident recovery (audited + alerted)",
+		Long: `Reveal a secret's plaintext value. This is the ONLY command that returns a
+value, and it is not the normal path — a workload receives secrets by runner
+injection (orun run), never by a human reveal.
+
+reveal is an elevated, deny-by-default action: it requires --break-glass and a
+--reason, is recorded in the audit log, and raises a secret.revealed alert.
+Expect near-zero use outside incident recovery.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSecretsReveal(cmd, args[0])
+		},
+	}
+	revealCmd.Flags().StringVar(&secretsEnvFlag, "env", "", "Target environment (slug)")
+	revealCmd.Flags().BoolVar(&secretsBreakGlass, "break-glass", false, "Required acknowledgement that this is an audited emergency reveal")
+	revealCmd.Flags().StringVar(&secretsReason, "reason", "", "Required justification, recorded in the audit log")
+
+	secretsCmd.AddCommand(setCmd, importCmd, listCmd, rotateCmd, revokeCmd, versionsCmd, revealCmd)
 	root.AddCommand(secretsCmd)
+}
+
+// runSecretsReveal implements the break-glass reveal — the one value-returning
+// command (SD-3). It hard-requires --break-glass and --reason, prints the value
+// to stdout only (with a stderr warning), and never writes it to any file.
+func runSecretsReveal(cmd *cobra.Command, key string) error {
+	ctx := cmd.Context()
+	if !secretsBreakGlass {
+		return fmt.Errorf("reveal requires --break-glass: this is an audited emergency action, not the normal path (workloads receive secrets via `orun run`)")
+	}
+	if strings.TrimSpace(secretsReason) == "" {
+		return fmt.Errorf("reveal requires --reason: the justification is recorded in the audit log")
+	}
+	rt, err := newSecretsRuntime(ctx)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(secretsEnvFlag) == "" {
+		return rt.errEnvRequired(false)
+	}
+	scope, label, err := rt.environmentScope(ctx, secretsEnvFlag)
+	if err != nil {
+		return err
+	}
+	id, err := findSecretID(ctx, rt, scope, label, key)
+	if err != nil {
+		return err
+	}
+	revealed, err := rt.client.RevealSecret(ctx, scope, id, secretsReason)
+	if err != nil {
+		return renderSecretsWriteError(err, key)
+	}
+	color := ui.ColorEnabledForWriter(os.Stderr)
+	fmt.Fprintf(os.Stderr, "%s break-glass reveal of %s (%s, version %d) — this access has been audited and alerted\n",
+		ui.Yellow(color, "⚠"), key, label, revealed.Version)
+	// The value goes to stdout ALONE so it can be piped without the notice; it
+	// is never written to a file by orun.
+	fmt.Println(revealed.Value)
+	return nil
 }
 
 // addSecretsScopeFlags registers the rung-selector flags shared by set/list/
