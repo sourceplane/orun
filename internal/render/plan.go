@@ -105,6 +105,7 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 			Retries:                  job.Retries,
 			Env:                      buildPlanJobEnv(job),
 			SecretRefs:               buildPlanJobSecretRefs(job),
+			Materialize:              buildPlanJobMaterialize(job),
 			Labels:                   job.Labels,
 			Parameters:               job.Parameters,
 		}
@@ -166,6 +167,20 @@ func buildPlanJobSecretRefs(job *model.JobInstance) []model.PlanSecretRef {
 		refs = append(refs, model.PlanSecretRef{AsEnv: k, Ref: job.SecretRefs[k]})
 	}
 	return refs
+}
+
+// buildPlanJobMaterialize renders the job's materialize block as the value-free
+// plan step: the target adapter id and the secret key names to deliver after
+// the deploy step (specs/orun-secrets/data-model.md §2.3, §5). The Secrets are
+// already key-sorted by the planner.
+func buildPlanJobMaterialize(job *model.JobInstance) *model.PlanMaterialize {
+	if job.Materialize == nil {
+		return nil
+	}
+	return &model.PlanMaterialize{
+		Target:  job.Materialize.Target,
+		Secrets: job.Materialize.Secrets,
+	}
 }
 
 // convertSteps converts rendered steps to plan steps

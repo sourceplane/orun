@@ -939,6 +939,7 @@ func loadExecutionProfileFromDir(compositionDir, name string) (*model.ExecutionP
 				Policies:       doc.Spec.Policies,
 				Jobs:           doc.Spec.Jobs,
 				SecretBindings: doc.Spec.SecretBindings,
+				Materialize:    doc.Spec.Materialize,
 			}, nil
 		}
 	}

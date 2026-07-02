@@ -15,8 +15,10 @@ import (
 
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/executor"
+	"github.com/sourceplane/orun/internal/materialize"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/redact"
+	"github.com/sourceplane/orun/internal/secretref"
 	"github.com/sourceplane/orun/internal/ui"
 )
 
@@ -100,6 +102,17 @@ type Runner struct {
 	// objrun blob write), the GHA emitter, and the console. Nil-safe; seeded
 	// with every value ResolveJobSecrets returns.
 	Redactor *redact.Redactor
+
+	// MaterializeAdapters resolves a materialize target id → adapter for the
+	// deploy-time last mile (specs/orun-secrets/runner-integration.md §6). It is
+	// injected by cmd/orun with credentials the deploy job already has, so the
+	// runner stays decoupled from cloud specifics. Nil-safe: a run whose jobs
+	// declare no materialize, or one without a cloud, is unaffected.
+	MaterializeAdapters *materialize.Registry
+	// MaterializeSyncRecorder records materialization provenance to the backend
+	// (the SM5 …/config/secrets/syncs route, Invariant 10). Best-effort: a
+	// record failure warns but never undoes a written value. Nil-safe.
+	MaterializeSyncRecorder materialize.SyncRecorder
 
 	// ResumeJobs seeds the run with jobs that already succeeded in a prior run
 	// of the same execution (read from the object graph). Seeded jobs are
@@ -719,6 +732,26 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				if r.Hooks != nil && r.Hooks.AfterJobTerminal != nil {
 					r.Hooks.AfterJobTerminal(job.ID, false, jobState.LastError)
 				}
+			}
+		}
+	}
+
+	// Materialize step (orun-secrets SEC6): after the job's steps succeed, deliver
+	// the resolved secrets into the deployed application's native store. No second
+	// resolve — it reuses jobSecretEnv (the values the job already resolved).
+	// Failure is loud: the step fails and the run seals red (design §8.3).
+	if !r.DryRun && !jobFailed && job.Materialize != nil {
+		if matErr := r.materializeJobSecrets(job, jobSecretEnv); matErr != nil {
+			jobFailed = true
+			r.updateState(persistState, execState, func() {
+				jobState.Status = "failed"
+				jobState.LastError = fmt.Sprintf("materialize: %v", matErr)
+				jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+			})
+			fmt.Fprintf(r.Stderr, "  %s %s: materialize failed: %v\n", ui.Red(r.Color, "✗"), job.ID, matErr)
+			summary.addFailed()
+			if r.Hooks != nil && r.Hooks.AfterJobTerminal != nil {
+				r.Hooks.AfterJobTerminal(job.ID, false, jobState.LastError)
 			}
 		}
 	}
@@ -1454,6 +1487,109 @@ func (r *Runner) resolveJobSecrets(job model.PlanJob) (map[string]string, error)
 		r.Redactor.Add(values...)
 	}
 	return resolved, nil
+}
+
+// materializeJobSecrets delivers the job's materialize secrets into the target
+// application's native store after the deploy step succeeds (specs/orun-secrets/
+// runner-integration.md §6). It reuses the already-resolved jobSecretEnv (no
+// second resolve). Every value is already registered with the redactor.
+// Failure is loud: a missing resolved key, an unknown target, or any Put error
+// fails the step (the caller seals the run red). On partial failure the keys
+// that already converged are reported alongside the one that failed; re-running
+// is idempotent (Put overwrites by key). Sync provenance is recorded per key,
+// best-effort — a record failure warns but never undoes a written value.
+func (r *Runner) materializeJobSecrets(job model.PlanJob, jobSecretEnv map[string]string) error {
+	mat := job.Materialize
+	if mat == nil || len(mat.Secrets) == 0 {
+		return nil
+	}
+	if r.MaterializeAdapters == nil {
+		return fmt.Errorf("job declares materialize target %q but no materialize adapters are configured (run against a cloud with credentials)", mat.Target)
+	}
+	adapter, ok := r.MaterializeAdapters.Lookup(mat.Target)
+	if !ok {
+		return r.MaterializeAdapters.UnknownTargetError(mat.Target)
+	}
+
+	target := r.materializeTargetBinding(job)
+	// Map the injected env name → its secret KEY (for provenance) and the KEY →
+	// resolved version (from the sealed resolve, SEC4). Neither carries a value.
+	asEnvToKey := make(map[string]string, len(job.SecretRefs))
+	for _, ref := range job.SecretRefs {
+		if parsed, perr := secretref.Parse(ref.Ref); perr == nil {
+			asEnvToKey[ref.AsEnv] = parsed.Key
+		}
+	}
+	keyToVersion := make(map[string]int)
+	for _, p := range r.secretProvenanceFor(job.ID) {
+		keyToVersion[p.Key] = p.Version
+	}
+
+	ctx := context.Background()
+	var converged []string
+	for _, name := range mat.Secrets {
+		value, ok := jobSecretEnv[name]
+		if !ok {
+			return fmt.Errorf("materialize secret %q was not resolved for this job (converged: %v)", name, converged)
+		}
+		if err := adapter.Put(ctx, target, name, value); err != nil {
+			// Value redacted: neither the adapter nor this error path echoes it.
+			return fmt.Errorf("materialize %q → %s failed: %w (converged: %v)", name, mat.Target, err, converged)
+		}
+		converged = append(converged, name)
+
+		// Record provenance (best-effort). secretKey is the underlying secret KEY
+		// (falling back to the injected name if the ref was not parseable).
+		if r.MaterializeSyncRecorder != nil {
+			secretKey := asEnvToKey[name]
+			if secretKey == "" {
+				secretKey = name
+			}
+			rec := materialize.SyncRecord{
+				SecretKey: secretKey,
+				Version:   keyToVersion[secretKey],
+				Target:    mat.Target,
+				EntityRef: target.EntityRef,
+				RunID:     r.ExecID,
+			}
+			if err := r.MaterializeSyncRecorder(ctx, rec); err != nil {
+				fmt.Fprintf(r.Stderr, "  %s materialize sync-record for %s failed (value written, provenance not recorded): %v\n",
+					ui.Yellow(r.Color, "⚠"), secretKey, err)
+			}
+		}
+	}
+
+	fmt.Fprintf(r.Stderr, "  %s materialized %d secret(s) → %s\n",
+		ui.Green(r.Color, "✓"), len(converged), mat.Target)
+	return nil
+}
+
+// materializeTargetBinding derives the adapter target for a job. The Worker
+// script name is derived from the deploy job — a parameter or label the deploy
+// exposes — never a free-form endpoint (the admission bar,
+// runner-integration.md §6). TODO(SM6/catalog): firm this up by deriving the
+// script name and entity ref from the provisioned catalog entity; until then a
+// job may pin the script via parameters.scriptName / a label, else the
+// component name is used, and the entity ref falls back to the component/env
+// identity.
+func (r *Runner) materializeTargetBinding(job model.PlanJob) materialize.TargetBinding {
+	script := ""
+	if v, ok := job.Parameters["scriptName"].(string); ok {
+		script = strings.TrimSpace(v)
+	}
+	if script == "" {
+		if v, ok := job.Labels["orun.io/worker-script"]; ok {
+			script = strings.TrimSpace(v)
+		}
+	}
+	if script == "" {
+		script = job.Component
+	}
+	entityRef := job.Component
+	if job.Environment != "" {
+		entityRef = fmt.Sprintf("component:%s@%s", job.Component, job.Environment)
+	}
+	return materialize.TargetBinding{ScriptName: script, EntityRef: entityRef}
 }
 
 func (r *Runner) stepExecContext(base executor.ExecContext, job model.PlanJob, step model.PlanStep, workingDir string, secretEnv map[string]string) (executor.ExecContext, func(), error) {

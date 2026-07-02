@@ -144,6 +144,24 @@ type ExecutionProfile struct {
 	// planner maps each binding to a secret:// reference for the resolving
 	// (project, env) at plan time (specs/orun-secrets/data-model.md §2.2).
 	SecretBindings map[string]SecretBinding `yaml:"secretBindings,omitempty" json:"secretBindings,omitempty"`
+	// Materialize declares the deploy-time last mile: after the deploy step
+	// succeeds the runner delivers the named (subset of) secrets into the
+	// deployed application's native store via a typed adapter, under the same
+	// policy decision the job's resolve already made (specs/orun-secrets/
+	// data-model.md §2.3, SD-13). Value-free — key names only.
+	Materialize *MaterializeSpec `yaml:"materialize,omitempty" json:"materialize,omitempty"`
+}
+
+// MaterializeSpec is a profile's runtime-delivery block (data-model.md §2.3).
+// Target names a typed adapter (v1: "cloudflare-worker"). Secrets are the
+// binding keys to sync — a compile-checked subset of the profile's
+// secretBindings (or the component's secretEnv). OnRotate is reserved (e.g.
+// "redeploy"): rotation convergence via a system trigger is a follow-up (SEC6
+// builds the deploy-time step only — see runner-integration.md §6).
+type MaterializeSpec struct {
+	Target   string   `yaml:"target" json:"target"`
+	Secrets  []string `yaml:"secrets,omitempty" json:"secrets,omitempty"`
+	OnRotate string   `yaml:"onRotate,omitempty" json:"onRotate,omitempty"`
 }
 
 // SecretBinding is one logical secret a profile requires. Required marks a
@@ -316,4 +334,5 @@ type ExecutionProfileSpec struct {
 	Policies       *ProfilePolicies          `yaml:"policies,omitempty" json:"policies,omitempty"`
 	Jobs           map[string]ProfileJobSpec `yaml:"jobs" json:"jobs"`
 	SecretBindings map[string]SecretBinding  `yaml:"secretBindings,omitempty" json:"secretBindings,omitempty"`
+	Materialize    *MaterializeSpec          `yaml:"materialize,omitempty" json:"materialize,omitempty"`
 }

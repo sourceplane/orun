@@ -64,6 +64,14 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 			// same for every job the profile selects; resolve them once.
 			bindings := jp.resolveProfileBindings(compInst, compositionInfo)
 
+			// The profile's materialize block (deploy-time last mile) is likewise
+			// profile-level; resolve + subset-check it once. A non-subset key is a
+			// compile error (specs/orun-secrets/data-model.md §2.3).
+			materialize, matErr := resolveMaterialize(jp.resolveProfileMaterialize(compInst, compositionInfo), bindings, compInst.SecretEnv)
+			if matErr != nil {
+				return nil, fmt.Errorf("component %s: %w", compInst.ComponentName, matErr)
+			}
+
 			for _, jobEntry := range jobsToRender {
 				jobID := fmt.Sprintf("%s.%s.%s", compInst.ComponentName, envName, jobEntry.job.Name)
 				secretRefs, mergeErr := mergeBindingRefs(compInst.SecretEnv, bindings, jp.Workspace, jp.Project, envName)
@@ -91,6 +99,7 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 					Env:                      compInst.Env,
 					SecretRefs:               secretRefs,
 					SecretBindings:           bindings,
+					Materialize:              materialize,
 					DependsOn:                make([]string, 0),
 				}
 

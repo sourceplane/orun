@@ -455,6 +455,34 @@ func (c *Client) unknownEnvError(env string, byslug map[string]string) error {
 	return fmt.Errorf("environment %q not found; available: %s", env, strings.Join(slugs, ", "))
 }
 
+// ── Materialization provenance (SD-13 — data-model.md §7e/§8) ─────────────────
+
+// RecordSyncRequest is the body for POST …/config/secrets/syncs (the SM5
+// route). It is value-free: the secret key, the version delivered, the target
+// adapter id, the provisioned entity ref, and the deploy run id. No value is
+// ever sent on this surface — the value was written directly to the target.
+type RecordSyncRequest struct {
+	SecretKey string `json:"secretKey"`
+	Version   int    `json:"version,omitempty"`
+	Target    string `json:"target"`
+	EntityRef string `json:"entityRef,omitempty"`
+	RunID     string `json:"runId,omitempty"`
+}
+
+// RecordSync calls POST <scope>/config/secrets/syncs to stamp a materialization
+// row (Invariant 10). Best-effort at the call site: the value is already
+// written to the target, so a record failure is surfaced but does not undo it.
+func (c *Client) RecordSync(ctx context.Context, scope Scope, req RecordSyncRequest) error {
+	path, err := scope.secretsPath()
+	if err != nil {
+		return err
+	}
+	if err := c.doJSON(ctx, http.MethodPost, path+"/syncs", req, nil, false); err != nil {
+		return fmt.Errorf("record secret sync %s: %w", req.SecretKey, err)
+	}
+	return nil
+}
+
 // ── SecretPolicy surface (Layer-2 documents — data-model.md §7d/§8) ───────────
 
 // PutSecretPolicyRequest is the body for PUT …/config/secret-policies. Document
