@@ -71,7 +71,59 @@ func BuildCatalogNodes(view *catalogresolve.CatalogView, resolverVersion int, ow
 			graphs = append(graphs, mapGraph(g, edgeKind))
 		}
 	}
+
+	// Emit the declared Repo entity (WO3): a repo self-describing, from the
+	// top-level `repo:` block. Absent when no block is declared, so existing
+	// catalogs are unchanged.
+	if view != nil && view.ResolvedCatalog != nil && view.RepoDecl != nil {
+		cat.DeclaredEntities = []nodes.Entity{repoEntity(view.RepoDecl)}
+	}
+
 	return cat, manifests, graphs, buildOwnership(view), buildFingerprints(view)
+}
+
+// repoEntity maps a resolved RepoDeclaration into the Repo node entity. Docs,
+// links, and owner land in the entity's dedicated blocks so the platform's
+// projector reads them the same way it reads a component's.
+func repoEntity(d *catalogresolve.RepoDeclaration) nodes.Entity {
+	e := nodes.Entity{
+		APIVersion: "orun.io/v1",
+		Kind:       nodes.EntityKindRepo,
+		Identity: nodes.EntityIdentity{
+			EntityKey: d.EntityKey,
+			Kind:      nodes.EntityKindRepo,
+			Name:      d.Name,
+			Namespace: d.Namespace,
+			Repo:      d.Repo,
+		},
+	}
+	meta := map[string]any{}
+	putNonEmpty(meta, "displayName", d.DisplayName)
+	putNonEmpty(meta, "description", d.Description)
+	if len(d.Tags) > 0 {
+		meta["tags"] = strSliceToAny(d.Tags)
+	}
+	if len(meta) > 0 {
+		e.Metadata = meta
+	}
+	if d.Owner != "" {
+		e.Ownership = map[string]any{"owner": d.Owner}
+	}
+	if d.Overview != "" {
+		e.Docs = map[string]any{"overview": d.Overview}
+	}
+	if len(d.Links) > 0 {
+		links := make([]map[string]any, 0, len(d.Links))
+		for _, l := range d.Links {
+			lm := map[string]any{}
+			putNonEmpty(lm, "title", l.Title)
+			putNonEmpty(lm, "url", l.URL)
+			putNonEmpty(lm, "icon", l.Icon)
+			links = append(links, lm)
+		}
+		e.Links = links
+	}
+	return e
 }
 
 // buildFingerprints maps the resolver's neutral fingerprint set onto the node

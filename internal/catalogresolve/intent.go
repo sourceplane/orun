@@ -15,11 +15,44 @@ import (
 // "key set to empty" via an explicit pointer/length check on the loader
 // side (see intentDefaults below).
 type intentFile struct {
-	Catalog *intentCatalogBlock `yaml:"catalog"`
+	Metadata *intentMetadata     `yaml:"metadata"`
+	Catalog  *intentCatalogBlock `yaml:"catalog"`
 	// Components are the inline component declarations. The catalog ingests
 	// these alongside discovered component.yaml files so the component set
 	// matches the legacy inline∪discovered set (orun-catalog-state CS5/CS6).
 	Components []inlineComponent `yaml:"components"`
+	// Repo is the optional top-level block that self-describes THIS repo
+	// (saas-workspace-overview WO3). When present, the resolver emits a single
+	// Repo entity; when absent, nothing changes.
+	Repo *intentRepoBlock `yaml:"repo"`
+}
+
+// intentMetadata mirrors intent.yaml's top-level metadata (name/description are
+// used to default the Repo entity's identity + description).
+type intentMetadata struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	Namespace   string `yaml:"namespace"`
+}
+
+// intentRepoBlock mirrors the top-level `repo:` block (model.md §2b).
+type intentRepoBlock struct {
+	DisplayName string           `yaml:"displayName"`
+	Description string           `yaml:"description"`
+	Owner       string           `yaml:"owner"`
+	Docs        *intentRepoDocs  `yaml:"docs"`
+	Links       []intentRepoLink `yaml:"links"`
+	Tags        []string         `yaml:"tags"`
+}
+
+type intentRepoDocs struct {
+	Overview string `yaml:"overview"`
+}
+
+type intentRepoLink struct {
+	Title string `yaml:"title"`
+	URL   string `yaml:"url"`
+	Icon  string `yaml:"icon"`
 }
 
 type intentCatalogBlock struct {

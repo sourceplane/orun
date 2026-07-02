@@ -41,16 +41,17 @@ This is **not** a one-line array change — budget three sites:
   relations (e.g. owner → `Group`) into `buildGraphs()` (the graph types are
   hardcoded; a new relation needs a new builder branch).
 
-**Ref:** mint the `Repo` ref from the **durable project/`ws_` id** — the stable
-join key the platform already uses (`model.md §2c`) — **not** from
-`CatalogSnapshot.Repo`, which is an un-normalized display string
-(`internal/catalogresolve/catalog_snapshot.go` copies `ResolverInputs.Repo`
-verbatim). Do **not** invent a remote-normalization here; the `path/ref/sha`
-provenance on `doc_ref` carries the human remote for "view source".
+**Ref:** the `Repo` entity key is the repo-local `FormatEntityKey(namespace,
+repo, name)` = `<namespace>/<repo>/<name>` (name defaults from `metadata.name`,
+else the repo segment), consistent with System/Domain keys. **No cloud project
+id exists at resolve time** (grep-confirmed; `orun plan` is offline), so the ref
+must not embed one; the platform joins the repo facet by `source_project_id` at
+projection time. Do **not** invent a remote-normalization here.
 
 **Done when:** `AllEntityKinds()` includes `Repo`; a repo with a `repo:` block
-produces exactly one `entities/Repo/<name>.json` with a project-id-derived ref and
-correct owner relation; `orun catalog list --kind Repo` validates.
+produces exactly one `entities/Repo/<name>.json` with a repo-local ref and its
+docs.overview/owner/links carried on the entity; `orun catalog list --kind Repo`
+validates.
 
 ## Step 3 — declare `repo` in intent
 
@@ -89,7 +90,7 @@ tree does not push bytes that mismatch the pinned sha.
 ## Step 5 — tests
 
 - `internal/catalogmodel`: `Repo` kind registration, **ref derivation from the
-  project id** (assert the ref, not just "a ref exists"), docs-overview round-trip.
+  repo-local key (assert the ref, not just "a ref exists"), docs-overview round-trip.
 - `internal/model`: parse the `repo:` block; assert `products:` is not consumed.
 - `internal/catalogresolve`: the `Repo` emit path + owner relation in the graph.
 - `cmd/orun`: an e2e mirroring `command_plan_pushcatalog_test.go` — push a repo
