@@ -342,6 +342,36 @@ func (c *Client) ListVersions(ctx context.Context, scope Scope, id string) ([]Se
 	return out, nil
 }
 
+// RevealSecret calls POST <scope>/config/secrets/{id}/reveal — the single
+// audited, elevated break-glass path that returns a plaintext value (SD-3).
+// The reason is mandatory and recorded server-side; the returned value is
+// printed to the caller and never persisted. This is the ONLY method on this
+// client that returns a secret value.
+func (c *Client) RevealSecret(ctx context.Context, scope Scope, id, reason string) (*RevealedSecret, error) {
+	path, err := scope.secretsPath()
+	if err != nil {
+		return nil, err
+	}
+	body := struct {
+		Reason string `json:"reason"`
+	}{Reason: reason}
+	// doJSON unwraps the platform {data:…} envelope, so decode the inner payload.
+	var payload struct {
+		Secret RevealedSecret `json:"secret"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, path+"/"+urlSegment(id)+"/reveal", body, &payload, false); err != nil {
+		return nil, fmt.Errorf("reveal secret: %w", err)
+	}
+	return &payload.Secret, nil
+}
+
+// RevealedSecret is the break-glass response: the plaintext value plus which
+// version served it. Held only transiently by the CLI to print, never stored.
+type RevealedSecret struct {
+	Value   string `json:"value"`
+	Version int    `json:"version"`
+}
+
 // ImportSecrets calls POST <scope>/config/secrets/import, chunking the items
 // into batches of ≤ ImportChunkSize. On a chunk error the results gathered so
 // far are returned alongside the error so the caller can render a partial
