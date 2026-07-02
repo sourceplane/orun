@@ -28,10 +28,18 @@ func isHermetic(job model.PlanJob) bool { return job.Labels[HermeticLabel] == "t
 // runs of the same job. (Input-artifact digests and the composition-lock digest
 // are not yet threaded through the plan; this is a deterministic subset, and the
 // server treats the hash as an opaque key.)
+//
+// Secret references join as "KEY=secret://…" entries: the reference (and any
+// @version pin) is content and belongs in the input set, while the resolved
+// VALUE never does — bare env keys never contain '=', so the two entry shapes
+// cannot collide.
 func jobInputHashFor(job model.PlanJob) string {
-	envKeys := make([]string, 0, len(job.Env))
+	envKeys := make([]string, 0, len(job.Env)+len(job.SecretRefs))
 	for k := range job.Env {
 		envKeys = append(envKeys, k)
+	}
+	for _, sr := range job.SecretRefs {
+		envKeys = append(envKeys, sr.AsEnv+"="+sr.Ref)
 	}
 	sort.Strings(envKeys)
 	return JobInputHash(JobInputHashInput{Steps: job.Steps, EnvKeys: envKeys})

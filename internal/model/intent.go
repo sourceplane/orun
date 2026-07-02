@@ -21,6 +21,9 @@ type Intent struct {
 	Components   []Component            `yaml:"components" json:"components"`
 	Execution    IntentExecution        `yaml:"execution,omitempty" json:"execution,omitempty"`
 	Env          map[string]string      `yaml:"env,omitempty" json:"env,omitempty"`
+	// SecretEnv maps env var names to secret:// references (never values —
+	// the planner rejects literals; specs/orun-secrets/data-model.md §2.1).
+	SecretEnv map[string]string `yaml:"secretEnv,omitempty" json:"secretEnv,omitempty"`
 }
 
 // IntentExecution holds optional execution-layer configuration in intent.yaml.
@@ -95,6 +98,8 @@ type Environment struct {
 	ParameterDefaults map[string]map[string]interface{} `yaml:"parameterDefaults" json:"parameterDefaults"`
 	Policies          map[string]interface{}            `yaml:"policies" json:"policies"`
 	Env               map[string]string                 `yaml:"env,omitempty" json:"env,omitempty"`
+	// SecretEnv maps env var names to secret:// references (never values).
+	SecretEnv map[string]string `yaml:"secretEnv,omitempty" json:"secretEnv,omitempty"`
 	// DependencyMode controls how component dependsOn edges are emitted
 	// for components subscribing to this environment. One of "enforced"
 	// (default), "advisory", "disabled". See concepts/dependency-rules.md.
@@ -154,22 +159,25 @@ type ComponentChange struct {
 
 // Component is execution-agnostic declaration
 type Component struct {
-	Name                      string                   `yaml:"name" json:"name"`
-	Type                      string                   `yaml:"type" json:"type"`
-	Domain                    string                   `yaml:"domain" json:"domain"`
-	Enabled                   bool                     `yaml:"enabled" json:"enabled"`
-	Path                      string                   `yaml:"path" json:"path"`
-	Subscribe                 ComponentSubscribe       `yaml:"subscribe" json:"subscribe"`
-	CompositionRef            *ComponentCompositionRef `yaml:"compositionRef,omitempty" json:"compositionRef,omitempty"`
-	Parameters                map[string]interface{}   `yaml:"parameters" json:"parameters"`
-	Overrides                 ComponentOverrides       `yaml:"overrides" json:"overrides"`
-	Labels                    map[string]string        `yaml:"labels" json:"labels"`
-	DependsOn                 []Dependency             `yaml:"dependsOn" json:"dependsOn"`
-	Env                       map[string]string        `yaml:"env,omitempty" json:"env,omitempty"`
-	Change                    ComponentChange          `yaml:"change,omitempty" json:"change,omitempty"`
-	ResolvedComposition       string                   `yaml:"-" json:"-"`
-	ResolvedCompositionSource string                   `yaml:"-" json:"-"`
-	SourcePath                string                   `yaml:"-" json:"-"`
+	Name           string                   `yaml:"name" json:"name"`
+	Type           string                   `yaml:"type" json:"type"`
+	Domain         string                   `yaml:"domain" json:"domain"`
+	Enabled        bool                     `yaml:"enabled" json:"enabled"`
+	Path           string                   `yaml:"path" json:"path"`
+	Subscribe      ComponentSubscribe       `yaml:"subscribe" json:"subscribe"`
+	CompositionRef *ComponentCompositionRef `yaml:"compositionRef,omitempty" json:"compositionRef,omitempty"`
+	Parameters     map[string]interface{}   `yaml:"parameters" json:"parameters"`
+	Overrides      ComponentOverrides       `yaml:"overrides" json:"overrides"`
+	Labels         map[string]string        `yaml:"labels" json:"labels"`
+	DependsOn      []Dependency             `yaml:"dependsOn" json:"dependsOn"`
+	Env            map[string]string        `yaml:"env,omitempty" json:"env,omitempty"`
+	// SecretEnv maps env var names to secret:// references (never values —
+	// the planner rejects literals; specs/orun-secrets/data-model.md §2.1).
+	SecretEnv                 map[string]string `yaml:"secretEnv,omitempty" json:"secretEnv,omitempty"`
+	Change                    ComponentChange   `yaml:"change,omitempty" json:"change,omitempty"`
+	ResolvedComposition       string            `yaml:"-" json:"-"`
+	ResolvedCompositionSource string            `yaml:"-" json:"-"`
+	SourcePath                string            `yaml:"-" json:"-"`
 }
 
 // ComponentSubscribe declares which environments a component participates in.
@@ -188,9 +196,11 @@ type EnvironmentSubscription struct {
 	// DependencyRules conditionally override DependencyMode based on the
 	// matched triggerRef. First match wins; if nothing matches, the
 	// subscription/environment DependencyMode (or default) is used.
-	DependencyRules []DependencyRule       `yaml:"dependencyRules,omitempty" json:"dependencyRules,omitempty"`
-	Env             map[string]string      `yaml:"env,omitempty" json:"env,omitempty"`
-	Parameters      map[string]interface{} `yaml:"parameters,omitempty" json:"parameters,omitempty"`
+	DependencyRules []DependencyRule  `yaml:"dependencyRules,omitempty" json:"dependencyRules,omitempty"`
+	Env             map[string]string `yaml:"env,omitempty" json:"env,omitempty"`
+	// SecretEnv maps env var names to secret:// references (never values).
+	SecretEnv  map[string]string      `yaml:"secretEnv,omitempty" json:"secretEnv,omitempty"`
+	Parameters map[string]interface{} `yaml:"parameters,omitempty" json:"parameters,omitempty"`
 }
 
 // ProfileRule is a conditional override that selects a different execution profile
@@ -323,6 +333,7 @@ type NormalizedIntent struct {
 	Components     map[string]Component
 	ComponentIndex map[string]Component // for fast lookup
 	Env            map[string]string    // root-level env from intent
+	SecretEnv      map[string]string    // root-level secretEnv from intent (references only)
 }
 
 // ComponentInstance is the expanded form of Component for a specific environment
@@ -338,14 +349,18 @@ type ComponentInstance struct {
 	Labels                    map[string]string
 	Parameters                map[string]interface{}
 	Env                       map[string]string
-	StepOverrides             []Step
-	Policies                  map[string]interface{}
-	DependsOn                 []ResolvedDependency
-	Enabled                   bool
-	ProfileRef                string
-	ProfileName               string
-	ProfileSource             string
-	ProfileRuleTriggerRef     string
+	// SecretEnv maps env var names to validated secret:// references,
+	// merged with the same 4-layer precedence as Env. References only —
+	// the expander's leak guard rejects literals.
+	SecretEnv             map[string]string
+	StepOverrides         []Step
+	Policies              map[string]interface{}
+	DependsOn             []ResolvedDependency
+	Enabled               bool
+	ProfileRef            string
+	ProfileName           string
+	ProfileSource         string
+	ProfileRuleTriggerRef string
 	// DependencyMode is the resolved enforcement policy for this instance's
 	// dependsOn edges (enforced | advisory | disabled). Default enforced.
 	DependencyMode string

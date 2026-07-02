@@ -83,29 +83,30 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 		}
 
 		planJob := model.PlanJob{
-			ID:            job.ID,
-			Name:          job.Name,
-			Component:     job.Component,
-			Environment:   job.Environment,
-			Composition:   job.Composition,
-			Profile:       job.Profile,
-			ProfileSource: job.ProfileSource,
-			ProfileRuleTriggerRef: job.ProfileRuleTriggerRef,
+			ID:                       job.ID,
+			Name:                     job.Name,
+			Component:                job.Component,
+			Environment:              job.Environment,
+			Composition:              job.Composition,
+			Profile:                  job.Profile,
+			ProfileSource:            job.ProfileSource,
+			ProfileRuleTriggerRef:    job.ProfileRuleTriggerRef,
 			DependencyMode:           job.DependencyMode,
 			DependencySource:         job.DependencySource,
 			DependencyRuleTriggerRef: job.DependencyRuleTriggerRef,
 			AdvisoryDependsOn:        sortedStrings(job.AdvisoryDependsOn),
-			JobRegistry:   registryName,
-			Job:           job.Name, // The specific job name from the registry
-			RunsOn:        job.RunsOn,
-			Path:          job.Path,
-			Steps:         r.convertSteps(job.Steps),
-			DependsOn:     job.DependsOn,
-			Timeout:       job.Timeout,
-			Retries:       job.Retries,
-			Env:           buildPlanJobEnv(job),
-			Labels:        job.Labels,
-			Parameters:    job.Parameters,
+			JobRegistry:              registryName,
+			Job:                      job.Name, // The specific job name from the registry
+			RunsOn:                   job.RunsOn,
+			Path:                     job.Path,
+			Steps:                    r.convertSteps(job.Steps),
+			DependsOn:                job.DependsOn,
+			Timeout:                  job.Timeout,
+			Retries:                  job.Retries,
+			Env:                      buildPlanJobEnv(job),
+			SecretRefs:               buildPlanJobSecretRefs(job),
+			Labels:                   job.Labels,
+			Parameters:               job.Parameters,
 		}
 
 		if len(job.Gates) > 0 {
@@ -145,6 +146,26 @@ func buildPlanJobEnv(job *model.JobInstance) map[string]interface{} {
 		result[k] = job.Env[k]
 	}
 	return result
+}
+
+// buildPlanJobSecretRefs emits the job's secret references sorted by env var
+// name. References only — no value field exists on the plan, structurally
+// (specs/orun-secrets/data-model.md §5).
+func buildPlanJobSecretRefs(job *model.JobInstance) []model.PlanSecretRef {
+	if len(job.SecretRefs) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(job.SecretRefs))
+	for k := range job.SecretRefs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	refs := make([]model.PlanSecretRef, 0, len(keys))
+	for _, k := range keys {
+		refs = append(refs, model.PlanSecretRef{AsEnv: k, Ref: job.SecretRefs[k]})
+	}
+	return refs
 }
 
 // convertSteps converts rendered steps to plan steps

@@ -8,6 +8,7 @@ import (
 
 	compositionpkg "github.com/sourceplane/orun/internal/composition"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/secretref"
 )
 
 // Expander handles environment × component expansion and merging
@@ -61,16 +62,16 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 
 			// Create instance with merged properties
 			instance := &model.ComponentInstance{
-				ComponentName: compName,
-				Environment:   envName,
-				Type:          comp.Type,
+				ComponentName:             compName,
+				Environment:               envName,
+				Type:                      comp.Type,
 				ResolvedComposition:       comp.ResolvedComposition,
 				ResolvedCompositionSource: comp.ResolvedCompositionSource,
-				Domain:        comp.Domain,
-				Labels:        comp.Labels,
-				StepOverrides: comp.Overrides.Steps,
-				SourcePath:    comp.SourcePath,
-				Enabled:       comp.Enabled,
+				Domain:                    comp.Domain,
+				Labels:                    comp.Labels,
+				StepOverrides:             comp.Overrides.Steps,
+				SourcePath:                comp.SourcePath,
+				Enabled:                   comp.Enabled,
 			}
 
 			// Resolve execution profile if registry is available
@@ -92,6 +93,13 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 
 			// Merge explicit environment variables
 			instance.Env = e.mergeEnv(comp, env, envName)
+
+			// Merge secret references (leak-guarded: references only)
+			secretEnv, err := e.mergeSecretEnv(comp, env, envName)
+			if err != nil {
+				return nil, err
+			}
+			instance.SecretEnv = secretEnv
 
 			// Extract path from merged properties if it exists
 			if pathVal, exists := merged["path"]; exists {
@@ -181,9 +189,10 @@ func matchesPattern(pattern, value string) bool {
 
 // mergeProperties applies the merge precedence order with proper override hierarchy.
 // Precedence (lowest to highest):
-//   env parameterDefaults["*"] → env parameterDefaults[type] →
-//   group parameterDefaults["*"] → group parameterDefaults[type] →
-//   component parameters → subscription parameters
+//
+//	env parameterDefaults["*"] → env parameterDefaults[type] →
+//	group parameterDefaults["*"] → group parameterDefaults[type] →
+//	component parameters → subscription parameters
 func (e *Expander) mergeProperties(comp model.Component, env model.Environment, envName, compName string) map[string]interface{} {
 	merged := make(map[string]interface{})
 
@@ -345,6 +354,53 @@ func (e *Expander) mergeEnv(comp model.Component, env model.Environment, envName
 	}
 
 	return merged
+}
+
+// mergeSecretEnv merges secret references with the same 4-layer precedence as
+// mergeEnv (intent root → environment → component → subscription), then
+// enforces the leak guard: every merged value must be a valid secret://
+// reference — a literal in a secretEnv slot is a compile error, and a
+// plaintext env entry may not share a key with a secret reference
+// (specs/orun-secrets/data-model.md §2.1, Invariant 1).
+func (e *Expander) mergeSecretEnv(comp model.Component, env model.Environment, envName string) (map[string]string, error) {
+	merged := make(map[string]string)
+
+	for k, v := range e.normalized.SecretEnv {
+		merged[k] = v
+	}
+
+	for k, v := range env.SecretEnv {
+		merged[k] = v
+	}
+
+	for k, v := range comp.SecretEnv {
+		merged[k] = v
+	}
+
+	sub := comp.Subscribe.FindSubscription(envName)
+	if sub != nil {
+		for k, v := range sub.SecretEnv {
+			merged[k] = v
+		}
+	}
+
+	if len(merged) == 0 {
+		return nil, nil
+	}
+
+	plainEnv := e.mergeEnv(comp, env, envName)
+	for k, v := range merged {
+		interpolated := e.interpolateString(v, envName, comp.Domain, comp.Name)
+		if _, err := secretref.Parse(interpolated); err != nil {
+			return nil, fmt.Errorf("component %s (env %s): secretEnv %s: %w", comp.Name, envName, k, err)
+		}
+		if _, shadowed := plainEnv[k]; shadowed {
+			return nil, fmt.Errorf("component %s (env %s): key %s is declared in both env and secretEnv — a plaintext env entry may not shadow a secret reference", comp.Name, envName, k)
+		}
+		merged[k] = interpolated
+	}
+
+	return merged, nil
 }
 
 // resolvePolicies extracts policies that apply to this component in this environment
