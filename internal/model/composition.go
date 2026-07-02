@@ -54,8 +54,8 @@ type CompositionDocumentSpec struct {
 	// golden path is a versioned, owned artifact.
 	Version string `yaml:"version,omitempty" json:"version,omitempty"`
 	// Lifecycle is the composition's maturity stage (stable|beta|deprecated).
-	Lifecycle  string `yaml:"lifecycle,omitempty" json:"lifecycle,omitempty"`
-	DefaultJob string `yaml:"defaultJob" json:"defaultJob"`
+	Lifecycle         string                      `yaml:"lifecycle,omitempty" json:"lifecycle,omitempty"`
+	DefaultJob        string                      `yaml:"defaultJob" json:"defaultJob"`
 	DefaultProfile    string                      `yaml:"defaultProfile,omitempty" json:"defaultProfile,omitempty"`
 	SchemaRef         *ResourceRef                `yaml:"schemaRef,omitempty" json:"schemaRef,omitempty"`
 	ParameterSchema   map[string]interface{}      `yaml:"parameterSchema,omitempty" json:"parameterSchema,omitempty"`
@@ -139,6 +139,20 @@ type ExecutionProfile struct {
 	Description string                    `yaml:"description,omitempty" json:"description,omitempty"`
 	Policies    *ProfilePolicies          `yaml:"policies,omitempty" json:"policies,omitempty"`
 	Jobs        map[string]ProfileJobSpec `yaml:"jobs" json:"jobs"`
+	// SecretBindings declares the logical secrets this profile needs, keyed by
+	// binding name. It is portable (ships in the Stack) and value-free: the
+	// planner maps each binding to a secret:// reference for the resolving
+	// (project, env) at plan time (specs/orun-secrets/data-model.md §2.2).
+	SecretBindings map[string]SecretBinding `yaml:"secretBindings,omitempty" json:"secretBindings,omitempty"`
+}
+
+// SecretBinding is one logical secret a profile requires. Required marks a
+// binding whose reference MUST be mappable at plan time (else a compile error).
+// AsEnv optionally overrides the environment variable the resolved value is
+// injected as; it defaults to the binding key when empty.
+type SecretBinding struct {
+	Required bool   `yaml:"required,omitempty" json:"required,omitempty"`
+	AsEnv    string `yaml:"asEnv,omitempty" json:"asEnv,omitempty"`
 }
 
 // ProfilePolicies defines enforcement rules for a profile.
@@ -298,7 +312,8 @@ type ExecutionProfileDocument struct {
 
 // ExecutionProfileSpec defines the behavior overlay for one execution context.
 type ExecutionProfileSpec struct {
-	Description string                    `yaml:"description,omitempty" json:"description,omitempty"`
-	Policies    *ProfilePolicies          `yaml:"policies,omitempty" json:"policies,omitempty"`
-	Jobs        map[string]ProfileJobSpec `yaml:"jobs" json:"jobs"`
+	Description    string                    `yaml:"description,omitempty" json:"description,omitempty"`
+	Policies       *ProfilePolicies          `yaml:"policies,omitempty" json:"policies,omitempty"`
+	Jobs           map[string]ProfileJobSpec `yaml:"jobs" json:"jobs"`
+	SecretBindings map[string]SecretBinding  `yaml:"secretBindings,omitempty" json:"secretBindings,omitempty"`
 }

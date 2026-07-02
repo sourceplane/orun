@@ -23,17 +23,17 @@ import (
 )
 
 const (
-	compositionKind          = "Composition"
-	compositionPackageKind   = "CompositionPackage"
-	componentSchemaKind      = "ComponentSchema"
-	jobTemplateKind          = "JobTemplate"
-	executionProfileKind     = "ExecutionProfile"
-	stackKind                = "Stack"
-	lockAPIVersion           = "sourceplane.io/v1alpha1"
-	lockKind                 = "CompositionLock"
-	legacySourceName         = "legacy-config-dir"
-	legacySourceKind         = "legacy-dir"
-	lockFilePath             = ".orun/compositions.lock.yaml"
+	compositionKind        = "Composition"
+	compositionPackageKind = "CompositionPackage"
+	componentSchemaKind    = "ComponentSchema"
+	jobTemplateKind        = "JobTemplate"
+	executionProfileKind   = "ExecutionProfile"
+	stackKind              = "Stack"
+	lockAPIVersion         = "sourceplane.io/v1alpha1"
+	lockKind               = "CompositionLock"
+	legacySourceName       = "legacy-config-dir"
+	legacySourceKind       = "legacy-dir"
+	lockFilePath           = ".orun/compositions.lock.yaml"
 )
 
 // Composition is the resolved internal representation used by planning and validation.
@@ -935,9 +935,10 @@ func loadExecutionProfileFromDir(compositionDir, name string) (*model.ExecutionP
 		}
 		if doc.Kind == executionProfileKind && doc.Metadata.Name == name {
 			return &model.ExecutionProfile{
-				Description: doc.Spec.Description,
-				Policies:    doc.Spec.Policies,
-				Jobs:        doc.Spec.Jobs,
+				Description:    doc.Spec.Description,
+				Policies:       doc.Spec.Policies,
+				Jobs:           doc.Spec.Jobs,
+				SecretBindings: doc.Spec.SecretBindings,
 			}, nil
 		}
 	}

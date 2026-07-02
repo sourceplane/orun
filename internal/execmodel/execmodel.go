@@ -39,6 +39,22 @@ type JobState struct {
 	HeartbeatAt string            `json:"heartbeatAt,omitempty"`
 	Steps       map[string]string `json:"steps"`
 	LastError   string            `json:"lastError,omitempty"`
+	// SecretProvenance records which secret versions this job resolved and under
+	// which policy decision — sealed-run provenance (Invariant 6,
+	// specs/orun-secrets/platform-integration.md §3). It is metadata only: a
+	// value NEVER appears here, structurally.
+	SecretProvenance []SecretResolution `json:"secretProvenance,omitempty"`
+}
+
+// SecretResolution is one resolved secret's provenance: the key, the version
+// served, the chain scope that served it, and the audit decision id. Populated
+// from the runner's resolve response (remotestate.ResolvedSecretMeta). It
+// carries NO value — Invariant 1 applies to the sealed execution too.
+type SecretResolution struct {
+	Key        string `json:"key"`
+	Version    int    `json:"version"`
+	Scope      string `json:"scope,omitempty"`
+	DecisionID string `json:"decisionId,omitempty"`
 }
 
 // ExecutionLink is an external link surfaced for an execution (CI run page, etc.).
