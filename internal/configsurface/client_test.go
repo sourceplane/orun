@@ -144,6 +144,82 @@ func TestImportSecretsChunksAt100(t *testing.T) {
 	}
 }
 
+func TestSecretPoliciesPathConstruction(t *testing.T) {
+	ws, err := (Scope{Kind: ScopeWorkspace, Org: "org_1"}).secretPoliciesPath()
+	if err != nil || ws != "/v1/organizations/org_1/config/secret-policies" {
+		t.Fatalf("workspace path = %q, err %v", ws, err)
+	}
+	prj, err := (Scope{Kind: ScopeProject, Org: "org_1", Project: "prj_2"}).secretPoliciesPath()
+	if err != nil || prj != "/v1/organizations/org_1/projects/prj_2/config/secret-policies" {
+		t.Fatalf("project path = %q, err %v", prj, err)
+	}
+	// Environment scope is invalid for the policy surface.
+	if _, err := (Scope{Kind: ScopeEnvironment, Org: "org_1", Project: "prj_2", EnvID: "env_3"}).secretPoliciesPath(); err == nil {
+		t.Error("environment scope must be rejected for secret-policies")
+	}
+}
+
+func TestPutSecretPolicy(t *testing.T) {
+	var gotPath, gotMethod string
+	var gotBody PutSecretPolicyRequest
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod = r.URL.Path, r.Method
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"policy": map[string]any{
+			"name": "prod-secrets", "tier": "stack", "source": "stack:acme@1.0.0",
+			"scope": "organization", "documentHash": "abc123", "updated": true,
+		}}})
+	})
+	res, err := client.PutSecretPolicy(context.Background(),
+		Scope{Kind: ScopeWorkspace, Org: "org_1"},
+		PutSecretPolicyRequest{Name: "prod-secrets", Tier: "stack", Source: "stack:acme@1.0.0", Document: json.RawMessage(`{"rules":[]}`)})
+	if err != nil {
+		t.Fatalf("PutSecretPolicy: %v", err)
+	}
+	if gotMethod != http.MethodPut {
+		t.Errorf("method = %q, want PUT", gotMethod)
+	}
+	if gotPath != "/v1/organizations/org_1/config/secret-policies" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if gotBody.Tier != "stack" || gotBody.Name != "prod-secrets" {
+		t.Errorf("body = %+v", gotBody)
+	}
+	if !res.Updated || res.DocumentHash != "abc123" {
+		t.Errorf("result = %+v", res)
+	}
+}
+
+func TestEvaluateSecretPolicy(t *testing.T) {
+	var gotPath string
+	var gotBody EvaluateSecretPolicyRequest
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+			"layer1":   map[string]any{"action": "secret.value.use", "allow": true, "reason": "granted"},
+			"layer2":   map[string]any{"allow": false, "ruleId": "laptops-never-prod", "reason": "laptops-never-prod"},
+			"decision": map[string]any{"allow": false},
+		}})
+	})
+	res, err := client.EvaluateSecretPolicy(context.Background(),
+		Scope{Kind: ScopeProject, Org: "org_1", Project: "prj_2"},
+		EvaluateSecretPolicyRequest{Key: "STRIPE_KEY", Env: "prod", Platform: "local-cli",
+			Subject: EvalSubject{Teams: []string{"platform-admins"}, Kind: "user"}})
+	if err != nil {
+		t.Fatalf("EvaluateSecretPolicy: %v", err)
+	}
+	if gotPath != "/v1/organizations/org_1/projects/prj_2/config/secret-policies/evaluate" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if gotBody.Key != "STRIPE_KEY" || gotBody.Platform != "local-cli" {
+		t.Errorf("body = %+v", gotBody)
+	}
+	if !res.Layer1.Allow || res.Layer2.Allow || res.Layer2.RuleID != "laptops-never-prod" || res.Decision.Allow {
+		t.Errorf("result = %+v", res)
+	}
+}
+
 func itoa(i int) string {
 	return string(rune('0'+i/100)) + string(rune('0'+(i/10)%10)) + string(rune('0'+i%10))
 }
