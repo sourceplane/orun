@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -23,6 +24,14 @@ const (
 	maxRetryAttempts   = 3
 	retryBaseDelay     = 2 * time.Second
 	retryMaxDelay      = 10 * time.Second
+
+	// objectWriteRetryAttempts caps attempts for raw object-plane writes (blob
+	// PUTs, multipart parts). Set higher than maxRetryAttempts because a catalog
+	// push fans out many uploads under one identity, so a large first push can
+	// legitimately keep tripping the per-identity rate limit; more attempts let
+	// the push ride through the limiter (honoring Retry-After) instead of
+	// aborting the whole sync on the first 429.
+	objectWriteRetryAttempts = 6
 
 	// maxIdleConnsPerHost caps idle keep-alive connections kept per backend host.
 	// The default (2) would force the parallel object uploader (objremote, 8
@@ -87,6 +96,10 @@ type APIError struct {
 	Details json.RawMessage `json:"-"`
 	// Status is the HTTP status code, when known.
 	Status int `json:"-"`
+	// RetryAfter is the server's Retry-After hint (0 when absent). A rate-limited
+	// (429) response carries how long to wait before retrying; the retrying
+	// callers honor it over the default exponential backoff.
+	RetryAfter time.Duration `json:"-"`
 }
 
 func (e *APIError) Error() string {
@@ -536,6 +549,58 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body, out inte
 	return lastErr
 }
 
+// doRawWithRetry runs a raw object-plane HTTP call — one that streams a request
+// body and so cannot go through doJSON — under the same retry policy: retry
+// network errors, 5xx, and 429 up to `attempts`, failing loud immediately on
+// auth/contract errors. `do` must build and send a fresh request on every call
+// (its body reader is consumed per attempt). Between attempts it waits per
+// retryDelay, honoring a server Retry-After hint over exponential backoff.
+func (c *Client) doRawWithRetry(ctx context.Context, attempts int, do func() error) error {
+	if attempts < 1 {
+		attempts = 1
+	}
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(retryDelay(attempt, lastErr)):
+			}
+		}
+		err := do()
+		if err == nil {
+			return nil
+		}
+		if mapped := c.mapAPIError(err); mapped != err {
+			return mapped
+		}
+		if !isRetryable(err) {
+			return err
+		}
+		lastErr = err
+	}
+	return lastErr
+}
+
+// retryDelay picks the wait before the next attempt. When the failed response
+// carried a Retry-After hint (the rate limiter tells us exactly how long to
+// wait) it is honored, plus jitter so concurrent uploaders don't retry in
+// lockstep and stampede the just-refilled bucket. Otherwise it falls back to
+// exponential backoff. Capped at retryMaxDelay so a large or hostile hint can't
+// stall a push.
+func retryDelay(attempt int, err error) time.Duration {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.RetryAfter > 0 {
+		d := apiErr.RetryAfter + time.Duration(rand.Float64()*float64(retryBaseDelay))
+		if d > retryMaxDelay {
+			d = retryMaxDelay
+		}
+		return d
+	}
+	return backoff(attempt)
+}
+
 // doJSONWith executes a single (non-retried) JSON call using a specific HTTP
 // client — e.g. the longer-timeout log client — while applying the same
 // contract-/auth-error rendering as doJSON.
@@ -676,14 +741,31 @@ func decodeSuccessBody(data []byte, out interface{}) error {
 
 func (c *Client) parseError(resp *http.Response) error {
 	data, _ := io.ReadAll(resp.Body)
-	if apiErr := decodeErrorEnvelope(data, resp.StatusCode); apiErr != nil {
-		return apiErr
+	apiErr := decodeErrorEnvelope(data, resp.StatusCode)
+	if apiErr == nil {
+		apiErr = &APIError{
+			Message: fmt.Sprintf("server returned status %d", resp.StatusCode),
+			Code:    httpStatusCode(resp.StatusCode),
+			Status:  resp.StatusCode,
+		}
 	}
-	return &APIError{
-		Message: fmt.Sprintf("server returned status %d", resp.StatusCode),
-		Code:    httpStatusCode(resp.StatusCode),
-		Status:  resp.StatusCode,
+	apiErr.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
+	return apiErr
+}
+
+// parseRetryAfter interprets a Retry-After header. The platform emits the
+// delay-seconds form ("Retry-After: 1"); that is the only form handled. Returns
+// 0 when the header is absent or unparseable so the caller falls back to the
+// default exponential backoff.
+func parseRetryAfter(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
 	}
+	if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return 0
 }
 
 // decodeErrorEnvelope parses both the platform's nested envelope

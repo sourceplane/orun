@@ -76,6 +76,16 @@ func (c *Client) ObjectsMissing(ctx context.Context, digests []string) ([]string
 // the path by size, so callers normally use EnsureObject rather than this
 // directly.
 func (c *Client) PutObject(ctx context.Context, digest, kind string, blob []byte) error {
+	// Retried on 429/5xx/network errors so a large catalog push (many PUTs under
+	// one rate-limited identity) rides through the limiter instead of aborting
+	// the whole sync on the first 429. The closure rebuilds the request each
+	// attempt so the body reader is fresh.
+	return c.doRawWithRetry(ctx, objectWriteRetryAttempts, func() error {
+		return c.putObjectOnce(ctx, digest, kind, blob)
+	})
+}
+
+func (c *Client) putObjectOnce(ctx context.Context, digest, kind string, blob []byte) error {
 	token, err := c.tokenSrc.Token(ctx)
 	if err != nil {
 		return fmt.Errorf("resolving auth token: %w", err)
@@ -250,6 +260,16 @@ func (c *Client) startUpload(ctx context.Context, digest string) (uploadID strin
 // uploadPart PUTs one part's bytes. The uploadId is a server-generated R2
 // multipart id (path-segment safe; never contains '/').
 func (c *Client) uploadPart(ctx context.Context, digest, uploadID string, partNumber int, part []byte) error {
+	// Same rate-limit-aware retry as PutObject: a multipart upload is a burst of
+	// part PUTs under one identity, so honor Retry-After and retry rather than
+	// abort the whole object. The closure rebuilds the request (fresh body
+	// reader) each attempt.
+	return c.doRawWithRetry(ctx, objectWriteRetryAttempts, func() error {
+		return c.uploadPartOnce(ctx, digest, uploadID, partNumber, part)
+	})
+}
+
+func (c *Client) uploadPartOnce(ctx context.Context, digest, uploadID string, partNumber int, part []byte) error {
 	path := c.statePath("/objects/" + digestSegment(digest) + "/uploads/" + uploadID + "/parts/" + strconv.Itoa(partNumber))
 	req, err := c.authedObjectRequest(ctx, http.MethodPut, path, bytes.NewReader(part),
 		map[string]string{"Content-Type": "application/octet-stream"})
