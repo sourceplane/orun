@@ -11,12 +11,14 @@ description: orun is the planner–cockpit for platform engineering. Compile dec
     <code>orun</code> compiles policy-aware platform intent into a deterministic execution DAG,
     then runs it through the backend you choose — local shell, Docker, or GitHub Actions.
     The CLI and the TUI render the same plan, the same state, the same glyphs. Drift between
-    surfaces is a compile error, not a visual regression.
+    surfaces is a compile error, not a visual regression. And when your plans need a home,
+    <a href="https://docs.orun.dev">Orun Cloud</a> gives them managed remote state, live runs,
+    and a workspace console.
   </p>
   <div className="heroActions">
     <a className="button button--primary button--lg" href="/start/quick-start">Quick start →</a>
     <a className="button button--secondary button--lg" href="/principles">The principles</a>
-    <a className="button button--secondary button--lg" href="/cockpit/overview">See the cockpit</a>
+    <a className="button button--secondary button--lg" href="https://docs.orun.dev">Orun Cloud docs</a>
   </div>
 
 <div className="cockpitFrame">
@@ -156,6 +158,56 @@ intent.yaml ── component.yaml ── compositions ──┐
 The boundary on the left is **planning**. The boundary on the right is **operations**.
 `plan.json` and `.orun/` are the only contracts between them — both versioned, both
 deterministic, both reviewable.
+
+## Orun Cloud — the managed backend
+
+`orun` is local-first: state lives in your repo's `.orun/`, and no server is required.
+**[Orun Cloud](https://docs.orun.dev)** is what you add when a team shares that state —
+point `execution.state.backendUrl` at it and every plan, run, and state transition is
+stored, ordered, and streamed. It is also a complete open-source SaaS control plane,
+built and converged by orun itself.
+
+<div className="signalGrid">
+  <article className="signalCard">
+    <strong>remote state</strong>
+    <h3>Managed, no buckets to babysit</h3>
+    <p>
+      Declare the backend in <code>intent.yaml</code>, authenticate with
+      <a href="/cli/orun-auth"><code>orun auth login</code></a> — or with nothing at all in
+      CI, where GitHub Actions OIDC exchanges the runner's identity for a scoped token.
+      <a href="/cli/orun-cloud"><code>orun cloud check</code></a> pre-flights the link.
+    </p>
+  </article>
+  <article className="signalCard">
+    <strong>live runs</strong>
+    <h3>A console for convergence</h3>
+    <p>
+      Jobs coordinate through the backend across runners — dependency-ordered, observable
+      in real time, resumable on retry. The <a href="https://app.orun.dev">workspace
+      console</a> renders runs, history, and the catalog of record.
+    </p>
+  </article>
+  <article className="signalCard">
+    <strong>workspaces</strong>
+    <h3>Tenancy, access, audit</h3>
+    <p>
+      Workspaces, projects, deny-by-default RBAC, teams, API keys, an immutable audit
+      log, metering, billing, and signed webhooks — the
+      <a href="https://docs.orun.dev">Orun Cloud docs</a> cover the whole platform,
+      product by product.
+    </p>
+  </article>
+  <article className="signalCard">
+    <strong>open baseline</strong>
+    <h3>Fork the whole platform</h3>
+    <p>
+      Orun Cloud is <a href="https://github.com/sourceplane/orun-cloud">open source</a> and
+      written as portable component intent, converged by orun on every commit — the thesis,
+      made concrete. <a href="https://docs.orun.dev/self-hosting/deploy-your-own">Run your
+      own</a> from a clean clone.
+    </p>
+  </article>
+</div>
 
 ## How to read these docs
 

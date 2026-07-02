@@ -8,6 +8,10 @@ ID (`ws_…`, short and immutable), its slug, or a legacy `org_…` id — all a
 accepted wherever `--workspace`/`--org` is. The link is resolved once and cached in
 `~/.orun/config.yaml`; every `--remote-state` call then runs under that scope.
 
+This page covers the CLI surface. The Orun Cloud **platform** — workspaces,
+access control, the API, webhooks, billing, and self-hosting — is documented at
+[docs.orun.dev](https://docs.orun.dev).
+
 :::tip Most teams don't run `orun cloud link` directly
 [`orun auth login`](./orun-auth.md) already authenticates **and auto-links** the
 current repo in one step, and `orun run --remote-state` self-heals an unlinked
