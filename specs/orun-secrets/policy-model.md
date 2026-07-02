@@ -1,224 +1,227 @@
-# Policy model — the portable, GitHub-native `SecretPolicy`
+# Policy model (v3) — two layers; the portable `SecretPolicy` conditions
 
-> `SecretPolicy` is a versioned, portable document (apiVersion `orun.io/v1`) that
-> binds GitHub identities to secret scopes under conditions on four axes — who,
-> which component, where (environment/trigger), and how (execution platform). It
-> attaches at three tiers — composition-attached, stack-wide, intent overlay —
-> each lower tier narrow-only; it is deny-by-default and enforced at compile
-> time (visible in `orun plan`) and fetch time (authoritative in `orun-api`).
-> This doc fixes the placement tiers, the subject model, the condition
-> vocabulary, evaluation, and provenance. The document schema is in
-> `data-model.md` §4.
+> Access to secrets is decided in **two layers**. **Layer 1** is the platform's
+> shipped role×scope RBAC (`packages/policy-engine`): deny-by-default role
+> matrices with account cascade and per-action provenance, whose dormant
+> `secret.read` / `secret.write` / `secret.value.use` actions v3 activates.
+> **Layer 2** is `SecretPolicy` — a versioned, portable document (apiVersion
+> `orun.io/v1`) of conditions over four axes: who, which component, where
+> (environment/trigger), and how (execution platform). It attaches at three
+> tiers — composition-attached, stack-wide, intent overlay — each lower tier
+> narrow-only; it is deny-by-default for protected scopes and enforced at
+> compile time (visible in `orun plan`) and fetch time (authoritative). The
+> document schema is in `data-model.md` §4.
+
+## 0. Layer 1 — the shipped engine (what v3 activates, not builds)
+
+`packages/policy-engine/src/index.ts` already ships everything the coarse gate
+needs:
+
+- **Actions** `secret.read`, `secret.write`, `secret.value.use` exist in the
+  catalog (`index.ts:334-336`) and in the role matrices: org `owner`/`admin`
+  hold all three; `builder` holds `secret.read` + `secret.value.use`; `viewer`
+  holds `secret.read` (`index.ts:67-178`). **No route consumes them today** —
+  secret handlers authorize with `*.config.read/write`
+  (`create-secret.ts:161`).
+- **Account cascade (WID6):** membership-worker assembles authorization facts,
+  remapping account-scope grants onto child workspaces with
+  `grantedVia:{kind:"account_cascade"}` (`authz-facts.ts:40-94`); team-derived
+  grants fold in the same way.
+- **Provenance (TM6b1):** decisions report the permitting fact
+  (`via: direct | team | account_cascade`).
+
+v3 changes exactly two things at this layer: the secret routes switch to their
+own actions (SEC1), and one **new elevated action** `secret.reveal` is added
+for break-glass (owner/admin only — never builder). Layer 1 answers: *may this
+principal, on this scope, perform this class of operation at all?* Everything
+finer is Layer 2.
 
 ## 1. Three placement tiers — policy lives next to what it governs (SD-10)
 
-orun's portable unit of platform truth is the **Stack** — composition types
-packaged with metadata and distributed over a directory, archive, or OCI ref
-(`website/docs/concepts/stacks.md`, layout in
-`internal/model/composition.go:201-238`). A platform team authors a golden
-Stack once and publishes it; consumers adopt it across many repos and orgs.
-`SecretPolicy` rides that same rail, at three tiers:
+Unchanged from v2. orun's portable unit of platform truth is the **Stack**;
+`SecretPolicy` rides it at three tiers:
 
 ```text
-acme-platform/                      ← published once, adopted everywhere
-├── stack.yaml
+acme-platform/                              ← published once, adopted everywhere
 ├── compositions/
-│   ├── terraform/
-│   │   ├── composition.yaml                ← contract (existing)
-│   │   ├── profiles/…                      ← secretBindings + materialize (data-model.md §2)
-│   │   └── secret-policy.yaml              ← TIER 1: composition-attached defaults
-│   │                                          auto-scoped to component.type == "terraform";
-│   │                                          CANNOT grant beyond its own composition
-│   └── cloudflare-worker/…
+│   └── terraform/
+│       ├── composition.yaml                ← contract (existing)
+│       ├── profiles/…                      ← secretBindings + materialize
+│       └── secret-policy.yaml              ← TIER 1: composition-attached defaults
+│                                              (auto-scoped: component.type == "terraform")
 └── policies/
-    ├── prod-secrets.SecretPolicy.yaml      ← TIER 2: stack-wide rules
-    └── pr-secrets.SecretPolicy.yaml           (prod lockdown, laptop denial, shared groups)
+    └── prod-secrets.SecretPolicy.yaml      ← TIER 2: stack-wide rules
 
 acme-api/  (an adopting repo)
 └── intent.yaml / policies/                 ← TIER 3: intent overlays — tightening only
 ```
 
-- **Tier 1 — composition-attached.** The composition author ships sane access
-  defaults *with the composition*: "the terraform `release` profile may read
-  `AWS_*` only on a declared push to `main` from CI OIDC." The fragment is
-  constitutionally scoped — the loader injects
-  `component.type == "<composition>"` into every rule — so a composition can
-  never grant outside itself. This is "policy closer to the compositions" made
-  literal: the golden path carries its own access rules in the same directory
-  as its contract.
-- **Tier 2 — stack-wide.** Cross-cutting rules in `policies/`: environment
-  lockdowns, platform denials, `_shared/<group>` grants.
-- **Tier 3 — intent overlay.** The adopting repo may add conditions or denials,
-  never widen (see §5).
+The tier loader lives in orun (compile-time); `orun plan`/`orun publish` push
+the resolved, tier-tagged documents to the backend
+(`config.secret_policies`, `data-model.md` §7d) so fetch-time evaluation uses
+exactly the rules the plan displayed.
 
-Adopting the Stack pulls in the compositions, their attached defaults, and the
-platform rules, versioned together over OCI. This is the concrete form of the
-design goal: **policy is portable and lives next to the compositions it
-governs.**
-
-## 2. Subjects — GitHub-native, portable (ties to `design.md` §5)
+## 2. Subjects — platform principals, portable (SD-4′)
 
 A subject is one of:
 
 | Subject form | Written as | Resolves to |
 |--------------|-----------|-------------|
-| GitHub user (by **numeric id**, portable) | `gh:user:583231` | one identity |
-| GitHub user (by login, convenience) | `gh:user:@octocat` | numeric id via the GH map (login is sugar; id is canonical) |
-| GitHub team | `gh:team:@acme/platform-admins` | current team membership (live from the GH map) |
+| Platform user | `user:<subjectId>` | one identity (session / CLI JWT) |
+| Team | `team:<slug>` | current team membership from membership facts (account cascade included) |
+| Service principal | `service_principal:<id>` | an `sk_` API-key identity |
+| Actor kind | `workflow` \| `user` \| `service_principal` | any actor of that kind (e.g. any CI-OIDC workflow bound to this project) |
 | Any authenticated caller | `*authenticated` | any valid token |
-| Service principal | `sp:<id>` | an Orun Cloud machine identity (GH App installation) |
-| CI workload by OIDC claim | `gh:oidc:repo=acme/api,ref=refs/heads/main` | a GitHub Actions run matching the claim |
 
-**Canonicalization (portability invariant).** Logins and team slugs are resolved
-to **stable numeric GitHub ids** at decision time via the `gh_identity_map`
-(`data-model.md` §6), which Orun Cloud populates from the GitHub App installation
-and refreshes on `membership`/`team` webhooks. A policy authored against
-`@acme/platform-admins` therefore means "whoever is in that team *now*", and the
-same document yields the same decision in any backend that has the map — the
-portability invariant (Invariant 8, `design.md` §11).
+**Canonicalization (portability invariant).** Team slugs resolve to current
+membership **at decision time** via membership-worker's authorization facts —
+the same facts Layer 1 consumes, so the two layers can never disagree about who
+is on a team. A document authored against `team:platform-admins` means "whoever
+is in that team *now*"; the same document yields the same decision in any
+backend with the same membership (Invariant 8).
+
+> **What happened to `gh:user:<numeric id>`?** v2 keyed subjects on GitHub
+> numeric ids and required a new `gh_identity_map` subsystem. v3 keys on the
+> principals every enforcement point already trusts (`resolve-bearer.ts`:
+> user / service_principal / workflow). GitHub *team sync* into platform teams
+> is a later integrations-worker feature — it enriches `team:` subjects without
+> changing this model. CI workloads are addressed by the `workflow` kind plus
+> **trigger facts** (§4.3), which carry the OIDC claims (`repository`, `ref`)
+> that v2's `gh:oidc:` subject form encoded.
 
 ## 3. Scope — what a rule targets
 
-A rule targets a **secret scope**, matching the `secret://` reference grammar
-(`data-model.md` §1) with wildcards:
+A rule targets `{env, key}` with globs; most-specific-wins:
 
 ```
-namespace : <org>/<repo> | <org>/_shared/<group>   # repo default; shared groups explicit (SD-12)
-env       : prod | staging | base | * | {list}
-key       : DATABASE_URL | STRIPE_* | *
+env : prod | staging | * | {list}
+key : DATABASE_URL | STRIPE_* | *
 ```
 
-A `*` in `namespace` never matches across the `_shared/` boundary: granting
-`acme/*` grants repo namespaces only; a shared group must be named
-(`acme/_shared/observability`).
-
-Scopes compose most-specific-wins, mirroring orun's existing parameter/env merge
-precedence (`internal/expand/expander.go:182-187`) so it feels native to authors.
+The **tenancy** scope of a document is not authored inside it — it comes from
+where the document is pushed (project-scoped or workspace-wide,
+`data-model.md` §7d) and, for tier-1 fragments, from the injected
+`component.type`. v2's `namespace` scope field and its `_shared/` boundary
+rules are gone with the namespace concept itself: chain rungs above project
+scope (workspace/account) are governed by rule conditions (e.g.
+`servesFrom == "workspace"`, §4.3) and by write-side guardrails
+(`overridable:false`, SD-12′), not by a parallel naming scheme.
 
 ## 4. Conditions — the four axes
 
-Each rule may constrain any of four axes (all optional; absent = unconstrained).
-Facts come from data orun already computes:
+Each rule may constrain any of four axes (absent = unconstrained). Facts come
+from data the platform already computes:
 
 ### 4.1 Who (user-aware)
-`subject.id`, `subject.teams[]`, `subject.kind ∈ {user, service, oidc}`.
-Source: resolved caller identity (`design.md` §5).
+`subject.id`, `subject.teams[]`, `subject.kind ∈ {user, service_principal,
+workflow}`. Source: the verified ActorContext (api-edge → worker headers).
 
 ### 4.2 What (component-aware)
 `component.type`, `component.domain`, `component.name`, `component.labels{}`.
-Source: `ComponentInstance` (`internal/model/intent.go:309`) — the same expanded
-instance the planner uses. **This is what makes the policy component-aware:** a
-rule can grant `STRIPE_KEY` only to `component.type == "billing-worker"`.
+Source: `ComponentInstance` (`internal/model/intent.go:329-358`) — carried into
+the resolve request as run facts. A rule can grant `STRIPE_KEY` only to
+`component.type == "billing-worker"`.
 
 ### 4.3 Where (environment + trigger-aware)
-`env`, `trigger.event`, `trigger.action`, `trigger.branch`, `trigger.baseBranch`,
-`trigger.tag`, `trigger.declared` (declared vs system), `trigger.actor`.
-Source: `Environment` + `TriggerOccurrence` (`internal/triggerctx/context.go:61-76`,
-`internal/model/trigger.go:38-52`). Lets you express "prod DB creds only on a
-declared push to `main`, never on a PR trigger or a manual run."
+`env`, `servesFrom ∈ {environment, project, workspace, account}` (which chain
+rung serves the key), `trigger.event`, `trigger.action`, `trigger.branch`,
+`trigger.baseBranch`, `trigger.tag`, `trigger.declared`, `trigger.actor`,
+`trigger.repository` (from OIDC claims for workflow actors).
+Source: `TriggerOccurrence` (`internal/triggerctx/context.go:61-76`),
+`NormalizedEvent` (`internal/model/trigger.go:38-52`), the in-plan
+`PlanTrigger` echo, and — for workflow actors — the OIDC claims the exchange
+verified (`oidc/github.ts:13-30`). Lets you express "prod DB creds only on a
+declared push to `main`, never on a PR trigger" or "this env never serves keys
+inherited from account scope."
 
 ### 4.4 How (execution-platform-aware)
-`platform ∈ {local-cli, github-actions-oidc, orun-cloud-runner, service-token}`.
-Source: the resolved auth mode (`internal/remotestate/auth.go:157-208` returns
-`ResolvedMode ∈ {oidc, static, session}`) plus runner identity. Lets you express
-"prod secrets are unreadable from a developer laptop (`local-cli`) — only from
-CI OIDC or an Orun Cloud runner."
+`platform ∈ {local-cli, ci-oidc, service}`. **Server-derived from the verified
+actor kind** — CLI-session user ⇒ `local-cli`, workflow (OIDC-exchanged) ⇒
+`ci-oidc`, `sk_` service principal ⇒ `service` — never self-reported
+(`resolve-bearer.ts:19-70`; risk R-3). Lets you express "prod secrets are
+unreadable from a developer laptop."
 
 ## 5. Evaluation
 
 ```
 decision(request) :=
-  rules ← all SecretPolicy rules in scope,
-          ordered: composition-attached → stack policies/ → intent overlays   (SD-10)
+  L1 ← policy-engine authorize(subject facts, action, resource scope)      # role×scope, deny-by-default
+  if !L1.allow                                   → DENY (reason: L1.reason)
+  rules ← SecretPolicy rules in scope,
+          ordered: composition-attached → stack policies/ → intent overlays  (SD-10)
   applicable ← { r ∈ rules | scopeMatches(r, request.ref) ∧ conditionsMatch(r, request.facts) }
-  if ∃ r ∈ applicable with effect=deny            → DENY  (reason: r.id)
-  else if ∃ r ∈ applicable with effect=allow      → ALLOW (grant: most-specific r)
-  else                                            → DENY  (reason: no-matching-grant)   # deny-by-default
+  if ∃ r ∈ applicable with effect=deny           → DENY  (reason: r.id)
+  else if ∃ r ∈ applicable with effect=allow     → ALLOW (grant: most-specific r)
+  else if protected(request.env)                 → DENY  (reason: no-matching-grant)
+  else                                           → ALLOW (reason: rbac-only)   # unprotected env, L1 sufficed
 ```
 
-- **Deny-by-default** (SD-6), matching the `multi-tenant-saas` constitution
-  (`apps/policy-worker`, `specs/components/03-policy-authorization.md`).
-- **Explicit deny wins** over allow at the same or broader specificity.
-- **Narrow-only downward (SD-10):**
-  - A **composition-attached** fragment is force-scoped to
-    `component.type == "<its composition>"` at load; it cannot reference other
-    components, `_shared` groups outside its declared bindings, or `*` component
-    scopes. (Structurally cannot widen.)
-  - An **intent** `allow` whose scope/conditions are broader than any
-    Stack-or-composition `allow` is rejected at load — adopting a Stack cannot
-    be loosened by a downstream repo. Intent `deny` rules are always accepted.
-  - `orun policy lint` enforces both statically (`cli-surface.md` §2).
-- **Personal overlays (SD-11):** a resolve that would return a *personal* value
-  additionally requires `subject.id == owner(personal config)` and
-  `platform == "local-cli"` — evaluated as built-in facts, not authorable rules,
-  so no policy can ever route a personal value to CI (Invariant 9).
-- **Shared groups (SD-12):** a ref into `org/_shared/<group>` matches only rules
-  whose scope names that group explicitly — there is no wildcard that crosses
-  the `_shared` boundary by accident.
-- **Determinism:** every decision is a pure function of (rules, facts); no I/O
-  beyond the identity-map lookup, which is itself a snapshot at decision time.
+- **Layer 1 always gates first**; Layer 2 refines. An environment becomes
+  **protected** the moment any `SecretPolicy` rule targets it — from then on
+  access to it is deny-by-default at Layer 2 too. Environments no policy
+  targets are governed by Layer 1 alone, so a fresh workspace works
+  out-of-the-box (Doppler-grade onboarding) and hardens declaratively.
+- **Explicit deny wins** over allow at any specificity.
+- **Narrow-only downward (SD-10):** a composition-attached fragment is
+  force-scoped to `component.type == "<its composition>"` at load (structurally
+  cannot widen); an intent `allow` broader than any Stack/composition `allow`
+  is rejected at load; intent `deny` rules are always accepted.
+  `orun policy lint` enforces both statically.
+- **Personal overlays (SD-11′):** a resolve that would serve a *personal* value
+  additionally requires `subject.id == personal_owner` and
+  `platform == "local-cli"` — built-in facts, not authorable rules; no policy
+  can route a personal value to CI (Invariant 9).
+- **Determinism:** every decision is a pure function of (rules, facts); the
+  only lookup is the membership-facts snapshot taken at decision time.
+
+**Where each layer runs:** Layer 1 in policy-worker (as today, via the
+membership-facts + authorize round-trip); Layer 2 in config-worker at the
+resolve/reveal handlers, as a pure library over the pushed documents —
+unit-testable, no cross-worker hop, with the door open to relocate once a
+second consumer of condition-policies exists (`design.md` §12).
 
 ## 6. The predicate vocabulary (SD-7) and the CEL upgrade path
 
-Following the scorecards precedent (`specs/orun-scorecards/` locks an allowlisted
-predicate vocabulary with **Google CEL** named as the upgrade path), v1 conditions
-are a **small, locked, typed predicate set** — not a free DSL:
-
-| Predicate | Form | Example |
-|-----------|------|---------|
-| equals | `field == "value"` | `env == "prod"` |
-| in | `field in [a,b]` | `trigger.event in ["push","release"]` |
-| glob | `field matches "glob"` | `key matches "STRIPE_*"` |
-| bool | `field` / `!field` | `trigger.declared` |
-| team-member | `subject in team "@org/team"` | `subject in team "@acme/platform-admins"` |
-| platform | `platform == "github-actions-oidc"` | — |
-
-Rules are AND-of-predicates within a rule; OR is expressed as multiple rules.
-This is auditable, statically checkable at `orun plan`, and safe to evaluate in
-the Worker. **CEL** is the named upgrade if customers need richer logic — the
-`SecretPolicy` schema reserves `expr` for it, gated behind a capability flag.
+Unchanged from v2 (scorecards precedent): v1 conditions are a small, locked,
+typed predicate set — equals, `in`, glob `matches`, bool, team-membership,
+platform — AND-of-predicates within a rule, OR via multiple rules. Auditable,
+statically checkable at `orun plan`, safe to evaluate in a Worker. **CEL** is
+the named upgrade path behind the reserved `expr` field and a capability flag.
 
 > **`SecretPolicy` is the engine behind the contract's `secret.value.use`
-> action (SD-15).** The orun-cloud wire contract (§6 policy map) already defines
-> `secret.read` / `secret.write` / `secret.value.use` as **server-enforced,
-> deny-by-default** actions. orun-secrets does not add a second authorization
-> layer — the four-axis evaluation in this document *is* what the server runs to
-> decide `secret.value.use` on the run-scoped resolve call, plus
-> `secret.value.reveal` and `secret.policy.write` for the extension routes
-> (`data-model.md` §8). The contract names the action; `SecretPolicy` decides it.
+> action (SD-15′).** The state-api contract's policy map names the action;
+> Layer 1 grants the class; the four-axis evaluation in this document decides
+> the instance. One decision id covers both layers (SD-17).
 
 ## 7. Compile-time vs fetch-time (the two enforcement points)
 
 | | Compile time (`orun plan`) | Fetch time (`…/runs/{runId}/secrets/resolve`) |
 |---|---|---|
-| Facts available | component, env, trigger, platform-intent; **subject often unknown** | **all four axes**, subject from the presented token |
-| Question answered | "is this reference *grantable in principle* here?" | "is *this caller* allowed *now*?" |
-| Failure | plan error / warning, listed in `--json` | typed denial + reason code; audited |
+| Facts available | component, env, trigger, platform-intent; **subject often unknown** | **all four axes**; subject from the verified token; lease verified |
+| Question | "is this reference *grantable in principle* here?" | "is *this caller* allowed *now*?" |
+| Failure | plan error / warning, in `--json` | typed denial + stable reason code; audited |
 | Purpose | visibility + fail-fast (orun philosophy) | the security boundary |
 
-Compile-time evaluates with `subject = *any-permitted` (existential): it passes if
-*some* subject could be granted, and renders the requirement in the plan
-(`job deploy → secrets: [DATABASE_URL@prod]`, no values). Fetch-time is
-universal/authoritative for the concrete caller.
+Compile-time evaluates with `subject = *any-permitted` (existential) and
+annotates each ref in the plan (`grant`, `servesFrom`, `personalShadow` —
+`data-model.md` §5). Fetch-time is authoritative for the concrete caller.
 
 ## 8. Decision provenance
 
-Every fetch-time decision produces a `SecretDecision{decisionId, allow, ruleId,
-reason, subjectId, key, version, ts}` written to `secret_audit` (D1). An allow
-emits the contract's **`secret.accessed`** event per key (the audit hook the
-contract already specifies for the resolve route, `data-model.md` §8); a denial
-emits `secret.denied` with the reason code. Both payloads are key-name-only
-(never the value), matching `config-worker`'s metadata-only event stance.
-The sealed `ExecutionRun` records the `decisionId` + `{key, version}` (never the
-value), so operations can answer "what did prod deploy #4821 read, and under which
-rule?" directly from the object graph — closing the loop with Orun Cloud
-operations/audit.
+Every fetch-time decision produces
+`SecretDecision{decisionId, allow, layer, ruleId|via, reason, subjectId, key,
+version, ts}` — `via` is Layer 1's permitting-fact provenance (TM6b1), `ruleId`
+is Layer 2's matched rule. An allow emits **`secret.accessed`** per key; a
+denial emits **`secret.denied`** with the reason code — both through the
+shipped `appendEventWithAudit` (`events/repository.ts:188`), key-name-only,
+never the value. The sealed `ExecutionRun` records `{key, version, decisionId}`
+so operations can answer "what did prod deploy #4821 read, and under which
+rule?" from the object graph.
 
 ## 9. Worked example
 
-The `terraform` composition ships its own defaults (tier 1,
-`compositions/terraform/secret-policy.yaml` — `component.type == "terraform"`
-is injected automatically):
+Tier 1 — the `terraform` composition ships its defaults
+(`component.type == "terraform"` injected automatically):
 
 ```yaml
 apiVersion: orun.io/v1
@@ -226,17 +229,17 @@ kind: SecretPolicy
 metadata: { name: terraform-defaults }
 spec:
   rules:
-    # The release profile's bindings are readable only on a declared main push from CI.
-    - effect: allow
-      subjects: ["*authenticated"]
+    - id: release-bindings-ci-main
+      effect: allow
+      subjects: ["workflow"]
       scope: { env: "*", key: "AWS_ROLE_ARN" }
       when:
         - trigger.declared
         - trigger.branch == "main"
-        - platform == "github-actions-oidc"
+        - platform == "ci-oidc"
 ```
 
-The `acme-platform` Stack ships `prod-secrets.SecretPolicy.yaml` (tier 2):
+Tier 2 — the `acme-platform` Stack ships `prod-secrets.SecretPolicy.yaml`:
 
 ```yaml
 apiVersion: orun.io/v1
@@ -244,31 +247,36 @@ kind: SecretPolicy
 metadata: { name: prod-secrets }
 spec:
   rules:
-    # Platform admins may read any prod secret, but only from CI or cloud runners.
-    - effect: allow
-      subjects: ["gh:team:@acme/platform-admins"]
+    - id: admins-prod-from-ci
+      effect: allow
+      subjects: ["team:platform-admins"]
       scope: { env: prod, key: "*" }
       when:
-        - platform in ["github-actions-oidc", "orun-cloud-runner"]
-    # The billing component may read STRIPE_* in prod on a declared main deploy.
-    - effect: allow
+        - platform in ["ci-oidc", "service"]
+    - id: billing-stripe-main-deploys
+      effect: allow
       subjects: ["*authenticated"]
       scope: { env: prod, key: "STRIPE_*" }
       when:
         - component.type == "billing-worker"
         - trigger.declared
         - trigger.branch == "main"
-    # Never expose prod secrets to a laptop.
-    - effect: deny
+    - id: laptops-never-prod
+      effect: deny
       subjects: ["*authenticated"]
       scope: { env: prod, key: "*" }
       when:
         - platform == "local-cli"
 ```
 
-A PR run by a non-admin on branch `feature/x` requesting `secret://acme/prod/STRIPE_KEY`:
-no `allow` matches (`trigger.branch != main`, not declared) → **deny by default**.
-The same component on a `push` to `main` from GitHub Actions OIDC → **allow** by the
-second rule. A platform admin on their laptop → **deny** by the third rule even
-though the first would otherwise allow (deny wins). All three outcomes are
-deterministic, audited, and portable to any org that installs the GitHub App.
+A PR run by a non-admin on `feature/x` requesting
+`secret://acme/api/prod/STRIPE_KEY`: Layer 1 passes (builder holds
+`secret.value.use`), but `prod` is protected and no Layer-2 `allow` matches
+(`trigger.branch != main`, not declared) → **deny by default**. The same
+component on a declared `push` to `main` from CI → **allow**
+(`billing-stripe-main-deploys`). A platform admin on their laptop → **deny**
+(`laptops-never-prod` — deny wins over `admins-prod-from-ci`). Meanwhile the
+same admin resolving `secret://acme/api/dev/DB_URL` — an env no policy targets
+— gets **allow (rbac-only)**, personal overlay served if one exists. All
+outcomes are deterministic, audited with layer + rule provenance, and portable
+to any workspace that adopts the Stack.

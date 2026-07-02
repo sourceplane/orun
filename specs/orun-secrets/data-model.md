@@ -1,56 +1,63 @@
-# Data model
+# Data model (v3)
 
-> Schemas for the reference grammar, environments and personal overlays, the
-> ciphertext envelope, the D1 tables, the `SecretPolicy` document, composition
-> `secretBindings` + `materialize`, the plan additions, and the GitHub identity
-> map. Design rationale is in `design.md`; the policy engine in
-> `policy-model.md`; the catalog facet in `platform-integration.md`. All
-> documents are apiVersion `orun.io/v1`.
+> Schemas for the reference grammar, the scope chain and personal overlays, the
+> ciphertext envelope + key hierarchy, the Postgres tables (extending the
+> shipped `config` schema), the `SecretPolicy` document, composition
+> `secretBindings` + `materialize`, the plan additions, and the wire routes.
+> Design rationale in `design.md`; the policy engine in `policy-model.md`; the
+> catalog facet in `platform-integration.md`. Documents are apiVersion
+> `orun.io/v1`.
 
-## 1. The `secret://` reference grammar (the only secret-shaped thing in content)
+## 1. The `secret://` reference grammar
 
 ```
-secret://<namespace>/<env>/<KEY>[@<version>]
+secret://<workspace>/<project>/<env>/<KEY>[@<version>]
 
-namespace : <org>/<repo>                  # default: the repo namespace (SD-12)
-          | <org>/_shared/<group>        # explicit org-shared group (SD-12)
-env       : an environment declared in intent, or the reserved "base"
-KEY       : ^[A-Za-z][A-Za-z0-9._-]{0,127}$   (same shape as config-worker KEY_RE)
-version   : positive integer, or omitted ⇒ resolves "latest" at run time
+workspace : the workspace slug (an organizations row; APIs also accept ws_<id>)
+project   : the project slug (== the repo, OV2 bijection)
+env       : an environment declared in intent (projects.environments slug)
+KEY       : ^[A-Za-z][A-Za-z0-9._-]{0,127}$        (the shipped KEY shape)
+version   : positive integer, or omitted ⇒ head at resolve time
 ```
 
 Examples: `secret://acme/api/prod/DATABASE_URL`,
-`secret://acme/api/prod/STRIPE_KEY@7`,
-`secret://acme/_shared/observability/DATADOG_API_KEY`.
+`secret://acme/api/prod/STRIPE_KEY@7`.
 
-> **Tenancy mapping note (SD-15/SD-16, reconciles with orun-cloud).** The
-> orun-cloud contract retires the "namespace" wording in favor of the platform's
-> **org → project → environment** spine. v2 keeps `namespace` here for
-> continuity; it maps as `<org>/<repo>` → `org/project` and the trailing `env`
-> is the contract's `environment` unchanged. The rename of the `namespace` term
-> to `org/project` across this spec is a tracked follow-up
-> (`risks-and-open-questions.md`, Deferred), not done in v2 — the single known,
-> deliberate inconsistency with the locked orun-cloud decision.
+Grammar notes (v3):
 
-A reference is opaque content: it is safe in `intent.yaml`, `component.yaml`,
-`plan.json`, refs, and logs. It carries **no value** and **no identity** —
-personal overlays (SD-11) are a resolve-time concern and never appear in the
-grammar, so plans stay content-stable regardless of who runs them.
+- **The v2 `namespace` term is retired** (closes v2's deferred D-1). The first
+  two segments are the platform's workspace/project spine — exactly what
+  `RepoLink` caches (`internal/cliauth/types.go:74-88`), so
+  `{{workspace}}`/`{{project}}` default from the linked scope and authors
+  rarely type them.
+- **There is no `_shared/<group>` namespace and no reserved `base` env.** A
+  reference always names the project's chain; *which scope serves the key*
+  (environment / project / workspace / account) is resolution, surfaced in the
+  plan, `--chain`, and the catalog facet (`design.md` §6).
+- A reference is opaque content: safe in `intent.yaml`, `component.yaml`,
+  `plan.json`, refs, and logs. It carries **no value** and **no identity** —
+  personal overlays are a resolve-time concern and never appear in the grammar,
+  so plans stay content-stable regardless of who runs them.
 
-### 1.1 Environment chain resolution (SD-11)
+### 1.1 Chain resolution (SD-11′)
 
-A resolve of `secret://ns/<env>/<KEY>` walks, per key:
+A resolve of `secret://ws/prj/<env>/<KEY>` walks, per key, most-specific-first:
 
 ```
-1. personal(ns, env, KEY, caller.gh_user_id)   — only if platform == local-cli
-2. (ns, env, KEY)
-3. (ns, "base", KEY)
+1. personal(environment_id, KEY, subject)   — only if platform fact == local-cli; owner only
+2. (scope=environment, environment_id, KEY)
+3. (scope=project,     project_id,     KEY)      ← v2's "base" rung, now a real scope
+4. (scope=workspace,   org_id,         KEY)      ← replaces _shared/<group>
+5. (scope=account,     parent org,     KEY)      ← account rung via effectiveBillingOrgId
 → first hit wins; no hit ⇒ unknown-reference error
 ```
 
-`base` is a reserved env name holding org-shared defaults; `@<version>` pins
-apply to whichever link served the key. The chain is fixed at three links in
-v1 (`design.md` §6).
+This is the shipped WID7 settings chain (`config-resolver.ts:66-132`) — which
+was explicitly "designed so secret_metadata can adopt the same shape later" —
+with the personal rung on top. `@<version>` pins apply to whichever rung serves
+the key. A serving row with `overridable = false` at account/workspace scope
+also **rejects lower-rung writes** of the same key (409, mirroring
+`create-setting.ts:189-190`).
 
 ## 2. Authoring surface
 
@@ -62,22 +69,20 @@ apiVersion: orun.io/v1
 kind: Component
 metadata: { name: api, type: cloudflare-worker, domain: payments }
 spec:
-  env:                         # existing plaintext env (unchanged)
+  env:                          # existing plaintext env (unchanged)
     LOG_LEVEL: info
-  secretEnv:                   # NEW — references only, never values
+  secretEnv:                    # NEW — references only, never values
     DATABASE_URL: "secret://acme/api/{{env}}/DATABASE_URL"
     STRIPE_KEY:   "secret://acme/api/{{env}}/STRIPE_KEY"
 ```
 
-`{{env}}` interpolates the resolving environment (reuses the existing
-interpolation in `internal/expand/expander.go:316-348`), so one declaration
-spans dev/staging/prod.
+`{{env}}` interpolates the resolving environment (existing interpolation,
+`internal/expand/expander.go:321-348`). The expander gains `mergeSecretEnv`
+mirroring `mergeEnv`, writing `ComponentInstance.SecretEnv`
+(`internal/model/intent.go:329-358`). **Leak guard:** a literal (non-reference)
+value in `secretEnv` is a compile error.
 
 ### 2.2 Composition `secretBindings` (portable requirement, ships in the Stack)
-
-`secretBindings` is added to `JobTemplate` / `ExecutionProfile`
-(`internal/model/composition.go`). It declares the **logical** secrets a
-profile needs — portable, component-aware, OCI-distributable:
 
 ```yaml
 # compositions/terraform/profiles/terraform-release.yaml
@@ -92,74 +97,59 @@ spec:
 ```
 
 At plan time the planner maps each binding to a `secret://` reference for the
-resolving `(namespace, env)` and emits it on the job (§5). A `required` binding
-with no grantable reference is a **compile-time error**. Bindings (declared)
-joined with backend state (bound/missing) form the catalog facet
-(`platform-integration.md` §1).
+instance's `(project, env)` and emits it on the job (§5). A `required` binding
+with no resolvable, grantable reference is a **compile-time error**. Bindings
+(declared) joined with backend state (bound/missing) form the catalog facet.
 
-### 2.3 Shared-group binding (SD-12)
+> v2's `secretGroups` bind block is **removed** with the `_shared` namespaces:
+> shared keys are served by the workspace/account rungs of the chain, and their
+> visibility obligations move to the plan annotations (`servesFrom`), the
+> `--chain` view, and lockable guardrails (SD-12′).
 
-A component opts into an org-shared group explicitly; sharing is never ambient:
-
-```yaml
-# component.yaml (continued)
-spec:
-  secretGroups: ["observability"]        # binds acme/_shared/observability
-  secretEnv:
-    DATADOG_API_KEY: "secret://acme/_shared/observability/DATADOG_API_KEY"
-```
-
-A `secretEnv` reference into `_shared/<group>` without the matching
-`secretGroups` entry is a compile-time error, and a policy must still grant the
-group (`policy-model.md` §5).
-
-### 2.4 Composition `materialize` (runtime delivery, SD-13)
-
-A deploy-shaped profile may declare how bound secrets reach the *deployed*
-application's native store:
+### 2.3 Composition `materialize` (runtime delivery, SD-13)
 
 ```yaml
 # compositions/cloudflare-worker/profiles/worker-deploy.yaml
-apiVersion: orun.io/v1
-kind: ExecutionProfile
-metadata: { name: worker-deploy }
 spec:
   secretBindings:
     DATABASE_URL: { required: true }
     STRIPE_KEY:   { required: true }
   materialize:
-    target: cloudflare-worker         # typed adapter id (v1: cloudflare-worker)
-    secrets: [DATABASE_URL, STRIPE_KEY]   # subset of this profile's bindings
-    onRotate: redeploy                # rotation raises a system trigger for this profile
+    target: cloudflare-worker            # typed adapter id (v1: cloudflare-worker)
+    secrets: [DATABASE_URL, STRIPE_KEY]  # must be ⊆ this profile's bindings (compile-checked)
+    onRotate: redeploy                   # rotation raises a system trigger for this profile
 ```
 
-Constraints: `secrets` must be a subset of the profile's `secretBindings`
-(compile-time check); the adapter is typed and versioned with the composition;
-the materialize step renders as an explicit plan step and writes `secret_syncs`
-provenance (§7, `runner-integration.md` §6).
+The adapter is typed and versioned with the composition; the materialize step
+renders as an explicit plan step and writes `secret_syncs` provenance (§7).
 
-## 3. Ciphertext envelope (stored in D1, never in the graph)
-
-Extends the shipped `config-worker` envelope
-(`multi-tenant-saas/apps/config-worker/src/encryption.ts:14-23`) with `keyId`:
+## 3. Ciphertext envelope + key hierarchy (SD-2′)
 
 ```jsonc
+// stored per VERSION in config.secret_versions.ciphertext_envelope
 {
-  "alg":   "AES-256-GCM",   // authenticated encryption
-  "v":     1,               // envelope format version (migration)
-  "keyId": "dek:acme:3",    // which namespace DEK + generation (cryptoshred / rotate)
+  "alg":   "AES-256-GCM",       // authenticated encryption; per-value random 12-byte IV
+  "v":     2,                    // envelope format version
+  "keyId": "ws:org_01H…:3",      // workspace DEK + generation (cryptoshred / rotate unit)
   "iv":    "<base64 12-byte nonce>",
   "ct":    "<base64 ciphertext incl. GCM tag>"
 }
 ```
 
-- Per-value random 12-byte IV.
-- The DEK named by `keyId` is itself stored **wrapped** (by the namespace's
-  current KEK in Cloudflare Secrets Store); the unwrapped DEK exists only in
-  Worker memory during a resolve.
-- `provider` (reserved, optional): for a future external-backed value
-  (`aws-secrets-manager://…`) the envelope is a pointer, not ciphertext — the
-  seam for inbound external-provider sync (deferred).
+- `v:1` envelopes (the shipped shape, `encryption.ts:14-23`, no `keyId`)
+  decrypt under the static `SECRET_ENCRYPTION_KEY` (implicit `keyId:"k0"`);
+  `v:2` envelopes name a workspace DEK generation. Lazy migration: reads accept
+  both; writes and rotations produce `v:2`.
+- The DEK named by `keyId` is stored **wrapped** in `config.secret_deks`; the
+  **KEK lives in Cloudflare Secrets Store** bound to config-worker (entitlement
+  confirmed — saas-secrets-sync SS4), never in Postgres. The unwrapped DEK
+  exists only in Worker memory during a resolve.
+- Decrypt-capable key import (`["decrypt"]` usage) exists **only** in the
+  resolve and break-glass handlers — today no decrypt path exists anywhere
+  (`encryption.ts:27-29,70`), and v3 keeps that surface minimal.
+- `provider` (reserved, optional): for a future external-backed value the
+  envelope is a pointer, not ciphertext — the seam for inbound provider sync
+  (deferred).
 
 ## 4. `SecretPolicy` document (portable; composition, Stack, or intent — SD-10)
 
@@ -170,35 +160,43 @@ metadata:
   name: prod-secrets
 spec:
   rules:
-    - id: admins-prod              # stable id, used in audit reason codes
-      effect: allow                # allow | deny
-      subjects:                    # GitHub-native (policy-model.md §2)
-        - "gh:team:@acme/platform-admins"
-      scope:
-        namespace: "acme/*"        # repo namespaces only; _shared must be named (SD-12)
-        env: prod
-        key: "*"
-      when:                        # locked predicate vocabulary (policy-model.md §6)
-        - 'platform in ["github-actions-oidc","orun-cloud-runner"]'
+    - id: laptops-never-prod         # stable id, used in audit reason codes
+      effect: deny
+      scope: { env: prod, key: "*" }
+      when:
+        - 'platform == "local-cli"'
+    - id: admins-and-ci-prod
+      effect: allow
+      subjects:
+        - "team:platform-admins"     # platform principals (policy-model.md §2)
+        - "workflow"                 # any CI-OIDC actor bound to this project
+      scope: { env: prod, key: "*" }
+      when:
+        - 'trigger.declared && trigger.branch == "main"'
   # reserved: expr (CEL) behind a capability flag (SD-7)
 ```
 
 Field notes:
-- `subjects[]` — GitHub ids/teams/principals; resolved via the GH map at
-  decision time.
-- `scope{namespace,env,key}` — glob-capable; most-specific-wins; `namespace`
-  globs never cross the `_shared/` boundary.
-- `when[]` — AND-of-predicates from the locked vocabulary; OR via multiple
-  rules.
-- Placement determines constraints (`policy-model.md` §1): a
-  composition-attached document gets `component.type == "<composition>"`
-  injected into every rule; an intent-layer `allow` broader than any
-  Stack/composition `allow` is rejected (narrow-only).
+- `subjects[]` — `user:<id>`, `team:<slug>`, `service_principal:<id>`, the
+  actor-kind literals `workflow`/`user`/`service_principal`, `*authenticated`.
+  Team membership resolves at decision time from membership facts (WID6
+  cascade included).
+- `scope{env,key}` — glob-capable; most-specific-wins. (No `namespace` field:
+  a document's tenancy scope comes from where it is pushed — workspace-wide or
+  project-scoped — `§7(d)`.)
+- `when[]` — AND-of-predicates from the locked vocabulary (`policy-model.md`
+  §6); OR via multiple rules.
+- Placement determines constraints: a composition-attached document gets
+  `component.type == "<composition>"` injected into every rule; an intent-tier
+  `allow` broader than any Stack/composition `allow` is rejected (narrow-only,
+  `policy-model.md` §5).
 
 ## 5. Plan additions (references only — Invariant 1)
 
-`PlanJob` gains `secretRefs`, `outputs` (SD-9), and materialize steps render
-explicitly. **No value field exists**; this is structural, not conventional.
+`PlanJob` gains `secretRefs`; materialize and outputs render explicitly. The
+fields land on the verified seams: `JobInstance` (`internal/model/job.go:101`),
+`PlanJob` (`internal/model/plan.go:138`), converters
+(`internal/planner/planner.go:59-77`, `internal/render/plan.go:52-148`).
 
 ```jsonc
 // inside plan.json — content-addressed, value-free
@@ -207,180 +205,145 @@ explicitly. **No value field exists**; this is structural, not conventional.
   "component": "api",
   "environment": "prod",
   "env": { "LOG_LEVEL": "info" },          // existing plaintext env (unchanged)
-  "secretRefs": [                           // NEW — references the runner will resolve
-    { "asEnv": "DATABASE_URL", "ref": "secret://acme/api/prod/DATABASE_URL@latest" },
-    { "asEnv": "STRIPE_KEY",   "ref": "secret://acme/api/prod/STRIPE_KEY@latest" }
+  "secretRefs": [
+    { "asEnv": "DATABASE_URL", "ref": "secret://acme/api/prod/DATABASE_URL",
+      "grant": "allow", "servesFrom": "environment", "personalShadow": false },
+    { "asEnv": "STRIPE_KEY",   "ref": "secret://acme/api/prod/STRIPE_KEY",
+      "grant": "allow", "servesFrom": "workspace",   "personalShadow": false }
   ],
-  "materialize": {                          // NEW — explicit, reviewable sync step (SD-13)
-    "target": "cloudflare-worker",
-    "secrets": ["DATABASE_URL", "STRIPE_KEY"]
-  },
-  "outputs": { "image": { "sensitive": false } },   // NEW — declared job outputs (SD-9)
+  "materialize": { "target": "cloudflare-worker", "secrets": ["DATABASE_URL", "STRIPE_KEY"] },
+  "outputs": { "image": { "sensitive": false } },
   "dependsOn": ["build-api"]
 }
 ```
 
-Render is extended in `internal/render/plan.go` to emit `secretRefs` and
-`materialize`; the existing `buildEnv` (`internal/render/plan.go:133-148`) is
-unchanged and continues to carry only non-secret env. A planner guard rejects
-any `secretEnv` key whose resolved value is a literal rather than a `secret://`
-reference (defense against leak vector #1). `orun plan` additionally marks refs
-that may be personally shadowed for the current user (SD-11) so local behavior
-is never a surprise.
+`grant`/`servesFrom`/`personalShadow` are compile-time annotations (existential
+subject; metadata-only chain lookup). **No value field exists — structurally.**
+A planner guard rejects any `secretEnv` value that is a literal rather than a
+reference. The plan checksum (`plan.go:211-224`) covers refs; job memoization
+already hashes env **keys only** (`internal/statebackend/coordbackend.go:31-38`)
+— `secretRefs` keys + pinned versions join it, values never do.
 
 ## 6. The catalog facet (`extensions.x-orun-secrets`)
 
-Shape and derivation live in `platform-integration.md` §1; it attaches via the
-entity envelope's typed extension seam
-(`internal/catalogmodel/entity_envelope.go:36`,
-`specs/orun-service-catalog/data-model.md` §8) and is a **derived projection** —
-rebuildable from compositions (declared) + backend metadata (live), never a
-source of truth.
+Shape in `platform-integration.md` §1; registered via
+`catalogext.Registry.Register("x-orun-secrets", …)`
+(`internal/catalogext/registry.go:26-44`) and carried on
+`EntityEnvelope.Extensions` (`internal/catalogmodel/entity_envelope.go:36`) — a
+derived projection, rebuildable from compositions (declared) + backend metadata
+(live), never a source of truth. v3 change: a `servesFrom` scope per binding
+replaces v2's `groups` list.
 
-## 7. D1 schema (Orun Cloud backend — extends the migration bundle)
+## 7. Postgres schema (extends the shipped `config` schema)
 
-Added to the embedded migrations applied by `orun backend init`
-(`cmd/orun/command_backend.go:457-493`, `internal/backendbundle`):
+Migrations extend `packages/db/src/migrations/`. Shipped baseline:
+`070_config_settings_flags` (`config.secret_metadata` — scope columns,
+CHECK-constrained `scope_kind`, `ciphertext_envelope BYTEA`, `version` counter,
+`rotation_policy`/`expires_at`/`last_rotated_at`) and
+`430_config_account_scope` (account scope + `overridable` — **settings only**).
 
 ```sql
--- secret metadata (one row per logical secret per scope) — NO value here
-CREATE TABLE secret_metadata (
-  id            TEXT PRIMARY KEY,
-  namespace     TEXT NOT NULL,            -- org/repo or org/_shared/<group> (SD-12)
-  env           TEXT NOT NULL,            -- declared env or reserved 'base' (SD-11)
-  key           TEXT NOT NULL,
-  personal_owner INTEGER,                 -- NULL = shared; else GitHub numeric user id (SD-11)
-  display_name  TEXT,
-  rotation_policy TEXT,
-  current_version INTEGER NOT NULL DEFAULT 0,
-  created_by    TEXT NOT NULL,            -- GitHub numeric user id
-  created_at    TEXT NOT NULL,
-  UNIQUE (namespace, env, key, personal_owner)
-);
+-- (a) widen secret_metadata: account scope, guardrail, personal owner, last-used
+ALTER TABLE config.secret_metadata
+  ADD COLUMN personal_owner UUID,           -- NULL = shared; else owning subject (SD-11′)
+  ADD COLUMN overridable BOOLEAN NOT NULL DEFAULT true,  -- lockable (SD-12′)
+  ADD COLUMN last_used_at TIMESTAMPTZ;      -- stamped by resolve (contract promises it; column missing today)
+-- scope_kind CHECK widens to ('account','organization','project','environment')
+--   (organization ≡ workspace; mirrors 430's settings change);
+-- overridable = false permitted only for account/organization scope;
+-- personal_owner permitted only for scope_kind = 'environment';
+-- the unique scope-key index gains COALESCE(personal_owner, zero-uuid).
 
--- append-only versions; ciphertext envelope only (design.md §4)
-CREATE TABLE secret_versions (
-  secret_id     TEXT NOT NULL REFERENCES secret_metadata(id),
-  version       INTEGER NOT NULL,
-  ciphertext_envelope TEXT NOT NULL,      -- JSON envelope; never plaintext
-  created_by    TEXT NOT NULL,
-  created_at    TEXT NOT NULL,
+-- (b) append-only version history (SD-2′); head stays on secret_metadata.version
+CREATE TABLE config.secret_versions (
+  secret_id     UUID NOT NULL REFERENCES config.secret_metadata(id),
+  version       INTEGER NOT NULL CHECK (version >= 1),
+  ciphertext_envelope BYTEA NOT NULL,       -- JSON envelope (§3); never plaintext
+  status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','revoked')),
+  created_by    UUID NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (secret_id, version)
 );
+-- rotation appends here and bumps the head — it no longer overwrites ciphertext
+-- in place (today: repository.ts:397-421 destroys history).
 
--- wrapped DEKs per namespace+generation (KEK lives in Secrets Store, not here)
-CREATE TABLE secret_deks (
-  namespace     TEXT NOT NULL,
+-- (c) wrapped workspace DEKs (KEK in Cloudflare Secrets Store, not here)
+CREATE TABLE config.secret_deks (
+  org_id        UUID NOT NULL,              -- the workspace
   generation    INTEGER NOT NULL,
-  wrapped_dek   TEXT NOT NULL,
-  state         TEXT NOT NULL,            -- active | retiring | shredded
-  PRIMARY KEY (namespace, generation)
+  wrapped_dek   BYTEA NOT NULL,
+  state         TEXT NOT NULL CHECK (state IN ('active','retiring','shredded')),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (org_id, generation)
 );
 
--- compiled SecretPolicy rules (rebuildable from the composition/Stack/intent source-of-truth)
-CREATE TABLE secret_policies (
-  id            TEXT PRIMARY KEY,
-  namespace     TEXT NOT NULL,
-  source        TEXT NOT NULL,            -- "composition:<type>" | "stack:<ref>" | "intent"  (SD-10)
-  document      TEXT NOT NULL,            -- canonical SecretPolicy JSON
+-- (d) SecretPolicy documents, tier-tagged (SD-10)
+CREATE TABLE config.secret_policies (
+  id            UUID PRIMARY KEY,
+  org_id        UUID NOT NULL,
+  project_id    UUID,                       -- NULL = workspace-wide
+  name          TEXT NOT NULL,
+  tier          TEXT NOT NULL CHECK (tier IN ('composition','stack','intent')),
+  source        TEXT NOT NULL,              -- "stack:acme-platform@1.4.0" | "composition:terraform" | "intent"
+  document      JSONB NOT NULL,             -- validated SecretPolicy spec
+  document_hash TEXT NOT NULL,              -- content address; push is idempotent by hash
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- (e) materialization provenance (SD-13, Invariant 10)
+CREATE TABLE config.secret_syncs (
+  id            UUID PRIMARY KEY,
+  secret_id     UUID NOT NULL REFERENCES config.secret_metadata(id),
   version       INTEGER NOT NULL,
-  created_at    TEXT NOT NULL
-);
-
--- materialization provenance: which version was synced into which deployed entity (SD-13)
-CREATE TABLE secret_syncs (
-  id            TEXT PRIMARY KEY,
-  namespace     TEXT NOT NULL,
-  env           TEXT NOT NULL,
-  key           TEXT NOT NULL,
-  version       INTEGER NOT NULL,
-  target        TEXT NOT NULL,            -- adapter id, e.g. cloudflare-worker
-  entity_ref    TEXT NOT NULL,            -- provisioned catalog entity (effects.graph)
-  exec_id       TEXT NOT NULL,            -- the deploy run that performed the sync
-  status        TEXT NOT NULL,            -- synced | superseded | orphaned
-  ts            TEXT NOT NULL
-);
-
--- GitHub identity projection (cache of the org via the GH App) — never authoritative
-CREATE TABLE gh_identity_map (
-  gh_user_id    INTEGER PRIMARY KEY,      -- stable numeric id (the portable key, SD-4)
-  gh_login      TEXT NOT NULL,            -- current login (mutable; convenience)
-  namespace     TEXT NOT NULL,            -- org/installation
-  teams         TEXT NOT NULL,            -- JSON array of team slugs
-  updated_at    TEXT NOT NULL
-);
-
--- decision audit; key-name-only, never values (policy-model.md §8)
-CREATE TABLE secret_audit (
-  decision_id   TEXT PRIMARY KEY,
-  ts            TEXT NOT NULL,
-  subject_id    TEXT NOT NULL,
-  namespace     TEXT NOT NULL,
-  env           TEXT NOT NULL,
-  key           TEXT NOT NULL,
-  version       INTEGER,
-  allow         INTEGER NOT NULL,         -- 0|1
-  rule_id       TEXT,
-  reason        TEXT NOT NULL,
-  platform      TEXT NOT NULL,
-  exec_id       TEXT
+  target        TEXT NOT NULL,              -- adapter id, e.g. 'cloudflare-worker'
+  entity_ref    TEXT NOT NULL,              -- provisioned catalog entity
+  run_id        TEXT NOT NULL,              -- the deploy run (ULID)
+  status        TEXT NOT NULL CHECK (status IN ('synced','superseded','orphaned')),
+  synced_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
 
-`gh_identity_map` and `secret_syncs` are **derived projections** (of GitHub and
-of performed deploys respectively) — rebuildable, never the source of truth;
-consistent with the object-model rule that databases are derived and rebuildable
-(`specs/orun-object-model/remote-and-consumers.md:55-62`).
+Audit rides the shipped `events.event_log` + `events.audit_entries` via
+`appendEventWithAudit` (`packages/db/src/events/repository.ts:188`), the same
+pattern the secret write path already uses transactionally
+(`create-secret.ts:231`). New event types: `secret.accessed`,
+`secret.revealed`, `secret.policy.updated`, `secret.sync.recorded` (today only
+`secrets.updated` exists).
 
-## 8. API surface (reconciled to the orun-cloud wire contract — SD-15)
+## 8. Wire routes (revision of contract §4 — one API)
 
-The orun-cloud wire contract (`specs/orun-cloud/vendored/state-api-contract.md`
-§4 "Secrets", §6 policy map) is **normative** for the secret API shape.
-orun-secrets does **not** define a parallel API; it *adopts* the contract's
-routes and *extends* the same contract with the routes its added capabilities
-need. The contract owns the wire shape; this spec owns the design behind it.
+```jsonc
+// Write path — the shipped …/config/secrets surface, unchanged shapes
+POST   …/config/secrets                        // create (write-only value)
+GET    …/config/secrets                        // metadata only; ?chain=true adds the serving-scope view
+POST   …/config/secrets/{id}/rotate            // append a version, bump head
+DELETE …/config/secrets/{id}                   // revoke (head, or a version)
 
-**Contract routes (normative — already in the contract, do not redefine):**
+// v3 additions on the config surface
+POST   …/config/secrets/import                 // dotenv bulk onboarding (write-only)
+GET    …/config/secrets/{id}/versions          // version metadata history
+PUT    …/config/secret-policies                // push tier-tagged documents (idempotent by hash)
+POST   …/config/secret-policies/evaluate       // dry-run a decision (orun policy test)
+GET    …/config/secrets/syncs                  // materialization state
+POST   …/config/secrets/{id}/reveal            // break-glass: elevated action + alert (SD-3)
 
-```
-PUT    …/secrets/{key}                { value, environment }       write-only; create or rotate (version+1)   [secret.write]
-GET    …/secrets?environment=                                      metadata only (key, version, scope, rotatedAt, lastUsedAt)  [secret.read]
-DELETE …/secrets/{key}?environment=                                tombstone                                   [secret.write]
-POST   …/state/runs/{runId}/secrets/resolve                        runner path — live job lease required       [secret.value.use]
-       { runnerId, jobId, keys[] } → { secrets, ttlSeconds }       emits secret.accessed per key
-```
-
-The runner resolve is **lease-bound, TTL'd, and fail-closed** exactly as the
-contract specifies (`runner-integration.md` §1). orun-secrets' four-axis
-`SecretPolicy` decision, env-chain walk (§1.1), and personal-overlay rules are
-**what the server runs to authorize the `secret.value.use` action** before
-unwrapping the DEK and decrypting — they make the contract's deny-by-default
-policy real, they do not replace the endpoint.
-
-**orun-secrets extension routes (additive to the same contract):**
-
-```
-POST   …/secrets/import               importDotenv(environment, entries)    write-only bulk onboarding  [secret.write]
-POST   …/secrets/{key}/reveal         reveal(breakGlass=true)               elevated, alerted human break-glass (SD-3)  [secret.value.reveal]
-POST   …/secrets/syncs                recordSync(entries[])                 materialization provenance (runner, post-materialize, SD-13)  [secret.write]
-GET    …/secrets/syncs?scope|entityRef                                      sync state (catalog resolver, dashboard)  [secret.read]
-POST   …/policies                     putPolicy(SecretPolicy, source)       publish a policy tier (SD-10)  [secret.policy.write]
-POST   …/policies/evaluate            dryRun(refs, facts) → decisions       compile-time + `orun plan` + UI  [secret.read]
+// The resolve — state plane, because the lease lives there (SD-18)
+POST …/state/runs/{runId}/secrets/resolve
+{ "runnerId": "…", "jobId": "…", "leaseEpoch": 3, "refs": ["secret://…", …] }
+→ 200 { "secrets": { "<KEY>": "<value>", … },
+        "resolved": [ { "key", "version", "scope", "personal", "decisionId" }, … ],
+        "ttlSeconds": 300 }
+→ 409 lease_lost   |   403 typed policy denial   |   404 (resource-hiding)
 ```
 
-Notes:
-- **Rotate** is not a separate route — it is `PUT …/secrets/{key}` with a new
-  value (version+1), per the contract; the `onRotate` re-materialization
-  triggers (SD-13) fire server-side on that write.
-- **`secret.value.reveal`** and **`secret.policy.write`** are new actions added
-  to the contract's §6 policy map (deny-by-default like the rest).
-- The run-scoped resolve is **the only route that returns plaintext to a
-  machine**; `reveal` is the single human path (SD-3).
+Personal overlays write with `--personal` → `personal_owner = subject`; every
+resolve whose server-derived platform fact ≠ `local-cli` skips rung 1
+structurally (Invariant 9).
 
-## 9. Identity resolution inputs
-
-| Caller | Token | Subject facts derived |
-|--------|-------|-----------------------|
-| GitHub Actions | OIDC JWT (`internal/remotestate/auth.go:24-88`) | `actor`→gh_user_id, `repository`→namespace, `ref`→branch, `platform=github-actions-oidc` |
-| Human CLI/dashboard | OAuth session (`internal/cliauth`) | gh_user_id + teams (GH map), `platform=local-cli` |
-| Service / cloud runner | `ORUN_TOKEN` / sp binding | sp id, `platform ∈ {service-token, orun-cloud-runner}` |
+**Actions per route** (Layer 1 — activating the dormant catalog,
+`policy-engine/index.ts:334-336`): metadata reads → `secret.read`; create,
+rotate, revoke, import, policy push → `secret.write`; resolve →
+`secret.value.use`; reveal → `secret.reveal` (**new elevated action** — owner/
+admin only, never builder). Today's handlers authorize with
+`*.config.read/write` (`create-secret.ts:161`); the switch to `secret.*` is
+SEC1.
