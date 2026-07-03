@@ -6,19 +6,19 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// brandRamp is the violet gradient the animated brand mark flows through.
-// The ramp loops (dark → light → dark) so advancing the phase produces a
+// brandRamp is the amber gradient the animated brand mark flows through.
+// The ramp loops (deep → bright → deep) so advancing the phase produces a
 // continuous shimmer sweeping across the wordmark. Colors stay inside the
-// cockpit's brand family (style.DefaultPalette violets).
+// cockpit's brand family (style.DefaultPalette amber — the Orun Cloud brand).
 var brandRamp = []lipgloss.AdaptiveColor{
-	{Light: "#6d28d9", Dark: "#7c3aed"},
-	{Light: "#7c3aed", Dark: "#8b5cf6"},
-	{Light: "#8b5cf6", Dark: "#a78bfa"},
-	{Light: "#a78bfa", Dark: "#c4b5fd"},
-	{Light: "#c4b5fd", Dark: "#ede9fe"},
-	{Light: "#a78bfa", Dark: "#c4b5fd"},
-	{Light: "#8b5cf6", Dark: "#a78bfa"},
-	{Light: "#7c3aed", Dark: "#8b5cf6"},
+	{Light: "#b45309", Dark: "#d97706"},
+	{Light: "#d97706", Dark: "#f59e0b"},
+	{Light: "#f59e0b", Dark: "#fbbf24"},
+	{Light: "#fbbf24", Dark: "#fcd34d"},
+	{Light: "#fcd34d", Dark: "#fde68a"},
+	{Light: "#fbbf24", Dark: "#fcd34d"},
+	{Light: "#f59e0b", Dark: "#fbbf24"},
+	{Light: "#d97706", Dark: "#f59e0b"},
 }
 
 // brandText is the cockpit wordmark. Single-width glyph + ASCII only, so the

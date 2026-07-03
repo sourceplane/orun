@@ -189,7 +189,7 @@ type Palette struct {
 	FG, FGDark             string
 	Dim, DimDark           string
 	Muted, MutedDark       string
-	Brand, BrandDark       string // accent (violet)
+	Brand, BrandDark       string // accent (amber — Orun Cloud brand)
 	BrandSoft, BrandSoftDark string
 	Secondary, SecondaryDark string
 	Success, SuccessDark   string
@@ -200,22 +200,25 @@ type Palette struct {
 	RowSel, RowSelDark     string
 }
 
-// DefaultPalette is the soft modern accent system inspired by Claude
-// Code / Linear. Mutating fields at runtime is unsupported — define a
-// fresh Palette instead.
+// DefaultPalette is the Orun Cloud design system: an amber accent over
+// neutral zinc surfaces, matching the console and the orun.dev landing
+// (primary #f59e0b, near-black zinc canvas). The docs sites mirror these
+// exact values so the CLI cockpit, the TUI, and every web surface speak
+// one visual language. Mutating fields at runtime is unsupported — define
+// a fresh Palette instead.
 var DefaultPalette = Palette{
-	FG: "#1f2933", FGDark: "#e2e8f0",
-	Dim: "#64748b", DimDark: "#64748b",
-	Muted: "#94a3b8", MutedDark: "#475569",
-	Brand: "#7c3aed", BrandDark: "#a78bfa",
-	BrandSoft: "#c4b5fd", BrandSoftDark: "#6d28d9",
+	FG: "#18181b", FGDark: "#fafafa",
+	Dim: "#71717a", DimDark: "#71717a",
+	Muted: "#a1a1aa", MutedDark: "#52525b",
+	Brand: "#d97706", BrandDark: "#f59e0b",
+	BrandSoft: "#fbbf24", BrandSoftDark: "#b45309",
 	Secondary: "#0891b2", SecondaryDark: "#22d3ee",
-	Success: "#059669", SuccessDark: "#34d399",
+	Success: "#16a34a", SuccessDark: "#4ade80",
 	Warning: "#b45309", WarningDark: "#fbbf24",
 	Error: "#dc2626", ErrorDark: "#f87171",
-	Border: "#cbd5e1", BorderDark: "#334155",
-	RowAlt: "#f1f5f9", RowAltDark: "#1e293b",
-	RowSel: "#ede9fe", RowSelDark: "#312e81",
+	Border: "#e4e4e7", BorderDark: "#3f3f46",
+	RowAlt: "#f4f4f5", RowAltDark: "#18181b",
+	RowSel: "#fef3c7", RowSelDark: "#422006",
 }
 
 func normalizeStatus(s string) string {

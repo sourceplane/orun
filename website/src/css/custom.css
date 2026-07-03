@@ -8,11 +8,11 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
 
 :root {
-  /* Brand — cockpit violet (matches internal/cockpit/style.DefaultPalette) */
-  --orun-violet: #7c3aed;
-  --orun-violet-soft: #a78bfa;
-  --orun-violet-edge: #c4b5fd;
-  --orun-violet-shadow: rgba(124, 58, 237, 0.18);
+  /* Brand — Orun Cloud amber (matches internal/cockpit/style.DefaultPalette) */
+  --orun-brand: #f59e0b;
+  --orun-brand-soft: #fbbf24;
+  --orun-brand-edge: #fcd34d;
+  --orun-brand-shadow: rgba(245, 158, 11, 0.18);
 
   /* Status palette — mirrors cockpit/style tokens */
   --orun-success: #22c55e;
@@ -22,78 +22,78 @@
   --orun-pending: #94a3b8;
   --orun-muted: #64748b;
 
-  /* Docusaurus primaries → violet */
-  --ifm-color-primary: var(--orun-violet);
-  --ifm-color-primary-dark: #6d28d9;
-  --ifm-color-primary-darker: #5b21b6;
-  --ifm-color-primary-darkest: #4c1d95;
-  --ifm-color-primary-light: var(--orun-violet-soft);
-  --ifm-color-primary-lighter: #c4b5fd;
-  --ifm-color-primary-lightest: #ddd6fe;
+  /* Docusaurus primaries → amber */
+  --ifm-color-primary: var(--orun-brand);
+  --ifm-color-primary-dark: #d97706;
+  --ifm-color-primary-darker: #b45309;
+  --ifm-color-primary-darkest: #92400e;
+  --ifm-color-primary-light: var(--orun-brand-soft);
+  --ifm-color-primary-lighter: #fcd34d;
+  --ifm-color-primary-lightest: #fde68a;
 
   /* Surface — soft paper, faint grid like the cockpit canvas */
-  --ifm-background-color: #fafaff;
-  --ifm-navbar-background-color: rgba(250, 250, 255, 0.82);
-  --ifm-footer-background-color: #0b0a18;
+  --ifm-background-color: #fdfcfb;
+  --ifm-navbar-background-color: rgba(253, 252, 251, 0.82);
+  --ifm-footer-background-color: #09090b;
 
   --ifm-font-family-base: 'Inter', 'Segoe UI', system-ui, sans-serif;
   --ifm-heading-font-family: 'Space Grotesk', 'Inter', sans-serif;
   --ifm-font-family-monospace: 'JetBrains Mono', 'SFMono-Regular', monospace;
   --ifm-code-font-size: 92%;
-  --ifm-heading-color: #18112d;
+  --ifm-heading-color: #18181b;
   --ifm-line-height-base: 1.65;
   --ifm-global-radius: 14px;
 
   --orun-surface: rgba(255, 255, 255, 0.78);
   --orun-surface-strong: #ffffff;
-  --orun-border: rgba(124, 58, 237, 0.16);
-  --orun-border-strong: rgba(124, 58, 237, 0.28);
-  --orun-shadow: 0 16px 40px rgba(28, 12, 64, 0.08);
-  --orun-shadow-strong: 0 24px 60px rgba(28, 12, 64, 0.14);
+  --orun-border: rgba(245, 158, 11, 0.16);
+  --orun-border-strong: rgba(245, 158, 11, 0.28);
+  --orun-shadow: 0 16px 40px rgba(0, 0, 0, 0.08);
+  --orun-shadow-strong: 0 24px 60px rgba(0, 0, 0, 0.14);
 
   /* Faint grid that evokes the cockpit canvas (TUI background feel) */
-  --orun-grid: linear-gradient(rgba(124, 58, 237, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(124, 58, 237, 0.05) 1px, transparent 1px);
+  --orun-grid: linear-gradient(rgba(245, 158, 11, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(245, 158, 11, 0.05) 1px, transparent 1px);
 }
 
 [data-theme='dark'] {
-  --ifm-color-primary: var(--orun-violet-soft);
-  --ifm-color-primary-dark: #9472f5;
-  --ifm-color-primary-darker: #8763f3;
-  --ifm-color-primary-darkest: #6b3fea;
-  --ifm-color-primary-light: #b9a3f9;
-  --ifm-color-primary-lighter: #c4b5fd;
-  --ifm-color-primary-lightest: #e0d9fe;
+  --ifm-color-primary: var(--orun-brand-soft);
+  --ifm-color-primary-dark: #f59e0b;
+  --ifm-color-primary-darker: #d97706;
+  --ifm-color-primary-darkest: #b45309;
+  --ifm-color-primary-light: #fcd34d;
+  --ifm-color-primary-lighter: #fcd34d;
+  --ifm-color-primary-lightest: #fef3c7;
 
-  --ifm-background-color: #0a0816;
-  --ifm-navbar-background-color: rgba(10, 8, 22, 0.82);
-  --ifm-footer-background-color: #050410;
-  --ifm-heading-color: #f5f3ff;
+  --ifm-background-color: #0a0a0a;
+  --ifm-navbar-background-color: rgba(10, 10, 10, 0.82);
+  --ifm-footer-background-color: #050505;
+  --ifm-heading-color: #fafafa;
 
-  --orun-surface: rgba(20, 16, 38, 0.82);
-  --orun-surface-strong: #14102a;
-  --orun-border: rgba(167, 139, 250, 0.18);
-  --orun-border-strong: rgba(167, 139, 250, 0.34);
+  --orun-surface: rgba(24, 24, 27, 0.82);
+  --orun-surface-strong: #141417;
+  --orun-border: rgba(251, 191, 36, 0.18);
+  --orun-border-strong: rgba(251, 191, 36, 0.34);
   --orun-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
   --orun-shadow-strong: 0 32px 80px rgba(0, 0, 0, 0.55);
 
-  --orun-grid: linear-gradient(rgba(167, 139, 250, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(167, 139, 250, 0.06) 1px, transparent 1px);
+  --orun-grid: linear-gradient(rgba(251, 191, 36, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(251, 191, 36, 0.06) 1px, transparent 1px);
 }
 
 html,
 body {
   background:
-    radial-gradient(circle at 12% -10%, rgba(167, 139, 250, 0.22), transparent 38%),
-    radial-gradient(circle at 88% 4%, rgba(124, 58, 237, 0.14), transparent 32%),
+    radial-gradient(circle at 12% -10%, rgba(251, 191, 36, 0.22), transparent 38%),
+    radial-gradient(circle at 88% 4%, rgba(245, 158, 11, 0.14), transparent 32%),
     var(--ifm-background-color);
 }
 
 body {
   background-image:
     var(--orun-grid),
-    radial-gradient(circle at 12% -10%, rgba(167, 139, 250, 0.22), transparent 38%),
-    radial-gradient(circle at 88% 4%, rgba(124, 58, 237, 0.14), transparent 32%);
+    radial-gradient(circle at 12% -10%, rgba(251, 191, 36, 0.22), transparent 38%),
+    radial-gradient(circle at 88% 4%, rgba(245, 158, 11, 0.14), transparent 32%);
   background-size: 32px 32px, auto, auto;
 }
 
@@ -102,20 +102,20 @@ body {
 .navbar {
   backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--orun-border);
-  box-shadow: 0 6px 24px rgba(28, 12, 64, 0.05);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.05);
 }
 
 .navbar__brand::before {
   content: '▲';
   display: inline-block;
   margin-right: 0.45rem;
-  color: var(--orun-violet);
+  color: var(--orun-brand);
   font-family: var(--ifm-font-family-monospace);
   transform: translateY(-1px);
 }
 
 [data-theme='dark'] .navbar__brand::before {
-  color: var(--orun-violet-soft);
+  color: var(--orun-brand-soft);
 }
 
 .navbar__title {
@@ -125,10 +125,10 @@ body {
 }
 
 .footer {
-  border-top: 1px solid rgba(167, 139, 250, 0.18);
+  border-top: 1px solid rgba(251, 191, 36, 0.18);
   background:
-    radial-gradient(circle at top left, rgba(167, 139, 250, 0.16), transparent 28%),
-    linear-gradient(180deg, rgba(11, 10, 24, 0.96), #050410);
+    radial-gradient(circle at top left, rgba(251, 191, 36, 0.16), transparent 28%),
+    linear-gradient(180deg, rgba(9, 9, 11, 0.96), #050505);
 }
 
 .theme-doc-sidebar-container,
@@ -149,7 +149,7 @@ body {
 .menu__caret:hover,
 .theme-doc-sidebar-item-link:hover,
 .theme-doc-sidebar-item-category:hover {
-  background: rgba(124, 58, 237, 0.08);
+  background: rgba(245, 158, 11, 0.08);
 }
 
 .menu__link--active {
@@ -184,14 +184,14 @@ body {
 
 .markdown > h2::before {
   content: '§ ';
-  color: var(--orun-violet);
+  color: var(--orun-brand);
   font-family: var(--ifm-font-family-monospace);
   font-weight: 500;
   opacity: 0.6;
 }
 
 [data-theme='dark'] .markdown > h2::before {
-  color: var(--orun-violet-soft);
+  color: var(--orun-brand-soft);
 }
 
 /* ───────── code blocks ───────── */
@@ -208,16 +208,16 @@ body {
 }
 
 code {
-  background: rgba(124, 58, 237, 0.09);
-  border: 1px solid rgba(124, 58, 237, 0.18);
+  background: rgba(245, 158, 11, 0.09);
+  border: 1px solid rgba(245, 158, 11, 0.18);
   border-radius: 6px;
   padding: 0.08em 0.4em;
   font-size: 0.86em;
 }
 
 [data-theme='dark'] code {
-  background: rgba(167, 139, 250, 0.12);
-  border-color: rgba(167, 139, 250, 0.24);
+  background: rgba(251, 191, 36, 0.12);
+  border-color: rgba(251, 191, 36, 0.24);
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -233,12 +233,12 @@ code {
   border: 1px solid var(--orun-border-strong);
   border-radius: 14px;
   background:
-    linear-gradient(180deg, rgba(20, 16, 38, 0.96), rgba(11, 10, 24, 0.98));
-  color: #e9e4ff;
+    linear-gradient(180deg, rgba(24, 24, 27, 0.96), rgba(9, 9, 11, 0.98));
+  color: #fef3c7;
   font-family: var(--ifm-font-family-monospace);
   font-size: 0.86rem;
   line-height: 1.55;
-  box-shadow: 0 30px 80px rgba(28, 12, 64, 0.22);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.22);
   overflow: hidden;
 }
 
@@ -247,8 +247,8 @@ code {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 0% 0%, rgba(167, 139, 250, 0.18), transparent 38%),
-    radial-gradient(circle at 100% 100%, rgba(124, 58, 237, 0.16), transparent 38%);
+    radial-gradient(circle at 0% 0%, rgba(251, 191, 36, 0.18), transparent 38%),
+    radial-gradient(circle at 100% 100%, rgba(245, 158, 11, 0.16), transparent 38%);
   pointer-events: none;
 }
 
@@ -271,7 +271,7 @@ code {
   gap: 0.5rem;
   margin-bottom: 0.85rem;
   font-size: 0.74rem;
-  color: rgba(196, 181, 253, 0.7);
+  color: rgba(252, 211, 77, 0.7);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -285,7 +285,7 @@ code {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: rgba(167, 139, 250, 0.3);
+  background: rgba(251, 191, 36, 0.3);
 }
 
 .cockpitFrame .cf-dots span:nth-child(1) { background: #ef4444cc; }
@@ -311,7 +311,7 @@ code {
 .g-run     { color: var(--orun-running); background: rgba(56, 189, 248, 0.14); }
 .g-pending { color: var(--orun-pending); background: rgba(148, 163, 184, 0.14); }
 .g-skip    { color: var(--orun-warning); background: rgba(245, 158, 11, 0.14); }
-.g-brand   { color: var(--orun-violet-soft); background: rgba(167, 139, 250, 0.16); }
+.g-brand   { color: var(--orun-brand-soft); background: rgba(251, 191, 36, 0.16); }
 
 /* ─────────────────────────────────────────────────────────────────────
    hero
@@ -325,17 +325,17 @@ code {
   border: 1px solid var(--orun-border);
   border-radius: 24px;
   background:
-    radial-gradient(circle at 100% 0%, rgba(167, 139, 250, 0.22), transparent 38%),
-    radial-gradient(circle at 0% 100%, rgba(124, 58, 237, 0.14), transparent 42%),
-    linear-gradient(160deg, rgba(255, 255, 255, 0.96), rgba(244, 240, 255, 0.92));
+    radial-gradient(circle at 100% 0%, rgba(251, 191, 36, 0.22), transparent 38%),
+    radial-gradient(circle at 0% 100%, rgba(245, 158, 11, 0.14), transparent 42%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.96), rgba(254, 243, 199, 0.92));
   box-shadow: var(--orun-shadow-strong);
 }
 
 [data-theme='dark'] .heroFrame {
   background:
-    radial-gradient(circle at 100% 0%, rgba(167, 139, 250, 0.16), transparent 38%),
-    radial-gradient(circle at 0% 100%, rgba(124, 58, 237, 0.14), transparent 42%),
-    linear-gradient(160deg, rgba(20, 16, 38, 0.98), rgba(10, 8, 22, 0.96));
+    radial-gradient(circle at 100% 0%, rgba(251, 191, 36, 0.16), transparent 38%),
+    radial-gradient(circle at 0% 100%, rgba(245, 158, 11, 0.14), transparent 42%),
+    linear-gradient(160deg, rgba(24, 24, 27, 0.98), rgba(10, 10, 10, 0.96));
 }
 
 .eyebrow {
@@ -346,8 +346,8 @@ code {
   padding: 0.32rem 0.75rem;
   border: 1px solid var(--orun-border-strong);
   border-radius: 999px;
-  background: rgba(124, 58, 237, 0.08);
-  color: var(--orun-violet);
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--orun-brand);
   font-family: var(--ifm-font-family-monospace);
   font-size: 0.74rem;
   font-weight: 600;
@@ -356,7 +356,7 @@ code {
 }
 
 [data-theme='dark'] .eyebrow {
-  color: var(--orun-violet-soft);
+  color: var(--orun-brand-soft);
 }
 
 .eyebrow::before {
@@ -374,7 +374,7 @@ code {
 
 .heroTitle em {
   font-style: normal;
-  background: linear-gradient(120deg, var(--orun-violet), var(--orun-violet-soft));
+  background: linear-gradient(120deg, var(--orun-brand), var(--orun-brand-soft));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -401,13 +401,13 @@ code {
 }
 
 .heroActions .button--primary {
-  background: var(--orun-violet);
-  border-color: var(--orun-violet);
+  background: var(--orun-brand);
+  border-color: var(--orun-brand);
 }
 
 .heroActions .button--primary:hover {
-  background: #6d28d9;
-  border-color: #6d28d9;
+  background: #d97706;
+  border-color: #d97706;
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -467,7 +467,7 @@ code {
 .pillarCard strong {
   display: block;
   margin-bottom: 0.45rem;
-  color: var(--orun-violet);
+  color: var(--orun-brand);
   font-family: var(--ifm-font-family-monospace);
   font-size: 0.74rem;
   letter-spacing: 0.1em;
@@ -477,7 +477,7 @@ code {
 [data-theme='dark'] .signalCard strong,
 [data-theme='dark'] .pathCard strong,
 [data-theme='dark'] .pillarCard strong {
-  color: var(--orun-violet-soft);
+  color: var(--orun-brand-soft);
 }
 
 .pillarCard .glyph {
@@ -489,16 +489,16 @@ code {
   margin-bottom: 0.75rem;
   border: 1px solid var(--orun-border-strong);
   border-radius: 10px;
-  background: rgba(124, 58, 237, 0.08);
-  color: var(--orun-violet);
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--orun-brand);
   font-family: var(--ifm-font-family-monospace);
   font-size: 1.15rem;
   font-weight: 600;
 }
 
 [data-theme='dark'] .pillarCard .glyph {
-  background: rgba(167, 139, 250, 0.1);
-  color: var(--orun-violet-soft);
+  background: rgba(251, 191, 36, 0.1);
+  color: var(--orun-brand-soft);
 }
 
 /* ───────── tables / admonitions ───────── */
@@ -514,11 +514,11 @@ code {
 }
 
 .theme-doc-markdown table thead {
-  background: rgba(124, 58, 237, 0.09);
+  background: rgba(245, 158, 11, 0.09);
 }
 
 [data-theme='dark'] .theme-doc-markdown table thead {
-  background: rgba(167, 139, 250, 0.12);
+  background: rgba(251, 191, 36, 0.12);
 }
 
 .theme-doc-markdown blockquote,

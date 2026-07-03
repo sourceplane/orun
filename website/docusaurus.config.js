@@ -42,7 +42,7 @@ const config = {
       respectPrefersColorScheme: true,
     },
     metadata: [
-      { name: 'theme-color', content: '#7c3aed' },
+      { name: 'theme-color', content: '#f59e0b' },
       { name: 'description', content: 'orun is the planner–cockpit for platform engineering. Compile declarative intent into a deterministic execution DAG, then operate it through a unified CLI + TUI cockpit.' },
     ],
     navbar: {
@@ -54,7 +54,7 @@ const config = {
         { to: '/cockpit/overview', label: 'Cockpit', position: 'left' },
         { to: '/cli/orun', label: 'CLI', position: 'left' },
         { href: 'https://docs.orun.dev', label: 'Orun Cloud', position: 'left' },
-        { to: '/release-notes/v2.19.0', label: 'Releases', position: 'right' },
+        { to: '/release-notes/v2.22.0', label: 'Releases', position: 'right' },
         {
           href: 'https://github.com/sourceplane/orun',
           label: 'GitHub',
