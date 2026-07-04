@@ -271,4 +271,5 @@ func init() {
 	registerSecretsCommand(rootCmd)
 	registerPolicyCommand(rootCmd)
 	registerWorkCommand(rootCmd)
+	registerSpecCommand(rootCmd)
 }
