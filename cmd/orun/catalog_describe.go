@@ -33,6 +33,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// catalogDescribeKindFlag addresses a non-Component entity kind (WO3.1b).
+var catalogDescribeKindFlag string
+
 // catalogDescribeData is the --json payload: the full manifest plus the
 // catalog-local execution rows for the component (§4).
 type catalogDescribeData struct {
@@ -41,29 +44,73 @@ type catalogDescribeData struct {
 	Deployments []objread.Deployment                 `json:"deployments,omitempty"`
 }
 
+// catalogDescribeEntityData is the --json payload for a non-Component entity
+// (WO3.1b): the entity envelope under `entity`, matching cli-surface.md §2.
+type catalogDescribeEntityData struct {
+	Entity catalogEntityJSON `json:"entity"`
+}
+
+// catalogEntityJSON is the stable machine-readable projection of an EntityView.
+type catalogEntityJSON struct {
+	Kind        string           `json:"kind"`
+	EntityKey   string           `json:"entityKey"`
+	Name        string           `json:"name"`
+	Namespace   string           `json:"namespace,omitempty"`
+	Repo        string           `json:"repo,omitempty"`
+	DisplayName string           `json:"displayName,omitempty"`
+	Description string           `json:"description,omitempty"`
+	Owner       string           `json:"owner,omitempty"`
+	Tags        []string         `json:"tags,omitempty"`
+	Lifecycle   string           `json:"lifecycle,omitempty"`
+	Version     string           `json:"version,omitempty"`
+	MemberCount int              `json:"memberCount"`
+	Members     []string         `json:"members,omitempty"`
+	Links       []map[string]any `json:"links,omitempty"`
+	Docs        map[string]any   `json:"docs,omitempty"`
+}
+
+func entityJSON(e objcatalog.EntityView) catalogEntityJSON {
+	return catalogEntityJSON{
+		Kind: e.Kind, EntityKey: e.EntityKey, Name: e.Name, Namespace: e.Namespace,
+		Repo: e.Repo, DisplayName: e.DisplayName, Description: e.Description,
+		Owner: e.Owner, Tags: e.Tags, Lifecycle: e.Lifecycle, Version: e.Version,
+		MemberCount: e.MemberCount, Members: e.Members, Links: e.Links, Docs: e.Docs,
+	}
+}
+
 func registerCatalogDescribeCommand(parent *cobra.Command) {
 	cmd := &cobra.Command{
-		Use:   "describe <component>",
-		Short: "Show the full resolved manifest for one component",
-		Long: `Show the full resolved manifest for one component in the selected catalog.
+		Use:   "describe <entity>",
+		Short: "Show the full resolved manifest for one component or entity",
+		Long: `Show the full resolved envelope for one entity in the selected catalog.
 
-The component may be given as a bare name (resolved within the catalog) or as
-a fully-qualified component key (namespace/repo/name) for an exact match. A
-bare name that matches components in more than one repo exits 4 with the list
-of candidate keys.
+Components are the default. Other entity kinds (Repo, System, Domain, API,
+Resource, Group, Composition, Environment) are addressed with a kind-prefixed
+selector or --kind:
+
+  - bare name / key           → a Component (unchanged behavior)
+  - <kind>:<key>              → that entity, e.g. repo:sourceplane/ogpic/ogpic
+  - --kind <Kind> <name|key>  → that entity by name or full key
+  - bare kind keyword         → the single entity of that kind (e.g. "repo",
+                                which is one-per-snapshot)
+
+A bare name (component or entity) that matches more than one candidate exits 4
+with the list of candidate keys.
 
 Examples:
   orun catalog describe api-edge
-  orun catalog describe api-edge --source main
   orun catalog describe sourceplane/orun/api-edge
-  orun catalog describe api-edge --json
+  orun catalog describe repo:sourceplane/ogpic/ogpic
+  orun catalog describe repo               # the one Repo entity
+  orun catalog describe --kind System payments
+  orun catalog describe repo:sourceplane/ogpic/ogpic --json
 
 Exit codes:
-  0  Component found and rendered.
-  1  Invalid selector or missing component argument.
+  0  Component or entity found and rendered.
+  1  Invalid selector or missing argument.
   3  StateStore failure.
-  4  Ambiguous bare name across repos.
-  6  Catalog or component not found.`,
+  4  Ambiguous name across repos/kinds.
+  6  Catalog, component, or entity not found.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCatalogDescribe(cmd.Context(), args[0])
@@ -71,6 +118,7 @@ Exit codes:
 	}
 
 	addCatalogSelectorFlags(cmd)
+	cmd.Flags().StringVar(&catalogDescribeKindFlag, "kind", "", "Address an entity of this kind (Repo|System|Domain|API|Resource|Group|Composition|Environment) instead of a Component")
 	cmd.Flags().BoolVar(&catalogJSONFlag, "json", false, "Stable machine-readable output")
 
 	parent.AddCommand(cmd)
@@ -88,6 +136,24 @@ func runCatalogDescribe(ctx context.Context, arg string) error {
 	view, reader, err := loadObjCatalog(ctx)
 	if err != nil {
 		return err
+	}
+
+	// Kind-aware routing (WO3.1b): a <kind>:<key> selector, --kind, or a bare
+	// kind keyword addresses a non-Component entity. A bare kind keyword defers
+	// to a same-named Component when one exists (back-compat).
+	if kind, key, isEntity := parseEntitySelector(arg, catalogDescribeKindFlag); isEntity {
+		if key == "" && componentNamed(view, arg) {
+			// fall through to the component path below
+		} else {
+			e, serr := selectObjEntity(view, kind, key)
+			if serr != nil {
+				return serr
+			}
+			if catalogJSONFlag {
+				return writeCatalogEnvelope(kindCatalogDescribeResult, catalogDescribeEntityData{Entity: entityJSON(e)}, nil)
+			}
+			return renderCatalogEntityText(e)
+		}
 	}
 
 	c, err := selectObjComponent(view, arg)
@@ -424,6 +490,202 @@ func renderCatalogDescribeText(m catalogmodel.ComponentManifest, execs []catalog
 		}
 	}
 	return nil
+}
+
+// parseEntitySelector decides whether arg addresses a non-Component entity and,
+// if so, returns its canonical kind and key. Three entity forms are recognized
+// (§WO3.1b): a `<kind>:<key>` prefix, the --kind flag, or a bare kind keyword
+// (key == "" → the single entity of that kind). Anything else routes to the
+// Component path (isEntity == false), preserving `describe <component>`.
+func parseEntitySelector(arg, kindFlag string) (kind, key string, isEntity bool) {
+	if i := strings.IndexByte(arg, ':'); i > 0 {
+		if k := canonicalKindCase(arg[:i]); catalogmodel.IsEntityKind(k) {
+			if norm := catalogmodel.NormalizeEntityKind(k); norm != catalogmodel.EntityKindComponent {
+				return norm, arg[i+1:], true
+			}
+		}
+	}
+	if kindFlag != "" {
+		norm := catalogmodel.NormalizeEntityKind(canonicalKindCase(kindFlag))
+		if norm == catalogmodel.EntityKindComponent {
+			return "", arg, false
+		}
+		return norm, arg, true
+	}
+	if !strings.Contains(arg, "/") {
+		if k := canonicalKindCase(arg); catalogmodel.IsEntityKind(k) {
+			if norm := catalogmodel.NormalizeEntityKind(k); norm != catalogmodel.EntityKindComponent {
+				return norm, "", true
+			}
+		}
+	}
+	return "", arg, false
+}
+
+// canonicalKindCase maps a case-insensitive kind token onto its canonical
+// spelling (repo→Repo, api→API), so `repo:` and `--kind repo` both resolve.
+func canonicalKindCase(s string) string {
+	for _, k := range catalogmodel.AllEntityKinds() {
+		if strings.EqualFold(k, s) {
+			return k
+		}
+	}
+	if strings.EqualFold(s, catalogmodel.EntityKindOwner) {
+		return catalogmodel.EntityKindOwner
+	}
+	return s
+}
+
+// componentNamed reports whether a component with this exact name exists — used
+// so a bare kind keyword defers to a same-named Component (back-compat).
+func componentNamed(view objcatalog.CatalogView, name string) bool {
+	for _, c := range view.Components {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// selectObjEntity resolves a non-Component selector against view.Entities.
+// An empty key selects the single entity of the kind (exit 4 if more than one);
+// otherwise it matches an exact entityKey, then a bare name (exit 4 if the name
+// is ambiguous, exit 6 if absent).
+func selectObjEntity(view objcatalog.CatalogView, kind, key string) (objcatalog.EntityView, error) {
+	var ofKind []objcatalog.EntityView
+	for _, e := range view.Entities {
+		if e.Kind == kind {
+			ofKind = append(ofKind, e)
+		}
+	}
+	if len(ofKind) == 0 {
+		return objcatalog.EntityView{}, exitErr(6, "no %s entity in catalog", kind)
+	}
+	if key == "" {
+		if len(ofKind) == 1 {
+			return ofKind[0], nil
+		}
+		return objcatalog.EntityView{}, exitErr(4,
+			"%s is ambiguous (%d in catalog); qualify with a key: %s",
+			kind, len(ofKind), strings.Join(entityKeysOf(ofKind), ", "))
+	}
+	for _, e := range ofKind {
+		if e.EntityKey == key {
+			return e, nil
+		}
+	}
+	var matches []objcatalog.EntityView
+	for _, e := range ofKind {
+		if e.Name == key {
+			matches = append(matches, e)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return objcatalog.EntityView{}, exitErr(6, "%s %q not found in catalog", kind, key)
+	case 1:
+		return matches[0], nil
+	default:
+		return objcatalog.EntityView{}, exitErr(4,
+			"%s %q is ambiguous; qualify with a full key: %s",
+			kind, key, strings.Join(entityKeysOf(matches), ", "))
+	}
+}
+
+func entityKeysOf(es []objcatalog.EntityView) []string {
+	keys := make([]string, 0, len(es))
+	for _, e := range es {
+		keys = append(keys, e.EntityKey)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// renderCatalogEntityText renders one non-Component entity's envelope: identity,
+// ownership, tags, docs (the overview doc_ref shows path + digest), links, and
+// membership.
+func renderCatalogEntityText(e objcatalog.EntityView) error {
+	color := ui.ColorEnabledForWriter(os.Stdout)
+	out := os.Stdout
+
+	section := func(title string) { fmt.Fprintf(out, "\n%s\n", ui.Bold(color, title)) }
+	kv := func(k, v string) {
+		if v != "" {
+			fmt.Fprintf(out, "  %-14s %s\n", k+":", v)
+		}
+	}
+
+	name := e.DisplayName
+	if name == "" {
+		name = e.Name
+	}
+	fmt.Fprintf(out, "%s\n", ui.Bold(color, name))
+
+	section(e.Kind)
+	kv("Key", e.EntityKey)
+	kv("Name", e.Name)
+	kv("DisplayName", e.DisplayName)
+	kv("Description", e.Description)
+	kv("Namespace", e.Namespace)
+	kv("Repo", e.Repo)
+	kv("Version", e.Version)
+	kv("Lifecycle", e.Lifecycle)
+
+	section("Ownership")
+	if e.Owner == "" {
+		fmt.Fprintln(out, "  (none)")
+	} else {
+		kv("Owner", e.Owner)
+	}
+
+	if len(e.Tags) > 0 {
+		section("Tags")
+		fmt.Fprintf(out, "  %s\n", strings.Join(e.Tags, ", "))
+	}
+
+	section("Docs")
+	if len(e.Docs) == 0 {
+		fmt.Fprintln(out, "  (none)")
+	} else {
+		for _, k := range sortedAnyMapKeys(e.Docs) {
+			switch v := e.Docs[k].(type) {
+			case map[string]any:
+				path := anyString(v["path"])
+				digest := anyString(v["digest"])
+				if digest != "" {
+					fmt.Fprintf(out, "  %-14s %s (%s)\n", k+":", path, digest)
+				} else {
+					fmt.Fprintf(out, "  %-14s %s\n", k+":", path)
+				}
+			default:
+				fmt.Fprintf(out, "  %-14s %v\n", k+":", v)
+			}
+		}
+	}
+
+	if len(e.Links) > 0 {
+		section("Links")
+		for _, l := range e.Links {
+			title := anyString(l["title"])
+			url := anyString(l["url"])
+			fmt.Fprintf(out, "  %-14s %s\n", title, url)
+		}
+	}
+
+	section("Members")
+	if e.MemberCount == 0 && len(e.Members) == 0 {
+		fmt.Fprintln(out, "  (none)")
+	} else {
+		for _, m := range e.Members {
+			fmt.Fprintf(out, "  %s\n", m)
+		}
+	}
+	return nil
+}
+
+func anyString(v any) string {
+	s, _ := v.(string)
+	return s
 }
 
 func sortedEnvKeys(m map[string]catalogmodel.ComponentEnvironment) []string {
