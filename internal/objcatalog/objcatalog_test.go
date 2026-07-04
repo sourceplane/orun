@@ -388,6 +388,51 @@ func TestLoad_ReadsEntities_MultiKindAndSkips(t *testing.T) {
 	}
 }
 
+// TestLoad_ReadsEntities_RepoEnvelopeBlocks asserts the WO3.1a enrichment: a Repo
+// entity's metadata/ownership/links/docs blocks project onto EntityView so a
+// describe/docs consumer can render the front page and the overview doc_ref.
+func TestLoad_ReadsEntities_RepoEnvelopeBlocks(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	repoBlob, _ := f.store.PutBlob(ctx, []byte(`{"apiVersion":"orun.io/v1","kind":"Repo",`+
+		`"identity":{"entityKey":"sourceplane/ogpic/ogpic","kind":"Repo","name":"ogpic","namespace":"sourceplane","repo":"ogpic"},`+
+		`"metadata":{"displayName":"Ogpic","description":"Photography rental marketplace","tags":["saas","marketplace"]},`+
+		`"ownership":{"owner":"platform"},`+
+		`"links":[{"title":"Source","url":"https://github.com/sourceplane/ogpic","icon":"github"}],`+
+		`"docs":{"overview":{"path":"docs/overview.md","sha":"ae6ab3","digest":"sha256:7b0b2a"}}}`))
+	repoTree, _ := f.store.PutTree(ctx, []objectstore.TreeEntry{{Name: "ogpic.json", Kind: objectstore.KindBlob, ID: repoBlob}})
+	entities, _ := f.store.PutTree(ctx, []objectstore.TreeEntry{{Name: "Repo", Kind: objectstore.KindTree, ID: repoTree}})
+	root := seedCatalogWithExtraSubtree(t, f, dirEntities, entities)
+
+	view, err := New(f.store, f.refs).Load(ctx, string(root))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(view.Entities) != 1 {
+		t.Fatalf("entities = %+v", view.Entities)
+	}
+	e := view.Entities[0]
+	if e.Kind != "Repo" || e.DisplayName != "Ogpic" {
+		t.Errorf("kind/displayName = %q/%q", e.Kind, e.DisplayName)
+	}
+	if e.Description != "Photography rental marketplace" {
+		t.Errorf("description = %q (should fall back to metadata)", e.Description)
+	}
+	if e.Owner != "platform" {
+		t.Errorf("owner = %q", e.Owner)
+	}
+	if len(e.Tags) != 2 || e.Tags[0] != "saas" {
+		t.Errorf("tags = %v", e.Tags)
+	}
+	if len(e.Links) != 1 || e.Links[0]["url"] != "https://github.com/sourceplane/ogpic" {
+		t.Errorf("links = %v", e.Links)
+	}
+	ov, ok := e.Docs["overview"].(map[string]any)
+	if !ok || ov["digest"] != "sha256:7b0b2a" || ov["path"] != "docs/overview.md" {
+		t.Errorf("docs.overview = %v", e.Docs["overview"])
+	}
+}
+
 // TestLoad_LazyUpConvertsFlatManifest reads a pre-SC1 (v1alpha1, flat) component
 // blob — owner inside metadata, lifecycle in spec, no ownership/lifecycle blocks
 // — and asserts the read view up-converts it to the v1 envelope shape without
