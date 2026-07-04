@@ -57,6 +57,13 @@ type WorkImportResponse struct {
 	TasksSkipped int `json:"tasksSkipped"`
 }
 
+// WorkActor is a membership subject on the wire.
+type WorkActor struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	Via  string `json:"via,omitempty"`
+}
+
 // WorkLifecycle is the fold's per-task output: a rung WITH its evidence.
 type WorkLifecycle struct {
 	Rung     string   `json:"rung"`
@@ -67,23 +74,32 @@ type WorkLifecycle struct {
 
 // WorkTaskView is one task in the summary.
 type WorkTaskView struct {
-	Key       string        `json:"key"`
-	Spec      string        `json:"spec,omitempty"`
-	Title     string        `json:"title"`
-	Lifecycle WorkLifecycle `json:"lifecycle"`
+	Key       string            `json:"key"`
+	Spec      string            `json:"spec,omitempty"`
+	Title     string            `json:"title"`
+	Labels    map[string]string `json:"labels,omitempty"`
+	Contract  *WorkContract     `json:"contract,omitempty"`
+	CreatedBy WorkActor         `json:"createdBy"`
+	CreatedAt string            `json:"createdAt,omitempty"`
+	Lifecycle WorkLifecycle     `json:"lifecycle"`
 }
 
 // WorkSpecView is one spec in the summary with its derived progress.
 type WorkSpecView struct {
-	Key      string         `json:"key"`
-	Title    string         `json:"title"`
-	Progress map[string]int `json:"progress"`
+	Key       string         `json:"key"`
+	Title     string         `json:"title"`
+	DocRef    string         `json:"docRef,omitempty"`
+	CreatedBy WorkActor      `json:"createdBy"`
+	CreatedAt string         `json:"createdAt,omitempty"`
+	Progress  map[string]int `json:"progress"`
 }
 
 // WorkSummary is the workspace lens: everything derives from the two logs.
 type WorkSummary struct {
-	Specs []WorkSpecView `json:"specs"`
-	Tasks []WorkTaskView `json:"tasks"`
+	Specs    []WorkSpecView `json:"specs"`
+	Tasks    []WorkTaskView `json:"tasks"`
+	CoordSeq int64          `json:"coordSeq"`
+	ObsSeq   int64          `json:"obsSeq"`
 }
 
 // workPath builds an org-scoped work path (no project segment — the work

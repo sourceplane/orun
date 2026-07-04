@@ -11,9 +11,9 @@
 |----|-----------|--------|
 | WP0 | Import + the derived read (dogfood zero) | ✅ Shipped — orun #454 (worklens oracle + import dry-run) + orun-cloud #318 (two-log substrate) + the WP1 surface PRs (query API, console list, import apply, `orun work import`/`list`) |
 | WP1 | Coordination + the board | 🏗️ In progress — fold query API with evidence + mutator verdicts + read-only console Work page + import apply landed (orun-cloud WP1 PR; orun: remotestate work client, `orun work import` apply, `orun work list`); optimistic store + SSE replay + pin/comment UI pending |
-| WP2 | Observation ingestion: PRs + drift | 🗓️ Not started |
-| WP3 | Gates → Done, overlay → Released | 🗓️ Not started |
-| WP4 | Sealing + `orun spec pull` | 🗓️ Not started |
+| WP2 | Observation ingestion: PRs + drift | ✅ Shipped — orun-cloud #327: the webhook drain projects normalized scm.* PR/branch events into the fact log (same-tx, semantic dedupe, task-key parse); the `ci` producer endpoint carries affected sets; the WP0 claim join + drift inbox light up from live facts |
+| WP3 | Gates → Done, overlay → Released | 🏗️ Mostly shipped — orun-cloud WP3 PR: run-stream gate verdicts from terminal job phases keyed to the run's git revision (P-3: execution truth, never GitHub statuses); the deploy-overlay → revision_live bridge built + tested; the In Review → Done → Released walk proven from facts. Remaining: the runtime call site awaits saas-resources-runtime |
+| WP4 | Sealing + `orun spec pull` | 🏗️ In progress — seal core (canonical JSON, ContentID, SpecSnapshot intent-only-by-type with a hot-state guard, chained log segments) + `orun spec pull <slug>[@sha256:…]` (client-side seal from the fold API, read-only materialization, pin verification, --id-only for dispatch). Remaining: server-side sealing + the refs/work remote leg |
 | WP5 | The orun MCP | 🗓️ Not started |
 
 ## WP0 — as-built

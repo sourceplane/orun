@@ -1,0 +1,220 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/sourceplane/orun/internal/remotestate"
+	"github.com/sourceplane/orun/internal/worklens"
+)
+
+func registerSpecCommand(root *cobra.Command) {
+	specCmd := &cobra.Command{
+		Use:   "spec",
+		Short: "Frozen spec snapshots: pull a sealed brief to implement against",
+		Long: `Frozen spec snapshots (specs/orun-work v2, the system of proof).
+
+A SpecSnapshot is the intent plane only — the spec doc reference plus task
+contracts, pinned to the two log cursors it reflects. It structurally cannot
+carry a rung or an assignee; an agent implementing against spec@hash cannot
+have the ground shift under it.
+
+Subcommands:
+  pull    Freeze a spec's current intent into a content-addressed snapshot
+
+Run 'orun spec <subcommand> --help' for details.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+	}
+	registerSpecPullCommand(specCmd)
+	root.AddCommand(specCmd)
+}
+
+func registerSpecPullCommand(parent *cobra.Command) {
+	var (
+		workspace  string
+		backendURL string
+		idOnly     bool
+	)
+	cmd := &cobra.Command{
+		Use:   "pull <spec-slug>[@sha256:…]",
+		Short: "Freeze a spec's intent into a content-addressed snapshot under .orun/specs/",
+		Long: `Fetch the spec's current intent (envelope + task contracts) from the
+workspace fold API, seal it into a canonical, content-addressed SpecSnapshot,
+and materialize a read-only view under .orun/specs/<slug>/.
+
+With an @sha256:… pin the sealed snapshot must match the pin exactly — the
+dispatcher's guarantee that an agent implements against exactly this brief.
+(v1 seals client-side from the fold query; server-side sealing + the
+refs/work remote ride a later slice.)`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			slug, pin := args[0], ""
+			if i := strings.Index(args[0], "@"); i >= 0 {
+				slug, pin = args[0][:i], args[0][i+1:]
+			}
+
+			client, err := workClient(cmd.Context(), backendURL, workspace)
+			if err != nil {
+				return err
+			}
+			summary, err := client.GetWorkSummary(cmd.Context())
+			if err != nil {
+				return fmt.Errorf("orun spec pull: %w", err)
+			}
+
+			snapshot, err := snapshotFromSummary(client.Scope().OrgID, slug, summary)
+			if err != nil {
+				return err
+			}
+			id, canonical, err := worklens.SealSpecSnapshot(*snapshot)
+			if err != nil {
+				return err
+			}
+			if pin != "" && pin != id {
+				return fmt.Errorf("orun spec pull: snapshot %s does not match pin %s (the spec moved since the pin was minted)", id, pin)
+			}
+
+			dir := filepath.Join(".orun", "specs", slug)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
+			snapPath := filepath.Join(dir, "snapshot.json")
+			_ = os.Chmod(snapPath, 0o644) // allow overwrite of a prior read-only pull
+			if err := os.WriteFile(snapPath, canonical, 0o444); err != nil {
+				return err
+			}
+			briefPath := filepath.Join(dir, "BRIEF.md")
+			_ = os.Chmod(briefPath, 0o644)
+			if err := os.WriteFile(briefPath, []byte(renderBrief(snapshot, id)), 0o444); err != nil {
+				return err
+			}
+
+			out := cmd.OutOrStdout()
+			if idOnly {
+				fmt.Fprintln(out, id)
+				return nil
+			}
+			fmt.Fprintf(out, "sealed  %s\n", id)
+			fmt.Fprintf(out, "spec    %s — %s (%d tasks)\n", snapshot.Spec.Key, snapshot.Spec.Title, len(snapshot.Tasks))
+			fmt.Fprintf(out, "cursors coord=%d obs=%d\n", snapshot.CoordSeq, snapshot.ObsSeq)
+			fmt.Fprintf(out, "view    %s (read-only)\n", dir)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", "", "target workspace (org id or slug; defaults to the linked repo's)")
+	cmd.Flags().StringVar(&backendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
+	cmd.Flags().BoolVar(&idOnly, "id-only", false, "print only the snapshot id (for scripting/dispatch)")
+	parent.AddCommand(cmd)
+}
+
+// snapshotFromSummary rebuilds intent envelopes from the fold summary and
+// freezes them. Only intent crosses into the snapshot: contracts, docs,
+// provenance — never a rung, assignee, or pin.
+func snapshotFromSummary(workspace, slug string, summary *remotestate.WorkSummary) (*worklens.SpecSnapshot, error) {
+	var specView *remotestate.WorkSpecView
+	for i := range summary.Specs {
+		if summary.Specs[i].Key == slug {
+			specView = &summary.Specs[i]
+			break
+		}
+	}
+	if specView == nil {
+		return nil, fmt.Errorf("orun spec pull: unknown spec %q in workspace", slug)
+	}
+	spec := worklens.Spec{
+		APIVersion: worklens.APIVersion,
+		Kind:       worklens.KindSpec,
+		Key:        specView.Key,
+		Workspace:  workspace,
+		Title:      specView.Title,
+		DocRef:     specView.DocRef,
+		CreatedBy:  toLensActor(specView.CreatedBy),
+		CreatedAt:  specView.CreatedAt,
+	}
+	var tasks []worklens.Task
+	for _, t := range summary.Tasks {
+		if t.Spec != slug {
+			continue
+		}
+		tasks = append(tasks, worklens.Task{
+			APIVersion: worklens.APIVersion,
+			Kind:       worklens.KindTask,
+			Key:        t.Key,
+			Workspace:  workspace,
+			Spec:       t.Spec,
+			Title:      t.Title,
+			Labels:     t.Labels,
+			Contract:   toLensContract(t.Contract),
+			CreatedBy:  toLensActor(t.CreatedBy),
+			CreatedAt:  t.CreatedAt,
+		})
+	}
+	snap := worklens.NewSpecSnapshot(spec, tasks, "", summary.CoordSeq, summary.ObsSeq)
+	return &snap, nil
+}
+
+func toLensActor(a remotestate.WorkActor) worklens.Actor {
+	return worklens.Actor{Type: worklens.ActorType(a.Type), ID: a.ID, Via: a.Via}
+}
+
+func toLensContract(c *remotestate.WorkContract) *worklens.Contract {
+	if c == nil {
+		return nil
+	}
+	return &worklens.Contract{
+		Goal:         c.Goal,
+		Affects:      c.Affects,
+		DoneWhen:     c.DoneWhen,
+		Gates:        c.Gates,
+		DesignRefs:   c.DesignRefs,
+		Deps:         c.Deps,
+		GatesDefined: c.GatesDefined,
+	}
+}
+
+// renderBrief writes the human/agent-readable face of the frozen snapshot.
+func renderBrief(s *worklens.SpecSnapshot, id string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s — frozen brief\n\n", s.Spec.Title)
+	fmt.Fprintf(&b, "- snapshot: `%s`\n- spec: `%s`\n- cursors: coord=%d obs=%d\n", id, s.Spec.Key, s.CoordSeq, s.ObsSeq)
+	if s.Spec.DocRef != "" {
+		fmt.Fprintf(&b, "- doc: `%s`\n", s.Spec.DocRef)
+	}
+	fmt.Fprintf(&b, "\nThis view is read-only by construction: lifecycle derives from the\nobservation log, and coordination happens through the mutators — nothing\nhere accepts an edit.\n")
+	keys := make([]string, 0, len(s.Tasks))
+	for _, t := range s.Tasks {
+		keys = append(keys, t.Key)
+	}
+	sort.Strings(keys)
+	for _, t := range s.Tasks {
+		fmt.Fprintf(&b, "\n## %s — %s\n", t.Key, t.Title)
+		if c := t.Contract; c != nil {
+			if c.Goal != "" {
+				fmt.Fprintf(&b, "\n**Goal:** %s\n", c.Goal)
+			}
+			if len(c.Affects) > 0 {
+				fmt.Fprintf(&b, "**Affects:** %s\n", strings.Join(c.Affects, ", "))
+			}
+			if len(c.DoneWhen) > 0 {
+				fmt.Fprintf(&b, "**Done when:**\n")
+				for _, d := range c.DoneWhen {
+					fmt.Fprintf(&b, "- %s\n", d)
+				}
+			}
+			if len(c.Gates) > 0 {
+				fmt.Fprintf(&b, "**Gates:** %s\n", strings.Join(c.Gates, ", "))
+			}
+			if len(c.Deps) > 0 {
+				fmt.Fprintf(&b, "**Deps:** %s\n", strings.Join(c.Deps, ", "))
+			}
+		}
+	}
+	return b.String()
+}
