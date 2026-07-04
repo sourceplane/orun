@@ -9,8 +9,8 @@
 
 | ID | Milestone | Status |
 |----|-----------|--------|
-| WP0 | Import + the derived read (dogfood zero) | 🏗️ In progress — substrate landed both repos; read surface rides WP1's first PR |
-| WP1 | Coordination + the board | 🗓️ Not started |
+| WP0 | Import + the derived read (dogfood zero) | ✅ Shipped — orun #454 (worklens oracle + import dry-run) + orun-cloud #318 (two-log substrate) + the WP1 surface PRs (query API, console list, import apply, `orun work import`/`list`) |
+| WP1 | Coordination + the board | 🏗️ In progress — fold query API with evidence + mutator verdicts + read-only console Work page + import apply landed (orun-cloud WP1 PR; orun: remotestate work client, `orun work import` apply, `orun work list`); optimistic store + SSE replay + pin/comment UI pending |
 | WP2 | Observation ingestion: PRs + drift | 🗓️ Not started |
 | WP3 | Gates → Done, overlay → Released | 🗓️ Not started |
 | WP4 | Sealing + `orun spec pull` | 🗓️ Not started |
@@ -62,6 +62,23 @@
   ready → in_review → done → released walk from the logs with a pin
   rendering beside truth and auto-expiring on catch-up.
 
-**Still open for WP0/WP1:** the api-edge query surface + read-only console
-list (re-sliced into WP1's first PR), and the import apply path (the CLI
-refuses non-`--dry-run` until it exists).
+## WP1 — as-built (in progress)
+
+**orun-cloud:** the fold query API (`GET /v1/organizations/{org}/work` —
+rungs WITH evidence, drift, suggestions, per-spec progress, log cursors),
+the coordination-log events endpoint, the mutator routes with structured
+verdicts (agent pin → 422 `verdict_rejected`; no set-status route exists),
+the idempotent import apply (milestone-dep tokens rewrite to allocated
+keys; every event `via: import`; NO lifecycle imported), `work.read`/
+`work.write` policy actions, the SDK `WorkClient`, and the read-only
+console Work page (rung badges with evidence, pinned-beside-truth,
+blocked flags, drift inbox, claim suggestions).
+
+**orun:** `internal/remotestate` work client (`ImportWork`,
+`GetWorkSummary`), `orun work import` apply (scope/auth preamble shared
+with catalog push), `orun work list` (evidence-bearing rungs in the
+terminal).
+
+**Still open for WP1:** the local-first console store (snapshot + cursor
+replay over SSE/LISTEN-NOTIFY), optimistic apply, and the pin/comment UI —
+then the dogfood gate (this table retires).

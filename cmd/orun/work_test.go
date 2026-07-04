@@ -37,13 +37,13 @@ func TestWorkImportDryRunJSON(t *testing.T) {
 	}
 }
 
-func TestWorkImportRefusesApply(t *testing.T) {
+func TestWorkImportApplyNeedsBackend(t *testing.T) {
+	// Apply (no --dry-run) must resolve a backend + workspace before any
+	// write; in a bare test environment that resolution fails loudly rather
+	// than silently doing nothing.
 	out, err := runWorkCmd(t, "work", "import", "../../internal/worklens/testdata/spectree", "--workspace", "ws_test")
 	if err == nil {
-		t.Fatalf("apply accepted before the cloud path exists:\n%s", out)
-	}
-	if !strings.Contains(err.Error(), "--dry-run") {
-		t.Fatalf("error does not point at --dry-run: %v", err)
+		t.Fatalf("apply succeeded without a backend:\n%s", out)
 	}
 }
 
