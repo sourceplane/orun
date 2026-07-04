@@ -1,0 +1,263 @@
+{
+  "comment": "orun-work v2 fold conformance fixtures. The Go fold (internal/worklens) is the oracle; the orun-cloud TypeScript fold replays this exact file. Do not edit one copy without the other — the files must stay byte-identical.",
+  "cases": [
+    {
+      "name": "no contract folds to draft",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-1", "workspace": "ws_test", "title": "sketch", "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [],
+      "observations": [],
+      "expect": {
+        "lifecycles": { "ORN-1": { "rung": "draft", "ready": false, "blocked": false } }
+      }
+    },
+    {
+      "name": "complete contract folds to ready",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-2", "workspace": "ws_test", "title": "route reads", "contract": { "goal": "route catalog reads", "affects": ["sourceplane/orun/api-edge"], "doneWhen": ["parity green"], "gates": ["tests"] }, "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [],
+      "observations": [],
+      "expect": {
+        "lifecycles": { "ORN-2": { "rung": "ready", "ready": true, "blocked": false, "evidence": ["contract complete"] } }
+      }
+    },
+    {
+      "name": "branch seen with key parse folds to in_progress",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-3", "workspace": "ws_test", "title": "wire fold", "contract": { "goal": "g", "affects": ["a/b/c"], "doneWhen": ["d"], "gates": ["tests"] }, "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "branch_seen", "at": "2026-07-02T10:00:00Z", "dedupeKey": "gh:branch:orn-3-wire", "payload": { "branch": "feat/ORN-3-wire", "taskKeys": ["ORN-3"] }, "seq": 1 }
+      ],
+      "expect": {
+        "lifecycles": { "ORN-3": { "rung": "in_progress", "ready": true, "blocked": false, "evidence": ["branch feat/ORN-3-wire seen"] } }
+      }
+    },
+    {
+      "name": "open PR folds to in_review; draft PR to in_progress",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-4", "workspace": "ws_test", "title": "open pr", "createdBy": { "type": "user", "id": "usr_1" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-5", "workspace": "ws_test", "title": "draft pr", "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_opened", "at": "2026-07-02T10:00:00Z", "dedupeKey": "gh:pr:o/r#41:opened", "payload": { "pr": "o/r#41", "taskKeys": ["ORN-4"] }, "seq": 1 },
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_opened", "at": "2026-07-02T10:01:00Z", "dedupeKey": "gh:pr:o/r#42:opened", "payload": { "pr": "o/r#42", "draft": true, "taskKeys": ["ORN-5"] }, "seq": 2 }
+      ],
+      "expect": {
+        "lifecycles": {
+          "ORN-4": { "rung": "in_review", "ready": false, "blocked": false, "evidence": ["PR o/r#41 open"] },
+          "ORN-5": { "rung": "in_progress", "ready": false, "blocked": false, "evidence": ["PR o/r#42 draft"] }
+        }
+      }
+    },
+    {
+      "name": "merged with undeclared gates parks in_review (gates unknown to orun)",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-6", "workspace": "ws_test", "title": "no gates declared", "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_merged", "at": "2026-07-02T10:00:00Z", "dedupeKey": "gh:pr:o/r#43:merged", "payload": { "pr": "o/r#43", "revision": "sha256:aa", "taskKeys": ["ORN-6"] }, "seq": 1 }
+      ],
+      "expect": {
+        "lifecycles": { "ORN-6": { "rung": "in_review", "ready": false, "blocked": false, "evidence": ["PR o/r#43 merged; gates unknown to orun"] } }
+      }
+    },
+    {
+      "name": "merged with a gate orun has no record of parks in_review (P-3)",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-7", "workspace": "ws_test", "title": "gate unknown", "contract": { "goal": "g", "affects": ["a/b/c"], "doneWhen": ["d"], "gates": ["tests", "parity"] }, "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_merged", "at": "2026-07-02T10:00:00Z", "dedupeKey": "gh:pr:o/r#44:merged", "payload": { "pr": "o/r#44", "revision": "sha256:bb", "taskKeys": ["ORN-7"] }, "seq": 1 },
+        { "workspace": "ws_test", "source": "run-stream", "sourceVersion": 1, "kind": "gate_result", "at": "2026-07-02T10:01:00Z", "dedupeKey": "run:tests:sha256:bb", "payload": { "gate": "tests", "revision": "sha256:bb", "status": "green" }, "seq": 2 }
+      ],
+      "expect": {
+        "lifecycles": { "ORN-7": { "rung": "in_review", "ready": true, "blocked": false, "evidence": ["PR o/r#44 merged; gate parity unknown"] } }
+      }
+    },
+    {
+      "name": "merged with a red gate parks in_review naming the gate",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-8", "workspace": "ws_test", "title": "gate red", "contract": { "goal": "g", "affects": ["a/b/c"], "doneWhen": ["d"], "gates": ["tests"] }, "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_merged", "at": "2026-07-02T10:00:00Z", "dedupeKey": "gh:pr:o/r#45:merged", "payload": { "pr": "o/r#45", "revision": "sha256:cc", "taskKeys": ["ORN-8"] }, "seq": 1 },
+        { "workspace": "ws_test", "source": "run-stream", "sourceVersion": 1, "kind": "gate_result", "at": "2026-07-02T10:01:00Z", "dedupeKey": "run:tests:sha256:cc", "payload": { "gate": "tests", "revision": "sha256:cc", "status": "red" }, "seq": 2 }
+      ],
+      "expect": {
+        "lifecycles": { "ORN-8": { "rung": "in_review", "ready": true, "blocked": false, "evidence": ["PR o/r#45 merged; gate tests red"] } }
+      }
+    },
+    {
+      "name": "merged with all gates verified green folds to done",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-9", "workspace": "ws_test", "title": "gates green", "contract": { "goal": "g", "affects": ["a/b/c"], "doneWhen": ["d"], "gates": ["tests", "parity"] }, "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_merged", "at": "2026-07-02T10:00:00Z", "dedupeKey": "gh:pr:o/r#46:merged", "payload": { "pr": "o/r#46", "revision": "sha256:dd", "taskKeys": ["ORN-9"] }, "seq": 1 },
+        { "workspace": "ws_test", "source": "run-stream", "sourceVersion": 1, "kind": "gate_result", "at": "2026-07-02T10:01:00Z", "dedupeKey": "run:tests:sha256:dd", "payload": { "gate": "tests", "revision": "sha256:dd", "status": "green" }, "seq": 2 },
+        { "workspace": "ws_test", "source": "run-stream", "sourceVersion": 1, "kind": "gate_result", "at": "2026-07-02T10:02:00Z", "dedupeKey": "run:parity:sha256:dd", "payload": { "gate": "parity", "revision": "sha256:dd", "status": "green" }, "seq": 3 }
+      ],
+      "expect": {
+        "lifecycles": { "ORN-9": { "rung": "done", "ready": true, "blocked": false, "evidence": ["PR o/r#46 merged; gates green"] } }
+      }
+    },
+    {
+      "name": "explicit empty gate set lets merge alone reach done (P-7)",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-10", "workspace": "ws_test", "title": "gates empty", "contract": { "goal": "g", "affects": ["a/b/c"], "doneWhen": ["d"], "gatesDefined": true }, "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_merged", "at": "2026-07-02T10:00:00Z", "dedupeKey": "gh:pr:o/r#47:merged", "payload": { "pr": "o/r#47", "revision": "sha256:ee", "taskKeys": ["ORN-10"] }, "seq": 1 }
+      ],
+      "expect": {
+        "lifecycles": { "ORN-10": { "rung": "done", "ready": true, "blocked": false, "evidence": ["PR o/r#47 merged"] } }
+      }
+    },
+    {
+      "name": "revision observed live folds to released (never a deploy attempt)",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-11", "workspace": "ws_test", "title": "ship it", "contract": { "goal": "g", "affects": ["a/b/c"], "doneWhen": ["d"], "gates": ["tests"] }, "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_merged", "at": "2026-07-02T10:00:00Z", "dedupeKey": "gh:pr:o/r#48:merged", "payload": { "pr": "o/r#48", "revision": "sha256:ff", "taskKeys": ["ORN-11"] }, "seq": 1 },
+        { "workspace": "ws_test", "source": "run-stream", "sourceVersion": 1, "kind": "gate_result", "at": "2026-07-02T10:01:00Z", "dedupeKey": "run:tests:sha256:ff", "payload": { "gate": "tests", "revision": "sha256:ff", "status": "green" }, "seq": 2 },
+        { "workspace": "ws_test", "source": "deploy-overlay", "sourceVersion": 1, "kind": "revision_live", "at": "2026-07-02T10:05:00Z", "dedupeKey": "overlay:sha256:ff:production", "payload": { "revision": "sha256:ff", "environment": "production" }, "seq": 3 }
+      ],
+      "expect": {
+        "lifecycles": { "ORN-11": { "rung": "released", "ready": true, "blocked": false, "evidence": ["revision sha256:ff live in production (PR o/r#48)"] } }
+      }
+    },
+    {
+      "name": "pin renders beside observed truth and expires on catch-up",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-12", "workspace": "ws_test", "title": "pinned while draft", "createdBy": { "type": "user", "id": "usr_1" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-13", "workspace": "ws_test", "title": "pin expired by merge", "contract": { "goal": "g", "affects": ["a/b/c"], "doneWhen": ["d"], "gatesDefined": true }, "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [
+        { "workspace": "ws_test", "subject": "ORN-12", "kind": "pinned", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-02T09:00:00Z", "payload": { "rung": "done", "note": "shipping as-is" }, "seq": 1 },
+        { "workspace": "ws_test", "subject": "ORN-13", "kind": "pinned", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-02T09:01:00Z", "payload": { "rung": "done" }, "seq": 2 }
+      ],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_merged", "at": "2026-07-02T10:00:00Z", "dedupeKey": "gh:pr:o/r#49:merged", "payload": { "pr": "o/r#49", "revision": "sha256:gg", "taskKeys": ["ORN-13"] }, "seq": 1 }
+      ],
+      "expect": {
+        "lifecycles": {
+          "ORN-12": { "rung": "draft", "ready": false, "blocked": false, "pinned": { "rung": "done", "by": "usr_1" } },
+          "ORN-13": { "rung": "done", "ready": true, "blocked": false, "evidence": ["PR o/r#49 merged"] }
+        }
+      }
+    },
+    {
+      "name": "unpin clears an active pin",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-14", "workspace": "ws_test", "title": "unpinned", "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [
+        { "workspace": "ws_test", "subject": "ORN-14", "kind": "pinned", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-02T09:00:00Z", "payload": { "rung": "done" }, "seq": 1 },
+        { "workspace": "ws_test", "subject": "ORN-14", "kind": "pinned", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-02T09:05:00Z", "payload": {}, "seq": 2 }
+      ],
+      "observations": [],
+      "expect": {
+        "lifecycles": { "ORN-14": { "rung": "draft", "ready": false, "blocked": false } }
+      }
+    },
+    {
+      "name": "canceled is terminal and authored",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-15", "workspace": "ws_test", "title": "gave up", "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [
+        { "workspace": "ws_test", "subject": "ORN-15", "kind": "canceled", "actor": { "type": "user", "id": "usr_2" }, "at": "2026-07-02T09:00:00Z", "seq": 1 }
+      ],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_opened", "at": "2026-07-02T10:00:00Z", "dedupeKey": "gh:pr:o/r#50:opened", "payload": { "pr": "o/r#50", "taskKeys": ["ORN-15"] }, "seq": 1 }
+      ],
+      "expect": {
+        "lifecycles": { "ORN-15": { "rung": "canceled", "ready": false, "blocked": false, "evidence": ["canceled by usr_2"] } }
+      }
+    },
+    {
+      "name": "unambiguous component overlap claims; ambiguity suggests (P-6)",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-16", "workspace": "ws_test", "title": "solo claimer", "contract": { "goal": "g", "affects": ["ns/repo/auth"], "doneWhen": ["d"], "gates": ["tests"] }, "createdBy": { "type": "user", "id": "usr_1" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-17", "workspace": "ws_test", "title": "contender a", "contract": { "goal": "g", "affects": ["ns/repo/billing"], "doneWhen": ["d"], "gates": ["tests"] }, "createdBy": { "type": "user", "id": "usr_1" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-18", "workspace": "ws_test", "title": "contender b", "contract": { "goal": "g", "affects": ["ns/repo/billing"], "doneWhen": ["d"], "gates": ["tests"] }, "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_opened", "at": "2026-07-02T10:00:00Z", "dedupeKey": "gh:pr:o/r#51:opened", "payload": { "pr": "o/r#51", "affected": ["ns/repo/auth"] }, "seq": 1 },
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_opened", "at": "2026-07-02T10:01:00Z", "dedupeKey": "gh:pr:o/r#52:opened", "payload": { "pr": "o/r#52", "affected": ["ns/repo/billing"] }, "seq": 2 }
+      ],
+      "expect": {
+        "lifecycles": {
+          "ORN-16": { "rung": "in_review", "ready": true, "blocked": false, "evidence": ["PR o/r#51 open"] },
+          "ORN-17": { "rung": "ready", "ready": true, "blocked": false, "evidence": ["contract complete"] },
+          "ORN-18": { "rung": "ready", "ready": true, "blocked": false, "evidence": ["contract complete"] }
+        },
+        "suggestions": [ { "pr": "o/r#52", "taskKeys": ["ORN-17", "ORN-18"] } ]
+      }
+    },
+    {
+      "name": "unclaimed merged PR over unplanned components raises drift",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-19", "workspace": "ws_test", "title": "planned work", "contract": { "goal": "g", "affects": ["ns/repo/auth"], "doneWhen": ["d"], "gates": ["tests"] }, "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_merged", "at": "2026-07-02T10:00:00Z", "dedupeKey": "gh:pr:o/r#53:merged", "payload": { "pr": "o/r#53", "revision": "sha256:hh", "affected": ["ns/repo/billing-worker"] }, "seq": 1 }
+      ],
+      "expect": {
+        "lifecycles": { "ORN-19": { "rung": "ready", "ready": true, "blocked": false, "evidence": ["contract complete"] } },
+        "drift": [ { "pr": "o/r#53", "affected": ["ns/repo/billing-worker"] } ]
+      }
+    },
+    {
+      "name": "open dep raises the blocked flag; done dep clears it",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-20", "workspace": "ws_test", "title": "dep open", "contract": { "goal": "g", "affects": ["a/b/c"], "doneWhen": ["d"], "gates": ["tests"], "deps": ["ORN-21"] }, "createdBy": { "type": "user", "id": "usr_1" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-21", "workspace": "ws_test", "title": "the dep", "contract": { "goal": "g", "affects": ["a/b/d"], "doneWhen": ["d"], "gatesDefined": true }, "createdBy": { "type": "user", "id": "usr_1" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-22", "workspace": "ws_test", "title": "dep done", "contract": { "goal": "g", "affects": ["a/b/e"], "doneWhen": ["d"], "gates": ["tests"], "deps": ["ORN-23"] }, "createdBy": { "type": "user", "id": "usr_1" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-23", "workspace": "ws_test", "title": "the done dep", "contract": { "goal": "g", "affects": ["a/b/f"], "doneWhen": ["d"], "gatesDefined": true }, "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_merged", "at": "2026-07-02T10:00:00Z", "dedupeKey": "gh:pr:o/r#54:merged", "payload": { "pr": "o/r#54", "revision": "sha256:ii", "taskKeys": ["ORN-23"] }, "seq": 1 }
+      ],
+      "expect": {
+        "lifecycles": {
+          "ORN-20": { "rung": "ready", "ready": true, "blocked": true, "evidence": ["contract complete"] },
+          "ORN-21": { "rung": "ready", "ready": true, "blocked": false, "evidence": ["contract complete"] },
+          "ORN-22": { "rung": "ready", "ready": true, "blocked": false, "evidence": ["contract complete"] },
+          "ORN-23": { "rung": "done", "ready": true, "blocked": false, "evidence": ["PR o/r#54 merged"] }
+        }
+      }
+    }
+  ]
+}
