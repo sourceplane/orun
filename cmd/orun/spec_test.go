@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sourceplane/orun/internal/remotestate"
+	"github.com/sourceplane/orun/internal/workbrief"
 	"github.com/sourceplane/orun/internal/worklens"
 )
 
@@ -40,7 +41,7 @@ func summaryFixture() *remotestate.WorkSummary {
 }
 
 func TestSnapshotFromSummaryFreezesIntentOnly(t *testing.T) {
-	snap, err := snapshotFromSummary("ws_1", "demo-epic", summaryFixture())
+	snap, err := workbrief.SnapshotFromSummary("ws_1", "demo-epic", summaryFixture())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,18 +62,18 @@ func TestSnapshotFromSummaryFreezesIntentOnly(t *testing.T) {
 		}
 	}
 	// Determinism across rebuilds.
-	snap2, _ := snapshotFromSummary("ws_1", "demo-epic", summaryFixture())
+	snap2, _ := workbrief.SnapshotFromSummary("ws_1", "demo-epic", summaryFixture())
 	id2, _, _ := worklens.SealSpecSnapshot(*snap2)
 	if id != id2 {
 		t.Fatal("rebuilt snapshot sealed to a different id")
 	}
-	if _, err := snapshotFromSummary("ws_1", "missing", summaryFixture()); err == nil {
+	if _, err := workbrief.SnapshotFromSummary("ws_1", "missing", summaryFixture()); err == nil {
 		t.Fatal("unknown slug accepted")
 	}
 }
 
 func TestRenderBriefIsAgentReadable(t *testing.T) {
-	snap, _ := snapshotFromSummary("ws_1", "demo-epic", summaryFixture())
+	snap, _ := workbrief.SnapshotFromSummary("ws_1", "demo-epic", summaryFixture())
 	id, _, _ := worklens.SealSpecSnapshot(*snap)
 	brief := renderBrief(snap, id)
 	for _, want := range []string{"# Demo Epic — frozen brief", id, "## WRK-1 — first", "**Goal:** g", "**Gates:** tests", "read-only by construction"} {
@@ -91,7 +92,7 @@ func TestSpecPullMaterializationIsReadOnly(t *testing.T) {
 	defer func() { _ = os.Chdir(old) }()
 	_ = os.Chdir(dir)
 
-	snap, _ := snapshotFromSummary("ws_1", "demo-epic", summaryFixture())
+	snap, _ := workbrief.SnapshotFromSummary("ws_1", "demo-epic", summaryFixture())
 	_, canonical, _ := worklens.SealSpecSnapshot(*snap)
 	target := filepath.Join(".orun", "specs", "demo-epic")
 	if err := os.MkdirAll(target, 0o755); err != nil {

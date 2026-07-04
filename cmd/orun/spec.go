@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/sourceplane/orun/internal/remotestate"
+	"github.com/sourceplane/orun/internal/workbrief"
 	"github.com/sourceplane/orun/internal/worklens"
 )
 
@@ -69,7 +69,7 @@ refs/work remote ride a later slice.)`,
 				return fmt.Errorf("orun spec pull: %w", err)
 			}
 
-			snapshot, err := snapshotFromSummary(client.Scope().OrgID, slug, summary)
+			snapshot, err := workbrief.SnapshotFromSummary(client.Scope().OrgID, slug, summary)
 			if err != nil {
 				return err
 			}
@@ -112,71 +112,6 @@ refs/work remote ride a later slice.)`,
 	cmd.Flags().StringVar(&backendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
 	cmd.Flags().BoolVar(&idOnly, "id-only", false, "print only the snapshot id (for scripting/dispatch)")
 	parent.AddCommand(cmd)
-}
-
-// snapshotFromSummary rebuilds intent envelopes from the fold summary and
-// freezes them. Only intent crosses into the snapshot: contracts, docs,
-// provenance — never a rung, assignee, or pin.
-func snapshotFromSummary(workspace, slug string, summary *remotestate.WorkSummary) (*worklens.SpecSnapshot, error) {
-	var specView *remotestate.WorkSpecView
-	for i := range summary.Specs {
-		if summary.Specs[i].Key == slug {
-			specView = &summary.Specs[i]
-			break
-		}
-	}
-	if specView == nil {
-		return nil, fmt.Errorf("orun spec pull: unknown spec %q in workspace", slug)
-	}
-	spec := worklens.Spec{
-		APIVersion: worklens.APIVersion,
-		Kind:       worklens.KindSpec,
-		Key:        specView.Key,
-		Workspace:  workspace,
-		Title:      specView.Title,
-		DocRef:     specView.DocRef,
-		CreatedBy:  toLensActor(specView.CreatedBy),
-		CreatedAt:  specView.CreatedAt,
-	}
-	var tasks []worklens.Task
-	for _, t := range summary.Tasks {
-		if t.Spec != slug {
-			continue
-		}
-		tasks = append(tasks, worklens.Task{
-			APIVersion: worklens.APIVersion,
-			Kind:       worklens.KindTask,
-			Key:        t.Key,
-			Workspace:  workspace,
-			Spec:       t.Spec,
-			Title:      t.Title,
-			Labels:     t.Labels,
-			Contract:   toLensContract(t.Contract),
-			CreatedBy:  toLensActor(t.CreatedBy),
-			CreatedAt:  t.CreatedAt,
-		})
-	}
-	snap := worklens.NewSpecSnapshot(spec, tasks, "", summary.CoordSeq, summary.ObsSeq)
-	return &snap, nil
-}
-
-func toLensActor(a remotestate.WorkActor) worklens.Actor {
-	return worklens.Actor{Type: worklens.ActorType(a.Type), ID: a.ID, Via: a.Via}
-}
-
-func toLensContract(c *remotestate.WorkContract) *worklens.Contract {
-	if c == nil {
-		return nil
-	}
-	return &worklens.Contract{
-		Goal:         c.Goal,
-		Affects:      c.Affects,
-		DoneWhen:     c.DoneWhen,
-		Gates:        c.Gates,
-		DesignRefs:   c.DesignRefs,
-		Deps:         c.Deps,
-		GatesDefined: c.GatesDefined,
-	}
 }
 
 // renderBrief writes the human/agent-readable face of the frozen snapshot.

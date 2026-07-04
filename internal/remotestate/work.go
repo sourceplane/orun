@@ -127,3 +127,65 @@ func (c *Client) GetWorkSummary(ctx context.Context) (*WorkSummary, error) {
 	}
 	return &resp, nil
 }
+
+// ── Coordination mutators (the WP1 routes; the MCP's write surface) ─────────
+
+// CreateWorkTaskRequest mirrors the platform's CreateWorkTaskRequest.
+type CreateWorkTaskRequest struct {
+	Prefix   string        `json:"prefix"`
+	Title    string        `json:"title"`
+	SpecKey  string        `json:"specKey,omitempty"`
+	Contract *WorkContract `json:"contract,omitempty"`
+}
+
+// WorkMutationResponse reports the appended coordination event's seq.
+type WorkMutationResponse struct {
+	Key string `json:"key"`
+	Seq int64  `json:"seq"`
+}
+
+// CreateWorkTask creates a task through the one mutator surface.
+func (c *Client) CreateWorkTask(ctx context.Context, req CreateWorkTaskRequest) (*WorkMutationResponse, error) {
+	var resp WorkMutationResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/tasks"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CommentWork appends a comment_added event.
+func (c *Client) CommentWork(ctx context.Context, key, body string) (*WorkMutationResponse, error) {
+	var resp WorkMutationResponse
+	req := struct {
+		Body string `json:"body"`
+	}{Body: body}
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/tasks/"+urlSegment(key)+"/comment"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// AssignWork appends an assigned/unassigned event for a membership subject.
+func (c *Client) AssignWork(ctx context.Context, key, subject string, unassign bool) (*WorkMutationResponse, error) {
+	var resp WorkMutationResponse
+	req := struct {
+		Subject  string `json:"subject"`
+		Unassign bool   `json:"unassign,omitempty"`
+	}{Subject: subject, Unassign: unassign}
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/tasks/"+urlSegment(key)+"/assign"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// EditWorkContract appends a contract_edited event.
+func (c *Client) EditWorkContract(ctx context.Context, key string, contract WorkContract) (*WorkMutationResponse, error) {
+	var resp WorkMutationResponse
+	req := struct {
+		Contract WorkContract `json:"contract"`
+	}{Contract: contract}
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/tasks/"+urlSegment(key)+"/contract"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
