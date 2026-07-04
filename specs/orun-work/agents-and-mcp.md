@@ -98,3 +98,8 @@ Agents epic:
 
 No new model, no new write path, no new permissions. The Agents section is
 UI over rails this spec lays.
+
+> That epic now exists: `orun-cloud/specs/epics/saas-agents/` (cluster
+> **AG** — the sandbox runtime, session identity, design/implementation
+> runs, autonomy ladder), paired with the holding entry
+> [`../orun-agents/`](../orun-agents/README.md) for this repo's half.
