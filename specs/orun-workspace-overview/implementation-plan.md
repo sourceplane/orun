@@ -1,10 +1,16 @@
 # Orun Workspace Overview (CLI half) — Implementation plan
 
-Status: Draft (revised 2026-07-01 to adopt `architecture-review.md`). This is
+Status: **WO3 Steps 1–5 landed** (revised 2026-07-01 to adopt
+`architecture-review.md`; implementation verified 2026-07-04 on `ogpic`). This is
 milestone **WO3** of the cross-repo epic (orun-cloud
 `specs/epics/saas-workspace-overview/`) — the CLI half, in **Phase 2**. The
 orun-cloud landing (**WO2**) ships first and needs nothing here; this milestone
 lands behind a page that is already live.
+
+**Follow-up: WO3.1 (below) is open** — the read surface. WO3 writes the `Repo`
+entity and its overview blob correctly, but `catalog describe repo:<…>` (Step 5's
+"done when") does **not** render, because `describe` is component-only and the
+entity read view drops `docs`/`links`/`ownership`. See §3d in `README.md`.
 
 Scope for WO3: the **`Repo`** kind, `docs.overview`, and doc **blobs** (docs ride
 the existing `blob` object kind — no new kind). **`Product` is deferred to WO6**
@@ -98,8 +104,61 @@ tree does not push bytes that mismatch the pinned sha.
   closure, the head advances, an unchanged re-push is a no-op, and a dirty-tree
   push either reads from the commit or refuses the doc object.
 
-**Done when:** the above pass and `orun catalog describe repo:<…>` renders the new
-entity with its overview reference.
+**Done when:** the above pass. (The `orun catalog describe repo:<…>` render is
+**moved to WO3.1** — `describe` is not yet kind-aware, so it cannot be a WO3
+gate; the write-path tests above stand on their own.)
+
+## Milestone WO3.1 — entity read surface + overview render (OPEN)
+
+The gap found on 2026-07-04: WO3 resolves and pushes the `Repo` entity + overview
+blob, but nothing surfaces them locally. Design in `README.md §3d`; three steps,
+smallest first.
+
+### 3.1a — enrich the entity read view (enabling)
+
+- `internal/objcatalog`: extend `EntityView` with `DisplayName`, `Description`,
+  `Owner`, `Tags []string`, `Links []map[string]any`, `Docs map[string]any`;
+  populate them in `readEntities` from the decoded `nodes.Entity`
+  (`Metadata`/`Ownership`/`Links`/`Docs`). Keep the existing fields.
+
+**Done when:** loading the `ogpic` catalog yields a `Repo` `EntityView` whose
+`Docs["overview"]` carries `{path, sha, digest}`, `Owner`/`Tags`/`Links` are
+populated, and existing consumers (`list --kind`) still compile/pass.
+
+### 3.1b — make `catalog describe` kind-aware
+
+- `cmd/orun/catalog_describe.go`: add `selectObjEntity(view, kind, key)` and route
+  a `<kind>:<key>` arg (or `--kind != Component`) to it; keep `selectObjComponent`
+  as the default (no-prefix) path so `describe api-edge` is unchanged.
+- Accept `describe repo:<key>`, `describe --kind Repo <name|key>`, and bare
+  `describe repo` (resolve the single `Repo` in the snapshot).
+- Render entity envelope sections (metadata/ownership/links/docs/relations/
+  members); the `docs.overview` line prints `path` + `digest`. `--json` emits the
+  entity envelope.
+- Exit codes per `orun-service-catalog/cli-surface.md §2`: `4` ambiguous across
+  kinds (list `kind/entityKey` candidates), `6` entity absent.
+
+**Done when:** `orun catalog describe repo:sourceplane/ogpic/ogpic` (and bare
+`describe repo`) renders the entity with its overview reference; `describe
+api-edge` is byte-unchanged; ambiguity/absent exit 4/6.
+
+### 3.1c — render the overview bytes
+
+- Add `orun catalog docs <entity> [name]` (default `overview`): resolve
+  `docs.<name>.digest` off the entity, `Get` the closure `blob` via the
+  `objcatalog` store, print the markdown (text) or `--json {path, sha, digest,
+  content}`. Exit `6` when the entity or the named doc is absent.
+
+**Done when:** `orun catalog docs repo:sourceplane/ogpic/ogpic` prints
+`docs/overview.md`'s bytes and the digest matches the `doc_ref.digest` in the
+snapshot (local preview == what orun-cloud renders).
+
+### 3.1 tests
+
+- `internal/objcatalog`: `EntityView` carries docs/links/owner/tags for a `Repo`.
+- `cmd/orun`: `describe repo:<key>`, bare `describe repo`, `--kind Repo`, the
+  cross-kind ambiguity (exit 4) and absent (exit 6) paths; `describe api-edge`
+  golden unchanged; `catalog docs` digest-parity.
 
 ## Sequencing & compatibility
 
