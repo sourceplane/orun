@@ -55,7 +55,7 @@ Scope defaults to the linked project: --env <env> targets an environment rung,
 
 	setCmd := &cobra.Command{
 		Use:   "set <KEY>",
-		Short: "Set a secret value (reads the value from stdin unless --value is given)",
+		Short: "Set a secret value (prompts for the value, or reads stdin / --value)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSecretsSet(cmd, args[0])
@@ -94,7 +94,7 @@ Scope defaults to the linked project: --env <env> targets an environment rung,
 
 	rotateCmd := &cobra.Command{
 		Use:   "rotate <KEY> --env <env>",
-		Short: "Append a new version of a secret (value from stdin unless --value)",
+		Short: "Append a new version of a secret (prompts for the value, or reads stdin / --value)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSecretsRotate(cmd, args[0])
@@ -326,27 +326,47 @@ func intentEnvironmentNames(intent *model.Intent) []string {
 	return names
 }
 
-// readSecretValue returns the value for set/rotate: from --value (with a
-// shell-history warning) or from stdin. On a TTY a short prompt goes to
-// stderr; all of stdin is read and one trailing newline is trimmed.
+// readSecretValue returns the value for set/rotate. Precedence:
+//   - --value flag (with a shell-history warning);
+//   - an interactive terminal: a masked single-line prompt (echo off), where
+//     Enter submits — no Ctrl-D / EOF needed (the wrangler-style flow);
+//   - a pipe / non-TTY stdin: the piped value, with one trailing newline
+//     trimmed (so `printf 'x' |` and `echo x |` both work), for CI and scripts.
 func readSecretValue(cmd *cobra.Command) (string, error) {
 	if cmd.Flags().Changed("value") {
-		fmt.Fprintln(os.Stderr, "warning: --value may be recorded in your shell history; prefer piping the value on stdin")
+		fmt.Fprintln(os.Stderr, "warning: --value may be recorded in your shell history; prefer the interactive prompt or piping on stdin")
 		if secretsValueFlag == "" {
 			return "", fmt.Errorf("--value is empty")
 		}
 		return secretsValueFlag, nil
 	}
-	if term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Fprintln(os.Stderr, "Enter value (input hidden not guaranteed; end with EOF):")
+
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		// Masked, single line: read the value with terminal echo disabled and
+		// submit on Enter. The value is taken verbatim (never trimmed) so a
+		// token with meaningful whitespace is preserved.
+		fmt.Fprint(os.Stderr, "Enter secret value (input hidden): ")
+		data, err := term.ReadPassword(fd)
+		fmt.Fprintln(os.Stderr) // Enter is not echoed; move off the prompt line.
+		if err != nil {
+			return "", fmt.Errorf("reading value: %w", err)
+		}
+		value := string(data)
+		if value == "" {
+			return "", fmt.Errorf("no value entered")
+		}
+		return value, nil
 	}
+
+	// Piped / non-interactive stdin.
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		return "", fmt.Errorf("reading value from stdin: %w", err)
 	}
 	value := trimOneTrailingNewline(string(data))
 	if value == "" {
-		return "", fmt.Errorf("no value provided: pipe the value on stdin or pass --value")
+		return "", fmt.Errorf("no value provided: run interactively, pipe the value on stdin, or pass --value")
 	}
 	return value, nil
 }
