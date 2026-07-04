@@ -14,7 +14,7 @@
 | WP2 | Observation ingestion: PRs + drift | ✅ Shipped — orun-cloud #327: the webhook drain projects normalized scm.* PR/branch events into the fact log (same-tx, semantic dedupe, task-key parse); the `ci` producer endpoint carries affected sets; the WP0 claim join + drift inbox light up from live facts |
 | WP3 | Gates → Done, overlay → Released | 🏗️ Mostly shipped — orun-cloud WP3 PR: run-stream gate verdicts from terminal job phases keyed to the run's git revision (P-3: execution truth, never GitHub statuses); the deploy-overlay → revision_live bridge built + tested; the In Review → Done → Released walk proven from facts. Remaining: the runtime call site awaits saas-resources-runtime |
 | WP4 | Sealing + `orun spec pull` | 🏗️ In progress — seal core (canonical JSON, ContentID, SpecSnapshot intent-only-by-type with a hot-state guard, chained log segments) + `orun spec pull <slug>[@sha256:…]` (client-side seal from the fold API, read-only materialization, pin verification, --id-only for dispatch). Remaining: server-side sealing + the refs/work remote leg |
-| WP5 | The orun MCP | 🗓️ Not started |
+| WP5 | The orun MCP | ✅ Shipped — `orun mcp serve` (stdio, dependency-free JSON-RPC 2.0): reads return the fold with evidence (`work_query`/`work_get`) and sealed intent-only briefs (`spec_get`); the write surface is exactly four tools through the cloud mutators (`task_create`/`task_comment`/`task_assign`/`contract_propose` — applied AND flagged for human review). No lifecycle write tool and no pin tool exist (WP-3/WP-10: the lie is unrepresentable), asserted by test |
 
 ## WP0 — as-built
 
@@ -82,3 +82,27 @@ terminal).
 **Still open for WP1:** the local-first console store (snapshot + cursor
 replay over SSE/LISTEN-NOTIFY), optimistic apply, and the pin/comment UI —
 then the dogfood gate (this table retires).
+
+## WP5 — as-built
+
+**orun (`internal/workmcp` + `orun mcp serve`):** a minimal, dependency-free
+MCP server (newline-delimited JSON-RPC 2.0 over stdio) over the `WorkAPI`
+seam (`remotestate.Client`). The tool surface is closed at 7:
+
+- Reads: `work_query` (the fold summary with evidence), `work_get` (one
+  task), `spec_get` (a client-side-sealed, content-addressed SpecSnapshot —
+  fold output asserted absent from the sealed bytes).
+- Writes: `task_create`, `task_comment`, `task_assign`, and
+  `contract_propose` (contract applied through the mutators AND flagged
+  with a review comment — an agent cannot quietly redefine its own
+  definition of done). Tool failures return MCP `isError` results (verdicts
+  the agent reasons about), never protocol faults.
+- **No `task_update_status` and no pin tool exist** — asserted by test; the
+  cloud mutator additionally rejects agent pins server-side (defense in
+  depth, not client-side trust).
+
+Remaining epic-wide (recorded per milestone): WP1b console depth (optimistic
+store, SSE cursor replay, pin/comment UI), the resources-runtime call site
+for `revision_live`, server-side sealing + the `refs/work` remote leg, and
+`orun work import` of both repos' spec trees against a live workspace (the
+dogfood gate that retires this table).
