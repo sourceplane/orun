@@ -129,6 +129,7 @@ Run 'orun catalog <subcommand> --help' for details on each.`,
 	registerCatalogPushCommand(catalogCmd)
 	registerCatalogListCommand(catalogCmd)
 	registerCatalogDescribeCommand(catalogCmd)
+	registerCatalogDocsCommand(catalogCmd)
 	registerCatalogTreeCommand(catalogCmd)
 	registerCatalogHistoryCommand(catalogCmd)
 	registerCatalogValidateCommand(catalogCmd)
