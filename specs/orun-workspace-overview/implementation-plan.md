@@ -7,10 +7,10 @@ milestone **WO3** of the cross-repo epic (orun-cloud
 orun-cloud landing (**WO2**) ships first and needs nothing here; this milestone
 lands behind a page that is already live.
 
-**Follow-up: WO3.1 (below) is open** — the read surface. WO3 writes the `Repo`
-entity and its overview blob correctly, but `catalog describe repo:<…>` (Step 5's
-"done when") does **not** render, because `describe` is component-only and the
-entity read view drops `docs`/`links`/`ownership`. See §3d in `README.md`.
+**Follow-up: WO3.1 (below) is ✅ shipped** — the read surface. `EntityView` now
+carries the entity envelope (#449); `catalog describe` is kind-aware (#450);
+`catalog docs <entity>` prints the overview bytes (#451). `catalog describe
+repo:<…>` (Step 5's "done when") now renders. See §3d in `README.md`.
 
 Scope for WO3: the **`Repo`** kind, `docs.overview`, and doc **blobs** (docs ride
 the existing `blob` object kind — no new kind). **`Product` is deferred to WO6**
@@ -108,7 +108,7 @@ tree does not push bytes that mismatch the pinned sha.
 **moved to WO3.1** — `describe` is not yet kind-aware, so it cannot be a WO3
 gate; the write-path tests above stand on their own.)
 
-## Milestone WO3.1 — entity read surface + overview render (OPEN)
+## Milestone WO3.1 — entity read surface + overview render (✅ SHIPPED — #449/#450/#451)
 
 The gap found on 2026-07-04: WO3 resolves and pushes the `Repo` entity + overview
 blob, but nothing surfaces them locally. Design in `README.md §3d`; three steps,

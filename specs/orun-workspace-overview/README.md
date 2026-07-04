@@ -17,7 +17,7 @@
 
 | | |
 |---|---|
-| **Status** | WO3 **landed** — `Repo` kind, `docs.overview`, and doc blobs resolve and push (verified on `ogpic`: `entities/Repo/ogpic.json` carries `docs.overview={path,sha,digest}` and the overview md is a closure `blob`). **Read surface incomplete** (§3d / WO3.1): the resolved `Repo` entity and its overview are not renderable locally — `catalog describe` is still component-only and the entity read view drops `docs`/`links`/`ownership`, so the WO3 "done when" (`describe repo:<…>` renders the overview) does not pass. |
+| **Status** | ✅ **WO3 + WO3.1 shipped.** WO3: `Repo` kind, `docs.overview`, and doc blobs resolve and push (verified on `ogpic`: `entities/Repo/ogpic.json` carries `docs.overview={path,sha,digest}` and the overview md is a closure `blob`). WO3.1 (the read surface, §3d): `EntityView` now carries the entity envelope (#449); `catalog describe` is kind-aware (#450); `catalog docs <entity>` prints the overview bytes (#451). The WO3 "done when" passes — `catalog describe repo:<…>` renders the entity and `catalog docs repo:<…>` prints `docs/overview.md` with digest parity to the snapshot's `doc_ref`. |
 | **Repos** | `sourceplane/orun` (CLI, Go — this half) · `sourceplane/orun-cloud` (platform, TS) |
 | **Target branch** | `claude/orun-workspace-overview-design-qonyiv` |
 | **Pairs with** | orun-cloud WO4 (projection + `state.repo_facet` + `doc_ref`; docs ride the existing `blob` kind), `specs/orun-service-catalog` (the entity model this extends), `specs/oidc-ci-tenancy` (the org/project push scope this reuses) |
