@@ -17,7 +17,7 @@
 
 | | |
 |---|---|
-| **Status** | Proposed (design complete; no code landed) |
+| **Status** | WO3 **landed** — `Repo` kind, `docs.overview`, and doc blobs resolve and push (verified on `ogpic`: `entities/Repo/ogpic.json` carries `docs.overview={path,sha,digest}` and the overview md is a closure `blob`). **Read surface incomplete** (§3d / WO3.1): the resolved `Repo` entity and its overview are not renderable locally — `catalog describe` is still component-only and the entity read view drops `docs`/`links`/`ownership`, so the WO3 "done when" (`describe repo:<…>` renders the overview) does not pass. |
 | **Repos** | `sourceplane/orun` (CLI, Go — this half) · `sourceplane/orun-cloud` (platform, TS) |
 | **Target branch** | `claude/orun-workspace-overview-design-qonyiv` |
 | **Pairs with** | orun-cloud WO4 (projection + `state.repo_facet` + `doc_ref`; docs ride the existing `blob` kind), `specs/orun-service-catalog` (the entity model this extends), `specs/oidc-ci-tenancy` (the org/project push scope this reuses) |
@@ -158,6 +158,66 @@ otherwise the pushed bytes can diverge from the sha the provenance line advertis
 This preserves the **"any git remote, no GitHub App"** invariant
 (`orun-cloud/specs/components/18-state.md`): the CLI reads the repo and pushes;
 nothing here depends on a provider API.
+
+### 3d. Catalog read surface for the `Repo` entity + its overview (WO3.1) — the gap
+
+WO3 (§3a–§3c) **writes** the `Repo` entity and walks the overview md into the
+closure correctly, but there is **no read command that surfaces it**. The gap,
+grounded against the built binary:
+
+- **`catalog list --kind Repo`** works (`objcatalog.CatalogView.Entities` already
+  enumerates `entities/<Kind>/`), but the row is thin — `ENTITY / KEY / MEMBERS`
+  only. `objcatalog.EntityView` carries `Kind/EntityKey/Name/Namespace/Repo/
+  MemberCount/Members/Version/Lifecycle/Description` and **drops** the entity's
+  `docs`, `links`, `ownership`, and `metadata` (displayName/description/tags)
+  blocks. So the overview reference, owner, links, and tags are invisible.
+- **`catalog describe <arg>`** is **component-only**: `selectObjComponent`
+  (`cmd/orun/catalog_describe.go`) matches `arg` against `view.Components` alone.
+  `describe repo:<key>` returns exit 6 "component not found", so the resolved
+  `Repo` entity — and its overview — cannot be inspected. This directly fails the
+  WO3 "done when" (`implementation-plan.md` Step 5).
+- **No command renders the overview bytes.** Even with the `doc_ref.digest` in
+  hand there is no CLI path to read the closure `blob` and print the markdown, so
+  a repo author cannot preview locally what orun-cloud will render at the read
+  edge.
+
+Note this surface was **already designed** for the catalog broadly in
+`orun-service-catalog/cli-surface.md §2` ("`orun catalog describe <entity>` —
+full envelope … Replaces today's component-only manifest render", with `--kind`
+disambiguation and exit `4` ambiguous / `6` absent). That kind-aware `describe`
+was **not built** (the list half of SC3 shipped; the describe half did not). WO3.1
+finishes it for the `Repo`/overview case and leaves the general entity path
+conformant with the service-catalog design.
+
+**Design — three changes, smallest first:**
+
+1. **Enrich the read view (enabling change).** In `internal/objcatalog`, extend
+   `EntityView` with `DisplayName`, `Description`, `Owner`, `Tags []string`,
+   `Links []map[string]any`, and `Docs map[string]any`, populated in
+   `readEntities` from the decoded `nodes.Entity` (`Metadata`/`Ownership`/`Links`/
+   `Docs`). Nothing else can render the overview until this lands.
+2. **Make `describe` kind-aware** (conform to `orun-service-catalog/cli-surface.md
+   §2`). Selector grammar, back-compatible:
+   - `<kind>:<key>` explicit — `describe repo:sourceplane/ogpic/ogpic`,
+     `describe system:payments`;
+   - `--kind <Kind>` + bare name or full `entityKey`;
+   - bare `repo` (no key) resolves the **one** `Repo` in the snapshot (Repo is
+     one-per-snapshot);
+   - a bare arg with no prefix keeps today's behavior (search Components), so
+     `describe api-edge` is unchanged.
+   Route a recognized `<kind>:` prefix (or `--kind != Component`) to a new
+   `selectObjEntity(view, kind, key)`; render the envelope sections —
+   `metadata`/`ownership`/`links`/`docs` (the `overview` line shows `path` +
+   `digest`) + `relations`/`members`. Exit codes track §2: `4` ambiguous across
+   kinds (list `kind/entityKey`), `6` entity absent.
+3. **Render the overview bytes.** Add `orun catalog docs <entity> [name]`
+   (default `name=overview`): resolve `docs.<name>.digest`, `Get` the closure
+   blob via the `objcatalog` store, and print the markdown (text) or `--json
+   {path, sha, digest, content}`. This is the local preview of the exact bytes
+   orun-cloud renders — same digest, no git round-trip.
+
+`tree`/`graph` need no change: `Repo` is not a dependency-graph node (its only
+edge is `owner → Group`, already in `relations.json`).
 
 ## 4. What does NOT change
 
