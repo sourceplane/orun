@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sourceplane/orun/internal/objectstore"
+	"github.com/sourceplane/orun/internal/objectstore/refstore"
 
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/workbrief"
@@ -107,5 +112,84 @@ func TestSpecPullMaterializationIsReadOnly(t *testing.T) {
 	}
 	if info.Mode().Perm()&0o222 != 0 {
 		t.Fatal("materialized snapshot is writable (WD-7 heritage: pull is read-only)")
+	}
+}
+
+type fakeRemote struct {
+	store objectstore.ObjectStore
+	refs  refstore.RefStore
+}
+
+func (f *fakeRemote) RemoteStores() (objectstore.ObjectStore, refstore.RefStore) {
+	return f.store, f.refs
+}
+
+func openTestStores(t *testing.T, root string) (objectstore.ObjectStore, refstore.RefStore) {
+	t.Helper()
+	store, err := objectstore.NewLocalStore(objectstore.LocalConfig{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs, err := refstore.NewLocalRefStore(refstore.LocalConfig{Root: root, Writer: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store, refs
+}
+
+func TestPushSealedSnapshotSyncsRefsWork(t *testing.T) {
+	ctx := context.Background()
+	local, localRefs := openTestStores(t, t.TempDir())
+	remoteStore, remoteRefs := openTestStores(t, t.TempDir())
+	remote := &fakeRemote{store: remoteStore, refs: remoteRefs}
+
+	snap, _ := workbrief.SnapshotFromSummary("ws_1", "demo-epic", summaryFixture())
+	id, canonical, err := worklens.SealSpecSnapshot(*snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	refName, res, err := pushSealedSnapshot(ctx, local, localRefs, remote, "demo-epic", canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refName != "work/specs/demo-epic/latest" {
+		t.Fatalf("ref = %s", refName)
+	}
+	if res.Copied != 1 || res.RefMoved != true {
+		t.Fatalf("first push: %+v", res)
+	}
+
+	// The remote ref resolves to a blob whose bytes reseal to the same id.
+	ref, err := remoteRefs.Read(ctx, refName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, body, err := remoteStore.Get(ctx, objectstore.ObjectID(ref.Target))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != string(canonical) {
+		t.Fatal("remote bytes differ from the sealed snapshot")
+	}
+	var round worklens.SpecSnapshot
+	if err := json.Unmarshal(body, &round); err != nil {
+		t.Fatal(err)
+	}
+	roundID, _, err := worklens.SealSpecSnapshot(round)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roundID != id {
+		t.Fatalf("round-trip id %s != %s", roundID, id)
+	}
+
+	// Idempotent re-push: set-difference copies nothing.
+	_, res2, err := pushSealedSnapshot(ctx, local, localRefs, remote, "demo-epic", canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res2.Copied != 0 || res2.Skipped != 1 {
+		t.Fatalf("re-push: %+v", res2)
 	}
 }
