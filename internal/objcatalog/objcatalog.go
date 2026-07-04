@@ -62,6 +62,16 @@ type EntityView struct {
 	Version     string   // Composition semver (Step 4); "" for other kinds
 	Lifecycle   string   // Composition lifecycle stage (Step 4)
 	Description string   // git-authored one-line summary (catalog-portal CPF)
+	// Envelope blocks carried whole so a describe/docs consumer can render the
+	// entity's front page (saas-workspace-overview WO3.1a). Empty when the kind
+	// declares none; the Repo kind carries displayName/owner/tags/links and a
+	// docs.overview doc_ref here.
+	DisplayName string           // metadata.displayName
+	Owner       string           // ownership.owner
+	Tags        []string         // metadata.tags (spec.tags fallback)
+	Links       []map[string]any // links[] (title/url/icon)
+	Docs        map[string]any   // docs block, incl. overview={path,sha,digest}
+	Metadata    map[string]any   // the verbatim metadata block
 }
 
 // RelationEdgeView is one forward edge of the catalog-wide relation graph
@@ -356,6 +366,19 @@ func (r *Reader) readEntities(ctx context.Context, treeID objectstore.ObjectID) 
 			ev.Version = stringField(e.Spec, "version")
 			ev.Lifecycle = stringField(e.Spec, "lifecycle")
 			ev.Description = stringField(e.Spec, "description")
+			if ev.Description == "" {
+				ev.Description = stringField(e.Metadata, "description")
+			}
+			// Envelope blocks for the entity front page (WO3.1a).
+			ev.DisplayName = stringField(e.Metadata, "displayName")
+			ev.Owner = stringField(e.Ownership, "owner")
+			ev.Tags = stringSliceField(e.Metadata, "tags")
+			if len(ev.Tags) == 0 {
+				ev.Tags = stringSliceField(e.Spec, "tags")
+			}
+			ev.Links = e.Links
+			ev.Docs = e.Docs
+			ev.Metadata = e.Metadata
 			out = append(out, ev)
 		}
 	}
