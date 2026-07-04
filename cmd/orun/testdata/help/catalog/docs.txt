@@ -1,0 +1,40 @@
+Print the bytes of a resolved doc for one entity.
+
+The doc must have been walked into the catalog closure as a content-addressed
+blob (a doc_ref {path,sha,digest}); the Repo kind's docs.overview is the
+canonical case. This is the local preview of exactly what orun-cloud renders at
+the read edge — the same content address, no git round-trip.
+
+The entity is addressed the same way as 'catalog describe':
+  - <kind>:<key>              e.g. repo:sourceplane/ogpic/ogpic
+  - --kind <Kind> <name|key>
+  - bare kind keyword         e.g. repo (the one Repo entity)
+  - a Component name/key
+The optional [doc] selects which doc (default: overview).
+
+Examples:
+  orun catalog docs repo:sourceplane/ogpic/ogpic
+  orun catalog docs repo
+  orun catalog docs repo:sourceplane/ogpic/ogpic --json
+
+Exit codes:
+  0  Doc found and printed.
+  1  Invalid selector or missing argument.
+  3  StateStore failure.
+  4  Ambiguous name across repos/kinds.
+  6  Catalog, entity, or doc (with content) not found.
+
+Usage:
+  orun catalog docs <entity> [doc] [flags]
+
+Flags:
+      --catalog-snapshot string   Bypass refs; pin to an explicit catalogSnapshotKey
+      --catalog-source string     Resolve catalog by ref selector (current|main|latest|branches/<name>|prs/<n>|cat-<key>)
+      --json                      Stable machine-readable output (includes the doc content)
+      --kind string               Address an entity of this kind instead of a Component
+      --source string             Alias for --catalog-source
+
+Global Flags:
+      --all                 Disable CWD-based component scoping; process all components
+  -c, --config-dir string   Config directory for JobRegistry definitions (or set ORUN_CONFIG_DIR; use * or ** for recursive scanning)
+  -i, --intent string       Intent file path (auto-discovered if not set) (default "intent.yaml")
