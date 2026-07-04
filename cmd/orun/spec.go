@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sourceplane/orun/internal/objectstore"
+	"github.com/sourceplane/orun/internal/objectstore/refstore"
+	"github.com/sourceplane/orun/internal/objremote"
 	"github.com/sourceplane/orun/internal/workbrief"
 	"github.com/sourceplane/orun/internal/worklens"
 )
@@ -41,6 +45,7 @@ func registerSpecPullCommand(parent *cobra.Command) {
 		workspace  string
 		backendURL string
 		idOnly     bool
+		pushRemote bool
 	)
 	cmd := &cobra.Command{
 		Use:   "pull <spec-slug>[@sha256:…]",
@@ -97,6 +102,19 @@ refs/work remote ride a later slice.)`,
 			}
 
 			out := cmd.OutOrStdout()
+			if pushRemote {
+				store, refs, _, err := openObjectModel()
+				if err != nil {
+					return err
+				}
+				refName, res, err := pushSealedSnapshot(cmd.Context(), store, refs, client, slug, canonical)
+				if err != nil {
+					return fmt.Errorf("orun spec pull --push: %w", err)
+				}
+				if !idOnly {
+					fmt.Fprintf(out, "pushed  %s (%d copied, %d already present)\n", refName, res.Copied, res.Skipped)
+				}
+			}
 			if idOnly {
 				fmt.Fprintln(out, id)
 				return nil
@@ -111,7 +129,53 @@ refs/work remote ride a later slice.)`,
 	cmd.Flags().StringVar(&workspace, "workspace", "", "target workspace (org id or slug; defaults to the linked repo's)")
 	cmd.Flags().StringVar(&backendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
 	cmd.Flags().BoolVar(&idOnly, "id-only", false, "print only the snapshot id (for scripting/dispatch)")
+	cmd.Flags().BoolVar(&pushRemote, "push", false, "also store the sealed snapshot in the object store and sync refs/work/specs/<slug>/latest to the remote")
 	parent.AddCommand(cmd)
+}
+
+// remoteEndpoints is the seam the push test fakes: the real client returns
+// its org/project-routed remote object+ref stores.
+type remoteEndpoints interface {
+	RemoteStores() (objectstore.ObjectStore, refstore.RefStore)
+}
+
+// pushSealedSnapshot writes the canonical snapshot bytes into the local
+// object store as a blob, advances the local work ref, and syncs the closure
+// to the remote (set-difference: objects already present are skipped) — the
+// same push spine the catalog uses. Sealing stays in Go (one canonicalizer,
+// one determinism contract); the remote leg is pure content transport.
+func pushSealedSnapshot(
+	ctx context.Context,
+	store objectstore.ObjectStore,
+	refs refstore.RefStore,
+	remote remoteEndpoints,
+	slug string,
+	canonical []byte,
+) (string, objremote.Result, error) {
+	blobID, err := store.PutBlob(ctx, canonical)
+	if err != nil {
+		return "", objremote.Result{}, fmt.Errorf("store snapshot blob: %w", err)
+	}
+	refName := "work/specs/" + slug + "/latest"
+	oldTarget := ""
+	if cur, err := refs.Read(ctx, refName); err == nil {
+		oldTarget = cur.Target
+	}
+	if oldTarget != string(blobID) {
+		if err := refs.Update(ctx, refName, oldTarget, string(blobID)); err != nil {
+			return "", objremote.Result{}, fmt.Errorf("advance %s: %w", refName, err)
+		}
+	}
+	remoteStore, remoteRefs := remote.RemoteStores()
+	res, err := objremote.Sync(ctx,
+		objremote.Endpoint{Objects: store, Refs: refs},
+		objremote.Endpoint{Objects: remoteStore, Refs: remoteRefs},
+		refName,
+	)
+	if err != nil {
+		return "", res, fmt.Errorf("sync %s: %w", refName, err)
+	}
+	return refName, res, nil
 }
 
 // renderBrief writes the human/agent-readable face of the frozen snapshot.

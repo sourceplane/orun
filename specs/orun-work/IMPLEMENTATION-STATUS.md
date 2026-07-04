@@ -13,7 +13,7 @@
 | WP1 | Coordination + the board | 🏗️ In progress — fold query API with evidence + mutator verdicts + read-only console Work page + import apply landed (orun-cloud WP1 PR; orun: remotestate work client, `orun work import` apply, `orun work list`); optimistic store + SSE replay + pin/comment UI pending |
 | WP2 | Observation ingestion: PRs + drift | ✅ Shipped — orun-cloud #327: the webhook drain projects normalized scm.* PR/branch events into the fact log (same-tx, semantic dedupe, task-key parse); the `ci` producer endpoint carries affected sets; the WP0 claim join + drift inbox light up from live facts |
 | WP3 | Gates → Done, overlay → Released | 🏗️ Mostly shipped — orun-cloud WP3 PR: run-stream gate verdicts from terminal job phases keyed to the run's git revision (P-3: execution truth, never GitHub statuses); the deploy-overlay → revision_live bridge built + tested; the In Review → Done → Released walk proven from facts. Remaining: the runtime call site awaits saas-resources-runtime |
-| WP4 | Sealing + `orun spec pull` | 🏗️ In progress — seal core (canonical JSON, ContentID, SpecSnapshot intent-only-by-type with a hot-state guard, chained log segments) + `orun spec pull <slug>[@sha256:…]` (client-side seal from the fold API, read-only materialization, pin verification, --id-only for dispatch). Remaining: server-side sealing + the refs/work remote leg |
+| WP4 | Sealing + `orun spec pull` | ✅ Shipped — seal core + `orun spec pull <slug>[@sha256:…]` (pin verification, read-only view, --id-only), and the remote leg: `--push` stores the sealed blob in the object store and set-difference-syncs `refs/work/specs/<slug>/latest` to the org/project-routed remote (the catalog's push spine). Sealing deliberately stays in Go: one canonicalizer, one determinism contract |
 | WP5 | The orun MCP | ✅ Shipped — `orun mcp serve` (stdio, dependency-free JSON-RPC 2.0): reads return the fold with evidence (`work_query`/`work_get`) and sealed intent-only briefs (`spec_get`); the write surface is exactly four tools through the cloud mutators (`task_create`/`task_comment`/`task_assign`/`contract_propose` — applied AND flagged for human review). No lifecycle write tool and no pin tool exist (WP-3/WP-10: the lie is unrepresentable), asserted by test |
 
 ## WP0 — as-built
@@ -101,8 +101,9 @@ seam (`remotestate.Client`). The tool surface is closed at 7:
   cloud mutator additionally rejects agent pins server-side (defense in
   depth, not client-side trust).
 
-Remaining epic-wide (recorded per milestone): WP1b console depth (optimistic
-store, SSE cursor replay, pin/comment UI), the resources-runtime call site
-for `revision_live`, server-side sealing + the `refs/work` remote leg, and
-`orun work import` of both repos' spec trees against a live workspace (the
-dogfood gate that retires this table).
+Remaining epic-wide: the resources-runtime call site for `revision_live`
+(gated on saas-resources-runtime P2 — the bridge is built and tested), a
+push-based SSE transport if the events-cursor poll ever misses the latency
+bar (the seam is transport-agnostic by design), and `orun work import` of
+both repos' spec trees against a live workspace (the dogfood gate that
+retires this table).
