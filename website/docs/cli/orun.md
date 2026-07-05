@@ -23,6 +23,12 @@ The root `orun` command is the entry point for planning, inspection, and executi
 | `orun compositions` | List or inspect available compositions |
 | `orun component` | List components or inspect a merged component view |
 | `orun github` | Inspect GitHub Actions artifact shards and workflow runs |
+| `orun catalog` | Resolve, persist, and query the service catalog (change detection) |
+| `orun secrets` | Manage workspace secrets (secret:// references in plans) |
+| `orun policy` | Inspect and lint the secret-policy tiers |
+| `orun work` | The work lens: import spec trees, list delivery-derived task rungs |
+| `orun spec` | Pull sealed, content-addressed spec briefs to implement against |
+| `orun mcp` | Serve the agent tool surface (MCP over stdio) for the work lens |
 | `orun completion` | Generate shell completion scripts |
 
 ## Global flags

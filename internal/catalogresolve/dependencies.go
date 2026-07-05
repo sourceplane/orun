@@ -69,6 +69,7 @@ func resolveDependencies(authored []AuthoredManifest, manifests []*catalogmodel.
 				Relationship: rel,
 				Optional:     d.Optional,
 				Include:      includeAlwaysOnly(d.Include),
+				Input:        d.Input,
 			}
 			if !ok {
 				dep.Key = d.Component

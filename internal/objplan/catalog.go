@@ -529,7 +529,7 @@ func entityRelations(cm *catalogmodel.ComponentManifest, own resolvedOwner, comp
 	for _, d := range cm.Spec.Dependencies.Components {
 		rels = append(rels, nodes.EntityRelation{
 			Type: catalogmodel.RelTypeDependsOn, To: d.Key, ToKind: catalogmodel.EntityKindComponent,
-			Optional: d.Optional, Include: d.Include,
+			Optional: d.Optional, Include: d.Include, Input: d.Input,
 		})
 	}
 	for _, r := range cm.Spec.Dependencies.Resources.Uses {
@@ -677,7 +677,7 @@ func mapGraph(g *catalogmodel.CatalogGraph, edgeKind string) nodes.CatalogGraph 
 		out.Nodes = append(out.Nodes, nodes.GraphNode{Key: n.Key, Kind: n.Kind, Name: n.Name})
 	}
 	for _, e := range g.Edges {
-		out.Edges = append(out.Edges, nodes.GraphEdge{From: e.From, To: e.To, Type: e.Type, Optional: e.Optional, Include: e.Include})
+		out.Edges = append(out.Edges, nodes.GraphEdge{From: e.From, To: e.To, Type: e.Type, Optional: e.Optional, Include: e.Include, Input: e.Input})
 	}
 	return out
 }

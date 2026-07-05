@@ -106,6 +106,7 @@ use** — `affected` is the way to inspect its output directly.
 orun catalog affected
 orun catalog affected --base main --head HEAD
 orun catalog affected --files apps/api/main.go --json
+orun catalog affected --files packages/policy-engine/src/index.ts --explain
 ```
 
 The result has four sets:
@@ -116,6 +117,12 @@ The result has four sets:
 | `dependents` | components that transitively depend on a changed one |
 | `affected` | the cockpit "blast radius" (`directlyChanged` + `dependents`) |
 | `selection` | the plan/run job set (`directlyChanged` + `include:always` deps) |
+
+Since v2.22.0, `directlyChanged` also folds in **build-input dependents**:
+components whose `dependsOn` entries marked `input: true` point at a changed
+component (transitively). A worker that bundles a shared package is rescoped —
+and therefore planned and deployed — when only the package's directory changed.
+See [Dependency rules → Input edges](../concepts/dependency-rules.md#input-edges-build-input-rescope).
 
 On classification ambiguity the engine **over-reports, never under** — a false
 positive is safe, a missed change is not. A `component.yaml` edit is treated as
@@ -128,6 +135,7 @@ structural: it lowers `confidence` and sets `needsFullResolve`.
 | `--files <path,...>` | Comma-separated changed files (bypasses git diff) |
 | `--intent-impact <mode>` | How global intent changes affect components (`watch`/`all`/`none`, default `watch`) |
 | `--json` | Emit the `CatalogAffectedResult` JSON envelope |
+| `--explain` | Show why each component was selected (file, intent, or build-input provenance) |
 
 The `--json` envelope (`directlyChanged`, `dependents`, `affected`, `selection`,
 `confidence`, `needsFullResolve`, `intentMode`, `catalogId`) is the

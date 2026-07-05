@@ -535,7 +535,7 @@ func assembleRelations(ctx context.Context, s store, manifests []ComponentManife
 			edges = append(edges, RelationEdge{
 				From: from, FromKind: "Component",
 				Type: r.Type, To: r.To, ToKind: r.ToKind,
-				Optional: r.Optional, Include: r.Include,
+				Optional: r.Optional, Include: r.Include, Input: r.Input,
 			})
 		}
 	}

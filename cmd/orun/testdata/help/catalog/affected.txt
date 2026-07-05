@@ -17,12 +17,14 @@ Examples:
   orun catalog affected
   orun catalog affected --base main --head HEAD
   orun catalog affected --files apps/api/main.go --json
+  orun catalog affected --files packages/policy-engine/src/index.ts --explain
 
 Usage:
   orun catalog affected [flags]
 
 Flags:
       --base string            Base ref for change detection (default: main)
+      --explain                Show why each component was selected (file, intent, or build-input provenance)
       --files strings          Comma-separated changed files (bypasses git diff)
       --head string            Head ref for change detection (default: working tree)
       --intent-impact string   How global intent changes affect components (all/watch/none) (default "watch")

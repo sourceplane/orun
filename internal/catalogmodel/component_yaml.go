@@ -132,6 +132,13 @@ type ComponentYAMLDependency struct {
 	// dependency into a --changed plan when the dependent is selected;
 	// "if-selected" (the omitted default) does not. (orun-catalog-state CS5.)
 	Include string `json:"include,omitempty"`
+	// Input declares the dependency's sources as build inputs of this
+	// component's artifact (a bundled shared package, not a runtime peer).
+	// Change detection then treats a change to the dependency as a direct
+	// change to this component — the reverse direction of Include — closing
+	// the shared-package rescope gap where `--changed` only matched files
+	// under a component's own directory. Transitive over other input edges.
+	Input bool `json:"input,omitempty"`
 }
 
 // ComponentYAMLEnvironment is one entry in the authored `environments` map.

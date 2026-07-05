@@ -263,6 +263,68 @@ func TestDetect_SelectionFollowsIncludeAlwaysOnly(t *testing.T) {
 	eq(t, r.Dependencies, []string{"ns/repo/lib", "ns/repo/shared"}, "Dependencies")
 }
 
+// TestDetect_InputEdgeRescopesDependents is the build-input rescope: an edge
+// marked input:true makes a change to the dependency a DIRECT change to the
+// dependent (its artifact embeds those sources), transitively over input
+// edges — the fix for the shared-package gap where a packages/* change never
+// selected the worker that bundles it.
+func TestDetect_InputEdgeRescopesDependents(t *testing.T) {
+	// contracts ← sdk ← console, all input edges; worker ← contracts input
+	// edge; peer depends on worker WITHOUT input (a runtime peer must NOT
+	// rescope).
+	c := &objcatalog.CatalogView{
+		Components: []objcatalog.CatalogComponentView{
+			{ComponentKey: "ns/repo/contracts", Name: "contracts"},
+			{ComponentKey: "ns/repo/sdk", Name: "sdk"},
+			{ComponentKey: "ns/repo/console", Name: "console"},
+			{ComponentKey: "ns/repo/worker", Name: "worker"},
+			{ComponentKey: "ns/repo/peer", Name: "peer"},
+		},
+		Relations: []objcatalog.RelationEdgeView{
+			{From: "ns/repo/sdk", FromKind: "Component", Type: "dependsOn", To: "ns/repo/contracts", ToKind: "Component", Input: true},
+			{From: "ns/repo/console", FromKind: "Component", Type: "dependsOn", To: "ns/repo/sdk", ToKind: "Component", Input: true},
+			{From: "ns/repo/worker", FromKind: "Component", Type: "dependsOn", To: "ns/repo/contracts", ToKind: "Component", Input: true},
+			{From: "ns/repo/peer", FromKind: "Component", Type: "dependsOn", To: "ns/repo/worker", ToKind: "Component"},
+		},
+		Ownership: &objcatalog.OwnershipView{
+			SchemaVersion: 1,
+			Components: map[string]string{
+				"packages/contracts": "ns/repo/contracts",
+				"packages/sdk":       "ns/repo/sdk",
+				"apps/console":       "ns/repo/console",
+				"apps/worker":        "ns/repo/worker",
+				"apps/peer":          "ns/repo/peer",
+			},
+			GlobalPaths:         []string{"intent.yaml"},
+			StructuralFilenames: []string{"component.yaml"},
+		},
+	}
+	r := detect(t, c, IntentImpactWatch, fakeSource{files: []string{"packages/contracts/src/work.ts"}})
+	// Directly changed: contracts itself plus every transitive input dependent.
+	eq(t, r.DirectlyChanged, []string{"ns/repo/console", "ns/repo/contracts", "ns/repo/sdk", "ns/repo/worker"}, "DirectlyChanged")
+	// peer rides only the plain runtime edge: a dependent (blast radius), not selected.
+	eq(t, r.Dependents, []string{"ns/repo/peer"}, "Dependents")
+	eq(t, r.Selection, []string{"ns/repo/console", "ns/repo/contracts", "ns/repo/sdk", "ns/repo/worker"}, "Selection")
+	// Provenance: each rescoped component carries an explain entry.
+	var reasons int
+	for _, e := range r.Explain {
+		if e.Reason == "build input changed (dependsOn input:true)" {
+			reasons++
+		}
+	}
+	if reasons != 3 {
+		t.Errorf("expected 3 build-input explain entries, got %d (%v)", reasons, r.Explain)
+	}
+}
+
+// TestDetect_InputEdgeIgnoredWithoutFlag: the same shape WITHOUT input:true
+// keeps the old semantics — the dependency change does not select dependents.
+func TestDetect_InputEdgeIgnoredWithoutFlag(t *testing.T) {
+	r := detect(t, sampleCatalogRelations(), IntentImpactWatch, fakeSource{files: []string{"libs/shared/main.go"}})
+	eq(t, r.DirectlyChanged, []string{"ns/repo/shared"}, "DirectlyChanged")
+	eq(t, r.Selection, []string{"ns/repo/shared"}, "Selection")
+}
+
 func TestDetect_SourceError(t *testing.T) {
 	_, err := NewDetector(sampleCatalog(), IntentImpactWatch).Detect(context.Background(),
 		fakeSource{err: context.Canceled})

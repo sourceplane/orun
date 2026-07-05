@@ -38,6 +38,9 @@ type GraphEdge struct {
 	// edges: "always" when the edge pulls its target into a --changed plan;
 	// omitted otherwise (the "if-selected" default). (orun-catalog-state CS5.)
 	Include string `json:"include,omitempty"`
+	// Input marks a build-input dependency edge: change detection rescopes
+	// the From component when To changes.
+	Input bool `json:"input,omitempty"`
 }
 
 // Graph kind names per data-model.md §4 (separate file per relationship).

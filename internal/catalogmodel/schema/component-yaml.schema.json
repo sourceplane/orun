@@ -71,6 +71,9 @@
               "include": {
                 "type": "string"
               },
+              "input": {
+                "type": "boolean"
+              },
               "optional": {
                 "type": "boolean"
               },

@@ -154,6 +154,9 @@ type EntityRelation struct {
 	ToKind   string `json:"toKind"`
 	Optional bool   `json:"optional,omitempty"`
 	Include  string `json:"include,omitempty"`
+	// Input marks a dependsOn edge whose target's sources are build inputs of
+	// this entity (change detection rescopes the dependent on a target change).
+	Input bool `json:"input,omitempty"`
 }
 
 // ImpactOwnership is the change-detection ownership map (data-model.md §2). It
@@ -201,6 +204,7 @@ type GraphEdge struct {
 	Type     string `json:"type"`
 	Optional bool   `json:"optional,omitempty"` // dependency-edge optionality, carried from the resolver (omitted when false to keep the catalog hash stable for required edges)
 	Include  string `json:"include,omitempty"`  // change-detection plan-selection mode ("always"; omitted = if-selected)
+	Input    bool   `json:"input,omitempty"`    // build-input edge: change detection rescopes the dependent on a target change
 }
 
 // CatalogGraph is one edge-kind slice (dependencies/systems/apis/resources/
@@ -233,6 +237,8 @@ type RelationEdge struct {
 	ToKind   string `json:"toKind"`
 	Optional bool   `json:"optional,omitempty"`
 	Include  string `json:"include,omitempty"`
+	// Input — see EntityRelation.Input.
+	Input bool `json:"input,omitempty"`
 }
 
 // RevisionScope captures the planning scope (full vs changed-subset). It is
