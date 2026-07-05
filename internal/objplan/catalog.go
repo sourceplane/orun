@@ -109,18 +109,9 @@ func repoEntity(d *catalogresolve.RepoDeclaration) nodes.Entity {
 	if d.Owner != "" {
 		e.Ownership = map[string]any{"owner": d.Owner}
 	}
-	if d.Overview != "" {
-		if len(d.OverviewContent) > 0 {
-			// doc_ref shape (WO3b): {path, sha} now; AssembleCatalog writes the
-			// blob and fills digest. The content rides PendingDocs into the closure.
-			ref := map[string]any{"path": d.Overview}
-			putNonEmpty(ref, "sha", d.OverviewSHA)
-			e.Docs = map[string]any{"overview": ref}
-			e.PendingDocs = map[string][]byte{"overview": d.OverviewContent}
-		} else {
-			// No content read (missing/unreadable): keep the path pointer.
-			e.Docs = map[string]any{"overview": d.Overview}
-		}
+	if docs, pending := docsWire(nil, d.Overview, d.Docs); docs != nil {
+		e.Docs = docs
+		e.PendingDocs = pending
 	}
 	if len(d.Links) > 0 {
 		links := make([]map[string]any, 0, len(d.Links))
@@ -267,10 +258,17 @@ func mapEntity(cm *catalogmodel.ComponentManifest, resolverVersion int, ownerRes
 		Relations:    entityRelations(cm, own, comp),
 		Contracts:    entityContracts(cm.Spec.Dependencies.APIs, exposedAPIs(comp), cm.Identity.Namespace, cm.Identity.Repo),
 		Integrations: integrations,
-		Docs:         docsBlock(cm.Docs),
 		Links:        linksBlock(cm.Links),
 		Extensions:   cm.Extensions,
 		Provenance:   entityProvenance(cm, resolverVersion),
+	}
+	legacyOverview := ""
+	if cm.Docs != nil {
+		legacyOverview = cm.Docs.Overview
+	}
+	if docs, pending := docsWire(cm.Docs, legacyOverview, cm.ResolvedDocs); docs != nil {
+		m.Docs = docs
+		m.PendingDocs = pending
 	}
 	return m
 }
@@ -346,24 +344,80 @@ func mergeIntegrations(authored, declared map[string]any) map[string]any {
 	return out
 }
 
-// docsBlock projects the docs pointers onto the envelope's generic docs map.
-func docsBlock(d *catalogmodel.ComponentDocs) map[string]any {
-	if d == nil {
-		return nil
-	}
+// docsWire builds the generic wire docs block from the legacy pointers plus
+// the resolved doc set (saas-catalog-docs CD1), returning it together with the
+// pending doc-key → bytes map assembly walks into the closure. Wire shape
+// (model.md §2b): an attached overview is {path, commit, sha, digest*}
+// (digest stamped at assembly; sha kept for WO4 wire compat, deprecated); a
+// declared-only overview stays the bare path string (WO compat). Pages emit
+// {key, title, role, path, commit, size, digest*}; a declared-only page emits
+// no digest and carries the skip reason instead.
+func docsWire(legacy *catalogmodel.ComponentDocs, legacyOverview string, resolved []catalogmodel.ResolvedDoc) (map[string]any, map[string][]byte) {
 	out := map[string]any{}
-	putNonEmpty(out, "overview", d.Overview)
-	putNonEmpty(out, "techdocs", d.TechDocs)
-	if len(d.Runbooks) > 0 {
-		out["runbooks"] = strSliceToAny(d.Runbooks)
+	var pending map[string][]byte
+	attach := func(key string, b []byte) {
+		if pending == nil {
+			pending = map[string][]byte{}
+		}
+		pending[key] = b
 	}
-	if len(d.ADRs) > 0 {
-		out["adrs"] = strSliceToAny(d.ADRs)
+
+	var overview *catalogmodel.ResolvedDoc
+	var pages []catalogmodel.ResolvedDoc
+	for i := range resolved {
+		if resolved[i].Key == catalogmodel.DocKeyOverview {
+			overview = &resolved[i]
+		} else {
+			pages = append(pages, resolved[i])
+		}
+	}
+
+	switch {
+	case overview != nil && overview.Attached():
+		ref := map[string]any{"path": overview.Path}
+		putNonEmpty(ref, "commit", overview.Commit)
+		putNonEmpty(ref, "sha", overview.SHA)
+		out["overview"] = ref
+		attach(catalogmodel.DocKeyOverview, overview.Bytes)
+	case overview != nil:
+		// Declared but not attached (missing/dirty/over-cap): the bare path
+		// pointer, exactly the WO shape for content-less declarations.
+		out["overview"] = overview.Path
+	case legacyOverview != "":
+		out["overview"] = legacyOverview
+	}
+
+	if len(pages) > 0 {
+		arr := make([]any, 0, len(pages))
+		for _, p := range pages {
+			pm := map[string]any{"key": p.Key, "path": p.Path}
+			putNonEmpty(pm, "title", p.Title)
+			putNonEmpty(pm, "role", p.Role)
+			putNonEmpty(pm, "commit", p.Commit)
+			if p.Attached() {
+				pm["size"] = len(p.Bytes)
+				attach(p.Key, p.Bytes)
+			} else {
+				putNonEmpty(pm, "reason", p.Reason)
+			}
+			arr = append(arr, pm)
+		}
+		out["pages"] = arr
+	}
+
+	if legacy != nil {
+		putNonEmpty(out, "techdocs", legacy.TechDocs)
+		if len(legacy.Runbooks) > 0 {
+			out["runbooks"] = strSliceToAny(legacy.Runbooks)
+		}
+		if len(legacy.ADRs) > 0 {
+			out["adrs"] = strSliceToAny(legacy.ADRs)
+		}
 	}
 	if len(out) == 0 {
-		return nil
+		return nil, nil
 	}
-	return out
+	return out, pending
 }
 
 // linksBlock projects the external links onto the envelope's generic link list.

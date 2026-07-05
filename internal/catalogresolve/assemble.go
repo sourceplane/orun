@@ -69,8 +69,8 @@ func authoredToManifest(am AuthoredManifest, namespace, repo string) *catalogmod
 	for _, l := range c.Spec.Links {
 		cm.Links = append(cm.Links, catalogmodel.ComponentLink{Title: l.Title, URL: l.URL, Icon: l.Icon})
 	}
-	if d := c.Spec.Docs; d != nil && (d.Overview != "" || d.TechDocs != "" || len(d.Runbooks) > 0 || len(d.ADRs) > 0) {
-		cm.Docs = &catalogmodel.ComponentDocs{Overview: d.Overview, TechDocs: d.TechDocs, Runbooks: d.Runbooks, ADRs: d.ADRs}
+	if d := c.Spec.Docs; d != nil && (d.Overview != "" || len(d.Pages) > 0 || d.TechDocs != "" || len(d.Runbooks) > 0 || len(d.ADRs) > 0) {
+		cm.Docs = &catalogmodel.ComponentDocs{Overview: d.Overview, Pages: d.Pages, TechDocs: d.TechDocs, Runbooks: d.Runbooks, ADRs: d.ADRs}
 	}
 
 	// Change-detection watches — carry the authored signals into the resolved

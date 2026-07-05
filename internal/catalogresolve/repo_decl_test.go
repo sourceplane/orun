@@ -6,14 +6,16 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sourceplane/orun/internal/catalogmodel"
 )
 
 func TestRepoDeclFromIntent(t *testing.T) {
 	// No intent / no repo block → no declaration (the feature is opt-in).
-	if repoDeclFromIntent(nil, "default", "orun", "") != nil {
+	if repoDeclFromIntent(nil, "default", "orun", nil) != nil {
 		t.Error("nil intent should yield nil")
 	}
-	if repoDeclFromIntent(&intentFile{}, "default", "orun", "") != nil {
+	if repoDeclFromIntent(&intentFile{}, "default", "orun", nil) != nil {
 		t.Error("intent without a repo block should yield nil")
 	}
 
@@ -29,7 +31,7 @@ func TestRepoDeclFromIntent(t *testing.T) {
 			Tags:        []string{"saas"},
 		},
 	}
-	d := repoDeclFromIntent(in, "sourceplane", "orun", "")
+	d := repoDeclFromIntent(in, "sourceplane", "orun", nil)
 	if d == nil {
 		t.Fatal("expected a declaration")
 	}
@@ -54,7 +56,7 @@ func TestRepoDeclFromIntent(t *testing.T) {
 
 	// Defaults: no metadata → name = repo segment, displayName = name; a block
 	// description takes precedence over metadata.
-	d2 := repoDeclFromIntent(&intentFile{Repo: &intentRepoBlock{Description: "block desc"}}, "default", "orun", "")
+	d2 := repoDeclFromIntent(&intentFile{Repo: &intentRepoBlock{Description: "block desc"}}, "default", "orun", nil)
 	if d2.Name != "orun" || d2.EntityKey != "default/orun/orun" {
 		t.Errorf("defaulted name/key = %q/%q", d2.Name, d2.EntityKey)
 	}
@@ -66,29 +68,51 @@ func TestRepoDeclFromIntent(t *testing.T) {
 	}
 }
 
-func TestRepoDeclReadsOverviewContent(t *testing.T) {
-	// The overview bytes are read from the working tree and hashed (WO3b).
+func TestRepoDeclResolvesDocSet(t *testing.T) {
+	// The doc set (overview + pages) resolves through the doc context: bytes
+	// read, sha256'd, titles defaulted from the first H1 (WO3b + CD1).
 	dir := t.TempDir()
 	body := []byte("# Overview\n\nHello.\n")
+	arch := []byte("# The Architecture\n\nBoxes.\n")
 	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "docs", "overview.md"), body, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	in := &intentFile{Repo: &intentRepoBlock{Docs: &intentRepoDocs{Overview: "docs/overview.md"}}}
-	d := repoDeclFromIntent(in, "default", "orun", dir)
-	if string(d.OverviewContent) != string(body) {
-		t.Errorf("OverviewContent = %q", d.OverviewContent)
+	if err := os.WriteFile(filepath.Join(dir, "docs", "architecture.md"), arch, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in := &intentFile{Repo: &intentRepoBlock{Docs: &intentRepoDocs{
+		Overview: "docs/overview.md",
+		Pages:    []catalogmodel.DocPage{{Path: "docs/architecture.md", Role: "architecture"}},
+	}}}
+	d := repoDeclFromIntent(in, "default", "orun", newDocResolveContext(dir))
+	if len(d.Docs) != 2 {
+		t.Fatalf("Docs = %+v, want overview + 1 page", d.Docs)
+	}
+	ov := d.Docs[0]
+	if ov.Key != "overview" || string(ov.Bytes) != string(body) {
+		t.Errorf("overview = %+v", ov)
 	}
 	sum := sha256.Sum256(body)
-	if d.OverviewSHA != hex.EncodeToString(sum[:]) {
-		t.Errorf("OverviewSHA = %q", d.OverviewSHA)
+	if ov.SHA != hex.EncodeToString(sum[:]) {
+		t.Errorf("overview SHA = %q", ov.SHA)
+	}
+	pg := d.Docs[1]
+	if pg.Key != "architecture" || pg.Role != "architecture" || !pg.Attached() {
+		t.Errorf("page = %+v", pg)
+	}
+	if pg.Title != "The Architecture" {
+		t.Errorf("page title = %q, want first H1", pg.Title)
 	}
 
-	// A missing file leaves the path pointer but no content (best-effort).
-	miss := repoDeclFromIntent(&intentFile{Repo: &intentRepoBlock{Docs: &intentRepoDocs{Overview: "docs/nope.md"}}}, "default", "orun", dir)
-	if miss.Overview != "docs/nope.md" || miss.OverviewContent != nil {
-		t.Errorf("missing-file case = %+v", miss)
+	// A missing file stays a declared-only entry (path pointer, reason set).
+	miss := repoDeclFromIntent(&intentFile{Repo: &intentRepoBlock{Docs: &intentRepoDocs{Overview: "docs/nope.md"}}}, "default", "orun", newDocResolveContext(dir))
+	if miss.Overview != "docs/nope.md" {
+		t.Errorf("missing-file path = %q", miss.Overview)
+	}
+	if len(miss.Docs) != 1 || miss.Docs[0].Attached() || miss.Docs[0].Reason == "" {
+		t.Errorf("missing-file doc = %+v", miss.Docs)
 	}
 }

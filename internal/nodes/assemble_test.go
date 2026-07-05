@@ -671,3 +671,84 @@ func TestAssembleValidationErrorsPropagate(t *testing.T) {
 		t.Fatalf("AssembleCatalog accepted bad manifest")
 	}
 }
+
+func TestAssembleCatalogWritesComponentDocPages(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := mem()
+	overview := []byte("# API\n")
+	runbook := []byte("# On-call\n")
+	shared := []byte("# Shared doc\n")
+	manifests := []ComponentManifest{
+		{
+			Identity: ComponentIdentity{ComponentKey: "default/orun/api", Name: "api", Namespace: "default", Repo: "orun"},
+			Docs: map[string]any{
+				"overview": map[string]any{"path": "apps/api/docs/overview.md", "commit": "c0ffee"},
+				"pages": []any{
+					map[string]any{"key": "runbook", "title": "On-call", "role": "runbook", "path": "apps/api/docs/runbook.md", "size": len(runbook)},
+					map[string]any{"key": "shared", "path": "docs/shared.md", "size": len(shared)},
+					map[string]any{"key": "missing", "path": "docs/missing.md", "reason": "unreadable: file not found"},
+				},
+			},
+			PendingDocs: map[string][]byte{"overview": overview, "runbook": runbook, "shared": shared},
+		},
+		{
+			// A second component sharing byte-identical content dedups to one blob.
+			Identity:    ComponentIdentity{ComponentKey: "default/orun/web", Name: "web", Namespace: "default", Repo: "orun"},
+			Docs:        map[string]any{"pages": []any{map[string]any{"key": "shared", "path": "docs/shared.md", "size": len(shared)}}},
+			PendingDocs: map[string][]byte{"shared": shared},
+		},
+	}
+	catID, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 16}, manifests, nil, ImpactOwnership{}, nil)
+	if err != nil {
+		t.Fatalf("AssembleCatalog: %v", err)
+	}
+
+	compTree, _ := findEntry(t, s, catID, dirComponents)
+	entries, _ := s.GetTree(ctx, compTree)
+	var api ComponentManifest
+	for _, e := range entries {
+		m, err := Decode[ComponentManifest]([]byte(blobBody(t, s, e.ID)))
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if m.Identity.Name == "api" {
+			api = m
+		}
+	}
+	ref, _ := api.Docs["overview"].(map[string]any)
+	if d, _ := ref["digest"].(string); d == "" {
+		t.Fatalf("component overview digest not stamped: %v", api.Docs)
+	}
+	if ref["commit"] != "c0ffee" {
+		t.Errorf("overview commit lost: %v", ref)
+	}
+	pages, _ := api.Docs["pages"].([]any)
+	if len(pages) != 3 {
+		t.Fatalf("pages = %d, want 3", len(pages))
+	}
+	byKey := map[string]map[string]any{}
+	for _, raw := range pages {
+		pm := raw.(map[string]any)
+		byKey[pm["key"].(string)] = pm
+	}
+	if d, _ := byKey["runbook"]["digest"].(string); d == "" {
+		t.Errorf("runbook page not stamped: %v", byKey["runbook"])
+	}
+	if byKey["runbook"]["role"] != "runbook" || byKey["runbook"]["title"] != "On-call" {
+		t.Errorf("runbook page lost identity: %v", byKey["runbook"])
+	}
+	if _, has := byKey["missing"]["digest"]; has {
+		t.Errorf("declared-only page must not gain a digest: %v", byKey["missing"])
+	}
+	if byKey["missing"]["reason"] == "" {
+		t.Errorf("declared-only page must keep its reason: %v", byKey["missing"])
+	}
+
+	// docs/ carries each distinct body exactly once (shared content dedups).
+	docsTree, _ := findEntry(t, s, catID, dirDocs)
+	docEntries, _ := s.GetTree(ctx, docsTree)
+	if len(docEntries) != 3 {
+		t.Errorf("docs/ = %d entries, want 3 (overview + runbook + shared, deduped)", len(docEntries))
+	}
+}

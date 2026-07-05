@@ -2,9 +2,7 @@ package catalogresolve
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"os"
+	"path"
 	"path/filepath"
 	"sort"
 
@@ -80,6 +78,28 @@ func Resolve(ctx context.Context, opts Options) (*ResolvedCatalog, []ValidationI
 		}
 		issues = append(issues, ii)
 	}
+
+	// Stage 9b — doc-set resolution (saas-catalog-docs CD1): validate each
+	// entity's declared docs.pages shape (errors — an authoring bug) and
+	// resolve the doc set (overview + pages) into bytes read at the pinned
+	// commit. Attachment problems (dirty path, over cap, missing file) are
+	// never issues — a doc problem never fails a plan; they log and leave the
+	// entry declared-only. One git probe + one byte budget span the resolve.
+	docCtx := newDocResolveContext(opts.WorkspaceRoot)
+	for _, cm := range manifests {
+		if cm.Docs == nil || (cm.Docs.Overview == "" && len(cm.Docs.Pages) == 0) {
+			continue
+		}
+		issues = append(issues, validateDocPages(cm.Docs.Pages, cm.Identity.SourceFile)...)
+		baseDir := path.Dir(cm.Identity.SourceFile)
+		if baseDir == "." {
+			baseDir = ""
+		}
+		cm.ResolvedDocs = docCtx.resolve(baseDir, cm.Docs.Overview, cm.Docs.Pages)
+	}
+	if intent != nil && intent.Repo != nil && intent.Repo.Docs != nil {
+		issues = append(issues, validateDocPages(intent.Repo.Docs.Pages, "intent.yaml")...)
+	}
 	sortIssues(issues)
 
 	// Stage 10 — manifestHash per component.
@@ -115,7 +135,7 @@ func Resolve(ctx context.Context, opts Options) (*ResolvedCatalog, []ValidationI
 		Repo:         repo,
 		Excludes:     EffectiveExcludes(intentExcludes),
 		Fingerprints: computeFingerprints(opts.WorkspaceRoot, manifests, globalDigest),
-		RepoDecl:     repoDeclFromIntent(intent, namespace, repo, opts.WorkspaceRoot),
+		RepoDecl:     repoDeclFromIntent(intent, namespace, repo, docCtx),
 	}
 
 	if firstErr := firstError(issues); firstErr != nil {
@@ -142,8 +162,10 @@ func loadIntentForResolve(opts Options) (*intentFile, error) {
 // RepoDeclaration, or nil when the intent declares none. The entity key is
 // repo-local (<namespace>/<repo>/<name>); no cloud project id is available at
 // resolve time (saas-workspace-overview WO3). displayName/description default
-// from metadata when omitted.
-func repoDeclFromIntent(intent *intentFile, namespace, repo, workspaceRoot string) *RepoDeclaration {
+// from metadata when omitted. The doc set (overview + pages, saas-catalog-docs
+// CD1) resolves through docCtx: bytes read at the pinned commit, dirty paths
+// refused, caps enforced — declared paths are repo-root-relative here.
+func repoDeclFromIntent(intent *intentFile, namespace, repo string, docCtx *docResolveContext) *RepoDeclaration {
 	if intent == nil || intent.Repo == nil {
 		return nil
 	}
@@ -161,8 +183,10 @@ func repoDeclFromIntent(intent *intentFile, namespace, repo, workspaceRoot strin
 		description = intent.Metadata.Description
 	}
 	overview := ""
+	var pages []catalogmodel.DocPage
 	if rb.Docs != nil {
 		overview = rb.Docs.Overview
+		pages = rb.Docs.Pages
 	}
 	links := make([]RepoLink, 0, len(rb.Links))
 	for _, l := range rb.Links {
@@ -177,19 +201,12 @@ func repoDeclFromIntent(intent *intentFile, namespace, repo, workspaceRoot strin
 		Description: description,
 		Owner:       rb.Owner,
 		Overview:    overview,
+		Pages:       append([]catalogmodel.DocPage(nil), pages...),
 		Links:       links,
 		Tags:        append([]string(nil), rb.Tags...),
 	}
-	// Read the overview bytes from the working tree (WO3b). Best-effort: a
-	// missing/unreadable file leaves the path pointer without a content blob, so
-	// the entity still records where the doc should live. The autopush publish
-	// gate requires a clean default branch, so working-tree == HEAD there.
-	if overview != "" && workspaceRoot != "" {
-		if b, err := os.ReadFile(filepath.Join(workspaceRoot, filepath.FromSlash(overview))); err == nil {
-			sum := sha256.Sum256(b)
-			d.OverviewContent = b
-			d.OverviewSHA = hex.EncodeToString(sum[:])
-		}
+	if docCtx != nil {
+		d.Docs = docCtx.resolve("", overview, pages)
 	}
 	return d
 }

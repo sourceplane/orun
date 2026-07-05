@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/sourceplane/orun/internal/catalogmodel"
 )
 
 // intentFile mirrors only the catalog-relevant slice of intent.yaml that
@@ -45,8 +47,13 @@ type intentRepoBlock struct {
 	Tags        []string         `yaml:"tags"`
 }
 
+// intentRepoDocs mirrors the repo block's docs: the reserved overview plus the
+// ordered pages set (saas-catalog-docs CD1). catalogmodel.DocPage decodes
+// directly — yaml.v3's default key mapping (lowercased field name) matches the
+// declared keys (path/key/title/role) exactly.
 type intentRepoDocs struct {
-	Overview string `yaml:"overview"`
+	Overview string                 `yaml:"overview"`
+	Pages    []catalogmodel.DocPage `yaml:"pages"`
 }
 
 type intentRepoLink struct {

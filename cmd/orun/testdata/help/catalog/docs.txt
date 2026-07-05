@@ -32,6 +32,7 @@ Flags:
       --catalog-source string     Resolve catalog by ref selector (current|main|latest|branches/<name>|prs/<n>|cat-<key>)
       --json                      Stable machine-readable output (includes the doc content)
       --kind string               Address an entity of this kind instead of a Component
+      --list                      List the entity's full doc set (the shelf) instead of printing one doc
       --source string             Alias for --catalog-source
 
 Global Flags:
