@@ -11,7 +11,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft — design (CD0) in review; no code landed |
+| **Status** | ✅ **CD1 + CD2 shipped.** CD1 (#463): `docs.pages` + the universal `PendingDocs` walk (components + repo block), pinned-commit provenance with dirty-path refusal, caps, `catalog docs --list`. CD2 (#464): `catalog.entities` enrichment for derived kinds with *enrich-never-create* validation. Platform half shipped in orun-cloud (CD3 #340 · CD4 #341 · CD5 #342 · CD6 #343); as-built record + recorded deviations in orun-cloud `specs/epics/saas-catalog-docs/IMPLEMENTATION-STATUS.md` (note: component doc paths resolve **component-relative**, normalized repo-relative on the wire — a refinement of model §2a). |
 | **Cluster** | **CD** (catalog docs). CLI milestones: **CD1** (doc set + universal walk + provenance + caps), **CD2** (enrichment) |
 | **Repos** | `sourceplane/orun` (CLI, Go — this half) · `sourceplane/orun-cloud` (platform, TS) · `sourceplane/ogpic` (reference adopter) |
 | **Target branch** | `claude/overview-epic-architecture-7d28im` |
