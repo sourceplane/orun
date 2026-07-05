@@ -307,6 +307,12 @@ type Dependency struct {
 	// Reason is a free-form note explaining why include=always was chosen.
 	// Surfaced in plan output for auditability; never affects behavior.
 	Reason string `yaml:"reason,omitempty" json:"reason,omitempty"`
+	// Input declares the dependency's sources as build inputs of this
+	// component. Interpreted by the catalog change engine (--changed
+	// rescopes the dependent when the dependency changes); inert to the
+	// plan engine's ordering semantics. Declared here so both parsers of
+	// component.yaml accept the same authored shape.
+	Input bool `yaml:"input,omitempty" json:"input,omitempty"`
 }
 
 // Dependency include modes.

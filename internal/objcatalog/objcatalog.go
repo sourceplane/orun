@@ -84,6 +84,7 @@ type RelationEdgeView struct {
 	ToKind   string
 	Optional bool
 	Include  string
+	Input    bool // build-input edge: the change engine rescopes From when To changes
 }
 
 // FingerprintView is the read view of one impact/fingerprints/<name>.json blob:
@@ -138,6 +139,7 @@ type RelationView struct {
 	ToKind   string
 	Optional bool
 	Include  string
+	Input    bool
 }
 
 // EnvView is one component-environment binding (spec.environments.<name>).
@@ -164,6 +166,7 @@ type GraphEdgeView struct {
 	Type     string
 	Optional bool   // dependency-edge optionality, carried from the resolved catalog
 	Include  string // change-detection plan-selection mode ("always"; empty = if-selected)
+	Input    bool   // build-input edge: the change engine rescopes From when To changes
 }
 
 // OwnershipView is the read view of impact/ownership.json (the ownership map the
@@ -271,6 +274,7 @@ func (r *Reader) Load(ctx context.Context, ref string) (CatalogView, error) {
 				view.Relations = append(view.Relations, RelationEdgeView{
 					From: ed.From, FromKind: ed.FromKind, Type: ed.Type,
 					To: ed.To, ToKind: ed.ToKind, Optional: ed.Optional, Include: ed.Include,
+					Input: ed.Input,
 				})
 			}
 		case e.Name == dirImpact && e.Kind == objectstore.KindTree:
@@ -415,7 +419,7 @@ func (r *Reader) readGraph(ctx context.Context, treeID objectstore.ObjectID) (ma
 			gv.Nodes = append(gv.Nodes, GraphNodeView{Key: n.Key, Kind: n.Kind, Name: n.Name})
 		}
 		for _, ed := range g.Edges {
-			gv.Edges = append(gv.Edges, GraphEdgeView{From: ed.From, To: ed.To, Type: ed.Type, Optional: ed.Optional, Include: ed.Include})
+			gv.Edges = append(gv.Edges, GraphEdgeView{From: ed.From, To: ed.To, Type: ed.Type, Optional: ed.Optional, Include: ed.Include, Input: ed.Input})
 		}
 		out[g.EdgeKind] = gv
 	}
@@ -604,7 +608,7 @@ func relationViews(rels []nodes.EntityRelation) []RelationView {
 	}
 	out := make([]RelationView, 0, len(rels))
 	for _, r := range rels {
-		out = append(out, RelationView{Type: r.Type, To: r.To, ToKind: r.ToKind, Optional: r.Optional, Include: r.Include})
+		out = append(out, RelationView{Type: r.Type, To: r.To, ToKind: r.ToKind, Optional: r.Optional, Include: r.Include, Input: r.Input})
 	}
 	return out
 }

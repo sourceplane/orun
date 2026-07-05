@@ -10,7 +10,7 @@
 | ID | Milestone | Status |
 |----|-----------|--------|
 | WP0 | Import + the derived read (dogfood zero) | ✅ Shipped — orun #454 (worklens oracle + import dry-run) + orun-cloud #318 (two-log substrate) + the WP1 surface PRs (query API, console list, import apply, `orun work import`/`list`) |
-| WP1 | Coordination + the board | 🏗️ In progress — fold query API with evidence + mutator verdicts + read-only console Work page + import apply landed (orun-cloud WP1 PR; orun: remotestate work client, `orun work import` apply, `orun work list`); optimistic store + SSE replay + pin/comment UI pending |
+| WP1 | Coordination + the board | ✅ Shipped — fold query API with evidence + mutator verdicts + console Work page + import apply (orun-cloud WP1 PR; orun: remotestate work client, `orun work import` apply, `orun work list`), then orun-cloud #333: pin/comment UI with inline mutator verdicts + live refresh (events-cursor poll over the coordination log — the log IS the sync signal). Remaining for the dogfood gate: the live `orun work import` of both repos' spec trees |
 | WP2 | Observation ingestion: PRs + drift | ✅ Shipped — orun-cloud #327: the webhook drain projects normalized scm.* PR/branch events into the fact log (same-tx, semantic dedupe, task-key parse); the `ci` producer endpoint carries affected sets; the WP0 claim join + drift inbox light up from live facts |
 | WP3 | Gates → Done, overlay → Released | 🏗️ Mostly shipped — orun-cloud WP3 PR: run-stream gate verdicts from terminal job phases keyed to the run's git revision (P-3: execution truth, never GitHub statuses); the deploy-overlay → revision_live bridge built + tested; the In Review → Done → Released walk proven from facts. Remaining: the runtime call site awaits saas-resources-runtime |
 | WP4 | Sealing + `orun spec pull` | ✅ Shipped — seal core + `orun spec pull <slug>[@sha256:…]` (pin verification, read-only view, --id-only), and the remote leg: `--push` stores the sealed blob in the object store and set-difference-syncs `refs/work/specs/<slug>/latest` to the org/project-routed remote (the catalog's push spine). Sealing deliberately stays in Go: one canonicalizer, one determinism contract |
@@ -79,9 +79,14 @@ blocked flags, drift inbox, claim suggestions).
 with catalog push), `orun work list` (evidence-bearing rungs in the
 terminal).
 
-**Still open for WP1:** the local-first console store (snapshot + cursor
-replay over SSE/LISTEN-NOTIFY), optimistic apply, and the pin/comment UI —
-then the dogfood gate (this table retires).
+**WP1 close-out (orun-cloud #333):** the pin/comment UI (the ONLY
+lifecycle-adjacent controls that exist — neither writes a rung) with the
+mutator's structured verdict rendered inline on rejection, and live refresh
+via an events-cursor poll over the coordination log. The seam is
+transport-agnostic: SSE replaces the poll without touching the
+mutation/verdict path (shipping as the WP1b follow-up in orun-cloud).
+Still open: the dogfood gate — a live `orun work import` of both repos'
+spec trees (this table retires there).
 
 ## WP5 — as-built
 
@@ -102,8 +107,13 @@ seam (`remotestate.Client`). The tool surface is closed at 7:
   depth, not client-side trust).
 
 Remaining epic-wide: the resources-runtime call site for `revision_live`
-(gated on saas-resources-runtime P2 — the bridge is built and tested), a
-push-based SSE transport if the events-cursor poll ever misses the latency
-bar (the seam is transport-agnostic by design), and `orun work import` of
-both repos' spec trees against a live workspace (the dogfood gate that
-retires this table).
+(gated on saas-resources-runtime P2 — the bridge is built and tested) and
+`orun work import` of both repos' spec trees against a live workspace (the
+dogfood gate that retires this table). The push-based SSE transport ships
+cloud-side as the WP1b follow-up (see orun-cloud's epic README for status).
+
+Adjacent platform fix motivated by this epic's rollout: `dependsOn[].input`
+(v2.22.0) — the change engine now rescopes a component when its declared
+build-input dependencies change, closing the shared-package gap that let a
+policy-engine-only change ship no policy-worker deploy (the production
+Work-page 404).

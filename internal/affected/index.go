@@ -46,10 +46,14 @@ type catalogIndex struct {
 	// dependency adjacency: deps[from] = its forward deps; dependents[to] = the
 	// components that depend on it. depsAlways is the forward adjacency
 	// restricted to include:always edges — the plan/run selection closure.
-	deps       map[string][]string
-	depsAlways map[string][]string
-	dependents map[string][]string
-	allComps   []string
+	// inputDependents is the REVERSE adjacency restricted to input:true edges:
+	// inputDependents[to] = the components whose artifacts embed to's sources,
+	// so a change to `to` is a direct change to each of them.
+	deps            map[string][]string
+	depsAlways      map[string][]string
+	dependents      map[string][]string
+	inputDependents map[string][]string
+	allComps        []string
 }
 
 // index builds the catalogIndex from the detector's catalog view.
@@ -63,6 +67,7 @@ func (d *Detector) index() *catalogIndex {
 		deps:                map[string][]string{},
 		depsAlways:          map[string][]string{},
 		dependents:          map[string][]string{},
+		inputDependents:     map[string][]string{},
 	}
 	if d.catalog == nil {
 		return idx
@@ -119,6 +124,9 @@ func (d *Detector) index() *catalogIndex {
 			if e.Include == "always" {
 				idx.depsAlways[e.From] = append(idx.depsAlways[e.From], e.To)
 			}
+			if e.Input {
+				idx.inputDependents[e.To] = append(idx.inputDependents[e.To], e.From)
+			}
 		}
 	default:
 		if g, ok := d.catalog.Graph["dependencies"]; ok {
@@ -127,6 +135,9 @@ func (d *Detector) index() *catalogIndex {
 				idx.dependents[e.To] = append(idx.dependents[e.To], e.From)
 				if e.Include == "always" {
 					idx.depsAlways[e.From] = append(idx.depsAlways[e.From], e.To)
+				}
+				if e.Input {
+					idx.inputDependents[e.To] = append(idx.inputDependents[e.To], e.From)
 				}
 			}
 		}
@@ -139,6 +150,15 @@ func (d *Detector) index() *catalogIndex {
 // in, excluding the seeds themselves, sorted.
 func (idx *catalogIndex) includeAlwaysClosure(seed map[string]bool) []string {
 	return idx.closure(seed, idx.depsAlways)
+}
+
+// inputDependentsClosure returns the transitive reverse closure of the seed set
+// over input:true edges only — the components whose build inputs the seeds are,
+// excluding the seeds themselves, sorted. These count as DIRECTLY changed: a
+// changed build input changes the consumer's artifact even though no file under
+// the consumer's own directory moved.
+func (idx *catalogIndex) inputDependentsClosure(seed map[string]bool) []string {
+	return idx.closure(seed, idx.inputDependents)
 }
 
 // classify maps one workspace-relative path to its class (the reference

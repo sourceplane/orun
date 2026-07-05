@@ -138,6 +138,9 @@ type ComponentDependency struct {
 	// Include is the resolved change-detection plan-selection mode ("always" or
 	// the omitted "if-selected" default). (orun-catalog-state CS5.)
 	Include string `json:"include,omitempty"`
+	// Input marks the dependency's sources as build inputs of this component:
+	// change detection rescopes this component when the dependency changes.
+	Input bool `json:"input,omitempty"`
 }
 
 // APIDependencies splits the API edges into provided and consumed.

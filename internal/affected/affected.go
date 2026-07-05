@@ -154,6 +154,20 @@ func (d *Detector) Detect(ctx context.Context, src ChangeSource) (Result, error)
 		}
 	}
 
+	// 2b. Build-input rescope: a component whose declared build inputs
+	// (dependsOn entries marked input:true) changed is itself directly
+	// changed — its artifact embeds the dependency's sources, so "only
+	// packages/x moved" still means this component's next build differs.
+	// Transitive over input edges (contracts → sdk → console). This is the
+	// systemic fix for the shared-package gap where a change under a
+	// dependency's directory never scheduled the consumer's deploy.
+	for _, key := range idx.inputDependentsClosure(directly) {
+		if !directly[key] {
+			directly[key] = true
+			explain = append(explain, ExplainEntry{Component: key, Reason: "build input changed (dependsOn input:true)"})
+		}
+	}
+
 	res.DirectlyChanged = sortedKeys(directly)
 
 	// 3. Dependency closure over the catalog graph.

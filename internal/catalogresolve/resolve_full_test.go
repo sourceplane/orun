@@ -505,6 +505,49 @@ func TestBuildCatalog_CarriesIncludeOnEdges(t *testing.T) {
 	}
 }
 
+// TestBuildCatalog_CarriesInputOnEdges: `input: true` on an authored dependsOn
+// entry survives resolution onto both the legacy dependencies graph and the
+// resolved manifest edge (the relations.json producer reads the latter).
+func TestBuildCatalog_CarriesInputOnEdges(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root+"/intent.yaml", "catalog:\n  namespace: ns\n")
+	mustWrite(t, root+"/apps/a/component.yaml",
+		"apiVersion: orun.io/v1alpha1\nkind: Component\nmetadata:\n  name: a\nspec:\n  type: worker\n  dependsOn:\n    - component: b\n      input: true\n    - component: c\n")
+	mustWrite(t, root+"/apps/b/component.yaml", validYAML("b"))
+	mustWrite(t, root+"/apps/c/component.yaml", validYAML("c"))
+
+	view, _, err := BuildCatalog(context.Background(), Options{WorkspaceRoot: root, Repo: "r"}, goldenInputs())
+	if err != nil {
+		t.Fatalf("BuildCatalog: %v", err)
+	}
+	dep := view.Graphs[0]
+	var toB, toC *catalogmodel.GraphEdge
+	for i := range dep.Edges {
+		switch dep.Edges[i].To {
+		case "ns/r/b":
+			toB = &dep.Edges[i]
+		case "ns/r/c":
+			toC = &dep.Edges[i]
+		}
+	}
+	if toB == nil || !toB.Input {
+		t.Errorf("a→b edge input = %+v, want true", toB)
+	}
+	if toC == nil || toC.Input {
+		t.Errorf("a→c edge input = %+v, want false", toC)
+	}
+	for _, m := range view.Manifests {
+		if m.Identity.Name != "a" {
+			continue
+		}
+		for _, d := range m.Spec.Dependencies.Components {
+			if d.Key == "ns/r/b" && !d.Input {
+				t.Errorf("manifest a→b dependency lost input: %+v", d)
+			}
+		}
+	}
+}
+
 func TestResolve_FingerprintsUseSourceFileDir(t *testing.T) {
 	// Real component.yaml files omit spec.path; the fingerprint dir must come
 	// from the discovered file location (SourceFile), not the empty spec.path —

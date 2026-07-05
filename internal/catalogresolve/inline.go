@@ -31,6 +31,7 @@ type inlineDependency struct {
 	Relationship string `yaml:"relationship"`
 	Optional     bool   `yaml:"optional"`
 	Include      string `yaml:"include"`
+	Input        bool   `yaml:"input"`
 }
 
 type inlineSubscribe struct {
@@ -122,6 +123,7 @@ func inlineToAuthored(ic inlineComponent) AuthoredManifest {
 			Relationship: d.Relationship,
 			Optional:     d.Optional,
 			Include:      d.Include,
+			Input:        d.Input,
 		})
 	}
 	if ic.Subscribe != nil && len(ic.Subscribe.Environments) > 0 {

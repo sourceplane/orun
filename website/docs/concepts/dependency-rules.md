@@ -202,6 +202,53 @@ changed: api-edge-worker  -> plan: identity-schema -> api-edge-worker
 
 `reason` is free-form text surfaced for auditability; it never affects behavior.
 
+## Input edges (build-input rescope)
+
+Since v2.22.0, `dependsOn` answers a third orthogonal question:
+
+3. **Rescope** — should *A* be treated as changed when only B changed? (new `input`)
+
+Mark a dependency `input: true` when its **sources are build inputs of your
+artifact** — a bundled shared package, generated contracts, anything your
+build compiles in. Change detection then treats a change to the dependency as
+a *direct* change to your component: `--changed` selects it, plans its jobs,
+and (on push-to-main lanes) schedules its deploy.
+
+```yaml
+metadata:
+  name: policy-worker
+spec:
+  type: cloudflare-worker-turbo
+  dependsOn:
+    - component: policy-engine
+      input: true   # the worker bundles packages/policy-engine
+```
+
+```text
+changed: packages/policy-engine  -> plan: policy-engine + policy-worker
+```
+
+Without `input`, this is the classic shared-package gap: the worker's bundle
+embeds the package, but `--changed` only matches files under the worker's own
+directory — so a package-only change ships no deploy and production serves a
+stale artifact until someone touches the worker's directory by hand.
+
+`input` is transitive over other input edges: with `contracts ←(input)─ sdk
+←(input)─ console`, a change to `contracts` rescopes both `sdk` and
+`console`. It composes with `include` (forward pull vs reverse rescope) and
+is inert to ordering (`dependencyMode` still decides what waits for what).
+Plain runtime peers — service bindings, API calls — should **not** be marked
+`input`: they appear in the blast radius (`orun catalog affected`) but a peer
+redeploy is not required for a peer-only change.
+
+`orun catalog affected --explain` records the provenance of every rescope:
+
+```text
+explain:
+  - ns/repo/policy-engine: input file changed: packages/policy-engine/src/index.ts
+  - ns/repo/policy-worker: build input changed (dependsOn input:true)
+```
+
 ### Relationship to `dependencyMode`
 
 `include` and `dependencyMode` are orthogonal — combine freely:

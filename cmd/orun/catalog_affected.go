@@ -21,7 +21,10 @@ import (
 
 const kindCatalogAffectedResult = "CatalogAffectedResult"
 
-var catalogAffectedJSON bool
+var (
+	catalogAffectedJSON        bool
+	catalogAffectedExplainFlag bool
+)
 
 // catalogAffectedData is the CatalogAffectedResult.data projection of
 // affected.Result (cli-surface.md §3). Empty sets serialize as [] for a stable
@@ -36,6 +39,15 @@ type catalogAffectedData struct {
 	NeedsFullResolve bool     `json:"needsFullResolve"`
 	IntentMode       string   `json:"intentMode"`
 	CatalogID        string   `json:"catalogId"`
+	// Explain carries the engine's per-component provenance entries when
+	// --explain is set (omitted otherwise to keep the envelope stable).
+	Explain []catalogAffectedExplain `json:"explain,omitempty"`
+}
+
+// catalogAffectedExplain mirrors affected.ExplainEntry for the JSON envelope.
+type catalogAffectedExplain struct {
+	Component string `json:"component,omitempty"`
+	Reason    string `json:"reason"`
 }
 
 func registerCatalogAffectedCommand(parent *cobra.Command) {
@@ -60,7 +72,8 @@ edit lowers confidence and sets needsFullResolve.
 Examples:
   orun catalog affected
   orun catalog affected --base main --head HEAD
-  orun catalog affected --files apps/api/main.go --json`,
+  orun catalog affected --files apps/api/main.go --json
+  orun catalog affected --files packages/policy-engine/src/index.ts --explain`,
 		Args: cobra.NoArgs,
 		RunE: runCatalogAffected,
 	}
@@ -69,6 +82,7 @@ Examples:
 	cmd.Flags().StringSliceVar(&changedFiles, "files", nil, "Comma-separated changed files (bypasses git diff)")
 	cmd.Flags().StringVar(&intentImpact, "intent-impact", "watch", "How global intent changes affect components (all/watch/none)")
 	cmd.Flags().BoolVar(&catalogAffectedJSON, "json", false, "Emit the CatalogAffectedResult JSON envelope")
+	cmd.Flags().BoolVar(&catalogAffectedExplainFlag, "explain", false, "Show why each component was selected (file, intent, or build-input provenance)")
 	parent.AddCommand(cmd)
 }
 
@@ -112,6 +126,11 @@ func runCatalogAffected(cmd *cobra.Command, _ []string) error {
 		IntentMode:       string(res.IntentMode),
 		CatalogID:        string(view.ObjectID),
 	}
+	if catalogAffectedExplainFlag {
+		for _, e := range res.Explain {
+			data.Explain = append(data.Explain, catalogAffectedExplain{Component: e.Component, Reason: e.Reason})
+		}
+	}
 
 	if catalogAffectedJSON {
 		return writeCatalogEnvelope(kindCatalogAffectedResult, data, nil)
@@ -123,6 +142,16 @@ func runCatalogAffected(cmd *cobra.Command, _ []string) error {
 // renderCatalogAffectedText prints a compact human-readable summary.
 func renderCatalogAffectedText(w io.Writer, d catalogAffectedData) {
 	fmt.Fprintf(w, "intent: %s   confidence: %s   needsFullResolve: %v\n", d.IntentMode, d.Confidence, d.NeedsFullResolve)
+	if len(d.Explain) > 0 {
+		fmt.Fprintf(w, "explain:\n")
+		for _, e := range d.Explain {
+			if e.Component != "" {
+				fmt.Fprintf(w, "  - %s: %s\n", e.Component, e.Reason)
+			} else {
+				fmt.Fprintf(w, "  - %s\n", e.Reason)
+			}
+		}
+	}
 	printComponentList(w, "directly changed", d.DirectlyChanged)
 	printComponentList(w, "dependents", d.Dependents)
 	printComponentList(w, "affected (blast radius)", d.Affected)
