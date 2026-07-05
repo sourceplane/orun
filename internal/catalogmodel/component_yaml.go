@@ -105,13 +105,17 @@ type ComponentYAMLLink struct {
 }
 
 // ComponentYAMLDocs points at overview/techdocs/runbooks/ADRs (data-model.md §2).
-// `overview` is the single front-page md for the entity (saas-workspace-overview
-// WO3): a path pointer, resolved to a content object downstream.
+// `overview` is the reserved front-page md for the entity (saas-workspace-
+// overview WO3); `pages` is the ordered multi-doc set (saas-catalog-docs CD1) —
+// each entry a mapping with `path` required and optional key/title/role.
+// Relative paths resolve against the component directory and are normalized
+// repo-relative on the wire.
 type ComponentYAMLDocs struct {
-	Overview string   `json:"overview,omitempty"`
-	TechDocs string   `json:"techdocs,omitempty"`
-	Runbooks []string `json:"runbooks,omitempty"`
-	ADRs     []string `json:"adrs,omitempty"`
+	Overview string    `json:"overview,omitempty"`
+	Pages    []DocPage `json:"pages,omitempty"`
+	TechDocs string    `json:"techdocs,omitempty"`
+	Runbooks []string  `json:"runbooks,omitempty"`
+	ADRs     []string  `json:"adrs,omitempty"`
 }
 
 // ComponentYAMLChange declares which intent change signals affect this

@@ -133,12 +133,14 @@ type APIContract struct {
 }
 
 // EntityDocs points at overview/techdocs/runbooks/ADRs (§2). `overview` is the
-// single front-page md pointer, shared by every kind (saas-workspace-overview WO3).
+// reserved front-page md pointer, shared by every kind (saas-workspace-overview
+// WO3); `pages` is the ordered multi-doc set (saas-catalog-docs CD1).
 type EntityDocs struct {
-	Overview string   `json:"overview,omitempty"`
-	TechDocs string   `json:"techdocs,omitempty"`
-	Runbooks []string `json:"runbooks,omitempty"`
-	ADRs     []string `json:"adrs,omitempty"`
+	Overview string    `json:"overview,omitempty"`
+	Pages    []DocPage `json:"pages,omitempty"`
+	TechDocs string    `json:"techdocs,omitempty"`
+	Runbooks []string  `json:"runbooks,omitempty"`
+	ADRs     []string  `json:"adrs,omitempty"`
 }
 
 // EntityLink is one external link surfaced in the portal/CLI (§2).

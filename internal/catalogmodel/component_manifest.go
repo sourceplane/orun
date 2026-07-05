@@ -25,6 +25,12 @@ type ComponentManifest struct {
 	Links        []ComponentLink `json:"links,omitempty"`
 	Docs         *ComponentDocs  `json:"docs,omitempty"`
 	Extensions   map[string]any  `json:"extensions,omitempty"`
+
+	// ResolvedDocs is the transient resolved doc set (saas-catalog-docs CD1):
+	// the overview + pages bytes read at the pinned commit, carried to objplan
+	// which walks them into the catalog closure as content-addressed blobs.
+	// NOT serialized and excluded from manifestHash by construction (json:"-").
+	ResolvedDocs []ResolvedDoc `json:"-"`
 }
 
 // ComponentLink is one external link (data-model.md §2).
@@ -35,12 +41,16 @@ type ComponentLink struct {
 }
 
 // ComponentDocs points at overview/techdocs/runbooks/ADRs (data-model.md §2).
-// `overview` is the single front-page md pointer (saas-workspace-overview WO3).
+// `overview` is the reserved front-page md pointer (saas-workspace-overview
+// WO3); `pages` is the ordered multi-doc set (saas-catalog-docs CD1). The
+// techdocs/runbooks/adrs pointers stay bodyless (wire compat); only overview
+// and pages ship bytes into the closure.
 type ComponentDocs struct {
-	Overview string   `json:"overview,omitempty"`
-	TechDocs string   `json:"techdocs,omitempty"`
-	Runbooks []string `json:"runbooks,omitempty"`
-	ADRs     []string `json:"adrs,omitempty"`
+	Overview string    `json:"overview,omitempty"`
+	Pages    []DocPage `json:"pages,omitempty"`
+	TechDocs string    `json:"techdocs,omitempty"`
+	Runbooks []string  `json:"runbooks,omitempty"`
+	ADRs     []string  `json:"adrs,omitempty"`
 }
 
 // ComponentIdentity is the stable cross-source identity of a component. The

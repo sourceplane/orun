@@ -100,6 +100,13 @@ type ComponentManifest struct {
 	Links        []map[string]any  `json:"links,omitempty"`
 	Provenance   map[string]any    `json:"provenance,omitempty"`
 	Extensions   map[string]any    `json:"extensions,omitempty"`
+
+	// PendingDocs is a transient assembly input (NOT serialized): doc-key →
+	// raw bytes to be written as content-addressed blobs into the catalog's
+	// docs/ subtree (saas-catalog-docs CD1 — components carry doc sets the
+	// same way entities do). AssembleCatalog uploads each and stamps the
+	// matching Docs entry's digest via stampPendingDocs.
+	PendingDocs map[string][]byte `json:"-"`
 }
 
 // EntityIdentity is the generalized, multi-kind identity tuple for a catalog

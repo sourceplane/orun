@@ -114,10 +114,23 @@ func AssembleRevision(ctx context.Context, s store, rev PlanRevision, planBytes 
 func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifests []ComponentManifest, graphs []CatalogGraph, ownership ImpactOwnership, fingerprints []ComponentFingerprint) (ObjectID, error) {
 	cat.Kind = KindCatalogSnapshot
 
+	// sink collects every content-addressed doc blob (WO3b, generalized to the
+	// multi-doc set by saas-catalog-docs CD1) across components AND entities,
+	// deduped by id so shared content is one tree entry.
+	sink := &docSink{seen: map[string]bool{}}
+
 	compEntries := make([]objectstore.TreeEntry, 0, len(manifests))
 	refs := make([]CatalogComponentRef, 0, len(manifests))
 	for _, m := range manifests {
 		m.Kind = KindComponentManifest
+		if len(m.PendingDocs) > 0 {
+			docs, err := stampPendingDocs(ctx, s, m.Docs, m.PendingDocs, sink)
+			if err != nil {
+				return "", err
+			}
+			m.Docs = docs
+			m.PendingDocs = nil
+		}
 		if err := m.Validate(); err != nil {
 			return "", err
 		}
@@ -169,7 +182,7 @@ func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifest
 	if len(cat.DeclaredEntities) > 0 {
 		derived = append(derived, cat.DeclaredEntities...)
 	}
-	entitiesTreeID, docBlobs, countsByKind, err := assembleEntities(ctx, s, derived)
+	entitiesTreeID, countsByKind, err := assembleEntities(ctx, s, derived, sink)
 	if err != nil {
 		return "", err
 	}
@@ -211,7 +224,8 @@ func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifest
 	// docs/ holds the content-addressed doc blobs entities reference by digest
 	// (WO3b). Always present (possibly empty) so the catalog tree shape is
 	// uniform and the id is deterministic.
-	docsTreeID, err := s.PutTree(ctx, docBlobs)
+	sort.Slice(sink.entries, func(i, j int) bool { return sink.entries[i].Name < sink.entries[j].Name })
+	docsTreeID, err := s.PutTree(ctx, sink.entries)
 	if err != nil {
 		return "", err
 	}
@@ -418,6 +432,74 @@ func shortHexTail(id string, n int) string {
 	return id
 }
 
+// docSink accumulates the docs/ subtree entries across every assembly loop,
+// deduping by blob id (two docs with identical bytes share one entry).
+type docSink struct {
+	entries []objectstore.TreeEntry
+	seen    map[string]bool
+}
+
+func (d *docSink) add(id ObjectID) {
+	if d.seen[string(id)] {
+		return
+	}
+	d.seen[string(id)] = true
+	d.entries = append(d.entries, blobEntry(sanitizeSegment(shortHexTail(string(id), 40)), id))
+}
+
+// stampPendingDocs writes each pending doc's bytes as a content-addressed blob
+// and stamps the resulting digest onto the matching docs entry: the key
+// "overview" targets docs.overview (upgrading a bare path pointer to a ref
+// object if needed); every other key targets the docs.pages[] element with
+// that key (saas-catalog-docs CD1). A pending key with no pages match is
+// stamped as a top-level ref object (forward-compat with future doc slots).
+// Returns the (possibly newly-allocated) docs map.
+func stampPendingDocs(ctx context.Context, s store, docs map[string]any, pending map[string][]byte, sink *docSink) (map[string]any, error) {
+	docKeys := make([]string, 0, len(pending))
+	for k := range pending {
+		docKeys = append(docKeys, k)
+	}
+	sort.Strings(docKeys)
+	if docs == nil {
+		docs = map[string]any{}
+	}
+	pages, _ := docs["pages"].([]any)
+	stampPage := func(key, digest string) bool {
+		for _, raw := range pages {
+			pm, _ := raw.(map[string]any)
+			if pm == nil {
+				continue
+			}
+			if k, _ := pm["key"].(string); k == key {
+				pm["digest"] = digest
+				return true
+			}
+		}
+		return false
+	}
+	for _, dk := range docKeys {
+		id, err := s.PutBlob(ctx, pending[dk])
+		if err != nil {
+			return docs, err
+		}
+		if dk != "overview" && stampPage(dk, string(id)) {
+			sink.add(id)
+			continue
+		}
+		ref, _ := docs[dk].(map[string]any)
+		if ref == nil {
+			ref = map[string]any{}
+			if p, ok := docs[dk].(string); ok && p != "" {
+				ref["path"] = p
+			}
+		}
+		ref["digest"] = string(id)
+		docs[dk] = ref
+		sink.add(id)
+	}
+	return docs, nil
+}
+
 // assembleEntities writes each derived entity as entities/<Kind>/<name>.json and
 // returns the entities/ subtree id plus the per-kind counts. The subtree is
 // always written (possibly empty) for a uniform catalog tree shape.
@@ -427,7 +509,7 @@ func shortHexTail(id string, n int) string {
 // the colliding entries fall back to the sanitized full entityKey so the tree
 // stays valid (duplicate tree names are rejected by the store) and the naming
 // stays deterministic.
-func assembleEntities(ctx context.Context, s store, entities []Entity) (ObjectID, []objectstore.TreeEntry, map[string]int, error) {
+func assembleEntities(ctx context.Context, s store, entities []Entity, sink *docSink) (ObjectID, map[string]int, error) {
 	// First pass: count sanitized names per kind to detect collisions.
 	nameCount := map[string]int{} // "<kind>/<sanitizedName>" → occurrences
 	keyCount := map[string]int{}  // "<kind>/<sanitizedKey>" → occurrences
@@ -438,53 +520,31 @@ func assembleEntities(ctx context.Context, s store, entities []Entity) (ObjectID
 
 	counts := map[string]int{}
 	byKind := map[string][]objectstore.TreeEntry{}
-	// docBlobs collects the content-addressed doc blobs (WO3b), deduped by id so
-	// two entities referencing the same content share one tree entry. Sorted by
-	// name before the tree is written (in AssembleCatalog) for determinism.
-	var docBlobs []objectstore.TreeEntry
-	docSeen := map[string]bool{}
-	for _, e := range entities {
+	for i := range entities {
+		e := &entities[i]
 		e.APIVersion = "orun.io/v1"
 		// Write any pending doc content as content-addressed blobs, then stamp
-		// the blob id onto the entity's doc_ref.digest so it references the doc
-		// by content address (the platform reads it from R2 by that digest).
+		// each blob id onto the matching docs entry (overview ref or pages[]
+		// element) so the entity references the doc by content address (the
+		// platform reads it from R2 by that digest).
 		if len(e.PendingDocs) > 0 {
-			docKeys := make([]string, 0, len(e.PendingDocs))
-			for k := range e.PendingDocs {
-				docKeys = append(docKeys, k)
+			docs, err := stampPendingDocs(ctx, s, e.Docs, e.PendingDocs, sink)
+			if err != nil {
+				return "", nil, err
 			}
-			sort.Strings(docKeys)
-			if e.Docs == nil {
-				e.Docs = map[string]any{}
-			}
-			for _, dk := range docKeys {
-				id, err := s.PutBlob(ctx, e.PendingDocs[dk])
-				if err != nil {
-					return "", nil, nil, err
-				}
-				ref, _ := e.Docs[dk].(map[string]any)
-				if ref == nil {
-					ref = map[string]any{}
-				}
-				ref["digest"] = string(id)
-				e.Docs[dk] = ref
-				if !docSeen[string(id)] {
-					docSeen[string(id)] = true
-					docBlobs = append(docBlobs, blobEntry(sanitizeSegment(shortHexTail(string(id), 40)), id))
-				}
-			}
+			e.Docs = docs
 			e.PendingDocs = nil
 		}
 		if err := e.Validate(); err != nil {
-			return "", nil, nil, err
+			return "", nil, err
 		}
 		b, err := Encode(e)
 		if err != nil {
-			return "", nil, nil, err
+			return "", nil, err
 		}
 		id, err := s.PutBlob(ctx, b)
 		if err != nil {
-			return "", nil, nil, err
+			return "", nil, err
 		}
 		fileBase := sanitizeSegment(e.Identity.Name)
 		if nameCount[e.Kind+"/"+fileBase] > 1 {
@@ -508,16 +568,15 @@ func assembleEntities(ctx context.Context, s store, entities []Entity) (ObjectID
 	for _, k := range kinds {
 		treeID, err := s.PutTree(ctx, byKind[k])
 		if err != nil {
-			return "", nil, nil, err
+			return "", nil, err
 		}
 		kindEntries = append(kindEntries, treeEntry(sanitizeSegment(k), treeID))
 	}
 	treeID, err := s.PutTree(ctx, kindEntries)
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, err
 	}
-	sort.Slice(docBlobs, func(i, j int) bool { return docBlobs[i].Name < docBlobs[j].Name })
-	return treeID, docBlobs, counts, nil
+	return treeID, counts, nil
 }
 
 // assembleRelations builds the single typed relation graph (relations.json) from

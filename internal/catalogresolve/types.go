@@ -124,15 +124,14 @@ type RepoDeclaration struct {
 	DisplayName string
 	Description string
 	Owner       string
-	Overview    string // docs.overview path, or ""
-	// OverviewContent is the doc's bytes read from the working tree at resolve
-	// time (nil when there is no overview or the file is unreadable); it becomes
-	// a content-addressed blob in the catalog closure (WO3b). OverviewSHA is
-	// their hex sha256 (the doc_ref.sha provenance).
-	OverviewContent []byte
-	OverviewSHA     string
-	Links           []RepoLink
-	Tags            []string
+	Overview    string                 // docs.overview path, or ""
+	Pages       []catalogmodel.DocPage // declared docs.pages (CD1)
+	// Docs is the resolved doc set (overview + pages): identity, provenance,
+	// and — for attached docs — the bytes that become content-addressed blobs
+	// in the catalog closure (WO3b, generalized by saas-catalog-docs CD1).
+	Docs  []catalogmodel.ResolvedDoc
+	Links []RepoLink
+	Tags  []string
 }
 
 // RepoLink is one external link on a RepoDeclaration.
