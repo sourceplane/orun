@@ -14,6 +14,15 @@
 > emit-path + graph work, not an `allEntityKinds` poke; and docs ride the existing
 > `blob` closure (no new object kind). The normative pass is in orun-cloud's
 > `architecture-review.md`.
+>
+> **Succeeded by `specs/orun-catalog-docs/` (CD, 2026-07-05).** The post-ship
+> review (orun-cloud `specs/epics/saas-workspace-overview/review-2026-07-05.md`)
+> found the shipped cut narrower than the ratified model: doc bytes walk only
+> for the `Repo` entity, one doc per entity, content-sha-only provenance (no
+> commit), and the pinned-commit read (§3a) still working-tree/best-effort.
+> The successor generalizes the spine to a **doc set on every kind** (CD1),
+> adds the `catalog.entities` enrichment for derived kinds (CD2), and makes
+> provenance true by construction. New doc-model work goes there, not here.
 
 | | |
 |---|---|
