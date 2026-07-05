@@ -67,6 +67,22 @@ type intentCatalogBlock struct {
 	Defaults  *intentCatalogDefaults `yaml:"defaults"`
 	Discovery *intentDiscovery       `yaml:"discovery"`
 	Inference *intentInference       `yaml:"inference"`
+	// Entities is the enrichment block (saas-catalog-docs CD2): metadata +
+	// docs merged onto entities the resolver DERIVES (System/Domain/Group/
+	// Environment), keyed "<kind>/<name>" with a lowercase kind. Enrichment
+	// never creates an entity — a target that doesn't materialize is a
+	// warning; an enrichment for a declared kind (component/repo/…) is an
+	// error (one declaration site per entity).
+	Entities map[string]*intentEntityEnrichment `yaml:"entities"`
+}
+
+// intentEntityEnrichment is one catalog.entities value (CD2).
+type intentEntityEnrichment struct {
+	Description string           `yaml:"description"`
+	Owner       string           `yaml:"owner"`
+	Links       []intentRepoLink `yaml:"links"`
+	Tags        []string         `yaml:"tags"`
+	Docs        *intentRepoDocs  `yaml:"docs"`
 }
 
 // intentInference mirrors the catalog.inference block of intent.yaml

@@ -175,7 +175,7 @@ func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifest
 	// under entities/<Kind>/ (orun-service-catalog SC3). Component blobs remain
 	// under components/ in this milestone; the full unification to
 	// entities/Component/ is the SC3 follow-up.
-	derived := deriveEntities(manifests)
+	derived := deriveEntities(manifests, cat.EntityEnrichments)
 	// Fold in resolver-declared entities (e.g. the Repo self-description, WO3):
 	// they are not implied by component relations, so deriveEntities never
 	// produces them. assembleEntities counts them into countsByKind.
@@ -258,7 +258,10 @@ const (
 // deriveEntities builds the distinct non-Component entities implied by the
 // component set: System/Domain (partOf), Group (ownedBy), API (contracts),
 // Resource (dependsOn Resource). Deterministic: returned sorted by (kind, key).
-func deriveEntities(manifests []ComponentManifest) []Entity {
+// enrichments (catalog.entities, CD2) apply onto matching derived entities by
+// (kind, bare name) — fill-empty metadata/ownership plus the doc set; an
+// enrichment with no match is ignored (enrich, never create).
+func deriveEntities(manifests []ComponentManifest, enrichments []EntityEnrichment) []Entity {
 	type key struct{ kind, k string }
 	seen := map[key]*Entity{}
 	order := []key{}
@@ -355,6 +358,50 @@ func deriveEntities(manifests []ComponentManifest) []Entity {
 		}
 		e.Spec["members"] = anyMem
 		e.Spec["memberCount"] = len(mem)
+	}
+	// Apply enrichments (CD2) onto the derived entities they target. Matching
+	// is by (kind, bare name); a Group's derived name may carry the `group:`
+	// typed-ref prefix (bare owner names normalize to "group:<name>"), so the
+	// prefix-stripped form matches too.
+	for _, enr := range enrichments {
+		for _, e := range seen {
+			if e.Kind != enr.Kind {
+				continue
+			}
+			if e.Identity.Name != enr.Name && strings.TrimPrefix(e.Identity.Name, "group:") != enr.Name {
+				continue
+			}
+			if enr.Description != "" {
+				if e.Metadata == nil {
+					e.Metadata = map[string]any{}
+				}
+				if _, has := e.Metadata["description"]; !has {
+					e.Metadata["description"] = enr.Description
+				}
+			}
+			if len(enr.Tags) > 0 {
+				if e.Metadata == nil {
+					e.Metadata = map[string]any{}
+				}
+				if _, has := e.Metadata["tags"]; !has {
+					tags := make([]any, len(enr.Tags))
+					for i, t := range enr.Tags {
+						tags[i] = t
+					}
+					e.Metadata["tags"] = tags
+				}
+			}
+			if enr.Owner != "" && e.Ownership == nil {
+				e.Ownership = map[string]any{"owner": enr.Owner, "source": "authored"}
+			}
+			if len(enr.Links) > 0 && e.Links == nil {
+				e.Links = enr.Links
+			}
+			if len(enr.Docs) > 0 && e.Docs == nil {
+				e.Docs = enr.Docs
+				e.PendingDocs = enr.PendingDocs
+			}
+		}
 	}
 	sort.Slice(order, func(i, j int) bool {
 		if order[i].kind != order[j].kind {
