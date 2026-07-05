@@ -752,3 +752,68 @@ func TestAssembleCatalogWritesComponentDocPages(t *testing.T) {
 		t.Errorf("docs/ = %d entries, want 3 (overview + runbook + shared, deduped)", len(docEntries))
 	}
 }
+
+func TestDeriveEntitiesAppliesEnrichments(t *testing.T) {
+	t.Parallel()
+	manifests := []ComponentManifest{
+		{Identity: ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api"},
+			Relations: []EntityRelation{
+				{Type: "partOf", To: "ns/repo/identity", ToKind: EntityKindDomain},
+			}},
+	}
+	body := []byte("# Identity domain\n")
+	enr := []EntityEnrichment{
+		{
+			Kind: EntityKindDomain, Name: "identity",
+			Description: "Sign-in and sessions.", Owner: "group:platform",
+			Tags:        []string{"auth"},
+			Docs:        map[string]any{"overview": map[string]any{"path": "docs/domains/identity.md", "commit": "c0ffee"}},
+			PendingDocs: map[string][]byte{"overview": body},
+		},
+		// Enrich, never create: no component references this domain.
+		{Kind: EntityKindDomain, Name: "phantom", Description: "must not appear"},
+	}
+	out := deriveEntities(manifests, enr)
+	var dom *Entity
+	for i := range out {
+		if out[i].Kind == EntityKindDomain && out[i].Identity.Name == "identity" {
+			dom = &out[i]
+		}
+		if out[i].Identity.Name == "phantom" {
+			t.Fatalf("enrichment created a phantom entity: %+v", out[i])
+		}
+	}
+	if dom == nil {
+		t.Fatal("derived domain missing")
+	}
+	if dom.Metadata["description"] != "Sign-in and sessions." {
+		t.Errorf("description = %v", dom.Metadata)
+	}
+	if dom.Ownership["owner"] != "group:platform" {
+		t.Errorf("ownership = %v", dom.Ownership)
+	}
+	if dom.Docs == nil || dom.PendingDocs == nil {
+		t.Errorf("docs not applied: %v / %v", dom.Docs, dom.PendingDocs)
+	}
+
+	// End-to-end through assembly: the enriched doc gets a digest.
+	ctx := context.Background()
+	s := mem()
+	catID, err := AssembleCatalog(ctx, s, CatalogSnapshot{SourceID: goodID("a"), ResolverVersion: 16, EntityEnrichments: enr}, manifests, nil, ImpactOwnership{}, nil)
+	if err != nil {
+		t.Fatalf("AssembleCatalog: %v", err)
+	}
+	entTree, _ := findEntry(t, s, catID, dirEntities)
+	domTree, _ := s.GetTree(ctx, kindTreeID(t, s, entTree, "Domain"))
+	de, err := Decode[Entity]([]byte(blobBody(t, s, domTree[0].ID)))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	ref, _ := de.Docs["overview"].(map[string]any)
+	if d, _ := ref["digest"].(string); d == "" {
+		t.Errorf("enriched doc digest not stamped: %v", de.Docs)
+	}
+	if ref["commit"] != "c0ffee" {
+		t.Errorf("enriched doc commit lost: %v", ref)
+	}
+}

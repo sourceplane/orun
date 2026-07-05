@@ -57,6 +57,13 @@ type CatalogSnapshot struct {
 	// NOT part of the serialized catalog record (json:"-"), so it never changes
 	// the catalog.json blob id; AssembleCatalog folds it into entities/<Kind>/.
 	DeclaredEntities []Entity `json:"-"`
+
+	// EntityEnrichments carries the resolver's catalog.entities entries
+	// (saas-catalog-docs CD2), applied to matching DERIVED entities during
+	// assembly (fill-empty metadata + the doc set). Enrich, never create: an
+	// entry with no matching derived entity is ignored here (the resolver
+	// already warned). Transient — not part of the serialized snapshot.
+	EntityEnrichments []EntityEnrichment `json:"-"`
 }
 
 // ComponentIdentity is the identifying tuple of a component. Environment is
@@ -375,4 +382,18 @@ type StoreVersion struct {
 	HashAlgo           string    `json:"hashAlgo"`
 	ResolverVersion    int       `json:"resolverVersion"`
 	CreatedAt          time.Time `json:"createdAt"`
+}
+
+// EntityEnrichment is one catalog.entities enrichment (saas-catalog-docs CD2)
+// targeted at a derived entity by (Kind, bare Name). Docs/PendingDocs follow
+// the same wire + assembly contract as every other entity doc set.
+type EntityEnrichment struct {
+	Kind        string
+	Name        string
+	Description string
+	Owner       string
+	Links       []map[string]any
+	Tags        []string
+	Docs        map[string]any
+	PendingDocs map[string][]byte
 }

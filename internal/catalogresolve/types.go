@@ -110,6 +110,12 @@ type ResolvedCatalog struct {
 	// the intent declares no `repo:` block (saas-workspace-overview WO3). When
 	// present, objplan emits a single Repo entity from it.
 	RepoDecl *RepoDeclaration
+
+	// Enrichments are the resolved catalog.entities entries (saas-catalog-docs
+	// CD2): metadata + doc sets merged onto derived System/Domain/Group/
+	// Environment entities at assembly. Enrich, never create — an entry whose
+	// target no component implies produces nothing (warned at resolve).
+	Enrichments []EntityEnrichment
 }
 
 // RepoDeclaration is the resolved `repo:` block: the repo self-describing.

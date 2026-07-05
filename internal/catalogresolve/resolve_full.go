@@ -100,6 +100,16 @@ func Resolve(ctx context.Context, opts Options) (*ResolvedCatalog, []ValidationI
 	if intent != nil && intent.Repo != nil && intent.Repo.Docs != nil {
 		issues = append(issues, validateDocPages(intent.Repo.Docs.Pages, "intent.yaml")...)
 	}
+
+	// Stage 9c — catalog.entities enrichment (saas-catalog-docs CD2): metadata
+	// + docs for derived kinds, resolved through the same doc context.
+	enrichments, enrichIssues := resolveEnrichments(intent, manifests, docCtx)
+	for _, ei := range enrichIssues {
+		if opts.Strict && ei.Severity == SeverityWarning {
+			ei.Severity = SeverityError
+		}
+		issues = append(issues, ei)
+	}
 	sortIssues(issues)
 
 	// Stage 10 — manifestHash per component.
@@ -136,6 +146,7 @@ func Resolve(ctx context.Context, opts Options) (*ResolvedCatalog, []ValidationI
 		Excludes:     EffectiveExcludes(intentExcludes),
 		Fingerprints: computeFingerprints(opts.WorkspaceRoot, manifests, globalDigest),
 		RepoDecl:     repoDeclFromIntent(intent, namespace, repo, docCtx),
+		Enrichments:  enrichments,
 	}
 
 	if firstErr := firstError(issues); firstErr != nil {

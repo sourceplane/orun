@@ -79,6 +79,32 @@ func BuildCatalogNodes(view *catalogresolve.CatalogView, resolverVersion int, ow
 		cat.DeclaredEntities = []nodes.Entity{repoEntity(view.RepoDecl)}
 	}
 
+	// Carry the catalog.entities enrichments (CD2) for the derived-entity
+	// assembly pass: fill-empty metadata + the doc set, keyed (kind, name).
+	if view != nil && view.ResolvedCatalog != nil {
+		for _, enr := range view.Enrichments {
+			ne := nodes.EntityEnrichment{
+				Kind:        enr.Kind,
+				Name:        enr.Name,
+				Description: enr.Description,
+				Owner:       enr.Owner,
+				Tags:        append([]string(nil), enr.Tags...),
+			}
+			for _, l := range enr.Links {
+				lm := map[string]any{}
+				putNonEmpty(lm, "title", l.Title)
+				putNonEmpty(lm, "url", l.URL)
+				putNonEmpty(lm, "icon", l.Icon)
+				ne.Links = append(ne.Links, lm)
+			}
+			if docs, pending := docsWire(nil, enr.Overview, enr.Docs); docs != nil {
+				ne.Docs = docs
+				ne.PendingDocs = pending
+			}
+			cat.EntityEnrichments = append(cat.EntityEnrichments, ne)
+		}
+	}
+
 	return cat, manifests, graphs, buildOwnership(view), buildFingerprints(view)
 }
 
