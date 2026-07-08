@@ -98,3 +98,12 @@ Agents epic:
 
 No new model, no new write path, no new permissions. The Agents section is
 UI over rails this spec lays.
+
+> That epic now exists, cross-repo under cluster **AG**. The **runtime** is
+> this repo: [`../orun-agents/`](../orun-agents/README.md) — the `AgentType`/
+> `AgentSession` object kinds (`agents/*.md` sealed like `SpecSnapshot`), the
+> `internal/agent` delegation loop, the `AgentDriver` seam, and the TUI Agent
+> mode. The **cloud control plane** (sandbox, session identity, design/
+> dispatch, console) is `orun-cloud/specs/epics/saas-agents/`. Dispatch is
+> still `assign`; the runtime has no status-write surface, exactly as this
+> section requires.
