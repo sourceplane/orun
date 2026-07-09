@@ -37,3 +37,26 @@ func CatalogID(algo objectstore.Algo, cat CatalogSnapshot, manifests []Component
 func RevisionID(algo objectstore.Algo, rev PlanRevision, planBytes []byte) (ObjectID, error) {
 	return AssembleRevision(context.Background(), hashStore{algo}, rev, planBytes)
 }
+
+// AgentTypeID returns the content id AssembleAgentType would produce, without
+// writing. Two agents/*.md files differing only in frontmatter key order or
+// whitespace yield the same id (canonical encoding).
+func AgentTypeID(algo objectstore.Algo, at AgentTypeSnapshot, body []byte, literacyName string, literacyBody []byte) (ObjectID, error) {
+	return AssembleAgentType(context.Background(), hashStore{algo}, at, body, literacyName, literacyBody)
+}
+
+// AgentBriefID returns the content id AssembleAgentBrief would produce.
+func AgentBriefID(algo objectstore.Algo, b AgentBrief) (ObjectID, error) {
+	return AssembleAgentBrief(context.Background(), hashStore{algo}, b)
+}
+
+// AgentSessionSegmentID returns the content id AssembleAgentSessionSegment
+// would produce.
+func AgentSessionSegmentID(algo objectstore.Algo, g AgentSessionSegment) (ObjectID, error) {
+	return AssembleAgentSessionSegment(context.Background(), hashStore{algo}, g)
+}
+
+// AgentSessionID returns the content id AssembleAgentSession would produce.
+func AgentSessionID(algo objectstore.Algo, s AgentSessionSnapshot) (ObjectID, error) {
+	return AssembleAgentSession(context.Background(), hashStore{algo}, s)
+}
