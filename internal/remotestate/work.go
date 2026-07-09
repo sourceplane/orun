@@ -2,6 +2,7 @@ package remotestate
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 )
 
@@ -185,6 +186,56 @@ func (c *Client) EditWorkContract(ctx context.Context, key string, contract Work
 		Contract WorkContract `json:"contract"`
 	}{Contract: contract}
 	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/tasks/"+urlSegment(key)+"/contract"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ── Read-only v3 surfaces the MCP exposes (PM5) ──────────────────────────────
+
+// WorkTimelineEntry is one interleaved entry of the two logs — a
+// coordination event or an observation, by time. Payloads stay raw: the MCP
+// hands them to the agent verbatim; nothing here is interpreted client-side.
+type WorkTimelineEntry struct {
+	At          string          `json:"at"`
+	Type        string          `json:"type"` // "event" | "observation"
+	Event       json.RawMessage `json:"event,omitempty"`
+	Observation json.RawMessage `json:"observation,omitempty"`
+}
+
+// WorkTimeline is the unified timeline for one item (PM1 route).
+type WorkTimeline struct {
+	Key     string              `json:"key"`
+	Entries []WorkTimelineEntry `json:"entries"`
+}
+
+// GetWorkTimeline fetches both logs interleaved for one task/spec key.
+func (c *Client) GetWorkTimeline(ctx context.Context, key string) (*WorkTimeline, error) {
+	var resp WorkTimeline
+	if err := c.doJSON(ctx, http.MethodGet, c.workPath("/timeline/"+urlSegment(key)), nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkDoc is one content-addressed cloud document revision (V3-2: the
+// digest form equals the imported doc_ref).
+type WorkDoc struct {
+	Revision  string `json:"revision"`
+	Parent    string `json:"parent,omitempty"`
+	SpecKey   string `json:"specKey"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"createdAt"`
+}
+
+// GetWorkDoc fetches a spec's cloud document (latest when rev is empty).
+func (c *Client) GetWorkDoc(ctx context.Context, specKey, rev string) (*WorkDoc, error) {
+	path := c.workPath("/specs/" + urlSegment(specKey) + "/doc")
+	if rev != "" {
+		path += "?rev=" + urlSegment(rev)
+	}
+	var resp WorkDoc
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
 		return nil, err
 	}
 	return &resp, nil

@@ -41,6 +41,21 @@ func (f *fakeAPI) EditWorkContract(_ context.Context, key string, _ remotestate.
 	f.edited = append(f.edited, key)
 	return &remotestate.WorkMutationResponse{Key: key, Seq: 15}, nil
 }
+func (f *fakeAPI) GetWorkTimeline(_ context.Context, key string) (*remotestate.WorkTimeline, error) {
+	if f.failNext != nil {
+		return nil, f.failNext
+	}
+	return &remotestate.WorkTimeline{Key: key, Entries: []remotestate.WorkTimelineEntry{
+		{At: "2026-07-01T00:00:00Z", Type: "event"},
+		{At: "2026-07-01T01:00:00Z", Type: "observation"},
+	}}, nil
+}
+func (f *fakeAPI) GetWorkDoc(_ context.Context, specKey, rev string) (*remotestate.WorkDoc, error) {
+	if f.failNext != nil {
+		return nil, f.failNext
+	}
+	return &remotestate.WorkDoc{Revision: "sha256:aa", SpecKey: specKey, Body: "# Doc\n\nbody for " + specKey + " " + rev}, nil
+}
 
 func fixtureSummary() *remotestate.WorkSummary {
 	return &remotestate.WorkSummary{
@@ -112,13 +127,13 @@ func TestInitializeAndToolSurface(t *testing.T) {
 	for _, tl := range tools {
 		names[tl.(map[string]interface{})["name"].(string)] = true
 	}
-	for _, want := range []string{"work_query", "work_get", "spec_get", "task_create", "task_comment", "task_assign", "contract_propose"} {
+	for _, want := range []string{"work_query", "work_get", "spec_get", "work_timeline", "spec_doc", "task_create", "task_comment", "task_assign", "contract_propose"} {
 		if !names[want] {
 			t.Errorf("missing tool %s", want)
 		}
 	}
-	if len(tools) != 7 {
-		t.Errorf("tool surface = %d tools, want exactly 7 (closed)", len(tools))
+	if len(tools) != 9 {
+		t.Errorf("tool surface = %d tools, want exactly 9 (closed: 5 reads + 4 writes)", len(tools))
 	}
 	// The lie is unrepresentable: no lifecycle write, no pin (WP-3, WP-10).
 	for name := range names {
@@ -159,6 +174,26 @@ func TestSpecGetSealsIntentOnly(t *testing.T) {
 	}
 	if !strings.Contains(text, `"goal":"g"`) {
 		t.Fatal("sealed brief lacks the contract")
+	}
+}
+
+func TestReadOnlyV3Tools(t *testing.T) {
+	s := &Server{API: &fakeAPI{summary: fixtureSummary()}, Workspace: "ws_1"}
+	responses := rpc(t, s,
+		callLine(1, "work_timeline", `{"key":"ORN-1"}`),
+		callLine(2, "spec_doc", `{"spec":"demo-epic"}`),
+		callLine(3, "work_timeline", `{}`),
+	)
+	text, isErr := resultText(t, responses[0])
+	if isErr || !strings.Contains(text, `"observation"`) {
+		t.Fatalf("work_timeline lacks the interleaved logs: %s", text)
+	}
+	text, isErr = resultText(t, responses[1])
+	if isErr || !strings.HasPrefix(text, "sha256:aa") || !strings.Contains(text, "demo-epic") {
+		t.Fatalf("spec_doc does not lead with the revision digest: %s", text)
+	}
+	if text, isErr = resultText(t, responses[2]); !isErr || !strings.Contains(text, "key is required") {
+		t.Fatalf("work_timeline without a key must fail: %s", text)
 	}
 }
 
