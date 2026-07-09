@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -228,6 +229,66 @@ func agenttypeHasError(issues []agenttype.Issue) bool {
 	return false
 }
 
+var agentReplayCmd = &cobra.Command{
+	Use:   "replay <sessionId>[@sha256:…]",
+	Short: "Re-render a sealed session's transcript from content alone",
+	Long: "Resolve a session by id (refs/agents/sessions/<id>) or an explicit\n" +
+		"@<objectId> pin, and replay its sealed segment chain — the run reconstructed\n" +
+		"deterministically from the object graph, no live process.",
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		sess, pin := args[0], ""
+		if i := strings.Index(args[0], "@"); i >= 0 {
+			sess, pin = args[0][:i], args[0][i+1:]
+		}
+		store, refs, _, ok := openObjectStores()
+		if !ok {
+			return fmt.Errorf("no object store at .orun")
+		}
+		ctx := cmd.Context()
+		target := pin
+		if target == "" {
+			ref, err := refs.Read(ctx, agent.SessionRef(sess))
+			if err != nil {
+				return fmt.Errorf("session %q not sealed: %w", sess, err)
+			}
+			target = ref.Target
+		}
+		snap, lines, err := agent.Replay(ctx, store, objectstore.ObjectID(target))
+		if err != nil {
+			return err
+		}
+		out := cmd.OutOrStdout()
+		fmt.Fprintf(out, "session   %s @ %s\n", snap.SessionID, target)
+		fmt.Fprintf(out, "runKind   %s\n", snap.RunKind)
+		fmt.Fprintf(out, "agentType %s\n", snap.AgentType)
+		fmt.Fprintf(out, "brief     %s\n", snap.Brief)
+		if snap.Outcome != nil {
+			fmt.Fprintf(out, "outcome   %s", snap.Outcome.Status)
+			if snap.Outcome.PR != "" {
+				fmt.Fprintf(out, "  pr=%s", snap.Outcome.PR)
+			}
+			fmt.Fprintln(out)
+		}
+		fmt.Fprintf(out, "\ntranscript (%d events):\n", len(lines))
+		for _, l := range lines {
+			fmt.Fprintf(out, "  %3d  %-20s %s\n", l.Seq, l.Kind, compactPayload(l.Payload))
+		}
+		return nil
+	},
+}
+
+func compactPayload(p map[string]any) string {
+	if len(p) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(p)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
 func registerAgentCommand(root *cobra.Command) {
 	agentContextCmd.Flags().BoolVar(&agentContextSeal, "seal", false, "store the literacy blob and pin its ref")
 	agentContextCmd.AddCommand(agentContextIDCmd)
@@ -237,5 +298,6 @@ func registerAgentCommand(root *cobra.Command) {
 	agentCmd.AddCommand(agentImportCmd)
 	agentCmd.AddCommand(agentShowCmd)
 	registerAgentRunCommand(agentCmd)
+	agentCmd.AddCommand(agentReplayCmd)
 	root.AddCommand(agentCmd)
 }

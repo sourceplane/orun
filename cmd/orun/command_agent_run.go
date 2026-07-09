@@ -128,13 +128,25 @@ snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
 		if runTask != "" {
 			branch = "agent/" + runTask + "-" + slugify(runType)
 		}
-		res, err := agent.Run(ctx, store, agent.RunOptions{
+		// Seal the session on terminal state so the run is discoverable and
+		// replayable (AG4). A session pins its agent type by hash, so sealing
+		// needs a sealed type — resolved from its ref; `orun agent import`
+		// first. Without one (or for a typeless interactive run) the run still
+		// executes and its segments are stored, just not indexed as a session.
+		opts := agent.RunOptions{
 			SessionID: newSessionID(),
 			Driver:    drv,
 			Brief:     brief,
 			Branch:    branch,
 			Policy:    agent.NewToolPolicy(toolPolicy),
-		})
+		}
+		if runType != "" {
+			if ref, rerr := refs.Read(ctx, agentTypeRef(runType)); rerr == nil && ref.Target != "" {
+				opts.Refs = refs
+				opts.Seal = &agent.SealInput{RunKind: runKind, AgentType: ref.Target, Brief: brief.ID, Principal: "usr_cli"}
+			}
+		}
+		res, err := agent.Run(ctx, store, opts)
 		if err != nil {
 			return err
 		}
@@ -151,6 +163,10 @@ snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
 		}
 		fmt.Fprintln(out)
 		fmt.Fprintf(out, "segments %d sealed\n", len(res.Segments))
+		if res.SnapshotID != "" {
+			fmt.Fprintf(out, "session  sealed %s (refs/%s)\n", res.SnapshotID, agent.SessionRef(res.SessionID))
+			fmt.Fprintf(out, "replay   orun agent replay %s\n", res.SessionID)
+		}
 		return nil
 	},
 }

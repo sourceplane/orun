@@ -89,7 +89,7 @@ The local-first product surface.
   keystroke, the PR link renders; the mode passes the existing TUI mode-
   capability + snapshot tests.
 
-## AG4 — Driver conformance + session seal — 🗓️ Planned
+## AG4 — Driver conformance + session seal — ✅ Shipped (`driver.CheckConformance` oracle, `agent.SealSession`/`Replay`, `orun agent replay`)
 
 Make "any binary" real and runs replayable.
 
