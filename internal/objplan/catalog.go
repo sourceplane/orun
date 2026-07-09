@@ -800,6 +800,12 @@ func agentTypeEntity(d *agenttype.Decl, namespace, repo string, manifests []*cat
 	}
 	putNonEmpty(meta, "autonomyDefault", d.AutonomyDefault)
 	putNonEmpty(meta, "extends", d.Extends)
+	// Surface mayAffect on metadata too (read views project metadata, not the
+	// spec block) so the Agent surface can render the blast-radius ceiling
+	// without re-reading the entity blob.
+	if len(d.MayAffect) > 0 {
+		meta["mayAffect"] = strSliceToAny(d.MayAffect)
+	}
 	e.Metadata = meta
 	if d.Owner != "" {
 		e.Ownership = map[string]any{"owner": d.Owner}

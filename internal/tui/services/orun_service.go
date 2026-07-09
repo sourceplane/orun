@@ -66,6 +66,11 @@ type OrunService interface {
 	// unreadable object model returns (nil, nil) so the surface renders its
 	// empty state rather than an error.
 	LoadCatalog(ctx context.Context) (*CatalogSnapshot, error)
+
+	// LoadAgentTypes reads the workspace's AgentType catalog entities
+	// (orun-agents AG1) for the Agent surface. Best-effort: an absent object
+	// model or catalog returns (nil, nil).
+	LoadAgentTypes(ctx context.Context) ([]AgentTypeRow, error)
 }
 
 // --- Request types ---

@@ -15,11 +15,19 @@ type MockOrunService struct {
 	RefreshCatalogFn func(ctx context.Context, force bool) (CatalogRefreshResult, error)
 	CatalogStaleFn   func(ctx context.Context) (bool, error)
 	LoadCatalogFn    func(ctx context.Context) (*CatalogSnapshot, error)
+	LoadAgentTypesFn func(ctx context.Context) ([]AgentTypeRow, error)
 }
 
 func (m *MockOrunService) LoadCatalog(ctx context.Context) (*CatalogSnapshot, error) {
 	if m.LoadCatalogFn != nil {
 		return m.LoadCatalogFn(ctx)
+	}
+	return nil, nil
+}
+
+func (m *MockOrunService) LoadAgentTypes(ctx context.Context) ([]AgentTypeRow, error) {
+	if m.LoadAgentTypesFn != nil {
+		return m.LoadAgentTypesFn(ctx)
 	}
 	return nil, nil
 }
