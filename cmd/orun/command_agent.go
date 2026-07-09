@@ -236,5 +236,6 @@ func registerAgentCommand(root *cobra.Command) {
 	agentCmd.AddCommand(agentLintCmd)
 	agentCmd.AddCommand(agentImportCmd)
 	agentCmd.AddCommand(agentShowCmd)
+	registerAgentRunCommand(agentCmd)
 	root.AddCommand(agentCmd)
 }

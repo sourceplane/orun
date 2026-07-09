@@ -49,7 +49,7 @@ store" deliverable.
   `mayAffect` edges; `orun agent pull <type>@<hash>` materializes the closure
   offline; two files differing only in key order seal to the same id.
 
-## AG2 — The delegation runtime — 🗓️ Planned
+## AG2 — The delegation runtime — ✅ Shipped (`internal/agent` loop + `internal/agent/driver` seam + `orun agent run`)
 
 The loop: brief in, PR out.
 
