@@ -255,3 +255,17 @@ func (w *Writer) Plan(ctx context.Context, in PlanInput) (PlanResult, error) {
 
 func isNotFound(err error) bool { return errors.Is(err, refstore.ErrNotFound) }
 func isConflict(err error) bool { return errors.Is(err, refstore.ErrConflict) }
+
+// WriteAgentType assembles a sealed agent type (idempotent — identical
+// persona + envelope dedup to one object) and points agentTypeRefs at it
+// (orun-agents AG1; conventionally refs "agents/types/<name>/latest").
+func (w *Writer) WriteAgentType(ctx context.Context, at nodes.AgentTypeSnapshot, body []byte, literacyName string, literacyBody []byte, agentTypeRefs ...string) (objectstore.ObjectID, error) {
+	id, err := nodes.AssembleAgentType(ctx, w.store, at, body, literacyName, literacyBody)
+	if err != nil {
+		return "", err
+	}
+	if err := w.moveRefs(ctx, agentTypeRefs, id); err != nil {
+		return "", err
+	}
+	return id, nil
+}

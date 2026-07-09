@@ -1,3 +1,19 @@
+---
+name: orchestrator
+kind: agent-type
+apiVersion: orun.io/v1
+harness: claude-code
+model: claude-opus-4-8
+runtime:
+  effort: high
+autonomyDefault: assist
+tools:
+  allow: [work_query, work_get, spec_get, catalog_get_component, catalog_affected, catalog_graph, task_comment]
+  ask: [task_create, task_assign, contract_propose]
+  deny: ["*"]
+owner: sourceplane/team/platform
+extends: base-orun-literacy
+---
 # orchestrator.md
 
 ## Purpose

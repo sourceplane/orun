@@ -3,8 +3,11 @@ package objplan
 import (
 	"encoding/json"
 	"path"
+	"path/filepath"
 	"sort"
+	"strings"
 
+	"github.com/sourceplane/orun/internal/agenttype"
 	"github.com/sourceplane/orun/internal/catalogmodel"
 	"github.com/sourceplane/orun/internal/catalogresolve"
 	"github.com/sourceplane/orun/internal/nodes"
@@ -77,6 +80,16 @@ func BuildCatalogNodes(view *catalogresolve.CatalogView, resolverVersion int, ow
 	// catalogs are unchanged.
 	if view != nil && view.ResolvedCatalog != nil && view.RepoDecl != nil {
 		cat.DeclaredEntities = []nodes.Entity{repoEntity(view.RepoDecl)}
+	}
+
+	// Emit one AgentType entity per agents/*.md declaration (orun-agents AG1):
+	// the persona rides as a pending doc blob (the WO3b doc spine), mayAffect
+	// globs resolve to typed edges against the resolved component keys.
+	if view != nil && view.ResolvedCatalog != nil {
+		for _, d := range view.AgentTypes {
+			cat.DeclaredEntities = append(cat.DeclaredEntities,
+				agentTypeEntity(d, view.Namespace, view.Repo, view.Manifests))
+		}
 	}
 
 	// Carry the catalog.entities enrichments (CD2) for the derived-entity
@@ -760,4 +773,120 @@ func mapGraph(g *catalogmodel.CatalogGraph, edgeKind string) nodes.CatalogGraph 
 		out.Edges = append(out.Edges, nodes.GraphEdge{From: e.From, To: e.To, Type: e.Type, Optional: e.Optional, Include: e.Include, Input: e.Input})
 	}
 	return out
+}
+
+// agentTypeEntity maps a parsed agents/<name>.md declaration into an
+// AgentType catalog entity (orun-agents AG1, data-model.md §6). The persona
+// body rides in PendingDocs (assembled to a content-addressed blob, digest
+// stamped, WO3b spine); mayAffect globs are kept verbatim in spec and, where
+// they match resolved component keys, additionally emitted as typed mayAffect
+// edges so blast radius is graph-queryable.
+func agentTypeEntity(d *agenttype.Decl, namespace, repo string, manifests []*catalogmodel.ComponentManifest) nodes.Entity {
+	e := nodes.Entity{
+		APIVersion: "orun.io/v1",
+		Kind:       nodes.EntityKindAgentType,
+		Identity: nodes.EntityIdentity{
+			EntityKey: namespace + "/" + repo + "/" + d.Name,
+			Kind:      nodes.EntityKindAgentType,
+			Name:      d.Name,
+			Namespace: namespace,
+			Repo:      repo,
+			Path:      filepath.ToSlash(d.Path),
+		},
+	}
+	meta := map[string]any{
+		"harness": d.Harness,
+		"model":   d.Model,
+	}
+	putNonEmpty(meta, "autonomyDefault", d.AutonomyDefault)
+	putNonEmpty(meta, "extends", d.Extends)
+	e.Metadata = meta
+	if d.Owner != "" {
+		e.Ownership = map[string]any{"owner": d.Owner}
+	}
+
+	spec := map[string]any{}
+	tools := map[string]any{}
+	if len(d.Tools.Allow) > 0 {
+		tools["allow"] = strSliceToAny(d.Tools.Allow)
+	}
+	if len(d.Tools.Ask) > 0 {
+		tools["ask"] = strSliceToAny(d.Tools.Ask)
+	}
+	if len(d.Tools.Deny) > 0 {
+		tools["deny"] = strSliceToAny(d.Tools.Deny)
+	}
+	if len(tools) > 0 {
+		spec["tools"] = tools
+	}
+	if len(d.MayAffect) > 0 {
+		spec["mayAffect"] = strSliceToAny(d.MayAffect)
+	}
+	if d.Runtime != nil {
+		rt := map[string]any{}
+		putNonEmpty(rt, "effort", d.Runtime.Effort)
+		putNonEmpty(rt, "temperature", d.Runtime.Temperature)
+		if d.Runtime.MaxTokens > 0 {
+			rt["maxTokens"] = d.Runtime.MaxTokens
+		}
+		if d.Runtime.ContextBudget > 0 {
+			rt["contextBudget"] = d.Runtime.ContextBudget
+		}
+		if len(rt) > 0 {
+			spec["runtime"] = rt
+		}
+	}
+	if d.Secrets != nil && len(d.Secrets.Use) > 0 {
+		spec["secrets"] = map[string]any{"use": strSliceToAny(d.Secrets.Use)}
+	}
+	if len(spec) > 0 {
+		e.Spec = spec
+	}
+
+	// Typed mayAffect edges against the resolved component keys. Globs match
+	// with path.Match semantics per full key; a bare '*' at either end also
+	// matches by prefix/suffix so the common "billing-*" tail form works.
+	for _, m := range manifests {
+		if m == nil {
+			continue
+		}
+		for _, glob := range d.MayAffect {
+			if matchComponentGlob(glob, m.Identity.ComponentKey) {
+				e.Relations = append(e.Relations, nodes.EntityRelation{
+					Type:   "mayAffect",
+					To:     m.Identity.ComponentKey,
+					ToKind: nodes.EntityKindComponent,
+				})
+				break
+			}
+		}
+	}
+
+	e.Docs = map[string]any{"persona": map[string]any{"path": filepath.ToSlash(d.Path)}}
+	e.PendingDocs = map[string][]byte{"persona": d.Body}
+	return e
+}
+
+// matchComponentGlob matches a mayAffect glob against a resolved component
+// key. path.Match semantics over the full key, plus suffix-wildcard matching
+// on the final segment ("billing-*" matches ".../billing-worker").
+func matchComponentGlob(glob, key string) bool {
+	if glob == "" {
+		return false
+	}
+	if ok, err := path.Match(glob, key); err == nil && ok {
+		return true
+	}
+	// Segment form: match the glob against the key's last segment too, so a
+	// short "billing-*" declares intent without spelling the namespace/repo.
+	if !strings.Contains(glob, "/") {
+		last := key
+		if i := strings.LastIndexByte(key, '/'); i >= 0 {
+			last = key[i+1:]
+		}
+		if ok, err := path.Match(glob, last); err == nil && ok {
+			return true
+		}
+	}
+	return false
 }

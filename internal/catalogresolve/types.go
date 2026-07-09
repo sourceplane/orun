@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/sourceplane/orun/internal/agenttype"
 	"github.com/sourceplane/orun/internal/catalogmodel"
 )
 
@@ -116,6 +117,14 @@ type ResolvedCatalog struct {
 	// Environment entities at assembly. Enrich, never create — an entry whose
 	// target no component implies produces nothing (warned at resolve).
 	Enrichments []EntityEnrichment
+
+	// AgentTypes are the workspace's agents/*.md agent-type declarations
+	// (orun-agents AG1): git-authored, projected into the catalog as
+	// AgentType entities with the persona as a doc blob — the RepoDecl
+	// pattern generalized. Files that are not agent types (no frontmatter, or
+	// another kind) are skipped; invalid agent-type files surface as warning
+	// issues and never abort a resolve.
+	AgentTypes []*agenttype.Decl
 }
 
 // RepoDeclaration is the resolved `repo:` block: the repo self-describing.

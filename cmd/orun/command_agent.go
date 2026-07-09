@@ -2,8 +2,12 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/sourceplane/orun/internal/agent"
+	"github.com/sourceplane/orun/internal/agenttype"
+	"github.com/sourceplane/orun/internal/nodes"
+	"github.com/sourceplane/orun/internal/nodewriter"
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/spf13/cobra"
 )
@@ -61,9 +65,176 @@ var agentContextIDCmd = &cobra.Command{
 	},
 }
 
+// agentTypeRef is the ref that tracks an agent type's newest sealed version.
+func agentTypeRef(name string) string { return "agents/types/" + name + "/latest" }
+
+var agentLintCmd = &cobra.Command{
+	Use:   "lint [dir]",
+	Short: "Validate agents/*.md agent-type files without writing",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dir := "agents"
+		if len(args) == 1 {
+			dir = args[0]
+		}
+		decls, issues := agenttype.LoadDir(dir)
+		out := cmd.OutOrStdout()
+		errs := 0
+		for _, is := range issues {
+			if is.Level == "error" {
+				errs++
+			}
+			fmt.Fprintln(out, is.String())
+		}
+		for _, d := range decls {
+			fmt.Fprintf(out, "%s: ok: agent-type %q (harness %s, model %s, owner %s)\n",
+				d.Path, d.Name, d.Harness, d.Model, d.Owner)
+		}
+		if errs > 0 {
+			return fmt.Errorf("%d agent-type error(s)", errs)
+		}
+		return nil
+	},
+}
+
+var agentImportIDOnly bool
+
+var agentImportCmd = &cobra.Command{
+	Use:   "import [dir]",
+	Short: "Seal agents/*.md into the object store as AgentTypeSnapshots",
+	Long: `Parse every agent-type file (frontmatter capability envelope + persona body),
+seal each into a content-addressed AgentTypeSnapshot — persona verbatim as a
+body blob, the binary's base literacy pinned via extends — and move
+refs/agents/types/<name>/latest. Idempotent: an unchanged file re-seals to the
+same id (mirrors 'orun work import' for the work tree).`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dir := "agents"
+		if len(args) == 1 {
+			dir = args[0]
+		}
+		decls, issues := agenttype.LoadDir(dir)
+		out := cmd.OutOrStdout()
+		for _, is := range issues {
+			if is.Level == "error" {
+				fmt.Fprintln(out, is.String())
+			}
+		}
+		if agenttypeHasError(issues) {
+			return fmt.Errorf("agent import: fix lint errors first")
+		}
+		if len(decls) == 0 {
+			fmt.Fprintf(out, "no agent types under %s\n", dir)
+			return nil
+		}
+		store, refs, _, err := openObjectModel()
+		if err != nil {
+			return err
+		}
+		w := nodewriter.New(store, refs)
+		for _, d := range decls {
+			// Pin the binary's literacy unless the file pins a custom one
+			// (name@id) explicitly.
+			litName, litBody := agent.LiteracyName, agent.Literacy()
+			if d.Extends != "" && strings.Contains(d.Extends, "@") {
+				litName, litBody = "", nil
+			}
+			id, err := w.WriteAgentType(cmd.Context(), d.Snapshot(), d.Body, litName, litBody, agentTypeRef(d.Name))
+			if err != nil {
+				return fmt.Errorf("agent import %s: %w", d.Name, err)
+			}
+			if agentImportIDOnly {
+				fmt.Fprintf(out, "%s %s\n", id, d.Name)
+				continue
+			}
+			fmt.Fprintf(out, "sealed  %s  %s (refs/%s)\n", id, d.Name, agentTypeRef(d.Name))
+		}
+		return nil
+	},
+}
+
+var agentShowCmd = &cobra.Command{
+	Use:   "show <name>[@sha256:…]",
+	Short: "Materialize a sealed agent type from the object store",
+	Long: `Resolve an agent type by name (refs/agents/types/<name>/latest) or by an
+explicit @<objectId> pin, and print the sealed envelope + persona from content
+alone — the offline read-back of 'orun agent import'.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name, pin := args[0], ""
+		if i := strings.Index(args[0], "@"); i >= 0 {
+			name, pin = args[0][:i], args[0][i+1:]
+		}
+		store, refs, _, ok := openObjectStores()
+		if !ok {
+			return fmt.Errorf("no object store at .orun — run `orun agent import` first")
+		}
+		ctx := cmd.Context()
+		target := pin
+		if target == "" {
+			ref, err := refs.Read(ctx, agentTypeRef(name))
+			if err != nil {
+				return fmt.Errorf("agent type %q not sealed (run `orun agent import`): %w", name, err)
+			}
+			target = ref.Target
+		}
+		entries, err := store.GetTree(ctx, objectstore.ObjectID(target))
+		if err != nil {
+			return fmt.Errorf("agent type %s: %w", target, err)
+		}
+		var rec nodes.AgentTypeSnapshot
+		var persona []byte
+		for _, e := range entries {
+			switch e.Name {
+			case "agent-type.json":
+				_, b, err := store.Get(ctx, e.ID)
+				if err != nil {
+					return err
+				}
+				if rec, err = nodes.Decode[nodes.AgentTypeSnapshot](b); err != nil {
+					return err
+				}
+			case "body.md":
+				if _, persona, err = store.Get(ctx, e.ID); err != nil {
+					return err
+				}
+			}
+		}
+		out := cmd.OutOrStdout()
+		fmt.Fprintf(out, "agent-type %s @ %s\n", rec.Name, target)
+		fmt.Fprintf(out, "harness    %s · model %s\n", rec.Harness, rec.Model)
+		fmt.Fprintf(out, "owner      %s\n", rec.Owner)
+		if rec.AutonomyDefault != "" {
+			fmt.Fprintf(out, "autonomy   %s\n", rec.AutonomyDefault)
+		}
+		if len(rec.MayAffect) > 0 {
+			fmt.Fprintf(out, "mayAffect  %s\n", strings.Join(rec.MayAffect, " · "))
+		}
+		if rec.Extends != "" {
+			fmt.Fprintf(out, "extends    %s\n", rec.Extends)
+		}
+		fmt.Fprintf(out, "tools      allow=%v ask=%v deny=%v\n", rec.Tools.Allow, rec.Tools.Ask, rec.Tools.Deny)
+		fmt.Fprintf(out, "\n%s", persona)
+		return nil
+	},
+}
+
+func agenttypeHasError(issues []agenttype.Issue) bool {
+	for _, i := range issues {
+		if i.Level == "error" {
+			return true
+		}
+	}
+	return false
+}
+
 func registerAgentCommand(root *cobra.Command) {
 	agentContextCmd.Flags().BoolVar(&agentContextSeal, "seal", false, "store the literacy blob and pin its ref")
 	agentContextCmd.AddCommand(agentContextIDCmd)
+	agentImportCmd.Flags().BoolVar(&agentImportIDOnly, "id-only", false, "print only '<id> <name>' lines (for scripting)")
 	agentCmd.AddCommand(agentContextCmd)
+	agentCmd.AddCommand(agentLintCmd)
+	agentCmd.AddCommand(agentImportCmd)
+	agentCmd.AddCommand(agentShowCmd)
 	root.AddCommand(agentCmd)
 }
