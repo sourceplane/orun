@@ -258,6 +258,36 @@
           "ORN-23": { "rung": "done", "ready": true, "blocked": false, "evidence": ["PR o/r#54 merged"] }
         }
       }
+    },
+    {
+      "name": "a blocks relation raises the blocked flag; unrelated clears it (v3 PM2)",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-24", "workspace": "ws_test", "title": "the blocker", "createdBy": { "type": "user", "id": "usr_1" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-25", "workspace": "ws_test", "title": "blocked by relation", "createdBy": { "type": "user", "id": "usr_1" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-26", "workspace": "ws_test", "title": "unblocked again", "createdBy": { "type": "user", "id": "usr_1" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-27", "workspace": "ws_test", "title": "blocker is done", "createdBy": { "type": "user", "id": "usr_1" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-28", "workspace": "ws_test", "title": "the done blocker", "contract": { "goal": "g", "affects": ["a/b/g"], "doneWhen": ["d"], "gatesDefined": true }, "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [
+        { "workspace": "ws_test", "subject": "ORN-24", "kind": "related", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-02T11:00:00Z", "payload": { "rel": "blocks", "target": "ORN-25" }, "seq": 1 },
+        { "workspace": "ws_test", "subject": "ORN-24", "kind": "related", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-02T11:01:00Z", "payload": { "rel": "blocks", "target": "ORN-26" }, "seq": 2 },
+        { "workspace": "ws_test", "subject": "ORN-24", "kind": "unrelated", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-02T11:02:00Z", "payload": { "rel": "blocks", "target": "ORN-26" }, "seq": 3 },
+        { "workspace": "ws_test", "subject": "ORN-24", "kind": "related", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-02T11:03:00Z", "payload": { "rel": "relates", "target": "ORN-26" }, "seq": 4 },
+        { "workspace": "ws_test", "subject": "ORN-28", "kind": "related", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-02T11:04:00Z", "payload": { "rel": "blocks", "target": "ORN-27" }, "seq": 5 }
+      ],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_merged", "at": "2026-07-02T11:05:00Z", "dedupeKey": "gh:pr:o/r#55:merged", "payload": { "pr": "o/r#55", "revision": "sha256:jj", "taskKeys": ["ORN-28"] }, "seq": 1 }
+      ],
+      "expect": {
+        "lifecycles": {
+          "ORN-24": { "rung": "draft", "ready": false, "blocked": false },
+          "ORN-25": { "rung": "draft", "ready": false, "blocked": true },
+          "ORN-26": { "rung": "draft", "ready": false, "blocked": false },
+          "ORN-27": { "rung": "draft", "ready": false, "blocked": false },
+          "ORN-28": { "rung": "done", "ready": true, "blocked": false, "evidence": ["PR o/r#55 merged"] }
+        }
+      }
     }
   ]
 }

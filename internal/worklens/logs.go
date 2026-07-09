@@ -44,6 +44,30 @@ func (e CoordinationEvent) Validate() error {
 	return nil
 }
 
+// RelationPayload is the payload of related/unrelated events (v3 PM2).
+// rel is one of blocks|parent|relates; `blocks` is the only kind the fold
+// reads — the target derives Blocked from it exactly as from contract Deps.
+type RelationPayload struct {
+	Rel    string `json:"rel"`
+	Target string `json:"target"`
+}
+
+// RelationOf decodes a related/unrelated event's payload; ok is false for
+// other kinds or malformed payloads.
+func (e CoordinationEvent) RelationOf() (RelationPayload, bool) {
+	if e.Kind != EventRelated && e.Kind != EventUnrelated {
+		return RelationPayload{}, false
+	}
+	if len(e.Payload) == 0 {
+		return RelationPayload{}, false
+	}
+	var p RelationPayload
+	if err := json.Unmarshal(e.Payload, &p); err != nil || p.Rel == "" || p.Target == "" {
+		return RelationPayload{}, false
+	}
+	return p, true
+}
+
 // PinOf decodes a pinned event's payload; ok is false for non-pin events.
 func (e CoordinationEvent) PinOf() (PinPayload, bool) {
 	if e.Kind != EventPinned {
