@@ -4,7 +4,7 @@ The orun-owned runtime milestones. The cloud control plane (AG5–AG11) lives in
 `orun-cloud/specs/epics/saas-agents/implementation-plan.md`. Design refs are to
 [`design.md`](./design.md) / [`data-model.md`](./data-model.md).
 
-## AG0 — Object kinds + foundation — 🗓️ Planned
+## AG0 — Object kinds + foundation — ✅ Shipped (`internal/nodes/agents.go`, `internal/agent`, `orun agent context`)
 
 The content substrate + the `internal/agent` skeleton. No delegation yet.
 

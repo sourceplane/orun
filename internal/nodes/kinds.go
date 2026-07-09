@@ -36,7 +36,16 @@ const (
 	// the per-edge-kind CatalogGraph slices (orun-service-catalog/data-model.md
 	// §3). Introduced in SC0; emitted by the resolver in SC2.
 	KindRelationGraph = "RelationGraph"
+	// AG object kinds (specs/orun-agents/data-model.md): agent types and agent
+	// sessions are content in the same graph. Introduced in AG0.
+	KindAgentTypeSnapshot    = "AgentTypeSnapshot"
+	KindAgentBrief           = "AgentBrief"
+	KindAgentSessionSnapshot = "AgentSessionSnapshot"
+	KindAgentSessionSegment  = "AgentSessionSegment"
 )
+
+// apiVersionV1 is the schema version stamped on records that carry one.
+const apiVersionV1 = "orun.io/v1"
 
 // Source scope values (identity-and-keys.md §3).
 const (
@@ -101,4 +110,8 @@ const (
 	dirEvents       = "events"
 	dirLogs         = "logs"
 	dirArtifacts    = "artifacts"
+	// AgentTypeSnapshot tree entries (specs/orun-agents/data-model.md §2.1).
+	fileAgentType     = "agent-type.json"
+	fileAgentBody     = "body.md"
+	fileAgentLiteracy = "base-literacy.md"
 )

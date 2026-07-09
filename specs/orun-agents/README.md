@@ -75,7 +75,7 @@ binary, kept running in a box, governed by the workspace's RBAC.
 
 | ID | Milestone | Status |
 |----|-----------|--------|
-| AG0 | Object kinds + foundation: `AgentTypeSnapshot` / `AgentSessionSnapshot` / session-segment schemas (canonical JSON, framed/addressed per `object-store.md`); refs `refs/agents/…`; `internal/agent` skeleton; the versioned **base literacy** module | 🗓️ Planned |
+| AG0 | Object kinds + foundation: `AgentTypeSnapshot` / `AgentSessionSnapshot` / session-segment schemas (canonical JSON, framed/addressed per `object-store.md`); refs `refs/agents/…`; `internal/agent` skeleton; the versioned **base literacy** module | ✅ Shipped |
 | AG1 | Authoring + seal/pull + catalog: `agents/*.md` → `AgentTypeSnapshot` (persona → body blob, frontmatter → envelope); `orun agent import`, `orun agent pull <type>@<hash>` (set-difference via `objremote`); **catalog projection** (`AgentType` entity + edges: owner, `mayAffect`) | 🗓️ Planned |
 | AG2 | The delegation runtime: `AgentDriver` seam (Claude Code first, headless stream-JSON); brief assembler (agent-type + task contract + `catalog affected` + base literacy, sealed); MCP manager + tool policy; append-only session event log; `orun agent run` (headless one-shot) | 🗓️ Planned |
 | AG3 | TUI **Agent mode**: a 6th `internal/tui` mode — transcript, the sealed brief, the live affected subgraph, tool approvals, PR link; fully local, no cloud; `orun agent` opens it | 🗓️ Planned |

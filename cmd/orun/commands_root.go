@@ -273,4 +273,5 @@ func init() {
 	registerWorkCommand(rootCmd)
 	registerSpecCommand(rootCmd)
 	registerMcpCommand(rootCmd)
+	registerAgentCommand(rootCmd)
 }
