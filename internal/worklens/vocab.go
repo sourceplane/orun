@@ -58,6 +58,22 @@ const (
 	EventOrdered        EventKind = "ordered"
 	EventPinned         EventKind = "pinned"
 	EventCanceled       EventKind = "canceled"
+
+	// v3 (orun-work-v3 PM0; orun-cloud specs/epics/orun-work-v3 design §1.2).
+	// Write-time acceptance only: every addition is intent or conversation
+	// (V3-1) and THE FOLD READS NONE OF THEM when deriving a rung — the
+	// shared conformance fixtures pin that byte-identically. There is still
+	// no lifecycle-write kind.
+	EventDocEdited       EventKind = "doc_edited"
+	EventReactionAdded   EventKind = "reaction_added"
+	EventReactionRemoved EventKind = "reaction_removed"
+	EventLabeled         EventKind = "labeled"
+	EventUnlabeled       EventKind = "unlabeled"
+	EventPrioritized     EventKind = "prioritized"
+	EventEstimated       EventKind = "estimated"
+	EventCycleSet        EventKind = "cycle_set"
+	EventRelated         EventKind = "related"
+	EventUnrelated       EventKind = "unrelated"
 )
 
 // EventKinds enumerates the closed set in a stable order.
@@ -65,6 +81,9 @@ var EventKinds = []EventKind{
 	EventItemCreated, EventItemEdited, EventContractEdited,
 	EventAssigned, EventUnassigned, EventCommentAdded,
 	EventOrdered, EventPinned, EventCanceled,
+	EventDocEdited, EventReactionAdded, EventReactionRemoved,
+	EventLabeled, EventUnlabeled, EventPrioritized,
+	EventEstimated, EventCycleSet, EventRelated, EventUnrelated,
 }
 
 // IsEventKind reports whether k is in the closed coordination vocabulary.

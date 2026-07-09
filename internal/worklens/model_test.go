@@ -49,8 +49,37 @@ func TestEventValidate(t *testing.T) {
 
 func TestNoLifecycleWriteKindExists(t *testing.T) {
 	for _, k := range EventKinds {
-		if k == "status_changed" || k == "lifecycle_changed" {
+		if k == "status_changed" || k == "lifecycle_changed" || k == "rung_set" || k == "status_set" {
 			t.Fatalf("lifecycle write kind %q exists — lifecycle is a derived query (WP-3)", k)
+		}
+	}
+}
+
+func TestV3VocabularyAcceptedAtWriteTime(t *testing.T) {
+	// orun-work-v3 PM0: the coordination vocabulary grows to 19; every
+	// addition is intent or conversation (V3-1). Write-time acceptance only —
+	// the fold reads none of them (the shared conformance fixtures pin the
+	// lifecycle logic byte-identically). The observation vocabulary is frozen.
+	if got := len(EventKinds); got != 19 {
+		t.Fatalf("EventKinds = %d, want 19", got)
+	}
+	if got := len(ObservationKinds); got != 6 {
+		t.Fatalf("ObservationKinds = %d, want 6 (frozen in v3 — V3-1)", got)
+	}
+	for _, k := range []EventKind{
+		EventDocEdited, EventReactionAdded, EventReactionRemoved,
+		EventLabeled, EventUnlabeled, EventPrioritized,
+		EventEstimated, EventCycleSet, EventRelated, EventUnrelated,
+	} {
+		if !IsEventKind(k) {
+			t.Errorf("v3 kind %q not accepted", k)
+		}
+		e := CoordinationEvent{
+			Workspace: "ws", Subject: "OGP-1", Kind: k,
+			Actor: Actor{Type: ActorUser, ID: "usr_1"}, At: "2026-07-09T00:00:00Z", Seq: 1,
+		}
+		if err := e.Validate(); err != nil {
+			t.Errorf("v3 kind %q rejected at write time: %v", k, err)
 		}
 	}
 }
