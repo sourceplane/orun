@@ -35,6 +35,9 @@ type GlobalKeyMap struct {
 	GoHistory key.Binding
 	NextPanel key.Binding
 	PrevPanel key.Binding
+
+	// GoAgent jumps to the agent surface (orun-agents AG3).
+	GoAgent key.Binding
 }
 
 // DefaultGlobalKeyMap returns the canonical global bindings.
@@ -61,6 +64,7 @@ func DefaultGlobalKeyMap() GlobalKeyMap {
 		GoHistory: key.NewBinding(key.WithKeys("ctrl+4"), key.WithHelp("⌃4", "history")),
 		NextPanel: key.NewBinding(key.WithKeys("shift+right"), key.WithHelp("⇧→", "next focus")),
 		PrevPanel: key.NewBinding(key.WithKeys("shift+left"), key.WithHelp("⇧←", "prev focus")),
+		GoAgent:   key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "agents")),
 	}
 }
 

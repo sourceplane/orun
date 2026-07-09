@@ -72,7 +72,7 @@ The loop: brief in, PR out.
   is unreachable and an `ask` tool blocks for a verdict, both logged; the
   session log seals to a chained segment set that replays the transcript.
 
-## AG3 — TUI Agent mode — 🗓️ Planned
+## AG3 — TUI Agent mode — ✅ Shipped (`internal/tui` ModeAgent + `views/agent.go` + `services.LoadAgentTypes`)
 
 The local-first product surface.
 

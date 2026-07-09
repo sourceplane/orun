@@ -19,12 +19,17 @@ type SessionLog struct {
 	pending   []nodes.AgentSessionEvent
 	segments  []string // sealed segment ids, in order
 	prev      string
+	observe   func(SessionEvent)
 }
 
 // NewSessionLog starts a log for a session (id must be "as_"-prefixed).
 func NewSessionLog(sessionID string) *SessionLog {
 	return &SessionLog{sessionID: sessionID}
 }
+
+// Observe registers a callback invoked for every appended event (live
+// visibility). Nil clears it.
+func (l *SessionLog) Observe(fn func(SessionEvent)) { l.observe = fn }
 
 // Append records one event, allocating its seq. kind must be in the closed
 // vocabulary (nodes.ValidSessionEventKind); an unknown kind is dropped rather
@@ -39,6 +44,9 @@ func (l *SessionLog) Append(kind string, payload map[string]any, ref string) {
 		Ref:     ref,
 		Payload: payload,
 	})
+	if l.observe != nil {
+		l.observe(SessionEvent{Seq: l.seq, Kind: kind, Payload: payload})
+	}
 	l.seq++
 }
 

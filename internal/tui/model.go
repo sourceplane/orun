@@ -63,6 +63,9 @@ const (
 	ModeLogExplorer
 	ModeHistory
 	ModeActivity
+	// ModeAgent is the agent surface (orun-agents AG3): the workspace's
+	// git-authored agent types + a live session transcript. Fully local.
+	ModeAgent
 )
 
 // ModeComponentStudio is an alias for the inline Compose surface that
@@ -84,6 +87,8 @@ func (m Mode) String() string {
 		return "history"
 	case ModeActivity:
 		return "activity"
+	case ModeAgent:
+		return "agent"
 	}
 	return "unknown"
 }
@@ -150,6 +155,7 @@ type Model struct {
 	logView    views.LogExplorerModel
 	activity   views.ActivityModel
 	catalog    views.CatalogModel
+	agent      views.AgentModel
 	inspector  views.InspectorModel
 
 	// selectedEnv is the cockpit's currently selected environment
@@ -254,6 +260,7 @@ func NewModel(svc services.OrunService) Model {
 		logView:          views.NewLogExplorerModel(),
 		activity:         views.NewActivityModel(),
 		catalog:          views.NewCatalogModel(),
+		agent:            views.NewAgentModel(nil),
 		inspector:        views.NewInspectorModel(),
 		commandPalette:   views.NewCommandPaletteModel(),
 		loading:          true,
@@ -297,6 +304,20 @@ func loadCatalogCmd(svc services.OrunService) tea.Cmd {
 	return func() tea.Msg {
 		snap, err := svc.LoadCatalog(context.Background())
 		return services.CatalogLoadedMsg{Snapshot: snap, Err: err}
+	}
+}
+
+// agentTypesLoadedMsg carries the workspace's AgentType rows to the Agent
+// surface (orun-agents AG3).
+type agentTypesLoadedMsg struct {
+	rows []services.AgentTypeRow
+	err  error
+}
+
+func loadAgentTypesCmd(svc services.OrunService) tea.Cmd {
+	return func() tea.Msg {
+		rows, err := svc.LoadAgentTypes(context.Background())
+		return agentTypesLoadedMsg{rows: rows, err: err}
 	}
 }
 
@@ -406,6 +427,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.catalog = m.catalog.SetSnapshot(msg.Snapshot)
 		if m.activeMode == ModeCatalog {
 			m.refreshInspectorSelection()
+		}
+		return m, nil
+
+	case agentTypesLoadedMsg:
+		// Best-effort, like CatalogLoadedMsg: a failed read keeps the surface.
+		if msg.err != nil {
+			return m, nil
+		}
+		m.agent.Types = msg.rows
+		m.agent.Width = m.width
+		if m.agent.Cursor >= len(msg.rows) {
+			m.agent.Cursor = 0
 		}
 		return m, nil
 
@@ -863,6 +896,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		mm := m.switchMode(ModeActivity)
 		_, cmd := mm.activity.AutoAttachCmd()
 		return mm, cmd
+	case key.Matches(msg, m.keys.GoAgent):
+		return m.switchMode(ModeAgent), loadAgentTypesCmd(m.svc)
 	case key.Matches(msg, m.keys.GoPlan):
 		return m.switchMode(ModePlanStudio), nil
 	case key.Matches(msg, m.keys.GoRun):
@@ -944,6 +979,10 @@ func (m Model) forwardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.catalog.AtRoot() != wasRoot {
 			return m, tea.Batch(c, tea.ClearScreen)
 		}
+		return m, c
+	case ModeAgent:
+		var c tea.Cmd
+		m.agent, c = m.agent.Update(msg)
 		return m, c
 	}
 	return m, nil
@@ -1777,6 +1816,8 @@ func (m Model) renderStage() string {
 		body = m.activity.View()
 	case ModeCatalog:
 		body = m.catalog.View()
+	case ModeAgent:
+		body = m.agent.View()
 	}
 	if m.searchActive {
 		body = m.search.View() + "\n\n" + body

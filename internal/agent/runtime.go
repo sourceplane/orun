@@ -36,6 +36,20 @@ type RunOptions struct {
 	// Policy gates tool calls the driver reports; when a tool resolves to
 	// DecisionAsk the runtime consults Approve. Zero value = deny-by-default.
 	Policy ToolPolicy
+	// Observe, when set, is called for every event appended to the session
+	// log, in order — the live-visibility seam the TUI Agent mode and the
+	// cloud DO relay consume. It must not block; the runtime calls it
+	// synchronously during the fold.
+	Observe func(SessionEvent)
+}
+
+// SessionEvent is one observed session-log entry (the runtime's live view of
+// what it just recorded). It mirrors the sealed nodes.AgentSessionEvent shape
+// without the storage concerns.
+type SessionEvent struct {
+	Seq     int
+	Kind    string
+	Payload map[string]any
 }
 
 // Run executes the loop: launch the driver on the brief, fold its normalized
@@ -49,6 +63,9 @@ func Run(ctx context.Context, store objectstore.ObjectStore, opts RunOptions) (R
 		return RunResult{}, fmt.Errorf("agent: run driver nil")
 	}
 	log := NewSessionLog(opts.SessionID)
+	if opts.Observe != nil {
+		log.Observe(opts.Observe)
+	}
 	log.Append(nodes.SessionEventStateChanged, map[string]any{"state": "running"}, "")
 
 	events := make(chan driver.Event, 16)
