@@ -7,6 +7,7 @@ import (
 	"github.com/sourceplane/orun/internal/agent/driver"
 	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/objectstore"
+	"github.com/sourceplane/orun/internal/objectstore/refstore"
 )
 
 // runtime.go — the delegation loop (specs/orun-agents/design.md §1): assemble
@@ -17,10 +18,11 @@ import (
 
 // RunResult is the outcome of a delegation loop.
 type RunResult struct {
-	SessionID string
-	BriefID   string
-	Segments  []string
-	Outcome   nodes.AgentOutcome
+	SessionID  string
+	BriefID    string
+	Segments   []string
+	Outcome    nodes.AgentOutcome
+	SnapshotID string // the sealed AgentSessionSnapshot id, when opts.Seal was set
 }
 
 // RunOptions configures one run.
@@ -41,6 +43,12 @@ type RunOptions struct {
 	// cloud DO relay consume. It must not block; the runtime calls it
 	// synchronously during the fold.
 	Observe func(SessionEvent)
+	// Seal, when set with a ref store, makes Run seal an AgentSessionSnapshot
+	// on terminal state and point refs/agents/sessions/<id> at it (AG4). The
+	// SessionID/Segments/Outcome are filled by the runtime; the caller
+	// supplies the run identity (agent type, brief, catalog, principal).
+	Seal *SealInput
+	Refs refstore.RefStore
 }
 
 // SessionEvent is one observed session-log entry (the runtime's live view of
@@ -95,7 +103,7 @@ func Run(ctx context.Context, store objectstore.ObjectStore, opts RunOptions) (R
 			if _, err := log.Seal(ctx, store); err != nil {
 				return RunResult{}, err
 			}
-			return RunResult{SessionID: opts.SessionID, BriefID: opts.Brief.ID, Segments: log.Segments(), Outcome: outcome}, ctx.Err()
+			return finish(ctx, store, opts, log, outcome, ctx.Err())
 		case e, ok := <-events:
 			if !ok {
 				events = nil
@@ -121,9 +129,40 @@ func Run(ctx context.Context, store objectstore.ObjectStore, opts RunOptions) (R
 			if _, sErr := log.Seal(ctx, store); sErr != nil {
 				return RunResult{}, sErr
 			}
-			return RunResult{SessionID: opts.SessionID, BriefID: opts.Brief.ID, Segments: log.Segments(), Outcome: outcome}, err
+			return finish(ctx, store, opts, log, outcome, err)
 		}
 	}
+}
+
+// finish assembles the RunResult and, when opts.Seal + opts.Refs are set,
+// seals an AgentSessionSnapshot on terminal state and points the session ref
+// at it (AG4). A seal failure is surfaced; runErr (the driver's terminal
+// error) takes precedence when both occur.
+func finish(ctx context.Context, store objectstore.ObjectStore, opts RunOptions, log *SessionLog, outcome nodes.AgentOutcome, runErr error) (RunResult, error) {
+	res := RunResult{
+		SessionID: opts.SessionID,
+		BriefID:   opts.Brief.ID,
+		Segments:  log.Segments(),
+		Outcome:   outcome,
+	}
+	if opts.Seal != nil && opts.Refs != nil {
+		in := *opts.Seal
+		in.SessionID = opts.SessionID
+		in.Segments = log.Segments()
+		in.Outcome = outcome
+		if in.Brief == "" {
+			in.Brief = opts.Brief.ID
+		}
+		id, err := SealSession(ctx, store, opts.Refs, in)
+		if err != nil {
+			if runErr != nil {
+				return res, runErr
+			}
+			return res, err
+		}
+		res.SnapshotID = string(id)
+	}
+	return res, runErr
 }
 
 // foldEvent maps one normalized driver event into the session log, enforcing
