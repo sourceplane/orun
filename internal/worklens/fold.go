@@ -82,9 +82,12 @@ func Fold(ws WorkSet) FoldResult {
 		tasks[t.Key] = t
 	}
 
-	// Pass 1 — coordination: cancellation and active pins, in log order.
+	// Pass 1 — coordination: cancellation, active pins, and blocks relations
+	// (v3 PM2: `related {rel: blocks, target}` makes target blocked by the
+	// subject exactly as a contract dep would), in log order.
 	canceled := map[string]Actor{}
 	pins := map[string]*Pin{}
+	blockers := map[string]map[string]bool{} // target key -> open set of blocker keys
 	for _, e := range ws.Events {
 		switch e.Kind {
 		case EventCanceled:
@@ -99,6 +102,19 @@ func Fold(ws WorkSet) FoldResult {
 				continue
 			}
 			pins[e.Subject] = &Pin{Rung: p.Rung, By: e.Actor, Note: p.Note, At: e.At}
+		case EventRelated, EventUnrelated:
+			r, ok := e.RelationOf()
+			if !ok || r.Rel != "blocks" {
+				continue
+			}
+			if e.Kind == EventRelated {
+				if blockers[r.Target] == nil {
+					blockers[r.Target] = map[string]bool{}
+				}
+				blockers[r.Target][e.Subject] = true
+			} else {
+				delete(blockers[r.Target], e.Subject)
+			}
 		}
 	}
 
@@ -228,7 +244,7 @@ func Fold(ws WorkSet) FoldResult {
 			continue
 		}
 		lc.Rung, lc.Evidence = observedRung(t, claims[t.Key], gates, gateKey, live)
-		lc.Blocked = isBlocked(t, tasks, canceled, claims, gates, gateKey, live)
+		lc.Blocked = isBlocked(t, tasks, canceled, blockers, claims, gates, gateKey, live)
 		if pin := pins[t.Key]; pin != nil {
 			oi, okO := RungIndex(lc.Rung)
 			pi, okP := RungIndex(pin.Rung)
@@ -331,22 +347,30 @@ func observedRung(t Task, claiming []*prState, gates map[string]GateStatus, gate
 	return RungDraft, nil
 }
 
-// isBlocked derives the Blocked flag from open blockedBy deps — a flag, not
-// a rung, so it can never go stale by forgetting to un-set it.
-func isBlocked(t Task, tasks map[string]Task, canceled map[string]Actor, claims map[string][]*prState, gates map[string]GateStatus, gateKey func(string, string) string, live map[string]string) bool {
-	if t.Contract == nil {
-		return false
-	}
-	for _, dep := range t.Contract.Deps {
-		depTask, ok := tasks[dep]
+// isBlocked derives the Blocked flag from open blockedBy deps and open
+// `blocks` relations (v3 PM2) — a flag, not a rung, so it can never go
+// stale by forgetting to un-set it.
+func isBlocked(t Task, tasks map[string]Task, canceled map[string]Actor, blockers map[string]map[string]bool, claims map[string][]*prState, gates map[string]GateStatus, gateKey func(string, string) string, live map[string]string) bool {
+	open := func(key string) bool {
+		blocker, ok := tasks[key]
 		if !ok {
-			continue // unresolved dep renders elsewhere (invariant 8), does not block
+			return false // unresolved blocker renders elsewhere (invariant 8), does not block
 		}
-		if _, isCanceled := canceled[dep]; isCanceled {
-			continue
+		if _, isCanceled := canceled[key]; isCanceled {
+			return false
 		}
-		rung, _ := observedRung(depTask, claims[dep], gates, gateKey, live)
-		if rung != RungDone && rung != RungReleased {
+		rung, _ := observedRung(blocker, claims[key], gates, gateKey, live)
+		return rung != RungDone && rung != RungReleased
+	}
+	if t.Contract != nil {
+		for _, dep := range t.Contract.Deps {
+			if open(dep) {
+				return true
+			}
+		}
+	}
+	for key := range blockers[t.Key] {
+		if open(key) {
 			return true
 		}
 	}
