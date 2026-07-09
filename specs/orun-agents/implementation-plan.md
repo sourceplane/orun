@@ -25,7 +25,7 @@ The content substrate + the `internal/agent` skeleton. No delegation yet.
   match assembled ids (the `hashStore` cross-check); base literacy seals and
   `orun agent context` prints it; `go build ./...` green with the skeleton.
 
-## AG1 — Authoring + seal/pull + catalog projection — 🗓️ Planned
+## AG1 — Authoring + seal/pull + catalog projection — ✅ Shipped (`internal/agenttype`, catalog projection, `orun agent lint/import/show`)
 
 Agent `.md` files become first-class objects — the "agent md in the object
 store" deliverable.

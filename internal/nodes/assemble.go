@@ -253,6 +253,10 @@ const (
 	EntityKindEnvironment = "Environment"
 	EntityKindComposition = "Composition"
 	EntityKindRepo        = "Repo"
+	// EntityKindAgentType projects a sealed agents/*.md agent-type
+	// declaration into the catalog (orun-agents AG1) — agents become as
+	// discoverable and governable as services.
+	EntityKindAgentType = "AgentType"
 )
 
 // deriveEntities builds the distinct non-Component entities implied by the

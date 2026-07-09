@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/sourceplane/orun/internal/agenttype"
 	"github.com/sourceplane/orun/internal/catalogmodel"
 )
 
@@ -137,6 +138,26 @@ func Resolve(ctx context.Context, opts Options) (*ResolvedCatalog, []ValidationI
 	}
 	globalDigest := computeGlobalDigest(intentAbs)
 
+	// Agent types (orun-agents AG1): scan the workspace's agents/ tree. Load
+	// errors demote to warnings (the file is skipped, the resolve continues) —
+	// a broken persona must not block a plan.
+	agentDecls, agentIssues := agenttype.LoadDir(filepath.Join(opts.WorkspaceRoot, "agents"))
+	for _, ai := range agentIssues {
+		if ai.Level != "error" {
+			continue
+		}
+		rel, relErr := filepath.Rel(opts.WorkspaceRoot, ai.Path)
+		if relErr != nil {
+			rel = ai.Path
+		}
+		issues = append(issues, ValidationIssue{
+			File:     filepath.ToSlash(rel),
+			Severity: SeverityWarning,
+			Code:     "agenttype.invalid",
+			Message:  ai.Message,
+		})
+	}
+
 	rc := &ResolvedCatalog{
 		Manifests:    manifests,
 		Issues:       issues,
@@ -147,6 +168,7 @@ func Resolve(ctx context.Context, opts Options) (*ResolvedCatalog, []ValidationI
 		Fingerprints: computeFingerprints(opts.WorkspaceRoot, manifests, globalDigest),
 		RepoDecl:     repoDeclFromIntent(intent, namespace, repo, docCtx),
 		Enrichments:  enrichments,
+		AgentTypes:   agentDecls,
 	}
 
 	if firstErr := firstError(issues); firstErr != nil {
