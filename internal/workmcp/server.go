@@ -28,6 +28,8 @@ import (
 // keyboard (WD/WP one-write-path heritage).
 type WorkAPI interface {
 	GetWorkSummary(ctx context.Context) (*remotestate.WorkSummary, error)
+	GetWorkTimeline(ctx context.Context, key string) (*remotestate.WorkTimeline, error)
+	GetWorkDoc(ctx context.Context, specKey, rev string) (*remotestate.WorkDoc, error)
 	CreateWorkTask(ctx context.Context, req remotestate.CreateWorkTaskRequest) (*remotestate.WorkMutationResponse, error)
 	CommentWork(ctx context.Context, key, body string) (*remotestate.WorkMutationResponse, error)
 	AssignWork(ctx context.Context, key, subject string, unassign bool) (*remotestate.WorkMutationResponse, error)
@@ -94,6 +96,8 @@ func Tools() []toolDef {
 		{Name: "work_query", Description: "The workspace lens: specs with progress, tasks with DERIVED lifecycle and its evidence, the drift inbox, claim suggestions. Nothing returned is a stored status.", InputSchema: obj(map[string]interface{}{})},
 		{Name: "work_get", Description: "One task: envelope, contract, and the fold's lifecycle with evidence.", InputSchema: obj(map[string]interface{}{"key": str("task key, e.g. ORN-142")}, "key")},
 		{Name: "spec_get", Description: "The frozen brief: a content-addressed SpecSnapshot (intent only — contracts and docs, never a rung or assignee). Implement against exactly this.", InputSchema: obj(map[string]interface{}{"spec": str("spec slug")}, "spec")},
+		{Name: "work_timeline", Description: "The unified timeline for one item: both logs (what people said, what the world did) interleaved by time — evidence attached, read-only.", InputSchema: obj(map[string]interface{}{"key": str("task or spec key")}, "key")},
+		{Name: "spec_doc", Description: "A spec's cloud document revision (content-addressed, V3-2; latest when rev is omitted) — read-only.", InputSchema: obj(map[string]interface{}{"spec": str("spec slug"), "rev": str("revision digest sha256:<hex> (optional)")}, "spec")},
 		{Name: "task_create", Description: "Create a task (e.g. discovered follow-up work) through the one mutator surface.", InputSchema: obj(map[string]interface{}{"prefix": str("task-key prefix, 2–5 uppercase"), "title": str("task title"), "spec": str("parent spec slug (optional)"), "contract": contractSchema}, "prefix", "title")},
 		{Name: "task_comment", Description: "Append a comment to a task's coordination log.", InputSchema: obj(map[string]interface{}{"key": str("task key"), "body": str("comment body")}, "key", "body")},
 		{Name: "task_assign", Description: "Assign a membership subject (self-assignment claims work).", InputSchema: obj(map[string]interface{}{"key": str("task key"), "subject": str("membership subject id (usr_/sp_/team_)")}, "key", "subject")},
@@ -236,6 +240,33 @@ func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (m
 			return nil, err
 		}
 		return toolText(fmt.Sprintf("%s\n%s", id, canonical), false), nil
+
+	case "work_timeline":
+		var a struct {
+			Key string `json:"key"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Key == "" {
+			return nil, fmt.Errorf("work_timeline: key is required")
+		}
+		timeline, err := s.API.GetWorkTimeline(ctx, a.Key)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(timeline)
+
+	case "spec_doc":
+		var a struct {
+			Spec string `json:"spec"`
+			Rev  string `json:"rev"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Spec == "" {
+			return nil, fmt.Errorf("spec_doc: spec is required")
+		}
+		doc, err := s.API.GetWorkDoc(ctx, a.Spec, a.Rev)
+		if err != nil {
+			return nil, err
+		}
+		return toolText(fmt.Sprintf("%s (parent %s)\n\n%s", doc.Revision, doc.Parent, doc.Body), false), nil
 
 	case "task_create":
 		var a struct {
