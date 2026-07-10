@@ -45,7 +45,7 @@ outputs matching the TS plane's shape; the parity test fails on any name/
 schema/annotation drift from the vendored manifest; `orun mcp serve` lists
 28 tools (9 work + 19 platform) under one initialize.
 
-## UM2 — Platform writes + rails — 🗓️ Planned
+## UM2 — Platform writes + rails — ✅ Done
 
 - The 6 write tools; per-attempt `Idempotency-Key` (+ supplied-key
   passthrough, ≤ 255 printable ASCII); `x-client-surface: mcp` on every

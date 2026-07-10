@@ -11,12 +11,19 @@ import (
 	"strconv"
 )
 
-// Public-API read methods (orun-mcp UM1) — the CLI's seam onto the Orun Cloud
-// public API, the routes behind the platform MCP tool plane. Same discipline
-// as work.go: doJSON-style transport (bearer, retry, Retry-After, platform
-// error decode) with thin methods — params in, decoded JSON out. Payloads
-// stay json.RawMessage: the MCP tools re-emit them verbatim; only what a tool
-// inspects (cursors, entity refs) is typed.
+// Public-API methods (orun-mcp UM1 reads, UM2 writes) — the CLI's seam onto
+// the Orun Cloud public API, the routes behind the platform MCP tool plane.
+// Same discipline as work.go: doJSON-style transport (bearer, retry,
+// Retry-After, platform error decode) with thin methods — params in, decoded
+// JSON out. Payloads stay json.RawMessage: the MCP tools re-emit them
+// verbatim; only what a tool inspects (cursors, entity refs) is typed.
+//
+// Every platform method (reads included) carries `x-client-surface: mcp` so
+// platform audit/metering attribute the call to the MCP surface (design §3).
+// Writes additionally carry the caller-supplied Idempotency-Key. Both ride
+// the platform-call path only: the work-plane and state methods (work.go,
+// client.go) keep their existing headers — MCP provenance for the work plane
+// is a separate decision, out of this seam's scope.
 //
 // Route map, PINNED against the TS SDK (orun-cloud packages/sdk/src @
 // f8dcc15 — the plane these tools mirror), not derived. org is the tool's
@@ -55,6 +62,18 @@ import (
 //
 // <config scope> is the tenancy-chain rung (configsurface convention):
 // /v1/organizations/{org}[/projects/{prj}[/environments/{env}]].
+//
+// Write routes (UM2), pinned against the same TS SDK revision:
+//
+//	POST  /v1/organizations/{org}/projects                              → CreateProject
+//	POST  …/projects/{prj}/environments                                 → CreateProjectEnvironment
+//	POST  <config scope>/config/feature-flags                           → CreateFeatureFlag
+//	PATCH <config scope>/config/feature-flags/{flagId}                  → UpdateFeatureFlag
+//	POST  /v1/organizations/{org}/webhooks/endpoints                    → CreateWebhookEndpoint
+//	POST  …/projects/{prj}/webhooks/endpoints                           → CreateWebhookEndpoint (project-scoped)
+//	POST  /v1/organizations/{org}/webhooks/subscriptions                → CreateWebhookSubscription
+//	POST  …/webhooks/delivery-attempts/{attemptId}/replay               → ReplayWebhookDelivery
+//	POST  /v1/organizations/{org}/invitations                           → CreateInvitation
 
 // PlatformPage is one public-API response: the data payload plus the meta
 // object (cursor etc.) passed through verbatim. Non-paginated reads simply
@@ -421,7 +440,73 @@ func (c *Client) ListWebhookDeliveries(ctx context.Context, org, endpoint string
 	return c.platformGet(ctx, orgPath(org, "/webhooks/endpoints/"+urlSegment(endpoint)+"/delivery-attempts")+encodeQ(q))
 }
 
+// ── write methods (orun-mcp UM2) ─────────────────────────────────────────────
+//
+// Each takes the caller's Idempotency-Key (the MCP layer always supplies one,
+// auto-minted per logical attempt when the tool caller does not), which makes
+// the retried POST/PATCH replay-safe.
+
+// CreateProject calls POST …/projects. body is {name, slug?}.
+func (c *Client) CreateProject(ctx context.Context, org string, body interface{}, idemKey string) (*PlatformPage, error) {
+	return c.platformDo(ctx, http.MethodPost, orgPath(org, "/projects"), body, idemKey)
+}
+
+// CreateProjectEnvironment calls POST …/projects/{prj}/environments. body is
+// {name, slug?}.
+func (c *Client) CreateProjectEnvironment(ctx context.Context, org, project string, body interface{}, idemKey string) (*PlatformPage, error) {
+	return c.platformDo(ctx, http.MethodPost, orgPath(org, "/projects/"+urlSegment(project)+"/environments"), body, idemKey)
+}
+
+// CreateFeatureFlag calls POST <scope>/config/feature-flags.
+func (c *Client) CreateFeatureFlag(ctx context.Context, scope ConfigScope, body interface{}, idemKey string) (*PlatformPage, error) {
+	return c.platformDo(ctx, http.MethodPost, scope.path("/config/feature-flags"), body, idemKey)
+}
+
+// UpdateFeatureFlag calls PATCH <scope>/config/feature-flags/{flagId}.
+func (c *Client) UpdateFeatureFlag(ctx context.Context, scope ConfigScope, flagID string, body interface{}, idemKey string) (*PlatformPage, error) {
+	return c.platformDo(ctx, http.MethodPatch, scope.path("/config/feature-flags/"+urlSegment(flagID)), body, idemKey)
+}
+
+// CreateWebhookEndpoint calls POST …/webhooks/endpoints — the project-scoped
+// variant when project is non-empty.
+func (c *Client) CreateWebhookEndpoint(ctx context.Context, org, project string, body interface{}, idemKey string) (*PlatformPage, error) {
+	path := orgPath(org, "/webhooks/endpoints")
+	if project != "" {
+		path = orgPath(org, "/projects/"+urlSegment(project)+"/webhooks/endpoints")
+	}
+	return c.platformDo(ctx, http.MethodPost, path, body, idemKey)
+}
+
+// CreateWebhookSubscription calls POST …/webhooks/subscriptions.
+func (c *Client) CreateWebhookSubscription(ctx context.Context, org string, body interface{}, idemKey string) (*PlatformPage, error) {
+	return c.platformDo(ctx, http.MethodPost, orgPath(org, "/webhooks/subscriptions"), body, idemKey)
+}
+
+// ReplayWebhookDelivery calls POST …/webhooks/delivery-attempts/{attemptId}/replay.
+func (c *Client) ReplayWebhookDelivery(ctx context.Context, org, attemptID, idemKey string) (*PlatformPage, error) {
+	return c.platformDo(ctx, http.MethodPost, orgPath(org, "/webhooks/delivery-attempts/"+urlSegment(attemptID)+"/replay"), nil, idemKey)
+}
+
+// CreateInvitation calls POST …/invitations. body is {email, role}. The
+// response carries a one-time accept token; the MCP tool strips it before
+// emitting (the TS-plane guard).
+func (c *Client) CreateInvitation(ctx context.Context, org string, body interface{}, idemKey string) (*PlatformPage, error) {
+	return c.platformDo(ctx, http.MethodPost, orgPath(org, "/invitations"), body, idemKey)
+}
+
 // ── transport helpers ────────────────────────────────────────────────────────
+
+const (
+	// clientSurfaceHeader/clientSurfaceMCP is the provenance header on every
+	// platform-API call: audit rows and metering attribute the call to the MCP
+	// surface (design §3, README locked decision 6).
+	clientSurfaceHeader = "x-client-surface"
+	clientSurfaceMCP    = "mcp"
+
+	// idempotencyKeyHeader carries the per-write replay key (≤ 255 printable
+	// ASCII; the MCP layer validates before it reaches the wire).
+	idempotencyKeyHeader = "Idempotency-Key"
+)
 
 func orgPath(org, suffix string) string {
 	return "/v1/organizations/" + urlSegment(org) + suffix
@@ -448,16 +533,31 @@ func encodeQ(q url.Values) string {
 
 // platformGet performs a retried GET that keeps the platform success envelope
 // ({data, meta}) intact — doJSON's decode drops meta, and the MCP tools pass
-// cursors through, so this path captures both halves verbatim. A flat (OSS)
-// body becomes Data with no Meta.
+// cursors through, so this path captures both halves verbatim.
 func (c *Client) platformGet(ctx context.Context, path string) (*PlatformPage, error) {
+	return c.platformDo(ctx, http.MethodGet, path, nil, "")
+}
+
+// platformDo performs a retried platform-API call (envelope-preserving decode
+// as platformGet). Writes are safe under the retry because the Idempotency-Key
+// makes the server replay the original result. A flat (OSS) body becomes Data
+// with no Meta.
+func (c *Client) platformDo(ctx context.Context, method, path string, body interface{}, idemKey string) (*PlatformPage, error) {
+	var payload []byte
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("marshalling request body: %w", err)
+		}
+		payload = b
+	}
 	var page PlatformPage
 	err := c.doRawWithRetry(ctx, maxRetryAttempts, func() error {
-		body, err := c.platformGetOnce(ctx, path)
+		raw, err := c.platformDoOnce(ctx, method, path, payload, idemKey)
 		if err != nil {
 			return err
 		}
-		trimmed := bytes.TrimSpace(body)
+		trimmed := bytes.TrimSpace(raw)
 		if len(trimmed) == 0 {
 			page = PlatformPage{}
 			return nil
@@ -484,7 +584,7 @@ func (c *Client) platformGet(ctx context.Context, path string) (*PlatformPage, e
 func (c *Client) platformGetBytes(ctx context.Context, path string) ([]byte, error) {
 	var body []byte
 	err := c.doRawWithRetry(ctx, maxRetryAttempts, func() error {
-		b, err := c.platformGetOnce(ctx, path)
+		b, err := c.platformDoOnce(ctx, http.MethodGet, path, nil, "")
 		if err != nil {
 			return err
 		}
@@ -497,18 +597,31 @@ func (c *Client) platformGetBytes(ctx context.Context, path string) ([]byte, err
 	return body, nil
 }
 
-func (c *Client) platformGetOnce(ctx context.Context, path string) ([]byte, error) {
+// platformDoOnce sends one platform-API request. Every call carries the MCP
+// provenance header; idemKey, when set, rides as Idempotency-Key.
+func (c *Client) platformDoOnce(ctx context.Context, method, path string, payload []byte, idemKey string) ([]byte, error) {
 	token, err := c.tokenSrc.Token(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("resolving auth token: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	var reqBody io.Reader
+	if payload != nil {
+		reqBody = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("building request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set(clientSurfaceHeader, clientSurfaceMCP)
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if idemKey != "" {
+		req.Header.Set(idempotencyKeyHeader, idemKey)
+	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err

@@ -42,15 +42,30 @@ type PlatformAPI interface {
 	ListSecretsMetadata(ctx context.Context, scope remotestate.ConfigScope) (*remotestate.PlatformPage, error)
 	ListWebhookEndpoints(ctx context.Context, org string, opts remotestate.PageQuery) (*remotestate.PlatformPage, error)
 	ListWebhookDeliveries(ctx context.Context, org, endpoint string, opts remotestate.PageQuery) (*remotestate.PlatformPage, error)
+
+	// Writes (UM2): each carries the per-attempt Idempotency-Key.
+	CreateProject(ctx context.Context, org string, body interface{}, idemKey string) (*remotestate.PlatformPage, error)
+	CreateProjectEnvironment(ctx context.Context, org, project string, body interface{}, idemKey string) (*remotestate.PlatformPage, error)
+	CreateFeatureFlag(ctx context.Context, scope remotestate.ConfigScope, body interface{}, idemKey string) (*remotestate.PlatformPage, error)
+	UpdateFeatureFlag(ctx context.Context, scope remotestate.ConfigScope, flagID string, body interface{}, idemKey string) (*remotestate.PlatformPage, error)
+	CreateWebhookEndpoint(ctx context.Context, org, project string, body interface{}, idemKey string) (*remotestate.PlatformPage, error)
+	CreateWebhookSubscription(ctx context.Context, org string, body interface{}, idemKey string) (*remotestate.PlatformPage, error)
+	ReplayWebhookDelivery(ctx context.Context, org, attemptID, idemKey string) (*remotestate.PlatformPage, error)
+	CreateInvitation(ctx context.Context, org string, body interface{}, idemKey string) (*remotestate.PlatformPage, error)
 }
 
 // Provider is the platform-plane mcpserve.ToolProvider. DefaultWorkspace,
 // when set (the serve-time resolved scope), fills an absent `workspace`
 // argument and makes it optional on the advertised schemas; an explicit
-// argument always wins.
+// argument always wins. ReadOnly filters the 6 write tools out of the
+// advertised roster (and blocks their execution): 19 tools instead of 25.
 type Provider struct {
 	API              PlatformAPI
 	DefaultWorkspace string
+	ReadOnly         bool
+
+	// ent is the lazy per-workspace feature.mcp_server gate (design §3).
+	ent entitlementGate
 }
 
 // maxToolBytes caps one tool result's text (parity with the TS plane's
@@ -60,12 +75,16 @@ const maxToolBytes = 64 * 1024
 // maxEntityLookupPages bounds catalog_get_entity's list-emulation walk.
 const maxEntityLookupPages = 5
 
-// Tools implements mcpserve.ToolProvider: the manifest's read tools,
-// verbatim, with `workspace` demoted from required when a default is active.
+// Tools implements mcpserve.ToolProvider: the manifest's tools, verbatim
+// (writes filtered out under ReadOnly), with `workspace` demoted from
+// required when a default is active.
 func (p *Provider) Tools() []mcpserve.ToolDef {
-	out := make([]mcpserve.ToolDef, 0, len(readTools))
-	for i := range readTools {
-		t := &readTools[i]
+	out := make([]mcpserve.ToolDef, 0, len(allTools))
+	for i := range allTools {
+		t := &allTools[i]
+		if p.ReadOnly && !t.readOnly {
+			continue
+		}
 		schema := decodeSchema(t.InputSchema)
 		if p.DefaultWorkspace != "" && t.hasWorkspace {
 			dropRequired(schema, "workspace")
@@ -89,6 +108,10 @@ func (p *Provider) Call(ctx context.Context, name string, raw json.RawMessage) (
 	if !ok {
 		return nil, false
 	}
+	if p.ReadOnly && !t.readOnly {
+		// Filtered from tools/list AND blocked at execution (design §3).
+		return mcpserve.TextResult(fmt.Sprintf("error: %s is unavailable: this server is running --read-only", name), true), true
+	}
 	a := argmap{}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &a); err != nil {
@@ -102,7 +125,20 @@ func (p *Provider) Call(ctx context.Context, name string, raw json.RawMessage) (
 			return mcpserve.TextResult(fmt.Sprintf("error: %s: workspace is required (call whoami or workspaces_list to discover yours)", name), true), true
 		}
 	}
-	text, err := p.call(ctx, name, a)
+	// Entitlement gate: every workspace-carrying call (reads and writes)
+	// checks feature.mcp_server lazily, once per workspace per TTL.
+	if ws := a.str("workspace"); ws != "" {
+		if err := p.ent.check(ctx, p.API, ws); err != nil {
+			return mcpserve.TextResult(errText(err), true), true
+		}
+	}
+	var text string
+	var err error
+	if t.readOnly {
+		text, err = p.call(ctx, name, a)
+	} else {
+		text, err = p.callWrite(ctx, name, a)
+	}
 	if err != nil {
 		return mcpserve.TextResult(errText(err), true), true
 	}

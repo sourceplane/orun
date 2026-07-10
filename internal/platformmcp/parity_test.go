@@ -10,13 +10,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sourceplane/orun/internal/mcpserve"
 )
 
 // The anti-drift contract (design §4): the vendored manifest exported from
 // the TS plane pins this package's roster. These tests fail on any name /
-// description / schema / annotation drift — scoped to readOnlyHint:true
-// tools for UM1 and trivially extensible to the writes in UM2 (flip the
-// filter).
+// description / schema / annotation drift — over the full 25-tool roster
+// since UM2 (reads and writes alike).
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
@@ -103,8 +104,9 @@ func canon(t *testing.T, v interface{}) string {
 }
 
 // TestManifestParity asserts the advertised roster equals the vendored
-// manifest's readOnlyHint:true tools: count, order, names, descriptions,
-// titles, annotations, and normalized inputSchemas.
+// manifest, tool for tool: count, order, names, descriptions, titles,
+// annotations, and normalized inputSchemas — the full 25 (UM2), and the
+// readOnlyHint:true 19 under ReadOnly.
 func TestManifestParity(t *testing.T) {
 	var m manifest
 	if err := json.Unmarshal(vendoredManifest(t), &m); err != nil {
@@ -113,44 +115,56 @@ func TestManifestParity(t *testing.T) {
 	if m.ToolCount != len(m.Tools) {
 		t.Fatalf("manifest toolCount %d != %d tools", m.ToolCount, len(m.Tools))
 	}
+	if len(m.Tools) != 25 {
+		t.Fatalf("UM2 expects 25 tools, manifest carries %d", len(m.Tools))
+	}
 
-	var want []manifestTool
+	var wantReads []manifestTool
 	for _, tool := range m.Tools {
 		if ro, _ := tool.Annotations["readOnlyHint"].(bool); ro {
-			want = append(want, tool)
+			wantReads = append(wantReads, tool)
 		}
 	}
-	if len(want) != m.ReadOnlyToolCount {
-		t.Fatalf("manifest readOnlyToolCount %d but %d readOnlyHint:true tools", m.ReadOnlyToolCount, len(want))
+	if len(wantReads) != m.ReadOnlyToolCount {
+		t.Fatalf("manifest readOnlyToolCount %d but %d readOnlyHint:true tools", m.ReadOnlyToolCount, len(wantReads))
 	}
-	if len(want) != 19 {
-		t.Fatalf("UM1 expects 19 read tools, manifest carries %d", len(want))
+	if len(wantReads) != 19 {
+		t.Fatalf("UM2 expects 19 read tools, manifest carries %d", len(wantReads))
 	}
 
-	got := (&Provider{}).Tools() // no default workspace: schemas must be the manifest's, verbatim
-	if len(got) != len(want) {
-		t.Fatalf("Provider.Tools() = %d tools, want %d", len(got), len(want))
-	}
-	for i, w := range want {
-		g := got[i]
-		if g.Name != w.Name {
-			t.Fatalf("tool %d: name %q, want %q (order must match the manifest)", i, g.Name, w.Name)
+	for _, tc := range []struct {
+		mode string
+		got  []mcpserve.ToolDef
+		want []manifestTool
+	}{
+		// no default workspace: schemas must be the manifest's, verbatim
+		{"full", (&Provider{}).Tools(), m.Tools},
+		{"read-only", (&Provider{ReadOnly: true}).Tools(), wantReads},
+	} {
+		if len(tc.got) != len(tc.want) {
+			t.Fatalf("%s: Provider.Tools() = %d tools, want %d", tc.mode, len(tc.got), len(tc.want))
 		}
-		if g.Description != w.Description {
-			t.Errorf("%s: description drifted from the manifest", w.Name)
-		}
-		if g.Title != w.Title {
-			t.Errorf("%s: title = %q, want %q", w.Name, g.Title, w.Title)
-		}
-		if canon(t, g.Annotations) != canon(t, w.Annotations) {
-			t.Errorf("%s: annotations = %s, want %s", w.Name, canon(t, g.Annotations), canon(t, w.Annotations))
-		}
-		var wantSchema interface{}
-		if err := json.Unmarshal(w.InputSchema, &wantSchema); err != nil {
-			t.Fatalf("%s: manifest schema: %v", w.Name, err)
-		}
-		if canon(t, g.InputSchema) != canon(t, wantSchema) {
-			t.Errorf("%s: inputSchema drifted:\n got  %s\n want %s", w.Name, canon(t, g.InputSchema), canon(t, wantSchema))
+		for i, w := range tc.want {
+			g := tc.got[i]
+			if g.Name != w.Name {
+				t.Fatalf("%s tool %d: name %q, want %q (order must match the manifest)", tc.mode, i, g.Name, w.Name)
+			}
+			if g.Description != w.Description {
+				t.Errorf("%s: description drifted from the manifest", w.Name)
+			}
+			if g.Title != w.Title {
+				t.Errorf("%s: title = %q, want %q", w.Name, g.Title, w.Title)
+			}
+			if canon(t, g.Annotations) != canon(t, w.Annotations) {
+				t.Errorf("%s: annotations = %s, want %s", w.Name, canon(t, g.Annotations), canon(t, w.Annotations))
+			}
+			var wantSchema interface{}
+			if err := json.Unmarshal(w.InputSchema, &wantSchema); err != nil {
+				t.Fatalf("%s: manifest schema: %v", w.Name, err)
+			}
+			if canon(t, g.InputSchema) != canon(t, wantSchema) {
+				t.Errorf("%s: inputSchema drifted:\n got  %s\n want %s", w.Name, canon(t, g.InputSchema), canon(t, wantSchema))
+			}
 		}
 	}
 }

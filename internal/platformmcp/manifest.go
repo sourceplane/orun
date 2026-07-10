@@ -1,8 +1,8 @@
 // Package platformmcp is the platform tool plane of the orun MCP
-// (orun-mcp UM1): the 19 read tools of the shipped TS plane
-// (orun-cloud/packages/mcp), reimplemented natively over the public API via
-// internal/remotestate. The stdio transport lives in internal/mcpserve; this
-// package supplies the tools.
+// (orun-mcp UM1+UM2): the 25 tools of the shipped TS plane (19 reads + 6
+// writes, orun-cloud/packages/mcp), reimplemented natively over the public
+// API via internal/remotestate. The stdio transport lives in
+// internal/mcpserve; this package supplies the tools.
 //
 // Tool names, descriptions, input schemas, and annotations are EMBEDDED from
 // the vendored contract (specs/orun-cloud/vendored/mcp-tool-manifest.json —
@@ -39,36 +39,40 @@ type manifest struct {
 }
 
 // toolSpec is one advertised tool: the manifest entry plus what the dispatch
-// layer needs (workspace-argument shape for the default fill).
+// layer needs (workspace-argument shape for the default fill, read/write for
+// the --read-only filter).
 type toolSpec struct {
 	manifestTool
+	readOnly          bool
 	hasWorkspace      bool
 	workspaceRequired bool
 }
 
-// readTools is the plane's roster, in manifest order, filtered to
-// readOnlyHint:true (UM1 — the 6 writes are UM2's).
-var readTools = mustLoadReadTools()
+// allTools is the plane's full roster (19 reads + 6 writes), in manifest
+// order.
+var allTools = mustLoadTools()
 
 var toolsByName = func() map[string]*toolSpec {
-	m := make(map[string]*toolSpec, len(readTools))
-	for i := range readTools {
-		m[readTools[i].Name] = &readTools[i]
+	m := make(map[string]*toolSpec, len(allTools))
+	for i := range allTools {
+		m[allTools[i].Name] = &allTools[i]
 	}
 	return m
 }()
 
-func mustLoadReadTools() []toolSpec {
+func mustLoadTools() []toolSpec {
 	var m manifest
 	if err := json.Unmarshal(manifestJSON, &m); err != nil {
 		panic(fmt.Sprintf("platformmcp: embedded manifest is invalid: %v", err))
 	}
-	var out []toolSpec
+	reads := 0
+	out := make([]toolSpec, 0, len(m.Tools))
 	for _, t := range m.Tools {
-		if ro, _ := t.Annotations["readOnlyHint"].(bool); !ro {
-			continue
-		}
 		spec := toolSpec{manifestTool: t}
+		spec.readOnly, _ = t.Annotations["readOnlyHint"].(bool)
+		if spec.readOnly {
+			reads++
+		}
 		var schema struct {
 			Properties map[string]json.RawMessage `json:"properties"`
 			Required   []string                   `json:"required"`
@@ -84,8 +88,9 @@ func mustLoadReadTools() []toolSpec {
 		}
 		out = append(out, spec)
 	}
-	if len(out) != m.ReadOnlyToolCount {
-		panic(fmt.Sprintf("platformmcp: embedded manifest advertises %d read tools but carries %d", m.ReadOnlyToolCount, len(out)))
+	if len(out) != m.ToolCount || reads != m.ReadOnlyToolCount {
+		panic(fmt.Sprintf("platformmcp: embedded manifest advertises %d tools (%d read-only) but carries %d (%d read-only)",
+			m.ToolCount, m.ReadOnlyToolCount, len(out), reads))
 	}
 	return out
 }
