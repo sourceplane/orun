@@ -62,10 +62,8 @@ workspace gets the platform error; `--read-only` lists 28 (9 work + 19
 platform reads — work writes are mutator-shaped by WP-6 and stay, as the
 work plane's own read-only story is WP5's, not this spec's).
 
-## UM3 — Docs + release — ⚠️ Docs shipped; release tag pending
+## UM3 — Docs + release — ✅ Done (v2.24.0 released)
 
-<!-- TODO(UM3): flip to ✅ (here, README, IMPLEMENTATION-STATUS) once the
-     v2.24.0 tag is pushed and the release-oci workflow goes green. -->
 
 - `website/docs/cli/orun-mcp.md` rewritten for the unified surface (also
   fixes the stale 7-tool work-MCP text → 9); client config snippets
