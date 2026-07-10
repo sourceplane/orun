@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/sourceplane/orun/internal/agent"
+	"github.com/sourceplane/orun/internal/agent/attach"
 	"github.com/sourceplane/orun/internal/agent/driver"
+	"github.com/sourceplane/orun/internal/agent/live"
 	"github.com/sourceplane/orun/internal/agenttype"
 	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/worklens"
@@ -31,12 +33,14 @@ func init() {
 }
 
 var (
-	runTask        string
-	runSpecSlug    string
-	runType        string
-	runDriver      string
-	agentRunDryRun bool
-	agentRunJSON   bool
+	runTask         string
+	runSpecSlug     string
+	runType         string
+	runDriver       string
+	agentRunDryRun  bool
+	agentRunJSON    bool
+	agentRunDetach  bool
+	agentRunSession string // hidden: the pre-minted session id a --detach parent hands its child
 )
 
 var agentRunCmd = &cobra.Command{
@@ -131,6 +135,12 @@ snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
 		if err != nil {
 			return err
 		}
+		// An interactive run (no --task) over the stub serves the input
+		// channels instead of replaying a canned script — the vendor-free
+		// interactive session (steer/approve/interrupt through any head).
+		if runDriver == "stub" && runKind == nodes.RunKindInteractive {
+			drv = &driver.Stub{Interactive: true}
+		}
 		// The Claude Code driver gets its hands wired: the orun MCP config,
 		// written under .orun and filtered through the agent type's tool
 		// policy (AL1). The harness-level gates mirror the policy; the
@@ -149,13 +159,26 @@ snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
 		if runTask != "" {
 			branch = "agent/" + runTask + "-" + slugify(runType)
 		}
+
+		sessionID := agentRunSession
+		if sessionID == "" {
+			sessionID = newSessionID()
+		}
+		// --detach: fork the body into its own process group and return; the
+		// child (same command, session id pinned) hosts the session. Closing
+		// this terminal never kills the run — the tmux discipline (design
+		// §3.1). Attach at will.
+		if agentRunDetach {
+			return detachBody(cmd, sessionID)
+		}
+
 		// Seal the session on terminal state so the run is discoverable and
 		// replayable (AG4). A session pins its agent type by hash, so sealing
 		// needs a sealed type — resolved from its ref; `orun agent import`
 		// first. Without one (or for a typeless interactive run) the run still
 		// executes and its segments are stored, just not indexed as a session.
 		opts := agent.RunOptions{
-			SessionID:     newSessionID(),
+			SessionID:     sessionID,
 			Driver:        drv,
 			Brief:         brief,
 			Branch:        branch,
@@ -168,6 +191,49 @@ snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
 				opts.Seal = &agent.SealInput{RunKind: runKind, AgentType: ref.Target, Brief: brief.ID, Principal: "usr_cli"}
 			}
 		}
+
+		// The body hosts the attach plane while it runs (AL2): heads join on
+		// the session socket; the live registry makes it discoverable
+		// (`orun agent ps`). The run itself is unchanged when nobody attaches.
+		inputs := agent.NewInputQueue()
+		srv := attach.NewServer(attach.SessionInfo{
+			SessionID: sessionID, BriefID: brief.ID, AgentType: runType,
+			Task: runTask, RunKind: string(runKind), Harness: runDriver,
+		}, inputs)
+		liveDir := agentLiveDir()
+		sock := filepath.Join(liveDir, sessionID+".sock")
+		listener, err := attach.ServeSocket(srv, sock)
+		if err != nil {
+			return err
+		}
+		defer listener.Close()
+		if err := live.Write(liveDir, live.Entry{
+			SessionID: sessionID, PID: os.Getpid(), Socket: sock, State: "running",
+			BriefID: brief.ID, AgentType: runType, Task: runTask, Driver: runDriver,
+			StartedAt: time.Now(),
+		}); err != nil {
+			return err
+		}
+		defer live.Remove(liveDir, sessionID)
+		defer srv.Close("terminal")
+
+		opts.Inputs = inputs
+		opts.ObserveDelta = srv.ObserveDelta
+		opts.Observe = func(ev agent.SessionEvent) {
+			srv.Observe(ev)
+			if ev.Kind == "state_changed" {
+				if st, ok := ev.Payload["state"].(string); ok {
+					_ = live.UpdateState(liveDir, sessionID, st)
+				}
+			}
+			if !agentRunJSON {
+				renderEventLine(out, ev.Kind, ev.Payload)
+			}
+		}
+		if !agentRunJSON {
+			fmt.Fprintf(out, "session %s hosting — attach from another terminal: orun agent attach %s\n", sessionID, sessionID)
+		}
+
 		res, err := agent.Run(ctx, store, opts)
 		if err != nil {
 			return err
@@ -247,7 +313,14 @@ func registerAgentRunCommand(parent *cobra.Command) {
 	agentRunCmd.Flags().StringVar(&runDriver, "driver", "stub", "driver id (see `orun agent drivers`)")
 	agentRunCmd.Flags().BoolVar(&agentRunDryRun, "dry-run", false, "seal and print the brief without launching")
 	agentRunCmd.Flags().BoolVar(&agentRunJSON, "json", false, "JSON output")
+	agentRunCmd.Flags().BoolVar(&agentRunDetach, "detach", false, "run the session body in its own process group and return (attach at will)")
+	agentRunCmd.Flags().StringVar(&agentRunSession, "session-id", "", "pre-minted session id (internal: set by --detach)")
+	_ = agentRunCmd.Flags().MarkHidden("session-id")
 	parent.AddCommand(agentRunCmd)
+	agentKillCmd.Flags().BoolVar(&agentKillForce, "force", false, "kill the body process and sweep the registry entry")
+	parent.AddCommand(agentPsCmd)
+	parent.AddCommand(agentAttachCmd)
+	parent.AddCommand(agentKillCmd)
 
 	parent.AddCommand(&cobra.Command{
 		Use:   "drivers",
