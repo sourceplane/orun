@@ -24,10 +24,13 @@ One stdio JSON-RPC loop composes two tool planes:
   work      9 tools over the work plane (specs/orun-work WP5): mutator-only
             writes, derived lifecycle, sealed briefs. Mounted when a
             workspace scope resolves.
-  platform  19 read tools over the Orun Cloud public API (catalog, runs and
-            logs, audit, events, access, usage, billing, config, webhooks).
-            Mounted whenever cloud auth resolves; tool schemas are pinned to
-            the vendored TS-plane manifest.
+  platform  25 tools over the Orun Cloud public API — 19 reads (catalog,
+            runs and logs, audit, events, access, usage, billing, config,
+            webhooks) + 6 writes (project/environment create, flag set,
+            webhook create/replay, member invite; per-attempt
+            Idempotency-Key). Mounted whenever cloud auth resolves; tool
+            schemas are pinned to the vendored TS-plane manifest.
+            --read-only drops the 6 platform writes.
 
 Subcommands:
   serve   Serve MCP over stdio (newline-delimited JSON-RPC 2.0)
@@ -80,6 +83,7 @@ func registerMcpServeCommand(parent *cobra.Command) {
 	var (
 		workspace  string
 		backendURL string
+		readOnly   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -98,7 +102,7 @@ func registerMcpServeCommand(parent *cobra.Command) {
 			if ws != "" {
 				providers = append(providers, &workmcp.Server{API: client, Workspace: ws})
 			}
-			providers = append(providers, &platformmcp.Provider{API: client, DefaultWorkspace: ws})
+			providers = append(providers, &platformmcp.Provider{API: client, DefaultWorkspace: ws, ReadOnly: readOnly})
 			server := &mcpserve.Server{Providers: providers, Version: version}
 			if ws != "" {
 				fmt.Fprintln(cmd.ErrOrStderr(), "orun MCP serving on stdio (workspace "+ws+"; work + platform tools)")
@@ -110,11 +114,15 @@ func registerMcpServeCommand(parent *cobra.Command) {
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", "", "target workspace (org id or slug; defaults to the linked repo's)")
 	cmd.Flags().StringVar(&backendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
+	cmd.Flags().BoolVar(&readOnly, "read-only", false, "serve only the platform plane's read tools (drops the 6 platform writes; work tools are mutator-shaped by design — WP-6 — and unaffected)")
 	parent.AddCommand(cmd)
 }
 
 func registerMcpToolsCommand(parent *cobra.Command) {
-	var asJSON bool
+	var (
+		asJSON   bool
+		readOnly bool
+	)
 	cmd := &cobra.Command{
 		Use:   "tools",
 		Short: "Print the merged tool roster (provider and read-only columns)",
@@ -130,7 +138,7 @@ func registerMcpToolsCommand(parent *cobra.Command) {
 			for _, t := range (&workmcp.Server{}).Tools() {
 				rows = append(rows, row{t.Name, "work", workmcp.ReadOnly(t.Name), t.Description})
 			}
-			for _, t := range (&platformmcp.Provider{}).Tools() {
+			for _, t := range (&platformmcp.Provider{ReadOnly: readOnly}).Tools() {
 				ro, _ := t.Annotations["readOnlyHint"].(bool)
 				rows = append(rows, row{t.Name, "platform", ro, t.Description})
 			}
@@ -157,5 +165,6 @@ func registerMcpToolsCommand(parent *cobra.Command) {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON")
+	cmd.Flags().BoolVar(&readOnly, "read-only", false, "list the roster as `serve --read-only` advertises it (platform writes dropped; work tools unaffected)")
 	parent.AddCommand(cmd)
 }

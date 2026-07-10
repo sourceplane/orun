@@ -13,9 +13,11 @@ import (
 )
 
 // fakeAPI records every seam call as "Method org=… …" and serves one canned
-// page (workmcp's fakeAPI convention).
+// page (workmcp's fakeAPI convention). Write calls also record their
+// Idempotency-Key, in call order, into keys.
 type fakeAPI struct {
 	calls []string
+	keys  []string
 	page  *remotestate.PlatformPage
 	// pages, when set, is consumed one page per call (multi-page flows).
 	pages []*remotestate.PlatformPage
@@ -130,6 +132,55 @@ func (f *fakeAPI) ListWebhookDeliveries(_ context.Context, org, endpoint string,
 	return f.rec("ListWebhookDeliveries org=%s endpoint=%s cursor=%s", org, endpoint, q.Cursor)
 }
 
+// recW records a write call: its Idempotency-Key into keys, the call (with
+// the body rendered as canonical JSON) into calls.
+func (f *fakeAPI) recW(key, format string, args ...interface{}) (*remotestate.PlatformPage, error) {
+	f.keys = append(f.keys, key)
+	return f.rec(format, args...)
+}
+
+func bodyJSON(body interface{}) string {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return "<unmarshalable>"
+	}
+	return string(b)
+}
+
+func (f *fakeAPI) CreateProject(_ context.Context, org string, body interface{}, key string) (*remotestate.PlatformPage, error) {
+	return f.recW(key, "CreateProject org=%s body=%s", org, bodyJSON(body))
+}
+func (f *fakeAPI) CreateProjectEnvironment(_ context.Context, org, project string, body interface{}, key string) (*remotestate.PlatformPage, error) {
+	return f.recW(key, "CreateProjectEnvironment org=%s project=%s body=%s", org, project, bodyJSON(body))
+}
+func (f *fakeAPI) CreateFeatureFlag(_ context.Context, s remotestate.ConfigScope, body interface{}, key string) (*remotestate.PlatformPage, error) {
+	return f.recW(key, "CreateFeatureFlag org=%s project=%s env=%s body=%s", s.Org, s.Project, s.Environment, bodyJSON(body))
+}
+func (f *fakeAPI) UpdateFeatureFlag(_ context.Context, s remotestate.ConfigScope, flagID string, body interface{}, key string) (*remotestate.PlatformPage, error) {
+	return f.recW(key, "UpdateFeatureFlag org=%s project=%s env=%s flag=%s body=%s", s.Org, s.Project, s.Environment, flagID, bodyJSON(body))
+}
+func (f *fakeAPI) CreateWebhookEndpoint(_ context.Context, org, project string, body interface{}, key string) (*remotestate.PlatformPage, error) {
+	return f.recW(key, "CreateWebhookEndpoint org=%s project=%s body=%s", org, project, bodyJSON(body))
+}
+func (f *fakeAPI) CreateWebhookSubscription(_ context.Context, org string, body interface{}, key string) (*remotestate.PlatformPage, error) {
+	return f.recW(key, "CreateWebhookSubscription org=%s body=%s", org, bodyJSON(body))
+}
+func (f *fakeAPI) ReplayWebhookDelivery(_ context.Context, org, attemptID, key string) (*remotestate.PlatformPage, error) {
+	return f.recW(key, "ReplayWebhookDelivery org=%s attempt=%s", org, attemptID)
+}
+func (f *fakeAPI) CreateInvitation(_ context.Context, org string, body interface{}, key string) (*remotestate.PlatformPage, error) {
+	return f.recW(key, "CreateInvitation org=%s body=%s", org, bodyJSON(body))
+}
+
+// granted pre-seeds the entitlement gate for the given workspaces so seam
+// call assertions stay gate-free (the gate has its own suite).
+func granted(p *Provider, wss ...string) *Provider {
+	for _, ws := range wss {
+		p.ent.seed(ws, true)
+	}
+	return p
+}
+
 func callTool(t *testing.T, p *Provider, name, args string) (string, bool) {
 	t.Helper()
 	result, owned := p.Call(context.Background(), name, json.RawMessage(args))
@@ -185,7 +236,7 @@ func TestPerToolHappyPath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		api := &fakeAPI{page: page(`{"items":[{"id":1}]}`, "")}
-		p := &Provider{API: api}
+		p := granted(&Provider{API: api}, "ws_1")
 		text, isErr := callTool(t, p, tc.tool, tc.args)
 		if isErr {
 			t.Errorf("%s %s errored: %s", tc.tool, tc.args, text)
@@ -224,7 +275,7 @@ func TestPerToolHappyPath(t *testing.T) {
 func TestCatalogGetEntityEmulation(t *testing.T) {
 	// Exact match wins over a same-page near-miss.
 	api := &fakeAPI{page: page(`{"entities":[{"entityRef":"component:default/api-gateway"},{"entityRef":"component:default/api","owner":"team-a"}]}`, "")}
-	p := &Provider{API: api}
+	p := granted(&Provider{API: api}, "ws_1")
 	text, isErr := callTool(t, p, "catalog_get_entity", `{"workspace":"ws_1","entityRef":"component:default/api"}`)
 	if isErr {
 		t.Fatalf("catalog_get_entity errored: %s", text)
@@ -241,7 +292,7 @@ func TestCatalogGetEntityEmulation(t *testing.T) {
 		page(`{"entities":[{"entityRef":"component:default/api-gateway"}]}`, `{"cursor":"c1"}`),
 		page(`{"entities":[{"entityRef":"component:default/api"}]}`, ""),
 	}}
-	p = &Provider{API: api}
+	p = granted(&Provider{API: api}, "ws_1")
 	if _, isErr := callTool(t, p, "catalog_get_entity", `{"workspace":"ws_1","entityRef":"component:default/api"}`); isErr {
 		t.Fatal("cursor-follow lookup failed")
 	}
@@ -250,7 +301,7 @@ func TestCatalogGetEntityEmulation(t *testing.T) {
 	}
 
 	// No match anywhere → an isError verdict.
-	p = &Provider{API: &fakeAPI{page: page(`{"entities":[]}`, "")}}
+	p = granted(&Provider{API: &fakeAPI{page: page(`{"entities":[]}`, "")}}, "ws_1")
 	text, isErr = callTool(t, p, "catalog_get_entity", `{"workspace":"ws_1","entityRef":"component:default/nope"}`)
 	if !isErr || !strings.Contains(text, "no catalog entity with ref component:default/nope") {
 		t.Fatalf("not-found shape: %q (isError=%v)", text, isErr)
@@ -261,7 +312,7 @@ func TestCatalogGetEntityEmulation(t *testing.T) {
 // in the emitted data and is flagged on the summary line.
 func TestCursorPassthrough(t *testing.T) {
 	api := &fakeAPI{page: page(`{"runs":[]}`, `{"cursor":"abc|123","total":9}`)}
-	p := &Provider{API: api}
+	p := granted(&Provider{API: api}, "ws_1")
 	text, isErr := callTool(t, p, "runs_list", `{"workspace":"ws_1"}`)
 	if isErr {
 		t.Fatalf("runs_list errored: %s", text)
@@ -290,7 +341,7 @@ func TestCursorPassthrough(t *testing.T) {
 // on the isError result.
 func TestErrorMapping(t *testing.T) {
 	api := &fakeAPI{err: &remotestate.APIError{Code: "forbidden", Message: "missing member role", RequestID: "req_42", Status: 403}}
-	p := &Provider{API: api}
+	p := granted(&Provider{API: api}, "ws_1")
 	text, isErr := callTool(t, p, "audit_search", `{"workspace":"ws_1"}`)
 	if !isErr {
 		t.Fatal("platform error did not map to isError")
@@ -299,7 +350,7 @@ func TestErrorMapping(t *testing.T) {
 		t.Fatalf("error text = %q", text)
 	}
 	// A non-API error keeps the workmcp "error: …" shape.
-	p = &Provider{API: &fakeAPI{err: fmt.Errorf("backend down")}}
+	p = granted(&Provider{API: &fakeAPI{err: fmt.Errorf("backend down")}}, "ws_1")
 	text, isErr = callTool(t, p, "audit_search", `{"workspace":"ws_1"}`)
 	if !isErr || text != "error: backend down" {
 		t.Fatalf("plain error shape: %q (isError=%v)", text, isErr)
@@ -310,7 +361,7 @@ func TestErrorMapping(t *testing.T) {
 // exact marker.
 func TestTruncationMarker(t *testing.T) {
 	api := &fakeAPI{doc: []byte(strings.Repeat("x", 100*1024))}
-	p := &Provider{API: api}
+	p := granted(&Provider{API: api}, "ws_1")
 	text, isErr := callTool(t, p, "catalog_read_doc", `{"workspace":"ws_1","digest":"sha256:aa"}`)
 	if isErr {
 		t.Fatalf("catalog_read_doc errored: %s", text)
@@ -330,7 +381,7 @@ func TestTruncationMarker(t *testing.T) {
 // explicit input wins, and without a default the tool fails actionably.
 func TestWorkspaceDefault(t *testing.T) {
 	api := &fakeAPI{page: page(`{}`, "")}
-	p := &Provider{API: api, DefaultWorkspace: "ws_ambient"}
+	p := granted(&Provider{API: api, DefaultWorkspace: "ws_ambient"}, "ws_ambient", "ws_explicit")
 	if _, isErr := callTool(t, p, "projects_list", `{}`); isErr {
 		t.Fatal("default workspace not applied")
 	}
@@ -360,13 +411,13 @@ func TestConfigScopeValidation(t *testing.T) {
 	}
 }
 
-// TestComposedServer: 28 tools (9 work + 19 platform) under one initialize,
+// TestComposedServer: 34 tools (9 work + 25 platform) under one initialize,
 // calls routed to the owning provider, and the WP-3/WP-10 forbidden-name
 // sweep green over the merged roster.
 func TestComposedServer(t *testing.T) {
 	platformAPI := &fakeAPI{page: page(`{}`, "")}
 	work := &workmcp.Server{API: workFake{}, Workspace: "ws_1"}
-	platform := &Provider{API: platformAPI, DefaultWorkspace: "ws_1"}
+	platform := granted(&Provider{API: platformAPI, DefaultWorkspace: "ws_1"}, "ws_1")
 	srv := &mcpserve.Server{Providers: []mcpserve.ToolProvider{work, platform}, Version: "test"}
 
 	in := strings.NewReader(strings.Join([]string{
@@ -394,8 +445,8 @@ func TestComposedServer(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(toolsResp.Result.Tools) != 28 {
-		t.Fatalf("merged roster = %d tools, want 28 (9 work + 19 platform)", len(toolsResp.Result.Tools))
+	if len(toolsResp.Result.Tools) != 34 {
+		t.Fatalf("merged roster = %d tools, want 34 (9 work + 25 platform)", len(toolsResp.Result.Tools))
 	}
 	for _, tool := range toolsResp.Result.Tools {
 		for _, frag := range mcpserve.ForbiddenNameFragments {
@@ -412,6 +463,59 @@ func TestComposedServer(t *testing.T) {
 	}
 	if len(platformAPI.calls) == 0 {
 		t.Error("platform seam never called")
+	}
+}
+
+// TestComposedServerReadOnly: --read-only drops exactly the 6 platform
+// writes (34 → 28); the 9 work tools stay — they are mutator-shaped by WP-6,
+// not read-only-filtered (risk U-R3) — and a filtered write is blocked at
+// execution too, not just delisted.
+func TestComposedServerReadOnly(t *testing.T) {
+	api := &fakeAPI{page: page(`{}`, "")}
+	work := &workmcp.Server{API: workFake{}, Workspace: "ws_1"}
+	platform := granted(&Provider{API: api, DefaultWorkspace: "ws_1", ReadOnly: true}, "ws_1")
+	srv := &mcpserve.Server{Providers: []mcpserve.ToolProvider{work, platform}, Version: "test"}
+
+	in := strings.NewReader(strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"project_create","arguments":{"workspace":"ws_1","name":"api"}}}`,
+	}, "\n") + "\n")
+	var out strings.Builder
+	if err := srv.Serve(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	var toolsResp struct {
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &toolsResp); err != nil {
+		t.Fatal(err)
+	}
+	if len(toolsResp.Result.Tools) != 28 {
+		t.Fatalf("read-only roster = %d tools, want 28 (9 work + 19 platform reads)", len(toolsResp.Result.Tools))
+	}
+	workCount := 0
+	for _, tool := range toolsResp.Result.Tools {
+		if strings.HasPrefix(tool.Name, "work_") || strings.HasPrefix(tool.Name, "spec_") ||
+			strings.HasPrefix(tool.Name, "task_") || strings.HasPrefix(tool.Name, "contract_") {
+			workCount++
+		}
+		if tool.Name == "project_create" {
+			t.Error("write tool advertised under --read-only")
+		}
+	}
+	if workCount != 9 {
+		t.Errorf("work tools under --read-only = %d, want 9 (mutator-shaped, unaffected)", workCount)
+	}
+	if !strings.Contains(lines[1], "isError") || !strings.Contains(lines[1], "read-only") {
+		t.Errorf("blocked write must be an isError read-only verdict: %s", lines[1])
+	}
+	if len(api.keys) != 0 {
+		t.Errorf("a write reached the seam under --read-only: %v", api.calls)
 	}
 }
 

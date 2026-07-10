@@ -3,6 +3,7 @@ package remotestate_test
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,13 +12,15 @@ import (
 )
 
 // TestPlatformReadPaths pins the public-API route shapes (orun-mcp UM1): the
-// org comes from the call, never the client's bound scope, and the success
-// envelope's data AND meta both survive the decode.
+// org comes from the call, never the client's bound scope, the success
+// envelope's data AND meta both survive the decode, and every call carries
+// the MCP provenance header (UM2).
 func TestPlatformReadPaths(t *testing.T) {
-	var gotPath, gotAuth string
+	var gotPath, gotAuth, gotSurface string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.String()
 		gotAuth = r.Header.Get("Authorization")
+		gotSurface = r.Header.Get("x-client-surface")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":{"items":[1]},"meta":{"cursor":"next|1"}}`))
 	}))
@@ -110,6 +113,9 @@ func TestPlatformReadPaths(t *testing.T) {
 		if gotAuth != "Bearer tok" {
 			t.Errorf("%s: auth = %q", tc.name, gotAuth)
 		}
+		if gotSurface != "mcp" {
+			t.Errorf("%s: x-client-surface = %q, want mcp (provenance on reads too)", tc.name, gotSurface)
+		}
 		if string(page.Data) != `{"items":[1]}` {
 			t.Errorf("%s: data = %s", tc.name, page.Data)
 		}
@@ -150,5 +156,88 @@ func TestPlatformReadBytesAndErrors(t *testing.T) {
 	}
 	if apiErr.Code != "forbidden" || apiErr.Message != "missing member role" || apiErr.RequestID != "req_7" {
 		t.Fatalf("decoded error = %+v", apiErr)
+	}
+}
+
+// TestPlatformWritePaths pins the write route shapes (orun-mcp UM2): method,
+// path, JSON body, and the two rails — the caller's Idempotency-Key verbatim
+// and `x-client-surface: mcp` — all observed at the transport.
+func TestPlatformWritePaths(t *testing.T) {
+	var gotMethod, gotPath, gotBody, gotKey, gotSurface, gotContentType string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.String()
+		gotKey = r.Header.Get("Idempotency-Key")
+		gotSurface = r.Header.Get("x-client-surface")
+		gotContentType = r.Header.Get("Content-Type")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"id":"obj_1"}}`))
+	}))
+	defer srv.Close()
+	c := remotestate.NewClient(srv.URL, "test", remotestate.NewStaticTokenSource("tok"))
+	ctx := context.Background()
+	body := map[string]interface{}{"name": "api"}
+
+	calls := []struct {
+		name string
+		do   func() (*remotestate.PlatformPage, error)
+		wantMethod, wantPath, wantBody string
+	}{
+		{"CreateProject", func() (*remotestate.PlatformPage, error) { return c.CreateProject(ctx, "ws_1", body, "key-1") },
+			"POST", "/v1/organizations/ws_1/projects", `{"name":"api"}`},
+		{"CreateProjectEnvironment", func() (*remotestate.PlatformPage, error) {
+			return c.CreateProjectEnvironment(ctx, "ws_1", "prj_a", body, "key-1")
+		}, "POST", "/v1/organizations/ws_1/projects/prj_a/environments", `{"name":"api"}`},
+		{"CreateFeatureFlag", func() (*remotestate.PlatformPage, error) {
+			return c.CreateFeatureFlag(ctx, remotestate.ConfigScope{Org: "ws_1", Project: "prj_a"}, map[string]interface{}{"flagKey": "k", "enabled": true}, "key-1")
+		}, "POST", "/v1/organizations/ws_1/projects/prj_a/config/feature-flags", `{"enabled":true,"flagKey":"k"}`},
+		{"UpdateFeatureFlag", func() (*remotestate.PlatformPage, error) {
+			return c.UpdateFeatureFlag(ctx, remotestate.ConfigScope{Org: "ws_1", Project: "prj_a", Environment: "env_x"}, "ff_9", map[string]interface{}{"enabled": false}, "key-1")
+		}, "PATCH", "/v1/organizations/ws_1/projects/prj_a/environments/env_x/config/feature-flags/ff_9", `{"enabled":false}`},
+		{"CreateWebhookEndpoint/org", func() (*remotestate.PlatformPage, error) {
+			return c.CreateWebhookEndpoint(ctx, "ws_1", "", map[string]interface{}{"url": "https://x"}, "key-1")
+		}, "POST", "/v1/organizations/ws_1/webhooks/endpoints", `{"url":"https://x"}`},
+		{"CreateWebhookEndpoint/project", func() (*remotestate.PlatformPage, error) {
+			return c.CreateWebhookEndpoint(ctx, "ws_1", "prj_a", map[string]interface{}{"url": "https://x"}, "key-1")
+		}, "POST", "/v1/organizations/ws_1/projects/prj_a/webhooks/endpoints", `{"url":"https://x"}`},
+		{"CreateWebhookSubscription", func() (*remotestate.PlatformPage, error) {
+			return c.CreateWebhookSubscription(ctx, "ws_1", map[string]interface{}{"endpointId": "whep_1", "eventType": "run.completed"}, "key-1:sub0")
+		}, "POST", "/v1/organizations/ws_1/webhooks/subscriptions", `{"endpointId":"whep_1","eventType":"run.completed"}`},
+		{"ReplayWebhookDelivery", func() (*remotestate.PlatformPage, error) {
+			return c.ReplayWebhookDelivery(ctx, "ws_1", "wha_1", "key-1")
+		}, "POST", "/v1/organizations/ws_1/webhooks/delivery-attempts/wha_1/replay", ""},
+		{"CreateInvitation", func() (*remotestate.PlatformPage, error) {
+			return c.CreateInvitation(ctx, "ws_1", map[string]interface{}{"email": "dev@example.com", "role": "viewer"}, "key-1")
+		}, "POST", "/v1/organizations/ws_1/invitations", `{"email":"dev@example.com","role":"viewer"}`},
+	}
+	for _, tc := range calls {
+		page, err := tc.do()
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if gotMethod != tc.wantMethod || gotPath != tc.wantPath {
+			t.Errorf("%s: %s %s, want %s %s", tc.name, gotMethod, gotPath, tc.wantMethod, tc.wantPath)
+		}
+		if gotBody != tc.wantBody {
+			t.Errorf("%s: body = %q, want %q", tc.name, gotBody, tc.wantBody)
+		}
+		if tc.wantBody != "" && gotContentType != "application/json" {
+			t.Errorf("%s: Content-Type = %q", tc.name, gotContentType)
+		}
+		wantKey := "key-1"
+		if tc.name == "CreateWebhookSubscription" {
+			wantKey = "key-1:sub0"
+		}
+		if gotKey != wantKey {
+			t.Errorf("%s: Idempotency-Key = %q, want %q (verbatim passthrough)", tc.name, gotKey, wantKey)
+		}
+		if gotSurface != "mcp" {
+			t.Errorf("%s: x-client-surface = %q, want mcp", tc.name, gotSurface)
+		}
+		if string(page.Data) != `{"id":"obj_1"}` {
+			t.Errorf("%s: data = %s", tc.name, page.Data)
+		}
 	}
 }
