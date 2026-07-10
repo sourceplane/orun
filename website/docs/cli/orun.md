@@ -28,7 +28,7 @@ The root `orun` command is the entry point for planning, inspection, and executi
 | `orun policy` | Inspect and lint the secret-policy tiers |
 | `orun work` | The work lens: import spec trees, list delivery-derived task rungs |
 | `orun spec` | Pull sealed, content-addressed spec briefs to implement against |
-| `orun mcp` | Serve the agent tool surface (MCP over stdio) for the work lens |
+| `orun mcp` | Serve the orun MCP over stdio: work-plane and platform tools for agents |
 | `orun completion` | Generate shell completion scripts |
 
 ## Global flags
