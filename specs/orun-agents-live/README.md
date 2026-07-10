@@ -75,7 +75,7 @@ conversation inside it.
 | AL2 | The session host: the body serves attach v1 on a unix socket; the live registry (`.orun/agents/live/`); `orun agent ps` / `attach <id>` / `kill <id>`; detach-safe process model | ✅ Shipped |
 | AL3 | The TUI head: ModeAgent becomes the interactive surface — session sidebar, conversation stage (turns, tool cards, approval cards, progress line), composer (steer/interrupt/detach), launch flow with brief preview | ✅ Shipped |
 | AL4 | Remote attach: `orun agent serve` (the real in-sandbox entrypoint, retiring the cloud's bash stand-in) speaks attach v1 over the dial-out; `orun agent attach as_…` — the same TUI head over SSE + control POSTs via `cliauth` | ✅ Shipped |
-| AL5 | Hardening + evals: multi-head arbitration fixtures, interrupt/steer semantics under load, replay-with-conversation goldens, delta backpressure, docs | 🗓️ Planned |
+| AL5 | Hardening + evals: multi-head arbitration fixtures, interrupt/steer semantics under load, replay-with-conversation goldens, delta backpressure, docs | ✅ Shipped |
 
 ## Scope boundary
 
