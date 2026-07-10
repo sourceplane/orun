@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sourceplane/orun/internal/mcpserve"
 	"github.com/sourceplane/orun/internal/workmcp"
 )
 
@@ -44,7 +45,12 @@ func registerMcpServeCommand(parent *cobra.Command) {
 			if err != nil {
 				return err
 			}
-			server := &workmcp.Server{API: client, Workspace: client.Scope().OrgID}
+			// One composed server (orun-mcp UM0): the work provider today;
+			// the platform provider mounts beside it in UM1.
+			server := &mcpserve.Server{
+				Providers: []mcpserve.ToolProvider{&workmcp.Server{API: client, Workspace: client.Scope().OrgID}},
+				Version:   version,
+			}
 			fmt.Fprintln(cmd.ErrOrStderr(), "orun MCP serving on stdio (workspace "+client.Scope().OrgID+")")
 			return server.Serve(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout())
 		},

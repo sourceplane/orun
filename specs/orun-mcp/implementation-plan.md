@@ -4,7 +4,7 @@ Status: In progress. PR-sized milestones; the spine is **UM0 → UM1 → UM2 →
 UM3**. UM1 consumes `saas-mcp-server` MCP9's manifest export (lands first in
 `orun-cloud`); UM3 cuts the release the MCP10 docs flip points at.
 
-## UM0 — Provider composition — 🗓️ Planned
+## UM0 — Provider composition — ✅ Done
 
 - Extract the stdio JSON-RPC loop from `internal/workmcp/server.go` into
   `internal/mcpserve` (scanner limits, initialize/ping/tools handling,
