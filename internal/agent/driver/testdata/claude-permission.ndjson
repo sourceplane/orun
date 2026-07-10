@@ -1,0 +1,6 @@
+{"do":"await","contains":"Proceed with your brief now"}
+{"do":"emit","raw":{"type":"system","subtype":"init","session_id":"cc-sess-2","model":"claude-opus-4-8"}}
+{"do":"emit","raw":{"type":"control_request","request_id":"cr-1","request":{"subtype":"can_use_tool","tool_name":"mcp__orun__contract_propose","input":{"key":"ORN-142"}}}}
+{"do":"await","contains":"\"behavior\":\"allow\""}
+{"do":"emit","raw":{"type":"assistant","message":{"content":[{"type":"text","text":"Contract proposed."}]}}}
+{"do":"emit","raw":{"type":"result","subtype":"success","result":"ok","session_id":"cc-sess-2","usage":{"input_tokens":10,"output_tokens":5}}}
