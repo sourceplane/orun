@@ -1,0 +1,14 @@
+{"v":1,"t":"attach","from":-1,"surface":"tui"}
+{"v":1,"t":"hello","sessionId":"as_fixture01","state":"running","briefId":"sha256:brief","agentType":"implementer","task":"ORN-142","runKind":"implementation","harness":"claude-code","model":"claude-opus-4-8","latestSeq":3}
+{"v":1,"t":"event","seq":0,"kind":"state_changed","payload":{"state":"running"}}
+{"v":1,"t":"event","seq":1,"kind":"message_agent","payload":{"text":"reading brief"}}
+{"v":1,"t":"event","seq":2,"kind":"tool_call","payload":{"decision":"allow","tool":"catalog_affected"}}
+{"v":1,"t":"event","seq":3,"kind":"tool_result","payload":{"text":"affected set resolved"},"ref":"sha256:chunk1"}
+{"v":1,"t":"live","fromSeq":-1}
+{"v":1,"t":"delta","turn":2,"text":"imple"}
+{"v":1,"t":"delta","turn":2,"text":"menting"}
+{"v":1,"t":"event","seq":4,"kind":"message_agent","payload":{"text":"implementing ORN-142"}}
+{"v":1,"t":"presence","heads":[{"principal":"usr_alice","surface":"tui"}]}
+{"v":1,"t":"ping","at":"2026-07-10T00:00:00Z"}
+{"v":1,"t":"pong","at":"2026-07-10T00:00:00Z"}
+{"v":1,"t":"bye","reason":"terminal"}

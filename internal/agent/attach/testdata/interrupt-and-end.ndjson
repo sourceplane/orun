@@ -1,0 +1,8 @@
+{"v":1,"t":"interrupt","ref":"in-3"}
+{"v":1,"t":"ack","ref":"in-3","ok":true}
+{"v":1,"t":"event","seq":8,"kind":"harness_event","payload":{"phase":"interrupted","principal":"usr_alice"}}
+{"v":1,"t":"end","ref":"in-4"}
+{"v":1,"t":"ack","ref":"in-4","ok":true}
+{"v":1,"t":"event","seq":9,"kind":"harness_event","payload":{"phase":"end_requested","principal":"usr_alice"}}
+{"v":1,"t":"event","seq":10,"kind":"state_changed","payload":{"state":"canceled"}}
+{"v":1,"t":"bye","reason":"terminal"}

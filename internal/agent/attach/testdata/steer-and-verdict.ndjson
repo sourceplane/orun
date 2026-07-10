@@ -1,0 +1,7 @@
+{"v":1,"t":"steer","text":"also update the changelog","ref":"in-1"}
+{"v":1,"t":"ack","ref":"in-1","ok":true}
+{"v":1,"t":"event","seq":5,"kind":"message_user","payload":{"principal":"usr_alice","text":"also update the changelog"}}
+{"v":1,"t":"event","seq":6,"kind":"approval_requested","payload":{"requestId":"req-1","tool":"contract_propose"}}
+{"v":1,"t":"verdict","ref":"in-2","reason":"lgtm","requestId":"req-1","approved":true}
+{"v":1,"t":"ack","ref":"in-2","ok":true}
+{"v":1,"t":"event","seq":7,"kind":"approval_resolved","payload":{"approved":true,"principal":"usr_alice","reason":"lgtm","requestId":"req-1"}}

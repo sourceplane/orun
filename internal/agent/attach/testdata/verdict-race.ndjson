@@ -1,0 +1,5 @@
+{"v":1,"t":"event","seq":6,"kind":"approval_requested","payload":{"requestId":"req-1","tool":"contract_propose"}}
+{"v":1,"t":"verdict","ref":"a-1","reason":"lgtm","requestId":"req-1","approved":true}
+{"v":1,"t":"ack","ref":"a-1","ok":true}
+{"v":1,"t":"verdict","ref":"b-1","reason":"too risky","requestId":"req-1","approved":false}
+{"v":1,"t":"ack","ref":"b-1","ok":false,"reason":"not_pending"}
