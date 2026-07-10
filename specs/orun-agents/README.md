@@ -85,6 +85,12 @@ The cloud-attach entrypoint (`orun agent serve`) is specified here (design §7)
 but *lands* with cloud **AG6** (it needs the session-token + DO relay from the
 paired epic).
 
+**Successor epic:** with AG0–AG4 shipped, the live/interactive half — the
+Claude Code driver, the attach plane, the interactive TUI head, and
+`orun agent serve` — is designed in
+[`../orun-agents-live/`](../orun-agents-live/README.md) (cluster **AL**,
+paired with `orun-cloud/specs/epics/saas-agents-live/`).
+
 ## Scope boundary
 
 | In scope (orun) | Out of scope (→ elsewhere) |
