@@ -1,0 +1,1198 @@
+{
+  "manifestVersion": 1,
+  "prompts": [
+    {
+      "args": [
+        {
+          "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+          "name": "workspace",
+          "required": true
+        },
+        {
+          "description": "Project public id (`prj_…`), when known.",
+          "name": "project",
+          "required": false
+        },
+        {
+          "description": "Run id (ULID), when known.",
+          "name": "runId",
+          "required": false
+        }
+      ],
+      "description": "Diagnose a failed delivery run: find it, read the failing jobs' logs, and summarize the root cause with verifiable ids.",
+      "name": "investigate_failed_run",
+      "title": "Investigate a failed run"
+    },
+    {
+      "args": [
+        {
+          "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+          "name": "workspace",
+          "required": true
+        }
+      ],
+      "description": "Review who can do what in a workspace, via which grant, cross-checked against recent security and audit activity.",
+      "name": "access_review",
+      "title": "Access review"
+    },
+    {
+      "args": [
+        {
+          "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+          "name": "workspace",
+          "required": true
+        }
+      ],
+      "description": "Review usage against quotas and plan entitlements; flag anomalies and dimensions nearing their limits.",
+      "name": "usage_review",
+      "title": "Usage and quota review"
+    },
+    {
+      "args": [
+        {
+          "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+          "name": "workspace",
+          "required": true
+        },
+        {
+          "description": "Exact catalog entity ref, e.g. `component:default/api`.",
+          "name": "entityRef",
+          "required": true
+        }
+      ],
+      "description": "One-shot service brief: catalog identity + owner + relations, its docs, and recent delivery health.",
+      "name": "service_snapshot",
+      "title": "Service snapshot"
+    }
+  ],
+  "protocolRevision": "2025-06-18",
+  "readOnlyToolCount": 19,
+  "resources": [
+    {
+      "description": "One catalog entity as markdown: identity, owner, relations, provenance, doc index, and the overview doc body (byte-capped). `entityKey` is base64url(entityRef). The agent-facing twin of the entity page; use `catalog_search` to find refs.",
+      "name": "catalog_entity",
+      "title": "Catalog entity overview",
+      "uriTemplate": "catalog://{workspace}/{entityKey}"
+    },
+    {
+      "description": "One delivery run as markdown: status, git provenance, timings, and the plan-DAG job list with per-job statuses. Use `runs_list` to find run ids, and the `runs_read_logs` tool for a job's log output.",
+      "name": "run_summary",
+      "title": "Run summary",
+      "uriTemplate": "runs://{workspace}/{project}/{runId}"
+    }
+  ],
+  "serverName": "orun-cloud",
+  "source": "@saas/mcp",
+  "toolCount": 25,
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Identify the authenticated actor and list the workspaces they belong to (with roles where the API reports them). Call this first to orient before any workspace-scoped tool; it takes no arguments.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "whoami",
+      "title": "Who am I"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List the workspaces the caller is a member of: slugs, `ws_…` refs, and kind (account/workspace). Use the returned slug or ref as the `workspace` argument of every scoped tool; not needed if `whoami` was already called.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "workspaces_list",
+      "title": "List workspaces"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List the projects (git repos) in a workspace. Pass `project` (id or slug) to narrow to one project and inline its environments; without the filter environments are omitted to keep the call cheap.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "project": {
+            "description": "Optional project filter: a `prj_…` id or project slug. When set, the matched project's environments are included.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "projects_list",
+      "title": "List projects"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Search the workspace's org-wide service catalog (the merged, git-derived component graph). Facets: `kind`, `owner`, `project`, `environment`; `q` free-text matches name or entityRef. For one known entityRef use `catalog_get_entity` instead.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Opaque continuation cursor from a previous page's `meta.cursor`; pass back verbatim.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "environment": {
+            "description": "Environment slug filter.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "description": "Entity kind facet (Component | API | System | …).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "description": "Page size (the server clamps to its own bounds).",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "owner": {
+            "description": "Owner facet.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "description": "Project (repo) public id (`prj_…`). Use `projects_list` to discover ids.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "q": {
+            "description": "Free-text match over name/entityRef.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "catalog_search",
+      "title": "Search the service catalog"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Fetch one catalog entity by its exact entityRef (e.g. `component:default/api`): identity, owner, relations, and provenance. Use `catalog_search` when you don't know the exact ref.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "entityRef": {
+            "description": "Exact entity ref, e.g. `component:default/api`.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "environment": {
+            "description": "Optional environment slug filter.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "description": "Optional provenance filter (`prj_…`) when the ref exists in several projects.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "entityRef"
+        ],
+        "type": "object"
+      },
+      "name": "catalog_get_entity",
+      "title": "Get a catalog entity"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Browse the workspace's git-authored catalog docs (filter by `entityRef`, `role`, `project`, `q`), or pass `digest` (from a browse row or an entity's docRef) to read one doc's markdown body, byte-capped. Not for run logs — use `runs_read_logs`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Opaque continuation cursor from a previous page's `meta.cursor`; pass back verbatim.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "digest": {
+            "description": "Content digest (`sha256:…`) of a doc body to read. When set, all browse filters are ignored.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "entityRef": {
+            "description": "Narrow the doc index to one entity's doc set.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "environment": {
+            "description": "Environment slug filter.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "description": "Page size (the server clamps to its own bounds).",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "project": {
+            "description": "Project (repo) public id (`prj_…`). Use `projects_list` to discover ids.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "q": {
+            "description": "Free-text match over title/path/entity name.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "role": {
+            "description": "Doc role slug (overview | guide | runbook | architecture | …).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "catalog_read_doc",
+      "title": "Browse and read catalog docs"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List delivery runs, newest first — org-wide when only `workspace` is given, or one project's history when `project` is set. Filter by `status`/`environment` (and `branch`/`source` org-wide). Use `runs_get` for one run's job detail.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "description": "Source branch filter (org-wide list only).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "cursor": {
+            "description": "Opaque continuation cursor from a previous page's `meta.cursor`; pass back verbatim.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "environment": {
+            "description": "Environment slug filter.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "description": "Page size (the server clamps to its own bounds).",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "project": {
+            "description": "Project (repo) public id (`prj_…`). Use `projects_list` to discover ids.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "description": "Run initiator (org-wide list only).",
+            "enum": [
+              "cli",
+              "ci"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "description": "Run status filter (pending | running | succeeded | failed | canceled).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "runs_list",
+      "title": "List runs"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Fetch one run's projection plus its plan-DAG job statuses — the starting point for diagnosing a failed run. For a failing job's output, follow up with `runs_read_logs`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "project": {
+            "description": "Project (repo) public id (`prj_…`). Use `projects_list` to discover ids.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "runId": {
+            "description": "Run id (a ULID from `runs_list`).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "project",
+          "runId"
+        ],
+        "type": "object"
+      },
+      "name": "runs_get",
+      "title": "Get a run with its jobs"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Read one job's assembled logs (byte-capped) with a live-tail cursor: pass the returned `nextSeq` back as `fromSeq` to resume where you left off instead of re-reading the whole log.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "fromSeq": {
+            "description": "Resume cursor: the `nextSeq` returned by a previous call. Defaults to 0 (start).",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "jobId": {
+            "description": "Job id from `runs_get`.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "description": "Project (repo) public id (`prj_…`). Use `projects_list` to discover ids.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "runId": {
+            "description": "Run id (a ULID from `runs_list`).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "project",
+          "runId",
+          "jobId"
+        ],
+        "type": "object"
+      },
+      "name": "runs_read_logs",
+      "title": "Read a run job's logs"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Search the workspace's immutable audit log (one page per call): filter by time range (`from`/`to`, ISO-8601), actor, subject, event type, or category. For the raw typed event stream use `events_search`; for sign-in/session security use `security_events_list`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "actorId": {
+            "description": "Actor id filter (`usr_…` / `sp_…`).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "actorType": {
+            "description": "Actor type filter (user | service_principal | …).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "category": {
+            "description": "Audit category filter.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "cursor": {
+            "description": "Opaque continuation cursor from a previous page's `meta.cursor`; pass back verbatim.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "eventType": {
+            "description": "Event type filter.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "from": {
+            "description": "Inclusive lower bound on occurredAt (ISO-8601).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "description": "Page size (the server clamps to its own bounds).",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "subjectId": {
+            "description": "Subject id filter.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "subjectKind": {
+            "description": "Subject kind filter.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "to": {
+            "description": "Inclusive upper bound on occurredAt (ISO-8601).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "audit_search",
+      "title": "Search the audit log"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Explore the workspace's typed event stream (one page per call): filter by `type` glob, `source`, project/environment, and time range — or pass `eventId` to fetch a single event. For the human-audit projection use `audit_search` instead.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Opaque continuation cursor from a previous page's `meta.cursor`; pass back verbatim.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "environment": {
+            "description": "Environment public id (`env_…`) filter.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "eventId": {
+            "description": "Fetch exactly this event by id (`evt_…`); other filters are ignored.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "from": {
+            "description": "Inclusive lower bound on occurredAt (ISO-8601).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "description": "Page size (the server clamps to its own bounds).",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "project": {
+            "description": "Project (repo) public id (`prj_…`). Use `projects_list` to discover ids.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "description": "Event source filter.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "to": {
+            "description": "Inclusive upper bound on occurredAt (ISO-8601).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "description": "Event type filter (glob supported, e.g. `run.*`).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "events_search",
+      "title": "Search the event stream"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List the calling actor's authentication/session security events (sign-ins, session lifecycle, failures), newest first. Actor-scoped — no workspace argument. For org-wide activity use `audit_search`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Opaque continuation cursor from a previous page's `meta.cursor`; pass back verbatim.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "description": "Page size (the server clamps to its own bounds).",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "security_events_list",
+      "title": "List security events"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Answer \"who can do what here, and via which grant\": effective permissions with provenance (direct / team / account-cascade) plus the workspace's member and team rosters. Defaults to the caller; pass `subjectId` for someone else (needs member-list authority) and `project` to narrow scope.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "project": {
+            "description": "Project (repo) public id (`prj_…`). Use `projects_list` to discover ids.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "subjectId": {
+            "description": "Subject to explain (`usr_…` / `sp_…`). Defaults to the caller.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "access_explain",
+      "title": "Explain effective access"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Summarize a workspace's metered usage for one `metric` (totals plus hour/day rollups), optionally narrowed by project/environment and a time window. For limit headroom use `quota_check`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "bucketType": {
+            "description": "Rollup bucket type filter.",
+            "enum": [
+              "hour",
+              "day"
+            ],
+            "type": "string"
+          },
+          "endTime": {
+            "description": "ISO-8601 end time (exclusive).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "environment": {
+            "description": "Environment public id filter (requires `project`).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "metric": {
+            "description": "Usage metric key to summarize.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "description": "Project (repo) public id (`prj_…`). Use `projects_list` to discover ids.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "startTime": {
+            "description": "ISO-8601 start time (inclusive).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "metric"
+        ],
+        "type": "object"
+      },
+      "name": "usage_summary",
+      "title": "Summarize metered usage"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Check one `metric` against the workspace's quota: allowed/limit/used/remaining plus period and enforcement mode. Use `usage_summary` for the underlying usage series.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "environment": {
+            "description": "Environment public id scoping.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "metric": {
+            "description": "Usage metric key to check.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "description": "Project (repo) public id (`prj_…`). Use `projects_list` to discover ids.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "resourceId": {
+            "description": "Resource scoping.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "metric"
+        ],
+        "type": "object"
+      },
+      "name": "quota_check",
+      "title": "Check quota headroom"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Read a workspace's billing posture: current plan, subscription, customer status, and the full entitlement set (plan + overrides). Read-only — plan changes happen in the console, not here.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "billing_summary",
+      "title": "Billing summary"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Read the settings and feature flags at one config scope — organization (default), project, or project+environment. Never returns secret values; for secret metadata use `secrets_list`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "environment": {
+            "description": "Environment scope (public id or slug); requires `project`.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "description": "Project scope (`prj_…`). Omit for organization scope.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "config_read",
+      "title": "Read settings and feature flags"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List secret METADATA (keys, versions, rotation state) at one config scope. Secret values are write-only platform-wide: no tool, flag, or argument can return one. Use `config_read` for settings/flags.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "environment": {
+            "description": "Environment scope (public id or slug); requires `project`.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "description": "Project scope (`prj_…`). Omit for organization scope.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "secrets_list",
+      "title": "List secret metadata"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Debug webhook delivery failures: pass `endpoint` (`whep_…`) to page through that endpoint's delivery attempts, newest first; omit it to list the workspace's endpoints so you can pick one. Read-only — to re-send a failed delivery use `webhook_delivery_replay`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Opaque continuation cursor from a previous page's `meta.cursor`; pass back verbatim.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "endpoint": {
+            "description": "Webhook endpoint id. Omit to list endpoints instead of deliveries.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "description": "Page size (the server clamps to its own bounds).",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "webhook_deliveries_list",
+      "title": "List webhook deliveries"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Create a new project (git repo) in a workspace. This is a WRITE: it is policy-gated (requires a builder-or-higher role) and audited like any console/CLI mutation. Retries are replay-safe — an Idempotency-Key is generated per call unless you supply `idempotencyKey`. To browse existing projects use `projects_list` instead.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "idempotencyKey": {
+            "description": "Optional Idempotency-Key for this write (1-255 printable ASCII chars). Omit it and the tool generates a fresh key per call; supply the SAME key when retrying a call whose outcome you did not observe, so the platform replays the original result instead of double-creating.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Human-readable project name.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "slug": {
+            "description": "URL-safe slug. Omit to let the API derive one from the name.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "name"
+        ],
+        "type": "object"
+      },
+      "name": "project_create",
+      "title": "Create project"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Create a new environment (e.g. staging) under a project. This is a WRITE: policy-gated (builder-or-higher role) and audited like any console/CLI mutation. Retries are replay-safe — an Idempotency-Key is generated per call unless you supply `idempotencyKey`. To browse existing environments use `projects_list` with the `project` filter.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "idempotencyKey": {
+            "description": "Optional Idempotency-Key for this write (1-255 printable ASCII chars). Omit it and the tool generates a fresh key per call; supply the SAME key when retrying a call whose outcome you did not observe, so the platform replays the original result instead of double-creating.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Human-readable environment name.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "description": "Project (repo) public id (`prj_…`). Use `projects_list` to discover ids.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "slug": {
+            "description": "URL-safe slug. Omit to let the API derive one from the name.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "project",
+          "name"
+        ],
+        "type": "object"
+      },
+      "name": "environment_create",
+      "title": "Create environment"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Set a feature flag at one config scope — organization (default), project, or project+environment: updates `enabled` and/or `value` for `flagKey`, creating the flag at that scope when it does not exist yet. This is a WRITE: policy-gated (builder-or-higher role) and audited like any console/CLI mutation; retries are replay-safe (an Idempotency-Key is generated per call unless you supply `idempotencyKey`). To read flags use `config_read`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "description": "Turn the flag on or off. At least one of `enabled`/`value` is required.",
+            "type": "boolean"
+          },
+          "environment": {
+            "description": "Environment scope (public id or slug); requires `project`.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "flagKey": {
+            "description": "Flag key to set, e.g. `checkout.new_flow`.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "description": "Optional Idempotency-Key for this write (1-255 printable ASCII chars). Omit it and the tool generates a fresh key per call; supply the SAME key when retrying a call whose outcome you did not observe, so the platform replays the original result instead of double-creating.",
+            "type": "string"
+          },
+          "project": {
+            "description": "Project scope (`prj_…`). Omit for organization scope.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "value": {
+            "description": "Optional JSON payload served with the flag (any JSON value)."
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "flagKey"
+        ],
+        "type": "object"
+      },
+      "name": "flag_set",
+      "title": "Set feature flag"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Create a webhook endpoint (delivery URL) in a workspace — optionally project-scoped via `project` — and subscribe it to the given `events` types in the same call. This is a WRITE: policy-gated (builder-or-higher role) and audited like any console/CLI mutation; retries are replay-safe (an Idempotency-Key is generated per call unless you supply `idempotencyKey`). Signing-secret material is never returned. To inspect deliveries use `webhook_deliveries_list`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "What this endpoint is for.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "events": {
+            "description": "Event types to subscribe the endpoint to (e.g. `run.completed`); each becomes a webhook subscription. Omit to create the endpoint with no subscriptions (it will receive nothing until subscribed).",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "idempotencyKey": {
+            "description": "Optional Idempotency-Key for this write (1-255 printable ASCII chars). Omit it and the tool generates a fresh key per call; supply the SAME key when retrying a call whose outcome you did not observe, so the platform replays the original result instead of double-creating.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Human-readable endpoint name.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "description": "Optional project scope (`prj_…`). Omit for a workspace-level endpoint.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "url": {
+            "description": "Delivery URL the platform will POST signed events to.",
+            "format": "uri",
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "url"
+        ],
+        "type": "object"
+      },
+      "name": "webhook_create",
+      "title": "Create webhook endpoint"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Re-send a past webhook delivery attempt to its endpoint through the normal signing/delivery path; returns the NEW attempt with its post-delivery status (the original is unchanged). Find attempt ids (`wha_…`) with `webhook_deliveries_list`. This is a WRITE: policy-gated and audited; retries are replay-safe (an Idempotency-Key is generated per call unless you supply `idempotencyKey`).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "delivery": {
+            "description": "Delivery attempt id (`wha_…`) from `webhook_deliveries_list`.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "description": "Optional Idempotency-Key for this write (1-255 printable ASCII chars). Omit it and the tool generates a fresh key per call; supply the SAME key when retrying a call whose outcome you did not observe, so the platform replays the original result instead of double-creating.",
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "delivery"
+        ],
+        "type": "object"
+      },
+      "name": "webhook_delivery_replay",
+      "title": "Replay webhook delivery"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Invite a person to a workspace by email with an organization role (they join once they accept). This is a WRITE: policy-gated (admin-or-higher role) and audited like any console/CLI mutation; retries are replay-safe (an Idempotency-Key is generated per call unless you supply `idempotencyKey`). The one-time accept token is NOT returned — the invitee accepts via their own signed-in session. To review members and grants use `access_explain`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "description": "Email address to invite.",
+            "format": "email",
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "description": "Optional Idempotency-Key for this write (1-255 printable ASCII chars). Omit it and the tool generates a fresh key per call; supply the SAME key when retrying a call whose outcome you did not observe, so the platform replays the original result instead of double-creating.",
+            "type": "string"
+          },
+          "role": {
+            "description": "Organization role granted on acceptance. Prefer the least-privileged role that fits (`viewer` for read-only access).",
+            "enum": [
+              "owner",
+              "admin",
+              "builder",
+              "viewer",
+              "billing_admin"
+            ],
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "email",
+          "role"
+        ],
+        "type": "object"
+      },
+      "name": "member_invite",
+      "title": "Invite member"
+    }
+  ]
+}
