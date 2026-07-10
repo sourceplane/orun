@@ -16,3 +16,13 @@ func NewProgram(svc services.OrunService) *tea.Program {
 		tea.WithMouseCellMotion(),
 	)
 }
+
+// NewProgramInAgentMode is the `orun agent` (bare) front door: the cockpit
+// opened straight onto the Agent surface (orun-agents-live AL3).
+func NewProgramInAgentMode(svc services.OrunService) *tea.Program {
+	return tea.NewProgram(
+		NewModel(svc).StartInAgentMode(),
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	)
+}

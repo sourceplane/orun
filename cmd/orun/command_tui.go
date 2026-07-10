@@ -64,6 +64,46 @@ func resolveTUIBackend() (statebackend.Backend, func(), error) {
 	return b, cleanup, nil
 }
 
+// buildTUIService discovers the intent root and constructs the live service
+// the cockpit reads — shared by `orun tui` and `orun agent` (bare).
+func buildTUIService() (services.OrunService, error) {
+	if intentRoot == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			if foundPath, foundDir, derr := discovery.FindIntentFile(cwd); derr == nil {
+				intentFile = foundPath
+				intentRoot = foundDir
+			}
+		}
+	}
+	backend, _, err := resolveTUIBackend()
+	if err != nil {
+		return nil, err
+	}
+	orunRoot, err := filepath.Abs(filepath.Join(storeDir(), ".orun"))
+	if err != nil {
+		return nil, fmt.Errorf("resolve object-model root: %w", err)
+	}
+	return services.NewLiveOrunService(services.LiveServiceConfig{
+		IntentFile:      intentFile,
+		IntentRoot:      intentRoot,
+		ConfigDir:       configDir,
+		ObjectModelRoot: orunRoot,
+		Backend:         backend,
+		Version:         version,
+	}), nil
+}
+
+// runAgentTUI opens the cockpit straight onto the Agent surface — the bare
+// `orun agent` front door (orun-agents-live AL3).
+func runAgentTUI(ctx context.Context) error {
+	svc, err := buildTUIService()
+	if err != nil {
+		return err
+	}
+	_, runErr := tui.NewProgramInAgentMode(svc).Run()
+	return runErr
+}
+
 func runTUI(ctx context.Context) error {
 	// Auto-discover the intent root so the cockpit (and the state/log store
 	// it reads) resolves to the repo root regardless of which command path
