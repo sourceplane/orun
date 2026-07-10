@@ -1,0 +1,8 @@
+{"do":"await","contains":"Proceed with your brief now"}
+{"do":"emit","raw":{"type":"system","subtype":"init","session_id":"cc-sess-4","model":"claude-opus-4-8"}}
+{"do":"emit","raw":{"type":"assistant","message":{"content":[{"type":"text","text":"Working."}]}}}
+{"do":"await","contains":"also update the changelog"}
+{"do":"emit","raw":{"type":"assistant","message":{"content":[{"type":"text","text":"Updating changelog too."}]}}}
+{"do":"await","contains":"\"subtype\":\"interrupt\""}
+{"do":"emit","raw":{"type":"control_response","response":{"subtype":"success","request_id":"orun-int-1"}}}
+{"do":"emit","raw":{"type":"result","subtype":"success","result":"interrupted","session_id":"cc-sess-4","usage":{"input_tokens":10,"output_tokens":5}}}

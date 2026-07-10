@@ -1,0 +1,9 @@
+{"do":"await","contains":"Proceed with your brief now"}
+{"do":"emit","raw":{"type":"system","subtype":"init","session_id":"cc-sess-1","model":"claude-opus-4-8","cwd":"/work"}}
+{"do":"emit","raw":{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Reading"}}}}
+{"do":"emit","raw":{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":" the brief."}}}}
+{"do":"emit","raw":{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the brief."}]}}}
+{"do":"emit","raw":{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu1","name":"mcp__orun__work_get","input":{"key":"ORN-142"}}]}}}
+{"do":"emit","raw":{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu1","content":"task ORN-142: sweep leases (Ready)"}]}}}
+{"do":"emit","raw":{"type":"assistant","message":{"content":[{"type":"text","text":"Done."}]}}}
+{"do":"emit","raw":{"type":"result","subtype":"success","result":"Done.","session_id":"cc-sess-1","usage":{"input_tokens":100,"output_tokens":50},"total_cost_usd":0.12,"duration_ms":2000,"num_turns":3}}

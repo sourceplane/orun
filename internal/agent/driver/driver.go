@@ -37,6 +37,13 @@ const (
 	// the turn's final EventMessage supersedes every delta. Fields may carry
 	// "turn" (int) so heads can bind deltas to the turn they stream into.
 	EventDelta EventKind = "delta"
+
+	// EventHarness is harness metadata worth keeping (folded into the log as
+	// harness_event): the harness session id captured at init (what makes
+	// suspend/resume continue the same conversation), version facts, phase
+	// markers. Fields carry the detail; "harnessSession" is the well-known
+	// key drivers set when their harness reports a resumable session id.
+	EventHarness EventKind = "harness_event"
 )
 
 // Event is one normalized emission from a driver. Text is the human-readable

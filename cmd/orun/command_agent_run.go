@@ -1,26 +1,33 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/sourceplane/orun/internal/agent"
 	"github.com/sourceplane/orun/internal/agent/driver"
 	"github.com/sourceplane/orun/internal/agenttype"
 	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/worklens"
+	"github.com/sourceplane/orun/internal/workmcp"
 	"github.com/spf13/cobra"
 )
 
 func init() {
 	// The stub driver runs the whole loop with no external binary — the
-	// local smoke path and the AG2 loop test. The Claude Code driver
-	// registers in AG4.
+	// local smoke path and the loop tests. Claude Code is the reference
+	// driver (orun-agents-live AL1); it stays opt-in (--driver claude-code)
+	// until the live smoke has soaked (risks Q2).
 	driver.Register(&driver.Stub{})
+	driver.Register(&driver.ClaudeCode{})
 }
 
 var (
@@ -124,6 +131,20 @@ snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
 		if err != nil {
 			return err
 		}
+		// The Claude Code driver gets its hands wired: the orun MCP config,
+		// written under .orun and filtered through the agent type's tool
+		// policy (AL1). The harness-level gates mirror the policy; the
+		// runtime fold remains the enforcement authority either way.
+		var mcpConfigPath string
+		if runDriver == driver.ClaudeCodeID {
+			setup, mErr := agent.WriteMCPConfig(filepath.Join(".orun", "agent-mcp"),
+				agent.NewToolPolicy(toolPolicy), workmcp.ToolNames(), nil)
+			if mErr != nil {
+				return mErr
+			}
+			mcpConfigPath = setup.ConfigPath
+			drv = &driver.ClaudeCode{ExtraArgs: setup.HarnessArgs()}
+		}
 		branch := ""
 		if runTask != "" {
 			branch = "agent/" + runTask + "-" + slugify(runType)
@@ -134,11 +155,12 @@ snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
 		// first. Without one (or for a typeless interactive run) the run still
 		// executes and its segments are stored, just not indexed as a session.
 		opts := agent.RunOptions{
-			SessionID: newSessionID(),
-			Driver:    drv,
-			Brief:     brief,
-			Branch:    branch,
-			Policy:    agent.NewToolPolicy(toolPolicy),
+			SessionID:     newSessionID(),
+			Driver:        drv,
+			Brief:         brief,
+			Branch:        branch,
+			Policy:        agent.NewToolPolicy(toolPolicy),
+			MCPConfigPath: mcpConfigPath,
 		}
 		if runType != "" {
 			if ref, rerr := refs.Read(ctx, agentTypeRef(runType)); rerr == nil && ref.Target != "" {
@@ -235,6 +257,36 @@ func registerAgentRunCommand(parent *cobra.Command) {
 			for _, id := range driver.IDs() {
 				fmt.Fprintln(cmd.OutOrStdout(), id)
 			}
+			return nil
+		},
+	})
+
+	parent.AddCommand(&cobra.Command{
+		Use:   "doctor",
+		Short: "Check the agent runtime environment (drivers, harness binary, MCP surface)",
+		Long: `Report what the live plane needs to run for real: the registered drivers,
+whether the Claude Code harness binary is reachable (and its version — the
+driver's wire protocol is pinned by fixtures, so version drift is worth
+knowing about before a session hits it), and the orun MCP tool surface a
+brief's tool policy filters.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "drivers    %v\n", driver.IDs())
+			fmt.Fprintf(out, "mcp tools  %d (orun mcp serve)\n", len(workmcp.ToolNames()))
+			path, err := exec.LookPath("claude")
+			if err != nil {
+				fmt.Fprintln(out, "claude     not found on PATH — `--driver claude-code` needs the Claude Code CLI")
+				return nil
+			}
+			vctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+			defer cancel()
+			ver, verr := exec.CommandContext(vctx, path, "--version").Output()
+			if verr != nil {
+				fmt.Fprintf(out, "claude     %s (version check failed: %v)\n", path, verr)
+				return nil
+			}
+			fmt.Fprintf(out, "claude     %s (%s)\n", path, strings.TrimSpace(string(ver)))
 			return nil
 		},
 	})

@@ -1,0 +1,4 @@
+{"do":"await","contains":"Proceed with your brief now"}
+{"do":"emit","raw":{"type":"system","subtype":"init","session_id":"cc-sess-5","model":"claude-opus-4-8"}}
+{"do":"emit","raw":"this is not a stream-json object"}
+{"do":"emit","raw":{"type":"result","subtype":"success","result":"ok","session_id":"cc-sess-5","usage":{"input_tokens":1,"output_tokens":1}}}

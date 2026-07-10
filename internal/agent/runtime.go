@@ -46,6 +46,10 @@ type RunOptions struct {
 	// Policy gates tool calls the driver reports; when a tool resolves to
 	// DecisionAsk the runtime consults Approve. Zero value = deny-by-default.
 	Policy ToolPolicy
+	// MCPConfigPath, when set, is handed to the driver (IO.MCPConfigPath) —
+	// the tool config its harness loads (WriteMCPConfig renders it from the
+	// same Policy).
+	MCPConfigPath string
 	// Observe, when set, is called for every event appended to the session
 	// log, in order — the live-visibility seam the TUI Agent mode and the
 	// cloud DO relay consume. It must not block; the runtime calls it
@@ -135,7 +139,8 @@ func Run(ctx context.Context, store objectstore.ObjectStore, opts RunOptions) (R
 	if opts.Inputs != nil {
 		defer opts.Inputs.close()
 	}
-	io := driver.IO{Events: events, Steer: l.steerCh, Approve: l.approve, Interrupt: l.interrupt}
+	io := driver.IO{Events: events, Steer: l.steerCh, Approve: l.approve, Interrupt: l.interrupt,
+		MCPConfigPath: opts.MCPConfigPath}
 
 	proc, err := opts.Driver.Launch(runCtx, driver.Brief{
 		ID:           opts.Brief.ID,
@@ -275,6 +280,8 @@ func (l *runLoop) foldEvent(e driver.Event) {
 		if opts.ObserveDelta != nil {
 			opts.ObserveDelta(e)
 		}
+	case driver.EventHarness:
+		log.Append(nodes.SessionEventHarness, fieldsPayload(e), "")
 	case driver.EventMessage:
 		log.Append(nodes.SessionEventMessageAgent, textPayload(e), e.RequestID)
 	case driver.EventToolCall:
@@ -287,7 +294,7 @@ func (l *runLoop) foldEvent(e driver.Event) {
 	case driver.EventToolResult:
 		log.Append(nodes.SessionEventToolResult, textPayload(e), e.RequestID)
 	case driver.EventApproval:
-		log.Append(nodes.SessionEventApprovalRequested, approvalPayload(e), "")
+		log.Append(nodes.SessionEventApprovalRequested, fieldsPayload(e), "")
 		if opts.Inputs != nil {
 			// A head answers via InputQueue.Verdict; the request stays
 			// pending until then (or the session ends with it unresolved).
@@ -381,9 +388,9 @@ func textPayload(e driver.Event) map[string]any {
 	return map[string]any{"text": e.Text}
 }
 
-// approvalPayload carries the request id + tool detail heads need to render
-// an approval card: the driver's Fields, plus text and the request id.
-func approvalPayload(e driver.Event) map[string]any {
+// fieldsPayload merges the driver's Fields with text and the request id —
+// the payload shape approval cards and harness events render from.
+func fieldsPayload(e driver.Event) map[string]any {
 	p := map[string]any{}
 	for k, v := range e.Fields {
 		p[k] = v

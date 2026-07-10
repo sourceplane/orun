@@ -82,6 +82,18 @@ func str(desc string) map[string]interface{} {
 	return map[string]interface{}{"type": "string", "description": desc}
 }
 
+// ToolNames returns the closed tool surface's names, in definition order —
+// the list the agent runtime's MCP config writer filters through tool policy
+// (internal/agent/mcp.go).
+func ToolNames() []string {
+	defs := Tools()
+	names := make([]string, len(defs))
+	for i, d := range defs {
+		names[i] = d.Name
+	}
+	return names
+}
+
 // Tools returns the closed tool surface. Note what is absent: no
 // task_update_status (no lifecycle write exists anywhere), no pin.
 func Tools() []toolDef {
