@@ -30,6 +30,13 @@ const (
 	EventCost       EventKind = "cost"               // token/cost sample
 	EventError      EventKind = "error"
 	EventDone       EventKind = "done" // terminal; carries the outcome
+
+	// EventDelta is streaming partial text for the in-progress agent turn.
+	// It is WIRE-ONLY (orun-agents-live/attach-protocol.md §4): the runtime
+	// relays it to attached heads and never folds it into the session log —
+	// the turn's final EventMessage supersedes every delta. Fields may carry
+	// "turn" (int) so heads can bind deltas to the turn they stream into.
+	EventDelta EventKind = "delta"
 )
 
 // Event is one normalized emission from a driver. Text is the human-readable
@@ -55,10 +62,16 @@ type Verdict struct {
 // IO is the driver's channels. The driver sends Events and reads Steer/Approve;
 // MCPConfigPath points at the tool config the driver hands its agent. Closing
 // Events (or emitting EventDone) ends the run.
+//
+// Interrupt, when non-nil, delivers turn-interrupt requests (the head pressed
+// Esc): the driver should stop the current turn — not the session — and keep
+// serving Steer. A driver that cannot interrupt mid-turn may ignore the
+// channel; the runtime logs the request either way.
 type IO struct {
 	Events        chan<- Event
 	Steer         <-chan Message
 	Approve       <-chan Verdict
+	Interrupt     <-chan struct{}
 	MCPConfigPath string
 }
 

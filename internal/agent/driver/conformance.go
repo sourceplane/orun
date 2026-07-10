@@ -123,7 +123,7 @@ func CheckConformance(ctx context.Context, d Driver, b Brief) ConformanceReport 
 func knownEventKind(k EventKind) bool {
 	switch k {
 	case EventMessage, EventToolCall, EventToolResult, EventApproval,
-		EventArtifact, EventCost, EventError, EventDone:
+		EventArtifact, EventCost, EventError, EventDone, EventDelta:
 		return true
 	default:
 		return false

@@ -70,7 +70,7 @@ conversation inside it.
 
 | ID | Milestone | Status |
 |----|-----------|--------|
-| AL0 | The attach plane: `internal/agent/attach` — frame types, Go encode/decode, golden fixtures (shared with the cloud, worklens-style); runtime input injection (`Inputs`: steer/verdict/interrupt → attributed session events); the in-process head contract | 🗓️ Planned |
+| AL0 | The attach plane: `internal/agent/attach` — frame types, Go encode/decode, golden fixtures (shared with the cloud, worklens-style); runtime input injection (`Inputs`: steer/verdict/interrupt → attributed session events); the in-process head contract | ✅ Shipped |
 | AL1 | The Claude Code driver: `driver/claudecode.go` — bidirectional stream-JSON, permission bridge → approval events, interrupt, harness-session capture for resume; MCP config wiring (`internal/agent/mcp.go`, the deferred WP5 hookup); passes `CheckConformance` + recorded-fixture suite | 🗓️ Planned |
 | AL2 | The session host: the body serves attach v1 on a unix socket; the live registry (`.orun/agents/live/`); `orun agent ps` / `attach <id>` / `kill <id>`; detach-safe process model | 🗓️ Planned |
 | AL3 | The TUI head: ModeAgent becomes the interactive surface — session sidebar, conversation stage (turns, tool cards, approval cards, progress line), composer (steer/interrupt/detach), launch flow with brief preview | 🗓️ Planned |

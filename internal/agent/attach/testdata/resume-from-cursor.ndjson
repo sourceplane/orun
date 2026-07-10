@@ -1,0 +1,7 @@
+{"v":1,"t":"attach","from":5,"surface":"console"}
+{"v":1,"t":"hello","sessionId":"as_fixture01","state":"running","briefId":"sha256:brief","agentType":"implementer","task":"ORN-142","runKind":"implementation","harness":"claude-code","model":"claude-opus-4-8","latestSeq":8}
+{"v":1,"t":"event","seq":6,"kind":"approval_requested","payload":{"requestId":"req-1","tool":"contract_propose"}}
+{"v":1,"t":"event","seq":7,"kind":"approval_resolved","payload":{"approved":true,"principal":"usr_alice","reason":"lgtm","requestId":"req-1"}}
+{"v":1,"t":"event","seq":8,"kind":"cost_sample","payload":{"tokens":4812}}
+{"v":1,"t":"live","fromSeq":5}
+{"v":1,"t":"detach"}

@@ -45,7 +45,7 @@ func (l *SessionLog) Append(kind string, payload map[string]any, ref string) {
 		Payload: payload,
 	})
 	if l.observe != nil {
-		l.observe(SessionEvent{Seq: l.seq, Kind: kind, Payload: payload})
+		l.observe(SessionEvent{Seq: l.seq, Kind: kind, Payload: payload, Ref: ref})
 	}
 	l.seq++
 }

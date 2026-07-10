@@ -1,0 +1,14 @@
+# orun-agents-live — Implementation Status (as-built)
+
+The as-built record, kept distinct from the design/plan docs. One row per
+milestone; the `As-built` cell names exactly what landed. The cloud half
+(AL6–AL9) is tracked in `orun-cloud/specs/epics/saas-agents-live/`.
+
+| Milestone | Status | As-built |
+|-----------|--------|----------|
+| AL0 — The attach plane (protocol + runtime inputs) | ✅ Shipped | `internal/agent/attach`: the frame vocabulary + NDJSON codec (`frames.go` — flat tagged union, typed constructors, `WriteFrame`/`Decoder`, version constant), the body-side server core (`server.go` — `Server` wired via `RunOptions.Observe`/`ObserveDelta`/`Inputs`; replay-from-cursor then live; per-head bounded queues with delta-shed-first past `softLimit` and bye{lagged} disconnect past `hardLimit`; presence on attach/detach; `HeadConn` doubles as the in-process client with sync-ack `Steer/Verdict/Interrupt/End` and the transport-facing `Submit` with loud version refusal). Runtime inputs: `agent.InputQueue` (`inputs.go` — submit-blocks-until-loop-acks, `ErrNotPending`/`ErrSessionDone`), consumed inside the select loop (`runtime.go` `runLoop`) so input order is log order — steer queues and logs `message_user{text,principal}` **at driver injection** via a never-blocking delivery goroutine; verdicts resolve a request-id-keyed pending set (first valid wins) and log attributed `approval_resolved`; interrupt logs `harness_event{interrupted}` + coalesced driver signal; end logs `harness_event{end_requested}` and cancels the run context (canceled outcome unless the driver reports its own). `driver.EventDelta` added wire-only (`foldEvent` routes to `ObserveDelta`, never the log) + `driver.IO.Interrupt`; `SessionEvent` gains `Ref`. The `Stub` gains `Interactive` mode (echo steers, `/ask <tool>` approval round-trip, `/done` terminal) — the live plane's CI workhorse. Headless posture preserved: with no `Inputs`, `Approve` (or auto-deny) behaves exactly as AG2. Fixtures: `attach/testdata/*.ndjson` (6 golden sequences — attach-replay-live, steer-and-verdict, verdict-race, interrupt-and-end, resume-from-cursor, errors), regenerable with `-update`, byte-identical decode→encode round-trip enforced + exact JSON-shape spot checks (the cross-repo contract for cloud AL6). Tests: full interactive lifecycle through two heads (second head attaches mid-run, answers first, attribution + late-verdict no-op asserted, sealed segments carry the conversation), cursor replay, lag disconnect, version refusal, watch-only refusal, closed-server refusal; `-race` clean. |
+| AL1 — Claude Code driver + MCP wiring | 🗓️ Planned | — |
+| AL2 — The session host | 🗓️ Planned | — |
+| AL3 — The TUI head | 🗓️ Planned | — |
+| AL4 — Remote attach | 🗓️ Planned | — |
+| AL5 — Hardening + evals | 🗓️ Planned | — |

@@ -1,0 +1,4 @@
+{"v":1,"t":"error","code":"version","message":"unsupported protocol version"}
+{"v":1,"t":"error","code":"bad_frame","message":"not json"}
+{"v":1,"t":"ack","ref":"in-9","ok":false,"reason":"terminal"}
+{"v":1,"t":"bye","reason":"lagged"}
