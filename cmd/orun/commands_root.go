@@ -234,7 +234,7 @@ func commandUsesIntent(cmd *cobra.Command) bool {
 func commandResolvesCloudConfig(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "auth", "cloud", "policy":
+		case "auth", "cloud", "policy", "mcp":
 			return true
 		}
 	}

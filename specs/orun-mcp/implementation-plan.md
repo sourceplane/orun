@@ -24,7 +24,7 @@ UM3**. UM1 consumes `saas-mcp-server` MCP9's manifest export (lands first in
 (9, same schemas), reports serverInfo `orun`, and the loop lives in
 `mcpserve` with composition tests green.
 
-## UM1 — Native platform reads + manifest parity — 🗓️ Planned
+## UM1 — Native platform reads + manifest parity — ✅ Done
 
 - `internal/remotestate`: public-API wire methods for the read families
   (org/project lists, catalog entities + docs, runs/jobs/logs, audit,

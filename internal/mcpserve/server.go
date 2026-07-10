@@ -21,11 +21,15 @@ import (
 // work MCP already spoke and every mainstream client negotiates down.
 const ProtocolVersion = "2024-11-05"
 
-// ToolDef is an MCP tool descriptor.
+// ToolDef is an MCP tool descriptor. Title and Annotations are optional
+// (the platform provider carries them from the vendored manifest; work
+// tools advertise neither — their wire shape is unchanged).
 type ToolDef struct {
 	Name        string                 `json:"name"`
+	Title       string                 `json:"title,omitempty"`
 	Description string                 `json:"description"`
 	InputSchema map[string]interface{} `json:"inputSchema"`
+	Annotations map[string]interface{} `json:"annotations,omitempty"`
 }
 
 // Result is an MCP tools/call result: content blocks plus the optional

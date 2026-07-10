@@ -1,14 +1,24 @@
 # Vendored wire contract
 
-This directory holds a **verbatim** copy of the normative State API contract
-owned by the platform repo:
+This directory holds **verbatim** copies of normative contracts owned by the
+platform repo:
 
     orun-cloud/specs/epics/saas-orun-platform/state-api-contract.md
+    orun-cloud/packages/mcp → mcp-tool-manifest.json  (MCP9 export)
 
-The platform repo owns the normative copy; this repo vendors it so that the
-`internal/remotestate` client can be developed and reviewed against a stable,
-checked-in version of the seam. Neither repo may break the contract
-unilaterally (see `specs/orun-cloud/README.md`).
+The platform repo owns the normative copies; this repo vendors them so that
+the `internal/remotestate` client (state contract) and the
+`internal/platformmcp` tool plane (tool manifest — orun-mcp design §4) can be
+developed and reviewed against stable, checked-in versions of the seams.
+Neither repo may break a contract unilaterally (see
+`specs/orun-cloud/README.md`).
+
+`mcp-tool-manifest.json` is additionally copied byte-for-byte into
+`internal/platformmcp/` for `go:embed`; `TestEmbeddedManifestMatchesVendored`
+and `TestVendoredManifestChecksum` (internal/platformmcp/parity_test.go) pin
+the copy and the CHECKSUM entry. Re-vendor procedure: copy the new export
+here AND into `internal/platformmcp/`, update `CHECKSUM`, run the parity
+tests.
 
 ## Drift guard
 

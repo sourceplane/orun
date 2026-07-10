@@ -67,6 +67,17 @@ func ToolNames() []string {
 	return names
 }
 
+// ReadOnly reports whether name is one of the surface's read tools —
+// display metadata for `orun mcp tools` (work tools advertise no MCP
+// annotations; the write surface is the four mutators and nothing else).
+func ReadOnly(name string) bool {
+	switch name {
+	case "work_query", "work_get", "spec_get", "work_timeline", "spec_doc":
+		return true
+	}
+	return false
+}
+
 // Tools returns the closed tool surface. Note what is absent: no
 // task_update_status (no lifecycle write exists anywhere), no pin.
 func Tools() []mcpserve.ToolDef {
