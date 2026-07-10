@@ -103,25 +103,61 @@ The session survives detach — this terminal is a head, not the body.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
+		// Local first: a live body on this machine attaches over its socket.
 		e, err := live.Resolve(agentLiveDir(), id)
-		if err != nil {
-			if errors.Is(err, live.ErrNotFound) {
-				return fmt.Errorf("no live local session %q (see `orun agent ps`; attaching to remote as_… sessions lands with AL4)", id)
+		if err == nil {
+			c, derr := attach.DialSocket(e.Socket, -1, "cli")
+			if derr != nil {
+				return fmt.Errorf("dial %s: %w", e.Socket, derr)
 			}
+			return runLineHead(cmd, socketHead{c})
+		}
+		if !errors.Is(err, live.ErrNotFound) {
 			return err
 		}
-		c, err := attach.DialSocket(e.Socket, -1, "cli")
-		if err != nil {
-			return fmt.Errorf("dial %s: %w", e.Socket, err)
-		}
-		return runLineHead(cmd, c)
+		// Not local: a remote as_… session resolves over the cloud relay
+		// (orun-agents-live AL4). Same head, transport swapped.
+		return attachRemote(cmd, id)
 	},
 }
+
+// attachRemote attaches the line head to a remote session over the cloud
+// relay: cliauth bearer → SSE feed + input POSTs (design §6.2).
+func attachRemote(cmd *cobra.Command, sessionID string) error {
+	cloudAPI := os.Getenv("ORUN_CLOUD_API")
+	orgID := os.Getenv("ORUN_ORG_ID")
+	token := os.Getenv("ORUN_SESSION_TOKEN")
+	if cloudAPI == "" || orgID == "" {
+		return fmt.Errorf("no live local session %q, and no cloud attach config (set ORUN_CLOUD_API + ORUN_ORG_ID; see `orun agent ps`)", sessionID)
+	}
+	base := fmt.Sprintf("%s/v1/organizations/%s/agents/sessions/%s", cloudAPI, orgID, sessionID)
+	c, err := attach.DialRelay(cmd.Context(), base, token, -1, nil)
+	if err != nil {
+		return fmt.Errorf("attach %s over relay: %w", sessionID, err)
+	}
+	return runLineHead(cmd, c)
+}
+
+// lineHead is the transport-agnostic head surface the line renderer drives:
+// the local SocketClient and the remote RelayHeadClient both satisfy it, so
+// `orun agent attach` renders a local and a Daytona session identically.
+type lineHead interface {
+	Frames() <-chan attach.Frame
+	Steer(text string) error
+	Verdict(requestID string, approved bool, reason string) error
+	Interrupt() error
+	End() error
+	Detach()
+}
+
+// socketHead adapts *attach.SocketClient to lineHead (it already has the
+// methods; the wrapper just names the interface at the call site).
+type socketHead struct{ *attach.SocketClient }
 
 // runLineHead is the AL2 head: a plain-text render of the feed plus a stdin
 // command loop. The AL3 TUI head replaces this as the default surface; line
 // mode stays for pipes and minimal terminals.
-func runLineHead(cmd *cobra.Command, c *attach.SocketClient) error {
+func runLineHead(cmd *cobra.Command, c lineHead) error {
 	out := cmd.OutOrStdout()
 
 	// stdin → inputs
@@ -154,7 +190,7 @@ func runLineHead(cmd *cobra.Command, c *attach.SocketClient) error {
 
 var errDetachRequested = errors.New("detach requested")
 
-func lineCommand(c *attach.SocketClient, line string) error {
+func lineCommand(c lineHead, line string) error {
 	if !strings.HasPrefix(line, "/") {
 		return c.Steer(line)
 	}
