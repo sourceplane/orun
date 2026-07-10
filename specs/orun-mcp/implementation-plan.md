@@ -65,13 +65,13 @@ work plane's own read-only story is WP5's, not this spec's).
 ## UM3 — Docs + release — ⚠️ Docs shipped; release tag pending
 
 <!-- TODO(UM3): flip to ✅ (here, README, IMPLEMENTATION-STATUS) once the
-     v2.23.0 tag is pushed and the release-oci workflow goes green. -->
+     v2.24.0 tag is pushed and the release-oci workflow goes green. -->
 
 - `website/docs/cli/orun-mcp.md` rewritten for the unified surface (also
   fixes the stale 7-tool work-MCP text → 9); client config snippets
   (Claude Code, Cursor, VS Code) point at `orun mcp serve`.
 - `website/docs/release-notes/v<next>.md` + `sidebars.js` entry.
-- Version: next minor tag (`v2.23.0` from v2.22.0 unless main has moved) —
+- Version: next minor tag (v2.24.0 — v2.23.0 was cut by parallel work before the UM milestones landed) —
   tag push drives `release-oci.yaml` (GoReleaser + kiox provider stamp);
   verify the release workflow goes green and the artifacts/naming match
   `install.sh` expectations.
