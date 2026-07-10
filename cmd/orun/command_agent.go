@@ -24,7 +24,14 @@ var agentCmd = &cobra.Command{
 	Short: "The agent runtime",
 	Long: "Delegate work to a coding agent (Claude Code first, any driver behind the seam).\n" +
 		"Agent types are content-addressed objects sealed from agents/*.md; runs are\n" +
-		"sealed and replayable. See specs/orun-agents/.",
+		"sealed and replayable. Run bare to open the interactive Agent surface (the TUI\n" +
+		"head). See specs/orun-agents/ and specs/orun-agents-live/.",
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Bare `orun agent` is the front door: the cockpit on the Agent
+		// surface (orun-agents-live AL3).
+		return runAgentTUI(cmd.Context())
+	},
 }
 
 var agentContextCmd = &cobra.Command{

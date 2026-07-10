@@ -16,6 +16,14 @@ type MockOrunService struct {
 	CatalogStaleFn   func(ctx context.Context) (bool, error)
 	LoadCatalogFn    func(ctx context.Context) (*CatalogSnapshot, error)
 	LoadAgentTypesFn func(ctx context.Context) ([]AgentTypeRow, error)
+	LiveSessionsFn   func() ([]LiveSessionRow, error)
+}
+
+func (m *MockOrunService) LiveSessions() ([]LiveSessionRow, error) {
+	if m.LiveSessionsFn != nil {
+		return m.LiveSessionsFn()
+	}
+	return nil, nil
 }
 
 func (m *MockOrunService) LoadCatalog(ctx context.Context) (*CatalogSnapshot, error) {

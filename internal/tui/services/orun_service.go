@@ -71,6 +71,11 @@ type OrunService interface {
 	// (orun-agents AG1) for the Agent surface. Best-effort: an absent object
 	// model or catalog returns (nil, nil).
 	LoadAgentTypes(ctx context.Context) ([]AgentTypeRow, error)
+
+	// LiveSessions lists the live session bodies on this machine
+	// (orun-agents-live AL3) for the Agent surface's sessions sidebar.
+	// Best-effort: an absent registry returns (nil, nil).
+	LiveSessions() ([]LiveSessionRow, error)
 }
 
 // --- Request types ---

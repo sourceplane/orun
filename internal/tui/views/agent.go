@@ -4,58 +4,110 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/sourceplane/orun/internal/agent/attach"
 	"github.com/sourceplane/orun/internal/tui/services"
 	"github.com/sourceplane/orun/internal/tui/theme"
 )
 
-// AgentModel is the cockpit's Agent surface (orun-agents AG3): the workspace's
-// git-authored agent types on the left, the selected type's detail plus a live
-// session transcript on the right. Fully local — types come from the same
-// content-addressed catalog every other surface reads; a transcript streams
-// from a running session over the Events channel (nil until a run starts).
+// AgentModel is the cockpit's Agent surface, elevated to an interactive head
+// (orun-agents-live AL3). Not attached, it browses the workspace's live
+// sessions and git-authored agent types. Attached to a session, it IS the
+// desktop-app experience: a streaming conversation, collapsible tool cards,
+// sticky approval cards, an activity line, and an always-on composer — the
+// same attach protocol the CLI and cloud console speak, so the transport
+// (in-process, local socket, cloud relay) is invisible here.
 type AgentModel struct {
-	Types  []services.AgentTypeRow
-	Cursor int
-	Filter string
-	Width  int
-	Height int
+	// Sidebar: live sessions then agent types.
+	Sessions []services.LiveSessionRow
+	Types    []services.AgentTypeRow
+	Cursor   int
+	Filter   string
+	Width    int
+	Height   int
 
-	// Live transcript.
-	transcript []string
-	running    bool
-	Events     <-chan AgentTranscriptEvent
+	// Attached conversation state (nil head ⇒ browsing).
+	head       AgentHead
+	frames     <-chan attach.Frame
+	info       attach.Frame // the hello frame
+	live       bool
+	items      []convItem
+	pending    []approval // unresolved approval requests, sticky
+	activity   string     // the live activity line (current delta/turn)
+	deltaBuf   strings.Builder
+	composer   textinput.Model
+	composerOn bool
+	status     string // transient status ("queued", "detached", errors)
 }
 
-// AgentTranscriptEvent is one line of a streaming session transcript delivered
-// to the Agent surface. Done marks end-of-stream.
-type AgentTranscriptEvent struct {
-	Line string
-	Done bool
+// AgentHead is the seam the conversation drives: the local SocketClient and a
+// future remote client both satisfy it, so the TUI head is one render path
+// over any transport (design §2 — interchangeability is the absence of
+// transport-specific behavior).
+type AgentHead interface {
+	Frames() <-chan attach.Frame
+	Steer(text string) error
+	Verdict(requestID string, approved bool, reason string) error
+	Interrupt() error
+	End() error
+	Detach()
 }
 
-// AgentTranscriptMsg wraps a streamed transcript event for the tea loop.
-type AgentTranscriptMsg struct{ Event AgentTranscriptEvent }
+type convItemKind int
 
-// WaitForAgentEvent blocks until the next transcript line arrives, mirroring
-// events.WaitForRunEvent. A closed channel yields a Done sentinel.
-func WaitForAgentEvent(ch <-chan AgentTranscriptEvent) tea.Cmd {
+const (
+	itemAgent convItemKind = iota
+	itemUser
+	itemTool
+	itemNote // state/harness/artifact/error/cost lines
+)
+
+type convItem struct {
+	kind      convItemKind
+	text      string
+	principal string
+	detail    string // tool decision, artifact url, etc.
+}
+
+type approval struct {
+	requestID string
+	tool      string
+}
+
+// AgentFrameMsg wraps one attach frame for the tea loop. Closed marks the head
+// feed as ended (the frame is zero).
+type AgentFrameMsg struct {
+	Frame  attach.Frame
+	Closed bool
+}
+
+// WaitForFrame blocks for the next attach frame, mirroring the run-view stream
+// pattern. A closed feed yields AgentFrameMsg{Closed: true}.
+func WaitForFrame(ch <-chan attach.Frame) tea.Cmd {
 	return func() tea.Msg {
-		e, ok := <-ch
+		f, ok := <-ch
 		if !ok {
-			return AgentTranscriptMsg{Event: AgentTranscriptEvent{Done: true}}
+			return AgentFrameMsg{Closed: true}
 		}
-		return AgentTranscriptMsg{Event: e}
+		return AgentFrameMsg{Frame: f}
 	}
 }
 
 // NewAgentModel builds the Agent surface from the loaded agent types.
 func NewAgentModel(types []services.AgentTypeRow) AgentModel {
-	return AgentModel{Types: types}
+	ti := textinput.New()
+	ti.Placeholder = "message the agent…  (enter steer · esc interrupt · ctrl+d detach)"
+	ti.Prompt = "› "
+	ti.CharLimit = 4000
+	return AgentModel{Types: types, composer: ti}
 }
 
 func (m AgentModel) Init() tea.Cmd { return nil }
+
+// Attached reports whether a session head is attached.
+func (m AgentModel) Attached() bool { return m.head != nil }
 
 // SetFilter narrows the type list by name/harness/owner substring.
 func (m AgentModel) SetFilter(f string) AgentModel {
@@ -64,24 +116,57 @@ func (m AgentModel) SetFilter(f string) AgentModel {
 	return m
 }
 
-// StartStream attaches a transcript channel and returns the first wait command.
-func (m AgentModel) StartStream(ch <-chan AgentTranscriptEvent) (AgentModel, tea.Cmd) {
-	m.Events = ch
-	m.running = true
-	m.transcript = nil
-	return m, WaitForAgentEvent(ch)
+// Attach connects the surface to a live session head and starts streaming.
+func (m AgentModel) Attach(head AgentHead) (AgentModel, tea.Cmd) {
+	m.head = head
+	m.frames = head.Frames()
+	m.items = nil
+	m.pending = nil
+	m.activity = ""
+	m.live = false
+	m.composerOn = true
+	m.composer.Focus()
+	m.status = ""
+	return m, WaitForFrame(m.frames)
 }
 
-// Selected returns the highlighted agent type, or nil.
+// Detach leaves the session (it keeps running) and returns to browsing.
+func (m AgentModel) Detach() AgentModel {
+	if m.head != nil {
+		m.head.Detach()
+	}
+	m.head = nil
+	m.frames = nil
+	m.composerOn = false
+	m.composer.Blur()
+	m.status = "detached"
+	return m
+}
+
+// ComposerFocused reports whether the composer is capturing text input — the
+// root model routes printable keys here and withholds them from mode keys.
+func (m AgentModel) ComposerFocused() bool { return m.composerOn && m.composer.Focused() }
+
+// Selected returns the highlighted agent type when the cursor is over the
+// types section, or nil.
 func (m AgentModel) Selected() *services.AgentTypeRow {
-	rows := m.filtered()
-	if len(rows) == 0 || m.Cursor < 0 || m.Cursor >= len(rows) {
+	rows := m.filteredTypes()
+	idx := m.Cursor - len(m.Sessions)
+	if idx < 0 || idx >= len(rows) {
 		return nil
 	}
-	return &rows[m.Cursor]
+	return &rows[idx]
 }
 
-func (m AgentModel) filtered() []services.AgentTypeRow {
+// SelectedSession returns the highlighted live session, or nil.
+func (m AgentModel) SelectedSession() *services.LiveSessionRow {
+	if m.Cursor < 0 || m.Cursor >= len(m.Sessions) {
+		return nil
+	}
+	return &m.Sessions[m.Cursor]
+}
+
+func (m AgentModel) filteredTypes() []services.AgentTypeRow {
 	if m.Filter == "" {
 		return m.Types
 	}
@@ -97,45 +182,240 @@ func (m AgentModel) filtered() []services.AgentTypeRow {
 	return out
 }
 
+func (m AgentModel) rowCount() int { return len(m.Sessions) + len(m.filteredTypes()) }
+
+// RowCount is the sidebar row count (sessions + filtered types) — the root
+// model clamps the cursor against it after a data load.
+func (m AgentModel) RowCount() int { return m.rowCount() }
+
+// --- test-only accessors (the model-level head integration test) ---
+
+// FramesForTest exposes the head feed so a test can drive the stream.
+func (m AgentModel) FramesForTest() <-chan attach.Frame { return m.frames }
+
+// LiveForTest reports whether the live marker has been folded.
+func (m AgentModel) LiveForTest() bool { return m.live }
+
+// PendingCountForTest reports the number of unresolved approvals.
+func (m AgentModel) PendingCountForTest() int { return len(m.pending) }
+
+// SetComposerForTest sets the composer text (as if the user typed it).
+func (m AgentModel) SetComposerForTest(text string) AgentModel {
+	m.composer.SetValue(text)
+	return m
+}
+
 func (m AgentModel) Update(msg tea.Msg) (AgentModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "up", "k":
-			if m.Cursor > 0 {
-				m.Cursor--
+		return m.handleKey(msg)
+	case AgentFrameMsg:
+		if msg.Closed {
+			m.live = false
+			m.composerOn = false
+			m.composer.Blur()
+			if m.status == "" {
+				m.status = "session ended"
 			}
-		case "down", "j":
-			if m.Cursor < len(m.filtered())-1 {
-				m.Cursor++
-			}
-		}
-	case AgentTranscriptMsg:
-		if msg.Event.Done {
-			m.running = false
+			m.head = nil
+			m.frames = nil
 			return m, nil
 		}
-		m.transcript = append(m.transcript, msg.Event.Line)
-		if m.Events != nil {
-			return m, WaitForAgentEvent(m.Events)
+		m = m.foldFrame(msg.Frame)
+		if m.frames != nil {
+			return m, WaitForFrame(m.frames)
 		}
 	}
 	return m, nil
 }
 
-func (m AgentModel) View() string {
-	rows := m.filtered()
-	if len(rows) == 0 {
-		return theme.StyleMuted.Render("No agent types. Author one under agents/<name>.md, then `orun agent import`.")
+func (m AgentModel) handleKey(msg tea.KeyMsg) (AgentModel, tea.Cmd) {
+	// Attached: the composer owns text; a few control keys are reserved.
+	if m.composerOn {
+		switch msg.String() {
+		case "enter":
+			text := strings.TrimSpace(m.composer.Value())
+			if text == "" {
+				return m, nil
+			}
+			m.composer.Reset()
+			// A pending approval answered by number shorthand: "y"/"n" are
+			// composer text, so approvals use explicit keys below; here we
+			// always steer.
+			if m.head != nil {
+				if err := m.head.Steer(text); err != nil {
+					m.status = err.Error()
+				} else {
+					m.status = "queued"
+				}
+			}
+			return m, nil
+		case "esc":
+			if m.head != nil {
+				_ = m.head.Interrupt()
+				m.status = "interrupted"
+			}
+			return m, nil
+		case "ctrl+d":
+			return m.Detach(), nil
+		case "ctrl+y":
+			return m.answerTopApproval(true), nil
+		case "ctrl+n":
+			return m.answerTopApproval(false), nil
+		}
+		var cmd tea.Cmd
+		m.composer, cmd = m.composer.Update(msg)
+		return m, cmd
 	}
+	// Browsing: navigate the sidebar.
+	switch msg.String() {
+	case "up", "k":
+		if m.Cursor > 0 {
+			m.Cursor--
+		}
+	case "down", "j":
+		if m.Cursor < m.rowCount()-1 {
+			m.Cursor++
+		}
+	}
+	return m, nil
+}
 
+// answerTopApproval resolves the oldest pending approval; the ctrl+y/ctrl+n
+// keys make an approval impossible to miss while the composer holds focus.
+func (m AgentModel) answerTopApproval(approved bool) AgentModel {
+	if len(m.pending) == 0 || m.head == nil {
+		return m
+	}
+	top := m.pending[0]
+	reason := ""
+	if err := m.head.Verdict(top.requestID, approved, reason); err != nil {
+		m.status = err.Error()
+	} else if approved {
+		m.status = "approved " + top.tool
+	} else {
+		m.status = "denied " + top.tool
+	}
+	return m
+}
+
+func (m AgentModel) foldFrame(f attach.Frame) AgentModel {
+	switch f.T {
+	case attach.THello:
+		m.info = f
+	case attach.TLive:
+		m.live = true
+	case attach.TDelta:
+		m.deltaBuf.WriteString(f.Text)
+		m.activity = m.deltaBuf.String()
+	case attach.TEvent:
+		m = m.foldEvent(f.Kind, f.Payload)
+	case attach.TPresence:
+		// advisory; rendered from f.Heads on demand — nothing to store
+	case attach.TBye:
+		m.live = false
+		m.status = "detached (" + f.Reason + ")"
+	case attach.TError:
+		m.items = append(m.items, convItem{kind: itemNote, text: "protocol error: " + f.Code + " " + f.Message})
+	}
+	return m
+}
+
+func (m AgentModel) foldEvent(kind string, payload map[string]any) AgentModel {
+	str := func(k string) string { s, _ := payload[k].(string); return s }
+	switch kind {
+	case "message_agent":
+		m.activity = ""
+		m.deltaBuf.Reset()
+		m.items = append(m.items, convItem{kind: itemAgent, text: str("text")})
+	case "message_user":
+		m.items = append(m.items, convItem{kind: itemUser, text: str("text"), principal: str("principal")})
+	case "tool_call":
+		m.items = append(m.items, convItem{kind: itemTool, text: str("tool"), detail: str("decision")})
+	case "tool_result":
+		m.activity = ""
+	case "approval_requested":
+		req := str("requestId")
+		m.pending = append(m.pending, approval{requestID: req, tool: str("tool")})
+		m.items = append(m.items, convItem{kind: itemNote, text: "approval needed: " + str("tool"), detail: req})
+	case "approval_resolved":
+		req := str("requestId")
+		m.pending = removeApproval(m.pending, req)
+		verdict := "denied"
+		if b, _ := payload["approved"].(bool); b {
+			verdict = "approved"
+		}
+		m.items = append(m.items, convItem{kind: itemNote,
+			text: fmt.Sprintf("approval %s %s by %s", req, verdict, orDashView(str("principal")))})
+	case "artifact_produced":
+		pr, _ := payload["pr"].(string)
+		m.items = append(m.items, convItem{kind: itemNote, text: "artifact", detail: pr})
+	case "cost_sample":
+		m.activity = fmt.Sprintf("· %v tokens", payload["tokens"])
+	case "state_changed":
+		st := str("state")
+		m.items = append(m.items, convItem{kind: itemNote, text: "state: " + st})
+		if st != "running" {
+			m.live = false
+		}
+	case "harness_event":
+		if phase := str("phase"); phase != "" {
+			m.items = append(m.items, convItem{kind: itemNote, text: "harness: " + phase})
+		}
+	case "error":
+		m.items = append(m.items, convItem{kind: itemNote, text: "error: " + str("text")})
+	}
+	return m
+}
+
+func removeApproval(list []approval, requestID string) []approval {
+	out := list[:0]
+	for _, a := range list {
+		if a.requestID != requestID {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func (m AgentModel) View() string {
+	if m.head != nil || len(m.items) > 0 {
+		return m.viewConversation()
+	}
+	return m.viewBrowse()
+}
+
+func (m AgentModel) viewBrowse() string {
 	var left strings.Builder
+	left.WriteString(theme.StyleSectionTitle.Render("Sessions"))
+	left.WriteByte('\n')
+	if len(m.Sessions) == 0 {
+		left.WriteString(theme.StyleMuted.Render("  none live — n to launch") + "\n")
+	}
+	for i, s := range m.Sessions {
+		marker := "  "
+		label := s.SessionID
+		if s.Task != "" {
+			label = s.Task + " · " + s.SessionID
+		}
+		if i == m.Cursor {
+			marker = theme.StyleAccent.Render("▸ ")
+			label = theme.StyleAccent.Render(label)
+		}
+		fmt.Fprintf(&left, "%s%s\n", marker, label)
+		left.WriteString(theme.StyleMuted.Render("    "+statusGlyph(s.State)+" "+s.State) + "\n")
+	}
+	left.WriteByte('\n')
 	left.WriteString(theme.StyleSectionTitle.Render("Agent types"))
 	left.WriteByte('\n')
+	rows := m.filteredTypes()
+	if len(rows) == 0 {
+		left.WriteString(theme.StyleMuted.Render("  none — author agents/<name>.md, then `orun agent import`") + "\n")
+	}
 	for i, t := range rows {
 		marker := "  "
 		name := t.Name
-		if i == m.Cursor {
+		if i+len(m.Sessions) == m.Cursor {
 			marker = theme.StyleAccent.Render("▸ ")
 			name = theme.StyleAccent.Render(name)
 		}
@@ -144,9 +424,16 @@ func (m AgentModel) View() string {
 	}
 
 	var right strings.Builder
-	if sel := m.Selected(); sel != nil {
-		right.WriteString(theme.StyleSectionTitle.Render(sel.Name))
+	if s := m.SelectedSession(); s != nil {
+		right.WriteString(theme.StyleSectionTitle.Render("Session "+s.SessionID) + "\n")
+		fmt.Fprintf(&right, "state    %s\n", s.State)
+		fmt.Fprintf(&right, "type     %s\n", orDashView(s.AgentType))
+		fmt.Fprintf(&right, "task     %s\n", orDashView(s.Task))
+		fmt.Fprintf(&right, "driver   %s\n", orDashView(s.Driver))
 		right.WriteByte('\n')
+		right.WriteString(theme.StyleAccent.Render("enter to attach") + "\n")
+	} else if sel := m.Selected(); sel != nil {
+		right.WriteString(theme.StyleSectionTitle.Render(sel.Name) + "\n")
 		fmt.Fprintf(&right, "harness   %s\n", sel.Harness)
 		fmt.Fprintf(&right, "model     %s\n", sel.Model)
 		fmt.Fprintf(&right, "owner     %s\n", orDashView(sel.Owner))
@@ -158,24 +445,84 @@ func (m AgentModel) View() string {
 		}
 		if p := strings.TrimSpace(sel.Persona); p != "" {
 			right.WriteByte('\n')
-			right.WriteString(theme.StyleMuted.Render(firstLines(p, 6)))
-			right.WriteByte('\n')
+			right.WriteString(theme.StyleMuted.Render(firstLines(p, 6)) + "\n")
 		}
 	}
-	if m.running || len(m.transcript) > 0 {
-		right.WriteByte('\n')
-		title := "Transcript"
-		if m.running {
-			title += " (live)"
-		}
-		right.WriteString(theme.StyleSectionTitle.Render(title))
-		right.WriteByte('\n')
-		for _, line := range m.transcript {
-			right.WriteString("  " + line + "\n")
+	if m.status != "" {
+		right.WriteString("\n" + theme.StyleMuted.Render(m.status) + "\n")
+	}
+	return joinColumns(left.String(), right.String(), m.Width)
+}
+
+func (m AgentModel) viewConversation() string {
+	var b strings.Builder
+	title := "Session"
+	if m.info.SessionID != "" {
+		title = "Session " + m.info.SessionID
+	}
+	head := theme.StyleSectionTitle.Render(title)
+	if m.live {
+		head += "  " + theme.StyleAccent.Render("● live")
+	}
+	b.WriteString(head + "\n\n")
+
+	for _, it := range m.items {
+		b.WriteString(renderItem(it) + "\n")
+	}
+	if m.activity != "" {
+		b.WriteString(theme.StyleMuted.Render("  "+m.activity+" …") + "\n")
+	}
+
+	// Sticky approval cards above the composer — impossible to scroll off.
+	if len(m.pending) > 0 {
+		b.WriteByte('\n')
+		for _, a := range m.pending {
+			b.WriteString(theme.StylePillWarn.Render(" approval ") +
+				" " + theme.StyleAccent.Render(a.tool) +
+				theme.StyleMuted.Render("  ctrl+y approve · ctrl+n deny  ("+a.requestID+")") + "\n")
 		}
 	}
 
-	return joinColumns(left.String(), right.String(), m.Width)
+	b.WriteByte('\n')
+	if m.composerOn {
+		b.WriteString(m.composer.View() + "\n")
+	}
+	if m.status != "" {
+		b.WriteString(theme.StyleMuted.Render(m.status))
+	}
+	return b.String()
+}
+
+func renderItem(it convItem) string {
+	switch it.kind {
+	case itemAgent:
+		return theme.StyleAccent.Render("agent") + "  " + it.text
+	case itemUser:
+		who := orDashView(it.principal)
+		return theme.StyleSectionTitle.Render(who) + "  " + it.text
+	case itemTool:
+		glyph := "⚙"
+		return theme.StyleMuted.Render("  "+glyph+" "+it.text+" ("+it.detail+")")
+	default:
+		s := "  " + it.text
+		if it.detail != "" {
+			s += " " + it.detail
+		}
+		return theme.StyleMuted.Render(s)
+	}
+}
+
+func statusGlyph(state string) string {
+	switch state {
+	case "running":
+		return "●"
+	case "completed":
+		return "✓"
+	case "failed", "canceled", "expired":
+		return "✕"
+	default:
+		return "·"
+	}
 }
 
 func orDashView(s string) string {
@@ -230,9 +577,7 @@ func joinColumns(left, right string, width int) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// lipglossWidth is the visible width of a possibly-styled string. Styling adds
-// ANSI escapes; strip them for width. Kept minimal to avoid a lipgloss import
-// churn here — the theme styles are simple foreground colors.
+// lipglossWidth is the visible width of a possibly-styled string.
 func lipglossWidth(s string) int {
 	w, inEsc := 0, false
 	for _, r := range s {

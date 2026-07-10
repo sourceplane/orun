@@ -32,6 +32,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -43,6 +45,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/sourceplane/orun/internal/agent/attach"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/tui/services"
 	"github.com/sourceplane/orun/internal/tui/theme"
@@ -287,7 +290,19 @@ func (m Model) LastError() error                       { return m.lastErr }
 func (m Model) Init() tea.Cmd {
 	// Refresh the object-model catalog on open (force — even a dirty tree) so
 	// the cockpit opens on a current catalog, then reloads when it lands.
-	return tea.Batch(loadWorkspaceCmd(m.svc), m.spinner.Tick, catalogRefreshTickCmd(), refreshCatalogCmd(m.svc, true), checkCatalogStaleCmd(m.svc), loadCatalogCmd(m.svc), brandTickCmd())
+	base := tea.Batch(loadWorkspaceCmd(m.svc), m.spinner.Tick, catalogRefreshTickCmd(), refreshCatalogCmd(m.svc, true), checkCatalogStaleCmd(m.svc), loadCatalogCmd(m.svc), brandTickCmd())
+	if m.activeMode == ModeAgent {
+		// `orun agent` opened straight onto the Agent surface — load its data.
+		return tea.Batch(base, loadAgentTypesCmd(m.svc), loadLiveSessionsCmd(m.svc))
+	}
+	return base
+}
+
+// StartInAgentMode sets the initial mode to the Agent surface — the bare
+// `orun agent` front door (design §5).
+func (m Model) StartInAgentMode() Model {
+	m.activeMode = ModeAgent
+	return m
 }
 
 // brandTickMsg advances the header wordmark's gradient shimmer.
@@ -320,6 +335,89 @@ func loadAgentTypesCmd(svc services.OrunService) tea.Cmd {
 		return agentTypesLoadedMsg{rows: rows, err: err}
 	}
 }
+
+// liveSessionsLoadedMsg carries the machine's live session bodies to the Agent
+// surface's sidebar (orun-agents-live AL3).
+type liveSessionsLoadedMsg struct {
+	rows []services.LiveSessionRow
+	err  error
+}
+
+func loadLiveSessionsCmd(svc services.OrunService) tea.Cmd {
+	return func() tea.Msg {
+		rows, err := svc.LiveSessions()
+		return liveSessionsLoadedMsg{rows: rows, err: err}
+	}
+}
+
+// agentAttachedMsg is the result of dialing a live session's socket to attach
+// the TUI head.
+type agentAttachedMsg struct {
+	head views.AgentHead
+	err  error
+}
+
+// attachSessionCmd dials a live session body's socket and returns a head. The
+// TUI is a socket client even for sessions it launched — one render path, no
+// privileged-head asymmetry (design §3.1).
+func attachSessionCmd(socket string) tea.Cmd {
+	return func() tea.Msg {
+		c, err := attach.DialSocket(socket, -1, "tui")
+		if err != nil {
+			return agentAttachedMsg{err: err}
+		}
+		return agentAttachedMsg{head: c}
+	}
+}
+
+// launchAgentCmd spawns a detached interactive session body (`orun agent run
+// --detach`), then polls the registry (through the service) for the new body's
+// socket and attaches — the launch flow spawns the body and joins it like any
+// other head (design §5.5). The TUI never runs the loop itself.
+func (m Model) launchAgentCmd() tea.Cmd {
+	svc := m.svc
+	before := map[string]bool{}
+	if rows, err := svc.LiveSessions(); err == nil {
+		for _, r := range rows {
+			before[r.SessionID] = true
+		}
+	}
+	return func() tea.Msg {
+		exe, err := os.Executable()
+		if err != nil {
+			return agentAttachedMsg{err: err}
+		}
+		if err := exec.Command(exe, "agent", "run", "--detach").Run(); err != nil {
+			return agentAttachedMsg{err: err}
+		}
+		// Poll for the newly-registered body (not in the pre-launch set).
+		var socket string
+		for i := 0; i < 100 && socket == ""; i++ {
+			rows, lerr := svc.LiveSessions()
+			if lerr == nil {
+				for _, r := range rows {
+					if !before[r.SessionID] && r.Socket != "" {
+						socket = r.Socket
+						break
+					}
+				}
+			}
+			if socket == "" {
+				time.Sleep(20 * time.Millisecond)
+			}
+		}
+		if socket == "" {
+			return agentAttachedMsg{err: errNoLaunchedSocket}
+		}
+		c, derr := attach.DialSocket(socket, -1, "tui")
+		if derr != nil {
+			return agentAttachedMsg{err: derr}
+		}
+		return agentAttachedMsg{head: c}
+	}
+}
+
+var errNoLaunchedSocket = fmt.Errorf("launched session produced no socket")
 
 func loadWorkspaceCmd(svc services.OrunService) tea.Cmd {
 	return func() tea.Msg {
@@ -437,10 +535,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.agent.Types = msg.rows
 		m.agent.Width = m.width
-		if m.agent.Cursor >= len(msg.rows) {
+		if m.agent.Cursor >= m.agent.RowCount() {
 			m.agent.Cursor = 0
 		}
 		return m, nil
+
+	case liveSessionsLoadedMsg:
+		if msg.err != nil {
+			return m, nil
+		}
+		m.agent.Sessions = msg.rows
+		m.agent.Width = m.width
+		if m.agent.Cursor >= m.agent.RowCount() {
+			m.agent.Cursor = 0
+		}
+		return m, nil
+
+	case agentAttachedMsg:
+		if msg.err != nil || msg.head == nil {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.agent, cmd = m.agent.Attach(msg.head)
+		return m, cmd
 
 	case liveRefreshTickMsg:
 		// While a run is in flight, re-read its per-job/step state so the
@@ -748,6 +865,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case views.PaletteCommandSelectedMsg:
 		return m.applyPaletteCommand(msg.Command)
 
+	case views.AgentFrameMsg:
+		// Attach-plane frames stream into the Agent head (orun-agents-live
+		// AL3); the view re-arms the wait until the feed closes.
+		var cmd tea.Cmd
+		m.agent, cmd = m.agent.Update(msg)
+		return m, cmd
+
 	case services.ErrMsg:
 		m.lastErr = msg.Err
 		if m.activeMode == ModePlanStudio {
@@ -813,6 +937,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.search, cmd = m.search.Update(msg)
 		m.applySearch(m.search.Value())
+		return m, cmd
+	}
+
+	// Agent composer precedence: when attached, the composer captures text —
+	// printable keys and its control keys route to the Agent view, never to
+	// the mode-switch/global keys. Quit (ctrl+c) still escapes.
+	if m.activeMode == ModeAgent && m.agent.ComposerFocused() && !key.Matches(msg, m.keys.Quit) {
+		var cmd tea.Cmd
+		m.agent, cmd = m.agent.Update(msg)
 		return m, cmd
 	}
 
@@ -897,7 +1030,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		_, cmd := mm.activity.AutoAttachCmd()
 		return mm, cmd
 	case key.Matches(msg, m.keys.GoAgent):
-		return m.switchMode(ModeAgent), loadAgentTypesCmd(m.svc)
+		return m.switchMode(ModeAgent), tea.Batch(loadAgentTypesCmd(m.svc), loadLiveSessionsCmd(m.svc))
 	case key.Matches(msg, m.keys.GoPlan):
 		return m.switchMode(ModePlanStudio), nil
 	case key.Matches(msg, m.keys.GoRun):
@@ -981,6 +1114,19 @@ func (m Model) forwardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, c
 	case ModeAgent:
+		// Browsing: enter attaches the highlighted live session; n launches a
+		// new one. (When the composer is focused these keys are already routed
+		// to the view by handleKey's precedence check.)
+		if !m.agent.Attached() {
+			switch msg.String() {
+			case "enter":
+				if s := m.agent.SelectedSession(); s != nil && s.Socket != "" {
+					return m, attachSessionCmd(s.Socket)
+				}
+			case "n":
+				return m, m.launchAgentCmd()
+			}
+		}
 		var c tea.Cmd
 		m.agent, c = m.agent.Update(msg)
 		return m, c
