@@ -214,6 +214,11 @@ cloud-attached. Tool policy filters the config at write time (deny =
 absent). This closes `orun-agents` design §5 as specified — no design change,
 just the unbuilt file.
 
+> **Note (orun-mcp UM1):** the two-endpoint mount above has collapsed — the
+> driver config lists the **single unified endpoint** (`orun mcp serve`),
+> which serves work and platform tools over one stdio loop (see
+> `specs/orun-mcp/`).
+
 ### 4.5 Testing without the vendor
 
 Recorded stream-JSON fixtures (real captures, committed) drive the mapping

@@ -8,5 +8,11 @@
 # digest. When that happens, re-vendor from orun-cloud or renegotiate the contract
 # (see README.md in this directory for the procedure).
 #
-# Format: <sha256>  state-api-contract.md
+# mcp-tool-manifest.json (the MCP tool-plane contract exported from
+# orun-cloud/packages/mcp — saas-mcp-server MCP9) is guarded the same way by
+# TestVendoredManifestChecksum (internal/platformmcp/parity_test.go), which
+# also pins the byte-identical go:embed copy in internal/platformmcp/.
+#
+# Format: <sha256>  <file>
 a2f8ef2a3e0fa64b10f5fb73c916d6cd15a47f1f137c590c841904bf2e65493d  state-api-contract.md
+d344a47d72a1f40605e0b819e516df5ce93cb5f6900de5533088ec718ba30822  mcp-tool-manifest.json
