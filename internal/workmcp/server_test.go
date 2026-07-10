@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sourceplane/orun/internal/mcpserve"
 	"github.com/sourceplane/orun/internal/remotestate"
 )
 
@@ -72,9 +73,12 @@ func fixtureSummary() *remotestate.WorkSummary {
 
 func rpc(t *testing.T, s *Server, lines ...string) []map[string]interface{} {
 	t.Helper()
+	// The provider is served exactly as production wires it (cmd/orun/mcp.go):
+	// behind the composed mcpserve loop.
+	srv := &mcpserve.Server{Providers: []mcpserve.ToolProvider{s}, Version: "test"}
 	in := strings.NewReader(strings.Join(lines, "\n") + "\n")
 	var out strings.Builder
-	if err := s.Serve(context.Background(), in, &out); err != nil {
+	if err := srv.Serve(context.Background(), in, &out); err != nil {
 		t.Fatal(err)
 	}
 	var responses []map[string]interface{}
@@ -118,8 +122,12 @@ func TestInitializeAndToolSurface(t *testing.T) {
 		t.Fatalf("responses = %d (notification must get none)", len(responses))
 	}
 	init := responses[0]["result"].(map[string]interface{})
-	if init["protocolVersion"] != protocolVersion {
+	if init["protocolVersion"] != mcpserve.ProtocolVersion {
 		t.Fatalf("protocolVersion = %v", init["protocolVersion"])
+	}
+	// serverInfo is the composed server's: name "orun", binary version (UM0).
+	if info := init["serverInfo"].(map[string]interface{}); info["name"] != "orun" {
+		t.Fatalf("serverInfo name = %v, want orun", info["name"])
 	}
 
 	tools := responses[1]["result"].(map[string]interface{})["tools"].([]interface{})
@@ -136,9 +144,13 @@ func TestInitializeAndToolSurface(t *testing.T) {
 		t.Errorf("tool surface = %d tools, want exactly 9 (closed: 5 reads + 4 writes)", len(tools))
 	}
 	// The lie is unrepresentable: no lifecycle write, no pin (WP-3, WP-10).
+	// The sweep runs over the composed server's tools/list (the merged
+	// roster — this rpc goes through mcpserve), with the shared fragments.
 	for name := range names {
-		if strings.Contains(name, "status") || strings.Contains(name, "pin") || strings.Contains(name, "lifecycle") {
-			t.Errorf("forbidden tool on the surface: %s", name)
+		for _, frag := range mcpserve.ForbiddenNameFragments {
+			if strings.Contains(name, frag) {
+				t.Errorf("forbidden tool on the surface: %s", name)
+			}
 		}
 	}
 }

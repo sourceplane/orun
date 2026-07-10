@@ -1,6 +1,7 @@
-// Package workmcp is the orun MCP (orun-work v2 WP5): the agent surface,
-// policy-identical to the console. A minimal, dependency-free MCP server
-// over newline-delimited JSON-RPC 2.0 on stdio.
+// Package workmcp is the work-plane tool provider of the orun MCP
+// (orun-work v2 WP5, mounted by orun-mcp UM0): the agent surface,
+// policy-identical to the console. The stdio JSON-RPC transport lives in
+// internal/mcpserve; this package supplies the tools.
 //
 // The tool surface is the whole point (agents-and-mcp.md): reads return the
 // fold's output WITH evidence; the write surface is four tools — task_create,
@@ -12,12 +13,11 @@
 package workmcp
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 
+	"github.com/sourceplane/orun/internal/mcpserve"
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/workbrief"
 	"github.com/sourceplane/orun/internal/worklens"
@@ -36,38 +36,11 @@ type WorkAPI interface {
 	EditWorkContract(ctx context.Context, key string, contract remotestate.WorkContract) (*remotestate.WorkMutationResponse, error)
 }
 
-// Server serves the MCP protocol for one workspace-scoped client.
+// Server is the work-plane mcpserve.ToolProvider for one workspace-scoped
+// client.
 type Server struct {
 	API       WorkAPI
 	Workspace string
-}
-
-const protocolVersion = "2024-11-05"
-
-type rpcRequest struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
-}
-
-type rpcError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-type rpcResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Result  interface{}     `json:"result,omitempty"`
-	Error   *rpcError       `json:"error,omitempty"`
-}
-
-// toolDef is an MCP tool descriptor.
-type toolDef struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	InputSchema map[string]interface{} `json:"inputSchema"`
 }
 
 func obj(props map[string]interface{}, required ...string) map[string]interface{} {
@@ -96,7 +69,7 @@ func ToolNames() []string {
 
 // Tools returns the closed tool surface. Note what is absent: no
 // task_update_status (no lifecycle write exists anywhere), no pin.
-func Tools() []toolDef {
+func Tools() []mcpserve.ToolDef {
 	contractSchema := obj(map[string]interface{}{
 		"goal":     str("one or two sentences; the brief's first line"),
 		"affects":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "catalog component keys"},
@@ -104,7 +77,7 @@ func Tools() []toolDef {
 		"gates":    map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "checks verified from orun execution truth"},
 		"deps":     map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
 	})
-	return []toolDef{
+	return []mcpserve.ToolDef{
 		{Name: "work_query", Description: "The workspace lens: specs with progress, tasks with DERIVED lifecycle and its evidence, the drift inbox, claim suggestions. Nothing returned is a stored status.", InputSchema: obj(map[string]interface{}{})},
 		{Name: "work_get", Description: "One task: envelope, contract, and the fold's lifecycle with evidence.", InputSchema: obj(map[string]interface{}{"key": str("task key, e.g. ORN-142")}, "key")},
 		{Name: "spec_get", Description: "The frozen brief: a content-addressed SpecSnapshot (intent only — contracts and docs, never a rung or assignee). Implement against exactly this.", InputSchema: obj(map[string]interface{}{"spec": str("spec slug")}, "spec")},
@@ -117,87 +90,39 @@ func Tools() []toolDef {
 	}
 }
 
-// Serve reads newline-delimited JSON-RPC requests from r and writes
-// responses to w until EOF. Notifications (no id) get no response.
-func (s *Server) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	enc := json.NewEncoder(w)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var req rpcRequest
-		if err := json.Unmarshal(line, &req); err != nil {
-			_ = enc.Encode(rpcResponse{JSONRPC: "2.0", Error: &rpcError{Code: -32700, Message: "parse error"}})
-			continue
-		}
-		resp := s.handle(ctx, &req)
-		if resp != nil {
-			if err := enc.Encode(resp); err != nil {
-				return err
-			}
-		}
+// Tools implements mcpserve.ToolProvider.
+func (s *Server) Tools() []mcpserve.ToolDef { return Tools() }
+
+// Call implements mcpserve.ToolProvider: owned=false for names outside the
+// work roster (another provider's business), and every owned failure maps
+// to an isError result — the mutator's verdict is something the agent
+// should reason about, not a protocol fault.
+func (s *Server) Call(ctx context.Context, name string, args json.RawMessage) (mcpserve.Result, bool) {
+	if !toolNames[name] {
+		return nil, false
 	}
-	return scanner.Err()
+	result, err := s.call(ctx, name, args)
+	if err != nil {
+		return toolText(fmt.Sprintf("error: %v", err), true), true
+	}
+	return result, true
 }
 
-func (s *Server) handle(ctx context.Context, req *rpcRequest) *rpcResponse {
-	if req.ID == nil {
-		// notifications (e.g. notifications/initialized) get no response
-		return nil
+// toolNames is the owned roster, derived from Tools() so ownership can
+// never drift from the advertised surface.
+var toolNames = func() map[string]bool {
+	m := map[string]bool{}
+	for _, t := range Tools() {
+		m[t.Name] = true
 	}
-	ok := func(result interface{}) *rpcResponse {
-		return &rpcResponse{JSONRPC: "2.0", ID: req.ID, Result: result}
-	}
-	fail := func(code int, msg string) *rpcResponse {
-		return &rpcResponse{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: code, Message: msg}}
-	}
+	return m
+}()
 
-	switch req.Method {
-	case "initialize":
-		return ok(map[string]interface{}{
-			"protocolVersion": protocolVersion,
-			"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
-			"serverInfo":      map[string]interface{}{"name": "orun-work", "version": "1"},
-		})
-	case "ping":
-		return ok(map[string]interface{}{})
-	case "tools/list":
-		return ok(map[string]interface{}{"tools": Tools()})
-	case "tools/call":
-		var params struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
-		}
-		if err := json.Unmarshal(req.Params, &params); err != nil {
-			return fail(-32602, "invalid params")
-		}
-		result, err := s.call(ctx, params.Name, params.Arguments)
-		if err != nil {
-			// Tool-level failures are results with isError (MCP convention):
-			// the mutator's verdict is something the agent should reason
-			// about, not a protocol fault.
-			return ok(toolText(fmt.Sprintf("error: %v", err), true))
-		}
-		return ok(result)
-	default:
-		return fail(-32601, "method not found: "+req.Method)
-	}
+func toolText(text string, isErr bool) mcpserve.Result {
+	return mcpserve.TextResult(text, isErr)
 }
 
-func toolText(text string, isErr bool) map[string]interface{} {
-	out := map[string]interface{}{
-		"content": []map[string]interface{}{{"type": "text", "text": text}},
-	}
-	if isErr {
-		out["isError"] = true
-	}
-	return out
-}
-
-func toolJSON(v interface{}) (map[string]interface{}, error) {
+func toolJSON(v interface{}) (mcpserve.Result, error) {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return nil, err
@@ -205,7 +130,7 @@ func toolJSON(v interface{}) (map[string]interface{}, error) {
 	return toolText(string(b), false), nil
 }
 
-func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (map[string]interface{}, error) {
+func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (mcpserve.Result, error) {
 	switch name {
 	case "work_query":
 		summary, err := s.API.GetWorkSummary(ctx)
