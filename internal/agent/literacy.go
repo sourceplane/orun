@@ -25,7 +25,7 @@ const LiteracyName = "base-orun-literacy"
 // LiteracyVersion identifies this revision of the embedded literacy. Bump it
 // whenever literacy.md changes in a way agents should be able to distinguish;
 // the content hash is the real identity, this is the human-readable rung.
-const LiteracyVersion = "v1"
+const LiteracyVersion = "v2"
 
 // Literacy returns the embedded base-literacy document.
 func Literacy() []byte { return literacyBody }
