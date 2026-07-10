@@ -53,7 +53,7 @@ one product surface.
 | UM0 | Provider composition: factor the stdio JSON-RPC loop out of `workmcp` into a provider-composing server; serverInfo → `orun`; work tools unchanged (9); merged-roster invariant tests | ✅ Done |
 | UM1 | Native platform reads: `internal/platformmcp` (19 read tools) over `remotestate` public-API methods; vendored tool manifest + parity test (needs `saas-mcp-server` MCP9's manifest export) | ✅ Done |
 | UM2 | Platform writes + rails: the 6 write tools, per-attempt `Idempotency-Key`, `x-client-surface: mcp` on every call, `--read-only`, entitlement gate (`feature.mcp_server`, fail-open) | ✅ Done |
-| UM3 | Docs + release: `website/docs/cli/orun-mcp.md` rewrite (unified surface; fixes the stale 7-tool text), release-notes page, version tag → GoReleaser/kiox release | ⚠️ Docs shipped; release tag pending |
+| UM3 | Docs + release: `website/docs/cli/orun-mcp.md` rewrite (unified surface; fixes the stale 7-tool text), release-notes page, version tag → GoReleaser/kiox release | ✅ Done (v2.24.0 released) |
 
 ## Scope boundary
 
