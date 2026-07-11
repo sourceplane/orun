@@ -34,6 +34,14 @@ type WorkAPI interface {
 	CommentWork(ctx context.Context, key, body string) (*remotestate.WorkMutationResponse, error)
 	AssignWork(ctx context.Context, key, subject string, unassign bool) (*remotestate.WorkMutationResponse, error)
 	EditWorkContract(ctx context.Context, key string, contract remotestate.WorkContract) (*remotestate.WorkMutationResponse, error)
+	// v4 (WH5) — the hierarchy legs. Reads only for decisions: there is no
+	// approve/adopt call on this seam at all (V4-2).
+	GetEpicBrief(ctx context.Context, epicKey, id string) (*remotestate.WorkEpicBrief, error)
+	GetEpicMilestones(ctx context.Context, epicKey string) (*remotestate.WorkMilestonesView, error)
+	GetWorkDesign(ctx context.Context, key string) (*remotestate.WorkDesignView, error)
+	GetWorkRollups(ctx context.Context, initiativeKey string) (*remotestate.WorkRollups, error)
+	CreateWorkDesign(ctx context.Context, initiativeKey string, req remotestate.CreateWorkDesignRequest) (*remotestate.WorkMutationResponse, error)
+	RegenerateWorkTasks(ctx context.Context, epicKey, milestone string, req remotestate.RegenerateWorkTasksRequest) (*remotestate.RegenerateWorkTasksResponse, error)
 }
 
 // Server is the work-plane mcpserve.ToolProvider for one workspace-scoped
@@ -72,7 +80,8 @@ func ToolNames() []string {
 // annotations; the write surface is the four mutators and nothing else).
 func ReadOnly(name string) bool {
 	switch name {
-	case "work_query", "work_get", "spec_get", "work_timeline", "spec_doc":
+	case "work_query", "work_get", "spec_get", "work_timeline", "spec_doc",
+		"epic_brief", "milestone_get", "design_get", "initiative_get":
 		return true
 	}
 	return false
@@ -94,10 +103,19 @@ func Tools() []mcpserve.ToolDef {
 		{Name: "spec_get", Description: "The frozen brief: a content-addressed SpecSnapshot (intent only — contracts and docs, never a rung or assignee). Implement against exactly this.", InputSchema: obj(map[string]interface{}{"spec": str("spec slug")}, "spec")},
 		{Name: "work_timeline", Description: "The unified timeline for one item: both logs (what people said, what the world did) interleaved by time — evidence attached, read-only.", InputSchema: obj(map[string]interface{}{"key": str("task or spec key")}, "key")},
 		{Name: "spec_doc", Description: "A spec's cloud document revision (content-addressed, V3-2; latest when rev is omitted) — read-only.", InputSchema: obj(map[string]interface{}{"spec": str("spec slug"), "rev": str("revision digest sha256:<hex> (optional)")}, "spec")},
-		{Name: "task_create", Description: "Create a task (e.g. discovered follow-up work) through the one mutator surface.", InputSchema: obj(map[string]interface{}{"prefix": str("task-key prefix, 2–5 uppercase"), "title": str("task title"), "spec": str("parent spec slug (optional)"), "contract": contractSchema}, "prefix", "title")},
+		{Name: "task_create", Description: "Create a task (e.g. discovered follow-up work) through the one mutator surface.", InputSchema: obj(map[string]interface{}{"prefix": str("task-key prefix, 2–5 uppercase"), "title": str("task title"), "spec": str("parent spec slug (optional)"), "milestone": str("milestone key within spec (optional, v4)"), "contract": contractSchema}, "prefix", "title")},
 		{Name: "task_comment", Description: "Append a comment to a task's coordination log.", InputSchema: obj(map[string]interface{}{"key": str("task key"), "body": str("comment body")}, "key", "body")},
 		{Name: "task_assign", Description: "Assign a membership subject (self-assignment claims work).", InputSchema: obj(map[string]interface{}{"key": str("task key"), "subject": str("membership subject id (usr_/sp_/team_)")}, "key", "subject")},
 		{Name: "contract_propose", Description: "Propose a contract change: applied through the mutators AND flagged with a review comment — an agent cannot quietly redefine its own definition of done.", InputSchema: obj(map[string]interface{}{"key": str("task key"), "contract": contractSchema}, "key", "contract")},
+		// v4 (WH5) — the hierarchy surface. Note what is STILL absent: no
+		// approve tool, no adopt tool (human-only decisions, V4-2), and
+		// still no status or pin.
+		{Name: "epic_brief", Description: "The frozen brief an APPROVAL sealed: EpicSnapshot canonical bytes + content id (doc ref, milestone ladder + hash, task contracts, approval record). Implement against exactly this; verify sha256(bytes) == id. An unapproved epic has no brief.", InputSchema: obj(map[string]interface{}{"epic": str("epic slug"), "id": str("pinned snapshot id sha256:<hex> (optional; latest otherwise)")}, "epic")},
+		{Name: "milestone_get", Description: "One epic's milestone ladder: authored goals/done-when plus DERIVED progress per milestone — read-only.", InputSchema: obj(map[string]interface{}{"epic": str("epic slug")}, "epic")},
+		{Name: "design_get", Description: "One design: doc pointer, sealed context (what it assumed), structured proposal, and folded intent state — read-only.", InputSchema: obj(map[string]interface{}{"key": str("design key, e.g. DSG-1")}, "key")},
+		{Name: "initiative_get", Description: "One initiative's DERIVED rollup: health with named evidence, progress, per-epic intent + execution. Nothing returned is enterable.", InputSchema: obj(map[string]interface{}{"initiative": str("initiative key")}, "initiative")},
+		{Name: "design_propose", Description: "Create a Draft design under an initiative: a document reference plus a structured proposal (epics → milestones → task skeletons). A design is a PROPOSAL — humans review, compare, and adopt; adoption mints epics and is not available here.", InputSchema: obj(map[string]interface{}{"initiative": str("initiative key"), "title": str("design title"), "docRef": str("design doc revision sha256:<hex> (optional)"), "proposal": map[string]interface{}{"type": "object", "description": "{epics: [{slug, title, docSeed?, milestones[], taskSkeletons[]}]}"}}, "initiative", "title")},
+		{Name: "task_regenerate", Description: "Re-plan one milestone in one verdict batch: PLANNED (draft/ready) tasks cancel, in-flight tasks survive, and every proposed contract is applied AND flagged for human review. Tasks are implementation detail (V4-5) — this never touches the epic's approval.", InputSchema: obj(map[string]interface{}{"epic": str("epic slug"), "milestone": str("milestone key, e.g. M1"), "prefix": str("task-key prefix (default WK)"), "tasks": map[string]interface{}{"type": "array", "items": obj(map[string]interface{}{"title": str("task title"), "contract": contractSchema}, "title"), "description": "the replacement plan"}}, "epic", "milestone", "tasks")},
 	}
 }
 
@@ -218,16 +236,17 @@ func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (m
 
 	case "task_create":
 		var a struct {
-			Prefix   string                    `json:"prefix"`
-			Title    string                    `json:"title"`
-			Spec     string                    `json:"spec"`
-			Contract *remotestate.WorkContract `json:"contract"`
+			Prefix    string                    `json:"prefix"`
+			Title     string                    `json:"title"`
+			Spec      string                    `json:"spec"`
+			Milestone string                    `json:"milestone"`
+			Contract  *remotestate.WorkContract `json:"contract"`
 		}
 		if err := json.Unmarshal(args, &a); err != nil || a.Prefix == "" || a.Title == "" {
 			return nil, fmt.Errorf("task_create: prefix and title are required")
 		}
 		out, err := s.API.CreateWorkTask(ctx, remotestate.CreateWorkTaskRequest{
-			Prefix: a.Prefix, Title: a.Title, SpecKey: a.Spec, Contract: a.Contract,
+			Prefix: a.Prefix, Title: a.Title, SpecKey: a.Spec, Milestone: a.Milestone, Contract: a.Contract,
 		})
 		if err != nil {
 			return nil, err
@@ -280,6 +299,106 @@ func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (m
 			return nil, fmt.Errorf("contract applied (seq %d) but review flag failed: %w", out.Seq, err)
 		}
 		return toolText(fmt.Sprintf("contract proposed on %s (event seq %d); flagged for human review", out.Key, out.Seq), false), nil
+
+	case "epic_brief":
+		var a struct {
+			Epic string `json:"epic"`
+			ID   string `json:"id"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Epic == "" {
+			return nil, fmt.Errorf("epic_brief: epic is required")
+		}
+		brief, err := s.API.GetEpicBrief(ctx, a.Epic, a.ID)
+		if err != nil {
+			return nil, err
+		}
+		if err := worklens.VerifySealedBytes(brief.ID, []byte(brief.Canonical)); err != nil {
+			return nil, fmt.Errorf("epic_brief: %w", err)
+		}
+		return toolText(fmt.Sprintf("%s\n%s", brief.ID, brief.Canonical), false), nil
+
+	case "milestone_get":
+		var a struct {
+			Epic string `json:"epic"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Epic == "" {
+			return nil, fmt.Errorf("milestone_get: epic is required")
+		}
+		view, err := s.API.GetEpicMilestones(ctx, a.Epic)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(view)
+
+	case "design_get":
+		var a struct {
+			Key string `json:"key"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Key == "" {
+			return nil, fmt.Errorf("design_get: key is required")
+		}
+		design, err := s.API.GetWorkDesign(ctx, a.Key)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(design)
+
+	case "initiative_get":
+		var a struct {
+			Initiative string `json:"initiative"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Initiative == "" {
+			return nil, fmt.Errorf("initiative_get: initiative is required")
+		}
+		rollups, err := s.API.GetWorkRollups(ctx, a.Initiative)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(rollups)
+
+	case "design_propose":
+		var a struct {
+			Initiative string          `json:"initiative"`
+			Title      string          `json:"title"`
+			DocRef     string          `json:"docRef"`
+			Proposal   json.RawMessage `json:"proposal"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Initiative == "" || a.Title == "" {
+			return nil, fmt.Errorf("design_propose: initiative and title are required")
+		}
+		out, err := s.API.CreateWorkDesign(ctx, a.Initiative, remotestate.CreateWorkDesignRequest{
+			Title: a.Title, DocRef: a.DocRef, Proposal: a.Proposal,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return toolText(fmt.Sprintf("proposed design %s (event seq %d) — a human reviews, compares, and adopts; adoption mints the epics", out.Key, out.Seq), false), nil
+
+	case "task_regenerate":
+		var a struct {
+			Epic      string `json:"epic"`
+			Milestone string `json:"milestone"`
+			Prefix    string `json:"prefix"`
+			Tasks     []struct {
+				Title    string                    `json:"title"`
+				Contract *remotestate.WorkContract `json:"contract"`
+			} `json:"tasks"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Epic == "" || a.Milestone == "" || len(a.Tasks) == 0 {
+			return nil, fmt.Errorf("task_regenerate: epic, milestone, and tasks are required")
+		}
+		req := remotestate.RegenerateWorkTasksRequest{Prefix: a.Prefix}
+		for _, t := range a.Tasks {
+			req.Tasks = append(req.Tasks, struct {
+				Title    string                    `json:"title"`
+				Contract *remotestate.WorkContract `json:"contract,omitempty"`
+			}{Title: t.Title, Contract: t.Contract})
+		}
+		out, err := s.API.RegenerateWorkTasks(ctx, a.Epic, a.Milestone, req)
+		if err != nil {
+			return nil, err
+		}
+		return toolText(fmt.Sprintf("regenerated %s/%s: created %v, canceled %v, kept in-flight %v — proposed contracts are flagged for human review", a.Epic, a.Milestone, out.Created, out.Canceled, out.Kept), false), nil
 
 	default:
 		return nil, fmt.Errorf("unknown tool %s", name)

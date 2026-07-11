@@ -61,8 +61,10 @@ type ToolProvider interface {
 // ForbiddenNameFragments must appear in no tool name on the merged roster:
 // the WP-3/WP-10 work-plane invariants (no lifecycle write, no pin, no
 // stored status) extend over every composed provider (README locked
-// decision 5). Tests sweep tools/list against these.
-var ForbiddenNameFragments = []string{"status", "pin", "lifecycle"}
+// decision 5), and v4 (WH5) extends them with the human-only decisions —
+// no approve, no adopt (V4-2: an agent cannot even NAME the decision).
+// Tests sweep tools/list against these.
+var ForbiddenNameFragments = []string{"status", "pin", "lifecycle", "approve", "adopt"}
 
 // Server composes tool providers behind one stdio JSON-RPC loop.
 type Server struct {
