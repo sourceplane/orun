@@ -10,6 +10,12 @@ lifecycle is a query, not a column.** The entire plane is two append-only logs
 observation log) — and every read surface (board, lifecycle, blast radius,
 drift inbox, epic progress, agent brief) is a pure function of them.
 
+> **Extended by v4** (`specs/orun-work-v4/` + orun-cloud
+> `specs/epics/orun-work-v4/`, cluster **WH**): the planning hierarchy —
+> Initiative → Design → Epic → Milestone → Task, with an authored, human-only,
+> content-addressed approval ladder on intent. Additive only: the logs, the
+> fold, and the derived delivery ladder below are unchanged.
+>
 > **v2 supersedes the archived v1**
 > (`specs/archive/orun-work-v1/`). v1 stored status and pointed automation at
 > the column; v2 deletes the column. v1 spec'd Cloudflare D1 + per-project
