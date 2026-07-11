@@ -25,7 +25,7 @@ drift, and health are facts — folds nobody can edit.**
 
 | Field | Value |
 |-------|-------|
-| Status | **Draft — design locked with the cloud epic; ready for review** |
+| Status | **In progress — WH0–WH6 orun legs shipped** (#489 oracle · #490 EpicSnapshot + `orun epic pull` · #491 MCP surface 9→15 · WH6 import v4 + fold budget ~1.4 ms on the real corpus); the live dogfood import remains |
 | Builds on | `specs/orun-work/` (v2, shipped WP0–WP5): `internal/worklens` (the conformance oracle), the two-log model, the contract, sealing + `orun spec pull`, `orun work import`, `orun mcp serve` |
 | Coordinates with | orun-cloud `specs/epics/orun-work-v4/` (authoritative; schema/API/console), `specs/orun-agents/` (AG8 design runs land as Design drafts; AG9 dispatch consumes the sealed brief + preconditions) |
 | apiVersion | `orun.io/v1` (adds `Design`, milestone sub-items, `EpicSnapshot`; `Spec` gains the surface name **Epic** — wire kind unchanged) |

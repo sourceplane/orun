@@ -1,25 +1,61 @@
 {
   "workspace": "ws_test",
   "root": "testdata/spectree",
+  "initiatives": [
+    {
+      "slug": "dm",
+      "title": "Cluster DM"
+    },
+    {
+      "slug": "doc",
+      "title": "Cluster DOC"
+    }
+  ],
   "specs": [
     {
       "slug": "demo-epic",
       "title": "Spec: demo-epic",
       "docPath": "demo-epic/README.md",
       "docSha256": "sha256:dee4b2a554fe53461c2e956f3f19efba6d4f9f4b68993d6bcc8ea427529f02f1",
-      "planPath": "demo-epic/implementation-plan.md"
+      "planPath": "demo-epic/implementation-plan.md",
+      "initiative": "dm"
     },
     {
       "slug": "docs-only",
       "title": "docs-only epic",
       "docPath": "docs-only/README.md",
-      "docSha256": "sha256:d9d8f033da28bab6aae3cf2bd8492285c630ad88ac113c970953178646da5297"
+      "docSha256": "sha256:d9d8f033da28bab6aae3cf2bd8492285c630ad88ac113c970953178646da5297",
+      "initiative": "doc"
+    }
+  ],
+  "milestones": [
+    {
+      "specSlug": "demo-epic",
+      "key": "D0",
+      "title": "Lay the substrate",
+      "goal": "the two tables exist and replay",
+      "doneWhen": [
+        "dropping caches and replaying reproduces reads",
+        "an event without an actor is rejected"
+      ],
+      "ordinal": 0
+    },
+    {
+      "specSlug": "demo-epic",
+      "key": "D1",
+      "title": "Wire the surface",
+      "goal": "the read surface renders evidence",
+      "doneWhen": [
+        "the list view shows rungs with evidence"
+      ],
+      "ordinal": 1
     }
   ],
   "tasks": [
     {
       "specSlug": "demo-epic",
       "milestoneId": "D0",
+      "milestone": "D0",
       "title": "Lay the substrate",
       "contract": {
         "goal": "the two tables exist and replay",
@@ -32,6 +68,7 @@
     {
       "specSlug": "demo-epic",
       "milestoneId": "D1",
+      "milestone": "D1",
       "title": "Wire the surface",
       "contract": {
         "goal": "the read surface renders evidence",

@@ -14,11 +14,12 @@ import (
 
 // WorkImportSpec mirrors the CLI import plan's spec entry.
 type WorkImportSpec struct {
-	Slug      string `json:"slug"`
-	Title     string `json:"title"`
-	DocPath   string `json:"docPath"`
-	DocSHA256 string `json:"docSha256"`
-	PlanPath  string `json:"planPath,omitempty"`
+	Slug       string `json:"slug"`
+	Title      string `json:"title"`
+	DocPath    string `json:"docPath"`
+	DocSHA256  string `json:"docSha256"`
+	PlanPath   string `json:"planPath,omitempty"`
+	Initiative string `json:"initiative,omitempty"`
 }
 
 // WorkImportTask mirrors the CLI import plan's task entry. No lifecycle
@@ -26,6 +27,7 @@ type WorkImportSpec struct {
 type WorkImportTask struct {
 	SpecSlug    string        `json:"specSlug"`
 	MilestoneID string        `json:"milestoneId"`
+	Milestone   string        `json:"milestone,omitempty"`
 	Title       string        `json:"title"`
 	Contract    *WorkContract `json:"contract,omitempty"`
 }
@@ -41,21 +43,45 @@ type WorkContract struct {
 	GatesDefined bool     `json:"gatesDefined,omitempty"`
 }
 
+// WorkImportInitiative mirrors the plan's initiative entry (v4 WH6).
+type WorkImportInitiative struct {
+	Slug  string `json:"slug"`
+	Title string `json:"title"`
+}
+
+// WorkImportMilestone mirrors the plan's milestone entry (v4 WH6).
+type WorkImportMilestone struct {
+	SpecSlug string   `json:"specSlug"`
+	Key      string   `json:"key"`
+	Title    string   `json:"title"`
+	Goal     string   `json:"goal,omitempty"`
+	DoneWhen []string `json:"doneWhen,omitempty"`
+	Ordinal  int      `json:"ordinal"`
+}
+
 // WorkImportRequest is the apply body (the dry-run plan, verbatim).
 type WorkImportRequest struct {
-	Workspace string           `json:"workspace"`
-	Root      string           `json:"root"`
-	Prefix    string           `json:"prefix,omitempty"`
-	Specs     []WorkImportSpec `json:"specs"`
-	Tasks     []WorkImportTask `json:"tasks"`
+	Workspace   string                 `json:"workspace"`
+	Root        string                 `json:"root"`
+	Prefix      string                 `json:"prefix,omitempty"`
+	Initiatives []WorkImportInitiative `json:"initiatives,omitempty"`
+	Specs       []WorkImportSpec       `json:"specs"`
+	Milestones  []WorkImportMilestone  `json:"milestones,omitempty"`
+	Tasks       []WorkImportTask       `json:"tasks"`
 }
 
 // WorkImportResponse reports apply counts; re-imports skip idempotently.
 type WorkImportResponse struct {
-	SpecsCreated int `json:"specsCreated"`
-	SpecsSkipped int `json:"specsSkipped"`
-	TasksCreated int `json:"tasksCreated"`
-	TasksSkipped int `json:"tasksSkipped"`
+	SpecsCreated  int `json:"specsCreated"`
+	SpecsSkipped  int `json:"specsSkipped"`
+	TasksCreated  int `json:"tasksCreated"`
+	TasksSkipped  int `json:"tasksSkipped"`
+	// v4 (WH6) — additive; zero on pre-v4 servers.
+	InitiativesCreated int `json:"initiativesCreated,omitempty"`
+	InitiativesSkipped int `json:"initiativesSkipped,omitempty"`
+	MilestonesCreated  int `json:"milestonesCreated,omitempty"`
+	MilestonesSkipped  int `json:"milestonesSkipped,omitempty"`
+	TasksMigrated      int `json:"tasksMigrated,omitempty"`
 }
 
 // WorkActor is a membership subject on the wire.

@@ -3,9 +3,11 @@ package worklens
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite golden files")
@@ -129,4 +131,56 @@ func indexOf(haystack, needle string) int {
 		}
 	}
 	return -1
+}
+
+// TestFoldBudgetOnDogfoodCorpus measures the delivery fold + the intent and
+// rollup folds over this repo's real specs tree — the WH6 budget record
+// (P-1 heritage: lifecycle-at-read must stay cheap on a hot workspace).
+// The number lands in specs/epics/orun-work-v4/implementation-plan.md.
+func TestFoldBudgetOnDogfoodCorpus(t *testing.T) {
+	root := filepath.Join("..", "..", "specs")
+	if _, err := os.Stat(root); err != nil {
+		t.Skip("specs tree not present")
+	}
+	plan, err := ParseSpecTree(root, "ws_dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tasks []Task
+	var events []CoordinationEvent
+	seq := int64(0)
+	for i, it := range plan.Tasks {
+		key := fmt.Sprintf("WRK-%d", i+1)
+		tasks = append(tasks, Task{
+			APIVersion: APIVersion, Kind: KindTask, Key: key, Workspace: "ws_dev",
+			Spec: it.SpecSlug, Milestone: it.Milestone, Title: it.Title, Contract: it.Contract,
+			CreatedBy: Actor{Type: ActorUser, ID: "usr_1", Via: "import"},
+		})
+	}
+	for _, m := range plan.Milestones {
+		seq++
+		payload, _ := json.Marshal(map[string]interface{}{"op": "create", "key": m.Key, "title": m.Title, "ordinal": m.Ordinal})
+		events = append(events, CoordinationEvent{
+			Workspace: "ws_dev", Subject: m.SpecSlug, Kind: EventMilestoneEdited,
+			Actor: Actor{Type: ActorUser, ID: "usr_1", Via: "import"},
+			At:    "2026-07-11T10:00:00Z", Payload: payload, Seq: seq,
+		})
+	}
+	ws := WorkSet{Tasks: tasks, Events: events}
+
+	const rounds = 50
+	start := time.Now()
+	for i := 0; i < rounds; i++ {
+		fr := Fold(ws)
+		for _, spec := range plan.Specs {
+			ladder := FoldMilestones(spec.Slug, events)
+			_ = FoldEpicExecution(ws, spec.Slug, ladder, fr)
+			_ = FoldEpicIntent(spec.Slug, events)
+		}
+	}
+	per := time.Since(start) / rounds
+	t.Logf("dogfood corpus: %d specs, %d milestones, %d tasks — full workspace fold+rollups: %s/round", len(plan.Specs), len(plan.Milestones), len(plan.Tasks), per)
+	if per > 250*time.Millisecond {
+		t.Fatalf("fold budget blown: %s/round (budget 250ms)", per)
+	}
 }
