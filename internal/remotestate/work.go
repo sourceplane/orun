@@ -228,6 +228,30 @@ type WorkDoc struct {
 	CreatedAt string `json:"createdAt"`
 }
 
+// WorkEpicBrief is the sealed brief approval minted (orun-work-v4 WH4):
+// canonical bytes plus their content id. Verification is content addressing
+// itself — sha256(Canonical) MUST equal ID; there is no second canonicalizer.
+type WorkEpicBrief struct {
+	ID        string `json:"id"`
+	Subject   string `json:"subject"`
+	Canonical string `json:"canonical"`
+	CreatedAt string `json:"createdAt,omitempty"`
+}
+
+// GetEpicBrief fetches the sealed EpicSnapshot for an epic — latest when id
+// is empty, or the exact pinned snapshot.
+func (c *Client) GetEpicBrief(ctx context.Context, epicKey, id string) (*WorkEpicBrief, error) {
+	path := c.workPath("/epics/" + urlSegment(epicKey) + "/brief")
+	if id != "" {
+		path += "?id=" + urlSegment(id)
+	}
+	var resp WorkEpicBrief
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // GetWorkDoc fetches a spec's cloud document (latest when rev is empty).
 func (c *Client) GetWorkDoc(ctx context.Context, specKey, rev string) (*WorkDoc, error) {
 	path := c.workPath("/specs/" + urlSegment(specKey) + "/doc")

@@ -27,6 +27,53 @@ type SpecSnapshot struct {
 	ObsSeq     int64  `json:"obsSeq"`            // observation-log cursor at seal time
 }
 
+// EpicSnapshotApproval is the approval record sealed into an EpicSnapshot:
+// who approved which doc revision, when. Intent — a decision — never fold
+// output.
+type EpicSnapshotApproval struct {
+	Revision string `json:"revision,omitempty"`
+	By       Actor  `json:"by"`
+	At       string `json:"at,omitempty"`
+}
+
+// EpicSnapshot ⊇ SpecSnapshot (orun-work-v4 WH4): the frozen brief approval
+// mints — the epic envelope, the milestone ladder + its canonical hash, the
+// task envelopes with contracts (informative context: task churn never
+// drifts approval, V4-5), the approval record, and the log cursors. The
+// cloud seals it in the approve transaction; `orun epic pull` verifies the
+// content id by hashing the returned canonical bytes — one artifact, no
+// second canonicalizer to drift (V4-6).
+type EpicSnapshot struct {
+	Kind       string               `json:"kind"` // "EpicSnapshot"
+	APIVersion string               `json:"apiVersion"`
+	Spec       Spec                 `json:"spec"`
+	Milestones []Milestone          `json:"milestones"`
+	Tasks      []Task               `json:"tasks"`
+	LadderHash string               `json:"ladderHash"`
+	Design     string               `json:"design,omitempty"` // adopted design revision
+	Approval   EpicSnapshotApproval `json:"approval"`
+	Catalog    string               `json:"catalog,omitempty"`
+	CoordSeq   int64                `json:"coordSeq"`
+	ObsSeq     int64                `json:"obsSeq"`
+}
+
+// VerifySealedBytes checks that canonical bytes hash to the claimed content
+// id — the whole trust chain of a fetched brief (content addressing needs
+// no second canonicalizer, only the hash).
+func VerifySealedBytes(id string, canonical []byte) error {
+	sum := sha256.Sum256(canonical)
+	got := "sha256:" + hex.EncodeToString(sum[:])
+	if got != id {
+		return fmt.Errorf("worklens: sealed bytes hash to %s, not the claimed %s", got, id)
+	}
+	for _, k := range hotStateKeys {
+		if containsToken(canonical, k) {
+			return fmt.Errorf("worklens: sealed brief carries hot state (%s) — invariant 1", k)
+		}
+	}
+	return nil
+}
+
 // CoordinationSegment seals a coordination-log range; Prev chains segments.
 type CoordinationSegment struct {
 	Kind       string              `json:"kind"` // "WorkCoordinationSegment"
