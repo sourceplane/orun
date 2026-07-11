@@ -56,13 +56,11 @@ func TestNoLifecycleWriteKindExists(t *testing.T) {
 }
 
 func TestV3VocabularyAcceptedAtWriteTime(t *testing.T) {
-	// orun-work-v3 PM0: the coordination vocabulary grows to 19; every
+	// orun-work-v3 PM0: the coordination vocabulary grew to 19; every
 	// addition is intent or conversation (V3-1). Write-time acceptance only —
 	// the fold reads none of them (the shared conformance fixtures pin the
 	// lifecycle logic byte-identically). The observation vocabulary is frozen.
-	if got := len(EventKinds); got != 19 {
-		t.Fatalf("EventKinds = %d, want 19", got)
-	}
+	// (The total count is asserted by the v4 test — TestV4VocabularyAndGuards.)
 	if got := len(ObservationKinds); got != 6 {
 		t.Fatalf("ObservationKinds = %d, want 6 (frozen in v3 — V3-1)", got)
 	}

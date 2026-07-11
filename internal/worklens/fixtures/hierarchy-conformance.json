@@ -1,0 +1,240 @@
+{
+  "comment": "orun-work v4 hierarchy conformance fixtures (WH0). The Go intent/rollup folds (internal/worklens) are the oracle; the orun-cloud TypeScript fold replays this exact file. Do not edit one copy without the other — the files must stay byte-identical. The v2 delivery fixtures (conformance.json) are frozen and separate (V4-1).",
+  "epicIntentCases": [
+    {
+      "name": "created epic folds to draft",
+      "epicKey": "sourceplane/specs/wh-demo",
+      "events": [
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "item_created", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:00:00Z", "seq": 1 }
+      ],
+      "expect": { "state": "draft" }
+    },
+    {
+      "name": "review request enters in_review",
+      "epicKey": "sourceplane/specs/wh-demo",
+      "events": [
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "item_created", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:00:00Z", "seq": 1 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "doc_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:05:00Z", "payload": { "revision": "sha256:aaa1" }, "seq": 2 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "review_requested", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:10:00Z", "payload": { "revision": "sha256:aaa1" }, "seq": 3 }
+      ],
+      "expect": { "state": "in_review", "currentRevision": "sha256:aaa1" }
+    },
+    {
+      "name": "approval covers the doc revision and the milestone ladder",
+      "epicKey": "sourceplane/specs/wh-demo",
+      "events": [
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "item_created", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:00:00Z", "seq": 1 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "doc_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:05:00Z", "payload": { "revision": "sha256:aaa1" }, "seq": 2 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "milestone_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:06:00Z", "payload": { "op": "create", "key": "M1", "title": "Foundation", "goal": "lay it", "ordinal": 0 }, "seq": 3 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "approved", "actor": { "type": "user", "id": "usr_rahul" }, "at": "2026-07-10T10:00:00Z", "payload": { "revision": "sha256:aaa1", "snapshot": "sha256:snap1" }, "seq": 4 }
+      ],
+      "expect": {
+        "state": "approved",
+        "currentRevision": "sha256:aaa1",
+        "approval": { "revision": "sha256:aaa1", "snapshot": "sha256:snap1", "by": "usr_rahul" },
+        "milestones": ["M1"]
+      }
+    },
+    {
+      "name": "doc edit after approval drifts it",
+      "epicKey": "sourceplane/specs/wh-demo",
+      "events": [
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "doc_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:05:00Z", "payload": { "revision": "sha256:aaa1" }, "seq": 1 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "approved", "actor": { "type": "user", "id": "usr_rahul" }, "at": "2026-07-10T10:00:00Z", "payload": { "revision": "sha256:aaa1" }, "seq": 2 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "doc_edited", "actor": { "type": "user", "id": "usr_2" }, "at": "2026-07-10T11:00:00Z", "payload": { "revision": "sha256:bbb2" }, "seq": 3 }
+      ],
+      "expect": { "state": "approved_drifted", "currentRevision": "sha256:bbb2", "docDrifted": true, "ladderDrifted": false, "approval": { "revision": "sha256:aaa1", "by": "usr_rahul" } }
+    },
+    {
+      "name": "milestone edit after approval drifts the ladder",
+      "epicKey": "sourceplane/specs/wh-demo",
+      "events": [
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "milestone_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:06:00Z", "payload": { "op": "create", "key": "M1", "title": "Foundation", "ordinal": 0 }, "seq": 1 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "approved", "actor": { "type": "user", "id": "usr_rahul" }, "at": "2026-07-10T10:00:00Z", "payload": { "revision": "" }, "seq": 2 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "milestone_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T11:00:00Z", "payload": { "op": "create", "key": "M2", "title": "Surface", "ordinal": 1 }, "seq": 3 }
+      ],
+      "expect": { "state": "approved_drifted", "docDrifted": false, "ladderDrifted": true, "milestones": ["M1", "M2"] }
+    },
+    {
+      "name": "task churn does not drift approval (V4-5): task-subject events are invisible to the epic fold",
+      "epicKey": "sourceplane/specs/wh-demo",
+      "events": [
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "approved", "actor": { "type": "user", "id": "usr_rahul" }, "at": "2026-07-10T10:00:00Z", "payload": { "revision": "" }, "seq": 1 },
+        { "workspace": "ws_test", "subject": "ORN-90", "kind": "canceled", "actor": { "type": "agent", "id": "sp_agent" }, "at": "2026-07-10T11:00:00Z", "seq": 2 },
+        { "workspace": "ws_test", "subject": "ORN-91", "kind": "item_created", "actor": { "type": "agent", "id": "sp_agent" }, "at": "2026-07-10T11:00:01Z", "seq": 3 },
+        { "workspace": "ws_test", "subject": "ORN-91", "kind": "contract_edited", "actor": { "type": "agent", "id": "sp_agent" }, "at": "2026-07-10T11:00:02Z", "seq": 4 },
+        { "workspace": "ws_test", "subject": "ORN-91", "kind": "milestone_set", "actor": { "type": "agent", "id": "sp_agent" }, "at": "2026-07-10T11:00:03Z", "payload": { "milestone": "M1" }, "seq": 5 }
+      ],
+      "expect": { "state": "approved" }
+    },
+    {
+      "name": "revocation clears approval; a later review request re-enters in_review",
+      "epicKey": "sourceplane/specs/wh-demo",
+      "events": [
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "approved", "actor": { "type": "user", "id": "usr_rahul" }, "at": "2026-07-10T10:00:00Z", "payload": { "revision": "sha256:aaa1" }, "seq": 1 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "approval_revoked", "actor": { "type": "user", "id": "usr_rahul" }, "at": "2026-07-10T12:00:00Z", "seq": 2 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "review_requested", "actor": { "type": "user", "id": "usr_2" }, "at": "2026-07-10T13:00:00Z", "seq": 3 }
+      ],
+      "expect": { "state": "in_review" }
+    },
+    {
+      "name": "re-approval clears drift",
+      "epicKey": "sourceplane/specs/wh-demo",
+      "events": [
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "doc_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:00:00Z", "payload": { "revision": "sha256:aaa1" }, "seq": 1 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "approved", "actor": { "type": "user", "id": "usr_rahul" }, "at": "2026-07-10T10:00:00Z", "payload": { "revision": "sha256:aaa1" }, "seq": 2 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "doc_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T11:00:00Z", "payload": { "revision": "sha256:bbb2" }, "seq": 3 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "approved", "actor": { "type": "user", "id": "usr_rahul" }, "at": "2026-07-10T12:00:00Z", "payload": { "revision": "sha256:bbb2", "snapshot": "sha256:snap2" }, "seq": 4 }
+      ],
+      "expect": { "state": "approved", "approval": { "revision": "sha256:bbb2", "snapshot": "sha256:snap2", "by": "usr_rahul" } }
+    },
+    {
+      "name": "milestone remove and reorder fold in log order",
+      "epicKey": "sourceplane/specs/wh-demo",
+      "events": [
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "milestone_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:00:00Z", "payload": { "op": "create", "key": "M1", "title": "One", "ordinal": 0 }, "seq": 1 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "milestone_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:01:00Z", "payload": { "op": "create", "key": "M2", "title": "Two", "ordinal": 1 }, "seq": 2 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "milestone_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:02:00Z", "payload": { "op": "create", "key": "M3", "title": "Three", "ordinal": 2 }, "seq": 3 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "milestone_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:03:00Z", "payload": { "op": "remove", "key": "M2" }, "seq": 4 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "milestone_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:04:00Z", "payload": { "op": "reorder", "key": "M3", "ordinal": 0 }, "seq": 5 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "milestone_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:05:00Z", "payload": { "op": "reorder", "key": "M1", "ordinal": 1 }, "seq": 6 }
+      ],
+      "expect": { "state": "draft", "milestones": ["M3", "M1"] }
+    }
+  ],
+  "designIntentCases": [
+    {
+      "name": "created design folds to draft",
+      "designKey": "DSG-1",
+      "events": [
+        { "workspace": "ws_test", "subject": "DSG-1", "kind": "item_created", "actor": { "type": "agent", "id": "sp_designer" }, "at": "2026-07-10T09:00:00Z", "seq": 1 }
+      ],
+      "expect": { "state": "draft" }
+    },
+    {
+      "name": "adoption freezes the record",
+      "designKey": "DSG-1",
+      "events": [
+        { "workspace": "ws_test", "subject": "DSG-1", "kind": "review_requested", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:10:00Z", "seq": 1 },
+        { "workspace": "ws_test", "subject": "DSG-1", "kind": "design_adopted", "actor": { "type": "user", "id": "usr_rahul" }, "at": "2026-07-10T10:00:00Z", "payload": { "revision": "sha256:ddd1", "minted": ["sourceplane/specs/epic-a", "sourceplane/specs/epic-b"] }, "seq": 2 }
+      ],
+      "expect": { "state": "adopted", "adoptedRevision": "sha256:ddd1", "minted": ["sourceplane/specs/epic-a", "sourceplane/specs/epic-b"], "adoptedBy": "usr_rahul" }
+    },
+    {
+      "name": "superseded is terminal and keeps the adoption record",
+      "designKey": "DSG-2",
+      "events": [
+        { "workspace": "ws_test", "subject": "DSG-2", "kind": "design_adopted", "actor": { "type": "user", "id": "usr_rahul" }, "at": "2026-07-10T10:00:00Z", "payload": { "revision": "sha256:eee1", "minted": ["sourceplane/specs/epic-c"] }, "seq": 1 },
+        { "workspace": "ws_test", "subject": "DSG-2", "kind": "superseded", "actor": { "type": "user", "id": "usr_rahul" }, "at": "2026-07-11T10:00:00Z", "payload": { "by": "DSG-3" }, "seq": 2 }
+      ],
+      "expect": { "state": "superseded", "supersededBy": "DSG-3", "adoptedRevision": "sha256:eee1", "minted": ["sourceplane/specs/epic-c"] }
+    }
+  ],
+  "rollupCases": [
+    {
+      "name": "milestone buckets, unscheduled bucket, and epic totals",
+      "epicKey": "sourceplane/specs/wh-demo",
+      "ladderEvents": [
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "milestone_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:00:00Z", "payload": { "op": "create", "key": "M1", "title": "One", "ordinal": 0 }, "seq": 1 },
+        { "workspace": "ws_test", "subject": "sourceplane/specs/wh-demo", "kind": "milestone_edited", "actor": { "type": "user", "id": "usr_1" }, "at": "2026-07-10T09:01:00Z", "payload": { "op": "create", "key": "M2", "title": "Two", "ordinal": 1 }, "seq": 2 }
+      ],
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "WHD-1", "workspace": "ws_test", "spec": "sourceplane/specs/wh-demo", "milestone": "M1", "title": "done task", "contract": { "goal": "g", "affects": ["a/b/c"], "doneWhen": ["d"], "gates": [], "gatesDefined": true }, "createdBy": { "type": "agent", "id": "sp_agent" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "WHD-2", "workspace": "ws_test", "spec": "sourceplane/specs/wh-demo", "milestone": "M1", "title": "ready task", "contract": { "goal": "g", "affects": ["a/b/c"], "doneWhen": ["d"], "gates": ["tests"] }, "createdBy": { "type": "agent", "id": "sp_agent" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "WHD-3", "workspace": "ws_test", "spec": "sourceplane/specs/wh-demo", "milestone": "M2", "title": "draft task", "createdBy": { "type": "user", "id": "usr_1" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "WHD-4", "workspace": "ws_test", "spec": "sourceplane/specs/wh-demo", "title": "unscheduled task", "createdBy": { "type": "user", "id": "usr_1" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "OTH-1", "workspace": "ws_test", "spec": "sourceplane/specs/other", "title": "other epic", "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_merged", "at": "2026-07-10T12:00:00Z", "dedupeKey": "gh:pr:o/r#7:merged", "payload": { "pr": "o/r#7", "revision": "sha256:rev7", "taskKeys": ["WHD-1"] }, "seq": 1 }
+      ],
+      "expect": {
+        "milestones": [
+          { "key": "M1", "total": 2, "complete": 1 },
+          { "key": "M2", "total": 1, "complete": 0 }
+        ],
+        "unscheduled": { "total": 1, "complete": 0 },
+        "total": 4,
+        "complete": 1,
+        "blocked": 0
+      }
+    }
+  ],
+  "healthCases": [
+    {
+      "name": "on_track with progress evidence",
+      "initiativeKey": "sourceplane/initiatives/ai-native-work",
+      "asOf": "2026-07-11",
+      "epics": [
+        {
+          "epic": { "apiVersion": "orun.io/v1", "kind": "Spec", "key": "sourceplane/specs/epic-a", "workspace": "ws_test", "title": "A", "initiative": "sourceplane/initiatives/ai-native-work", "createdBy": { "type": "user", "id": "usr_1" } },
+          "intent": { "state": "approved" },
+          "execution": { "totals": { "done": 1, "ready": 1 }, "total": 2, "complete": 1, "blocked": 0 }
+        }
+      ],
+      "events": [],
+      "expect": { "health": "on_track", "total": 2, "complete": 1, "evidence": ["1/2 tasks complete across 1 epic(s)"] }
+    },
+    {
+      "name": "at_risk names the blocked tasks and the drifted approval",
+      "initiativeKey": "sourceplane/initiatives/ai-native-work",
+      "asOf": "2026-07-11",
+      "epics": [
+        {
+          "epic": { "apiVersion": "orun.io/v1", "kind": "Spec", "key": "sourceplane/specs/epic-a", "workspace": "ws_test", "title": "A", "initiative": "sourceplane/initiatives/ai-native-work", "createdBy": { "type": "user", "id": "usr_1" } },
+          "intent": { "state": "approved_drifted" },
+          "execution": { "totals": { "in_progress": 2 }, "total": 2, "complete": 0, "blocked": 1 }
+        }
+      ],
+      "events": [],
+      "expect": { "health": "at_risk", "evidence": ["approval drifted on sourceplane/specs/epic-a", "1 blocked task(s) in sourceplane/specs/epic-a"] }
+    },
+    {
+      "name": "off_track when a member epic is past target and incomplete",
+      "initiativeKey": "sourceplane/initiatives/ai-native-work",
+      "asOf": "2026-07-11",
+      "epics": [
+        {
+          "epic": { "apiVersion": "orun.io/v1", "kind": "Spec", "key": "sourceplane/specs/epic-a", "workspace": "ws_test", "title": "A", "initiative": "sourceplane/initiatives/ai-native-work", "targetDate": "2026-07-01", "createdBy": { "type": "user", "id": "usr_1" } },
+          "intent": { "state": "approved" },
+          "execution": { "totals": { "in_review": 3 }, "total": 3, "complete": 0, "blocked": 0 }
+        }
+      ],
+      "events": [],
+      "expect": { "health": "off_track", "evidence": ["sourceplane/specs/epic-a past target 2026-07-01 (0/3 complete)"] }
+    },
+    {
+      "name": "pinned health renders beside derived truth and expires on catch-up",
+      "initiativeKey": "sourceplane/initiatives/ai-native-work",
+      "asOf": "2026-07-11",
+      "epics": [
+        {
+          "epic": { "apiVersion": "orun.io/v1", "kind": "Spec", "key": "sourceplane/specs/epic-a", "workspace": "ws_test", "title": "A", "initiative": "sourceplane/initiatives/ai-native-work", "createdBy": { "type": "user", "id": "usr_1" } },
+          "intent": { "state": "approved" },
+          "execution": { "totals": { "in_progress": 2 }, "total": 2, "complete": 0, "blocked": 1 }
+        }
+      ],
+      "events": [
+        { "workspace": "ws_test", "subject": "sourceplane/initiatives/ai-native-work", "kind": "pinned", "actor": { "type": "user", "id": "usr_rahul" }, "at": "2026-07-10T09:00:00Z", "payload": { "rung": "on_track", "note": "vendor fix lands Monday" }, "seq": 1 }
+      ],
+      "expect": { "health": "at_risk", "pinned": { "health": "on_track", "by": "usr_rahul" } }
+    },
+    {
+      "name": "a pin at or below derived health does not render",
+      "initiativeKey": "sourceplane/initiatives/ai-native-work",
+      "asOf": "2026-07-11",
+      "epics": [
+        {
+          "epic": { "apiVersion": "orun.io/v1", "kind": "Spec", "key": "sourceplane/specs/epic-a", "workspace": "ws_test", "title": "A", "initiative": "sourceplane/initiatives/ai-native-work", "createdBy": { "type": "user", "id": "usr_1" } },
+          "intent": { "state": "approved" },
+          "execution": { "totals": { "done": 2 }, "total": 2, "complete": 2, "blocked": 0 }
+        }
+      ],
+      "events": [
+        { "workspace": "ws_test", "subject": "sourceplane/initiatives/ai-native-work", "kind": "pinned", "actor": { "type": "user", "id": "usr_rahul" }, "at": "2026-07-10T09:00:00Z", "payload": { "rung": "on_track" }, "seq": 1 }
+      ],
+      "expect": { "health": "on_track" }
+    }
+  ]
+}

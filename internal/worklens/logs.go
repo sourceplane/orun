@@ -41,6 +41,9 @@ func (e CoordinationEvent) Validate() error {
 	if e.Kind == EventPinned && e.Actor.Type == ActorAgent {
 		return fmt.Errorf("worklens: agents may not pin (%s on %s)", e.Kind, e.Subject)
 	}
+	if IsHumanOnlyEventKind(e.Kind) && e.Actor.Type != ActorUser {
+		return fmt.Errorf("worklens: %s is a human-only decision — actor type %q may not author it (V4-2)", e.Kind, e.Actor.Type)
+	}
 	return nil
 }
 
@@ -77,6 +80,120 @@ func (e CoordinationEvent) PinOf() (PinPayload, bool) {
 	if len(e.Payload) > 0 {
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
 			return PinPayload{}, false
+		}
+	}
+	return p, true
+}
+
+// --- v4 intent-ladder payloads (orun-work-v4 design §1.3) ---
+
+// MilestonePayload is the payload of a milestone_edited event on an epic
+// subject — the only way milestones change. Pointer fields distinguish
+// "not touched" from "set to zero" on edit.
+type MilestonePayload struct {
+	Op         string   `json:"op"` // create | edit | reorder | remove
+	Key        string   `json:"key"`
+	Title      *string  `json:"title,omitempty"`
+	Goal       *string  `json:"goal,omitempty"`
+	DoneWhen   []string `json:"doneWhen,omitempty"`
+	TargetDate *string  `json:"targetDate,omitempty"`
+	Ordinal    *int     `json:"ordinal,omitempty"`
+}
+
+// MilestoneSetPayload is the payload of a milestone_set event on a task
+// subject. Milestone "" clears (back to the epic's unscheduled bucket).
+type MilestoneSetPayload struct {
+	Milestone string `json:"milestone,omitempty"`
+}
+
+// ReviewRequestedPayload enters an epic or design into In Review at a named
+// doc revision. Reviewers are suggestions, never gates.
+type ReviewRequestedPayload struct {
+	Revision  string   `json:"revision,omitempty"`
+	Reviewers []string `json:"reviewers,omitempty"`
+	Note      string   `json:"note,omitempty"`
+}
+
+// ReviewSubmittedPayload carries a reviewer's verdict at a revision. Agent
+// verdicts are advice (V4-2) — they count toward nothing by themselves.
+type ReviewSubmittedPayload struct {
+	Revision string        `json:"revision,omitempty"`
+	Verdict  ReviewVerdict `json:"verdict"`
+	Note     string        `json:"note,omitempty"`
+}
+
+// ApprovedPayload names exactly what was approved: the doc revision and the
+// sealed EpicSnapshot minted in the same transaction. "Approved" never
+// renders without "of what" (V4-2).
+type ApprovedPayload struct {
+	Revision string `json:"revision,omitempty"`
+	Snapshot string `json:"snapshot,omitempty"`
+}
+
+// DesignAdoptedPayload freezes the adoption record: the design revision the
+// mint ran from and the epic keys it created (V4-4).
+type DesignAdoptedPayload struct {
+	Revision string   `json:"revision,omitempty"`
+	Minted   []string `json:"minted,omitempty"`
+}
+
+// SupersededPayload marks a design terminal, optionally naming its rival.
+type SupersededPayload struct {
+	By   string `json:"by,omitempty"`
+	Note string `json:"note,omitempty"`
+}
+
+// MilestoneOf decodes a milestone_edited payload; ok is false for other
+// kinds or payloads without op+key.
+func (e CoordinationEvent) MilestoneOf() (MilestonePayload, bool) {
+	if e.Kind != EventMilestoneEdited || len(e.Payload) == 0 {
+		return MilestonePayload{}, false
+	}
+	var p MilestonePayload
+	if err := json.Unmarshal(e.Payload, &p); err != nil || p.Op == "" || p.Key == "" {
+		return MilestonePayload{}, false
+	}
+	return p, true
+}
+
+// DocRevisionOf decodes a doc_edited payload's revision; ok is false for
+// other kinds or revision-less payloads.
+func (e CoordinationEvent) DocRevisionOf() (string, bool) {
+	if e.Kind != EventDocEdited || len(e.Payload) == 0 {
+		return "", false
+	}
+	var p struct {
+		Revision string `json:"revision"`
+	}
+	if err := json.Unmarshal(e.Payload, &p); err != nil || p.Revision == "" {
+		return "", false
+	}
+	return p.Revision, true
+}
+
+// ApprovalOf decodes an approved payload; ok is false for other kinds.
+func (e CoordinationEvent) ApprovalOf() (ApprovedPayload, bool) {
+	if e.Kind != EventApproved {
+		return ApprovedPayload{}, false
+	}
+	var p ApprovedPayload
+	if len(e.Payload) > 0 {
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return ApprovedPayload{}, false
+		}
+	}
+	return p, true
+}
+
+// AdoptionOf decodes a design_adopted payload; ok is false for other kinds.
+func (e CoordinationEvent) AdoptionOf() (DesignAdoptedPayload, bool) {
+	if e.Kind != EventDesignAdopted {
+		return DesignAdoptedPayload{}, false
+	}
+	var p DesignAdoptedPayload
+	if len(e.Payload) > 0 {
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return DesignAdoptedPayload{}, false
 		}
 	}
 	return p, true
