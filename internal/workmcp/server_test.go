@@ -17,6 +17,9 @@ type fakeAPI struct {
 	created  []remotestate.CreateWorkTaskRequest
 	assigned []string
 	edited   []string
+	designs  []string
+	regenerated []string
+	brief    *remotestate.WorkEpicBrief
 	failNext error
 }
 
@@ -50,6 +53,42 @@ func (f *fakeAPI) GetWorkTimeline(_ context.Context, key string) (*remotestate.W
 		{At: "2026-07-01T00:00:00Z", Type: "event"},
 		{At: "2026-07-01T01:00:00Z", Type: "observation"},
 	}}, nil
+}
+func (f *fakeAPI) GetEpicBrief(_ context.Context, epicKey, id string) (*remotestate.WorkEpicBrief, error) {
+	if f.failNext != nil {
+		return nil, f.failNext
+	}
+	if f.brief == nil {
+		return nil, fmt.Errorf("no sealed brief for %s — approval seals one", epicKey)
+	}
+	return f.brief, nil
+}
+func (f *fakeAPI) GetEpicMilestones(_ context.Context, epicKey string) (*remotestate.WorkMilestonesView, error) {
+	return &remotestate.WorkMilestonesView{Epic: epicKey, Milestones: []remotestate.WorkMilestoneView{
+		{Key: "M1", Title: "Foundation", Goal: "lay it", Ordinal: 0, Total: 2, Complete: 1},
+	}}, nil
+}
+func (f *fakeAPI) GetWorkDesign(_ context.Context, key string) (*remotestate.WorkDesignView, error) {
+	return &remotestate.WorkDesignView{Key: key, Initiative: "ai-native-work", Title: "Design One",
+		CreatedBy: remotestate.WorkActor{Type: "agent", ID: "sp_1"},
+		Intent:    json.RawMessage(`{"state":"draft"}`)}, nil
+}
+func (f *fakeAPI) GetWorkRollups(_ context.Context, initiativeKey string) (*remotestate.WorkRollups, error) {
+	return &remotestate.WorkRollups{Initiative: initiativeKey, Health: "at_risk",
+		Evidence: []string{"1 blocked task(s) in demo-epic"}, Progress: map[string]int{"ready": 1},
+		Total: 2, Complete: 1, Epics: json.RawMessage(`[]`)}, nil
+}
+func (f *fakeAPI) CreateWorkDesign(_ context.Context, initiativeKey string, req remotestate.CreateWorkDesignRequest) (*remotestate.WorkMutationResponse, error) {
+	f.designs = append(f.designs, initiativeKey+": "+req.Title)
+	return &remotestate.WorkMutationResponse{Key: "DSG-1", Seq: 21}, nil
+}
+func (f *fakeAPI) RegenerateWorkTasks(_ context.Context, epicKey, milestone string, req remotestate.RegenerateWorkTasksRequest) (*remotestate.RegenerateWorkTasksResponse, error) {
+	f.regenerated = append(f.regenerated, epicKey+"/"+milestone)
+	created := make([]string, 0, len(req.Tasks))
+	for i := range req.Tasks {
+		created = append(created, fmt.Sprintf("WK-%d", i+1))
+	}
+	return &remotestate.RegenerateWorkTasksResponse{Canceled: []string{"WK-0"}, Kept: []string{"WK-9"}, Created: created}, nil
 }
 func (f *fakeAPI) GetWorkDoc(_ context.Context, specKey, rev string) (*remotestate.WorkDoc, error) {
 	if f.failNext != nil {
@@ -135,13 +174,18 @@ func TestInitializeAndToolSurface(t *testing.T) {
 	for _, tl := range tools {
 		names[tl.(map[string]interface{})["name"].(string)] = true
 	}
-	for _, want := range []string{"work_query", "work_get", "spec_get", "work_timeline", "spec_doc", "task_create", "task_comment", "task_assign", "contract_propose"} {
+	for _, want := range []string{
+		"work_query", "work_get", "spec_get", "work_timeline", "spec_doc",
+		"task_create", "task_comment", "task_assign", "contract_propose",
+		"epic_brief", "milestone_get", "design_get", "initiative_get",
+		"design_propose", "task_regenerate",
+	} {
 		if !names[want] {
 			t.Errorf("missing tool %s", want)
 		}
 	}
-	if len(tools) != 9 {
-		t.Errorf("tool surface = %d tools, want exactly 9 (closed: 5 reads + 4 writes)", len(tools))
+	if len(tools) != 15 {
+		t.Errorf("tool surface = %d tools, want exactly 15 (closed: 9 reads + 6 writes — WH5)", len(tools))
 	}
 	// The lie is unrepresentable: no lifecycle write, no pin (WP-3, WP-10).
 	// The sweep runs over the composed server's tools/list (the merged

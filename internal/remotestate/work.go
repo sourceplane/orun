@@ -133,10 +133,11 @@ func (c *Client) GetWorkSummary(ctx context.Context) (*WorkSummary, error) {
 
 // CreateWorkTaskRequest mirrors the platform's CreateWorkTaskRequest.
 type CreateWorkTaskRequest struct {
-	Prefix   string        `json:"prefix"`
-	Title    string        `json:"title"`
-	SpecKey  string        `json:"specKey,omitempty"`
-	Contract *WorkContract `json:"contract,omitempty"`
+	Prefix    string        `json:"prefix"`
+	Title     string        `json:"title"`
+	SpecKey   string        `json:"specKey,omitempty"`
+	Milestone string        `json:"milestone,omitempty"` // v4: lands inside SpecKey's ladder
+	Contract  *WorkContract `json:"contract,omitempty"`
 }
 
 // WorkMutationResponse reports the appended coordination event's seq.
@@ -226,6 +227,129 @@ type WorkDoc struct {
 	SpecKey   string `json:"specKey"`
 	Body      string `json:"body"`
 	CreatedAt string `json:"createdAt"`
+}
+
+// WorkMilestoneView mirrors the platform's milestone view: authored fields
+// plus DERIVED progress (never entered — V4-4).
+type WorkMilestoneView struct {
+	Key        string         `json:"key"`
+	Title      string         `json:"title"`
+	Goal       string         `json:"goal,omitempty"`
+	DoneWhen   []string       `json:"doneWhen,omitempty"`
+	TargetDate string         `json:"targetDate,omitempty"`
+	Ordinal    int            `json:"ordinal"`
+	Progress   map[string]int `json:"progress,omitempty"`
+	Total      int            `json:"total,omitempty"`
+	Complete   int            `json:"complete,omitempty"`
+}
+
+// WorkMilestonesView is one epic's ladder with derived progress.
+type WorkMilestonesView struct {
+	Epic        string              `json:"epic"`
+	Milestones  []WorkMilestoneView `json:"milestones"`
+	Unscheduled *struct {
+		Total    int `json:"total"`
+		Complete int `json:"complete"`
+	} `json:"unscheduled,omitempty"`
+}
+
+// GetEpicMilestones fetches an epic's milestone ladder with derived
+// per-milestone progress.
+func (c *Client) GetEpicMilestones(ctx context.Context, epicKey string) (*WorkMilestonesView, error) {
+	var resp WorkMilestonesView
+	if err := c.doJSON(ctx, http.MethodGet, c.workPath("/epics/"+urlSegment(epicKey)+"/milestones"), nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkDesignView mirrors the platform's design view: the doc chain pointer,
+// the sealed context, the structured proposal, and the FOLDED intent state.
+type WorkDesignView struct {
+	Key        string          `json:"key"`
+	Initiative string          `json:"initiative"`
+	Title      string          `json:"title"`
+	DocRef     string          `json:"docRef,omitempty"`
+	Context    json.RawMessage `json:"context,omitempty"`
+	Proposal   json.RawMessage `json:"proposal,omitempty"`
+	CreatedBy  WorkActor       `json:"createdBy"`
+	CreatedAt  string          `json:"createdAt,omitempty"`
+	Intent     json.RawMessage `json:"intent,omitempty"`
+}
+
+// GetWorkDesign fetches one design.
+func (c *Client) GetWorkDesign(ctx context.Context, key string) (*WorkDesignView, error) {
+	var resp WorkDesignView
+	if err := c.doJSON(ctx, http.MethodGet, c.workPath("/designs/"+urlSegment(key)), nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CreateWorkDesignRequest mirrors the platform's CreateWorkDesignRequest —
+// a design is a PROPOSAL (agents may author one); adoption stays human-only.
+type CreateWorkDesignRequest struct {
+	Title    string          `json:"title"`
+	DocRef   string          `json:"docRef,omitempty"`
+	Proposal json.RawMessage `json:"proposal,omitempty"`
+	Catalog  string          `json:"catalog,omitempty"`
+}
+
+// CreateWorkDesign creates a Draft design under an initiative; the cloud
+// seals the context (catalog digest + log cursors) server-side.
+func (c *Client) CreateWorkDesign(ctx context.Context, initiativeKey string, req CreateWorkDesignRequest) (*WorkMutationResponse, error) {
+	var resp WorkMutationResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/initiatives/"+urlSegment(initiativeKey)+"/designs"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkRollups mirrors the platform's initiative rollup: derived health with
+// named evidence plus per-epic intent + execution.
+type WorkRollups struct {
+	Initiative string          `json:"initiative"`
+	Health     string          `json:"health"`
+	Evidence   []string        `json:"evidence,omitempty"`
+	Progress   map[string]int  `json:"progress"`
+	Total      int             `json:"total"`
+	Complete   int             `json:"complete"`
+	Epics      json.RawMessage `json:"epics"`
+}
+
+// GetWorkRollups fetches one initiative's derived rollup.
+func (c *Client) GetWorkRollups(ctx context.Context, initiativeKey string) (*WorkRollups, error) {
+	var resp WorkRollups
+	if err := c.doJSON(ctx, http.MethodGet, c.workPath("/rollups?initiative="+urlSegment(initiativeKey)), nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// RegenerateWorkTasksRequest mirrors the platform's request: the replacement
+// plan for one milestone. Planned tasks cancel; in-flight tasks survive.
+type RegenerateWorkTasksRequest struct {
+	Tasks []struct {
+		Title    string        `json:"title"`
+		Contract *WorkContract `json:"contract,omitempty"`
+	} `json:"tasks"`
+	Prefix string `json:"prefix,omitempty"`
+}
+
+// RegenerateWorkTasksResponse reports the batch's one verdict.
+type RegenerateWorkTasksResponse struct {
+	Canceled []string `json:"canceled"`
+	Kept     []string `json:"kept"`
+	Created  []string `json:"created"`
+}
+
+// RegenerateWorkTasks re-plans one milestone in one verdict batch.
+func (c *Client) RegenerateWorkTasks(ctx context.Context, epicKey, milestone string, req RegenerateWorkTasksRequest) (*RegenerateWorkTasksResponse, error) {
+	var resp RegenerateWorkTasksResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/epics/"+urlSegment(epicKey)+"/milestones/"+urlSegment(milestone)+"/regenerate"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // WorkEpicBrief is the sealed brief approval minted (orun-work-v4 WH4):

@@ -445,8 +445,8 @@ func TestComposedServer(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(toolsResp.Result.Tools) != 34 {
-		t.Fatalf("merged roster = %d tools, want 34 (9 work + 25 platform)", len(toolsResp.Result.Tools))
+	if len(toolsResp.Result.Tools) != 40 {
+		t.Fatalf("merged roster = %d tools, want 40 (15 work + 25 platform — WH5)", len(toolsResp.Result.Tools))
 	}
 	for _, tool := range toolsResp.Result.Tools {
 		for _, frag := range mcpserve.ForbiddenNameFragments {
@@ -495,21 +495,23 @@ func TestComposedServerReadOnly(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(toolsResp.Result.Tools) != 28 {
-		t.Fatalf("read-only roster = %d tools, want 28 (9 work + 19 platform reads)", len(toolsResp.Result.Tools))
+	if len(toolsResp.Result.Tools) != 34 {
+		t.Fatalf("read-only roster = %d tools, want 34 (15 work + 19 platform reads — WH5)", len(toolsResp.Result.Tools))
 	}
 	workCount := 0
 	for _, tool := range toolsResp.Result.Tools {
 		if strings.HasPrefix(tool.Name, "work_") || strings.HasPrefix(tool.Name, "spec_") ||
-			strings.HasPrefix(tool.Name, "task_") || strings.HasPrefix(tool.Name, "contract_") {
+			strings.HasPrefix(tool.Name, "task_") || strings.HasPrefix(tool.Name, "contract_") ||
+			strings.HasPrefix(tool.Name, "epic_") || strings.HasPrefix(tool.Name, "design_") ||
+			strings.HasPrefix(tool.Name, "milestone_") || strings.HasPrefix(tool.Name, "initiative_") {
 			workCount++
 		}
 		if tool.Name == "project_create" {
 			t.Error("write tool advertised under --read-only")
 		}
 	}
-	if workCount != 9 {
-		t.Errorf("work tools under --read-only = %d, want 9 (mutator-shaped, unaffected)", workCount)
+	if workCount != 15 {
+		t.Errorf("work tools under --read-only = %d, want 15 (mutator-shaped, unaffected — WH5)", workCount)
 	}
 	if !strings.Contains(lines[1], "isError") || !strings.Contains(lines[1], "read-only") {
 		t.Errorf("blocked write must be an isError read-only verdict: %s", lines[1])
@@ -542,4 +544,22 @@ func (workFake) AssignWork(context.Context, string, string, bool) (*remotestate.
 }
 func (workFake) EditWorkContract(context.Context, string, remotestate.WorkContract) (*remotestate.WorkMutationResponse, error) {
 	return &remotestate.WorkMutationResponse{}, nil
+}
+func (workFake) GetEpicBrief(context.Context, string, string) (*remotestate.WorkEpicBrief, error) {
+	return &remotestate.WorkEpicBrief{}, nil
+}
+func (workFake) GetEpicMilestones(_ context.Context, epicKey string) (*remotestate.WorkMilestonesView, error) {
+	return &remotestate.WorkMilestonesView{Epic: epicKey}, nil
+}
+func (workFake) GetWorkDesign(_ context.Context, key string) (*remotestate.WorkDesignView, error) {
+	return &remotestate.WorkDesignView{Key: key}, nil
+}
+func (workFake) GetWorkRollups(_ context.Context, initiativeKey string) (*remotestate.WorkRollups, error) {
+	return &remotestate.WorkRollups{Initiative: initiativeKey}, nil
+}
+func (workFake) CreateWorkDesign(context.Context, string, remotestate.CreateWorkDesignRequest) (*remotestate.WorkMutationResponse, error) {
+	return &remotestate.WorkMutationResponse{}, nil
+}
+func (workFake) RegenerateWorkTasks(context.Context, string, string, remotestate.RegenerateWorkTasksRequest) (*remotestate.RegenerateWorkTasksResponse, error) {
+	return &remotestate.RegenerateWorkTasksResponse{}, nil
 }
