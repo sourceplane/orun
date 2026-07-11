@@ -7,10 +7,11 @@ title: orun mcp
 dependency-free JSON-RPC 2.0 server over stdio that gives an agent hands on
 everything orun through a single connection.
 
-One loop composes two tool planes — **34 tools under one initialize**:
+One loop composes two tool planes — **40 tools under one initialize**:
 
-- **The work plane** (9 tools) — orun's delivery-derived work tracker:
-  tasks with *derived* lifecycle and evidence, sealed spec briefs,
+- **The work plane** (15 tools) — orun's delivery-derived work tracker and
+  its planning hierarchy: tasks with *derived* lifecycle and evidence,
+  sealed spec and epic briefs, initiative/design/milestone reads,
   mutator-only writes. Mounted when a workspace scope resolves.
 - **The platform plane** (25 tools) — the Orun Cloud public API: catalog,
   runs and logs, audit, events, access, usage, billing, config, secret
@@ -89,7 +90,7 @@ orun mcp serve [--workspace <ref>] [--backend-url <url>] [--read-only]
 | --- | --- |
 | `--workspace <ref>` | Target workspace (org id or slug; defaults to the linked repo's). Mounts the work plane and becomes the platform tools' default `workspace`. |
 | `--backend-url <url>` | Backend URL (Orun Cloud or self-hosted). |
-| `--read-only` | Drop the 6 platform write tools from the roster (28 tools instead of 34). Filtered from `tools/list` *and* blocked at execution. |
+| `--read-only` | Drop the 6 platform write tools from the roster (34 tools instead of 40). Filtered from `tools/list` *and* blocked at execution. |
 
 `--read-only` deliberately does **not** touch the work plane's write tools:
 they are mutator-shaped by design (one audited mutator surface for UI, MCP,
@@ -107,7 +108,7 @@ orun mcp tools --json        # the same rows as JSON
 orun mcp tools --read-only   # the roster as `serve --read-only` advertises it
 ```
 
-## The work plane (9 tools)
+## The work plane (15 tools)
 
 | Tool | Kind | Purpose |
 | --- | --- | --- |
@@ -116,12 +117,18 @@ orun mcp tools --read-only   # the roster as `serve --read-only` advertises it
 | `work_timeline` | read | One item's unified timeline: coordination and observation logs interleaved by time, evidence attached |
 | `spec_get` | read | A sealed, content-addressed SpecSnapshot (intent only — fold output is asserted absent from the sealed bytes) |
 | `spec_doc` | read | A spec's cloud document revision (content-addressed; latest when `rev` is omitted) |
-| `task_create` | write | Create a task through the cloud mutator |
+| `epic_brief` | read | The frozen brief a **human approval sealed**: EpicSnapshot canonical bytes + content id — doc ref, milestone ladder + hash, task contracts, approval record. An unapproved epic has no brief |
+| `initiative_get` | read | One initiative's derived rollup: health with named evidence, progress, per-epic intent + execution |
+| `design_get` | read | One design: doc pointer, sealed context, structured proposal, folded intent state |
+| `milestone_get` | read | One epic's milestone ladder: authored goals/done-when plus derived progress |
+| `task_create` | write | Create a task through the cloud mutator (optionally inside a milestone) |
 | `task_comment` | write | Append a coordination comment |
 | `task_assign` | write | Assign/unassign through the mutator |
 | `contract_propose` | write | Edit a task contract — applied AND flagged with a review comment |
+| `design_propose` | write | Create a Draft design under an initiative (doc ref + structured proposal) — a *proposal*; humans review, compare, adopt |
+| `task_regenerate` | write | Re-plan one milestone in one verdict batch: planned tasks cancel, in-flight tasks survive, every contract flagged for review |
 
-Three properties are structural, not policy:
+Four properties are structural, not policy:
 
 - **No `task_update_status` exists.** Lifecycle derives from delivery facts;
   an agent moves a task to In Review by *opening a PR*, not by calling a tool.
@@ -129,9 +136,14 @@ Three properties are structural, not policy:
 - **No pin tool exists.** Pins are public, attributed human overrides; the
   cloud mutator additionally rejects agent pins server-side (defense in
   depth, not client-side trust).
-- **`contract_propose` cannot be quiet.** The edit is applied through the
-  normal mutator *and* a "human review requested" comment is written in the
-  same call — an agent cannot silently redefine its own definition of done.
+- **No approve or adopt tool exists.** Epic approval and design adoption are
+  human-only decisions; the forbidden-tool sweep (`status`, `pin`,
+  `lifecycle`, `approve`, `adopt`) is asserted across the whole roster, and
+  the cloud rejects agent approval server-side regardless.
+- **`contract_propose` and `design_propose` cannot be quiet.** The write is
+  applied through the normal mutator *and* flagged for human review in the
+  same call — an agent cannot silently redefine its own definition of done,
+  or its own plan.
 
 ## The platform plane (25 tools)
 

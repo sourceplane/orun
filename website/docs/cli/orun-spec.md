@@ -52,4 +52,5 @@ remotely are skipped, and the work ref advances atomically.
 ## Related
 
 - [`orun work`](./orun-work.md) — import and list the work lens
+- [`orun epic`](./orun-epic.md) — the approval-sealed epic brief, this command's v4 superset
 - [`orun mcp`](./orun-mcp.md) — `spec_get` serves the same sealed snapshot to agents
