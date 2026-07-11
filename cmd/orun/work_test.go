@@ -52,7 +52,7 @@ func TestWorkImportHuman(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"specs:     2", "tasks:     2", "demo-epic", "dry run"} {
+	for _, want := range []string{"initiatives: 2", "specs:       2", "milestones:  2", "tasks:       2", "demo-epic", "dry run"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}

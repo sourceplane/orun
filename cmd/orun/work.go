@@ -92,14 +92,23 @@ func toWirePlan(plan *worklens.ImportPlan, prefix string) remotestate.WorkImport
 		Root:      plan.Root,
 		Prefix:    prefix,
 	}
+	for _, i := range plan.Initiatives {
+		req.Initiatives = append(req.Initiatives, remotestate.WorkImportInitiative{Slug: i.Slug, Title: i.Title})
+	}
 	for _, s := range plan.Specs {
 		req.Specs = append(req.Specs, remotestate.WorkImportSpec{
 			Slug: s.Slug, Title: s.Title, DocPath: s.DocPath, DocSHA256: s.DocSHA256, PlanPath: s.PlanPath,
+			Initiative: s.Initiative,
+		})
+	}
+	for _, m := range plan.Milestones {
+		req.Milestones = append(req.Milestones, remotestate.WorkImportMilestone{
+			SpecSlug: m.SpecSlug, Key: m.Key, Title: m.Title, Goal: m.Goal, DoneWhen: m.DoneWhen, Ordinal: m.Ordinal,
 		})
 	}
 	for _, t := range plan.Tasks {
 		req.Tasks = append(req.Tasks, remotestate.WorkImportTask{
-			SpecSlug: t.SpecSlug, MilestoneID: t.MilestoneID, Title: t.Title, Contract: toWireContract(t.Contract),
+			SpecSlug: t.SpecSlug, MilestoneID: t.MilestoneID, Milestone: t.Milestone, Title: t.Title, Contract: toWireContract(t.Contract),
 		})
 	}
 	return req
@@ -140,9 +149,13 @@ re-imports skip existing specs and milestones).`,
 					enc.SetIndent("", "  ")
 					return enc.Encode(plan)
 				}
-				fmt.Fprintf(out, "workspace: %s\n", plan.Workspace)
-				fmt.Fprintf(out, "specs:     %d\n", len(plan.Specs))
-				fmt.Fprintf(out, "tasks:     %d\n\n", len(plan.Tasks))
+				fmt.Fprintf(out, "workspace:   %s\n", plan.Workspace)
+				if len(plan.Initiatives) > 0 {
+					fmt.Fprintf(out, "initiatives: %d\n", len(plan.Initiatives))
+				}
+				fmt.Fprintf(out, "specs:       %d\n", len(plan.Specs))
+				fmt.Fprintf(out, "milestones:  %d\n", len(plan.Milestones))
+				fmt.Fprintf(out, "tasks:       %d\n\n", len(plan.Tasks))
 				for _, s := range plan.Specs {
 					n := 0
 					for _, t := range plan.Tasks {
@@ -169,8 +182,12 @@ re-imports skip existing specs and milestones).`,
 				enc.SetIndent("", "  ")
 				return enc.Encode(resp)
 			}
-			fmt.Fprintf(out, "specs:  %d created, %d skipped\n", resp.SpecsCreated, resp.SpecsSkipped)
-			fmt.Fprintf(out, "tasks:  %d created, %d skipped\n", resp.TasksCreated, resp.TasksSkipped)
+			if resp.InitiativesCreated+resp.InitiativesSkipped > 0 {
+				fmt.Fprintf(out, "initiatives: %d created, %d skipped\n", resp.InitiativesCreated, resp.InitiativesSkipped)
+			}
+			fmt.Fprintf(out, "specs:       %d created, %d skipped\n", resp.SpecsCreated, resp.SpecsSkipped)
+			fmt.Fprintf(out, "milestones:  %d created, %d skipped\n", resp.MilestonesCreated, resp.MilestonesSkipped)
+			fmt.Fprintf(out, "tasks:       %d created, %d skipped, %d migrated into milestones\n", resp.TasksCreated, resp.TasksSkipped, resp.TasksMigrated)
 			fmt.Fprintln(out, "\nlifecycle derives from observations — check `orun work list`")
 			return nil
 		},
