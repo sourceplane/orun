@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/sourceplane/orun/internal/mcpserve"
 	"github.com/sourceplane/orun/internal/remotestate"
@@ -164,6 +165,12 @@ func (a argmap) intval(k string) int {
 // errText renders a tool failure: platform errors keep their code —
 // `<code>: <message> (requestId: …)` — so the agent can reason about
 // forbidden/not_found/rate_limited verdicts; anything else is `error: …`.
+//
+// A not_found additionally carries the wrong-backend hint (UM4): every
+// platform tool rides a route the Orun Cloud api-edge serves, but the
+// legacy state backend 404s them with a bare NOT_FOUND — the field
+// evaluation's most misleading failure. The hint is platform-plane only
+// (this function is); work tools keep their shapes.
 func errText(err error) string {
 	var apiErr *remotestate.APIError
 	if errors.As(err, &apiErr) && apiErr.Code != "" {
@@ -171,9 +178,21 @@ func errText(err error) string {
 		if apiErr.RequestID != "" {
 			s += " (requestId: " + apiErr.RequestID + ")"
 		}
+		if isNotFound(apiErr) {
+			s += wrongBackendHint
+		}
 		return s
 	}
 	return "error: " + err.Error()
+}
+
+// wrongBackendHint is appended to a platform tool's not_found verdict.
+const wrongBackendHint = " — hint: the backend URL may not be an Orun Cloud API endpoint (this route exists on api-edge); check 'orun cloud status' and 'orun auth login'"
+
+// isNotFound recognises both the platform's lowercase code and the legacy
+// backend's status-derived NOT_FOUND.
+func isNotFound(e *remotestate.APIError) bool {
+	return strings.EqualFold(e.Code, "not_found") || e.Status == 404
 }
 
 // truncate byte-caps a tool result, appending the plane's exact marker.

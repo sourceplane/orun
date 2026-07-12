@@ -12,15 +12,15 @@ import (
 )
 
 type fakeAPI struct {
-	summary  *remotestate.WorkSummary
-	comments []string
-	created  []remotestate.CreateWorkTaskRequest
-	assigned []string
-	edited   []string
-	designs  []string
+	summary     *remotestate.WorkSummary
+	comments    []string
+	created     []remotestate.CreateWorkTaskRequest
+	assigned    []string
+	edited      []string
+	designs     []string
 	regenerated []string
-	brief    *remotestate.WorkEpicBrief
-	failNext error
+	brief       *remotestate.WorkEpicBrief
+	failNext    error
 }
 
 func (f *fakeAPI) GetWorkSummary(context.Context) (*remotestate.WorkSummary, error) {
@@ -230,6 +230,42 @@ func TestSpecGetSealsIntentOnly(t *testing.T) {
 	}
 	if !strings.Contains(text, `"goal":"g"`) {
 		t.Fatal("sealed brief lacks the contract")
+	}
+}
+
+// TestWireAnnotations (UM4): every work tool carries complete, truthful
+// annotations — reads are readOnly/non-destructive/idempotent; the write
+// tools are non-readOnly, non-destructive (mutator-shaped, WP-6) and NOT
+// idempotent (no idempotency key; every call appends a coordination-log
+// event — see the Tools() comment). ReadOnly() must agree with the wire.
+func TestWireAnnotations(t *testing.T) {
+	readNames := map[string]bool{
+		"work_query": true, "work_get": true, "spec_get": true,
+		"work_timeline": true, "spec_doc": true, "epic_brief": true,
+		"milestone_get": true, "design_get": true, "initiative_get": true,
+	}
+	for _, tool := range Tools() {
+		want := map[string]bool{
+			"readOnlyHint":    readNames[tool.Name],
+			"destructiveHint": false,
+			"idempotentHint":  readNames[tool.Name],
+		}
+		for hint, wantVal := range want {
+			got, ok := tool.Annotations[hint].(bool)
+			if !ok {
+				t.Errorf("%s: annotation %s missing or non-bool", tool.Name, hint)
+				continue
+			}
+			if got != wantVal {
+				t.Errorf("%s: %s = %v, want %v", tool.Name, hint, got, wantVal)
+			}
+		}
+		if len(tool.Annotations) != 3 {
+			t.Errorf("%s: %d annotations, want exactly the 3 hints", tool.Name, len(tool.Annotations))
+		}
+		if ReadOnly(tool.Name) != readNames[tool.Name] {
+			t.Errorf("ReadOnly(%s) disagrees with the wire annotation", tool.Name)
+		}
 	}
 }
 

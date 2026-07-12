@@ -76,20 +76,36 @@ func ToolNames() []string {
 }
 
 // ReadOnly reports whether name is one of the surface's read tools —
-// display metadata for `orun mcp tools` (work tools advertise no MCP
-// annotations; the write surface is the four mutators and nothing else).
+// display metadata for `orun mcp tools`, derived from the wire annotations
+// (UM4) so the display can never disagree with what a client sees.
 func ReadOnly(name string) bool {
-	switch name {
-	case "work_query", "work_get", "spec_get", "work_timeline", "spec_doc",
-		"epic_brief", "milestone_get", "design_get", "initiative_get":
-		return true
+	for _, t := range Tools() {
+		if t.Name == name {
+			ro, _ := t.Annotations["readOnlyHint"].(bool)
+			return ro
+		}
 	}
 	return false
 }
 
 // Tools returns the closed tool surface. Note what is absent: no
 // task_update_status (no lifecycle write exists anywhere), no pin.
+//
+// Wire annotations (orun-mcp UM4). The reads are the plain truth:
+// readOnly/non-destructive/idempotent. The write tools are readOnly:false,
+// destructive:false (mutator-shaped per WP-6 — every write appends or
+// applies through the one mutator surface; nothing on this plane deletes
+// or irreversibly overwrites), and idempotent:FALSE: unlike the platform
+// writes (per-attempt Idempotency-Key, UM2), the work mutators carry no
+// idempotency key and every call appends a new event to the coordination
+// log — a blind retry of task_create/task_comment/design_propose
+// duplicates the artifact, task_assign/contract_propose append duplicate
+// events, and task_regenerate mints fresh task keys per run. Truthful
+// hints over optimistic ones: a strict client should confirm before
+// replaying a work write.
 func Tools() []mcpserve.ToolDef {
+	readAnn := mcpserve.Annotations(true, false, true)
+	writeAnn := mcpserve.Annotations(false, false, false)
 	contractSchema := obj(map[string]interface{}{
 		"goal":     str("one or two sentences; the brief's first line"),
 		"affects":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "catalog component keys"},
@@ -98,24 +114,24 @@ func Tools() []mcpserve.ToolDef {
 		"deps":     map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
 	})
 	return []mcpserve.ToolDef{
-		{Name: "work_query", Description: "The workspace lens: specs with progress, tasks with DERIVED lifecycle and its evidence, the drift inbox, claim suggestions. Nothing returned is a stored status.", InputSchema: obj(map[string]interface{}{})},
-		{Name: "work_get", Description: "One task: envelope, contract, and the fold's lifecycle with evidence.", InputSchema: obj(map[string]interface{}{"key": str("task key, e.g. ORN-142")}, "key")},
-		{Name: "spec_get", Description: "The frozen brief: a content-addressed SpecSnapshot (intent only — contracts and docs, never a rung or assignee). Implement against exactly this.", InputSchema: obj(map[string]interface{}{"spec": str("spec slug")}, "spec")},
-		{Name: "work_timeline", Description: "The unified timeline for one item: both logs (what people said, what the world did) interleaved by time — evidence attached, read-only.", InputSchema: obj(map[string]interface{}{"key": str("task or spec key")}, "key")},
-		{Name: "spec_doc", Description: "A spec's cloud document revision (content-addressed, V3-2; latest when rev is omitted) — read-only.", InputSchema: obj(map[string]interface{}{"spec": str("spec slug"), "rev": str("revision digest sha256:<hex> (optional)")}, "spec")},
-		{Name: "task_create", Description: "Create a task (e.g. discovered follow-up work) through the one mutator surface.", InputSchema: obj(map[string]interface{}{"prefix": str("task-key prefix, 2–5 uppercase"), "title": str("task title"), "spec": str("parent spec slug (optional)"), "milestone": str("milestone key within spec (optional, v4)"), "contract": contractSchema}, "prefix", "title")},
-		{Name: "task_comment", Description: "Append a comment to a task's coordination log.", InputSchema: obj(map[string]interface{}{"key": str("task key"), "body": str("comment body")}, "key", "body")},
-		{Name: "task_assign", Description: "Assign a membership subject (self-assignment claims work).", InputSchema: obj(map[string]interface{}{"key": str("task key"), "subject": str("membership subject id (usr_/sp_/team_)")}, "key", "subject")},
-		{Name: "contract_propose", Description: "Propose a contract change: applied through the mutators AND flagged with a review comment — an agent cannot quietly redefine its own definition of done.", InputSchema: obj(map[string]interface{}{"key": str("task key"), "contract": contractSchema}, "key", "contract")},
+		{Name: "work_query", Description: "The workspace lens: specs with progress, tasks with DERIVED lifecycle and its evidence, the drift inbox, claim suggestions. Nothing returned is a stored status.", InputSchema: obj(map[string]interface{}{}), Annotations: readAnn},
+		{Name: "work_get", Description: "One task: envelope, contract, and the fold's lifecycle with evidence.", InputSchema: obj(map[string]interface{}{"key": str("task key, e.g. ORN-142")}, "key"), Annotations: readAnn},
+		{Name: "spec_get", Description: "The frozen brief: a content-addressed SpecSnapshot (intent only — contracts and docs, never a rung or assignee). Implement against exactly this.", InputSchema: obj(map[string]interface{}{"spec": str("spec slug")}, "spec"), Annotations: readAnn},
+		{Name: "work_timeline", Description: "The unified timeline for one item: both logs (what people said, what the world did) interleaved by time — evidence attached, read-only.", InputSchema: obj(map[string]interface{}{"key": str("task or spec key")}, "key"), Annotations: readAnn},
+		{Name: "spec_doc", Description: "A spec's cloud document revision (content-addressed, V3-2; latest when rev is omitted) — read-only.", InputSchema: obj(map[string]interface{}{"spec": str("spec slug"), "rev": str("revision digest sha256:<hex> (optional)")}, "spec"), Annotations: readAnn},
+		{Name: "task_create", Description: "Create a task (e.g. discovered follow-up work) through the one mutator surface.", InputSchema: obj(map[string]interface{}{"prefix": str("task-key prefix, 2–5 uppercase"), "title": str("task title"), "spec": str("parent spec slug (optional)"), "milestone": str("milestone key within spec (optional, v4)"), "contract": contractSchema}, "prefix", "title"), Annotations: writeAnn},
+		{Name: "task_comment", Description: "Append a comment to a task's coordination log.", InputSchema: obj(map[string]interface{}{"key": str("task key"), "body": str("comment body")}, "key", "body"), Annotations: writeAnn},
+		{Name: "task_assign", Description: "Assign a membership subject (self-assignment claims work).", InputSchema: obj(map[string]interface{}{"key": str("task key"), "subject": str("membership subject id (usr_/sp_/team_)")}, "key", "subject"), Annotations: writeAnn},
+		{Name: "contract_propose", Description: "Propose a contract change: applied through the mutators AND flagged with a review comment — an agent cannot quietly redefine its own definition of done.", InputSchema: obj(map[string]interface{}{"key": str("task key"), "contract": contractSchema}, "key", "contract"), Annotations: writeAnn},
 		// v4 (WH5) — the hierarchy surface. Note what is STILL absent: no
 		// approve tool, no adopt tool (human-only decisions, V4-2), and
 		// still no status or pin.
-		{Name: "epic_brief", Description: "The frozen brief an APPROVAL sealed: EpicSnapshot canonical bytes + content id (doc ref, milestone ladder + hash, task contracts, approval record). Implement against exactly this; verify sha256(bytes) == id. An unapproved epic has no brief.", InputSchema: obj(map[string]interface{}{"epic": str("epic slug"), "id": str("pinned snapshot id sha256:<hex> (optional; latest otherwise)")}, "epic")},
-		{Name: "milestone_get", Description: "One epic's milestone ladder: authored goals/done-when plus DERIVED progress per milestone — read-only.", InputSchema: obj(map[string]interface{}{"epic": str("epic slug")}, "epic")},
-		{Name: "design_get", Description: "One design: doc pointer, sealed context (what it assumed), structured proposal, and folded intent state — read-only.", InputSchema: obj(map[string]interface{}{"key": str("design key, e.g. DSG-1")}, "key")},
-		{Name: "initiative_get", Description: "One initiative's DERIVED rollup: health with named evidence, progress, per-epic intent + execution. Nothing returned is enterable.", InputSchema: obj(map[string]interface{}{"initiative": str("initiative key")}, "initiative")},
-		{Name: "design_propose", Description: "Create a Draft design under an initiative: a document reference plus a structured proposal (epics → milestones → task skeletons). A design is a PROPOSAL — humans review, compare, and adopt; adoption mints epics and is not available here.", InputSchema: obj(map[string]interface{}{"initiative": str("initiative key"), "title": str("design title"), "docRef": str("design doc revision sha256:<hex> (optional)"), "proposal": map[string]interface{}{"type": "object", "description": "{epics: [{slug, title, docSeed?, milestones[], taskSkeletons[]}]}"}}, "initiative", "title")},
-		{Name: "task_regenerate", Description: "Re-plan one milestone in one verdict batch: PLANNED (draft/ready) tasks cancel, in-flight tasks survive, and every proposed contract is applied AND flagged for human review. Tasks are implementation detail (V4-5) — this never touches the epic's approval.", InputSchema: obj(map[string]interface{}{"epic": str("epic slug"), "milestone": str("milestone key, e.g. M1"), "prefix": str("task-key prefix (default WK)"), "tasks": map[string]interface{}{"type": "array", "items": obj(map[string]interface{}{"title": str("task title"), "contract": contractSchema}, "title"), "description": "the replacement plan"}}, "epic", "milestone", "tasks")},
+		{Name: "epic_brief", Description: "The frozen brief an APPROVAL sealed: EpicSnapshot canonical bytes + content id (doc ref, milestone ladder + hash, task contracts, approval record). Implement against exactly this; verify sha256(bytes) == id. An unapproved epic has no brief.", InputSchema: obj(map[string]interface{}{"epic": str("epic slug"), "id": str("pinned snapshot id sha256:<hex> (optional; latest otherwise)")}, "epic"), Annotations: readAnn},
+		{Name: "milestone_get", Description: "One epic's milestone ladder: authored goals/done-when plus DERIVED progress per milestone — read-only.", InputSchema: obj(map[string]interface{}{"epic": str("epic slug")}, "epic"), Annotations: readAnn},
+		{Name: "design_get", Description: "One design: doc pointer, sealed context (what it assumed), structured proposal, and folded intent state — read-only.", InputSchema: obj(map[string]interface{}{"key": str("design key, e.g. DSG-1")}, "key"), Annotations: readAnn},
+		{Name: "initiative_get", Description: "One initiative's DERIVED rollup: health with named evidence, progress, per-epic intent + execution. Nothing returned is enterable.", InputSchema: obj(map[string]interface{}{"initiative": str("initiative key")}, "initiative"), Annotations: readAnn},
+		{Name: "design_propose", Description: "Create a Draft design under an initiative: a document reference plus a structured proposal (epics → milestones → task skeletons). A design is a PROPOSAL — humans review, compare, and adopt; adoption mints epics and is not available here.", InputSchema: obj(map[string]interface{}{"initiative": str("initiative key"), "title": str("design title"), "docRef": str("design doc revision sha256:<hex> (optional)"), "proposal": map[string]interface{}{"type": "object", "description": "{epics: [{slug, title, docSeed?, milestones[], taskSkeletons[]}]}"}}, "initiative", "title"), Annotations: writeAnn},
+		{Name: "task_regenerate", Description: "Re-plan one milestone in one verdict batch: PLANNED (draft/ready) tasks cancel, in-flight tasks survive, and every proposed contract is applied AND flagged for human review. Tasks are implementation detail (V4-5) — this never touches the epic's approval.", InputSchema: obj(map[string]interface{}{"epic": str("epic slug"), "milestone": str("milestone key, e.g. M1"), "prefix": str("task-key prefix (default WK)"), "tasks": map[string]interface{}{"type": "array", "items": obj(map[string]interface{}{"title": str("task title"), "contract": contractSchema}, "title"), "description": "the replacement plan"}}, "epic", "milestone", "tasks"), Annotations: writeAnn},
 	}
 }
 

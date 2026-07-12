@@ -21,7 +21,7 @@ type fakeProvider struct {
 func (f *fakeProvider) Tools() []ToolDef {
 	defs := []ToolDef{}
 	for _, n := range f.names {
-		defs = append(defs, ToolDef{Name: n, Description: "fake " + n, InputSchema: map[string]interface{}{"type": "object"}})
+		defs = append(defs, ToolDef{Name: n, Description: "fake " + n, InputSchema: map[string]interface{}{"type": "object"}, Annotations: Annotations(true, false, true)})
 	}
 	return defs
 }
@@ -164,6 +164,48 @@ func TestDuplicateToolNameGuard(t *testing.T) {
 	}
 	if len(a.calls)+len(b.calls) != 0 {
 		t.Fatalf("no call may run on a shadowed roster")
+	}
+}
+
+// annotationProvider serves one tool with caller-chosen annotations.
+type annotationProvider struct {
+	ann map[string]interface{}
+}
+
+func (p *annotationProvider) Tools() []ToolDef {
+	return []ToolDef{{Name: "one_tool", Description: "one", InputSchema: map[string]interface{}{"type": "object"}, Annotations: p.ann}}
+}
+
+func (p *annotationProvider) Call(context.Context, string, json.RawMessage) (Result, bool) {
+	return nil, false
+}
+
+// TestAnnotationCompletenessGuard (UM4): EVERY ToolDef in a composed server
+// must carry all three hints — a roster missing any one fails loudly at
+// serve start, per hint, so a strict client never misreads the surface.
+func TestAnnotationCompletenessGuard(t *testing.T) {
+	cases := []struct {
+		name    string
+		ann     map[string]interface{}
+		missing string
+	}{
+		{"nil annotations", nil, "readOnlyHint"},
+		{"missing readOnlyHint", map[string]interface{}{"destructiveHint": false, "idempotentHint": true}, "readOnlyHint"},
+		{"missing destructiveHint", map[string]interface{}{"readOnlyHint": true, "idempotentHint": true}, "destructiveHint"},
+		{"missing idempotentHint", map[string]interface{}{"readOnlyHint": true, "destructiveHint": false}, "idempotentHint"},
+		{"non-bool hint", map[string]interface{}{"readOnlyHint": "yes", "destructiveHint": false, "idempotentHint": true}, "readOnlyHint"},
+	}
+	for _, tc := range cases {
+		s := &Server{Providers: []ToolProvider{&annotationProvider{ann: tc.ann}}, Version: "test"}
+		err := s.Serve(context.Background(), strings.NewReader(""), &strings.Builder{})
+		if err == nil || !strings.Contains(err.Error(), tc.missing) || !strings.Contains(err.Error(), `"one_tool"`) {
+			t.Errorf("%s: err = %v, want a loud %s failure naming the tool", tc.name, err, tc.missing)
+		}
+	}
+	// The complete set (the Annotations helper's shape) passes the guard.
+	s := &Server{Providers: []ToolProvider{&annotationProvider{ann: Annotations(false, false, false)}}, Version: "test"}
+	if err := s.Serve(context.Background(), strings.NewReader(""), &strings.Builder{}); err != nil {
+		t.Fatalf("complete annotations must pass the roster guard: %v", err)
 	}
 }
 
