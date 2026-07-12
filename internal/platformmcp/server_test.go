@@ -357,6 +357,31 @@ func TestErrorMapping(t *testing.T) {
 	}
 }
 
+// TestNotFoundCarriesWrongBackendHint (UM4): a platform tool mapping a
+// not_found appends the wrong-backend hint (the legacy state backend 404s
+// every platform route with a bare NOT_FOUND); any other code — forbidden
+// here — must NOT carry it.
+func TestNotFoundCarriesWrongBackendHint(t *testing.T) {
+	// The platform's lowercase code.
+	p := granted(&Provider{API: &fakeAPI{err: &remotestate.APIError{Code: "not_found", Message: "no such route", Status: 404}}}, "ws_1")
+	text, isErr := callTool(t, p, "runs_list", `{"workspace":"ws_1"}`)
+	if !isErr || !strings.HasPrefix(text, "not_found: no such route") || !strings.Contains(text, wrongBackendHint) {
+		t.Fatalf("not_found lacks the wrong-backend hint: %q", text)
+	}
+	// The legacy backend's status-derived NOT_FOUND (a 404 body with no
+	// platform envelope).
+	p = granted(&Provider{API: &fakeAPI{err: &remotestate.APIError{Code: "NOT_FOUND", Message: "server returned status 404", Status: 404}}}, "ws_1")
+	if text, _ := callTool(t, p, "runs_list", `{"workspace":"ws_1"}`); !strings.Contains(text, "may not be an Orun Cloud API endpoint") {
+		t.Fatalf("legacy NOT_FOUND lacks the hint: %q", text)
+	}
+	// forbidden: no hint — the route exists; the caller lacks access.
+	p = granted(&Provider{API: &fakeAPI{err: &remotestate.APIError{Code: "forbidden", Message: "missing member role", Status: 403}}}, "ws_1")
+	text, isErr = callTool(t, p, "runs_list", `{"workspace":"ws_1"}`)
+	if !isErr || strings.Contains(text, "hint:") {
+		t.Fatalf("forbidden must not carry the wrong-backend hint: %q", text)
+	}
+}
+
 // TestTruncationMarker: outputs over 64 KiB are byte-capped with the plane's
 // exact marker.
 func TestTruncationMarker(t *testing.T) {
@@ -438,7 +463,8 @@ func TestComposedServer(t *testing.T) {
 	var toolsResp struct {
 		Result struct {
 			Tools []struct {
-				Name string `json:"name"`
+				Name        string                 `json:"name"`
+				Annotations map[string]interface{} `json:"annotations"`
 			} `json:"tools"`
 		} `json:"result"`
 	}
@@ -452,6 +478,14 @@ func TestComposedServer(t *testing.T) {
 		for _, frag := range mcpserve.ForbiddenNameFragments {
 			if strings.Contains(tool.Name, frag) {
 				t.Errorf("forbidden tool on the merged surface: %s", tool.Name)
+			}
+		}
+		// UM4: every tool on the composed wire carries the complete hint
+		// set (the roster guard enforces it at serve start; this pins the
+		// serialized form a client actually sees).
+		for _, hint := range mcpserve.AnnotationHints {
+			if _, ok := tool.Annotations[hint].(bool); !ok {
+				t.Errorf("%s: %s missing from the wire annotations", tool.Name, hint)
 			}
 		}
 	}

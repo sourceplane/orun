@@ -85,11 +85,14 @@ Source: an external Claude Code test report (operator-run, macOS) + this
 repo's own live probe. The server scored 9/10 on protocol/tool design and
 2–4/10 on packaging/startup robustness. These milestones close that gap.
 
-## UM4 — Truthful wire metadata + `orun mcp doctor` — 🗓️ Planned
+## UM4 — Truthful wire metadata + `orun mcp doctor` — ✅ Done
 
 - **Work tools gain wire annotations**: `workmcp.Tools()` populates
   `readOnlyHint`/`destructiveHint`/`idempotentHint` (reads true/false/true;
-  the four mutators false/false/true — they are idempotency-shaped by WP-6).
+  the mutators false/false/**false** — as built, all six work writes since
+  WH5: WP-6 makes them mutator-shaped and non-destructive, but unlike the
+  platform writes they carry no idempotency key and every call appends a
+  coordination-log event, so idempotent is truthfully false).
   Today a strict client sees work reads as writes and over-prompts.
 - **Dynamic counts everywhere**: `mcp --help`/serve Long text derive tool
   counts from the live rosters (the field report caught "9 tools" drift).

@@ -21,15 +21,33 @@ import (
 // work MCP already spoke and every mainstream client negotiates down.
 const ProtocolVersion = "2024-11-05"
 
-// ToolDef is an MCP tool descriptor. Title and Annotations are optional
-// (the platform provider carries them from the vendored manifest; work
-// tools advertise neither — their wire shape is unchanged).
+// ToolDef is an MCP tool descriptor. Title is optional (the platform
+// provider carries titles from the vendored manifest; work tools have
+// none). Annotations are REQUIRED on every composed tool as of UM4 —
+// checkRoster rejects a roster with incomplete annotations, so a strict
+// client never has to guess a tool's read/write posture.
 type ToolDef struct {
 	Name        string                 `json:"name"`
 	Title       string                 `json:"title,omitempty"`
 	Description string                 `json:"description"`
 	InputSchema map[string]interface{} `json:"inputSchema"`
 	Annotations map[string]interface{} `json:"annotations,omitempty"`
+}
+
+// AnnotationHints are the three wire-annotation hints every composed tool
+// must carry (UM4): a strict client decides its prompting policy from
+// these, and an absent hint reads as "unknown, treat as a write" — the
+// field report's over-prompting failure.
+var AnnotationHints = []string{"readOnlyHint", "destructiveHint", "idempotentHint"}
+
+// Annotations builds a complete MCP tool-annotation set — the shape
+// checkRoster requires on every ToolDef.
+func Annotations(readOnly, destructive, idempotent bool) map[string]interface{} {
+	return map[string]interface{}{
+		"readOnlyHint":    readOnly,
+		"destructiveHint": destructive,
+		"idempotentHint":  idempotent,
+	}
 }
 
 // Result is an MCP tools/call result: content blocks plus the optional
@@ -91,10 +109,12 @@ type rpcResponse struct {
 	Error   *rpcError       `json:"error,omitempty"`
 }
 
-// checkRoster rejects duplicate tool names across providers: a shadowed
-// tool would be silently unreachable, so wiring fails loudly at serve
-// start instead. (Names are disjoint by construction — saas-mcp-server
-// locked decision 8 — this is the belt to that suspender.)
+// checkRoster rejects duplicate tool names across providers (a shadowed
+// tool would be silently unreachable — names are disjoint by construction,
+// saas-mcp-server locked decision 8; this is the belt to that suspender)
+// and, since UM4, incomplete annotations: every composed tool must carry
+// all three boolean hints, so wiring fails loudly at serve start instead
+// of shipping a roster a strict client misreads as all-writes.
 func (s *Server) checkRoster() error {
 	seen := map[string]bool{}
 	for _, p := range s.Providers {
@@ -103,6 +123,11 @@ func (s *Server) checkRoster() error {
 				return fmt.Errorf("mcpserve: duplicate tool name %q across providers — a provider would be silently shadowed", t.Name)
 			}
 			seen[t.Name] = true
+			for _, hint := range AnnotationHints {
+				if _, ok := t.Annotations[hint].(bool); !ok {
+					return fmt.Errorf("mcpserve: tool %q is missing the %s annotation — every composed tool must advertise complete wire metadata (UM4)", t.Name, hint)
+				}
+			}
 		}
 	}
 	return nil

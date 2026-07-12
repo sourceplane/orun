@@ -54,7 +54,7 @@ one product surface.
 | UM1 | Native platform reads: `internal/platformmcp` (19 read tools) over `remotestate` public-API methods; vendored tool manifest + parity test (needs `saas-mcp-server` MCP9's manifest export) | ✅ Done |
 | UM2 | Platform writes + rails: the 6 write tools, per-attempt `Idempotency-Key`, `x-client-surface: mcp` on every call, `--read-only`, entitlement gate (`feature.mcp_server`, fail-open) | ✅ Done |
 | UM3 | Docs + release: `website/docs/cli/orun-mcp.md` rewrite (unified surface; fixes the stale 7-tool text), release-notes page, version tag → GoReleaser/kiox release | ✅ Done (v2.24.0 released) |
-| UM4 | Truthful wire metadata + doctor: work-tool annotations on the wire, dynamic tool counts, wrong-backend hint, `orun mcp doctor` | 🗓️ Planned |
+| UM4 | Truthful wire metadata + doctor: work-tool annotations on the wire, dynamic tool counts, wrong-backend hint, `orun mcp doctor` | ✅ Done |
 | UM5 | Never fail the handshake: initialize always answers; `auth_status` tool; consistent degraded mode for absent/expired auth; `--verbose` startup summary | 🗓️ Planned |
 | UM6 | Resources & prompts parity (resolves U-D2): catalog/runs resources + 4 prompts from the vendored manifest, capabilities advertised conditionally | 🗓️ Planned |
 

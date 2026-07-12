@@ -14,33 +14,62 @@ import (
 	"github.com/sourceplane/orun/internal/workmcp"
 )
 
+// mcpRosterCounts derives every tool count in the mcp help text from the
+// live rosters (UM4: zero hardcoded numbers — the field report caught the
+// help text drifting from the actual surface).
+type mcpRosterCounts struct {
+	work, workReads, workWrites             int
+	platform, platformReads, platformWrites int
+}
+
+func countMcpRoster() mcpRosterCounts {
+	var c mcpRosterCounts
+	for _, t := range workmcp.Tools() {
+		c.work++
+		if ro, _ := t.Annotations["readOnlyHint"].(bool); ro {
+			c.workReads++
+		}
+	}
+	c.workWrites = c.work - c.workReads
+	c.platform = len((&platformmcp.Provider{}).Tools())
+	c.platformReads = len((&platformmcp.Provider{ReadOnly: true}).Tools())
+	c.platformWrites = c.platform - c.platformReads
+	return c
+}
+
 func registerMcpCommand(root *cobra.Command) {
+	counts := countMcpRoster()
 	mcpCmd := &cobra.Command{
 		Use:   "mcp",
 		Short: "The orun MCP: one agent surface over the work and platform planes",
-		Long: `The orun MCP (specs/orun-mcp) — the ecosystem's one local MCP.
+		Long: fmt.Sprintf(`The orun MCP (specs/orun-mcp) — the ecosystem's one local MCP.
 
 One stdio JSON-RPC loop composes two tool planes:
-  work      9 tools over the work plane (specs/orun-work WP5): mutator-only
-            writes, derived lifecycle, sealed briefs. Mounted when a
-            workspace scope resolves.
-  platform  25 tools over the Orun Cloud public API — 19 reads (catalog,
+  work      %d tools over the work plane (specs/orun-work WP5): %d reads +
+            %d mutator-only writes, derived lifecycle, sealed briefs.
+            Mounted when a workspace scope resolves.
+  platform  %d tools over the Orun Cloud public API — %d reads (catalog,
             runs and logs, audit, events, access, usage, billing, config,
-            webhooks) + 6 writes (project/environment create, flag set,
+            webhooks) + %d writes (project/environment create, flag set,
             webhook create/replay, member invite; per-attempt
             Idempotency-Key). Mounted whenever cloud auth resolves; tool
             schemas are pinned to the vendored TS-plane manifest.
-            --read-only drops the 6 platform writes.
+            --read-only drops the %d platform writes.
 
 Subcommands:
-  serve   Serve MCP over stdio (newline-delimited JSON-RPC 2.0)
-  tools   Print the merged tool roster`,
+  serve    Serve MCP over stdio (newline-delimited JSON-RPC 2.0)
+  tools    Print the merged tool roster
+  doctor   Diagnose the serve preconditions (binary, auth, workspace, backend)`,
+			counts.work, counts.workReads, counts.workWrites,
+			counts.platform, counts.platformReads, counts.platformWrites,
+			counts.platformWrites),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
-	registerMcpServeCommand(mcpCmd)
+	registerMcpServeCommand(mcpCmd, counts)
 	registerMcpToolsCommand(mcpCmd)
+	registerMcpDoctorCommand(mcpCmd)
 	root.AddCommand(mcpCmd)
 }
 
@@ -79,7 +108,7 @@ func mcpCloudClient(ctx context.Context, backendURLFlag, orgFlag string) (*remot
 	return remotestate.NewClientWithScope(backendURL, version, tokenSrc, scope), nil
 }
 
-func registerMcpServeCommand(parent *cobra.Command) {
+func registerMcpServeCommand(parent *cobra.Command, counts mcpRosterCounts) {
 	var (
 		workspace  string
 		backendURL string
@@ -114,7 +143,7 @@ func registerMcpServeCommand(parent *cobra.Command) {
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", "", "target workspace (org id or slug; defaults to the linked repo's)")
 	cmd.Flags().StringVar(&backendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
-	cmd.Flags().BoolVar(&readOnly, "read-only", false, "serve only the platform plane's read tools (drops the 6 platform writes; work tools are mutator-shaped by design — WP-6 — and unaffected)")
+	cmd.Flags().BoolVar(&readOnly, "read-only", false, fmt.Sprintf("serve only the platform plane's read tools (drops the %d platform writes; work tools are mutator-shaped by design — WP-6 — and unaffected)", counts.platformWrites))
 	parent.AddCommand(cmd)
 }
 
@@ -136,7 +165,10 @@ func registerMcpToolsCommand(parent *cobra.Command) {
 			}
 			var rows []row
 			for _, t := range (&workmcp.Server{}).Tools() {
-				rows = append(rows, row{t.Name, "work", workmcp.ReadOnly(t.Name), t.Description})
+				// The read-only column is the wire annotation itself (UM4) —
+				// the display can never disagree with what a client sees.
+				ro, _ := t.Annotations["readOnlyHint"].(bool)
+				rows = append(rows, row{t.Name, "work", ro, t.Description})
 			}
 			for _, t := range (&platformmcp.Provider{ReadOnly: readOnly}).Tools() {
 				ro, _ := t.Annotations["readOnlyHint"].(bool)
