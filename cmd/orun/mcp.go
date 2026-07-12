@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"text/tabwriter"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/sourceplane/orun/internal/mcpserve"
 	"github.com/sourceplane/orun/internal/platformmcp"
-	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/workmcp"
 )
 
@@ -20,6 +18,7 @@ import (
 type mcpRosterCounts struct {
 	work, workReads, workWrites             int
 	platform, platformReads, platformWrites int
+	server                                  int // built-in tools (UM5: connection_info)
 }
 
 func countMcpRoster() mcpRosterCounts {
@@ -34,6 +33,7 @@ func countMcpRoster() mcpRosterCounts {
 	c.platform = len((&platformmcp.Provider{}).Tools())
 	c.platformReads = len((&platformmcp.Provider{ReadOnly: true}).Tools())
 	c.platformWrites = c.platform - c.platformReads
+	c.server = len((&mcpserve.ConnectionInfoProvider{}).Tools())
 	return c
 }
 
@@ -56,13 +56,17 @@ One stdio JSON-RPC loop composes two tool planes:
             schemas are pinned to the vendored TS-plane manifest.
             --read-only drops the %d platform writes.
 
+plus %d built-in tool (connection_info), mounted on EVERY serve — even with
+no credentials at all: initialize always answers, and the tool reports auth
+state, backend URL, which planes mounted and why, and the exact fix (UM5).
+
 Subcommands:
   serve    Serve MCP over stdio (newline-delimited JSON-RPC 2.0)
   tools    Print the merged tool roster
   doctor   Diagnose the serve preconditions (binary, auth, workspace, backend)`,
 			counts.work, counts.workReads, counts.workWrites,
 			counts.platform, counts.platformReads, counts.platformWrites,
-			counts.platformWrites),
+			counts.platformWrites, counts.server),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
@@ -71,80 +75,6 @@ Subcommands:
 	registerMcpToolsCommand(mcpCmd)
 	registerMcpDoctorCommand(mcpCmd)
 	root.AddCommand(mcpCmd)
-}
-
-// mcpCloudClient is the serve-time auth/scope preamble: workClient's
-// resolution chain, but the workspace is optional — the platform plane
-// mounts on auth alone (design §1), so only auth failures are fatal here.
-func mcpCloudClient(ctx context.Context, backendURLFlag, orgFlag string) (*remotestate.Client, error) {
-	intent := loadIntentForCloudConfig()
-	backendURL, err := requireBackendURL(intent, backendURLFlag)
-	if err != nil {
-		return nil, err
-	}
-	repo, err := resolveRepoContext(backendURL)
-	if err != nil {
-		return nil, err
-	}
-	linkOrg, linkProject := "", ""
-	if repo != nil {
-		linkOrg, linkProject = repo.OrgID, repo.ProjectID
-	}
-	intentOrg, intentProject, _ := intentScope(intent)
-	scope := resolveScope(orgFlag, "", intentOrg, intentProject, linkOrg, linkProject)
-	tokenSrc, _, _, err := remotestate.ResolveTokenSource(ctx, remotestate.ResolveOptions{
-		BackendURL:   backendURL,
-		Version:      version,
-		Interactive:  termIsInteractive(),
-		RequireLogin: true,
-		Org:          scope.OrgID,
-	})
-	if err != nil {
-		if isNoLoginErr(err) {
-			return nil, errNotLoggedIn()
-		}
-		return nil, fmt.Errorf("remote state auth: %w", err)
-	}
-	return remotestate.NewClientWithScope(backendURL, version, tokenSrc, scope), nil
-}
-
-func registerMcpServeCommand(parent *cobra.Command, counts mcpRosterCounts) {
-	var (
-		workspace  string
-		backendURL string
-		readOnly   bool
-	)
-	cmd := &cobra.Command{
-		Use:   "serve",
-		Short: "Serve the orun MCP over stdio",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := mcpCloudClient(cmd.Context(), backendURL, workspace)
-			if err != nil {
-				return err
-			}
-			// Contextual mounting (orun-mcp UM1): platform tools whenever auth
-			// resolves; work tools only with a workspace scope. Stdout is
-			// protocol-pure; diagnostics go to stderr.
-			ws := client.Scope().OrgID
-			var providers []mcpserve.ToolProvider
-			if ws != "" {
-				providers = append(providers, &workmcp.Server{API: client, Workspace: ws})
-			}
-			providers = append(providers, &platformmcp.Provider{API: client, DefaultWorkspace: ws, ReadOnly: readOnly})
-			server := &mcpserve.Server{Providers: providers, Version: version}
-			if ws != "" {
-				fmt.Fprintln(cmd.ErrOrStderr(), "orun MCP serving on stdio (workspace "+ws+"; work + platform tools)")
-			} else {
-				fmt.Fprintln(cmd.ErrOrStderr(), "orun MCP serving on stdio (no workspace resolved: platform tools only — pass --workspace or link the repo to mount work tools)")
-			}
-			return server.Serve(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout())
-		},
-	}
-	cmd.Flags().StringVar(&workspace, "workspace", "", "target workspace (org id or slug; defaults to the linked repo's)")
-	cmd.Flags().StringVar(&backendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
-	cmd.Flags().BoolVar(&readOnly, "read-only", false, fmt.Sprintf("serve only the platform plane's read tools (drops the %d platform writes; work tools are mutator-shaped by design — WP-6 — and unaffected)", counts.platformWrites))
-	parent.AddCommand(cmd)
 }
 
 func registerMcpToolsCommand(parent *cobra.Command) {
@@ -173,6 +103,12 @@ func registerMcpToolsCommand(parent *cobra.Command) {
 			for _, t := range (&platformmcp.Provider{ReadOnly: readOnly}).Tools() {
 				ro, _ := t.Annotations["readOnlyHint"].(bool)
 				rows = append(rows, row{t.Name, "platform", ro, t.Description})
+			}
+			// The built-in provider (UM5): present on every serve, listed
+			// last to match the composed roster order.
+			for _, t := range (&mcpserve.ConnectionInfoProvider{}).Tools() {
+				ro, _ := t.Annotations["readOnlyHint"].(bool)
+				rows = append(rows, row{t.Name, "server", ro, t.Description})
 			}
 			out := cmd.OutOrStdout()
 			if asJSON {

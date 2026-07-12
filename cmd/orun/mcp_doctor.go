@@ -215,26 +215,14 @@ func doctorAuth(ctx context.Context, backendURL, org string) (remotestate.TokenS
 // describeSessionAuth renders the session-auth verdict: user + expiry,
 // never token material. An expired access token with a live refresh token
 // is healthy (it refreshes on first use); a fully expired session fails.
+// The classification is sessionMountState (mcp_serve.go) — one truth shared
+// with serve's mount report and connection_info.
 func describeSessionAuth(creds *cliauth.Credentials, now time.Time) (bool, string) {
-	if creds == nil {
-		return false, "no local session; run `orun auth login`"
+	state, detail, expiresAt := sessionMountState(creds, now)
+	if expiresAt != "" {
+		detail += "; access token valid until " + expiresAt
 	}
-	user := creds.DisplayUser()
-	if user == "" {
-		user = "unknown user"
-	}
-	access, refresh := creds.AccessExpiryTime(), creds.RefreshExpiryTime()
-	if creds.AccessToken != "" && (access.IsZero() || access.After(now)) {
-		line := fmt.Sprintf("local session for %s", user)
-		if !access.IsZero() {
-			line += fmt.Sprintf("; access token valid until %s", access.Format(time.RFC3339))
-		}
-		return true, line
-	}
-	if strings.TrimSpace(creds.RefreshToken) != "" && (refresh.IsZero() || refresh.After(now)) {
-		return true, fmt.Sprintf("local session for %s; access token expired, refresh token live — it refreshes on first use", user)
-	}
-	return false, fmt.Sprintf("local session for %s has fully expired; run `orun auth login`", user)
+	return state == "ok", detail
 }
 
 // doctorWorkspace resolves the workspace exactly like `mcp serve`

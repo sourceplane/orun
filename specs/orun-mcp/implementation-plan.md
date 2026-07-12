@@ -112,21 +112,24 @@ mcpserve-level test requires every ToolDef to carry all three hints); help
 text has no hardcoded counts; doctor exits non-zero with an actionable line
 per failed check and zero with a copy-pastable registration line.
 
-## UM5 — Never fail the handshake — 🗓️ Planned
+## UM5 — Never fail the handshake — ✅ Done
 
 - **Always answer `initialize`.** Missing/unresolvable auth no longer exits
   before the handshake (the field report's second blocker: exit 1 with zero
   stdout is indistinguishable from a crash). Instead the server starts with
-  whatever mounts, plus an always-present **`auth_status`** tool that
+  whatever mounts, plus an always-present **`connection_info`** tool that
   reports auth state, expiry, backend URL, and the exact login command.
+  (As built: the tool was planned as `auth_status`, but "status" is a
+  `ForbiddenNameFragments` entry — the WP-3/WP-10 sweep over the merged
+  roster — and the sweep is not weakened for a built-in; renamed instead.)
 - **Consistent degradation**: missing token and expired token behave the
   same — mounted-but-degraded, per-call isError carrying the login hint.
 - **`--verbose` startup summary** on stderr: planes mounted, auth path
   tried (OIDC/ORUN_TOKEN/session), token expiry, workspace source.
 
 **Done when:** with no credentials at all, an MCP client completes
-initialize, lists ≥1 tool (`auth_status`), and gets actionable isError text
-from any other call; expired vs absent tokens produce the same shape;
+initialize, lists ≥1 tool (`connection_info`), and gets actionable isError
+text from any other call; expired vs absent tokens produce the same shape;
 `--verbose` explains what mounted and why.
 
 ## UM6 — Resources & prompts parity (resolves U-D2) — 🗓️ Planned
