@@ -55,7 +55,7 @@ one product surface.
 | UM2 | Platform writes + rails: the 6 write tools, per-attempt `Idempotency-Key`, `x-client-surface: mcp` on every call, `--read-only`, entitlement gate (`feature.mcp_server`, fail-open) | ✅ Done |
 | UM3 | Docs + release: `website/docs/cli/orun-mcp.md` rewrite (unified surface; fixes the stale 7-tool text), release-notes page, version tag → GoReleaser/kiox release | ✅ Done (v2.24.0 released) |
 | UM4 | Truthful wire metadata + doctor: work-tool annotations on the wire, dynamic tool counts, wrong-backend hint, `orun mcp doctor` | ✅ Done |
-| UM5 | Never fail the handshake: initialize always answers; `auth_status` tool; consistent degraded mode for absent/expired auth; `--verbose` startup summary | 🗓️ Planned |
+| UM5 | Never fail the handshake: initialize always answers; built-in `connection_info` tool (planned as `auth_status`; renamed — "status" is a forbidden name fragment); consistent degraded mode for absent/expired auth; `--verbose` startup summary | ✅ Done |
 | UM6 | Resources & prompts parity (resolves U-D2): catalog/runs resources + 4 prompts from the vendored manifest, capabilities advertised conditionally | 🗓️ Planned |
 
 ## Scope boundary

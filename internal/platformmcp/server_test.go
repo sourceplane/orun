@@ -382,6 +382,27 @@ func TestNotFoundCarriesWrongBackendHint(t *testing.T) {
 	}
 }
 
+// TestUnauthenticatedCarriesLoginHint (UM5): a platform tool whose call the
+// backend 401s — the expired/rejected-credential case — appends the login
+// hint, so present-but-expired auth degrades exactly like absent auth:
+// actionable, per call, never an exit. Both the platform's lowercase
+// `unauthenticated` and the legacy `unauthorized` spelling qualify.
+func TestUnauthenticatedCarriesLoginHint(t *testing.T) {
+	p := granted(&Provider{API: &fakeAPI{err: &remotestate.APIError{Code: "unauthenticated", Message: "token expired", RequestID: "req_7", Status: 401}}}, "ws_1")
+	text, isErr := callTool(t, p, "runs_list", `{"workspace":"ws_1"}`)
+	if !isErr || !strings.HasPrefix(text, "unauthenticated: token expired") || !strings.Contains(text, loginHint) {
+		t.Fatalf("unauthenticated lacks the login hint: %q (isError=%v)", text, isErr)
+	}
+	if !strings.Contains(text, "orun auth login") {
+		t.Fatalf("hint must name the login command: %q", text)
+	}
+
+	p = granted(&Provider{API: &fakeAPI{err: &remotestate.APIError{Code: "unauthorized", Message: "bad bearer", Status: 401}}}, "ws_1")
+	if text, _ := callTool(t, p, "audit_search", `{"workspace":"ws_1"}`); !strings.Contains(text, loginHint) {
+		t.Fatalf("legacy unauthorized lacks the login hint: %q", text)
+	}
+}
+
 // TestTruncationMarker: outputs over 64 KiB are byte-capped with the plane's
 // exact marker.
 func TestTruncationMarker(t *testing.T) {

@@ -178,8 +178,11 @@ func errText(err error) string {
 		if apiErr.RequestID != "" {
 			s += " (requestId: " + apiErr.RequestID + ")"
 		}
-		if isNotFound(apiErr) {
+		switch {
+		case isNotFound(apiErr):
 			s += wrongBackendHint
+		case isUnauthenticated(apiErr):
+			s += loginHint
 		}
 		return s
 	}
@@ -189,10 +192,25 @@ func errText(err error) string {
 // wrongBackendHint is appended to a platform tool's not_found verdict.
 const wrongBackendHint = " — hint: the backend URL may not be an Orun Cloud API endpoint (this route exists on api-edge); check 'orun cloud status' and 'orun auth login'"
 
+// loginHint is appended to a platform tool's unauthenticated verdict (UM5:
+// an expired credential must degrade exactly like an absent one —
+// actionable, per call, never an exit). The absent-token case never reaches
+// here (serve mounts only connection_info); this covers the
+// present-but-expired/rejected credential the backend 401s. A session whose
+// REFRESH fails locally surfaces as cliauth.ErrSessionRevoked, whose text
+// already carries the login command.
+const loginHint = " — hint: the credential was rejected or expired; run 'orun auth login' to refresh"
+
 // isNotFound recognises both the platform's lowercase code and the legacy
 // backend's status-derived NOT_FOUND.
 func isNotFound(e *remotestate.APIError) bool {
 	return strings.EqualFold(e.Code, "not_found") || e.Status == 404
+}
+
+// isUnauthenticated recognises the platform's 401 code (unauthenticated),
+// the legacy spelling (unauthorized), and a bare 401 status.
+func isUnauthenticated(e *remotestate.APIError) bool {
+	return strings.EqualFold(e.Code, "unauthenticated") || strings.EqualFold(e.Code, "unauthorized") || e.Status == 401
 }
 
 // truncate byte-caps a tool result, appending the plane's exact marker.
