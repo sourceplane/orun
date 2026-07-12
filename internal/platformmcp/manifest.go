@@ -31,11 +31,38 @@ type manifestTool struct {
 	Annotations map[string]interface{} `json:"annotations"`
 }
 
+// manifestResource / manifestPrompt are the manifest's reserved MCP9 stubs,
+// consumed since UM6: the 2 resource templates and 4 prompts the TS plane
+// registers. The stub is minimal — no mimeType (the provider supplies
+// text/markdown) and no prompt text (rendering is implementation-side; the
+// texts are ported from the TS plane's prompts.ts and drift-guarded in tests).
+type manifestResource struct {
+	Name        string `json:"name"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	URITemplate string `json:"uriTemplate"`
+}
+
+type manifestPromptArg struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Required    bool   `json:"required"`
+}
+
+type manifestPrompt struct {
+	Name        string              `json:"name"`
+	Title       string              `json:"title"`
+	Description string              `json:"description"`
+	Args        []manifestPromptArg `json:"args"`
+}
+
 type manifest struct {
-	ManifestVersion   int            `json:"manifestVersion"`
-	ReadOnlyToolCount int            `json:"readOnlyToolCount"`
-	ToolCount         int            `json:"toolCount"`
-	Tools             []manifestTool `json:"tools"`
+	ManifestVersion   int                `json:"manifestVersion"`
+	ReadOnlyToolCount int                `json:"readOnlyToolCount"`
+	ToolCount         int                `json:"toolCount"`
+	Tools             []manifestTool     `json:"tools"`
+	Resources         []manifestResource `json:"resources"`
+	Prompts           []manifestPrompt   `json:"prompts"`
 }
 
 // toolSpec is one advertised tool: the manifest entry plus what the dispatch
@@ -48,9 +75,12 @@ type toolSpec struct {
 	workspaceRequired bool
 }
 
-// allTools is the plane's full roster (19 reads + 6 writes), in manifest
-// order.
-var allTools = mustLoadTools()
+// embedded is the parsed manifest; allTools the plane's full tool roster
+// (19 reads + 6 writes), in manifest order. Resources and prompts come off
+// embedded directly (resources.go / prompts.go).
+var embedded = mustParseManifest()
+
+var allTools = mustLoadTools(embedded)
 
 var toolsByName = func() map[string]*toolSpec {
 	m := make(map[string]*toolSpec, len(allTools))
@@ -60,11 +90,15 @@ var toolsByName = func() map[string]*toolSpec {
 	return m
 }()
 
-func mustLoadTools() []toolSpec {
+func mustParseManifest() manifest {
 	var m manifest
 	if err := json.Unmarshal(manifestJSON, &m); err != nil {
 		panic(fmt.Sprintf("platformmcp: embedded manifest is invalid: %v", err))
 	}
+	return m
+}
+
+func mustLoadTools(m manifest) []toolSpec {
 	reads := 0
 	out := make([]toolSpec, 0, len(m.Tools))
 	for _, t := range m.Tools {

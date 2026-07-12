@@ -9,14 +9,19 @@ via the official SDK. Clients negotiate, so this is not blocking — but the
 two ends of the product now advertise different revisions. Options: keep the
 hand-rolled loop (smallest change, taken for UM0–UM2) or adopt the official
 `modelcontextprotocol/go-sdk` (new dependency, revisit when a feature needs
-it — resources/prompts parity, see U-D2). Track with the sibling epic's D6.
+it). UM6 showed resources/prompts did NOT need it — the hand-rolled loop
+grew them in ~100 lines — so the remaining trigger is the protocol revision
+itself. Track with the sibling epic's D6. **Still open.**
 
-### U-D2 — Resources & prompts parity (MCP4)
+### U-D2 — Resources & prompts parity (MCP4) — ✅ Resolved (UM6)
 
-The TS plane serves 2 resource templates + 4 prompts. The hand-rolled loop
-serves tools only. Ship the unified server tools-first (UM0–UM3) and add
-resources/prompts parity as a follow-up — likely together with U-D1, since
-the Go SDK gives both cheaply. The manifest format reserves room for them.
+The TS plane serves 2 resource templates + 4 prompts; the hand-rolled loop
+served tools only. Resolved WITHOUT the Go SDK (contra the "likely together
+with U-D1" guess): UM6 added `resources/*` + `prompts/*` to the same loop,
+providers opt in via optional `ResourceProvider`/`PromptProvider`
+interfaces, `platformmcp` serves both surfaces from the manifest's reserved
+stubs (parity-tested), and capabilities advertise them only when a mounted
+provider supplies them. U-D1 stays open on its own merits.
 
 ## Risks
 

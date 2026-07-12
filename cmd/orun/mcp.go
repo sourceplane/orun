@@ -19,6 +19,7 @@ type mcpRosterCounts struct {
 	work, workReads, workWrites             int
 	platform, platformReads, platformWrites int
 	server                                  int // built-in tools (UM5: connection_info)
+	resources, prompts                      int // platform-plane templates/prompts (UM6)
 }
 
 func countMcpRoster() mcpRosterCounts {
@@ -34,6 +35,8 @@ func countMcpRoster() mcpRosterCounts {
 	c.platformReads = len((&platformmcp.Provider{ReadOnly: true}).Tools())
 	c.platformWrites = c.platform - c.platformReads
 	c.server = len((&mcpserve.ConnectionInfoProvider{}).Tools())
+	c.resources = len((&platformmcp.Provider{}).ResourceTemplates())
+	c.prompts = len((&platformmcp.Provider{}).Prompts())
 	return c
 }
 
@@ -55,6 +58,9 @@ One stdio JSON-RPC loop composes two tool planes:
             Idempotency-Key). Mounted whenever cloud auth resolves; tool
             schemas are pinned to the vendored TS-plane manifest.
             --read-only drops the %d platform writes.
+            Also serves %d resource templates (catalog entity overview, run
+            summary) and %d prompts — capabilities advertise resources and
+            prompts only when this plane mounts (UM6).
 
 plus %d built-in tool (connection_info), mounted on EVERY serve — even with
 no credentials at all: initialize always answers, and the tool reports auth
@@ -66,7 +72,7 @@ Subcommands:
   doctor   Diagnose the serve preconditions (binary, auth, workspace, backend)`,
 			counts.work, counts.workReads, counts.workWrites,
 			counts.platform, counts.platformReads, counts.platformWrites,
-			counts.platformWrites, counts.server),
+			counts.platformWrites, counts.resources, counts.prompts, counts.server),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},

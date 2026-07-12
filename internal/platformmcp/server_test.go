@@ -62,7 +62,7 @@ func (f *fakeAPI) ListCatalogEntities(_ context.Context, org string, q remotesta
 	return f.rec("ListCatalogEntities org=%s kind=%s q=%s cursor=%s limit=%d", org, q.Kind, q.Q, q.Cursor, q.Limit)
 }
 func (f *fakeAPI) ListCatalogDocs(_ context.Context, org string, q remotestate.CatalogDocsQuery) (*remotestate.PlatformPage, error) {
-	return f.rec("ListCatalogDocs org=%s role=%s", org, q.Role)
+	return f.rec("ListCatalogDocs org=%s entityRef=%s role=%s limit=%d", org, q.EntityRef, q.Role, q.Limit)
 }
 func (f *fakeAPI) ReadCatalogDoc(_ context.Context, org, digest string) ([]byte, error) {
 	f.calls = append(f.calls, fmt.Sprintf("ReadCatalogDoc org=%s digest=%s", org, digest))
@@ -208,7 +208,7 @@ func TestPerToolHappyPath(t *testing.T) {
 			[]string{"ListProjects org=ws_1 project=prj_a", "ListProjectEnvironments org=ws_1 project=prj_a"}, "environments"},
 		{"catalog_search", `{"workspace":"ws_1","kind":"Component","q":"api","cursor":"c0","limit":5}`,
 			[]string{"ListCatalogEntities org=ws_1 kind=Component q=api cursor=c0 limit=5"}, "catalog entities in ws_1"},
-		{"catalog_read_doc", `{"workspace":"ws_1","role":"runbook"}`, []string{"ListCatalogDocs org=ws_1 role=runbook"}, "catalog docs"},
+		{"catalog_read_doc", `{"workspace":"ws_1","role":"runbook"}`, []string{"ListCatalogDocs org=ws_1 entityRef= role=runbook limit=0"}, "catalog docs"},
 		{"runs_list", `{"workspace":"ws_1","branch":"main"}`, []string{"ListOrgRuns org=ws_1 status= branch=main"}, "runs in ws_1"},
 		{"runs_list", `{"workspace":"ws_1","project":"prj_a","status":"failed"}`,
 			[]string{"ListProjectRuns org=ws_1 project=prj_a status=failed"}, "runs for project prj_a"},
@@ -471,14 +471,38 @@ func TestComposedServer(t *testing.T) {
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"whoami","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"work_query","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":5,"method":"resources/templates/list"}`,
+		`{"jsonrpc":"2.0","id":6,"method":"prompts/get","params":{"name":"usage_review","arguments":{"workspace":"acme"}}}`,
 	}, "\n") + "\n")
 	var out strings.Builder
 	if err := srv.Serve(context.Background(), in, &out); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("responses = %d, want 4", len(lines))
+	if len(lines) != 6 {
+		t.Fatalf("responses = %d, want 6", len(lines))
+	}
+
+	// UM6: with the platform plane mounted the composed server advertises
+	// all three capabilities and serves the resources/prompts methods.
+	var initResp struct {
+		Result struct {
+			Capabilities map[string]interface{} `json:"capabilities"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &initResp); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"tools", "resources", "prompts"} {
+		if _, ok := initResp.Result.Capabilities[key]; !ok {
+			t.Errorf("composed capabilities lack %s: %v", key, initResp.Result.Capabilities)
+		}
+	}
+	if !strings.Contains(lines[4], "catalog://{workspace}/{entityKey}") || !strings.Contains(lines[4], "runs://{workspace}/{project}/{runId}") {
+		t.Errorf("resources/templates/list missing the two templates: %s", lines[4])
+	}
+	if !strings.Contains(lines[5], "usage_summary") || !strings.Contains(lines[5], `"role":"user"`) {
+		t.Errorf("prompts/get did not render the workflow: %s", lines[5])
 	}
 
 	var toolsResp struct {

@@ -1,7 +1,8 @@
-# orun-mcp — Implementation Plan (UM0–UM3)
+# orun-mcp — Implementation Plan (UM0–UM6)
 
-Status: In progress. PR-sized milestones; the spine is **UM0 → UM1 → UM2 →
-UM3**. UM1 consumes `saas-mcp-server` MCP9's manifest export (lands first in
+Status: Complete — UM0–UM6 shipped. PR-sized milestones; the spine is
+**UM0 → UM1 → UM2 → UM3**, followed by the hardening phase **UM4 → UM5 →
+UM6**. UM1 consumes `saas-mcp-server` MCP9's manifest export (lands first in
 `orun-cloud`); UM3 cuts the release the MCP10 docs flip points at.
 
 ## UM0 — Provider composition — ✅ Done
@@ -132,11 +133,15 @@ initialize, lists ≥1 tool (`connection_info`), and gets actionable isError
 text from any other call; expired vs absent tokens produce the same shape;
 `--verbose` explains what mounted and why.
 
-## UM6 — Resources & prompts parity (resolves U-D2) — 🗓️ Planned
+## UM6 — Resources & prompts parity (resolves U-D2) — ✅ Done
 
 - `mcpserve` gains `resources/list`/`resources/read` +
   `prompts/list`/`prompts/get` (hand-rolled, same loop — U-D1 stays open;
   the Go SDK remains a later option) and providers can advertise them.
+  (As built: also `resources/templates/list` — the two templates are the
+  discoverable surface; `resources/list` stays empty like the TS plane.
+  Providers opt in via the optional `ResourceProvider`/`PromptProvider`
+  interfaces, type-asserted at dispatch — tool-only providers unchanged.)
 - `platformmcp` serves the TS plane's 2 resource templates
   (`catalog://{workspace}/{entityKey}`, `runs://{workspace}/{project}/{runId}`)
   and 4 prompts (investigate_failed_run, access_review, usage_review,
