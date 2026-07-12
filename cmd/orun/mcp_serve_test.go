@@ -58,6 +58,15 @@ func TestDegradedServeAssembly(t *testing.T) {
 	if info["name"] != "orun" {
 		t.Fatalf("degraded initialize serverInfo = %v", info)
 	}
+	// UM6: a degraded serve stays a tools-only server — no provider supplies
+	// resources/prompts, so capabilities must not advertise them.
+	caps := responses[0]["result"].(map[string]interface{})["capabilities"].(map[string]interface{})
+	if _, ok := caps["resources"]; ok {
+		t.Fatalf("degraded serve must not advertise resources: %v", caps)
+	}
+	if _, ok := caps["prompts"]; ok {
+		t.Fatalf("degraded serve must not advertise prompts: %v", caps)
+	}
 	tools := responses[1]["result"].(map[string]interface{})["tools"].([]interface{})
 	if len(tools) != 1 || tools[0].(map[string]interface{})["name"] != "connection_info" {
 		t.Fatalf("degraded roster = %v, want exactly [connection_info]", tools)
@@ -91,9 +100,19 @@ func TestFullyMountedAssemblyRoster(t *testing.T) {
 	providers := assembleMcpProviders(client, rep, false)
 	s := &mcpserve.Server{Providers: providers, Version: "test"}
 	responses := serveRPC(t, s,
+		`{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}`,
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"connection_info","arguments":{}}}`,
 	)
+	// UM6: the platform plane supplies resources + prompts, so a fully
+	// mounted serve advertises all three capabilities.
+	caps := responses[0]["result"].(map[string]interface{})["capabilities"].(map[string]interface{})
+	for _, key := range []string{"tools", "resources", "prompts"} {
+		if _, ok := caps[key]; !ok {
+			t.Fatalf("fully mounted capabilities lack %s: %v", key, caps)
+		}
+	}
+	responses = responses[1:]
 	tools := responses[0]["result"].(map[string]interface{})["tools"].([]interface{})
 	counts := countMcpRoster()
 	if want := counts.work + counts.platform + counts.server; len(tools) != want {

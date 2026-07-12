@@ -169,6 +169,66 @@ func TestManifestParity(t *testing.T) {
 	}
 }
 
+// TestResourcesPromptsParity (UM6): the advertised resource templates and
+// prompts equal the vendored manifest's reserved sections — names, titles,
+// descriptions, uriTemplates, and prompt args including required flags, in
+// manifest order — and neither surface is filtered under ReadOnly.
+func TestResourcesPromptsParity(t *testing.T) {
+	var m manifest
+	if err := json.Unmarshal(vendoredManifest(t), &m); err != nil {
+		t.Fatalf("parse vendored manifest: %v", err)
+	}
+	if len(m.Resources) != 2 {
+		t.Fatalf("UM6 expects 2 resource templates, manifest carries %d", len(m.Resources))
+	}
+	if len(m.Prompts) != 4 {
+		t.Fatalf("UM6 expects 4 prompts, manifest carries %d", len(m.Prompts))
+	}
+
+	templates := (&Provider{}).ResourceTemplates()
+	if len(templates) != len(m.Resources) {
+		t.Fatalf("ResourceTemplates() = %d, want %d", len(templates), len(m.Resources))
+	}
+	for i, w := range m.Resources {
+		g := templates[i]
+		if g.Name != w.Name || g.Title != w.Title || g.Description != w.Description || g.URITemplate != w.URITemplate {
+			t.Errorf("resource %d drifted from the manifest:\n got  %+v\n want %+v", i, g, w)
+		}
+		if g.MimeType != "text/markdown" {
+			t.Errorf("%s: mimeType = %q, want text/markdown", w.Name, g.MimeType)
+		}
+	}
+
+	prompts := (&Provider{}).Prompts()
+	if len(prompts) != len(m.Prompts) {
+		t.Fatalf("Prompts() = %d, want %d", len(prompts), len(m.Prompts))
+	}
+	for i, w := range m.Prompts {
+		g := prompts[i]
+		if g.Name != w.Name || g.Title != w.Title || g.Description != w.Description {
+			t.Errorf("prompt %d drifted from the manifest:\n got  %s/%s\n want %s/%s", i, g.Name, g.Description, w.Name, w.Description)
+		}
+		if len(g.Arguments) != len(w.Args) {
+			t.Errorf("%s: %d args, want %d", w.Name, len(g.Arguments), len(w.Args))
+			continue
+		}
+		for j, wa := range w.Args {
+			ga := g.Arguments[j]
+			if ga.Name != wa.Name || ga.Description != wa.Description || ga.Required != wa.Required {
+				t.Errorf("%s arg %d drifted:\n got  %+v\n want %+v", w.Name, j, ga, wa)
+			}
+		}
+	}
+
+	// Read-only never filters resources/prompts (they are read-only context /
+	// text templates by construction — the TS posture).
+	ro := &Provider{ReadOnly: true}
+	if len(ro.ResourceTemplates()) != 2 || len(ro.Prompts()) != 4 {
+		t.Fatalf("ReadOnly filtered resources/prompts: %d templates, %d prompts",
+			len(ro.ResourceTemplates()), len(ro.Prompts()))
+	}
+}
+
 // TestWorkspaceDefaultAdjustsSchema: with an ambient default, `workspace`
 // drops out of each schema's required array (and only that — properties are
 // untouched); tools without a workspace argument are unchanged.

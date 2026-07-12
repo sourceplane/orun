@@ -16,7 +16,7 @@ context supports.
 
 | Field | Value |
 |-------|-------|
-| Status | **In progress** — UM0–UM3 ✅ shipped (v2.24.0); hardening phase UM4–UM6 in progress (from the 2026-07-12 field evaluation) |
+| Status | **Complete** — UM0–UM3 ✅ shipped (v2.24.0); hardening phase UM4–UM6 ✅ complete (from the 2026-07-12 field evaluation) |
 | Cluster | **UM** (unified MCP — pairs the `saas-mcp-server` epic's unification phase, MCP9–MCP10, in `orun-cloud`) |
 | Owner(s) | `internal/workmcp` (transport refactor) · `internal/platformmcp` (new) · `internal/remotestate` (public-API wire methods) · `cmd/orun/mcp.go` · `specs/orun-cloud/vendored/` (tool-manifest vendor) · `website/docs/cli/orun-mcp.md` · release machinery |
 | Target branch | `claude/orun-cloud-mcp-server-h95b57` (PRs merged incrementally) |
@@ -56,7 +56,7 @@ one product surface.
 | UM3 | Docs + release: `website/docs/cli/orun-mcp.md` rewrite (unified surface; fixes the stale 7-tool text), release-notes page, version tag → GoReleaser/kiox release | ✅ Done (v2.24.0 released) |
 | UM4 | Truthful wire metadata + doctor: work-tool annotations on the wire, dynamic tool counts, wrong-backend hint, `orun mcp doctor` | ✅ Done |
 | UM5 | Never fail the handshake: initialize always answers; built-in `connection_info` tool (planned as `auth_status`; renamed — "status" is a forbidden name fragment); consistent degraded mode for absent/expired auth; `--verbose` startup summary | ✅ Done |
-| UM6 | Resources & prompts parity (resolves U-D2): catalog/runs resources + 4 prompts from the vendored manifest, capabilities advertised conditionally | 🗓️ Planned |
+| UM6 | Resources & prompts parity (resolves U-D2): catalog/runs resources + 4 prompts from the vendored manifest, capabilities advertised conditionally | ✅ Done |
 
 ## Scope boundary
 
