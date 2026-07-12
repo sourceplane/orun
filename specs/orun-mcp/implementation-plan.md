@@ -76,3 +76,70 @@ work plane's own read-only story is WP5's, not this spec's).
 
 **Done when:** the release is published with the unified MCP, release notes
 live on the website, and a fresh `install.sh` install serves 34 tools.
+
+---
+
+# Hardening phase (UM4–UM6) — from the 2026-07-12 field evaluation
+
+Source: an external Claude Code test report (operator-run, macOS) + this
+repo's own live probe. The server scored 9/10 on protocol/tool design and
+2–4/10 on packaging/startup robustness. These milestones close that gap.
+
+## UM4 — Truthful wire metadata + `orun mcp doctor` — 🗓️ Planned
+
+- **Work tools gain wire annotations**: `workmcp.Tools()` populates
+  `readOnlyHint`/`destructiveHint`/`idempotentHint` (reads true/false/true;
+  the four mutators false/false/true — they are idempotency-shaped by WP-6).
+  Today a strict client sees work reads as writes and over-prompts.
+- **Dynamic counts everywhere**: `mcp --help`/serve Long text derive tool
+  counts from the live rosters (the field report caught "9 tools" drift).
+- **Wrong-backend hint**: a platform tool getting `not_found` on a known
+  route appends "the backend URL does not look like an Orun Cloud API
+  endpoint — check `orun cloud status` / `orun auth login`" (the legacy
+  state backend 404s platform routes with an unhelpful NOT_FOUND today).
+- **`orun mcp doctor`**: validates in order — binary has the mcp capability
+  (self-version), auth state + token expiry (without printing secrets),
+  workspace resolution chain, backend URL sanity (probes one platform and
+  one work route), then prints the exact `claude mcp add orun -- <abs path>
+  mcp serve` line (absolute path — the field report's P0 was a stale PATH
+  binary silently lacking `mcp`).
+
+**Done when:** `tools/list` annotations are complete for all 34 tools (a
+mcpserve-level test requires every ToolDef to carry all three hints); help
+text has no hardcoded counts; doctor exits non-zero with an actionable line
+per failed check and zero with a copy-pastable registration line.
+
+## UM5 — Never fail the handshake — 🗓️ Planned
+
+- **Always answer `initialize`.** Missing/unresolvable auth no longer exits
+  before the handshake (the field report's second blocker: exit 1 with zero
+  stdout is indistinguishable from a crash). Instead the server starts with
+  whatever mounts, plus an always-present **`auth_status`** tool that
+  reports auth state, expiry, backend URL, and the exact login command.
+- **Consistent degradation**: missing token and expired token behave the
+  same — mounted-but-degraded, per-call isError carrying the login hint.
+- **`--verbose` startup summary** on stderr: planes mounted, auth path
+  tried (OIDC/ORUN_TOKEN/session), token expiry, workspace source.
+
+**Done when:** with no credentials at all, an MCP client completes
+initialize, lists ≥1 tool (`auth_status`), and gets actionable isError text
+from any other call; expired vs absent tokens produce the same shape;
+`--verbose` explains what mounted and why.
+
+## UM6 — Resources & prompts parity (resolves U-D2) — 🗓️ Planned
+
+- `mcpserve` gains `resources/list`/`resources/read` +
+  `prompts/list`/`prompts/get` (hand-rolled, same loop — U-D1 stays open;
+  the Go SDK remains a later option) and providers can advertise them.
+- `platformmcp` serves the TS plane's 2 resource templates
+  (`catalog://{workspace}/{entityKey}`, `runs://{workspace}/{project}/{runId}`)
+  and 4 prompts (investigate_failed_run, access_review, usage_review,
+  service_snapshot) — sourced from the vendored manifest's reserved
+  `resources`/`prompts` stubs, parity-tested like the tools.
+- Capabilities advertise `resources` + `prompts` only when a mounted
+  provider supplies them.
+
+**Done when:** a resources-capable client can read a catalog entity
+overview and a run summary as markdown; prompts/get renders the four
+workflows; the parity test covers the manifest's resources/prompts
+sections; work-plane surface unchanged.
