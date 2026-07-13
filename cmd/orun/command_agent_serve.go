@@ -94,26 +94,15 @@ Identity comes from the sandbox environment (injected by the control plane):
 			return fmt.Errorf("session heartbeat failed: %w", hbErr)
 		}
 
-		store, refs, _, ok := openObjectStores()
-		if !ok {
-			return fmt.Errorf("no object store at .orun — pull the brief first")
-		}
-
-		// Resolve the agent type + contract the same way `agent run` does; the
-		// brief is content-addressed so this run matches its local twin by hash.
-		var persona []byte
-		var toolPolicy nodes.AgentToolPolicy
+		// Identity/type/task resolve from env+flags (no I/O), so the event relay
+		// can go up BEFORE any brief pull or driver setup. The relay is the
+		// console's eyes and the steer intake — it must NOT be gated behind
+		// object-store or driver work that could block. (This is why a prior run
+		// showed a live heartbeat but a totally dark relay: serve had reached the
+		// heartbeat but not yet DialToRelay.)
 		typeName := serveType
 		if typeName == "" {
 			typeName = os.Getenv("ORUN_AGENT_TYPE")
-		}
-		if typeName != "" {
-			d, issues := agenttype.Load(filepath.Join("agents", typeName+".md"))
-			if d == nil {
-				return fmt.Errorf("agent type %q: %v", typeName, issues)
-			}
-			persona = d.Body
-			toolPolicy = d.Tools
 		}
 		task := serveTask
 		if task == "" {
@@ -123,13 +112,54 @@ Identity comes from the sandbox environment (injected by the control plane):
 		if task == "" {
 			runKind = nodes.RunKindInteractive
 		}
+
+		// Event relay: the DURABLE console log. POST /events fills the DB the
+		// console polls (GET /events); the write-path is resilient (retry + loud
+		// log + drop) and never gates the run — liveness is the heartbeat above.
+		// Its bearer tracks the heartbeat's token refreshes (TokenFn). pumpDown
+		// drains the input return-queue and acks steers so the console's
+		// fail-visible POST /input resolves.
+		inputs := agent.NewInputQueue()
+		srv := attach.NewServer(attach.SessionInfo{
+			SessionID: sessionID, AgentType: typeName,
+			Task: task, RunKind: string(runKind), Harness: serveDriver,
+		}, inputs)
+		relayCtx, relayCancel := context.WithCancel(ctx)
+		defer relayCancel()
+		fmt.Fprintf(errOut, "orun agent serve: connecting event relay — %s\n", relayBase)
+		relaySession, rerr := attach.DialToRelay(relayCtx, srv, inputs, attach.RelayConfig{
+			BaseURL: relayBase, Token: token, TokenFn: hb.Token, Log: errOut,
+		})
+		if rerr != nil {
+			fmt.Fprintf(errOut, "orun agent serve: WARNING event relay unavailable (%v) — session continues on heartbeat; console tail degraded\n", rerr)
+		} else {
+			fmt.Fprintf(errOut, "orun agent serve: event relay connected\n")
+		}
+
+		// Now the (potentially blocking) brief + driver setup — the relay is
+		// already streaming and draining steers regardless of how this goes.
+		store, refs, _, ok := openObjectStores()
+		if !ok {
+			return fmt.Errorf("no object store at .orun — pull the brief first")
+		}
+		var persona []byte
+		var toolPolicy nodes.AgentToolPolicy
+		if typeName != "" {
+			d, issues := agenttype.Load(filepath.Join("agents", typeName+".md"))
+			if d == nil {
+				return fmt.Errorf("agent type %q: %v", typeName, issues)
+			}
+			persona = d.Body
+			toolPolicy = d.Tools
+		}
+		fmt.Fprintf(errOut, "orun agent serve: assembling brief (type=%q task=%q)\n", typeName, task)
 		brief, err := agent.AssembleBrief(ctx, store, agent.BriefInput{
 			RunKind: runKind, Task: task, Persona: persona,
 		})
 		if err != nil {
 			return err
 		}
-
+		fmt.Fprintf(errOut, "orun agent serve: brief %s ready\n", brief.ID)
 		drv, err := driver.Get(serveDriver)
 		if err != nil {
 			return err
@@ -147,33 +177,9 @@ Identity comes from the sandbox environment (injected by the control plane):
 		if serveDriver == "stub" && runKind == nodes.RunKindInteractive {
 			drv = &driver.Stub{Interactive: true}
 		}
-
 		branch := ""
 		if task != "" {
 			branch = "agent/" + task + "-" + slugify(typeName)
-		}
-
-		// Event relay: the DURABLE console log. POST /events fills the DB the
-		// console polls (GET /events); the write-path is resilient (retry + loud
-		// log + drop) and never gates the run — liveness is the heartbeat above.
-		// Its bearer tracks the heartbeat's token refreshes (TokenFn). pumpDown
-		// drains the input return-queue and acks steers so the console's
-		// fail-visible POST /input resolves.
-		inputs := agent.NewInputQueue()
-		srv := attach.NewServer(attach.SessionInfo{
-			SessionID: sessionID, BriefID: brief.ID, AgentType: typeName,
-			Task: task, RunKind: string(runKind), Harness: serveDriver,
-		}, inputs)
-		relayCtx, relayCancel := context.WithCancel(ctx)
-		defer relayCancel()
-		fmt.Fprintf(errOut, "orun agent serve: connecting event relay — %s\n", relayBase)
-		relaySession, rerr := attach.DialToRelay(relayCtx, srv, inputs, attach.RelayConfig{
-			BaseURL: relayBase, Token: token, TokenFn: hb.Token, Log: errOut,
-		})
-		if rerr != nil {
-			fmt.Fprintf(errOut, "orun agent serve: WARNING event relay unavailable (%v) — session continues on heartbeat; console tail degraded\n", rerr)
-		} else {
-			fmt.Fprintf(errOut, "orun agent serve: event relay connected\n")
 		}
 
 		opts := agent.RunOptions{
