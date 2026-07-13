@@ -180,13 +180,15 @@ func (h *Heartbeat) firstBeat(ctx context.Context) error {
 }
 
 // run beats on a fixed cadence and refreshes the token before it expires, until
-// ctx is canceled or a terminal state ends the session.
+// ctx is canceled or a terminal state ends the session. Only the BEAT is allowed
+// to terminate the session (and only on a genuine kill signal); token refresh is
+// best-effort and never kills — a running session must not die because a
+// proactive /token call had a transient hiccup.
 func (h *Heartbeat) run(ctx context.Context, onTerminal func(reason string)) {
 	// Now that the lease exists, get a full-TTL token: the env token may already
 	// be partway through its 15m and its exact expiry is unknown to us.
-	if terminal, err := h.maybeRefresh(ctx, true); err != nil && terminal {
-		h.terminate(onTerminal, err)
-		return
+	if err := h.maybeRefresh(ctx, true); err != nil {
+		h.cfg.logf("orun agent serve: initial token refresh failed (%v); continuing on the boot token\n", err)
 	}
 	ticker := time.NewTicker(h.interval())
 	defer ticker.Stop()
@@ -195,12 +197,8 @@ func (h *Heartbeat) run(ctx context.Context, onTerminal func(reason string)) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if terminal, err := h.maybeRefresh(ctx, false); err != nil {
-				if terminal {
-					h.terminate(onTerminal, err)
-					return
-				}
-				h.cfg.logf("orun agent serve: token refresh transient failure (%v); keeping current token\n", err)
+			if err := h.maybeRefresh(ctx, false); err != nil {
+				h.cfg.logf("orun agent serve: token refresh failed (%v); keeping current token, the beat will recover auth if needed\n", err)
 			}
 			if terminal, err := h.beat(ctx); err != nil {
 				if terminal {
@@ -232,7 +230,13 @@ func (h *Heartbeat) beat(ctx context.Context) (terminal bool, err error) {
 	}
 	if status == http.StatusUnauthorized {
 		if rerr := h.refresh(ctx); rerr != nil {
-			return true, fmt.Errorf("heartbeat 401 and token refresh failed: %w", rerr)
+			// Only a genuinely auth-dead refresh (401/403/404 on /token) is
+			// terminal; a transient (5xx/network) must not kill a live session —
+			// retry next cadence with the current token.
+			if isTerminalErr(rerr) {
+				return true, fmt.Errorf("heartbeat 401 and token refresh rejected: %w", rerr)
+			}
+			return false, fmt.Errorf("heartbeat 401 and token refresh transient (%w) — retrying next cadence", rerr)
 		}
 		status2, err2 := h.postHeartbeat(ctx)
 		if err2 == nil {
@@ -247,15 +251,13 @@ func (h *Heartbeat) beat(ctx context.Context) (terminal bool, err error) {
 }
 
 // maybeRefresh refreshes the token when it is within RefreshMargin of expiry (or
-// force=true). terminal=true means the refresh hit a terminal/auth status.
-func (h *Heartbeat) maybeRefresh(ctx context.Context, force bool) (terminal bool, err error) {
+// force=true). It never terminates the session — a refresh failure is returned
+// for logging only; the beat path is the sole authority on terminal state.
+func (h *Heartbeat) maybeRefresh(ctx context.Context, force bool) error {
 	if !force && !h.expiry.IsZero() && time.Until(h.expiry) > h.refreshMargin() {
-		return false, nil
+		return nil
 	}
-	if rerr := h.refresh(ctx); rerr != nil {
-		return isTerminalErr(rerr), rerr
-	}
-	return false, nil
+	return h.refresh(ctx)
 }
 
 // refresh mints a fresh session token (POST /token, lease-gated) and updates the

@@ -40,18 +40,15 @@ type RelayConfig struct {
 	FlushEvery time.Duration // event-batch flush cadence (default 200ms)
 	PollEvery  time.Duration // input long-poll spacing on empty (default 1s)
 
-	// Dial-home hardening. The FIRST POST /events is the box's first contact
-	// with the cloud: it proves the relay URL resolves, the network is up, and
-	// the session token is accepted. A cold snapshot pull + install can outrun a
-	// transient relay/token-propagation window, so it is retried; a persistent
-	// failure is reported LOUDLY rather than swallowed, so a session that can't
-	// dial home fails where someone can read it instead of silently.
-	// NOTE: this is the /events attach channel — it is NOT the session
-	// /heartbeat endpoint the control plane uses to flip provisioning→running.
-	// A green dial-home here does not by itself create the lease.
-	DialRetries  int           // first /events dial-home attempts before giving up (default 6)
+	// Write-path resilience. POST /events is the DURABLE console log (the cloud
+	// DB the console polls via GET /events) — not a handshake and not liveness
+	// (the heartbeat owns that). So event posting must never wedge the stream: a
+	// failed batch is retried with backoff, then LOUDLY logged and dropped, and
+	// the pump keeps running. One transient must not black out the whole session
+	// the way a single returned error used to.
+	PostRetries  int           // per-batch POST /events attempts before dropping (default 4)
 	RetryBackoff time.Duration // base backoff between attempts (default 500ms)
-	Log          io.Writer     // where a mid-session pump failure is reported (nil = discard)
+	Log          io.Writer     // where write-path failures are reported (nil = discard)
 }
 
 func (c RelayConfig) client() *http.Client {
@@ -100,14 +97,13 @@ func (s *RelaySession) Close() {
 // or the session's bye). Lets the caller observe an unexpected relay drop.
 func (s *RelaySession) Done() <-chan struct{} { return s.done }
 
-// DialToRelay attaches to the body's Server, performs the first /events
-// dial-home SYNCHRONOUSLY (with retry/backoff), and only on success spawns the
-// background event/input pumps. It returns an error — loudly, not swallowed —
-// when the dial-home never lands, so `orun agent serve` can exit non-zero with
-// a diagnostic instead of running a local agent whose output the cloud never
-// sees. This turns the silent 30-min `lease_lost` into a readable failure: the
-// dial-home either provably reaches the cloud (URL resolves, token accepted) or
-// fails where someone can read it.
+// DialToRelay attaches to the body's Server and spawns the background event/
+// input pumps. It does NOT gate on a synchronous dial-home: liveness and
+// reachability are the heartbeat's job (already proven before serve runs the
+// agent), and the /events write-path is the durable console log — it must keep
+// trying for the whole session, not be disabled because one early POST failed.
+// The pumps post events resiliently (retry + loud log + drop, never wedge) and
+// drain the input return-queue. The only error returned is an attach failure.
 func DialToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cfg RelayConfig) (*RelaySession, error) {
 	flush := cfg.FlushEvery
 	if flush <= 0 {
@@ -122,19 +118,6 @@ func DialToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cfg
 		return nil, err
 	}
 
-	// The first dial-home: the catch-up frames enqueued at Attach (hello, any
-	// replayed events, the live marker) are the initial batch. Drain and POST
-	// them with retry — this proves reachability and that the token is accepted.
-	initial, err := drainInitial(head)
-	if err != nil {
-		head.Detach()
-		return nil, err
-	}
-	if err := postFirstDialHome(ctx, cfg, initial); err != nil {
-		head.Detach()
-		return nil, err
-	}
-
 	pctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
@@ -146,11 +129,8 @@ func DialToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cfg
 		select {
 		case <-pctx.Done():
 		case err := <-errc:
-			// A pump that dies mid-session (the relay became unreachable, the
-			// token was revoked) is not fatal to the local run, but it must not
-			// be silent — the cloud is now blind to this session.
 			if err != nil && !errors.Is(err, context.Canceled) {
-				cfg.logf("orun agent serve: relay pump ended, cloud is no longer receiving this session: %v\n", err)
+				cfg.logf("orun agent serve: relay pump ended: %v\n", err)
 			}
 		}
 	}()
@@ -176,74 +156,14 @@ func ServeToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cf
 	}
 }
 
-// drainInitial pulls the catch-up frames Attach enqueued — hello, any replayed
-// events, up to and including the live marker — into the first dial-home batch.
-// Those frames are all queued before Attach returns, so this does not block on
-// the live agent; it stops at the live marker (or a bye / closed queue).
-func drainInitial(head *HeadConn) ([]Frame, error) {
-	var batch []Frame
-	for {
-		f, ok := head.Recv()
-		if !ok {
-			// The session ended before it even went live. Send what we have so
-			// the cloud still records the session rather than timing out blind.
-			return batch, nil
-		}
-		batch = append(batch, f)
-		if f.T == TLive || f.T == TBye {
-			return batch, nil
-		}
-	}
-}
-
-// postFirstDialHome POSTs the initial batch to /events, retrying transient
-// failures with exponential backoff. A cold box (snapshot pull + orun install)
-// can momentarily outrun the relay being reachable or the session token being
-// active at the DO, so a few retries turn a race into a success. A persistent
-// failure returns a diagnostic that names the likely cause — an expired token,
-// no reachability — instead of a bare status line.
-func postFirstDialHome(ctx context.Context, cfg RelayConfig, batch []Frame) error {
-	attempts := cfg.DialRetries
-	if attempts <= 0 {
-		attempts = 6
-	}
-	backoff := cfg.RetryBackoff
-	if backoff <= 0 {
-		backoff = 500 * time.Millisecond
-	}
-	var lastErr error
-	for i := 0; i < attempts; i++ {
-		if i > 0 {
-			cfg.logf("orun agent serve: dial-home attempt %d/%d failed (%v); retrying in %s\n",
-				i, attempts, lastErr, backoff)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(backoff):
-			}
-			if backoff < 8*time.Second {
-				backoff *= 2
-			}
-		}
-		if err := postJSON(ctx, cfg, "/events", batch); err != nil {
-			lastErr = err
-			continue
-		}
-		return nil
-	}
-	var httpErr *relayHTTPError
-	if errors.As(lastErr, &httpErr) && (httpErr.Status == http.StatusUnauthorized || httpErr.Status == http.StatusForbidden) {
-		return fmt.Errorf("dial-home (POST /events) rejected with HTTP %d after %d attempts — the session token (ORUN_SESSION_TOKEN) is invalid or expired; a cold boot can outlast its short TTL, in which case the cloud must mint a fresh token or extend the TTL: %w",
-			httpErr.Status, attempts, lastErr)
-	}
-	return fmt.Errorf("dial-home (POST /events) never landed after %d attempts (relay %s unreachable or rejecting) — the cloud will see no event stream from this session: %w",
-		attempts, cfg.BaseURL, lastErr)
-}
-
-// pumpUp batches the head's event frames to /events and forwards deltas to
-// /stream. A bye ends the pump (the session is over). A forwarding goroutine
-// unblocks the Recv loop so the flush ticker fires even when the frame stream
-// is momentarily idle (a settled batch must still flush).
+// pumpUp posts the runtime's DURABLE event frames to /events — the store the
+// console polls. Only t:"event" frames go to the durable log; hello/live/bye and
+// other attach-protocol control frames are NOT events and are skipped (posting
+// them would write junk rows the console can't render). Deltas go to /stream
+// (ephemeral, best-effort). A forwarding goroutine unblocks Recv so the flush
+// ticker fires even when the frame stream is momentarily idle. Crucially, a POST
+// failure NEVER returns from the pump: postEventBatch retries, logs loudly, then
+// drops — one transient must not black out the rest of the session.
 func pumpUp(ctx context.Context, head *HeadConn, cfg RelayConfig, flush time.Duration) error {
 	ticker := time.NewTicker(flush)
 	defer ticker.Stop()
@@ -265,56 +185,89 @@ func pumpUp(ctx context.Context, head *HeadConn, cfg RelayConfig, flush time.Dur
 	}()
 
 	var batch []Frame
-	send := func() error {
+	send := func() {
 		if len(batch) == 0 {
-			return nil
+			return
 		}
-		if err := postJSON(ctx, cfg, "/events", batch); err != nil {
-			return err
-		}
+		postEventBatch(ctx, cfg, batch)
 		batch = batch[:0]
-		return nil
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if err := send(); err != nil {
-				return err
-			}
+			send()
 		case f, ok := <-frames:
 			if !ok {
-				return send()
+				send()
+				return nil
 			}
 			switch f.T {
-			case TEvent, THello, TLive:
+			case TEvent:
 				batch = append(batch, f)
 				if len(batch) >= 100 {
-					if err := send(); err != nil {
-						return err
-					}
+					send()
 				}
 			case TDelta:
+				// Ephemeral live-token streaming: SSE-only on the cloud, never in
+				// the durable poll model. Best-effort, never blocks the log.
 				_ = postJSON(ctx, cfg, "/stream", f)
 			case TBye:
-				// Flush the sealed tail, then forward the bye so the relay can
-				// close its head feeds (the session is over).
-				if err := send(); err != nil {
-					return err
-				}
-				_ = postJSON(ctx, cfg, "/events", []Frame{f})
+				// Session over: flush the durable tail and stop. The terminal
+				// state itself reaches the log as a state_changed event, not via
+				// this control frame.
+				send()
 				return nil
 			}
 		}
 	}
 }
 
-// pumpDown long-polls the input return-queue and feeds head inputs into the
-// runtime. A cursor advances past consumed items; acks post back so a head's
-// SocketClient-style sync wait resolves.
+// postEventBatch POSTs a durable event batch to /events, retrying transient
+// failures with backoff, then LOUDLY logging and dropping so the pump survives.
+// The cloud dedupes by (sessionId, seq), so a retried batch is safe.
+func postEventBatch(ctx context.Context, cfg RelayConfig, batch []Frame) {
+	tries := cfg.PostRetries
+	if tries <= 0 {
+		tries = 4
+	}
+	backoff := cfg.RetryBackoff
+	if backoff <= 0 {
+		backoff = 500 * time.Millisecond
+	}
+	var lastErr error
+	for i := 0; i < tries; i++ {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			if backoff < 8*time.Second {
+				backoff *= 2
+			}
+		}
+		if err := postJSON(ctx, cfg, "/events", batch); err == nil {
+			return
+		} else {
+			lastErr = err
+			cfg.logf("orun agent serve: POST /events failed (attempt %d/%d): %v\n", i+1, tries, err)
+		}
+	}
+	cfg.logf("orun agent serve: POST /events dropping %d event(s) after %d failed attempts — console log will miss them: %v\n",
+		len(batch), tries, lastErr)
+}
+
+// pumpDown long-polls the input return-queue (the cloud holds GET /inputs open
+// ~25s) and feeds head inputs into the runtime, acking each so the console's
+// POST /input (which blocks up to 25s for the ack) resolves promptly with
+// ok:true. A cursor advances past consumed items. Persistent failures are
+// logged LOUDLY (a wedged return-queue silently swallows every steer) rather
+// than the old silent backoff.
 func pumpDown(ctx context.Context, inputs *agent.InputQueue, cfg RelayConfig, poll time.Duration) error {
 	cursor := 0
+	consecutiveErr := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -323,7 +276,13 @@ func pumpDown(ctx context.Context, inputs *agent.InputQueue, cfg RelayConfig, po
 		}
 		items, next, err := getInputs(ctx, cfg, cursor)
 		if err != nil {
-			// Transient relay hiccup: back off, keep the cursor.
+			consecutiveErr++
+			// Loud on the first failure and periodically after, so a wedged
+			// input path (e.g. the route still 404ing) is visible instead of
+			// silently eating the user's steers.
+			if consecutiveErr == 1 || consecutiveErr%10 == 0 {
+				cfg.logf("orun agent serve: GET /inputs failing (x%d) — steering degraded until it recovers: %v\n", consecutiveErr, err)
+			}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -331,7 +290,11 @@ func pumpDown(ctx context.Context, inputs *agent.InputQueue, cfg RelayConfig, po
 			}
 			continue
 		}
+		consecutiveErr = 0
 		if len(items) == 0 {
+			// The server's long-poll window elapsed empty; re-poll immediately
+			// (the ~25s block IS the spacing), but guard a misconfigured instant
+			// return with a small floor so we don't hot-loop.
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
