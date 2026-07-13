@@ -45,6 +45,12 @@ Identity comes from the sandbox environment (injected by the control plane):
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		errOut := cmd.ErrOrStderr()
+		// FIRST line, unconditionally: which binary is actually running. A stale
+		// baked-in image once ran an old orun for four sessions while we shipped
+		// fixes into a void; the process announcing its own version is the
+		// cheapest insurance against ever wondering again. Matches `orun
+		// --version` ("dev" in local builds, the tag in releases).
+		fmt.Fprintf(errOut, "orun agent serve: orun version %s\n", version)
 		sessionID := serveSessionID
 		if sessionID == "" {
 			sessionID = os.Getenv("ORUN_SESSION_ID")
