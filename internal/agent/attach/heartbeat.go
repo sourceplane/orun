@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -66,12 +67,30 @@ func (c HeartbeatConfig) logf(format string, args ...any) {
 }
 
 // Heartbeat owns the session lease. One goroutine sends beats and refreshes the
-// token; all token/expiry mutation lives on that goroutine (plus the synchronous
-// first beat before it starts), so there is no shared-state race.
+// token; expiry is touched only by that goroutine (plus the synchronous first
+// beat before it starts). The token is guarded by mu because the relay reads it
+// concurrently via Token() so its auth tracks refreshes instead of pinning the
+// 15-min boot token.
 type Heartbeat struct {
 	cfg    HeartbeatConfig
+	mu     sync.Mutex
 	token  string
 	expiry time.Time // best-known expiry of the current token; zero = unknown
+}
+
+// Token returns the current (possibly refreshed) session token. Safe for
+// concurrent use — pass it as RelayConfig.TokenFn so the relay's bearer tracks
+// the heartbeat's refreshes rather than expiring mid-run with the boot token.
+func (h *Heartbeat) Token() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.token
+}
+
+func (h *Heartbeat) setToken(tok string) {
+	h.mu.Lock()
+	h.token = tok
+	h.mu.Unlock()
 }
 
 // StartHeartbeat sends the first beat synchronously — the call that flips
@@ -253,7 +272,7 @@ func (h *Heartbeat) refresh(ctx context.Context) error {
 	if jerr := json.Unmarshal(body, &tr); jerr != nil || tr.Token == "" {
 		return &httpStatusErr{status: status, err: fmt.Errorf("token refresh: malformed response")}
 	}
-	h.token = tr.Token
+	h.setToken(tr.Token)
 	if t, perr := time.Parse(time.RFC3339, tr.ExpiresAt); perr == nil {
 		h.expiry = t
 	} else {
@@ -277,7 +296,7 @@ func (h *Heartbeat) doPOST(ctx context.Context, path string) (int, []byte, error
 	if err != nil {
 		return 0, nil, err
 	}
-	req.Header.Set("authorization", "Bearer "+h.token)
+	req.Header.Set("authorization", "Bearer "+h.Token())
 	resp, err := h.cfg.client().Do(req)
 	if err != nil {
 		return 0, nil, err

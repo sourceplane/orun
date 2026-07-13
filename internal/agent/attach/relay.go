@@ -30,9 +30,13 @@ import (
 
 // RelayConfig points the body at its session relay.
 type RelayConfig struct {
-	BaseURL    string // e.g. https://api…/v1/organizations/<org>/agents/sessions/<id>
-	Token      string // the session bearer (ORUN_SESSION_TOKEN)
-	HTTP       *http.Client
+	BaseURL string // e.g. https://api…/v1/organizations/<org>/agents/sessions/<id>
+	Token   string // the session bearer (ORUN_SESSION_TOKEN) — the boot value
+	// TokenFn, when set, supplies the live bearer for each request, overriding
+	// Token. Wire it to Heartbeat.Token so the relay's auth tracks the token
+	// refreshes and does not lapse ~15m in with the expired boot token.
+	TokenFn func() string
+	HTTP    *http.Client
 	FlushEvery time.Duration // event-batch flush cadence (default 200ms)
 	PollEvery  time.Duration // input long-poll spacing on empty (default 1s)
 
@@ -55,6 +59,17 @@ func (c RelayConfig) client() *http.Client {
 		return c.HTTP
 	}
 	return &http.Client{Timeout: 60 * time.Second}
+}
+
+// authToken is the bearer to present on a relay request: the live TokenFn value
+// when available, else the static boot Token.
+func (c RelayConfig) authToken() string {
+	if c.TokenFn != nil {
+		if t := c.TokenFn(); t != "" {
+			return t
+		}
+	}
+	return c.Token
 }
 
 func (c RelayConfig) logf(format string, args ...any) {
@@ -396,8 +411,8 @@ func postJSON(ctx context.Context, cfg RelayConfig, path string, body any) error
 		return err
 	}
 	req.Header.Set("content-type", "application/json")
-	if cfg.Token != "" {
-		req.Header.Set("authorization", "Bearer "+cfg.Token)
+	if tok := cfg.authToken(); tok != "" {
+		req.Header.Set("authorization", "Bearer "+tok)
 	}
 	resp, err := cfg.client().Do(req)
 	if err != nil {
@@ -422,8 +437,8 @@ func getInputs(ctx context.Context, cfg RelayConfig, cursor int) ([]Frame, int, 
 	if err != nil {
 		return nil, cursor, err
 	}
-	if cfg.Token != "" {
-		req.Header.Set("authorization", "Bearer "+cfg.Token)
+	if tok := cfg.authToken(); tok != "" {
+		req.Header.Set("authorization", "Bearer "+tok)
 	}
 	resp, err := cfg.client().Do(req)
 	if err != nil {
