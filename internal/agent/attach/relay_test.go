@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -142,6 +143,91 @@ func relayClient(ts *httptest.Server) *http.Client {
 	return &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}}
+}
+
+// TestDialToRelayRetriesFirstDialHome proves the first /events dial-home
+// survives a cold-boot race: the relay rejects the first two POST /events
+// (relay not warm / token not yet active) and DialToRelay retries until it
+// lands, rather than giving up and leaving the cloud blind.
+func TestDialToRelayRetriesFirstDialHome(t *testing.T) {
+	var mu sync.Mutex
+	var eventsPosts int
+	var gotHello, gotLive bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/events" {
+			w.WriteHeader(200)
+			return
+		}
+		mu.Lock()
+		eventsPosts++
+		n := eventsPosts
+		mu.Unlock()
+		if n <= 2 {
+			w.WriteHeader(503) // relay not warm yet
+			return
+		}
+		var batch []Frame
+		json.NewDecoder(req.Body).Decode(&batch)
+		mu.Lock()
+		for _, f := range batch {
+			if f.T == THello {
+				gotHello = true
+			}
+			if f.T == TLive {
+				gotLive = true
+			}
+		}
+		mu.Unlock()
+		w.WriteHeader(200)
+	}))
+	defer ts.Close()
+
+	srv := NewServer(SessionInfo{SessionID: "as_retry", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
+	sess, err := DialToRelay(context.Background(), srv, agent.NewInputQueue(), RelayConfig{
+		BaseURL: ts.URL, Token: "tok", HTTP: ts.Client(),
+		DialRetries: 5, RetryBackoff: time.Millisecond,
+		FlushEvery: 10 * time.Millisecond, PollEvery: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("DialToRelay should have retried past the transient 503s: %v", err)
+	}
+	defer sess.Close()
+	mu.Lock()
+	defer mu.Unlock()
+	if eventsPosts < 3 {
+		t.Fatalf("expected the first dial-home to be retried; only %d posts", eventsPosts)
+	}
+	if !gotHello || !gotLive {
+		t.Fatalf("first dial-home should carry the hello+live catch-up (hello=%v live=%v)", gotHello, gotLive)
+	}
+}
+
+// TestDialToRelayFailsLoudOnAuthReject proves an expired/invalid session token
+// (candidate: the 15-min TTL outlasting a cold boot) fails LOUDLY with a
+// token-specific diagnostic instead of being swallowed into a 30-min silent
+// lease_lost.
+func TestDialToRelayFailsLoudOnAuthReject(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer ts.Close()
+
+	srv := NewServer(SessionInfo{SessionID: "as_401", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
+	sess, err := DialToRelay(context.Background(), srv, agent.NewInputQueue(), RelayConfig{
+		BaseURL: ts.URL, Token: "expired", HTTP: ts.Client(),
+		DialRetries: 2, RetryBackoff: time.Millisecond,
+	})
+	if err == nil {
+		sess.Close()
+		t.Fatal("DialToRelay must fail when the first heartbeat is rejected 401, not run blind")
+	}
+	if sess != nil {
+		t.Fatal("no RelaySession should be returned on a failed dial-home")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "401") || !strings.Contains(msg, "ORUN_SESSION_TOKEN") {
+		t.Fatalf("error should name the 401 and the token; got: %v", err)
+	}
 }
 
 func TestServeAndRemoteAttachOverRelay(t *testing.T) {
