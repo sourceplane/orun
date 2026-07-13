@@ -36,15 +36,18 @@ type RelayConfig struct {
 	FlushEvery time.Duration // event-batch flush cadence (default 200ms)
 	PollEvery  time.Duration // input long-poll spacing on empty (default 1s)
 
-	// Dial-home hardening. The FIRST POST /events is the lease-creating
-	// heartbeat: until it lands the cloud has a `provisioning` session with no
-	// lease, and the sweep reclaims it as `lease_lost` ~30 min later with zero
-	// logs. So the first heartbeat is retried (a cold snapshot pull + install
-	// can outrun a transient relay/token-propagation window) and its failure is
-	// reported LOUDLY rather than swallowed.
-	HeartbeatRetries int           // first-heartbeat attempts before giving up (default 6)
-	RetryBackoff     time.Duration // base backoff between attempts (default 500ms)
-	Log              io.Writer     // where a mid-session pump failure is reported (nil = discard)
+	// Dial-home hardening. The FIRST POST /events is the box's first contact
+	// with the cloud: it proves the relay URL resolves, the network is up, and
+	// the session token is accepted. A cold snapshot pull + install can outrun a
+	// transient relay/token-propagation window, so it is retried; a persistent
+	// failure is reported LOUDLY rather than swallowed, so a session that can't
+	// dial home fails where someone can read it instead of silently.
+	// NOTE: this is the /events attach channel — it is NOT the session
+	// /heartbeat endpoint the control plane uses to flip provisioning→running.
+	// A green dial-home here does not by itself create the lease.
+	DialRetries  int           // first /events dial-home attempts before giving up (default 6)
+	RetryBackoff time.Duration // base backoff between attempts (default 500ms)
+	Log          io.Writer     // where a mid-session pump failure is reported (nil = discard)
 }
 
 func (c RelayConfig) client() *http.Client {
@@ -82,14 +85,14 @@ func (s *RelaySession) Close() {
 // or the session's bye). Lets the caller observe an unexpected relay drop.
 func (s *RelaySession) Done() <-chan struct{} { return s.done }
 
-// DialToRelay attaches to the body's Server, performs the lease-creating first
-// heartbeat SYNCHRONOUSLY (with retry/backoff), and only on success spawns the
+// DialToRelay attaches to the body's Server, performs the first /events
+// dial-home SYNCHRONOUSLY (with retry/backoff), and only on success spawns the
 // background event/input pumps. It returns an error — loudly, not swallowed —
-// when the first heartbeat never lands, so `orun agent serve` can exit non-zero
-// with a diagnostic instead of running a local agent whose output the cloud
-// never sees. This is the single fix for the silent 30-min `lease_lost`: the
-// dial-home either provably reaches the cloud or fails where someone can read
-// it.
+// when the dial-home never lands, so `orun agent serve` can exit non-zero with
+// a diagnostic instead of running a local agent whose output the cloud never
+// sees. This turns the silent 30-min `lease_lost` into a readable failure: the
+// dial-home either provably reaches the cloud (URL resolves, token accepted) or
+// fails where someone can read it.
 func DialToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cfg RelayConfig) (*RelaySession, error) {
 	flush := cfg.FlushEvery
 	if flush <= 0 {
@@ -104,15 +107,15 @@ func DialToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cfg
 		return nil, err
 	}
 
-	// The first heartbeat: the catch-up frames enqueued at Attach (hello, any
+	// The first dial-home: the catch-up frames enqueued at Attach (hello, any
 	// replayed events, the live marker) are the initial batch. Drain and POST
-	// them with retry — this is the call that creates the session lease.
+	// them with retry — this proves reachability and that the token is accepted.
 	initial, err := drainInitial(head)
 	if err != nil {
 		head.Detach()
 		return nil, err
 	}
-	if err := postFirstHeartbeat(ctx, cfg, initial); err != nil {
+	if err := postFirstDialHome(ctx, cfg, initial); err != nil {
 		head.Detach()
 		return nil, err
 	}
@@ -159,7 +162,7 @@ func ServeToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cf
 }
 
 // drainInitial pulls the catch-up frames Attach enqueued — hello, any replayed
-// events, up to and including the live marker — into the first-heartbeat batch.
+// events, up to and including the live marker — into the first dial-home batch.
 // Those frames are all queued before Attach returns, so this does not block on
 // the live agent; it stops at the live marker (or a bye / closed queue).
 func drainInitial(head *HeadConn) ([]Frame, error) {
@@ -178,14 +181,14 @@ func drainInitial(head *HeadConn) ([]Frame, error) {
 	}
 }
 
-// postFirstHeartbeat POSTs the initial batch to /events, retrying transient
+// postFirstDialHome POSTs the initial batch to /events, retrying transient
 // failures with exponential backoff. A cold box (snapshot pull + orun install)
 // can momentarily outrun the relay being reachable or the session token being
 // active at the DO, so a few retries turn a race into a success. A persistent
 // failure returns a diagnostic that names the likely cause — an expired token,
 // no reachability — instead of a bare status line.
-func postFirstHeartbeat(ctx context.Context, cfg RelayConfig, batch []Frame) error {
-	attempts := cfg.HeartbeatRetries
+func postFirstDialHome(ctx context.Context, cfg RelayConfig, batch []Frame) error {
+	attempts := cfg.DialRetries
 	if attempts <= 0 {
 		attempts = 6
 	}
@@ -215,10 +218,10 @@ func postFirstHeartbeat(ctx context.Context, cfg RelayConfig, batch []Frame) err
 	}
 	var httpErr *relayHTTPError
 	if errors.As(lastErr, &httpErr) && (httpErr.Status == http.StatusUnauthorized || httpErr.Status == http.StatusForbidden) {
-		return fmt.Errorf("first heartbeat rejected with HTTP %d after %d attempts — the session token (ORUN_SESSION_TOKEN) is invalid or expired; a cold boot can outlast its short TTL, in which case the cloud must mint a fresh token or extend the TTL: %w",
+		return fmt.Errorf("dial-home (POST /events) rejected with HTTP %d after %d attempts — the session token (ORUN_SESSION_TOKEN) is invalid or expired; a cold boot can outlast its short TTL, in which case the cloud must mint a fresh token or extend the TTL: %w",
 			httpErr.Status, attempts, lastErr)
 	}
-	return fmt.Errorf("first heartbeat never landed after %d attempts (relay %s unreachable or rejecting) — the cloud will see no dial-home and reclaim this session as lease_lost: %w",
+	return fmt.Errorf("dial-home (POST /events) never landed after %d attempts (relay %s unreachable or rejecting) — the cloud will see no event stream from this session: %w",
 		attempts, cfg.BaseURL, lastErr)
 }
 

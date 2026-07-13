@@ -145,11 +145,11 @@ func relayClient(ts *httptest.Server) *http.Client {
 	}}
 }
 
-// TestDialToRelayRetriesFirstHeartbeat proves the lease-creating first
-// heartbeat survives a cold-boot race: the relay rejects the first two POST
-// /events (relay not warm / token not yet active) and DialToRelay retries until
-// it lands, rather than giving up and leaving the cloud blind.
-func TestDialToRelayRetriesFirstHeartbeat(t *testing.T) {
+// TestDialToRelayRetriesFirstDialHome proves the first /events dial-home
+// survives a cold-boot race: the relay rejects the first two POST /events
+// (relay not warm / token not yet active) and DialToRelay retries until it
+// lands, rather than giving up and leaving the cloud blind.
+func TestDialToRelayRetriesFirstDialHome(t *testing.T) {
 	var mu sync.Mutex
 	var eventsPosts int
 	var gotHello, gotLive bool
@@ -185,7 +185,7 @@ func TestDialToRelayRetriesFirstHeartbeat(t *testing.T) {
 	srv := NewServer(SessionInfo{SessionID: "as_retry", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
 	sess, err := DialToRelay(context.Background(), srv, agent.NewInputQueue(), RelayConfig{
 		BaseURL: ts.URL, Token: "tok", HTTP: ts.Client(),
-		HeartbeatRetries: 5, RetryBackoff: time.Millisecond,
+		DialRetries: 5, RetryBackoff: time.Millisecond,
 		FlushEvery: 10 * time.Millisecond, PollEvery: 10 * time.Millisecond,
 	})
 	if err != nil {
@@ -195,10 +195,10 @@ func TestDialToRelayRetriesFirstHeartbeat(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	if eventsPosts < 3 {
-		t.Fatalf("expected the first heartbeat to be retried; only %d posts", eventsPosts)
+		t.Fatalf("expected the first dial-home to be retried; only %d posts", eventsPosts)
 	}
 	if !gotHello || !gotLive {
-		t.Fatalf("first heartbeat should carry the hello+live catch-up (hello=%v live=%v)", gotHello, gotLive)
+		t.Fatalf("first dial-home should carry the hello+live catch-up (hello=%v live=%v)", gotHello, gotLive)
 	}
 }
 
@@ -215,7 +215,7 @@ func TestDialToRelayFailsLoudOnAuthReject(t *testing.T) {
 	srv := NewServer(SessionInfo{SessionID: "as_401", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
 	sess, err := DialToRelay(context.Background(), srv, agent.NewInputQueue(), RelayConfig{
 		BaseURL: ts.URL, Token: "expired", HTTP: ts.Client(),
-		HeartbeatRetries: 2, RetryBackoff: time.Millisecond,
+		DialRetries: 2, RetryBackoff: time.Millisecond,
 	})
 	if err == nil {
 		sess.Close()
