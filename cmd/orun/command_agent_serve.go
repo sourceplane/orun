@@ -84,13 +84,14 @@ Identity comes from the sandbox environment (injected by the control plane):
 		runCtx, runCancel := context.WithCancel(ctx)
 		defer runCancel()
 		fmt.Fprintf(errOut, "orun agent serve: sending first heartbeat — session %s → %s\n", sessionID, relayBase)
-		if _, err := attach.StartHeartbeat(hbCtx, attach.HeartbeatConfig{
+		hb, hbErr := attach.StartHeartbeat(hbCtx, attach.HeartbeatConfig{
 			BaseURL: relayBase, Token: token, Log: errOut,
 		}, func(reason string) {
 			fmt.Fprintf(errOut, "orun agent serve: session ended by cloud (heartbeat terminal): %s\n", reason)
 			runCancel()
-		}); err != nil {
-			return fmt.Errorf("session heartbeat failed: %w", err)
+		})
+		if hbErr != nil {
+			return fmt.Errorf("session heartbeat failed: %w", hbErr)
 		}
 
 		store, refs, _, ok := openObjectStores()
@@ -167,7 +168,7 @@ Identity comes from the sandbox environment (injected by the control plane):
 		defer relayCancel()
 		fmt.Fprintf(errOut, "orun agent serve: connecting event relay — %s\n", relayBase)
 		relaySession, rerr := attach.DialToRelay(relayCtx, srv, inputs, attach.RelayConfig{
-			BaseURL: relayBase, Token: token, Log: errOut,
+			BaseURL: relayBase, Token: token, TokenFn: hb.Token, Log: errOut,
 		})
 		if rerr != nil {
 			fmt.Fprintf(errOut, "orun agent serve: WARNING event relay unavailable (%v) — session continues on heartbeat; console tail degraded\n", rerr)

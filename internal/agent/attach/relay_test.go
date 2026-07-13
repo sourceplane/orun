@@ -230,6 +230,62 @@ func TestDialToRelayFailsLoudOnAuthReject(t *testing.T) {
 	}
 }
 
+// TestRelayUsesLiveTokenFn proves the relay presents the live TokenFn bearer
+// (the heartbeat's refreshed token), not the static boot token — so relay auth
+// does not lapse ~15m in when the boot token expires.
+func TestRelayUsesLiveTokenFn(t *testing.T) {
+	var mu sync.Mutex
+	var lastAuth string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/events" {
+			mu.Lock()
+			lastAuth = req.Header.Get("Authorization")
+			mu.Unlock()
+		}
+		w.WriteHeader(200)
+	}))
+	defer ts.Close()
+
+	// tokenBox stands in for the heartbeat's mutex-guarded live token.
+	var tokBox struct {
+		sync.Mutex
+		val string
+	}
+	tokBox.val = "boot-token"
+	tokenFn := func() string { tokBox.Lock(); defer tokBox.Unlock(); return tokBox.val }
+
+	srv := NewServer(SessionInfo{SessionID: "as_tok", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
+	sess, err := DialToRelay(context.Background(), srv, agent.NewInputQueue(), RelayConfig{
+		BaseURL: ts.URL, Token: "boot-token", TokenFn: tokenFn,
+		HTTP: ts.Client(), FlushEvery: 10 * time.Millisecond, PollEvery: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("dial-home: %v", err)
+	}
+	mu.Lock()
+	firstAuth := lastAuth
+	mu.Unlock()
+	if firstAuth != "Bearer boot-token" {
+		t.Fatalf("expected the TokenFn bearer, got %q", firstAuth)
+	}
+	sess.Close() // stop the pump before mutating the token
+
+	// Simulate the heartbeat refreshing the token: a later post must carry it.
+	tokBox.Lock()
+	tokBox.val = "refreshed-token"
+	tokBox.Unlock()
+	if err := postJSON(context.Background(), RelayConfig{
+		BaseURL: ts.URL, TokenFn: tokenFn, HTTP: ts.Client(),
+	}, "/events", []Frame{}); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if lastAuth != "Bearer refreshed-token" {
+		t.Fatalf("relay must track the refreshed token, got %q", lastAuth)
+	}
+}
+
 func TestServeAndRemoteAttachOverRelay(t *testing.T) {
 	relay := newFakeRelay()
 	ts := httptest.NewServer(relay.handler())
