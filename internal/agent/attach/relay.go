@@ -123,6 +123,7 @@ func DialToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cfg
 
 	pctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
+	cfg.logf("orun agent serve: relay pumps launching — base %s\n", cfg.BaseURL)
 	go func() {
 		defer close(done)
 		defer head.Detach()
@@ -131,10 +132,11 @@ func DialToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cfg
 		go func() { errc <- pumpDown(pctx, inputs, cfg, poll) }()
 		select {
 		case <-pctx.Done():
+			cfg.logf("orun agent serve: relay pumps stopping (context canceled)\n")
 		case err := <-errc:
-			if err != nil && !errors.Is(err, context.Canceled) {
-				cfg.logf("orun agent serve: relay pump ended: %v\n", err)
-			}
+			// Never silent: even a clean/canceled exit is announced, because a
+			// dark relay with no logs is the failure mode we keep hitting.
+			cfg.logf("orun agent serve: relay pump exited: %v\n", err)
 		}
 	}()
 	return &RelaySession{cancel: cancel, done: done}, nil
@@ -167,7 +169,9 @@ func ServeToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cf
 // ticker fires even when the frame stream is momentarily idle. Crucially, a POST
 // failure NEVER returns from the pump: postEventBatch retries, logs loudly, then
 // drops — one transient must not black out the rest of the session.
-func pumpUp(ctx context.Context, head *HeadConn, cfg RelayConfig, flush time.Duration) error {
+func pumpUp(ctx context.Context, head *HeadConn, cfg RelayConfig, flush time.Duration) (err error) {
+	cfg.logf("orun agent serve: pumpUp started — POST %s/events\n", cfg.BaseURL)
+	defer func() { cfg.logf("orun agent serve: pumpUp exited: %v\n", err) }()
 	ticker := time.NewTicker(flush)
 	defer ticker.Stop()
 
@@ -305,7 +309,9 @@ func frameSeq(f Frame) string {
 // ok:true. A cursor advances past consumed items. Persistent failures are
 // logged LOUDLY (a wedged return-queue silently swallows every steer) rather
 // than the old silent backoff.
-func pumpDown(ctx context.Context, inputs *agent.InputQueue, cfg RelayConfig, poll time.Duration) error {
+func pumpDown(ctx context.Context, inputs *agent.InputQueue, cfg RelayConfig, poll time.Duration) (err error) {
+	cfg.logf("orun agent serve: pumpDown started — long-poll GET %s/inputs\n", cfg.BaseURL)
+	defer func() { cfg.logf("orun agent serve: pumpDown exited: %v\n", err) }()
 	cursor := 0
 	consecutiveErr := 0
 	for {
