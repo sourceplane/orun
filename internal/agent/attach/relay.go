@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sourceplane/orun/internal/agent"
+	"github.com/sourceplane/orun/internal/nodes"
 )
 
 // relay.go — the cloud transport (attach-protocol.md §6.3): the body
@@ -35,8 +38,8 @@ type RelayConfig struct {
 	// TokenFn, when set, supplies the live bearer for each request, overriding
 	// Token. Wire it to Heartbeat.Token so the relay's auth tracks the token
 	// refreshes and does not lapse ~15m in with the expired boot token.
-	TokenFn func() string
-	HTTP    *http.Client
+	TokenFn    func() string
+	HTTP       *http.Client
 	FlushEvery time.Duration // event-batch flush cadence (default 200ms)
 	PollEvery  time.Duration // input long-poll spacing on empty (default 1s)
 
@@ -205,6 +208,15 @@ func pumpUp(ctx context.Context, head *HeadConn, cfg RelayConfig, flush time.Dur
 			}
 			switch f.T {
 			case TEvent:
+				if !nodes.ValidSessionEventKind(f.Kind) {
+					// The /events batch is non-transactional (one INSERT per
+					// frame): an out-of-vocabulary kind 422s and drops the rest
+					// of its batch cloud-side, forever on retry. Never send one —
+					// skip it loudly. (The runtime log already validates kinds;
+					// this is the wire-boundary backstop.)
+					cfg.logf("orun agent serve: skipping out-of-vocabulary event kind %q (seq %s) — not sent to /events\n", f.Kind, frameSeq(f))
+					continue
+				}
 				batch = append(batch, f)
 				if len(batch) >= 100 {
 					send()
@@ -248,15 +260,43 @@ func postEventBatch(ctx context.Context, cfg RelayConfig, batch []Frame) {
 				backoff *= 2
 			}
 		}
-		if err := postJSON(ctx, cfg, "/events", batch); err == nil {
+		err := postJSON(ctx, cfg, "/events", batch)
+		if err == nil {
 			return
-		} else {
-			lastErr = err
-			cfg.logf("orun agent serve: POST /events failed (attempt %d/%d): %v\n", i+1, tries, err)
 		}
+		lastErr = err
+		// A 400/422 is a DETERMINISTIC client rejection: retrying can't fix it,
+		// and because the batch is non-transactional the frames after the bad
+		// one are already dropped cloud-side — retrying just re-persists the
+		// prefix and re-drops the tail forever. Log LOUDLY (with the kinds, to
+		// pinpoint the offender) and give up on this batch, never retry-storm.
+		var he *relayHTTPError
+		if errors.As(err, &he) && (he.Status == http.StatusBadRequest || he.Status == http.StatusUnprocessableEntity) {
+			cfg.logf("orun agent serve: POST /events rejected HTTP %d (non-retryable) — dropping %d frame(s) [kinds: %s]: %v\n",
+				he.Status, len(batch), batchKinds(batch), err)
+			return
+		}
+		cfg.logf("orun agent serve: POST /events failed (attempt %d/%d): %v\n", i+1, tries, err)
 	}
 	cfg.logf("orun agent serve: POST /events dropping %d event(s) after %d failed attempts — console log will miss them: %v\n",
 		len(batch), tries, lastErr)
+}
+
+// batchKinds summarizes the event kinds in a batch for a rejection log line.
+func batchKinds(batch []Frame) string {
+	ks := make([]string, 0, len(batch))
+	for _, f := range batch {
+		ks = append(ks, f.Kind)
+	}
+	return strings.Join(ks, ",")
+}
+
+// frameSeq renders a frame's seq for logging (frames carry *int seq).
+func frameSeq(f Frame) string {
+	if f.Seq == nil {
+		return "?"
+	}
+	return strconv.Itoa(*f.Seq)
 }
 
 // pumpDown long-polls the input return-queue (the cloud holds GET /inputs open

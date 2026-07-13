@@ -268,6 +268,95 @@ func TestRelayPumpSurvivesPostFailure(t *testing.T) {
 	}, "pump should have survived the failure and posted the recovered event")
 }
 
+// TestRelaySkipsOutOfVocabKind proves an out-of-vocabulary event kind is never
+// POSTed to /events — the non-transactional batch would 422 and drop its tail.
+func TestRelaySkipsOutOfVocabKind(t *testing.T) {
+	var mu sync.Mutex
+	var posted []Frame
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/events" {
+			var batch []Frame
+			json.NewDecoder(req.Body).Decode(&batch)
+			mu.Lock()
+			posted = append(posted, batch...)
+			mu.Unlock()
+		}
+		w.WriteHeader(200)
+	}))
+	defer ts.Close()
+
+	srv := NewServer(SessionInfo{SessionID: "as_vocab", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
+	sess, err := DialToRelay(context.Background(), srv, agent.NewInputQueue(), RelayConfig{
+		BaseURL: ts.URL, Token: "tok", HTTP: ts.Client(),
+		FlushEvery: 5 * time.Millisecond, PollEvery: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	srv.Observe(agent.SessionEvent{Seq: 0, Kind: "totally_bogus_kind", Payload: map[string]any{"x": 1}})
+	srv.Observe(agent.SessionEvent{Seq: 1, Kind: nodes.SessionEventMessageAgent, Payload: map[string]any{"text": "ok"}})
+
+	waitUntil(t, time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, f := range posted {
+			if f.Kind == nodes.SessionEventMessageAgent {
+				return true
+			}
+		}
+		return false
+	}, "valid event should post")
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, f := range posted {
+		if f.Kind == "totally_bogus_kind" {
+			t.Fatal("out-of-vocabulary kind must never be posted to /events")
+		}
+	}
+}
+
+// TestRelayDoesNotRetryRejectedBatch proves a 422 (deterministic client
+// rejection) is posted once and NOT retried — retrying a non-transactional batch
+// only re-persists the prefix and re-drops the tail forever.
+func TestRelayDoesNotRetryRejectedBatch(t *testing.T) {
+	var mu sync.Mutex
+	posts := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/events" {
+			mu.Lock()
+			posts++
+			mu.Unlock()
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer ts.Close()
+
+	srv := NewServer(SessionInfo{SessionID: "as_422", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
+	sess, err := DialToRelay(context.Background(), srv, agent.NewInputQueue(), RelayConfig{
+		BaseURL: ts.URL, Token: "tok", HTTP: ts.Client(),
+		PostRetries: 5, RetryBackoff: time.Millisecond,
+		FlushEvery: 5 * time.Millisecond, PollEvery: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	srv.Observe(agent.SessionEvent{Seq: 0, Kind: nodes.SessionEventMessageAgent, Payload: map[string]any{"text": "hi"}})
+	time.Sleep(80 * time.Millisecond) // ample time for (disallowed) retries
+
+	mu.Lock()
+	defer mu.Unlock()
+	if posts != 1 {
+		t.Fatalf("a 422 must not be retried (PostRetries=5); got %d posts", posts)
+	}
+}
+
 // TestRelayUsesLiveTokenFn proves the relay presents the live TokenFn bearer
 // (the heartbeat's refreshed token), not the static boot token — so relay auth
 // does not lapse ~15m in when the boot token expires.
