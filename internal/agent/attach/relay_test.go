@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -98,6 +97,11 @@ func (r *fakeRelay) handler() http.Handler {
 			fmt.Fprintf(w, "data: %s\n\n", b)
 			flusher.Flush()
 		}
+		// The body posts only durable events to /events; the cloud synthesizes
+		// the attach-protocol framing (hello + live) for a head from the session
+		// it already knows. Model that so the remote head still initializes.
+		writeSSE(HelloFrame(SessionInfo{SessionID: "as_relay1", RunKind: "interactive", Harness: "stub"}, "running", len(replay)-1))
+		writeSSE(LiveFrame(-1))
 		for _, f := range replay {
 			writeSSE(f)
 		}
@@ -145,89 +149,123 @@ func relayClient(ts *httptest.Server) *http.Client {
 	}}
 }
 
-// TestDialToRelayRetriesFirstDialHome proves the first /events dial-home
-// survives a cold-boot race: the relay rejects the first two POST /events
-// (relay not warm / token not yet active) and DialToRelay retries until it
-// lands, rather than giving up and leaving the cloud blind.
-func TestDialToRelayRetriesFirstDialHome(t *testing.T) {
+// waitUntil polls cond until it holds or the deadline elapses (test helper for
+// the async relay pumps).
+func waitUntil(t *testing.T, d time.Duration, cond func() bool, msg string) {
+	t.Helper()
+	for start := time.Now(); time.Since(start) < d; {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !cond() {
+		t.Fatalf("timeout: %s", msg)
+	}
+}
+
+// TestRelayPostsOnlyEventFrames proves the durable /events log carries event
+// frames only — hello/live/other control frames are not written as events.
+func TestRelayPostsOnlyEventFrames(t *testing.T) {
 	var mu sync.Mutex
-	var eventsPosts int
-	var gotHello, gotLive bool
+	var posted []Frame
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path != "/events" {
-			w.WriteHeader(200)
-			return
+		if req.URL.Path == "/events" {
+			var batch []Frame
+			json.NewDecoder(req.Body).Decode(&batch)
+			mu.Lock()
+			posted = append(posted, batch...)
+			mu.Unlock()
 		}
-		mu.Lock()
-		eventsPosts++
-		n := eventsPosts
-		mu.Unlock()
-		if n <= 2 {
-			w.WriteHeader(503) // relay not warm yet
-			return
-		}
-		var batch []Frame
-		json.NewDecoder(req.Body).Decode(&batch)
-		mu.Lock()
-		for _, f := range batch {
-			if f.T == THello {
-				gotHello = true
-			}
-			if f.T == TLive {
-				gotLive = true
-			}
-		}
-		mu.Unlock()
 		w.WriteHeader(200)
 	}))
 	defer ts.Close()
 
-	srv := NewServer(SessionInfo{SessionID: "as_retry", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
+	srv := NewServer(SessionInfo{SessionID: "as_ev", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
 	sess, err := DialToRelay(context.Background(), srv, agent.NewInputQueue(), RelayConfig{
 		BaseURL: ts.URL, Token: "tok", HTTP: ts.Client(),
-		DialRetries: 5, RetryBackoff: time.Millisecond,
-		FlushEvery: 10 * time.Millisecond, PollEvery: 10 * time.Millisecond,
+		FlushEvery: 5 * time.Millisecond, PollEvery: 5 * time.Millisecond,
 	})
 	if err != nil {
-		t.Fatalf("DialToRelay should have retried past the transient 503s: %v", err)
+		t.Fatal(err)
 	}
 	defer sess.Close()
+
+	srv.Observe(agent.SessionEvent{Seq: 0, Kind: nodes.SessionEventMessageAgent, Payload: map[string]any{"text": "hi"}})
+
+	waitUntil(t, time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(posted) >= 1
+	}, "expected the event to be posted to /events")
+
 	mu.Lock()
 	defer mu.Unlock()
-	if eventsPosts < 3 {
-		t.Fatalf("expected the first dial-home to be retried; only %d posts", eventsPosts)
+	sawEvent := false
+	for _, f := range posted {
+		if f.T != TEvent {
+			t.Fatalf("only event frames belong in the durable log, got t=%q on /events", f.T)
+		}
+		if f.Kind == nodes.SessionEventMessageAgent {
+			sawEvent = true
+		}
 	}
-	if !gotHello || !gotLive {
-		t.Fatalf("first dial-home should carry the hello+live catch-up (hello=%v live=%v)", gotHello, gotLive)
+	if !sawEvent {
+		t.Fatal("message_agent event never reached /events")
 	}
 }
 
-// TestDialToRelayFailsLoudOnAuthReject proves an expired/invalid session token
-// (candidate: the 15-min TTL outlasting a cold boot) fails LOUDLY with a
-// token-specific diagnostic instead of being swallowed into a 30-min silent
-// lease_lost.
-func TestDialToRelayFailsLoudOnAuthReject(t *testing.T) {
+// TestRelayPumpSurvivesPostFailure proves one failed /events POST does not kill
+// the write-path: after a transient 503 the pump keeps running and posts the
+// next event once the endpoint recovers. This is the fix for the whole-session
+// blackout where a single returned error stopped all further posting.
+func TestRelayPumpSurvivesPostFailure(t *testing.T) {
+	var mu sync.Mutex
+	fail := true
+	okPosts := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
+		if req.URL.Path == "/events" {
+			mu.Lock()
+			f := fail
+			if !f {
+				okPosts++
+			}
+			mu.Unlock()
+			if f {
+				w.WriteHeader(503)
+				return
+			}
+		}
+		w.WriteHeader(200)
 	}))
 	defer ts.Close()
 
-	srv := NewServer(SessionInfo{SessionID: "as_401", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
+	srv := NewServer(SessionInfo{SessionID: "as_resil", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
 	sess, err := DialToRelay(context.Background(), srv, agent.NewInputQueue(), RelayConfig{
-		BaseURL: ts.URL, Token: "expired", HTTP: ts.Client(),
-		DialRetries: 2, RetryBackoff: time.Millisecond,
+		BaseURL: ts.URL, Token: "tok", HTTP: ts.Client(),
+		PostRetries: 2, RetryBackoff: time.Millisecond,
+		FlushEvery: 5 * time.Millisecond, PollEvery: 5 * time.Millisecond,
 	})
-	if err == nil {
-		sess.Close()
-		t.Fatal("DialToRelay must fail when the first heartbeat is rejected 401, not run blind")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if sess != nil {
-		t.Fatal("no RelaySession should be returned on a failed dial-home")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "401") || !strings.Contains(msg, "ORUN_SESSION_TOKEN") {
-		t.Fatalf("error should name the 401 and the token; got: %v", err)
-	}
+	defer sess.Close()
+
+	// First event: POST /events 503s, retried, then dropped — the pump must live.
+	srv.Observe(agent.SessionEvent{Seq: 0, Kind: nodes.SessionEventMessageAgent, Payload: map[string]any{"text": "one"}})
+	time.Sleep(60 * time.Millisecond)
+
+	// Endpoint recovers; the next event must still post (pump survived).
+	mu.Lock()
+	fail = false
+	mu.Unlock()
+	srv.Observe(agent.SessionEvent{Seq: 1, Kind: nodes.SessionEventMessageAgent, Payload: map[string]any{"text": "two"}})
+
+	waitUntil(t, time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return okPosts >= 1
+	}, "pump should have survived the failure and posted the recovered event")
 }
 
 // TestRelayUsesLiveTokenFn proves the relay presents the live TokenFn bearer
@@ -235,18 +273,18 @@ func TestDialToRelayFailsLoudOnAuthReject(t *testing.T) {
 // does not lapse ~15m in when the boot token expires.
 func TestRelayUsesLiveTokenFn(t *testing.T) {
 	var mu sync.Mutex
-	var lastAuth string
+	var auths []string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path == "/events" {
 			mu.Lock()
-			lastAuth = req.Header.Get("Authorization")
+			auths = append(auths, req.Header.Get("Authorization"))
 			mu.Unlock()
 		}
 		w.WriteHeader(200)
 	}))
 	defer ts.Close()
 
-	// tokenBox stands in for the heartbeat's mutex-guarded live token.
+	// tokBox stands in for the heartbeat's mutex-guarded live token.
 	var tokBox struct {
 		sync.Mutex
 		val string
@@ -256,34 +294,34 @@ func TestRelayUsesLiveTokenFn(t *testing.T) {
 
 	srv := NewServer(SessionInfo{SessionID: "as_tok", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
 	sess, err := DialToRelay(context.Background(), srv, agent.NewInputQueue(), RelayConfig{
-		BaseURL: ts.URL, Token: "boot-token", TokenFn: tokenFn,
-		HTTP: ts.Client(), FlushEvery: 10 * time.Millisecond, PollEvery: 10 * time.Millisecond,
+		BaseURL: ts.URL, TokenFn: tokenFn,
+		HTTP: ts.Client(), FlushEvery: 5 * time.Millisecond, PollEvery: 5 * time.Millisecond,
 	})
 	if err != nil {
-		t.Fatalf("dial-home: %v", err)
+		t.Fatal(err)
 	}
-	mu.Lock()
-	firstAuth := lastAuth
-	mu.Unlock()
-	if firstAuth != "Bearer boot-token" {
-		t.Fatalf("expected the TokenFn bearer, got %q", firstAuth)
-	}
-	sess.Close() // stop the pump before mutating the token
+	defer sess.Close()
 
-	// Simulate the heartbeat refreshing the token: a later post must carry it.
+	srv.Observe(agent.SessionEvent{Seq: 0, Kind: nodes.SessionEventMessageAgent, Payload: map[string]any{"text": "boot"}})
+	waitUntil(t, time.Second, func() bool { mu.Lock(); defer mu.Unlock(); return len(auths) >= 1 }, "first event should post")
+	mu.Lock()
+	if auths[0] != "Bearer boot-token" {
+		mu.Unlock()
+		t.Fatalf("expected the TokenFn bearer, got %q", auths[0])
+	}
+	before := len(auths)
+	mu.Unlock()
+
+	// Simulate the heartbeat refreshing the token: a later event must carry it.
 	tokBox.Lock()
 	tokBox.val = "refreshed-token"
 	tokBox.Unlock()
-	if err := postJSON(context.Background(), RelayConfig{
-		BaseURL: ts.URL, TokenFn: tokenFn, HTTP: ts.Client(),
-	}, "/events", []Frame{}); err != nil {
-		t.Fatalf("post: %v", err)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if lastAuth != "Bearer refreshed-token" {
-		t.Fatalf("relay must track the refreshed token, got %q", lastAuth)
-	}
+	srv.Observe(agent.SessionEvent{Seq: 1, Kind: nodes.SessionEventMessageAgent, Payload: map[string]any{"text": "later"}})
+	waitUntil(t, time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(auths) > before && auths[len(auths)-1] == "Bearer refreshed-token"
+	}, "relay must track the refreshed token")
 }
 
 func TestServeAndRemoteAttachOverRelay(t *testing.T) {

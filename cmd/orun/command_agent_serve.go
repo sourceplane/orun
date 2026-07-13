@@ -153,12 +153,12 @@ Identity comes from the sandbox environment (injected by the control plane):
 			branch = "agent/" + task + "-" + slugify(typeName)
 		}
 
-		// Event relay: mirrors the session event stream to the cloud for the
-		// console tail. This is NOT liveness — the heartbeat above owns that — so
-		// a relay failure must not kill a healthy session; log loudly and run on.
-		// (Cloud issue #466 reconciles the relay contract: today /stream,
-		// /inputs, /inputs/ack 404, and the token isn't refreshed on this
-		// channel, so /events auth lapses ~15m in.)
+		// Event relay: the DURABLE console log. POST /events fills the DB the
+		// console polls (GET /events); the write-path is resilient (retry + loud
+		// log + drop) and never gates the run — liveness is the heartbeat above.
+		// Its bearer tracks the heartbeat's token refreshes (TokenFn). pumpDown
+		// drains the input return-queue and acks steers so the console's
+		// fail-visible POST /input resolves.
 		inputs := agent.NewInputQueue()
 		srv := attach.NewServer(attach.SessionInfo{
 			SessionID: sessionID, BriefID: brief.ID, AgentType: typeName,
@@ -193,15 +193,17 @@ Identity comes from the sandbox environment (injected by the control plane):
 				opts.Seal = &agent.SealInput{RunKind: runKind, AgentType: ref.Target, Brief: brief.ID, Principal: "sp_session"}
 			}
 		}
+		fmt.Fprintf(errOut, "orun agent serve: starting agent loop — session %s\n", sessionID)
 		res, err := agent.Run(runCtx, store, opts)
 		srv.Close("terminal")
 		relaySession.Close() // nil-safe when the relay was unavailable
 		relayCancel()
 		hbCancel()
 		if err != nil {
+			fmt.Fprintf(errOut, "orun agent serve: agent loop ended with error: %v\n", err)
 			return err
 		}
-		fmt.Fprintf(cmd.ErrOrStderr(), "session %s ended: %s\n", res.SessionID, res.Outcome.Status)
+		fmt.Fprintf(errOut, "orun agent serve: session %s ended: %s\n", res.SessionID, res.Outcome.Status)
 		return nil
 	},
 }
