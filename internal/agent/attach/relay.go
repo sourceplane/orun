@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,6 +35,16 @@ type RelayConfig struct {
 	HTTP       *http.Client
 	FlushEvery time.Duration // event-batch flush cadence (default 200ms)
 	PollEvery  time.Duration // input long-poll spacing on empty (default 1s)
+
+	// Dial-home hardening. The FIRST POST /events is the lease-creating
+	// heartbeat: until it lands the cloud has a `provisioning` session with no
+	// lease, and the sweep reclaims it as `lease_lost` ~30 min later with zero
+	// logs. So the first heartbeat is retried (a cold snapshot pull + install
+	// can outrun a transient relay/token-propagation window) and its failure is
+	// reported LOUDLY rather than swallowed.
+	HeartbeatRetries int           // first-heartbeat attempts before giving up (default 6)
+	RetryBackoff     time.Duration // base backoff between attempts (default 500ms)
+	Log              io.Writer     // where a mid-session pump failure is reported (nil = discard)
 }
 
 func (c RelayConfig) client() *http.Client {
@@ -43,12 +54,43 @@ func (c RelayConfig) client() *http.Client {
 	return &http.Client{Timeout: 60 * time.Second}
 }
 
-// ServeToRelay bridges a live session's attach Server to the cloud relay until
-// ctx is canceled or the session ends. The Server is the body's single
-// in-process head sink; ServeToRelay attaches to it, batches its event feed
-// upstream, streams deltas, and pumps the input return-queue into inputs.
-// Blocking; run it in the serve command's foreground.
-func ServeToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cfg RelayConfig) error {
+func (c RelayConfig) logf(format string, args ...any) {
+	if c.Log != nil {
+		fmt.Fprintf(c.Log, format, args...)
+	}
+}
+
+// RelaySession is a live body↔relay bridge whose first heartbeat has already
+// landed (the cloud lease exists). Its pumps run in the background until Close
+// or ctx cancellation.
+type RelaySession struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// Close stops the pumps and waits for them to drain (so a sealed bye posted on
+// teardown makes it out before the process exits). Idempotent.
+func (s *RelaySession) Close() {
+	if s == nil {
+		return
+	}
+	s.cancel()
+	<-s.done
+}
+
+// Done is closed when the pumps have exited on their own (a fatal relay error
+// or the session's bye). Lets the caller observe an unexpected relay drop.
+func (s *RelaySession) Done() <-chan struct{} { return s.done }
+
+// DialToRelay attaches to the body's Server, performs the lease-creating first
+// heartbeat SYNCHRONOUSLY (with retry/backoff), and only on success spawns the
+// background event/input pumps. It returns an error — loudly, not swallowed —
+// when the first heartbeat never lands, so `orun agent serve` can exit non-zero
+// with a diagnostic instead of running a local agent whose output the cloud
+// never sees. This is the single fix for the silent 30-min `lease_lost`: the
+// dial-home either provably reaches the cloud or fails where someone can read
+// it.
+func DialToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cfg RelayConfig) (*RelaySession, error) {
 	flush := cfg.FlushEvery
 	if flush <= 0 {
 		flush = 200 * time.Millisecond
@@ -59,20 +101,125 @@ func ServeToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cf
 	}
 	head, err := srv.Attach(-1, "relay", "cloud")
 	if err != nil {
+		return nil, err
+	}
+
+	// The first heartbeat: the catch-up frames enqueued at Attach (hello, any
+	// replayed events, the live marker) are the initial batch. Drain and POST
+	// them with retry — this is the call that creates the session lease.
+	initial, err := drainInitial(head)
+	if err != nil {
+		head.Detach()
+		return nil, err
+	}
+	if err := postFirstHeartbeat(ctx, cfg, initial); err != nil {
+		head.Detach()
+		return nil, err
+	}
+
+	pctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer head.Detach()
+		errc := make(chan error, 2)
+		go func() { errc <- pumpUp(pctx, head, cfg, flush) }()
+		go func() { errc <- pumpDown(pctx, inputs, cfg, poll) }()
+		select {
+		case <-pctx.Done():
+		case err := <-errc:
+			// A pump that dies mid-session (the relay became unreachable, the
+			// token was revoked) is not fatal to the local run, but it must not
+			// be silent — the cloud is now blind to this session.
+			if err != nil && !errors.Is(err, context.Canceled) {
+				cfg.logf("orun agent serve: relay pump ended, cloud is no longer receiving this session: %v\n", err)
+			}
+		}
+	}()
+	return &RelaySession{cancel: cancel, done: done}, nil
+}
+
+// ServeToRelay bridges a live session's attach Server to the cloud relay until
+// ctx is canceled or the session ends: it dials home (first heartbeat, with
+// retry) and then runs the pumps to completion. Blocking. Returns an error if
+// the first heartbeat never lands. Kept as the one-call form for callers that
+// don't need the dial-home result before proceeding.
+func ServeToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cfg RelayConfig) error {
+	sess, err := DialToRelay(ctx, srv, inputs, cfg)
+	if err != nil {
 		return err
 	}
-	defer head.Detach()
-
-	errc := make(chan error, 2)
-	go func() { errc <- pumpUp(ctx, head, cfg, flush) }()
-	go func() { errc <- pumpDown(ctx, inputs, cfg, poll) }()
-
 	select {
 	case <-ctx.Done():
+		sess.Close()
 		return ctx.Err()
-	case err := <-errc:
-		return err
+	case <-sess.Done():
+		return nil
 	}
+}
+
+// drainInitial pulls the catch-up frames Attach enqueued — hello, any replayed
+// events, up to and including the live marker — into the first-heartbeat batch.
+// Those frames are all queued before Attach returns, so this does not block on
+// the live agent; it stops at the live marker (or a bye / closed queue).
+func drainInitial(head *HeadConn) ([]Frame, error) {
+	var batch []Frame
+	for {
+		f, ok := head.Recv()
+		if !ok {
+			// The session ended before it even went live. Send what we have so
+			// the cloud still records the session rather than timing out blind.
+			return batch, nil
+		}
+		batch = append(batch, f)
+		if f.T == TLive || f.T == TBye {
+			return batch, nil
+		}
+	}
+}
+
+// postFirstHeartbeat POSTs the initial batch to /events, retrying transient
+// failures with exponential backoff. A cold box (snapshot pull + orun install)
+// can momentarily outrun the relay being reachable or the session token being
+// active at the DO, so a few retries turn a race into a success. A persistent
+// failure returns a diagnostic that names the likely cause — an expired token,
+// no reachability — instead of a bare status line.
+func postFirstHeartbeat(ctx context.Context, cfg RelayConfig, batch []Frame) error {
+	attempts := cfg.HeartbeatRetries
+	if attempts <= 0 {
+		attempts = 6
+	}
+	backoff := cfg.RetryBackoff
+	if backoff <= 0 {
+		backoff = 500 * time.Millisecond
+	}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			cfg.logf("orun agent serve: dial-home attempt %d/%d failed (%v); retrying in %s\n",
+				i, attempts, lastErr, backoff)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+			if backoff < 8*time.Second {
+				backoff *= 2
+			}
+		}
+		if err := postJSON(ctx, cfg, "/events", batch); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	var httpErr *relayHTTPError
+	if errors.As(lastErr, &httpErr) && (httpErr.Status == http.StatusUnauthorized || httpErr.Status == http.StatusForbidden) {
+		return fmt.Errorf("first heartbeat rejected with HTTP %d after %d attempts — the session token (ORUN_SESSION_TOKEN) is invalid or expired; a cold boot can outlast its short TTL, in which case the cloud must mint a fresh token or extend the TTL: %w",
+			httpErr.Status, attempts, lastErr)
+	}
+	return fmt.Errorf("first heartbeat never landed after %d attempts (relay %s unreachable or rejecting) — the cloud will see no dial-home and reclaim this session as lease_lost: %w",
+		attempts, cfg.BaseURL, lastErr)
 }
 
 // pumpUp batches the head's event frames to /events and forwards deltas to
@@ -222,6 +369,20 @@ func ackReason(err error) string {
 	}
 }
 
+// relayHTTPError carries the status code of a non-2xx relay response so callers
+// can distinguish an auth rejection (401/403 — a token problem) from a
+// transport or 5xx failure and report the right diagnostic.
+type relayHTTPError struct {
+	Method string
+	Path   string
+	Status int
+	status string
+}
+
+func (e *relayHTTPError) Error() string {
+	return fmt.Sprintf("attach relay: %s %s: %s", e.Method, e.Path, e.status)
+}
+
 func postJSON(ctx context.Context, cfg RelayConfig, path string, body any) error {
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -242,7 +403,7 @@ func postJSON(ctx context.Context, cfg RelayConfig, path string, body any) error
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("attach relay: POST %s: %s", path, resp.Status)
+		return &relayHTTPError{Method: http.MethodPost, Path: path, Status: resp.StatusCode, status: resp.Status}
 	}
 	return nil
 }

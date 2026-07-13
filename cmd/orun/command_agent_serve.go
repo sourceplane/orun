@@ -118,8 +118,12 @@ Identity comes from the sandbox environment (injected by the control plane):
 			branch = "agent/" + task + "-" + slugify(typeName)
 		}
 
-		// Host the attach plane and bridge it to the relay in the background;
-		// the loop runs in the foreground and seals on terminal state.
+		// Host the attach plane and bridge it to the relay. The dial-home is
+		// synchronous and MUST land before the agent runs: the first heartbeat
+		// creates the cloud session lease, and a local run whose stream never
+		// reaches the cloud is worse than useless — it burns a box while the
+		// control plane sees a silent `provisioning` session it reclaims 30 min
+		// later as `lease_lost`. So fail here, loudly, with a diagnostic.
 		inputs := agent.NewInputQueue()
 		srv := attach.NewServer(attach.SessionInfo{
 			SessionID: sessionID, BriefID: brief.ID, AgentType: typeName,
@@ -127,11 +131,15 @@ Identity comes from the sandbox environment (injected by the control plane):
 		}, inputs)
 		relayCtx, relayCancel := context.WithCancel(ctx)
 		defer relayCancel()
-		go func() {
-			_ = attach.ServeToRelay(relayCtx, srv, inputs, attach.RelayConfig{
-				BaseURL: relayBase, Token: token,
-			})
-		}()
+		fmt.Fprintf(cmd.ErrOrStderr(), "orun agent serve: dialing home — session %s → relay %s\n", sessionID, relayBase)
+		relaySession, err := attach.DialToRelay(relayCtx, srv, inputs, attach.RelayConfig{
+			BaseURL: relayBase, Token: token, Log: cmd.ErrOrStderr(),
+		})
+		if err != nil {
+			return fmt.Errorf("cloud dial-home failed: %w", err)
+		}
+		defer relaySession.Close()
+		fmt.Fprintf(cmd.ErrOrStderr(), "orun agent serve: dial-home ok — first heartbeat landed, cloud lease is live\n")
 
 		opts := agent.RunOptions{
 			SessionID:     sessionID,
@@ -150,9 +158,9 @@ Identity comes from the sandbox environment (injected by the control plane):
 				opts.Seal = &agent.SealInput{RunKind: runKind, AgentType: ref.Target, Brief: brief.ID, Principal: "sp_session"}
 			}
 		}
-		fmt.Fprintf(cmd.ErrOrStderr(), "orun agent serve: session %s → relay %s\n", sessionID, relayBase)
 		res, err := agent.Run(ctx, store, opts)
 		srv.Close("terminal")
+		relaySession.Close()
 		relayCancel()
 		if err != nil {
 			return err
