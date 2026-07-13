@@ -55,10 +55,14 @@ Identity comes from the sandbox environment (injected by the control plane):
 
 		// Dial-home identity is create-time sandbox env the control plane set on
 		// the box. Log (redacted) which of the four actually reached this
-		// process — this is the first line to read when a session never leaves
-		// `provisioning`. The signature of the control-plane env-propagation
-		// split is the identity trio empty while ORUN_SESSION_TOKEN — injected
-		// separately as the toolbox exec's `export` prefix — is present.
+		// process — the first line to read when a session never leaves
+		// `provisioning`. serve needs all four to build the cloud URL and
+		// heartbeat; if the identity trio is empty while ORUN_SESSION_TOKEN
+		// (injected separately as the toolbox exec's `export` prefix) is present,
+		// that points at the toolbox exec not inheriting sandbox env — an
+		// orun-cloud bootstrap issue. (NOTE: a full identity here is necessary
+		// but not sufficient — the session only flips provisioning→running once
+		// serve POSTs /heartbeat, which is the actual root-cause fix.)
 		fmt.Fprintf(errOut, "orun agent serve: dial-home identity — ORUN_CLOUD_API=%s ORUN_ORG_ID=%s ORUN_SESSION_ID=%s ORUN_SESSION_TOKEN=%s\n",
 			orMissing(cloudAPI), orMissing(orgID), orMissing(sessionID), redactSecret(token))
 		if err := checkServeIdentity(cloudAPI, orgID, sessionID, token); err != nil {
@@ -226,10 +230,11 @@ func checkServeIdentity(cloudAPI, orgID, sessionID, token string) error {
 		return nil
 	}
 	if token != "" && (cloudAPI == "" || orgID == "" || sessionID == "") {
-		return fmt.Errorf("dial-home identity missing (%s) while ORUN_SESSION_TOKEN is present — this is the control-plane env-propagation split. "+
-			"The control plane sets these as box-create sandbox env, but they are not reaching the `orun agent serve` process. "+
-			"The token is injected separately as the toolbox exec's `export` prefix; the identity vars are only sandbox env and the toolbox session-exec is not carrying them in. "+
-			"The fix belongs in orun-cloud (re-export the identity vars in the bootstrap exec prefix), not in orun",
+		return fmt.Errorf("dial-home identity missing (%s) while ORUN_SESSION_TOKEN is present — "+
+			"serve cannot build the cloud URL and cannot heartbeat. "+
+			"If this recurs in-sandbox, suspect the Daytona toolbox exec not inheriting box-create sandbox env: "+
+			"the token arrives via the exec `export` prefix while the identity vars are only sandbox env — "+
+			"that would be an orun-cloud bootstrap fix (export the identity vars in the exec prefix)",
 			strings.Join(missing, ", "))
 	}
 	return fmt.Errorf("missing sandbox env required for cloud dial-home: %s", strings.Join(missing, ", "))
