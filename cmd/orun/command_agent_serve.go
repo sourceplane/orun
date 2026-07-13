@@ -69,12 +69,34 @@ Identity comes from the sandbox environment (injected by the control plane):
 			return err
 		}
 		relayBase := fmt.Sprintf("%s/v1/organizations/%s/agents/sessions/%s", cloudAPI, orgID, sessionID)
+		ctx := cmd.Context()
+
+		// Heartbeat FIRST — it is the session's sole liveness (contract). The
+		// first beat is the only thing that flips provisioning→running, stamps
+		// started_at, and sets the lease to now+15m; POST /events never touches
+		// the lease. Send it before we pull the brief or start the agent, and
+		// fail loudly if it never lands — a run whose session the cloud never
+		// marks running is dead on arrival and would be swept as lease_lost with
+		// no logs. The loop then beats every 5m and refreshes the 15m token; a
+		// terminal beat (console kill, lapsed lease) cancels the run.
+		hbCtx, hbCancel := context.WithCancel(ctx)
+		defer hbCancel()
+		runCtx, runCancel := context.WithCancel(ctx)
+		defer runCancel()
+		fmt.Fprintf(errOut, "orun agent serve: sending first heartbeat — session %s → %s\n", sessionID, relayBase)
+		if _, err := attach.StartHeartbeat(hbCtx, attach.HeartbeatConfig{
+			BaseURL: relayBase, Token: token, Log: errOut,
+		}, func(reason string) {
+			fmt.Fprintf(errOut, "orun agent serve: session ended by cloud (heartbeat terminal): %s\n", reason)
+			runCancel()
+		}); err != nil {
+			return fmt.Errorf("session heartbeat failed: %w", err)
+		}
 
 		store, refs, _, ok := openObjectStores()
 		if !ok {
 			return fmt.Errorf("no object store at .orun — pull the brief first")
 		}
-		ctx := cmd.Context()
 
 		// Resolve the agent type + contract the same way `agent run` does; the
 		// brief is content-addressed so this run matches its local twin by hash.
@@ -130,12 +152,12 @@ Identity comes from the sandbox environment (injected by the control plane):
 			branch = "agent/" + task + "-" + slugify(typeName)
 		}
 
-		// Host the attach plane and bridge it to the relay. The dial-home is
-		// synchronous and MUST land before the agent runs: the first heartbeat
-		// creates the cloud session lease, and a local run whose stream never
-		// reaches the cloud is worse than useless — it burns a box while the
-		// control plane sees a silent `provisioning` session it reclaims 30 min
-		// later as `lease_lost`. So fail here, loudly, with a diagnostic.
+		// Event relay: mirrors the session event stream to the cloud for the
+		// console tail. This is NOT liveness — the heartbeat above owns that — so
+		// a relay failure must not kill a healthy session; log loudly and run on.
+		// (Cloud issue #466 reconciles the relay contract: today /stream,
+		// /inputs, /inputs/ack 404, and the token isn't refreshed on this
+		// channel, so /events auth lapses ~15m in.)
 		inputs := agent.NewInputQueue()
 		srv := attach.NewServer(attach.SessionInfo{
 			SessionID: sessionID, BriefID: brief.ID, AgentType: typeName,
@@ -143,21 +165,15 @@ Identity comes from the sandbox environment (injected by the control plane):
 		}, inputs)
 		relayCtx, relayCancel := context.WithCancel(ctx)
 		defer relayCancel()
-		fmt.Fprintf(errOut, "orun agent serve: dialing home — session %s → relay %s\n", sessionID, relayBase)
-		relaySession, err := attach.DialToRelay(relayCtx, srv, inputs, attach.RelayConfig{
+		fmt.Fprintf(errOut, "orun agent serve: connecting event relay — %s\n", relayBase)
+		relaySession, rerr := attach.DialToRelay(relayCtx, srv, inputs, attach.RelayConfig{
 			BaseURL: relayBase, Token: token, Log: errOut,
 		})
-		if err != nil {
-			return fmt.Errorf("cloud dial-home failed: %w", err)
+		if rerr != nil {
+			fmt.Fprintf(errOut, "orun agent serve: WARNING event relay unavailable (%v) — session continues on heartbeat; console tail degraded\n", rerr)
+		} else {
+			fmt.Fprintf(errOut, "orun agent serve: event relay connected\n")
 		}
-		defer relaySession.Close()
-		// The event-stream dial-home reached the relay and the token was
-		// accepted — the box can talk to the cloud with this identity. NOTE:
-		// this is the /events attach channel, not the session /heartbeat
-		// endpoint the control plane uses to flip provisioning→running (see the
-		// PR discussion); it proves reachability + auth, which is what makes a
-		// stuck-in-provisioning session diagnosable.
-		fmt.Fprintf(errOut, "orun agent serve: dial-home ok — relay reachable and session token accepted\n")
 
 		opts := agent.RunOptions{
 			SessionID:     sessionID,
@@ -176,10 +192,11 @@ Identity comes from the sandbox environment (injected by the control plane):
 				opts.Seal = &agent.SealInput{RunKind: runKind, AgentType: ref.Target, Brief: brief.ID, Principal: "sp_session"}
 			}
 		}
-		res, err := agent.Run(ctx, store, opts)
+		res, err := agent.Run(runCtx, store, opts)
 		srv.Close("terminal")
-		relaySession.Close()
+		relaySession.Close() // nil-safe when the relay was unavailable
 		relayCancel()
+		hbCancel()
 		if err != nil {
 			return err
 		}
