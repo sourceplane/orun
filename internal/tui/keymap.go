@@ -70,16 +70,16 @@ func DefaultGlobalKeyMap() GlobalKeyMap {
 
 // ShortHelp returns the row of bindings shown in the key-hint bar.
 func (k GlobalKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.ToggleMode, k.Back, k.ToggleInspector, k.Search, k.Palette, k.Help, k.Quit}
+	return []key.Binding{k.GoAgent, k.ToggleMode, k.Back, k.ToggleInspector, k.Search, k.Palette, k.Help, k.Quit}
 }
 
 // FullHelp returns the table-style help shown by the `?` overlay.
 func (k GlobalKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.GoCatalog, k.GoActivity, k.ToggleMode},
-		{k.Back, k.Forward, k.Cancel},
+		{k.GoCatalog, k.GoActivity, k.GoAgent},
+		{k.ToggleMode, k.Back, k.Forward},
 		{k.ToggleSidebar, k.ToggleInspector, k.Reload},
 		{k.Help, k.Palette, k.Search},
-		{k.Quit},
+		{k.Cancel, k.Quit},
 	}
 }

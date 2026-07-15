@@ -389,8 +389,9 @@ func (m AgentModel) viewBrowse() string {
 	var left strings.Builder
 	left.WriteString(theme.StyleSectionTitle.Render("Sessions"))
 	left.WriteByte('\n')
+	left.WriteString(theme.StyleAccent.Render("  + New session") + theme.StyleMuted.Render("  n") + "\n")
 	if len(m.Sessions) == 0 {
-		left.WriteString(theme.StyleMuted.Render("  none live — n to launch") + "\n")
+		left.WriteString(theme.StyleMuted.Render("  no live sessions yet") + "\n")
 	}
 	for i, s := range m.Sessions {
 		marker := "  "
@@ -403,7 +404,11 @@ func (m AgentModel) viewBrowse() string {
 			label = theme.StyleAccent.Render(label)
 		}
 		fmt.Fprintf(&left, "%s%s\n", marker, label)
-		left.WriteString(theme.StyleMuted.Render("    "+statusGlyph(s.State)+" "+s.State) + "\n")
+		meta := theme.StyleMuted.Render("    " + statusGlyph(s.State) + " " + s.State)
+		if b := driverBadge(s.Driver); b != "" {
+			meta += " " + b
+		}
+		left.WriteString(meta + "\n")
 	}
 	left.WriteByte('\n')
 	left.WriteString(theme.StyleSectionTitle.Render("Agent types"))
@@ -461,6 +466,9 @@ func (m AgentModel) viewConversation() string {
 		title = "Session " + m.info.SessionID
 	}
 	head := theme.StyleSectionTitle.Render(title)
+	if b := driverBadge(m.info.Harness); b != "" {
+		head += "  " + b
+	}
 	if m.live {
 		head += "  " + theme.StyleAccent.Render("● live")
 	}
@@ -502,13 +510,30 @@ func renderItem(it convItem) string {
 		return theme.StyleSectionTitle.Render(who) + "  " + it.text
 	case itemTool:
 		glyph := "⚙"
-		return theme.StyleMuted.Render("  "+glyph+" "+it.text+" ("+it.detail+")")
+		return theme.StyleMuted.Render("  " + glyph + " " + it.text + " (" + it.detail + ")")
 	default:
 		s := "  " + it.text
 		if it.detail != "" {
 			s += " " + it.detail
 		}
 		return theme.StyleMuted.Render(s)
+	}
+}
+
+// driverBadge renders an honest at-a-glance marker for a session's driver:
+// `claude` for a real delegated run, a `stub` warning pill so a deterministic
+// fixture session is never mistaken for real work. An unknown driver is shown
+// verbatim; an empty driver renders nothing.
+func driverBadge(driver string) string {
+	switch driver {
+	case "":
+		return ""
+	case "claude-code":
+		return theme.StyleChipAccent.Render(" claude ")
+	case "stub":
+		return theme.StylePillWarn.Render(" stub ")
+	default:
+		return theme.StyleDim.Render(" " + driver + " ")
 	}
 }
 
