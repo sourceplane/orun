@@ -4,7 +4,7 @@
 > by the **torkflow** runtime. This doc fixes the model (§2), the two surfaces
 > and the single backend they share (§3–§4), the execution boundary + engine
 > pinning (§5), the secret bridge (§6), the **determinism/provenance law** (§7),
-> failure & concurrency semantics (§8), the per-module deferral (§9),
+> failure & concurrency semantics (§8), the hook-granularity model (§9),
 > observability (§10), the invariants (§11), and the sharpness register (§12).
 > RFC 2119 keywords are binding.
 
@@ -95,15 +95,23 @@ steps:
 ```
 
 ```yaml
-# in a blueprint (SURFACE B) — upgrades the §12 run:[argv] hook seam
+# in a blueprint (SURFACE B) — upgrades the SHIPPED §12 run:[argv] hook seam.
+# The scaffolder (internal/scaffold) runs hooks AFTER the atomic write, opt-in
+# via --run-hooks: per-phase hooks in phase order, then the global postInstantiate
+# list. There is no preInstantiate in the shipped scaffolder (§8 reconciliation).
+phases:
+  - name: contracts
+    modules: [contracts, sdk]
+    hooks:                       # a phases[].hooks entry — runs in phase order
+      - id: verify-contracts
+        workflow: workflows/verify-contracts.yaml
 hooks:
-  preInstantiate:                # idempotent preconditions only (§7, §8)
-    - id: ensure-repo
-      workflow: workflows/ensure-repo.yaml     # get-or-create; safe to re-run
-      with: { org: "{{ .orgName }}", name: "{{ .serviceName }}" }
-  postInstantiate:               # after the output gate passes (§8)
+  postInstantiate:               # the global list — runs last, after the gate + write
     - id: open-pr
-      workflow: workflows/open-pr.yaml         # git commit/push + createPullRequest
+      # first action is github.getOrCreateRepo (idempotent), then push + open PR —
+      # the "ensure the repo exists" precondition folds into the workflow itself,
+      # because there is no pre-placement hook to host it.
+      workflow: workflows/open-pr.yaml
       with: { branch: "scaffold/{{ .serviceName }}" }
 ```
 
@@ -115,10 +123,12 @@ hooks:
   inputs, templated at compile/scaffold time against the same context the
   surface already resolves (a step's env/inputs; a blueprint's validated
   `inputs`), then handed to the engine as the workflow's `Trigger` context.
-- **Mutual exclusion is one rule.** A step/hook with more than one of
-  `run`/`use`/`workflow` set is a **compile error** (surface A) / **blueprint
-  validation error** (surface B). This mirrors the existing `localExecutor`
-  guard that already refuses a `use:` step under the local runner.
+- **Mutual exclusion is one rule.** A plan step with more than one of
+  `run`/`use`/`workflow` is a **compile error** (surface A); a `scaffold.Hook`
+  with both `run` and `workflow` is a **blueprint validation error** (surface B —
+  the shipped `Hook` has only `Run`, so the epic adds `Workflow` beside it and
+  requires exactly one). Both mirror the existing `localExecutor` guard that
+  already refuses a `use:` step under the local runner.
 
 ## 4. The two surfaces share one backend
 
@@ -134,16 +144,20 @@ resolve+pin  →  bind inputs  →  execute (shell pinned engine)  →  seal res
   the executor only shells a pinned engine, a `workflow:` step runs under **any**
   runner — unlike `use:`, which forces `github-actions`. (Availability of the
   engine + provider binaries in that runtime is the runner's concern, §12 S-4.)
-- **Surface B (blueprint hook)** runs the four ops **inside `orun new`/
-  `instantiate`**, in the hook phase — `preInstantiate` before placement,
-  `postInstantiate` after the output gate — outside the template sandbox, exactly
-  where §12 already puts hooks.
+- **Surface B (blueprint hook)** runs the four ops **inside `orun new`/`create`/
+  `instantiate`** (opt-in via `--run-hooks`), in the shipped scaffolder's hook
+  step — which runs **after** the atomic write of the gated tree + provenance:
+  each `phases[].hooks` list in phase order, then the global
+  `hooks.postInstantiate` list, outside the template sandbox, exactly where the
+  shipped §12 seam puts hooks. The shipped scaffolder has **no `preInstantiate`**
+  (see §8); a true pre-placement precondition is not a seam this epic assumes.
 
 The shared implementation is a `workflowbackend` package (invocation + JSON
 contract + secret injection + sealing) and a thin `workflowExecutor` in
 `internal/executor` that adapts it to the `Executor` interface for surface A;
-surface B calls `workflowbackend` directly from the scaffolder's hook runner. No
-second engine-invocation path exists.
+surface B calls `workflowbackend` directly from the scaffolder's `runHooks`
+(`internal/scaffold/hooks.go`), which today only shells argv. No second
+engine-invocation path exists.
 
 ## 5. The execution boundary — pin the engine and the workflow by digest
 
@@ -220,12 +234,16 @@ state. The workflow *outcome* is a logged run fact.**
   tree left as a second source of truth (S-2). Side effects the workflow caused
   (a PR URL, a message timestamp) appear **in that sealed log** as run facts;
   they are never promoted into `plan.json`.
-- **Provenance (surface B).** `.orun/provenance.lock` records each hook's
-  `workflow@digest` and the inputs-hash alongside the existing `blueprint@digest
-  + source@digest + inputs-hash`. It does **not** record the PR URL or repo id —
-  those are outcomes, not lineage. An `orun … upgrade` re-render (`orun-
-  scaffolding` §11) can therefore reason about "did the hook workflow change"
-  purely from digests.
+- **Provenance (surface B).** The shipped `Provenance` struct
+  (`internal/scaffold/provenance.go`, `kind: ScaffoldProvenance`, `orun.dev/v1`)
+  already pins `Blueprint.Digest`, `Sources[].Digest`, `InputsHash`, and per-module
+  `mode`/`targets` — this epic adds a `Hooks []ProvHook` field recording each
+  hook's `{ id, workflow, digest }`. It does **not** record the PR URL or repo id
+  — those are outcomes, not lineage. Note the shipped ordering already suits the
+  law: provenance is written **before** `runHooks` executes (`scaffold.go`), so it
+  can only capture the hook's *reference + digest* (known pre-execution), never its
+  result. An `orun new upgrade` re-render (`orun-scaffolding` §11) can therefore
+  reason about "did the hook workflow change" purely from digests.
 
 The mental test for any new field: *would it differ between two runs with
 identical inputs?* If yes, it is an outcome and MUST NOT enter plan or lock.
@@ -244,39 +262,51 @@ identical inputs?* If yes, it is an outcome and MUST NOT enter plan or lock.
   workflow's internal `maxParallelSteps` parallelism is its own and does not
   interact with the plan's job `concurrency`.
 
-**Surface B — blueprint hook (fail-closed, §9/§10 of scaffolding).**
-- **`preInstantiate` runs before any placement.** A pre-hook failure aborts with
-  a non-zero exit and **nothing is written** — fail-closed is clean. Therefore a
-  pre-hook MUST be an **idempotent precondition** (get-or-create the repo, assert
-  a namespace exists), never a one-way mutation, because placement or the gate
-  may still fail afterward and there is no rollback (S-6).
-- **`postInstantiate` runs after the output gate passes.** By then the tree is
-  valid and materialized. A post-hook failure is reported as a **non-zero exit
-  with the tree left in place** and a clear message that the scaffold succeeded
-  but publishing failed — and the hook, being provider-driven, is **re-runnable**
-  (`orun … upgrade`/a re-run of the hook). This is the honest boundary: a
-  post-gate side effect cannot be un-run, so orun does not pretend to; it reports
-  precisely what materialized and what did not.
+**Surface B — blueprint hook (matches the shipped scaffolder's post-write model).**
+The shipped pipeline is atomic-then-hooks: *place → gate → write tree → write
+provenance → run hooks* (`internal/scaffold/scaffold.go`). All hooks — per-phase
+`phases[].hooks` (in phase order) and the global `postInstantiate` list — run
+**after** the gated tree is on disk. There is no pre-placement hook.
+- **A hook failure leaves the valid tree in place.** By the time any hook runs,
+  the tree has passed the output gate (§10 of scaffolding) and been written. A
+  hook failure returns a **non-zero exit with the tree materialized** and a clear
+  message that the scaffold succeeded but the hook (publish) failed — and the
+  hook, being provider-driven, is **re-runnable** (`orun new upgrade`, or re-run
+  with `--run-hooks`). This is the honest boundary: a side effect a hook already
+  caused cannot be un-run, so orun reports precisely what materialized and what
+  did not, rather than pretending to roll back.
+- **Idempotence is the author's contract, not a phase guarantee.** Because there
+  is no pre-placement hook to host preconditions, a workflow that must *ensure* a
+  precondition (the repo exists) folds that in as its own idempotent first action
+  (`github.getOrCreateRepo`). A hook workflow SHOULD be idempotent/re-runnable so
+  a retried `--run-hooks` converges rather than duplicating side effects (S-6).
+- **Per-phase interleaving is a scaffolder follow-on.** Today even
+  `phases[].hooks` run after the *whole* tree is written (the scaffolder's own
+  comment marks interleaved-per-phase writes + approval gates as a planned
+  resumable follow-on). This epic binds `workflow:` to the phase-hook attachment
+  point that exists; it does not itself add mid-placement execution.
 
-## 9. Per-module hooks — designed, deferred
+## 9. Hook granularity — two shipped, per-module deferred
 
-The review raised "after each blueprint copy / after each step" — a **per-module**
-hook firing as each module in the scaffolding DAG lands (e.g. a PR per module).
-It is coherent but materially riskier, so v1 ships **per-instantiation only** and
-this section fixes the design for a later milestone.
+The review raised "after each blueprint copy / each step." The shipped scaffolder
+already answers the useful part of this: `workflow:` hooks attach at **two
+granularities out of the box**, and only the finest is deferred.
 
-- **Shape (deferred):** a `hooks.postModule` list, run after each module is
-  placed, with the module's name/target in the hook's `with` context.
-- **Why deferred:** per-module side effects **interleave with placement**, so a
-  failure mid-DAG leaves some modules published and some not — directly at odds
-  with the fail-closed law (§8) that per-instantiation hooks preserve by running
-  only at the boundaries. It also multiplies external effects (N PRs for one
-  repo), which is rarely the intent for a single instantiation and is better
-  served by one post-instantiate workflow that opens one PR.
-- **When it lands** it MUST be **opt-in and explicit** (`each: module`), MUST
-  restrict per-module hooks to idempotent/re-runnable workflows, and MUST record
-  per-module hook digests in provenance. Until then, the dominant use cases —
-  *ensure repo* (pre) and *open one PR* (post) — are fully served by §3.
+- **Global (`hooks.postInstantiate`)** — one hook run after the whole scaffold.
+  The place to open the single PR for the instance.
+- **Per-phase (`phases[].hooks`)** — a hook per operational stage, run in phase
+  order. This is the shipped answer to "after each step": a phase groups modules
+  (e.g. `contracts`, then `services`), and its hooks run once that phase's slice
+  is placed. A `verify-contracts` or `seed-config` workflow lands here.
+- **Per-module (`postModule`) — deferred.** A hook firing as each *module* lands
+  (a PR per module) is coherent but materially riskier: per-module side effects
+  would need to **interleave with placement** (which the shipped scaffolder does
+  not yet do — §8), so a failure mid-DAG leaves some modules published and some
+  not, and it multiplies external effects (N PRs for one repo) rarely wanted for a
+  single instantiation. When it lands it MUST be **opt-in and explicit**
+  (`each: module`), restricted to idempotent/re-runnable workflows, and recorded
+  per-module in provenance. Until then, the dominant cases — *open one PR* (global)
+  and *verify per stage* (per-phase) — are fully served by the shipped seams.
 
 ## 10. Observability — one cockpit, one log
 
@@ -312,9 +342,9 @@ same layer behind `orun status`/`logs`/`tui`), not a second UI.
 7. **Ecosystem-neutral core.** No provider-specific string (slack/github/http)
    appears in orun; every `actionRef` lives in torkflow's action store (§2).
 8. **Fail-closed at both surfaces.** `run`\|`use`\|`workflow` mutual exclusion is
-   a compile/validation error; pre-hooks are idempotent preconditions; a
-   post-gate hook failure is reported precisely with the valid tree left in place
-   (§3, §8).
+   a compile/validation error; scaffolding hooks run only **after** the gated tree
+   is written, so a hook failure leaves the valid tree in place and is reported
+   precisely and re-runnably (§3, §8).
 
 ## 12. Sharpness register
 
@@ -325,8 +355,8 @@ same layer behind `orun status`/`logs`/`tui`), not a second UI.
 | S-3 | **Two secret models** — a second `secrets.yaml` fragments the secret story or writes a token to disk | orun brokers all in-plan/in-hook credentials from `orun-secrets`, injected in-memory on stdin, redacted from all output; torkflow's file secret store is used only for standalone authoring (`orun workflow run`) (§6). |
 | S-4 | **Engine/providers missing at runtime** (docker fresh container, gha runner) | The engine + provider binaries are pinned OCI artifacts; the runner ensures/materializes them like any packaged dependency; a missing engine is a clear pre-flight error, not a mid-step crash (§5). |
 | S-5 | **Cross-module import barrier** — torkflow's engine is `internal/`, unimportable from orun | v1 uses the process boundary (subprocess + JSON contract), which needs no import and matches torkflow's own provider architecture; an in-process `pkg/` lift is a declared follow-on (§13). |
-| S-6 | **Pre-hook mutates the world, then the gate fails** — an orphaned repo for a scaffold that didn't ship | Pre-hooks are constrained to **idempotent preconditions** (get-or-create); all mutating publish is post-gate; §8 documents and the hook runner enforces the phase split. |
-| S-7 | **Per-module rollback** — interleaved side effects leave a half-published repo | Per-module hooks are **deferred** (§9); v1 runs hooks only at the pre/post boundaries where fail-closed holds; when added they are opt-in + idempotent-only + provenanced. |
+| S-6 | **A hook side effect can't be rolled back** — a hook opens a PR, a later hook fails | The shipped scaffolder runs all hooks **after** the gated tree is written, so the tree is always valid; hooks are authored idempotent/re-runnable (get-or-create) so a retried `--run-hooks` converges rather than duplicating; provenance pins the hook digest so `upgrade` can reason about it (§8). |
+| S-7 | **Per-module rollback** — interleaved side effects leave a half-published repo | Per-**module** hooks are **deferred** (§9); the shipped granularities (global `postInstantiate`, per-phase `phases[].hooks`) run at stage boundaries after the write, where fail-closed holds; per-module, when added, is opt-in + idempotent-only + provenanced. |
 | S-8 | **Two retry systems confuse operators** — orun step retry vs torkflow action retry | Documented as explicit outer/inner layers: orun retries the workflow as a black box; the workflow retries its own actions; orun never reaches inside (§8). |
 | S-9 | **Mutual-exclusion ambiguity** — a step sets both `run` and `workflow` | A compile error (surface A) / blueprint validation error (surface B), mirroring `localExecutor`'s existing `use:`-under-local guard (§3, invariant 8). |
 | S-10 | **`with` templating escapes** — a workflow input pulls host state a plan reviewer can't see | `with` is templated against the **same** bounded context the surface already exposes (a step's env/inputs; a blueprint's validated `inputs`), rendered at compile/scaffold time and captured in the plan/lock — so it is as reviewable as any other materialized field (§3, §7). |
