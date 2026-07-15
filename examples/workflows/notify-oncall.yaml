@@ -1,0 +1,26 @@
+apiVersion: torkflow/v1
+kind: Workflow
+metadata:
+  name: notify-oncall
+# A data-flow workflow used as a `workflow:` plan step (Surface A). It calls an
+# authenticated provider action and passes structured output between steps —
+# the vocabulary orun's run:/use: steps cannot express. The provider actions
+# (slack.*) live in torkflow's action store, never in orun.
+spec:
+  maxParallelSteps: 2
+  steps:
+    - name: Get_oncall
+      actionRef: slack.getUserByEmail
+      connection: slack-main
+      parameters:
+        email: "{{ Trigger.oncall_email }}"
+      outboundEdges:
+        - nextStepName: Notify
+    - name: Notify
+      actionRef: slack.postMessage
+      connection: slack-main
+      parameters:
+        channel: "{{ Trigger.channel }}"
+        text: >-
+          Deploy of {{ Trigger.component }} to {{ Trigger.environment }}
+          completed. On-call: {{ Steps.Get_oncall.user.real_name }}.
