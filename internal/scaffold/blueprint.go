@@ -166,10 +166,35 @@ type Hooks struct {
 	PostInstantiate []Hook `yaml:"postInstantiate,omitempty" json:"postInstantiate,omitempty"`
 }
 
-// Hook is one declared post-step: an explicit argv, no shell.
+// Hook is one declared post-step. It is exactly one of:
+//   - Run: an explicit argv, no shell (the shipped form), or
+//   - Workflow: a torkflow workflow file run through the workflow backend
+//     (specs/orun-workflows §3, Surface B).
 type Hook struct {
 	ID  string   `yaml:"id" json:"id"`
-	Run []string `yaml:"run" json:"run"`
+	Run []string `yaml:"run,omitempty" json:"run,omitempty"`
+	// Workflow names a torkflow workflow file (resolved against the blueprint's
+	// directory) to run as this hook. Exactly one of Run/Workflow may be set.
+	Workflow string `yaml:"workflow,omitempty" json:"workflow,omitempty"`
+	// With is the declared inputs handed to the workflow as its Trigger context.
+	With map[string]any `yaml:"with,omitempty" json:"with,omitempty"`
+}
+
+// IsWorkflow reports whether this hook runs a workflow (vs. an argv).
+func (h Hook) IsWorkflow() bool { return strings.TrimSpace(h.Workflow) != "" }
+
+// validate enforces that a hook is exactly one of run / workflow (Surface B
+// mutual exclusion, orun-workflows §3). Fail-closed.
+func (h Hook) validate() error {
+	hasRun := len(h.Run) > 0
+	hasWorkflow := strings.TrimSpace(h.Workflow) != ""
+	switch {
+	case hasRun && hasWorkflow:
+		return fmt.Errorf("hook %q sets both run and workflow — a hook must use exactly one", h.ID)
+	case !hasRun && !hasWorkflow:
+		return fmt.Errorf("hook %q sets neither run nor workflow", h.ID)
+	}
+	return nil
 }
 
 // Phase is one operational stage: an ordered group of modules placed as a
@@ -263,6 +288,27 @@ func (bp *Blueprint) validate() error {
 
 	if err := bp.validatePhases(moduleNames); err != nil {
 		return err
+	}
+	if err := bp.validateHooks(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateHooks enforces the run|workflow mutual-exclusion invariant across every
+// declared hook — the global postInstantiate list and each phase's hooks.
+func (bp *Blueprint) validateHooks() error {
+	for i, h := range bp.Hooks.PostInstantiate {
+		if err := h.validate(); err != nil {
+			return fmt.Errorf("hooks.postInstantiate[%d]: %w", i, err)
+		}
+	}
+	for pi, ph := range bp.Phases {
+		for i, h := range ph.Hooks {
+			if err := h.validate(); err != nil {
+				return fmt.Errorf("phases[%d] (%s) hooks[%d]: %w", pi, ph.Name, i, err)
+			}
+		}
 	}
 	return nil
 }
