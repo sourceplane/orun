@@ -151,6 +151,10 @@ portable collection of component intent, not a bespoke CI snowflake.
 - **A backend-swappable runtime.** The plan is the boundary — execute the same
   `plan.json` on your local shell, in Docker, or on GitHub Actions without
   recompiling.
+- **A scaffolder.** `orun new` (aka `create`/`instantiate`) turns a typed
+  `kind: Blueprint` into a catalog-valid component or a whole product repo from a
+  baseline — one engine, two scales, provenanced and upgradable. See
+  [docs/scaffolding.md](docs/scaffolding.md).
 - **A derived service catalog.** A projection of your sources and run history —
   never hand-maintained, never stale.
 - **A cockpit.** `orun status`, `orun logs`, and the `orun tui` terminal cockpit
