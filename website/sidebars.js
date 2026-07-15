@@ -52,6 +52,7 @@ const sidebars = {
         'concepts/stacks',
         'concepts/plan-dag',
         'concepts/execution-model',
+        'concepts/workflow-actions',
         'concepts/trigger-bindings',
         'concepts/profile-rules',
         'concepts/dependency-rules',
@@ -87,6 +88,7 @@ const sidebars = {
         'cli/orun',
         'cli/orun-plan',
         'cli/orun-run',
+        'cli/orun-workflow',
         'cli/orun-status',
         'cli/orun-logs',
         'cli/orun-get',
@@ -165,7 +167,7 @@ const sidebars = {
     {
       type: 'category',
       label: 'Release notes',
-      items: ['release-notes/v2.26.0',
+      items: ['release-notes/v2.32.0', 'release-notes/v2.26.0',
         'release-notes/v2.25.0', 'release-notes/v2.24.0', 'release-notes/v2.22.0', 'release-notes/v2.20.0', 'release-notes/v2.19.0', 'release-notes/v2.18.0', 'release-notes/v2.17.0', 'release-notes/v2.16.0', 'release-notes/v2.15.0', 'release-notes/v2.14.0', 'release-notes/v2.13.0', 'release-notes/v2.10.0', 'release-notes/v2.9.0', 'release-notes/v2.8.0', 'release-notes/v2.7.0', 'release-notes/v2.6.0'],
     },
     {

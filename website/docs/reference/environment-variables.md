@@ -10,6 +10,7 @@ title: Environment variables
 | --- | --- |
 | `ORUN_CONFIG_DIR` | Default value for the global `--config-dir` legacy fallback |
 | `ORUN_RUNNER` | Default runner for `orun run` |
+| `ORUN_TORKFLOW_ENGINE` | Path to the pinned torkflow engine binary used to execute [`workflow:`](../concepts/workflow-actions.md) plan steps and blueprint hooks, and `orun workflow run`/`view`. Only needed when a plan or scaffold actually uses a workflow |
 | `ORUN_EXEC_ID` | Execution ID injected into `orun run`; useful in CI for stable cross-job traceability |
 | `ORUN_PLAN_ID` | Plan reference injected into `orun run`; overrides the default `latest` resolution |
 | `ORUN_NO_COLOR` | Disable ANSI color output (any non-empty value) |
