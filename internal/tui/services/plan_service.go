@@ -217,6 +217,9 @@ func (s *LiveOrunService) GeneratePlan(ctx context.Context, req PlanRequest) (*P
 
 	// --- plan jobs + promotion deps + DAG sort ---
 	jobPlanner := planner.NewJobPlanner(compositionInfos)
+	// `workflow:` step references resolve (and are digest-pinned) against the
+	// intent file's directory (orun-workflows §5), matching the CLI.
+	jobPlanner.WorkflowBaseDir = dirPath(intentFile)
 	jobInstances, err := jobPlanner.PlanJobs(instances)
 	if err != nil {
 		return nil, fmt.Errorf("plan jobs: %w", err)

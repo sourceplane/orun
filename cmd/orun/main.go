@@ -302,6 +302,9 @@ func generatePlan() error {
 	}
 	jobPlanner.Workspace = bindWorkspace
 	jobPlanner.Project = bindProject
+	// `workflow:` step references resolve (and are digest-pinned) against the
+	// intent file's directory (orun-workflows §5).
+	jobPlanner.WorkflowBaseDir = filepath.Dir(intentFile)
 	jobInstances, err := jobPlanner.PlanJobs(instances)
 	if err != nil {
 		return fmt.Errorf("failed to plan jobs: %w", err)

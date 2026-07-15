@@ -198,6 +198,8 @@ func (r *Renderer) convertSteps(steps []model.RenderedStep) []model.PlanStep {
 			Order:            step.Order,
 			Run:              step.Run,
 			Use:              step.Use,
+			Workflow:         step.Workflow,
+			WorkflowDigest:   step.WorkflowDigest,
 			With:             step.With,
 			Env:              step.Env,
 			Shell:            step.Shell,
