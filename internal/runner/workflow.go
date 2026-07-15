@@ -28,6 +28,12 @@ func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob
 		WorkflowPath:   r.resolveWorkflowPath(execCtx, step.Workflow),
 		ExpectedDigest: step.WorkflowDigest,
 		With:           step.With,
+		// Secret bridge (WF3, §6): the credentials the job already resolved from
+		// orun-secrets (execCtx.SecretEnv) are injected into the engine request
+		// in-memory. They are never written to the workflow file, the plan, or the
+		// sealed run; the runner's single redaction site (seeded with these same
+		// values) masks any that surface in the workflow's output.
+		Credentials: credentialsFromSecretEnv(execCtx.SecretEnv),
 		Metadata: map[string]any{
 			"jobId":          job.ID,
 			"component":      job.Component,
@@ -36,7 +42,6 @@ func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob
 			"workflowRef":    step.Workflow,
 			"workflowDigest": step.WorkflowDigest,
 		},
-		// Credentials are injected by the secret bridge (WF3).
 	}
 
 	res, err := workflowbackend.RunStep(execCtx.Context, eng, spec)
@@ -85,6 +90,20 @@ func (r *Runner) resolveWorkflowPath(execCtx executor.ExecContext, ref string) s
 		return ref
 	}
 	return filepath.Join(base, ref)
+}
+
+// credentialsFromSecretEnv converts the job's resolved secret env (name→value)
+// into the engine request's in-memory credential map (orun-workflows §6). Returns
+// nil when the job resolved no secrets, so the request omits the field entirely.
+func credentialsFromSecretEnv(secretEnv map[string]string) map[string]any {
+	if len(secretEnv) == 0 {
+		return nil
+	}
+	creds := make(map[string]any, len(secretEnv))
+	for k, v := range secretEnv {
+		creds[k] = v
+	}
+	return creds
 }
 
 // formatWorkflowResult renders a readable summary of a workflow run for the step

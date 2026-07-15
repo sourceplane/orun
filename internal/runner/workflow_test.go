@@ -13,12 +13,14 @@ import (
 )
 
 type fakeWFEngine struct {
-	res workflowbackend.Result
-	err error
+	res    workflowbackend.Result
+	err    error
+	gotReq workflowbackend.Request
 }
 
 func (f *fakeWFEngine) Digest() string { return "sha256:fake" }
-func (f *fakeWFEngine) Invoke(_ context.Context, _ workflowbackend.Request) (workflowbackend.Result, error) {
+func (f *fakeWFEngine) Invoke(_ context.Context, req workflowbackend.Request) (workflowbackend.Result, error) {
+	f.gotReq = req
 	return f.res, f.err
 }
 
@@ -90,6 +92,43 @@ func TestRunWorkflowStepUnconfiguredEngineIsError(t *testing.T) {
 
 	if _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step); err == nil {
 		t.Fatalf("expected a clear error when no workflow engine is configured")
+	}
+}
+
+func TestRunWorkflowStepInjectsCredentials(t *testing.T) {
+	dir, digest := writeWF(t)
+	eng := &fakeWFEngine{res: workflowbackend.Result{Status: workflowbackend.StatusSuccess}}
+	r := &Runner{WorkflowEngine: eng}
+	ec := executor.ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: dir,
+		// The job's resolved orun-secrets values (name→value).
+		SecretEnv: map[string]string{"GITHUB_TOKEN": "ghp_s3cr3t"},
+	}
+	step := model.PlanStep{Name: "open-pr", Workflow: "wf.yaml", WorkflowDigest: digest}
+
+	out, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step)
+	if err != nil {
+		t.Fatalf("runWorkflowStep: %v", err)
+	}
+	// The resolved secret reaches the engine in-memory via the request.
+	if eng.gotReq.Credentials["GITHUB_TOKEN"] != "ghp_s3cr3t" {
+		t.Fatalf("credential not injected into the engine request: %#v", eng.gotReq.Credentials)
+	}
+	// It must never appear in the sealed step output (the summary carries no
+	// credentials; the runner's redactor is the second line of defense).
+	if strings.Contains(out, "ghp_s3cr3t") {
+		t.Fatalf("credential leaked into the sealed workflow output: %q", out)
+	}
+}
+
+func TestCredentialsFromSecretEnv(t *testing.T) {
+	if credentialsFromSecretEnv(nil) != nil {
+		t.Fatalf("empty secret env should yield nil credentials")
+	}
+	got := credentialsFromSecretEnv(map[string]string{"A": "1", "B": "2"})
+	if got["A"] != "1" || got["B"] != "2" || len(got) != 2 {
+		t.Fatalf("unexpected conversion: %#v", got)
 	}
 }
 
