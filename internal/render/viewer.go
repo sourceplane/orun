@@ -188,12 +188,19 @@ func (pv *PlanViewer) ViewDAG() string {
 
 						sb.WriteString(fmt.Sprintf("%s%s\n", stepPrefix, step.Name))
 
-						if pv.long && step.Run != "" {
+						if pv.long {
 							stepConnector := jobConnector + "│  "
 							if isLastStep {
 								stepConnector = jobConnector + "   "
 							}
-							sb.WriteString(fmt.Sprintf("%srun: %s\n", stepConnector, step.Run))
+							switch {
+							case step.Run != "":
+								sb.WriteString(fmt.Sprintf("%srun: %s\n", stepConnector, step.Run))
+							case step.Use != "":
+								sb.WriteString(fmt.Sprintf("%suse: %s\n", stepConnector, step.Use))
+							case step.Workflow != "":
+								sb.WriteString(fmt.Sprintf("%sworkflow: %s\n", stepConnector, step.Workflow))
+							}
 						}
 					}
 				}
@@ -305,6 +312,12 @@ func (pv *PlanViewer) ViewByComponent(componentName string) string {
 							useRef = useRef[:67] + "..."
 						}
 						sb.WriteString(fmt.Sprintf("%s    %s   use: %s\n", connector, "   ", useRef))
+					} else if step.Workflow != "" {
+						wfRef := step.Workflow
+						if len(wfRef) > 70 {
+							wfRef = wfRef[:67] + "..."
+						}
+						sb.WriteString(fmt.Sprintf("%s    %s   workflow: %s\n", connector, "   ", wfRef))
 					}
 				}
 			}

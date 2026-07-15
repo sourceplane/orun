@@ -236,6 +236,9 @@ func (r *Runner) printStepContext(step model.PlanStep, workingDir, timeoutValue 
 		if strings.TrimSpace(step.Use) != "" {
 			fmt.Fprintf(r.Stdout, "  │ use: %s\n", strings.TrimSpace(step.Use))
 		}
+		if strings.TrimSpace(step.Workflow) != "" {
+			fmt.Fprintf(r.Stdout, "  │ workflow: %s\n", strings.TrimSpace(step.Workflow))
+		}
 		if strings.TrimSpace(step.Run) != "" {
 			fmt.Fprintln(r.Stdout, "  │ run:")
 			for _, line := range formatCommandPreview(step.Run) {
