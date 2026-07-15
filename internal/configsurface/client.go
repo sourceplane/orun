@@ -147,6 +147,16 @@ type SecretMeta struct {
 	LastRotatedAt  string `json:"lastRotatedAt,omitempty"`
 	LastUsedAt     string `json:"lastUsedAt,omitempty"`
 	CreatedAt      string `json:"createdAt,omitempty"`
+	// Source distinguishes a stored value ("static") from a brokered pointer
+	// ("brokered"), whose value is minted just-in-time from an integration
+	// connection (saas-integration-hub IH7).
+	Source string `json:"source,omitempty"`
+	// BindingStatus / Orphaned are the derived orphan-health projection the
+	// config surface stamps onto a brokered row from live connection health
+	// (brokered-orphan-safety, Feature 1). Absent on static rows and left unset
+	// when the health lookup was unreachable (health unknown, NOT orphaned).
+	BindingStatus string `json:"bindingStatus,omitempty"`
+	Orphaned      *bool  `json:"orphaned,omitempty"`
 }
 
 // EffectiveScope returns the serving scope name, tolerating either the
@@ -161,6 +171,20 @@ func (m SecretMeta) EffectiveScope() string {
 // Locked reports whether the row is explicitly non-overridable.
 func (m SecretMeta) Locked() bool {
 	return m.Overridable != nil && !*m.Overridable
+}
+
+// Brokered reports whether the row is a brokered pointer (value minted at
+// resolve time) rather than a stored value.
+func (m SecretMeta) Brokered() bool {
+	return m.Source == "brokered"
+}
+
+// IsOrphaned reports whether the config surface flagged this brokered row as
+// orphaned — its integration connection is no longer active, so it can no
+// longer mint at plan/run time. Static rows and rows whose health could not be
+// determined (Orphaned unset) report false.
+func (m SecretMeta) IsOrphaned() bool {
+	return m.Orphaned != nil && *m.Orphaned
 }
 
 // ActorName decodes a createdBy field that may be a bare id string or a
