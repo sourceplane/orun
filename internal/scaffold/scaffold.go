@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/sourceplane/orun/internal/objectstore"
+	"github.com/sourceplane/orun/internal/workflowbackend"
 )
 
 // Options drives a scaffold/instantiate run (design §3 flow).
@@ -32,6 +33,10 @@ type Options struct {
 	// RunHooks opts into executing declared hooks (design §12). Off by default:
 	// hooks run outside the sandbox, so they are opt-in per instantiation.
 	RunHooks bool
+	// WorkflowEngine runs `workflow:` hooks (orun-workflows Surface B). Nil-safe:
+	// when a workflow hook runs and this is nil, the engine is resolved from
+	// ORUN_TORKFLOW_ENGINE. Tests inject a fake. Unused unless RunHooks is set.
+	WorkflowEngine workflowbackend.Engine
 }
 
 // Result summarizes a completed scaffold.
@@ -149,7 +154,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 
 	// Provenance (design §11): blueprint@digest + source@digest(s) + inputs-hash
 	// + per-module mode/target. Written even for a single scaffolded component.
-	prov, err := buildProvenance(ctx, opts.Store, opts.Blueprint, bp, values, sources, placed, consumed)
+	prov, err := buildProvenance(ctx, opts.Store, opts.Blueprint, bp, values, sources, placed, consumed, opts.SourceBaseDir)
 	if err != nil {
 		return nil, err
 	}
@@ -163,14 +168,21 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	// + approval gates are the planned resumable follow-on.
 	var hooksRun []string
 	if opts.RunHooks {
+		hr := &hookRunner{
+			outDir:      opts.OutDir,
+			baseDir:     opts.SourceBaseDir,
+			engine:      opts.WorkflowEngine,
+			credentials: values.SecretMap(),
+			digests:     hookDigestMap(prov),
+		}
 		for _, phase := range phases {
-			ran, herr := runHooks(phase.Hooks, opts.OutDir)
+			ran, herr := hr.run(ctx, phase.Hooks)
 			if herr != nil {
 				return nil, herr
 			}
 			hooksRun = append(hooksRun, ran...)
 		}
-		ran, herr := runHooks(bp.Hooks.PostInstantiate, opts.OutDir)
+		ran, herr := hr.run(ctx, bp.Hooks.PostInstantiate)
 		if herr != nil {
 			return nil, herr
 		}

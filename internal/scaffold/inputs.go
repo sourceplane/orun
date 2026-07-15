@@ -34,6 +34,20 @@ func (v Values) SecretValues() []string {
 	return out
 }
 
+// SecretMap returns the collected secret inputs as a name→value map, for
+// injecting into a workflow hook's engine request in-memory (orun-workflows §6).
+// Returns nil when no secrets were collected. The map is never persisted.
+func (v Values) SecretMap() map[string]any {
+	if len(v.secrets) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(v.secrets))
+	for k, val := range v.secrets {
+		out[k] = val
+	}
+	return out
+}
+
 // isSecretField reports whether name was collected as a secret.
 func (v Values) isSecretField(name string) bool {
 	_, ok := v.secrets[name]
