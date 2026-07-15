@@ -160,7 +160,7 @@ func placedEqual(a, b []PlacedFile) bool {
 
 func TestPlaceSingleFileCopy(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "package.json", `{"name":"lumen"}`)
+	writeFile(t, dir, "package.json", `{"name":"widget"}`)
 	// From names a single file; To is the exact target path.
 	m := Module{Name: "root-pkg", Mode: ModeCopy, Source: "base", From: "package.json", To: "package.json"}
 	out, err := placeModule(m, osTree{root: dir}, mkValues(map[string]any{}))
@@ -170,7 +170,7 @@ func TestPlaceSingleFileCopy(t *testing.T) {
 	if len(out.files) != 1 || out.files[0].Path != "package.json" {
 		t.Fatalf("single-file copy placed wrong: %+v", out.files)
 	}
-	if string(out.files[0].Bytes) != `{"name":"lumen"}` {
+	if string(out.files[0].Bytes) != `{"name":"widget"}` {
 		t.Fatalf("bytes = %q", out.files[0].Bytes)
 	}
 }
