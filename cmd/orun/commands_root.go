@@ -248,6 +248,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&allFlag, "all", false, "Disable CWD-based component scoping; process all components")
 
 	registerPlanCommand(rootCmd)
+	registerNewCommand(rootCmd)
 	registerRunCommand(rootCmd)
 	registerAuthCommand(rootCmd)
 	registerCloudCommand(rootCmd)
