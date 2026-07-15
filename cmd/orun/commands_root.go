@@ -250,6 +250,7 @@ func init() {
 	registerPlanCommand(rootCmd)
 	registerNewCommand(rootCmd)
 	registerRunCommand(rootCmd)
+	registerWorkflowCommand(rootCmd)
 	registerAuthCommand(rootCmd)
 	registerCloudCommand(rootCmd)
 	registerBackendCommand(rootCmd)
