@@ -20,6 +20,7 @@ import (
 	"github.com/sourceplane/orun/internal/redact"
 	"github.com/sourceplane/orun/internal/secretref"
 	"github.com/sourceplane/orun/internal/ui"
+	"github.com/sourceplane/orun/internal/workflowbackend"
 )
 
 // IsolationMode controls how each job's working tree is materialized.
@@ -82,6 +83,12 @@ type Runner struct {
 	Executor           executor.Executor
 	Runtime            executor.RuntimeContext
 	ExecID             string
+	// WorkflowEngine runs `workflow:` steps (orun-workflows WF2). A workflow step
+	// runs through this engine regardless of the selected runner (local/docker/
+	// gha). Nil-safe: when a plan contains a workflow: step and this is nil, the
+	// runner resolves the pinned engine from ORUN_TORKFLOW_ENGINE at first use and
+	// errors clearly if none is configured (S-4). Tests inject a fake.
+	WorkflowEngine workflowbackend.Engine
 	// PlanID is the plan checksum short-form, injected as ORUN_PLAN_ID into
 	// every step environment. Also used to build ORUN_JOB_RUN_ID.
 	PlanID           string
@@ -635,7 +642,15 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				break
 			}
 
-			output, stepErr = r.Executor.RunStep(execContext, job, step)
+			if strings.TrimSpace(step.Workflow) != "" {
+				// A workflow: step runs through the workflow backend regardless of
+				// the selected runner (orun-workflows §4). Its result is returned as
+				// this step's output and sealed into .orun/ via the same AfterStepLog
+				// path as any other step — no split-brain .runs/ (§7).
+				output, stepErr = r.runWorkflowStep(execContext, job, step)
+			} else {
+				output, stepErr = r.Executor.RunStep(execContext, job, step)
+			}
 			cancel()
 
 			// The single redaction site: mask resolved secret values before the
