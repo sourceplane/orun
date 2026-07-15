@@ -615,17 +615,34 @@ func runSecretsList(cmd *cobra.Command) error {
 		return nil
 	}
 	fmt.Print(renderSecretsTable(items, secretsChain))
+	if warn := orphanWarning(items); warn != "" {
+		fmt.Fprint(os.Stderr, warn)
+	}
 	return nil
 }
 
 // renderSecretsTable renders the metadata table. With chain it adds the
 // serving-scope view (SERVES FROM, LOCKED). Values are structurally absent.
+// A HEALTH column appears only when the scope contains at least one brokered
+// row, so static-only scopes keep the pre-broker table shape.
 func renderSecretsTable(items []configsurface.SecretMeta, chain bool) string {
 	sorted := make([]configsurface.SecretMeta, len(items))
 	copy(sorted, items)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].SecretKey < sorted[j].SecretKey })
 
-	headers := []string{"KEY", "SCOPE", "VERSION", "STATUS", "ROTATED", "LAST USED"}
+	showHealth := false
+	for _, m := range sorted {
+		if m.Brokered() {
+			showHealth = true
+			break
+		}
+	}
+
+	headers := []string{"KEY", "SCOPE", "VERSION", "STATUS"}
+	if showHealth {
+		headers = append(headers, "HEALTH")
+	}
+	headers = append(headers, "ROTATED", "LAST USED")
 	if chain {
 		headers = append(headers, "SERVES FROM", "LOCKED")
 	}
@@ -636,9 +653,11 @@ func renderSecretsTable(items []configsurface.SecretMeta, chain bool) string {
 			orDash(normalizeScopeName(m.EffectiveScope())),
 			versionCell(m.Version),
 			orDash(defaultString(m.Status, "active")),
-			orDash(formatAge(m.LastRotatedAt)),
-			orDash(formatAge(m.LastUsedAt)),
 		}
+		if showHealth {
+			row = append(row, secretHealthCell(m))
+		}
+		row = append(row, orDash(formatAge(m.LastRotatedAt)), orDash(formatAge(m.LastUsedAt)))
 		if chain {
 			locked := ""
 			if m.Locked() {
@@ -649,6 +668,49 @@ func renderSecretsTable(items []configsurface.SecretMeta, chain bool) string {
 		rows = append(rows, row)
 	}
 	return renderColumns(headers, rows)
+}
+
+// secretHealthCell renders the derived binding-health axis for a row. Static
+// rows have no binding and render "-"; a brokered row is "orphaned" when its
+// connection can no longer mint, "ok" when healthy, and "unknown" when the
+// health lookup was unreachable (never asserted orphaned on doubt).
+func secretHealthCell(m configsurface.SecretMeta) string {
+	if !m.Brokered() {
+		return "-"
+	}
+	if m.IsOrphaned() {
+		return "orphaned"
+	}
+	if m.Orphaned == nil {
+		return "unknown"
+	}
+	return "ok"
+}
+
+// orphanWarning returns an actionable stderr notice when any brokered row is
+// orphaned, naming the keys and pointing at the two remedies (repoint or
+// revoke). Empty when nothing is orphaned. It goes to stderr so `--json` and
+// piped stdout stay clean.
+func orphanWarning(items []configsurface.SecretMeta) string {
+	var orphaned []string
+	for _, m := range items {
+		if m.IsOrphaned() {
+			orphaned = append(orphaned, m.SecretKey)
+		}
+	}
+	if len(orphaned) == 0 {
+		return ""
+	}
+	sort.Strings(orphaned)
+	color := ui.ColorEnabledForWriter(os.Stderr)
+	noun := "secret"
+	if len(orphaned) > 1 {
+		noun = "secrets"
+	}
+	return fmt.Sprintf(
+		"\n%s %d brokered %s orphaned: %s\n  Their integration connection is no longer active, so they will FAIL to resolve at plan/run time.\n  Repoint them to a live connection or revoke them: `orun secrets revoke <KEY>`\n",
+		ui.Yellow(color, "⚠"), len(orphaned), noun, strings.Join(orphaned, ", "),
+	)
 }
 
 // normalizeScopeName maps the server's "organization" spelling to the CLI's
