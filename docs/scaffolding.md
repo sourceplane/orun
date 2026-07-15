@@ -177,9 +177,10 @@ what makes an instance upgradable rather than a permanent fork.
 
 A whole-repo blueprint (one `dir`/`git` source, many modules) instantiates a
 product repo — copying/consuming components in DAG order, gating every
-`component.yaml`, then passing `orun validate` + `plan --dry-run`. See
-`lumen/repo-blueprint.yaml` in the Lumen baseline for a real 46-component
-blueprint with phases and declared hooks.
+`component.yaml`, then passing `orun validate` + `plan --dry-run`. A baseline
+repo authors its own `repo-blueprint.yaml` describing every component with a
+declared `mode` and `dependsOn` edges, grouped into `phases` with declared
+hooks; `orun new --blueprint repo-blueprint.yaml --out <dir>` reproduces it.
 
 > **Spec:** `specs/orun-scaffolding/` — the unified Blueprint model, the module
 > atom, source resolution, ordering, the sandbox/secret/containment contracts,
