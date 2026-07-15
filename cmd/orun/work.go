@@ -23,6 +23,8 @@ status. The CLI surface is deliberately small; the board lives in Orun Cloud.
 Subcommands:
   import    Map a specs/ tree to Spec/Task envelopes and apply to Orun Cloud
   list      Show the workspace's derived lifecycle (rungs with evidence)
+  edit      Edit an item's envelope (title/description/owner/target/…)
+  cancel    Retire an item (task or epic) — the append-only "delete"
 
 Run 'orun work <subcommand> --help' for details.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -32,6 +34,8 @@ Run 'orun work <subcommand> --help' for details.`,
 
 	registerWorkImportCommand(workCmd)
 	registerWorkListCommand(workCmd)
+	registerWorkEditCommand(workCmd)
+	registerWorkCancelCommand(workCmd)
 	root.AddCommand(workCmd)
 }
 
@@ -196,6 +200,135 @@ re-imports skip existing specs and milestones).`,
 	cmd.Flags().StringVar(&backendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
 	cmd.Flags().StringVar(&prefix, "prefix", "WRK", "task-key prefix for imported milestones (2–5 uppercase)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the mapping without writing")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON")
+	parent.AddCommand(cmd)
+}
+
+func registerWorkEditCommand(parent *cobra.Command) {
+	var (
+		workspace   string
+		backendURL  string
+		asJSON      bool
+		title       string
+		description string
+		owner       string
+		target      string
+		initiative  string
+		criteria    []string
+	)
+	cmd := &cobra.Command{
+		Use:   "edit <key>",
+		Short: "Edit an item's envelope (title/description/owner/target/…)",
+		Long: `Edit an item's envelope through the one mutator (item_edited): title,
+plus the fields the item's kind exposes — description, owner, target date, and
+success criteria for an initiative; target date and initiative filing for an
+epic; title for a task.
+
+This is intent only. Nothing here can move a rung — lifecycle stays derived
+from observations (WP-3). Only the flags you pass are sent; pass an empty
+value (e.g. --owner "") to clear a field.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f := cmd.Flags()
+			req := remotestate.EditWorkItemRequest{}
+			if f.Changed("title") {
+				req.Title = &title
+			}
+			if f.Changed("description") {
+				req.Description = &description
+			}
+			if f.Changed("owner") {
+				req.Owner = &owner
+			}
+			if f.Changed("target") {
+				req.TargetDate = &target
+			}
+			if f.Changed("initiative") {
+				req.Initiative = &initiative
+			}
+			if f.Changed("criteria") {
+				req.SuccessCriteria = criteria
+			}
+			if req.Title == nil && req.Description == nil && req.Owner == nil &&
+				req.TargetDate == nil && req.Initiative == nil && req.SuccessCriteria == nil {
+				return fmt.Errorf("orun work edit: nothing to change; pass at least one of --title/--description/--owner/--target/--initiative/--criteria")
+			}
+
+			client, err := workClient(cmd.Context(), backendURL, workspace)
+			if err != nil {
+				return err
+			}
+			resp, err := client.EditWorkItem(cmd.Context(), args[0], req)
+			if err != nil {
+				return fmt.Errorf("orun work edit: %w", err)
+			}
+			out := cmd.OutOrStdout()
+			if asJSON {
+				enc := json.NewEncoder(out)
+				enc.SetIndent("", "  ")
+				return enc.Encode(resp)
+			}
+			fmt.Fprintf(out, "edited %s (seq %d)\n", resp.Key, resp.Seq)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&title, "title", "", "new title")
+	cmd.Flags().StringVar(&description, "description", "", "new description (initiatives)")
+	cmd.Flags().StringVar(&owner, "owner", "", "owner subject; \"\" clears (initiatives)")
+	cmd.Flags().StringVar(&target, "target", "", "target date YYYY-MM-DD; \"\" clears")
+	cmd.Flags().StringVar(&initiative, "initiative", "", "file an epic under this initiative key; \"\" unfiles")
+	cmd.Flags().StringArrayVar(&criteria, "criteria", nil, "success criterion (repeatable; initiatives)")
+	cmd.Flags().StringVar(&workspace, "workspace", "", "target workspace (org id or slug; defaults to the linked repo's)")
+	cmd.Flags().StringVar(&backendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON")
+	parent.AddCommand(cmd)
+}
+
+func registerWorkCancelCommand(parent *cobra.Command) {
+	var (
+		workspace  string
+		backendURL string
+		asJSON     bool
+		yes        bool
+	)
+	cmd := &cobra.Command{
+		Use:   "cancel <key>",
+		Short: "Retire an item (task or epic) — the append-only \"delete\"",
+		Long: `Retire a task or epic by folding a terminal 'canceled' state onto it.
+Cancel is the model's native "delete": a terminal, attributed, append-only
+state — the record and its whole history stay, and agents stop picking up its
+work. It is effectively permanent (there is no un-cancel).
+
+Initiatives have no lifecycle to cancel — edit their envelope, or retire their
+epics, instead.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			key := args[0]
+			if !yes && termIsInteractive() {
+				fmt.Fprintf(cmd.OutOrStdout(), "Retire %s? This is terminal and cannot be un-canceled. Re-run with --yes to confirm.\n", key)
+				return fmt.Errorf("orun work cancel: confirmation required (pass --yes)")
+			}
+			client, err := workClient(cmd.Context(), backendURL, workspace)
+			if err != nil {
+				return err
+			}
+			resp, err := client.CancelWorkItem(cmd.Context(), key)
+			if err != nil {
+				return fmt.Errorf("orun work cancel: %w", err)
+			}
+			out := cmd.OutOrStdout()
+			if asJSON {
+				enc := json.NewEncoder(out)
+				enc.SetIndent("", "  ")
+				return enc.Encode(resp)
+			}
+			fmt.Fprintf(out, "retired %s — canceled (seq %d)\n", resp.Key, resp.Seq)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
+	cmd.Flags().StringVar(&workspace, "workspace", "", "target workspace (org id or slug; defaults to the linked repo's)")
+	cmd.Flags().StringVar(&backendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON")
 	parent.AddCommand(cmd)
 }

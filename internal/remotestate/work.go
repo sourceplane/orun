@@ -72,10 +72,10 @@ type WorkImportRequest struct {
 
 // WorkImportResponse reports apply counts; re-imports skip idempotently.
 type WorkImportResponse struct {
-	SpecsCreated  int `json:"specsCreated"`
-	SpecsSkipped  int `json:"specsSkipped"`
-	TasksCreated  int `json:"tasksCreated"`
-	TasksSkipped  int `json:"tasksSkipped"`
+	SpecsCreated int `json:"specsCreated"`
+	SpecsSkipped int `json:"specsSkipped"`
+	TasksCreated int `json:"tasksCreated"`
+	TasksSkipped int `json:"tasksSkipped"`
 	// v4 (WH6) — additive; zero on pre-v4 servers.
 	InitiativesCreated int `json:"initiativesCreated,omitempty"`
 	InitiativesSkipped int `json:"initiativesSkipped,omitempty"`
@@ -213,6 +213,43 @@ func (c *Client) EditWorkContract(ctx context.Context, key string, contract Work
 		Contract WorkContract `json:"contract"`
 	}{Contract: contract}
 	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/tasks/"+urlSegment(key)+"/contract"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// EditWorkItemRequest mirrors the platform's EditWorkItemRequest — envelope
+// edits only (title/description/labels + the v4 properties). Nothing here can
+// move a rung; lifecycle stays derived (WP-3). Pointer fields distinguish
+// "leave unchanged" (nil) from "clear/unfile" (explicit null on the wire).
+type EditWorkItemRequest struct {
+	Title           *string           `json:"title,omitempty"`
+	Description     *string           `json:"description,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	Initiative      *string           `json:"initiative,omitempty"`
+	TargetDate      *string           `json:"targetDate,omitempty"`
+	Owner           *string           `json:"owner,omitempty"`
+	SuccessCriteria []string          `json:"successCriteria,omitempty"`
+}
+
+// EditWorkItem edits an item's envelope through the one mutator (item_edited).
+// Works for tasks, epics/specs, and initiatives — the fold reads whichever
+// fields the kind exposes.
+func (c *Client) EditWorkItem(ctx context.Context, key string, req EditWorkItemRequest) (*WorkMutationResponse, error) {
+	var resp WorkMutationResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/items/"+urlSegment(key)+"/edit"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CancelWorkItem retires an item that carries a lifecycle — a task's rung or
+// an epic's intent — through the kind-agnostic items path. Cancel is the
+// model's native "delete": a terminal, attributed, append-only state, never a
+// row removal. The server rejects initiatives (no lifecycle to cancel).
+func (c *Client) CancelWorkItem(ctx context.Context, key string) (*WorkMutationResponse, error) {
+	var resp WorkMutationResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/items/"+urlSegment(key)+"/cancel"), struct{}{}, &resp, false); err != nil {
 		return nil, err
 	}
 	return &resp, nil
