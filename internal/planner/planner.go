@@ -2,11 +2,13 @@ package planner
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/template"
 
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/workflowbackend"
 )
 
 // JobPlanner binds components to jobs and creates instances
@@ -19,6 +21,12 @@ type JobPlanner struct {
 	// resolvable at plan time — a required binding then fails to compile.
 	Workspace string
 	Project   string
+	// WorkflowBaseDir is the directory `workflow:` step references resolve against
+	// when orun pins their content digest at compile time (specs/orun-workflows
+	// §5). Set to the intent file's directory by the CLI. When empty, a workflow:
+	// step still compiles (reference + with are materialized) but no digest is
+	// pinned — the digest folds in once a base dir is available.
+	WorkflowBaseDir string
 }
 
 // CompositionInfo holds the default job for a composition
@@ -259,11 +267,24 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext) ([]
 
 	compType := tctx.CompInst.Type
 	for _, step := range sortedSteps {
+		// A step is exactly one of run/use/workflow (orun-workflows §3). Fail
+		// compilation before rendering when more than one is set.
+		if err := step.ValidateExecForm(); err != nil {
+			return nil, err
+		}
 		renderedRun, err := jp.renderTemplateString(compType, step.Name, "run", step.Run, context)
 		if err != nil {
 			return nil, err
 		}
 		renderedUse, err := jp.renderTemplateString(compType, step.Name, "use", step.Use, context)
+		if err != nil {
+			return nil, err
+		}
+		renderedWorkflow, err := jp.renderTemplateString(compType, step.Name, "workflow", step.Workflow, context)
+		if err != nil {
+			return nil, err
+		}
+		workflowDigest, err := jp.pinWorkflowDigest(step.Name, renderedWorkflow)
 		if err != nil {
 			return nil, err
 		}
@@ -291,6 +312,8 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext) ([]
 			Order:            step.Order,
 			Run:              renderedRun,
 			Use:              renderedUse,
+			Workflow:         renderedWorkflow,
+			WorkflowDigest:   workflowDigest,
 			With:             renderedWith,
 			Env:              renderedEnv,
 			Shell:            renderedShell,
@@ -302,6 +325,29 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext) ([]
 	}
 
 	return rendered, nil
+}
+
+// pinWorkflowDigest resolves a rendered `workflow:` reference against the
+// planner's WorkflowBaseDir and returns its content digest (orun-workflows §5).
+// An empty reference yields an empty digest. When no base dir is configured the
+// reference is materialized without a digest (the digest folds in once a base is
+// available). A configured base with an unreadable workflow file is a compile
+// error — fail-closed, since a pinned reference that cannot be read is not a
+// reproducible plan input.
+func (jp *JobPlanner) pinWorkflowDigest(stepName, workflow string) (string, error) {
+	workflow = strings.TrimSpace(workflow)
+	if workflow == "" || jp.WorkflowBaseDir == "" {
+		return "", nil
+	}
+	path := workflow
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(jp.WorkflowBaseDir, workflow)
+	}
+	digest, err := workflowbackend.WorkflowDigest(path)
+	if err != nil {
+		return "", fmt.Errorf("step %q: workflow %q: %w", stepName, workflow, err)
+	}
+	return digest, nil
 }
 
 func (jp *JobPlanner) renderTemplateString(componentType, stepName, fieldName, value string, context map[string]interface{}) (string, error) {

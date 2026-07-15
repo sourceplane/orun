@@ -1,6 +1,9 @@
 package model
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // StepPhase defines execution phase for a job step.
 type StepPhase string
@@ -41,6 +44,10 @@ type Step struct {
 	Order            int                    `yaml:"order,omitempty" json:"order,omitempty"`
 	Run              string                 `yaml:"run,omitempty" json:"run,omitempty"`
 	Use              string                 `yaml:"use,omitempty" json:"use,omitempty"`
+	// Workflow names a torkflow workflow file to run as this step — the third
+	// execution vocabulary beside run/use (specs/orun-workflows §3). Exactly one
+	// of Run/Use/Workflow may be set on a step.
+	Workflow         string                 `yaml:"workflow,omitempty" json:"workflow,omitempty"`
 	With             map[string]interface{} `yaml:"with,omitempty" json:"with,omitempty"`
 	Env              map[string]interface{} `yaml:"env,omitempty" json:"env,omitempty"`
 	Shell            string                 `yaml:"shell,omitempty" json:"shell,omitempty"`
@@ -48,6 +55,28 @@ type Step struct {
 	Timeout          string                 `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	Retry            int                    `yaml:"retry,omitempty" json:"retry,omitempty"`
 	OnFailure        string                 `yaml:"onFailure,omitempty" json:"onFailure,omitempty"` // stop, continue
+}
+
+// ValidateExecForm enforces the step's execution-vocabulary invariant: a step is
+// exactly one of run / use / workflow (specs/orun-workflows §3, invariant 8). A
+// step with more than one set is a compile error; a step with none is left to the
+// existing downstream handling (a bare step is a no-op today). Returns a nil error
+// when at most one form is set.
+func (s Step) ValidateExecForm() error {
+	set := make([]string, 0, 3)
+	if strings.TrimSpace(s.Run) != "" {
+		set = append(set, "run")
+	}
+	if strings.TrimSpace(s.Use) != "" {
+		set = append(set, "use")
+	}
+	if strings.TrimSpace(s.Workflow) != "" {
+		set = append(set, "workflow")
+	}
+	if len(set) > 1 {
+		return fmt.Errorf("step %q sets %s — a step must use exactly one of run/use/workflow", s.Name, strings.Join(set, " and "))
+	}
+	return nil
 }
 
 // NormalizePhase returns a normalized phase string and defaults empty values to "main".
@@ -182,6 +211,10 @@ type RenderedStep struct {
 	Order            int                    `json:"order,omitempty"`
 	Run              string                 `json:"run,omitempty"`
 	Use              string                 `json:"use,omitempty"`
+	// Workflow is the rendered torkflow workflow reference; WorkflowDigest is the
+	// content digest orun pinned for it at compile time (specs/orun-workflows §5).
+	Workflow         string                 `json:"workflow,omitempty"`
+	WorkflowDigest   string                 `json:"workflowDigest,omitempty"`
 	With             map[string]interface{} `json:"with,omitempty"`
 	Env              map[string]interface{} `json:"env,omitempty"`
 	Shell            string                 `json:"shell,omitempty"`
