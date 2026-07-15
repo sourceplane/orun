@@ -10,8 +10,8 @@ hand-rolled `curl | jq` inside a `run:` block. This epic adds the missing third
 vocabulary: **`workflow:`** — a portable, provider-backed, connection-
 authenticated, expression-driven workflow, executed by the **torkflow** runtime.
 It appears in exactly two places that share **one** execution backend and **one**
-secret bridge: **plan steps** (inside a job) and **blueprint hooks** (pre/post
-scaffolding). orun stays the compiler; torkflow becomes an execution backend
+secret bridge: **plan steps** (inside a job) and **blueprint hooks** (post-scaffold,
+global or per-phase). orun stays the compiler; torkflow becomes an execution backend
 bound at the step/hook level — the precise analogue of how a `use:` step selects
 the github-actions runner today.
 
@@ -30,11 +30,12 @@ the github-actions runner today.
 | Field | Value |
 |-------|-------|
 | Status | **Draft (v1) — for review** |
-| Absorbs | the two integration surfaces sketched in design review — a `workflow:` **plan step** (a job step that runs a data-flow workflow) and a `workflow:` **blueprint hook** (a pre/post-scaffold workflow) — into one backend + one secret bridge, rather than two bolt-ons |
+| Ground truth | Reconciled against the **shipped scaffolder** (`internal/scaffold`, merged in #506) on 2026-07-15. Surface B binds to the real `scaffold.Hook` seam — `Hooks.PostInstantiate` + `Phase.Hooks`, argv-only today, opt-in via `--run-hooks`, run **after** the atomic write; there is **no `preInstantiate`** in the shipped scaffolder (design §12 reconciliation). Surface A (plan-step `workflow:`) remains greenfield — `model.Step`/`PlanStep` still carry only `Run`/`Use`/`With`. |
+| Absorbs | the two integration surfaces sketched in design review — a `workflow:` **plan step** (a job step that runs a data-flow workflow) and a `workflow:` **blueprint hook** (a post-scaffold workflow: global `postInstantiate` **or** a per-phase `phases[].hooks`, matching the shipped `internal/scaffold` seam) — into one backend + one secret bridge, rather than two bolt-ons |
 | Builds on | orun's step model (`internal/model` `Step`/`PlanStep`/`RenderedStep`), the pluggable executor registry (`internal/executor` — `local`/`docker`/`github-actions`), the content-addressed object store + OCI/`internal/composition` fetch (for pinning the engine + workflow by digest), `orun-secrets` (the `secret://` reference model + lease-bound runner injection + log redaction), and `orun-scaffolding` §12 (the declared-hooks seam this epic upgrades) |
 | Runtime | **torkflow** (`github.com/sourceplane/torkflow`) — a thin workflow engine: a DAG scheduler over `actionRef` provider binaries (JSON stdin/stdout), a `{{ }}` + Goja expression resolver, a file-backed run store, and connection/credential resolution. Consumed as a **pinned, packaged provider artifact**, not vendored source |
 | Engine decision (locked) | orun invokes a **digest-pinned torkflow engine as a subprocess** over a JSON contract — the same process boundary torkflow already uses for its own providers. No cross-module Go import in v1 (torkflow's engine is `internal/`); an in-process `pkg/` lift is a declared follow-on (§13) |
-| Decisions locked | one execution backend for both surfaces; a step is exactly one of `run` \| `use` \| `workflow` (else a compile error); the engine **and** the workflow file are pinned by digest and folded into the plan checksum / provenance lock; the workflow's *outcome* is never plan or lock content; the workflow run is **sealed into `.orun/`** (no split-brain `.runs/`); credentials come from `orun-secrets` in-memory (**no second `secrets.yaml`**, never on disk); orun ships **no** provider-specific string (slack/github/http) — providers live in torkflow's action store; scaffolding hooks are **per-instantiation** in v1, per-module is opt-in and deferred (§ design §9) |
+| Decisions locked | one execution backend for both surfaces; a step is exactly one of `run` \| `use` \| `workflow` (else a compile error); the engine **and** the workflow file are pinned by digest and folded into the plan checksum / provenance lock; the workflow's *outcome* is never plan or lock content; the workflow run is **sealed into `.orun/`** (no split-brain `.runs/`); credentials come from `orun-secrets` in-memory (**no second `secrets.yaml`**, never on disk); orun ships **no** provider-specific string (slack/github/http) — providers live in torkflow's action store; scaffolding `workflow:` hooks attach at the two **shipped** granularities — global `postInstantiate` and per-phase `phases[].hooks`, both **post-write** — while per-module (`postModule`) is deferred (design §9) |
 | apiVersion | `orun.io/v1` (the new `workflow`/`with` fields on steps + hooks); workflow files keep their portable `torkflow/v1` envelope, unchanged |
 | Milestone prefix | **WF** (`WF0 → WF7`) |
 
@@ -68,14 +69,16 @@ integration, two surfaces, one determinism law.
               ▼                                                         ▼
    SURFACE A — plan step                              SURFACE B — blueprint hook
    ─────────────────────                              ─────────────────────────
-   job:                                               hooks:
-     steps:                                             preInstantiate:  (idempotent
-       - name: notify                                     - workflow: ensure-repo.yaml
-         workflow: wf/notify.yaml                       postInstantiate: (post-gate)
-         with: { chan: "{{ .channel }}" }                 - workflow: open-pr.yaml
-              │                                                        │
-   orun plan: resolve + DIGEST the file                orun new:  place → GATE → hooks
-   into plan.json (ref + digest + with)                provenance.lock records wf@digest
+   job:                                               hooks:                (global,
+     steps:                                             postInstantiate:     post-write)
+       - name: notify                                     - workflow: open-pr.yaml
+         workflow: wf/notify.yaml                     phases:               (per-phase)
+         with: { chan: "{{ .channel }}" }               - hooks:
+              │                                              - workflow: verify.yaml
+   orun plan: resolve + DIGEST the file                            │
+   into plan.json (ref + digest + with)                orun new --run-hooks:
+              │                                         place → GATE → write → hooks
+              │                                         provenance.lock records wf@digest
               │                                                        │
               └───────────────────────────┬───────────────────────────┘
                                           ▼
@@ -103,7 +106,7 @@ integration, two surfaces, one determinism law.
 | Surface | Where it's authored | What it's for | Runs when | Pinned into | Failure semantics |
 |---------|--------------------|---------------|-----------|-------------|-------------------|
 | **Plan step** (`workflow:` on a job step) | a composition/golden-path job, alongside `run:`/`use:` steps | a delivery action that needs structured, authenticated, multi-provider data-flow (notify on-call, sync an external system, gate on an API) | during `orun run`, as one step in a job | `plan.json` (ref + digest + `with`; folds into the plan checksum) | the step's existing `timeout`/`retry`/`onFailure`; orun's step retry wraps the whole workflow |
-| **Blueprint hook** (`workflow:` in `hooks.pre/postInstantiate`) | a `blueprint.yaml`, upgrading the §12 `run:[argv]` seam | scaffolding side effects orun must not internalize — *ensure the repo exists* (pre, idempotent), *commit + open the PR* (post, after the gate) | during `orun new`/`instantiate`, outside the template sandbox | `.orun/provenance.lock` (hook `workflow@digest` + inputs-hash) | pre: aborts before any write (fail-closed); post: after a passing gate the tree is valid, a hook failure is reported non-zero and re-runnable |
+| **Blueprint hook** (`workflow:` in `hooks.postInstantiate` or a `phases[].hooks`) | a `blueprint.yaml`, upgrading the shipped §12 `run:[argv]` seam (`scaffold.Hook`) | post-placement side effects orun must not internalize — *commit + open the PR*, run a *per-phase verification* — with *ensure-repo* folded in as the workflow's own idempotent first action | during `orun new`/`create`/`instantiate` with `--run-hooks`, after the atomic write, in phase order then global | `.orun/provenance.lock` (a new `hooks[]` entry: `id` + `workflow@digest`) | the tree is already gated + written; a hook failure exits non-zero with the valid tree in place and is re-runnable (`orun new upgrade`) |
 
 Both rows resolve the same file shape, run on the same `workflowExecutor`, draw
 credentials from the same `orun-secrets` bridge, and obey the same law: only the
@@ -113,7 +116,7 @@ reference + digest is durable state; the outcome is a logged run fact.
 
 | In scope (this spec) | Out of scope |
 |----------------------|--------------|
-| the `workflow`/`with` fields on `model.Step`/`PlanStep`/`RenderedStep` and on the scaffolding hook shape; the mutual-exclusion validation (`run`\|`use`\|`workflow`); compile/scaffold-time **digest pinning** of the workflow file (+ its action-store refs) and of the torkflow engine; a `workflowExecutor` in `internal/executor` that shells the pinned engine over a JSON contract and runs under `local`/`docker`/`gha`; the **secret bridge** from `orun-secrets` `secret://` refs to torkflow connection/credential injection (in-memory, redacted); sealing the workflow run into `.orun/`; the scaffolding hook upgrade (pre/post `workflow:`); cockpit/`orun logs` projection of a workflow step/hook; an `orun workflow` validate/view/run subcommand fronting torkflow | torkflow's engine internals, its provider SDK, and any specific provider (slack/http/**github**) — authored and released in the torkflow repo, consumed here as a pinned artifact (a `github` provider for the "create repo / open PR" examples is torkflow-side work); the `orun-secrets` store/policy engine itself (consumed, not re-specified); **per-module** scaffolding hooks (`postModule`) — designed but deferred (§9); an in-process Go import of the engine (§13); rewriting orun's planner or scheduler around torkflow's DAG (orun stays the compiler) |
+| the `workflow`/`with` fields on `model.Step`/`PlanStep`/`RenderedStep` and on the scaffolding hook shape; the mutual-exclusion validation (`run`\|`use`\|`workflow`); compile/scaffold-time **digest pinning** of the workflow file (+ its action-store refs) and of the torkflow engine; a `workflowExecutor` in `internal/executor` that shells the pinned engine over a JSON contract and runs under `local`/`docker`/`gha`; the **secret bridge** from `orun-secrets` `secret://` refs to torkflow connection/credential injection (in-memory, redacted); sealing the workflow run into `.orun/`; the scaffolding hook upgrade (a `workflow:` form on `scaffold.Hook`, usable in `postInstantiate` and `phases[].hooks`, plus a `hooks[]` block in `Provenance`); cockpit/`orun logs` projection of a workflow step/hook; an `orun workflow` validate/view/run subcommand fronting torkflow | torkflow's engine internals, its provider SDK, and any specific provider (slack/http/**github**) — authored and released in the torkflow repo, consumed here as a pinned artifact (a `github` provider for the "create repo / open PR" examples is torkflow-side work); the `orun-secrets` store/policy engine itself (consumed, not re-specified); **per-module** scaffolding hooks (`postModule`) — designed but deferred (§9); an in-process Go import of the engine (§13); rewriting orun's planner or scheduler around torkflow's DAG (orun stays the compiler) |
 
 ## Out-of-band references
 
