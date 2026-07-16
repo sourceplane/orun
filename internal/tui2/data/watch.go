@@ -51,11 +51,16 @@ func newWatcher(orunRoot string) *watcher {
 // (memory: the object store is git-like; refs are the mutation points).
 func (w *watcher) topicDirs() map[string]Topic {
 	return map[string]Topic{
-		filepath.Join(w.orunRoot, "refs"):                            TopicRuns,
-		filepath.Join(w.orunRoot, "objectmodel", "refs"):             TopicCatalog,
-		filepath.Join(w.orunRoot, "objectmodel", "refs", "catalogs"): TopicCatalog,
-		filepath.Join(w.orunRoot, "agents", "live"):                  TopicSessions,
-		filepath.Join(w.orunRoot, "plans"):                           TopicRuns,
+		filepath.Join(w.orunRoot, "refs"):                              TopicRuns,
+		filepath.Join(w.orunRoot, "objectmodel", "refs"):               TopicCatalog,
+		filepath.Join(w.orunRoot, "objectmodel", "refs", "catalogs"):   TopicCatalog,
+		filepath.Join(w.orunRoot, "objectmodel", "refs", "executions"): TopicRuns,
+		// The live run working tree: objrun projects step state here on
+		// every runner tick, so external runs (a CLI `orun run` in another
+		// terminal) stream step progress through the same deltas.
+		filepath.Join(w.orunRoot, "objectmodel", "run"): TopicRuns,
+		filepath.Join(w.orunRoot, "agents", "live"):     TopicSessions,
+		filepath.Join(w.orunRoot, "plans"):              TopicRuns,
 	}
 }
 
@@ -169,14 +174,16 @@ func (w *watcher) runWatcher(ctx context.Context, fsw *fsnotify.Watcher, dirs ma
 				go w.runFallback(ctx)
 				return
 			}
+			// New directories grow the watch: fsnotify is not recursive,
+			// and both the run working tree and ref namespaces nest.
+			if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
+				clean := filepath.Clean(ev.Name)
+				if _, isTarget := dirs[clean]; isTarget || classify(clean, dirs) != "" {
+					_ = fsw.Add(clean)
+				}
+			}
 			topic := classify(ev.Name, dirs)
 			if topic == "" {
-				// A new watchable directory may have appeared.
-				if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
-					if _, isTarget := dirs[filepath.Clean(ev.Name)]; isTarget {
-						_ = fsw.Add(ev.Name)
-					}
-				}
 				continue
 			}
 			pending[topic] = true

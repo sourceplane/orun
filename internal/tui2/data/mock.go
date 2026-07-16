@@ -18,6 +18,7 @@ type MockSource struct {
 	RunList      viewmodel.RunListView
 	RunViews     map[string]viewmodel.RunView
 	StepLogs     map[string]string // key: execID/jobID/stepID
+	Components   map[string]viewmodel.ComponentView
 	LiveSessions []live.Entry
 	Err          error // when set, every snapshot read fails with it
 
@@ -27,9 +28,10 @@ type MockSource struct {
 // NewMock returns an empty mock; seed the exported fields directly.
 func NewMock() *MockSource {
 	return &MockSource{
-		RunViews: make(map[string]viewmodel.RunView),
-		StepLogs: make(map[string]string),
-		watch:    newWatcher(""),
+		RunViews:   make(map[string]viewmodel.RunView),
+		StepLogs:   make(map[string]string),
+		Components: make(map[string]viewmodel.ComponentView),
+		watch:      newWatcher(""),
 	}
 }
 
@@ -58,6 +60,17 @@ func (m *MockSource) Catalog(context.Context) (viewmodel.CatalogView, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.CatalogView, m.Err
+}
+
+// Component implements Source.
+func (m *MockSource) Component(_ context.Context, key string) (viewmodel.ComponentView, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.Err != nil {
+		return viewmodel.ComponentView{}, false, m.Err
+	}
+	v, ok := m.Components[key]
+	return v, ok, nil
 }
 
 // Runs implements Source.
@@ -108,6 +121,19 @@ func SampleMock() *MockSource {
 	m.LiveSessions = []live.Entry{
 		{SessionID: "as_local_01", PID: 4242, State: "running", AgentType: "implementer", Task: "fix flaky catalog test", Driver: "claude-code", StartedAt: time.Now().Add(-25 * time.Minute)},
 		{SessionID: "as_local_02", PID: 4243, State: "running", AgentType: "reviewer", Task: "review PR #482", Driver: "claude-code", StartedAt: time.Now().Add(-5 * time.Minute)},
+	}
+	m.CatalogView = viewmodel.CatalogView{
+		SourceID: "src_abc", CatalogID: "cat_abc", Overlay: true,
+		Components: []viewmodel.ComponentRow{
+			{Key: "checkout", Name: "checkout", Type: "service", Domain: "payments", Envs: []string{"production", "staging"}, DirectlyChanged: true},
+			{Key: "payments", Name: "payments", Type: "service", Domain: "payments", Envs: []string{"production"}, Dependent: true, DependsOn: []string{"checkout"}},
+			{Key: "web", Name: "web", Type: "frontend", Domain: "storefront", Envs: []string{"production"}},
+		},
+	}
+	m.Components["checkout"] = viewmodel.ComponentView{
+		Key: "checkout", Name: "checkout", Type: "service", Domain: "payments", Path: "services/checkout",
+		Envs:      []viewmodel.EnvBinding{{Name: "production", Active: true}, {Name: "staging", Active: true}},
+		DependsOn: []string{"payments-db"}, Watches: []string{"services/checkout/**"},
 	}
 	m.RunViews["exec_01J8Z3"] = viewmodel.RunView{
 		ExecID: "exec_01J8Z3", PlanName: "deploy checkout", Status: "running",

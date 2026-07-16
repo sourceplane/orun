@@ -64,6 +64,9 @@ type Source interface {
 
 	// Catalog reads the component/entity catalog with the change overlay.
 	Catalog(ctx context.Context) (viewmodel.CatalogView, error)
+	// Component reads one component's detail page; ok=false when the key
+	// is not in the catalog.
+	Component(ctx context.Context, key string) (viewmodel.ComponentView, bool, error)
 	// Runs reads the run history, newest first.
 	Runs(ctx context.Context) (viewmodel.RunListView, error)
 	// Run reads one run's jobs and steps.

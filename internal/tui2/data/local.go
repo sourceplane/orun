@@ -81,6 +81,15 @@ func (s *LocalSource) reader() (*objread.Reader, error) {
 	return objread.New(store, refs, filepath.Join(s.cfg.OrunRoot, "objectmodel")), nil
 }
 
+// Component implements Source via the shared catalogread seam.
+func (s *LocalSource) Component(ctx context.Context, key string) (viewmodel.ComponentView, bool, error) {
+	store, refs, err := s.openModel()
+	if err != nil {
+		return viewmodel.ComponentView{}, false, err
+	}
+	return catalogread.New(store, refs, s.cfg.WorkspaceRoot).ComponentView(ctx, key)
+}
+
 // Runs implements Source.
 func (s *LocalSource) Runs(ctx context.Context) (viewmodel.RunListView, error) {
 	r, err := s.reader()
