@@ -211,6 +211,11 @@ type Model struct {
 	showConfirm bool
 	pendingRun  *PendingRun
 
+	// New-agent-session launch dialog (the "cloud-CLI" flow: pick a type +
+	// driver + task, then spawn a detached body and attach to it).
+	showAgentLaunch bool
+	agentLaunch     views.AgentLaunchModel
+
 	// Spinner state for run kickoff (drives the "Starting run…" card before
 	// the first RunEvent arrives).
 	runStarting bool
@@ -370,11 +375,23 @@ func attachSessionCmd(socket string) tea.Cmd {
 	}
 }
 
-// launchAgentCmd spawns a detached interactive session body (`orun agent run
-// --detach`), then polls the registry (through the service) for the new body's
-// socket and attaches — the launch flow spawns the body and joins it like any
-// other head (design §5.5). The TUI never runs the loop itself.
-func (m Model) launchAgentCmd() tea.Cmd {
+// openAgentLaunch opens the New Session dialog, seeding it with the loaded
+// agent types and whether the `claude` CLI is on PATH (which selects the
+// default driver). The dialog resolves a LaunchSpec that launchAgentCmd runs.
+func (m Model) openAgentLaunch() Model {
+	_, claudeErr := exec.LookPath("claude")
+	m.agentLaunch = views.NewAgentLaunchModel(m.agent.Types, claudeErr == nil)
+	m.agentLaunch.Width = m.width
+	m.showAgentLaunch = true
+	return m
+}
+
+// launchAgentCmd spawns a detached session body (`orun agent run --detach …`)
+// configured by the resolved LaunchSpec — driver, agent type, and optional task
+// — then polls the registry (through the service) for the new body's socket and
+// attaches. The launch flow spawns the body and joins it like any other head
+// (design §5.5); the TUI never runs the loop itself.
+func (m Model) launchAgentCmd(spec views.LaunchSpec) tea.Cmd {
 	svc := m.svc
 	before := map[string]bool{}
 	if rows, err := svc.LiveSessions(); err == nil {
@@ -382,12 +399,13 @@ func (m Model) launchAgentCmd() tea.Cmd {
 			before[r.SessionID] = true
 		}
 	}
+	args := agentRunArgs(spec)
 	return func() tea.Msg {
 		exe, err := os.Executable()
 		if err != nil {
 			return agentAttachedMsg{err: err}
 		}
-		if err := exec.Command(exe, "agent", "run", "--detach").Run(); err != nil {
+		if err := exec.Command(exe, args...).Run(); err != nil {
 			return agentAttachedMsg{err: err}
 		}
 		// Poll for the newly-registered body (not in the pre-launch set).
@@ -418,6 +436,24 @@ func (m Model) launchAgentCmd() tea.Cmd {
 }
 
 var errNoLaunchedSocket = fmt.Errorf("launched session produced no socket")
+
+// agentRunArgs maps a resolved LaunchSpec onto `orun agent run` flags. Always
+// detached (the TUI joins as a head, never runs the loop); driver/type/task are
+// added only when set — an empty type is an ad-hoc session, an empty task an
+// interactive one.
+func agentRunArgs(spec views.LaunchSpec) []string {
+	args := []string{"agent", "run", "--detach"}
+	if spec.Driver != "" {
+		args = append(args, "--driver", spec.Driver)
+	}
+	if spec.Type != "" {
+		args = append(args, "--type", spec.Type)
+	}
+	if spec.Task != "" {
+		args = append(args, "--task", spec.Task)
+	}
+	return args
+}
 
 func loadWorkspaceCmd(svc services.OrunService) tea.Cmd {
 	return func() tea.Msg {
@@ -899,6 +935,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Block all other input while modal is open.
 		return m, nil
 	}
+	if m.showAgentLaunch {
+		if key.Matches(msg, m.keys.Cancel) {
+			m.showAgentLaunch = false
+			return m, nil
+		}
+		var submit bool
+		m.agentLaunch, submit = m.agentLaunch.Update(msg)
+		if submit {
+			spec := m.agentLaunch.Spec()
+			m.showAgentLaunch = false
+			return m, m.launchAgentCmd(spec)
+		}
+		return m, nil
+	}
 	if m.showCommandPalette {
 		if key.Matches(msg, m.keys.Cancel) {
 			m.commandPalette = m.commandPalette.Close()
@@ -1124,7 +1174,7 @@ func (m Model) forwardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, attachSessionCmd(s.Socket)
 				}
 			case "n":
-				return m, m.launchAgentCmd()
+				return m.openAgentLaunch(), nil
 			}
 		}
 		var c tea.Cmd
@@ -1595,6 +1645,7 @@ func (m Model) stageDimensions() (int, int) {
 // chromeHeight is the rendered line count of everything around the stage box.
 func (m Model) chromeHeight() int {
 	h := lipgloss.Height(m.renderHeader()) +
+		lipgloss.Height(m.renderTabs()) +
 		lipgloss.Height(m.renderRule()) +
 		lipgloss.Height(m.renderHints()) +
 		lipgloss.Height(m.renderStatus())
@@ -1734,6 +1785,7 @@ func (m Model) View() string {
 	m.propagateSize()
 
 	header := m.renderHeader()
+	tabs := m.renderTabs()
 	rule := m.renderRule()
 
 	stage := m.renderStage()
@@ -1768,7 +1820,11 @@ func (m Model) View() string {
 	hints := m.renderHints()
 	status := m.renderStatus()
 
-	parts := []string{header, rule, body}
+	parts := []string{header}
+	if tabs != "" {
+		parts = append(parts, tabs)
+	}
+	parts = append(parts, rule, body)
 	if bp := m.renderBottomPanel(); bp != "" {
 		parts = append(parts, bp)
 	}
@@ -1781,6 +1837,10 @@ func (m Model) View() string {
 	// which reads as a frozen cockpit after pressing r).
 	if m.showConfirm {
 		return m.fitToScreen(placeOver(frame, m.renderConfirmModal(), m.width, m.height))
+	}
+	if m.showAgentLaunch {
+		card := theme.StyleModalCard.Width(clamp(m.width*60/100, 46, 78)).Render(m.agentLaunch.View())
+		return m.fitToScreen(placeOver(frame, card, m.width, m.height))
 	}
 	if m.showCommandPalette {
 		overlay := m.commandPalette.View()
@@ -1942,6 +2002,37 @@ func (m Model) renderRule() string {
 		return ""
 	}
 	return theme.StyleRule.Render(strings.Repeat("─", m.width))
+}
+
+// renderTabs draws the top-level surface bar: the primary cockpit surfaces with
+// their number-key shortcuts, the active one highlighted. Without it the Agents
+// surface (and the others) were reachable only by an undocumented number key —
+// invisible in the UI. Secondary modes (plan-studio, run-dashboard, logs,
+// history) map onto the surface they belong under so the bar always shows one
+// active tab.
+func (m Model) renderTabs() string {
+	if m.width <= 0 {
+		return ""
+	}
+	tabs := []struct {
+		label string
+		key   string
+		on    bool
+	}{
+		{"Catalog", "1", m.activeMode == ModeCatalog || m.activeMode == ModePlanStudio},
+		{"Activity", "2", m.activeMode == ModeActivity || m.activeMode == ModeRunDashboard ||
+			m.activeMode == ModeLogExplorer || m.activeMode == ModeHistory},
+		{"Agents", "3", m.activeMode == ModeAgent},
+	}
+	parts := make([]string, 0, len(tabs))
+	for _, t := range tabs {
+		if t.on {
+			parts = append(parts, theme.StyleChipAccent.Render(" "+t.label+" ")+theme.StyleKeyDim.Render(t.key))
+		} else {
+			parts = append(parts, theme.StyleDim.Render(" "+t.label+" ")+theme.StyleKeyDim.Render(t.key))
+		}
+	}
+	return strings.Join(parts, "  ")
 }
 
 func (m Model) renderStage() string {
