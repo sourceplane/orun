@@ -257,6 +257,12 @@ func (s *Surface) Update(msg tea.Msg) tea.Cmd {
 		s.foldRunEvent(msg.ev)
 		return nil
 
+	case toggleChangedMsg:
+		s.changedOnly = !s.changedOnly
+		s.sel = 0
+		s.rev++
+		return nil
+
 	case subscribedMsg:
 		s.deltas = msg.ch
 		return waitDelta(msg.ch)
@@ -449,6 +455,22 @@ func (s *Surface) rows() []viewmodel.ComponentRow {
 		}
 	}
 	return out
+}
+
+// toggleChangedMsg asks the surface to flip the changed-only filter.
+type toggleChangedMsg struct{}
+
+// Commands implements shell.CommandProvider.
+func (s *Surface) Commands() []shell.Command {
+	return []shell.Command{{
+		ID: "catalog.changed", Title: "Catalog: toggle changed-only", Keys: []string{"c"},
+		Run: func() tea.Cmd {
+			return tea.Batch(
+				func() tea.Msg { return shell.GotoMsg{ID: "catalog"} },
+				func() tea.Msg { return toggleChangedMsg{} },
+			)
+		},
+	}}
 }
 
 // Close releases the subscription context.

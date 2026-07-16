@@ -47,3 +47,22 @@ func TestRegisterReplacesByID(t *testing.T) {
 		t.Fatal("replace must take effect")
 	}
 }
+
+// stubProvider is a minimal CommandProvider for registration tests.
+type stubProvider struct{ Surface }
+
+func (stubProvider) ID() string    { return "stub" }
+func (stubProvider) Title() string { return "Stub" }
+func (stubProvider) Commands() []Command {
+	return []Command{{ID: "stub.action", Title: "Stub action"}}
+}
+
+// TestSurfaceCommandsRegistered pins design §13.4's mechanism: surface
+// capabilities become commands at construction, so palette and help are
+// complete by construction.
+func TestSurfaceCommandsRegistered(t *testing.T) {
+	sh := New(Config{Surfaces: []Surface{stubProvider{}}})
+	if _, ok := sh.Registry().Get("stub.action"); !ok {
+		t.Fatal("surface command must register at construction")
+	}
+}

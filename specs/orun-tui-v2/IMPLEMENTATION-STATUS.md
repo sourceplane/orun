@@ -11,6 +11,6 @@ Living document. Update per merged PR.
 | TR4 | Activity surface | ✅ Shipped | `internal/tui2/surfaces/activity` | Retires Run Dashboard / Log Explorer / History |
 | TR5 | Catalog surface + Compose flow | ✅ Shipped | `internal/tui2/surfaces/catalog` | Absorbs Plan Studio |
 | TR6 | Work surface | ✅ Shipped | `internal/tui2/surfaces/work` | Cloud lane built against fixtures |
-| TR7 | Home + palette + Events | ☐ Not started | `internal/tui2/surfaces/{home,events}`, command registry | Help generated from registry |
+| TR7 | Home + palette + Events | ✅ Shipped | `internal/tui2/surfaces/{home,events}`, command registry | Help generated from registry |
 | TR8 | Cloud connect + default flip | ☐ Not started | `internal/tui2/data` (CloudSource), `cmd/orun/command_tui.go` | Needs stage token for live smoke |
 | TR9 | Cutover (delete v1, rename, hardening) | ☐ Not started | `internal/tui` (delete), `internal/tui2`→`internal/tui` | After ≥1 release soaked |
