@@ -1,0 +1,4 @@
+note: harness: interrupted
+note: harness: end_requested
+note: state: canceled
+-- live=false state=canceled pending=0 latest=10 streaming=""

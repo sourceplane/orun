@@ -35,6 +35,9 @@ type (
 	OpenHelpMsg struct{}
 	// NoticeMsg puts a transient notice on the status line.
 	NoticeMsg struct{ Text string }
+	// OpenOverlayMsg pushes any overlay onto the stack — how surfaces open
+	// dialogs without reaching into the shell.
+	OpenOverlayMsg struct{ Overlay Overlay }
 )
 
 // Config assembles a shell.
@@ -179,6 +182,12 @@ func (s *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case OpenHelpMsg:
 		s.overlays = append(s.overlays, NewHelp(s.reg))
+		return s, nil
+
+	case OpenOverlayMsg:
+		if msg.Overlay != nil {
+			s.overlays = append(s.overlays, msg.Overlay)
+		}
 		return s, nil
 
 	case NoticeMsg:
