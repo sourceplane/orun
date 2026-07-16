@@ -1,0 +1,4 @@
+user(usr_alice): also update the changelog
+note: approval needed: contract_propose [req-1]
+note: approval req-1 approved by usr_alice
+-- live=false state= pending=0 latest=7 streaming=""

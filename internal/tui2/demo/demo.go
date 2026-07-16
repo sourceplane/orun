@@ -16,14 +16,23 @@ import (
 	"github.com/sourceplane/orun/internal/tui2/shell"
 )
 
-// New returns the demo surface set in tab order.
+// New returns the full demo surface set in tab order — the deterministic
+// program behind the kernel property tests and the bench.
 func New() []shell.Surface {
 	return []shell.Surface{
-		&homeSurface{},
+		NewHome(),
 		&agentsSurface{sessions: []string{"implementer · fix flaky catalog test", "reviewer · PR #482", "interactive · scratch"}},
-		&activitySurface{runs: []string{"deploy checkout · succeeded", "plan payments · succeeded", "deploy web · failed"}, progress: -1},
+		NewActivity(),
 		NewGallery(),
 	}
+}
+
+// NewHome returns the placeholder Home surface (replaced in TR7).
+func NewHome() shell.Surface { return &homeSurface{} }
+
+// NewActivity returns the placeholder Activity surface (replaced in TR4).
+func NewActivity() shell.Surface {
+	return &activitySurface{runs: []string{"deploy checkout · succeeded", "plan payments · succeeded", "deploy web · failed"}, progress: -1}
 }
 
 // --- Home -----------------------------------------------------------------

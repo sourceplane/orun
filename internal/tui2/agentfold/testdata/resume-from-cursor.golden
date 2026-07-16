@@ -1,0 +1,3 @@
+note: approval needed: contract_propose [req-1]
+note: approval req-1 approved by usr_alice
+-- live=true state=running pending=0 latest=8 streaming=""

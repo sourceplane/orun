@@ -119,7 +119,11 @@ func runAgentTUI(ctx context.Context) error {
 
 func runTUI(ctx context.Context) error {
 	if useNextTUI() {
-		_, err := tui2.NewProgram().Run()
+		orunRoot, rerr := filepath.Abs(filepath.Join(storeDir(), ".orun"))
+		if rerr != nil {
+			return fmt.Errorf("resolve state root: %w", rerr)
+		}
+		_, err := tui2.NewProgram(tui2.Options{OrunRoot: orunRoot, WorkspaceRoot: storeDir()}).Run()
 		return err
 	}
 

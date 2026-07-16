@@ -1,0 +1,3 @@
+note: protocol error: version unsupported protocol version
+note: protocol error: bad_frame not json
+-- live=false state= pending=0 latest=0 streaming=""
