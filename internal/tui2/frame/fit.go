@@ -52,6 +52,10 @@ func FitLine(line string, width int) string {
 	}
 }
 
+// LineWidth measures a line's display width, ANSI-aware — the measurement
+// every layout decision in the cockpit uses.
+func LineWidth(line string) int { return ansi.StringWidth(line) }
+
 // Check verifies that out satisfies the exact-size contract. It is the
 // assertion behind the frame invariants (design §13.1) — used by tests and
 // debug builds, never needed at runtime because Fit makes violations
