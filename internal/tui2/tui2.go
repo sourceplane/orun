@@ -11,6 +11,7 @@ import (
 	"github.com/sourceplane/orun/internal/tui2/demo"
 	"github.com/sourceplane/orun/internal/tui2/frame"
 	"github.com/sourceplane/orun/internal/tui2/shell"
+	"github.com/sourceplane/orun/internal/tui2/surfaces/activity"
 	"github.com/sourceplane/orun/internal/tui2/surfaces/agents"
 )
 
@@ -36,7 +37,7 @@ func NewProgram(opts Options) *tea.Program {
 	surfaces := []shell.Surface{
 		demo.NewHome(),
 		agents.New(src),
-		demo.NewActivity(),
+		activity.New(src),
 		demo.NewGallery(),
 	}
 	sh := shell.New(shell.Config{Surfaces: surfaces, Scope: src.Scope()})

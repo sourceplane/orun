@@ -99,6 +99,20 @@ func (s *LocalSource) Run(ctx context.Context, execID string) (viewmodel.RunView
 	return bridge.LoadRunView(ctx, bridge.FromObjectReader(r), execID)
 }
 
+// StepLog implements Source via objread (sealed blob for finished runs,
+// working-tree file for live ones).
+func (s *LocalSource) StepLog(ctx context.Context, execID, jobID, stepID string) ([]byte, error) {
+	r, err := s.reader()
+	if err != nil {
+		return nil, err
+	}
+	view, err := r.Get(ctx, execID)
+	if err != nil {
+		return nil, err
+	}
+	return r.StepLog(ctx, view, jobID, stepID)
+}
+
 // Sessions implements Source: the pid-swept live registry.
 func (s *LocalSource) Sessions(context.Context) ([]live.Entry, error) {
 	return live.List(filepath.Join(s.cfg.OrunRoot, "agents", "live"))

@@ -70,6 +70,9 @@ type Source interface {
 	Run(ctx context.Context, execID string) (viewmodel.RunView, error)
 	// Sessions reads the live agent-session registry.
 	Sessions(ctx context.Context) ([]live.Entry, error)
+	// StepLog reads one step's captured output (sealed blob or live
+	// working-tree file).
+	StepLog(ctx context.Context, execID, jobID, stepID string) ([]byte, error)
 
 	// Subscribe streams change notifications for the given topics (all
 	// topics when none given) until ctx ends. The channel closes on
