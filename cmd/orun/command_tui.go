@@ -12,12 +12,23 @@ import (
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/tui"
 	"github.com/sourceplane/orun/internal/tui/services"
+	"github.com/sourceplane/orun/internal/tui2"
 )
 
 var (
 	tuiRemoteState bool
 	tuiBackendURL  string
+	tuiNext        bool
 )
+
+// tuiNextEnvVar opts into the cockpit v2 without the flag; the default
+// flips at TR8 (specs/orun-tui-v2).
+const tuiNextEnvVar = "ORUN_TUI"
+
+// useNextTUI reports whether this launch should run the cockpit v2.
+func useNextTUI() bool {
+	return tuiNext || os.Getenv(tuiNextEnvVar) == "next"
+}
 
 var tuiCmd = &cobra.Command{
 	Use:   "tui",
@@ -36,6 +47,8 @@ func registerTuiCommand(root *cobra.Command) {
 		"Connect to orun-backend for remote run state")
 	tuiCmd.Flags().StringVar(&tuiBackendURL, "backend-url", "",
 		fmt.Sprintf("orun-backend URL (or set %s)", backendURLEnvVar))
+	tuiCmd.Flags().BoolVar(&tuiNext, "next", false,
+		fmt.Sprintf("Launch the cockpit v2 (or set %s=next)", tuiNextEnvVar))
 }
 
 // resolveTUIBackend returns the remote state backend when --remote-state is
@@ -105,6 +118,11 @@ func runAgentTUI(ctx context.Context) error {
 }
 
 func runTUI(ctx context.Context) error {
+	if useNextTUI() {
+		_, err := tui2.NewProgram().Run()
+		return err
+	}
+
 	// Auto-discover the intent root so the cockpit (and the state/log store
 	// it reads) resolves to the repo root regardless of which command path
 	// launched it (`orun` vs `orun tui`) or which subdirectory we are in.

@@ -1,4 +1,4 @@
-.PHONY: build run validate debug plan clean test help examples-validate examples-debug examples-plan examples-gha-smoke test-state-redesign test-object-model verify-generated
+.PHONY: build run validate debug plan clean test help examples-validate examples-debug examples-plan examples-gha-smoke test-state-redesign test-object-model verify-generated tui-bench
 
 BINARY_NAME=orun
 BINARY_PATH=./cmd/$(BINARY_NAME)
@@ -55,6 +55,11 @@ examples-gha-smoke: build
 test:
 	@echo "🧪 Running tests..."
 	@go test -v ./...
+
+# Cockpit v2 render benchmarks (specs/orun-tui-v2 §11). The budget
+# *assertions* run as ordinary tests; this target reports the numbers.
+tui-bench:
+	@go test ./internal/tui2/... -bench . -benchmem -run '^$$'
 
 clean:
 	@echo "🧹 Cleaning..."
