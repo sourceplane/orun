@@ -119,7 +119,7 @@ func SampleMock() *MockSource {
 				Steps: []viewmodel.Step{{ID: "build", Status: "completed"}, {ID: "push", Status: "completed"}}},
 			{ID: "payments@deploy", Component: "payments", Environment: "production", Short: "deploy", Status: "running",
 				StartedAt: time.Now().Add(-1 * time.Minute),
-				Steps: []viewmodel.Step{{ID: "build", Status: "completed"}, {ID: "migrate", Status: "running"}, {ID: "push", Status: "pending"}}},
+				Steps:     []viewmodel.Step{{ID: "build", Status: "completed"}, {ID: "migrate", Status: "running"}, {ID: "push", Status: "pending"}}},
 			{ID: "web@deploy", Component: "web", Environment: "production", Short: "deploy", Status: "pending",
 				Steps: []viewmodel.Step{{ID: "build", Status: "pending"}}},
 		},
