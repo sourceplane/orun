@@ -13,6 +13,7 @@ import (
 	"github.com/sourceplane/orun/internal/tui2/shell"
 	"github.com/sourceplane/orun/internal/tui2/surfaces/activity"
 	"github.com/sourceplane/orun/internal/tui2/surfaces/agents"
+	"github.com/sourceplane/orun/internal/tui2/surfaces/catalog"
 )
 
 // Options locates the workspace the cockpit reads.
@@ -22,22 +23,36 @@ type Options struct {
 	OrunRoot string
 	// WorkspaceRoot is the intent root (change-overlay base).
 	WorkspaceRoot string
+	// IntentFile and ConfigDir feed plan generation (the Compose flow).
+	IntentFile string
+	ConfigDir  string
+	Version    string
 }
 
 // NewProgram builds the cockpit v2 program: the real surfaces as they land
-// (Agents since TR3), demo placeholders for the rest.
+// (Agents TR3, Activity TR4, Catalog TR5), demo placeholders for the rest.
 func NewProgram(opts Options) *tea.Program {
 	var src data.Source
+	var comp data.Composer
 	if opts.OrunRoot == "" {
 		src = data.SampleMock()
+		comp = data.SampleComposer()
 	} else {
 		src = data.NewLocal(data.LocalConfig{OrunRoot: opts.OrunRoot, WorkspaceRoot: opts.WorkspaceRoot})
+		comp = data.NewLocalComposer(data.LocalComposerConfig{
+			IntentFile: opts.IntentFile,
+			IntentRoot: opts.WorkspaceRoot,
+			ConfigDir:  opts.ConfigDir,
+			OrunRoot:   opts.OrunRoot,
+			Version:    opts.Version,
+		})
 	}
 
 	surfaces := []shell.Surface{
 		demo.NewHome(),
 		agents.New(src),
 		activity.New(src),
+		catalog.New(src, comp),
 		demo.NewGallery(),
 	}
 	sh := shell.New(shell.Config{Surfaces: surfaces, Scope: src.Scope()})

@@ -123,7 +123,13 @@ func runTUI(ctx context.Context) error {
 		if rerr != nil {
 			return fmt.Errorf("resolve state root: %w", rerr)
 		}
-		_, err := tui2.NewProgram(tui2.Options{OrunRoot: orunRoot, WorkspaceRoot: storeDir()}).Run()
+		_, err := tui2.NewProgram(tui2.Options{
+			OrunRoot:      orunRoot,
+			WorkspaceRoot: storeDir(),
+			IntentFile:    intentFile,
+			ConfigDir:     configDir,
+			Version:       version,
+		}).Run()
 		return err
 	}
 

@@ -216,6 +216,31 @@ func (s *LiveOrunService) RunPlan(ctx context.Context, req RunRequest) (<-chan R
 			}
 			send(ev)
 		},
+		// Step-level events (runner OnStepStart/AfterStepTerminal) let live
+		// views render step progress from the stream instead of re-reading
+		// the working tree on a timer (specs/orun-tui-v2 §8).
+		OnStepStart: func(jobID, stepID string, index, total int) {
+			job := jobIndex[jobID]
+			send(RunEvent{
+				Kind:      RunEventStepStarted,
+				JobID:     jobID,
+				StepID:    stepID,
+				Component: job.Component,
+				Env:       job.Environment,
+				Status:    "running",
+			})
+		},
+		AfterStepTerminal: func(jobID, stepID, status string) {
+			job := jobIndex[jobID]
+			send(RunEvent{
+				Kind:      RunEventStepCompleted,
+				JobID:     jobID,
+				StepID:    stepID,
+				Component: job.Component,
+				Env:       job.Environment,
+				Status:    status,
+			})
+		},
 	}
 
 	// Native object-model run session: a real (non-dry) run opens a live working
