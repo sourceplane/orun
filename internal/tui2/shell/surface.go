@@ -52,3 +52,12 @@ type ScheduledSurface interface {
 	Surface
 	SetScheduler(*frame.Scheduler)
 }
+
+// CommandProvider is implemented by surfaces that contribute commands to
+// the registry. Registration happens once at shell construction, which is
+// what keeps the palette and help complete by construction (design §13.4):
+// a surface capability that isn't a command doesn't exist.
+type CommandProvider interface {
+	Surface
+	Commands() []Command
+}

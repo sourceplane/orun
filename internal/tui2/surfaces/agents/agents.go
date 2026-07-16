@@ -268,6 +268,12 @@ func (s *Surface) Update(msg tea.Msg) tea.Cmd {
 			s.status = "launch failed: " + msg.err.Error()
 		}
 		return nil
+
+	case openLaunchMsg:
+		if s.client == nil {
+			return s.openLaunchCmd()
+		}
+		return nil
 	}
 	return nil
 }
@@ -318,15 +324,37 @@ func (s *Surface) HandleKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	case "n":
-		ov := NewLaunchOverlay(func(spec LaunchSpec) tea.Cmd {
-			s.launching = true
-			s.status = "launching…"
-			s.rev++
-			return launchCmd(spec)
-		})
-		return func() tea.Msg { return shell.OpenOverlayMsg{Overlay: ov} }, true
+		return s.openLaunchCmd(), true
 	}
 	return nil, false
+}
+
+// openLaunchCmd yields the New Session overlay.
+func (s *Surface) openLaunchCmd() tea.Cmd {
+	ov := NewLaunchOverlay(func(spec LaunchSpec) tea.Cmd {
+		s.launching = true
+		s.status = "launching…"
+		s.rev++
+		return launchCmd(spec)
+	})
+	return func() tea.Msg { return shell.OpenOverlayMsg{Overlay: ov} }
+}
+
+// openLaunchMsg asks the surface to open the launch dialog (the palette's
+// "New agent session" from anywhere).
+type openLaunchMsg struct{}
+
+// Commands implements shell.CommandProvider.
+func (s *Surface) Commands() []shell.Command {
+	return []shell.Command{{
+		ID: "agents.new", Title: "New agent session", Keys: []string{"n"},
+		Run: func() tea.Cmd {
+			return tea.Batch(
+				func() tea.Msg { return shell.GotoMsg{ID: "agents"} },
+				func() tea.Msg { return openLaunchMsg{} },
+			)
+		},
+	}}
 }
 
 // handleAttachedKey mirrors the v1 head bindings exactly: enter steers,

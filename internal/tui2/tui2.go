@@ -14,6 +14,8 @@ import (
 	"github.com/sourceplane/orun/internal/tui2/surfaces/activity"
 	"github.com/sourceplane/orun/internal/tui2/surfaces/agents"
 	"github.com/sourceplane/orun/internal/tui2/surfaces/catalog"
+	"github.com/sourceplane/orun/internal/tui2/surfaces/events"
+	"github.com/sourceplane/orun/internal/tui2/surfaces/home"
 	"github.com/sourceplane/orun/internal/tui2/surfaces/work"
 )
 
@@ -31,7 +33,8 @@ type Options struct {
 }
 
 // NewProgram builds the cockpit v2 program: the real surfaces as they land
-// (Agents TR3, Activity TR4, Catalog TR5), demo placeholders for the rest.
+// (Home/Events TR7, Work TR6, Agents TR3, Activity TR4, Catalog TR5) plus
+// the design-system gallery.
 func NewProgram(opts Options) *tea.Program {
 	var src data.Source
 	var comp data.Composer
@@ -50,13 +53,14 @@ func NewProgram(opts Options) *tea.Program {
 	}
 
 	surfaces := []shell.Surface{
-		demo.NewHome(),
+		home.New(src),
 		work.New(src),
 		agents.New(src),
 		activity.New(src),
 		catalog.New(src, comp),
+		events.New(src),
 		demo.NewGallery(),
 	}
-	sh := shell.New(shell.Config{Surfaces: surfaces, Scope: src.Scope()})
+	sh := shell.New(shell.Config{Surfaces: surfaces, Scope: src.Scope(), Version: opts.Version})
 	return tea.NewProgram(frame.WithProfiling(sh), tea.WithAltScreen())
 }

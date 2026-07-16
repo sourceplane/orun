@@ -38,6 +38,8 @@ type (
 	// OpenOverlayMsg pushes any overlay onto the stack — how surfaces open
 	// dialogs without reaching into the shell.
 	OpenOverlayMsg struct{ Overlay Overlay }
+	// OpenSettingsMsg opens the settings overlay.
+	OpenSettingsMsg struct{}
 )
 
 // Config assembles a shell.
@@ -47,6 +49,8 @@ type Config struct {
 	Scope string
 	// Now overrides the clock (tests); nil means time.Now.
 	Now func() time.Time
+	// Version is shown in settings.
+	Version string
 }
 
 // Shell is the root Bubble Tea model.
@@ -60,6 +64,7 @@ type Shell struct {
 	sched    *frame.Scheduler
 
 	scope       string
+	version     string
 	notice      string
 	noticeAt    time.Time
 	quitArmedAt time.Time
@@ -75,11 +80,12 @@ type Shell struct {
 // and the command registry seeded with navigation, help, palette, and quit.
 func New(cfg Config) *Shell {
 	s := &Shell{
-		router: NewRouter(cfg.Surfaces),
-		reg:    NewRegistry(),
-		sched:  frame.NewScheduler(),
-		scope:  cfg.Scope,
-		now:    cfg.Now,
+		router:  NewRouter(cfg.Surfaces),
+		reg:     NewRegistry(),
+		sched:   frame.NewScheduler(),
+		scope:   cfg.Scope,
+		version: cfg.Version,
+		now:     cfg.Now,
 	}
 	if s.now == nil {
 		s.now = time.Now
@@ -110,9 +116,22 @@ func New(cfg Config) *Shell {
 		Run: func() tea.Cmd { return func() tea.Msg { return OpenHelpMsg{} } },
 	})
 	s.reg.Register(Command{
+		ID: "ui.settings", Title: "Settings", Keys: []string{","},
+		Run: func() tea.Cmd { return func() tea.Msg { return OpenSettingsMsg{} } },
+	})
+	s.reg.Register(Command{
 		ID: "app.quit", Title: "Quit", Keys: []string{"ctrl+c ctrl+c"},
 		Run: func() tea.Cmd { return tea.Quit },
 	})
+	// Surface-contributed commands land after the shell's own, so goto/help
+	// stay at the top of an unfiltered palette.
+	for _, sf := range cfg.Surfaces {
+		if cp, ok := sf.(CommandProvider); ok {
+			for _, c := range cp.Commands() {
+				s.reg.Register(c)
+			}
+		}
+	}
 	return s
 }
 
@@ -190,6 +209,10 @@ func (s *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return s, nil
 
+	case OpenSettingsMsg:
+		s.overlays = append(s.overlays, NewSettings(s.scope, s.version))
+		return s, nil
+
 	case NoticeMsg:
 		s.setNotice(msg.Text)
 		return s, s.sched.Arm()
@@ -262,6 +285,9 @@ func (s *Shell) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	case "?":
 		s.overlays = append(s.overlays, NewHelp(s.reg))
+		return nil
+	case ",":
+		s.overlays = append(s.overlays, NewSettings(s.scope, s.version))
 		return nil
 	case "esc":
 		if !sf.Pop() {
