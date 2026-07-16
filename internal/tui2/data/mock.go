@@ -7,6 +7,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/agent/live"
 	"github.com/sourceplane/orun/internal/cockpit/viewmodel"
+	"github.com/sourceplane/orun/internal/worklens"
 )
 
 // MockSource is the deterministic Source behind surface tests, goldens,
@@ -19,6 +20,7 @@ type MockSource struct {
 	RunViews     map[string]viewmodel.RunView
 	StepLogs     map[string]string // key: execID/jobID/stepID
 	Components   map[string]viewmodel.ComponentView
+	Epics        []EpicView
 	LiveSessions []live.Entry
 	Err          error // when set, every snapshot read fails with it
 
@@ -135,6 +137,24 @@ func SampleMock() *MockSource {
 		Envs:      []viewmodel.EnvBinding{{Name: "production", Active: true}, {Name: "staging", Active: true}},
 		DependsOn: []string{"payments-db"}, Watches: []string{"services/checkout/**"},
 	}
+	m.Epics = []EpicView{{
+		Slug: "checkout-rework",
+		Snapshot: worklens.EpicSnapshot{
+			Kind: "EpicSnapshot",
+			Spec: worklens.Spec{Key: "SPEC-12", Title: "Checkout rework"},
+			Milestones: []worklens.Milestone{
+				{Key: "M0", Title: "Extract payment intent", Goal: "one seam", DoneWhen: []string{"intent API behind flag"}, Ordinal: 0},
+				{Key: "M1", Title: "Cutover", Ordinal: 1},
+			},
+			Tasks: []worklens.Task{
+				{Key: "ORN-142", Title: "Fix flaky catalog test", Milestone: "M0", Spec: "SPEC-12"},
+				{Key: "ORN-143", Title: "Wire payment intent", Milestone: "M0", Spec: "SPEC-12"},
+				{Key: "ORN-150", Title: "Cutover checklist", Milestone: "M1", Spec: "SPEC-12"},
+			},
+			Approval: worklens.EpicSnapshotApproval{Revision: "rev_7", By: worklens.Actor{Type: "user", ID: "usr_rahul"}, At: "2026-07-10T12:00:00Z"},
+		},
+		Brief: "# Checkout rework\nSealed brief body with `code`.",
+	}}
 	m.RunViews["exec_01J8Z3"] = viewmodel.RunView{
 		ExecID: "exec_01J8Z3", PlanName: "deploy checkout", Status: "running",
 		Trigger: "deploy", StartedAt: time.Now().Add(-2 * time.Minute),
