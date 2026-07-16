@@ -110,9 +110,25 @@ func buildTUIService() (services.OrunService, error) {
 	}), nil
 }
 
-// runAgentTUI opens the cockpit straight onto the Agent surface — the bare
-// `orun agent` front door (orun-agents-live AL3).
+// runAgentTUI opens the cockpit straight onto the Agents surface — the bare
+// `orun agent` front door (orun-agents-live AL3; cockpit v2 since TR9 prep,
+// ORUN_TUI=legacy restores the v1 agent mode).
 func runAgentTUI(ctx context.Context) error {
+	if useNextTUI() {
+		orunRoot, rerr := filepath.Abs(filepath.Join(storeDir(), ".orun"))
+		if rerr != nil {
+			return fmt.Errorf("resolve state root: %w", rerr)
+		}
+		_, err := tui2.NewProgram(tui2.Options{
+			OrunRoot:       orunRoot,
+			WorkspaceRoot:  storeDir(),
+			IntentFile:     intentFile,
+			ConfigDir:      configDir,
+			Version:        version,
+			InitialSurface: "agents",
+		}).Run()
+		return err
+	}
 	svc, err := buildTUIService()
 	if err != nil {
 		return err

@@ -32,6 +32,9 @@ type Options struct {
 	IntentFile string
 	ConfigDir  string
 	Version    string
+	// InitialSurface opens the cockpit on a specific surface ("agents"
+	// for the bare `orun agent` front door). Empty = Home.
+	InitialSurface string
 }
 
 // NewProgram builds the cockpit v2 program: the real surfaces as they land
@@ -67,5 +70,8 @@ func NewProgram(opts Options) *tea.Program {
 		demo.NewGallery(),
 	}
 	sh := shell.New(shell.Config{Surfaces: surfaces, Scope: src.Scope(), Version: opts.Version})
+	if opts.InitialSurface != "" {
+		sh.Router().ActivateID(opts.InitialSurface)
+	}
 	return tea.NewProgram(frame.WithProfiling(sh), tea.WithAltScreen())
 }
