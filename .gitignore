@@ -68,3 +68,6 @@ Thumbs.db
 /website/docs-build/
 /website/node_modules/
 /website/.wrangler/
+
+# Local workspace state (content-addressed store, refs, live registries)
+.orun/
