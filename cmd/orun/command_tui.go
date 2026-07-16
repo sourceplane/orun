@@ -21,13 +21,17 @@ var (
 	tuiNext        bool
 )
 
-// tuiNextEnvVar opts into the cockpit v2 without the flag; the default
-// flips at TR8 (specs/orun-tui-v2).
+// tuiNextEnvVar selects the cockpit generation. The default flipped to v2
+// at TR8 (specs/orun-tui-v2); ORUN_TUI=legacy is the escape hatch until
+// the v1 cockpit is deleted at TR9.
 const tuiNextEnvVar = "ORUN_TUI"
 
 // useNextTUI reports whether this launch should run the cockpit v2.
 func useNextTUI() bool {
-	return tuiNext || os.Getenv(tuiNextEnvVar) == "next"
+	if os.Getenv(tuiNextEnvVar) == "legacy" || !tuiNext {
+		return false
+	}
+	return true
 }
 
 var tuiCmd = &cobra.Command{
@@ -47,8 +51,8 @@ func registerTuiCommand(root *cobra.Command) {
 		"Connect to orun-backend for remote run state")
 	tuiCmd.Flags().StringVar(&tuiBackendURL, "backend-url", "",
 		fmt.Sprintf("orun-backend URL (or set %s)", backendURLEnvVar))
-	tuiCmd.Flags().BoolVar(&tuiNext, "next", false,
-		fmt.Sprintf("Launch the cockpit v2 (or set %s=next)", tuiNextEnvVar))
+	tuiCmd.Flags().BoolVar(&tuiNext, "next", true,
+		fmt.Sprintf("Launch the cockpit v2 (default since TR8; %s=legacy restores the v1 cockpit)", tuiNextEnvVar))
 }
 
 // resolveTUIBackend returns the remote state backend when --remote-state is

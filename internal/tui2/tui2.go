@@ -5,6 +5,8 @@
 package tui2
 
 import (
+	"context"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/sourceplane/orun/internal/tui2/data"
@@ -42,7 +44,10 @@ func NewProgram(opts Options) *tea.Program {
 		src = data.SampleMock()
 		comp = data.SampleComposer()
 	} else {
-		src = data.NewLocal(data.LocalConfig{OrunRoot: opts.OrunRoot, WorkspaceRoot: opts.WorkspaceRoot})
+		src = data.WithCloud(
+			data.NewLocal(data.LocalConfig{OrunRoot: opts.OrunRoot, WorkspaceRoot: opts.WorkspaceRoot}),
+			data.ResolveCloud(context.Background(), opts.Version),
+		)
 		comp = data.NewLocalComposer(data.LocalComposerConfig{
 			IntentFile: opts.IntentFile,
 			IntentRoot: opts.WorkspaceRoot,
