@@ -22,6 +22,7 @@ func New() []shell.Surface {
 		&homeSurface{},
 		&agentsSurface{sessions: []string{"implementer · fix flaky catalog test", "reviewer · PR #482", "interactive · scratch"}},
 		&activitySurface{runs: []string{"deploy checkout · succeeded", "plan payments · succeeded", "deploy web · failed"}, progress: -1},
+		NewGallery(),
 	}
 }
 

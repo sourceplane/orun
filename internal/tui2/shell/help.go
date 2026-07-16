@@ -1,11 +1,11 @@
 package shell
 
 import (
-	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/sourceplane/orun/internal/tui2/design"
 	"github.com/sourceplane/orun/internal/tui2/frame"
 )
 
@@ -27,11 +27,6 @@ func (h *Help) Rev() string { return "help" }
 
 // View implements Overlay.
 func (h *Help) View(max frame.Size) string {
-	w := min(56, max.Width-4)
-	if w < 20 {
-		w = max.Width
-	}
-
 	keyWidth := 0
 	for _, c := range h.reg.All() {
 		if kw := len(strings.Join(c.Keys, " ")); kw > keyWidth {
@@ -39,18 +34,13 @@ func (h *Help) View(max frame.Size) string {
 		}
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "┌%s┐\n", strings.Repeat("─", w-2))
-	b.WriteString("│ keys\n")
-	fmt.Fprintf(&b, "├%s┤\n", strings.Repeat("─", w-2))
-	rows := 0
+	var lines []string
 	for _, c := range h.reg.All() {
-		if rows >= max.Height-5 {
+		if len(lines) >= max.Height-4 {
 			break
 		}
-		fmt.Fprintf(&b, "│ %-*s  %s\n", keyWidth, strings.Join(c.Keys, " "), c.Title)
-		rows++
+		keys := frame.FitLine(strings.Join(c.Keys, " "), keyWidth)
+		lines = append(lines, design.Text.Render(keys)+"  "+design.Dim.Render(c.Title))
 	}
-	fmt.Fprintf(&b, "└%s┘", strings.Repeat("─", w-2))
-	return frame.Fit(b.String(), frame.Size{Width: w, Height: rows + 4})
+	return design.Box("keys", strings.Join(lines, "\n"), max)
 }

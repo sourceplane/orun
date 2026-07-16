@@ -1,18 +1,17 @@
 package shell
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/sourceplane/orun/internal/tui2/design"
 	"github.com/sourceplane/orun/internal/tui2/frame"
 )
 
 // Palette is the command palette overlay: type to filter the registry,
-// enter to run. It renders plainly in TR0; Northwind Mono restyles it in
-// TR1 without touching its behavior.
+// enter to run.
 type Palette struct {
 	reg   *Registry
 	query string
@@ -65,41 +64,36 @@ func (p *Palette) Rev() string { return "palette/" + strconv.Itoa(p.rev) }
 
 // View implements Overlay.
 func (p *Palette) View(max frame.Size) string {
-	w := min(64, max.Width-4)
-	if w < 20 {
-		w = max.Width
+	w := min(60, max.Width-8)
+	if w < 16 {
+		w = max.Width - 4
 	}
-	rows := min(10, max.Height-4)
+	rows := min(10, max.Height-6)
 	if rows < 1 {
 		rows = 1
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "┌%s┐\n", strings.Repeat("─", w-2))
-	fmt.Fprintf(&b, "│ › %s\n", p.query)
-	fmt.Fprintf(&b, "├%s┤\n", strings.Repeat("─", w-2))
+	lines := []string{
+		frame.FitLine(design.Accent.Render("›")+" "+p.query+design.Muted.Render("▏"), w),
+		design.Rule(w),
+	}
 	m := p.matches()
-	shown := 0
 	for i, c := range m {
-		if shown >= rows {
+		if i >= rows {
 			break
 		}
-		marker := "  "
+		marker, title := "  ", design.Text.Render(c.Title)
 		if i == p.sel {
-			marker = "▸ "
+			marker, title = design.Selected.Render("▸ "), design.Selected.Render(c.Title)
 		}
 		keys := ""
 		if len(c.Keys) > 0 {
-			keys = "  " + strings.Join(c.Keys, " ")
+			keys = "  " + design.Dim.Render(strings.Join(c.Keys, " "))
 		}
-		fmt.Fprintf(&b, "│ %s%s%s\n", marker, c.Title, keys)
-		shown++
+		lines = append(lines, marker+title+keys)
 	}
 	if len(m) == 0 {
-		b.WriteString("│   no matching commands\n")
-		shown = 1
+		lines = append(lines, design.Dim.Render("no matching commands"))
 	}
-	fmt.Fprintf(&b, "└%s┘", strings.Repeat("─", w-2))
-
-	return frame.Fit(b.String(), frame.Size{Width: w, Height: shown + 4})
+	return design.Box("", strings.Join(lines, "\n"), max)
 }
