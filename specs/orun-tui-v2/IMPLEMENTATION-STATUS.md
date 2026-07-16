@@ -13,4 +13,4 @@ Living document. Update per merged PR.
 | TR6 | Work surface | ✅ Shipped | `internal/tui2/surfaces/work` | Cloud lane built against fixtures |
 | TR7 | Home + palette + Events | ✅ Shipped | `internal/tui2/surfaces/{home,events}`, command registry | Help generated from registry |
 | TR8 | Cloud connect + default flip | ◐ Partial | `internal/tui2/data` (CloudLane), `cmd/orun/command_tui.go` | Default flipped; cloud runs lane fixture-tested. Live stage smoke + work SSE/attention/remote-sessions lanes + in-app device flow pending sign-in (needs human browser approval) — TR8.1 |
-| TR9 | Cutover (delete v1, rename, hardening) | ☐ Not started | `internal/tui` (delete), `internal/tui2`→`internal/tui` | After ≥1 release soaked |
+| TR9 | Cutover (delete v1, rename, hardening) | ◐ Prep landed, deletion gated | `internal/tui` (delete), `internal/tui2`→`internal/tui` | Prep: bare `orun agent` opens the v2 Agents surface. Deletion gated per plan on (a) ≥1 release soaked with the flipped default, (b) TR8.1 cloud lanes, (c) moving `internal/tui/services` out from under `internal/tui` (v2's composer wraps it) |
