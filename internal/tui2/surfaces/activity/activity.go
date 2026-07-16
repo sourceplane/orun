@@ -19,6 +19,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/cockpit/viewmodel"
 	"github.com/sourceplane/orun/internal/tui2/data"
+	"github.com/sourceplane/orun/internal/tui2/shell"
 )
 
 type level int
@@ -252,7 +253,15 @@ func (s *Surface) keyFeed(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, true
 	case "enter":
 		if s.selRun < len(rows) {
-			s.pinned = rows[s.selRun].ExecID
+			id := rows[s.selRun].ExecID
+			if data.IsCloudRun(id) {
+				// Cloud rows are feed-only until the console-detail lane
+				// lands; drilling explains instead of faking a detail.
+				return func() tea.Msg {
+					return shell.NoticeMsg{Text: "cloud run — open it in orun cloud (detail lane is a TR8 follow-up)"}
+				}, true
+			}
+			s.pinned = id
 			s.run = viewmodel.RunView{}
 			s.level = levelRun
 			s.selJob = 0

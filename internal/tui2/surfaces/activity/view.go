@@ -2,6 +2,8 @@ package activity
 
 import (
 	"fmt"
+
+	"github.com/sourceplane/orun/internal/tui2/data"
 	"strings"
 	"time"
 
@@ -49,6 +51,9 @@ func (s *Surface) viewFeed(size frame.Size) string {
 		right := design.StatusText(r.Status)
 		if d := r.Duration(); d > 0 {
 			right += design.Dim.Render("  " + d.Truncate(time.Second).String())
+		}
+		if data.IsCloudRun(r.ExecID) {
+			right = design.Pill(design.ToneInfo, "◇ cloud") + "  " + right
 		}
 		b.WriteString(design.DataRow(size.Width, i == s.selRun, name, secondary, right) + "\n")
 	}

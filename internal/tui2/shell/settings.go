@@ -28,6 +28,17 @@ func (s *Settings) HandleKey(tea.KeyMsg) (tea.Cmd, bool) { return nil, true }
 // Rev implements Overlay.
 func (s *Settings) Rev() string { return "settings" }
 
+// connectionLine renders the connection state from the resolved scope:
+// a cloud lane renames the scope at startup, so scope is the truth.
+func connectionLine(scope string) string {
+	switch scope {
+	case "local", "mock", "":
+		return design.Text.Render("⏺ local") + design.Dim.Render("  — set ORUN_BACKEND_URL + ORUN_WORKSPACE and run `orun login` for the cloud lanes")
+	default:
+		return design.ToneSuccess.Style().Render("⏺ cloud") + design.Dim.Render("  — "+scope)
+	}
+}
+
 // View implements Overlay.
 func (s *Settings) View(max frame.Size) string {
 	if s.version == "" {
@@ -35,7 +46,7 @@ func (s *Settings) View(max frame.Size) string {
 	}
 	lines := []string{
 		design.Dim.Render("scope       ") + design.Text.Render(s.scope),
-		design.Dim.Render("connection  ") + design.Text.Render("⏺ local") + design.Dim.Render("  — sign-in arrives with cloud connect"),
+		design.Dim.Render("connection  ") + connectionLine(s.scope),
 		design.Dim.Render("version     ") + design.Ref.Render(s.version),
 		"",
 		design.Dim.Render("keys are listed under ? — all of them run from : too"),

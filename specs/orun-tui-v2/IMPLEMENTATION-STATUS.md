@@ -12,5 +12,5 @@ Living document. Update per merged PR.
 | TR5 | Catalog surface + Compose flow | ✅ Shipped | `internal/tui2/surfaces/catalog` | Absorbs Plan Studio |
 | TR6 | Work surface | ✅ Shipped | `internal/tui2/surfaces/work` | Cloud lane built against fixtures |
 | TR7 | Home + palette + Events | ✅ Shipped | `internal/tui2/surfaces/{home,events}`, command registry | Help generated from registry |
-| TR8 | Cloud connect + default flip | ☐ Not started | `internal/tui2/data` (CloudSource), `cmd/orun/command_tui.go` | Needs stage token for live smoke |
+| TR8 | Cloud connect + default flip | ◐ Partial | `internal/tui2/data` (CloudLane), `cmd/orun/command_tui.go` | Default flipped; cloud runs lane fixture-tested. Live stage smoke + work SSE/attention/remote-sessions lanes + in-app device flow pending sign-in (needs human browser approval) — TR8.1 |
 | TR9 | Cutover (delete v1, rename, hardening) | ☐ Not started | `internal/tui` (delete), `internal/tui2`→`internal/tui` | After ≥1 release soaked |
