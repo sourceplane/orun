@@ -42,6 +42,19 @@ type RunnerHooks struct {
 	// It is called synchronously; implementations should be non-blocking or
 	// fast to avoid delaying execution.
 	AfterStepLog func(jobID, stepID, output string)
+	// OnStepStart is called when a step begins executing, with its 1-based
+	// index and the job's step count. Advisory and rendering-oriented: live
+	// views (the cockpit, status --watch) key step progress off these
+	// events instead of re-reading the working tree (specs/orun-tui-v2 §8).
+	// Synchronous; implementations must be fast and non-blocking.
+	OnStepStart func(jobID, stepID string, index, total int)
+	// AfterStepTerminal is called when a step reaches a terminal state.
+	// Status is the step-state vocabulary the runner already persists:
+	// "completed" or "failed" (dry-run and resume-skipped steps complete
+	// immediately). Advisory, synchronous, must be fast. The sealed run
+	// record remains the source of truth — these events only feed live
+	// rendering.
+	AfterStepTerminal func(jobID, stepID, status string)
 	// AfterJobTerminal is called when a job reaches a terminal state.
 	AfterJobTerminal func(jobID string, success bool, errText string)
 	// BeforeJob is called before a job starts. If it returns (true, nil) the job
@@ -165,6 +178,20 @@ type finishedJobEntry struct {
 // inGHA reports whether output should be rendered for the GitHub Actions log
 // viewer (collapsible groups, workflow-command annotations, per-job buffering).
 func (r *Runner) inGHA() bool { return r.gha != nil }
+
+// emitStepStart fires the OnStepStart hook, nil-safe.
+func (r *Runner) emitStepStart(jobID, stepID string, index, total int) {
+	if r.Hooks != nil && r.Hooks.OnStepStart != nil {
+		r.Hooks.OnStepStart(jobID, stepID, index, total)
+	}
+}
+
+// emitStepTerminal fires the AfterStepTerminal hook, nil-safe.
+func (r *Runner) emitStepTerminal(jobID, stepID, status string) {
+	if r.Hooks != nil && r.Hooks.AfterStepTerminal != nil {
+		r.Hooks.AfterStepTerminal(jobID, stepID, status)
+	}
+}
 
 // State is kept for backwards compat with tests referencing old types.
 type State = execmodel.ExecState
@@ -597,12 +624,14 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				r.printStepSkipped(stepID, idx+1, len(job.Steps))
 			}
 			jobReport.observeStepDone(stepID, true, true, 0)
+			r.emitStepTerminal(job.ID, stepID, "completed")
 			continue
 		}
 
 		r.updateState(persistState, execState, func() {
 			jobState.Steps[stepID] = "running"
 		})
+		r.emitStepStart(job.ID, stepID, idx+1, len(job.Steps))
 
 		workingDir := r.resolveStepWorkingDir(jobWorkingDir, step.WorkingDirectory)
 		retryCount := r.resolveRetryCount(job, step)
@@ -615,6 +644,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 			r.updateState(persistState, execState, func() {
 				jobState.Steps[stepID] = "completed"
 			})
+			r.emitStepTerminal(job.ID, stepID, "completed")
 			r.printStepDryRun()
 			if r.inGHA() {
 				r.ghaPrintStepDryRun(job, stepID, idx+1)
@@ -698,6 +728,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				jobState.LastError = fmt.Sprintf("step %s: %v", stepID, stepErr)
 				jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 			})
+			r.emitStepTerminal(job.ID, stepID, "failed")
 
 			r.printStepFailure(job, step, view, stepDuration, stepErr, workingDir)
 			if strings.EqualFold(step.OnFailure, "continue") {
@@ -716,6 +747,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 		r.updateState(persistState, execState, func() {
 			jobState.Steps[stepID] = "completed"
 		})
+		r.emitStepTerminal(job.ID, stepID, "completed")
 		r.printStepSuccess(step, view, stepDuration)
 	}
 
