@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/sourceplane/orun/internal/tui2/design"
 	"github.com/sourceplane/orun/internal/tui2/frame"
 )
 
@@ -21,11 +22,6 @@ const (
 	quitGuardFor  = 2 * time.Second
 	noticeAnimID  = "shell.notice"
 	spinnerFrames = "⣾⣽⣻⢿⡿⣟⣯⣷"
-)
-
-var (
-	styleActive = lipgloss.NewStyle().Bold(true)
-	styleDim    = lipgloss.NewStyle().Faint(true)
 )
 
 // Messages the shell folds. Commands request shell effects by yielding
@@ -303,7 +299,7 @@ func (s *Shell) View() string {
 		return s.renderStatus(s.size.Width)
 	})
 
-	rule := styleDim.Render(strings.Repeat("─", s.size.Width))
+	rule := design.Rule(s.size.Width)
 	return header + "\n" + rule + "\n" + stage + "\n" + rule + "\n" + status
 }
 
@@ -314,19 +310,21 @@ func (s *Shell) headerKey() string {
 func (s *Shell) renderHeader(width int) string {
 	var b strings.Builder
 	b.WriteString(" ")
-	b.WriteString(styleActive.Render("orun"))
-	b.WriteString("  ")
+	b.WriteString(design.Accent.Render("▲"))
+	b.WriteString(" ")
+	b.WriteString(design.Title.Render("orun"))
+	b.WriteString("   ")
 	for i, sf := range s.router.Surfaces() {
 		label := sf.Title()
 		if i == s.router.ActiveIndex() {
-			b.WriteString(styleActive.Render(label))
+			b.WriteString(design.Selected.Render(label))
 		} else {
-			b.WriteString(styleDim.Render(label))
+			b.WriteString(design.Dim.Render(label))
 		}
 		b.WriteString("  ")
 	}
 	left := b.String()
-	right := styleDim.Render(s.scope) + " "
+	right := design.Dim.Render(s.scope) + " "
 	return joinEnds(left, right, width)
 }
 
@@ -341,14 +339,14 @@ func (s *Shell) statusKey() string {
 func (s *Shell) renderStatus(width int) string {
 	var left string
 	if s.sched.Active() {
-		left = " " + string([]rune(spinnerFrames)[s.spin%len([]rune(spinnerFrames))]) + " "
+		left = " " + design.LiveDot(s.spin) + " "
 	} else {
 		left = "   "
 	}
 	if s.notice != "" {
 		left += s.notice
 	}
-	right := styleDim.Render("⏺ "+s.scope+"   :cmd ?help") + " "
+	right := design.Dim.Render("⏺ "+s.scope+"   :cmd ?help") + " "
 	return joinEnds(left, right, width)
 }
 
