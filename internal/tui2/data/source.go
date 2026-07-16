@@ -30,10 +30,12 @@ const (
 	TopicRuns Topic = "runs"
 	// TopicSessions fires when the live agent-session registry changes.
 	TopicSessions Topic = "sessions"
+	// TopicWork fires when sealed epic/spec snapshots change.
+	TopicWork Topic = "work"
 )
 
 // AllTopics lists every topic, in stable order.
-var AllTopics = []Topic{TopicCatalog, TopicRuns, TopicSessions}
+var AllTopics = []Topic{TopicCatalog, TopicRuns, TopicSessions, TopicWork}
 
 // Delta is one change notification. Seq is monotonic per Source so
 // consumers can detect gaps after reconnects; Degraded marks deltas that
@@ -76,6 +78,8 @@ type Source interface {
 	// StepLog reads one step's captured output (sealed blob or live
 	// working-tree file).
 	StepLog(ctx context.Context, execID, jobID, stepID string) ([]byte, error)
+	// Work reads the local Work lane: approval-sealed epic snapshots.
+	Work(ctx context.Context) ([]EpicView, error)
 
 	// Subscribe streams change notifications for the given topics (all
 	// topics when none given) until ctx ends. The channel closes on

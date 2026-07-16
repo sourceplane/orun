@@ -14,6 +14,7 @@ import (
 	"github.com/sourceplane/orun/internal/tui2/surfaces/activity"
 	"github.com/sourceplane/orun/internal/tui2/surfaces/agents"
 	"github.com/sourceplane/orun/internal/tui2/surfaces/catalog"
+	"github.com/sourceplane/orun/internal/tui2/surfaces/work"
 )
 
 // Options locates the workspace the cockpit reads.
@@ -50,6 +51,7 @@ func NewProgram(opts Options) *tea.Program {
 
 	surfaces := []shell.Surface{
 		demo.NewHome(),
+		work.New(src),
 		agents.New(src),
 		activity.New(src),
 		catalog.New(src, comp),
