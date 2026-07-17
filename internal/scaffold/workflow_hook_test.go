@@ -156,6 +156,110 @@ func TestWorkflowHookFailureLeavesTreeInPlace(t *testing.T) {
 	}
 }
 
+const connHookWF = `apiVersion: torkflow/v1
+kind: Workflow
+metadata: { name: open-pr }
+spec:
+  steps:
+    - name: Open
+      actionRef: vcs.createPullRequest
+      connection: vcs-app
+`
+
+const grantHookBP = `apiVersion: orun.dev/v1
+kind: Blueprint
+metadata:
+  name: svc
+inputs:
+  vcsToken: { type: string, required: true, secret: true }
+  plainInput: { type: string, required: true }
+modules:
+  - name: worker
+    mode: template
+    files:
+      "README.md": "# hi\n"
+hooks:
+  postInstantiate:
+    - id: open-pr
+      workflow: hook.yaml
+      connections:
+        vcs-app:
+          token: vcsToken
+`
+
+func writeConnHookWF(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "hook.yaml"), []byte(connHookWF), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestHookGrantInjectsMappedOnly(t *testing.T) {
+	baseDir := writeConnHookWF(t)
+	eng := &fakeHookEngine{res: workflowbackend.Result{Status: workflowbackend.StatusSuccess}}
+
+	_, err := Run(context.Background(), Options{
+		Blueprint: []byte(grantHookBP),
+		Inputs: map[string]string{
+			"vcsToken":   "ghp_hook_secret",
+			"plainInput": "not-a-secret",
+		},
+		OutDir:         t.TempDir(),
+		Store:          objectstore.NewMemStore(objectstore.AlgoSHA256),
+		SourceBaseDir:  baseDir,
+		RunHooks:       true,
+		WorkflowEngine: eng,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	payload, ok := eng.gotReq.Connections["vcs-app"].(map[string]any)
+	if !ok || payload["token"] != "ghp_hook_secret" {
+		t.Fatalf("granted input not injected under its connection name: %#v", eng.gotReq.Connections)
+	}
+	if len(eng.gotReq.Connections) != 1 {
+		t.Fatalf("only the granted connection may cross: %#v", eng.gotReq.Connections)
+	}
+}
+
+func TestHookMissingGrantFailsBeforeAnyWrite(t *testing.T) {
+	baseDir := writeConnHookWF(t)
+	out := t.TempDir()
+	noGrant := strings.Replace(grantHookBP, "      connections:\n        vcs-app:\n          token: vcsToken\n", "", 1)
+
+	_, err := Run(context.Background(), Options{
+		Blueprint:     []byte(noGrant),
+		Inputs:        map[string]string{"vcsToken": "x", "plainInput": "y"},
+		OutDir:        out,
+		Store:         objectstore.NewMemStore(objectstore.AlgoSHA256),
+		SourceBaseDir: baseDir,
+	})
+	if err == nil || !strings.Contains(err.Error(), "connections:") {
+		t.Fatalf("expected a grant error with the paste block, got %v", err)
+	}
+	// Fail-closed BEFORE placement: nothing may be written.
+	if _, statErr := os.Stat(filepath.Join(out, "README.md")); !os.IsNotExist(statErr) {
+		t.Fatalf("grant failure must abort before any file is written")
+	}
+}
+
+func TestHookGrantRequiresSecretInput(t *testing.T) {
+	baseDir := writeConnHookWF(t)
+	nonSecret := strings.Replace(grantHookBP, "token: vcsToken", "token: plainInput", 1)
+	_, err := Run(context.Background(), Options{
+		Blueprint:     []byte(nonSecret),
+		Inputs:        map[string]string{"vcsToken": "x", "plainInput": "y"},
+		OutDir:        t.TempDir(),
+		Store:         objectstore.NewMemStore(objectstore.AlgoSHA256),
+		SourceBaseDir: baseDir,
+	})
+	if err == nil || !strings.Contains(err.Error(), "secret") {
+		t.Fatalf("a grant drawing from a non-secret input must fail: %v", err)
+	}
+}
+
 func TestWorkflowHookMissingFileIsError(t *testing.T) {
 	// No hook.yaml on disk: the reference cannot be pinned → fail-closed.
 	_, err := Run(context.Background(), Options{

@@ -24,16 +24,20 @@ func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob
 		return "", err
 	}
 
+	// The connections grant (orun-workflows-v2 §4): resolve exactly the refs the
+	// plan granted, keyed by the workflow's own connection names. The job's wider
+	// SecretEnv never crosses the boundary (invariant 10). Values stay in-memory
+	// and are masked by the runner's single redaction site.
+	connections, err := buildConnectionPayloads(job, step, execCtx.SecretEnv)
+	if err != nil {
+		return "", err
+	}
+
 	spec := workflowbackend.StepSpec{
 		WorkflowPath:   r.resolveWorkflowPath(execCtx, step.Workflow),
 		ExpectedDigest: step.WorkflowDigest,
 		With:           step.With,
-		// Secret bridge (WF3/WX0, §6): the credentials the job already resolved
-		// from orun-secrets (execCtx.SecretEnv) are injected into the engine
-		// request in-memory, never persisted, and masked by the runner's single
-		// redaction site. Until the WX2 connections grant lands, the payloads are
-		// keyed by the resolved secret names.
-		Connections: credentialsFromSecretEnv(execCtx.SecretEnv),
+		Connections:    connections,
 		Metadata: map[string]any{
 			"jobId":          job.ID,
 			"component":      job.Component,
@@ -92,18 +96,37 @@ func (r *Runner) resolveWorkflowPath(execCtx executor.ExecContext, ref string) s
 	return filepath.Join(base, ref)
 }
 
-// credentialsFromSecretEnv converts the job's resolved secret env (name→value)
-// into the engine request's in-memory credential map (orun-workflows §6). Returns
-// nil when the job resolved no secrets, so the request omits the field entirely.
-func credentialsFromSecretEnv(secretEnv map[string]string) map[string]any {
-	if len(secretEnv) == 0 {
-		return nil
+// buildConnectionPayloads materializes the step's compile-checked grant into
+// credential payloads: for each granted connection, each field's secret://
+// reference is looked up among the job's SecretRefs and resolved from the job's
+// already-resolved SecretEnv. Only granted refs are injected — an unmapped
+// secret provably never crosses (orun-workflows-v2 §4, invariant 10). A grant
+// referencing a secret the job does not carry is a launch error, fail-closed.
+func buildConnectionPayloads(job model.PlanJob, step model.PlanStep, secretEnv map[string]string) (map[string]any, error) {
+	if len(step.Connections) == 0 {
+		return nil, nil
 	}
-	creds := make(map[string]any, len(secretEnv))
-	for k, v := range secretEnv {
-		creds[k] = v
+	refToEnv := make(map[string]string, len(job.SecretRefs))
+	for _, sr := range job.SecretRefs {
+		refToEnv[sr.Ref] = sr.AsEnv
 	}
-	return creds
+	out := make(map[string]any, len(step.Connections))
+	for conn, fields := range step.Connections {
+		payload := make(map[string]any, len(fields))
+		for field, ref := range fields {
+			asEnv, ok := refToEnv[ref]
+			if !ok {
+				return nil, fmt.Errorf("step %q connection %q field %q references %s, which is not among the job's secretRefs — declare it on the job so the resolver can lease it", step.Name, conn, field, ref)
+			}
+			value, ok := secretEnv[asEnv]
+			if !ok {
+				return nil, fmt.Errorf("step %q connection %q field %q: secret %s (%s) was not resolved for this job", step.Name, conn, field, ref, asEnv)
+			}
+			payload[field] = value
+		}
+		out[conn] = payload
+	}
+	return out, nil
 }
 
 // formatWorkflowResult renders a readable summary of a workflow run for the step

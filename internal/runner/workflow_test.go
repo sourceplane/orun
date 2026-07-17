@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,40 +96,68 @@ func TestRunWorkflowStepUnconfiguredEngineIsError(t *testing.T) {
 	}
 }
 
-func TestRunWorkflowStepInjectsCredentials(t *testing.T) {
+func TestRunWorkflowStepGrantInjectsMappedOnly(t *testing.T) {
 	dir, digest := writeWF(t)
 	eng := &fakeWFEngine{res: workflowbackend.Result{Status: workflowbackend.StatusSuccess}}
 	r := &Runner{WorkflowEngine: eng}
+	const tokenRef = "secret://acme/api/prod/GITHUB_TOKEN"
+	job := model.PlanJob{
+		ID: "j",
+		SecretRefs: []model.PlanSecretRef{
+			{AsEnv: "GITHUB_TOKEN", Ref: tokenRef},
+			{AsEnv: "UNRELATED", Ref: "secret://acme/api/prod/UNRELATED"},
+		},
+	}
 	ec := executor.ExecContext{
 		Context:      context.Background(),
 		WorkspaceDir: dir,
-		// The job's resolved orun-secrets values (name→value).
-		SecretEnv: map[string]string{"GITHUB_TOKEN": "ghp_s3cr3t"},
+		SecretEnv: map[string]string{
+			"GITHUB_TOKEN": "ghp_s3cr3t",
+			"UNRELATED":    "canary-value", // resolved for the job, NOT granted
+		},
 	}
-	step := model.PlanStep{Name: "open-pr", Workflow: "wf.yaml", WorkflowDigest: digest}
+	step := model.PlanStep{
+		Name: "open-pr", Workflow: "wf.yaml", WorkflowDigest: digest,
+		Connections: map[string]map[string]string{
+			"vcs-app": {"token": tokenRef},
+		},
+	}
 
-	out, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step)
+	out, err := r.runWorkflowStep(ec, job, step)
 	if err != nil {
 		t.Fatalf("runWorkflowStep: %v", err)
 	}
-	// The resolved secret reaches the engine in-memory via the request.
-	if eng.gotReq.Connections["GITHUB_TOKEN"] != "ghp_s3cr3t" {
-		t.Fatalf("credential not injected into the engine request: %#v", eng.gotReq.Connections)
+	payload, ok := eng.gotReq.Connections["vcs-app"].(map[string]any)
+	if !ok || payload["token"] != "ghp_s3cr3t" {
+		t.Fatalf("granted credential not injected under its connection name: %#v", eng.gotReq.Connections)
 	}
-	// It must never appear in the sealed step output (the summary carries no
-	// credentials; the runner's redactor is the second line of defense).
+	// Invariant 10: the unmapped secret provably does not cross.
+	blob, _ := json.Marshal(eng.gotReq)
+	if strings.Contains(string(blob), "canary-value") || strings.Contains(string(blob), "UNRELATED") {
+		t.Fatalf("ungranted secret crossed the boundary: %s", blob)
+	}
 	if strings.Contains(out, "ghp_s3cr3t") {
 		t.Fatalf("credential leaked into the sealed workflow output: %q", out)
 	}
 }
 
-func TestCredentialsFromSecretEnv(t *testing.T) {
-	if credentialsFromSecretEnv(nil) != nil {
-		t.Fatalf("empty secret env should yield nil credentials")
+func TestBuildConnectionPayloadsFailClosed(t *testing.T) {
+	job := model.PlanJob{SecretRefs: []model.PlanSecretRef{{AsEnv: "T", Ref: "secret://a/b/c/T"}}}
+	// A grant referencing a secret the job does not carry is a launch error.
+	step := model.PlanStep{Name: "s", Connections: map[string]map[string]string{
+		"conn": {"token": "secret://a/b/c/ABSENT"},
+	}}
+	if _, err := buildConnectionPayloads(job, step, map[string]string{"T": "v"}); err == nil {
+		t.Fatalf("expected error for a grant outside the job's secretRefs")
 	}
-	got := credentialsFromSecretEnv(map[string]string{"A": "1", "B": "2"})
-	if got["A"] != "1" || got["B"] != "2" || len(got) != 2 {
-		t.Fatalf("unexpected conversion: %#v", got)
+	// A granted-but-unresolved secret is a launch error too.
+	step.Connections["conn"]["token"] = "secret://a/b/c/T"
+	if _, err := buildConnectionPayloads(job, step, map[string]string{}); err == nil {
+		t.Fatalf("expected error for an unresolved granted secret")
+	}
+	// No grant → nil payloads, no error.
+	if got, err := buildConnectionPayloads(job, model.PlanStep{Name: "s"}, nil); err != nil || got != nil {
+		t.Fatalf("no grant should yield nil: %v %v", got, err)
 	}
 }
 

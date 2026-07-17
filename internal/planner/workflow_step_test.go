@@ -3,6 +3,7 @@ package planner
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sourceplane/orun/internal/model"
@@ -104,15 +105,86 @@ func TestPlanJobs_MissingWorkflowFileIsCompileError(t *testing.T) {
 	}
 }
 
-func TestPinWorkflowDigest(t *testing.T) {
+func TestPinWorkflow(t *testing.T) {
 	jp := &JobPlanner{}
-	// No base dir: reference materialized without a digest.
-	if d, err := jp.pinWorkflowDigest("s", "wf.yaml"); err != nil || d != "" {
+	// No base dir: reference materialized without a digest or inspection.
+	if d, _, err := jp.pinWorkflow("s", "wf.yaml"); err != nil || d != "" {
 		t.Fatalf("no base dir should yield empty digest: %q err %v", d, err)
 	}
 	// Empty reference: empty digest.
 	jp.WorkflowBaseDir = t.TempDir()
-	if d, err := jp.pinWorkflowDigest("s", ""); err != nil || d != "" {
+	if d, _, err := jp.pinWorkflow("s", ""); err != nil || d != "" {
 		t.Fatalf("empty workflow should yield empty digest: %q err %v", d, err)
+	}
+}
+
+const connWorkflow = `apiVersion: torkflow/v1
+kind: Workflow
+metadata: { name: notify }
+spec:
+  steps:
+    - name: Notify
+      actionRef: chat.postMessage
+      connection: chat-main
+`
+
+func TestPlanJobs_GrantMaterializesIntoPlan(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "wf.yaml"), []byte(connWorkflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jp := NewJobPlanner(compositionWith(model.Step{
+		Name:     "notify",
+		Workflow: "wf.yaml",
+		Connections: map[string]map[string]string{
+			"chat-main": {"token": "secret://acme/api/prod/CHAT_TOKEN"},
+		},
+	}))
+	jp.WorkflowBaseDir = dir
+
+	ji, err := jp.PlanJobs(legacyInstance("svc"))
+	if err != nil {
+		t.Fatalf("PlanJobs: %v", err)
+	}
+	plan := render.NewRenderer().RenderPlan(model.Metadata{Name: "p"}, ji, nil)
+	got := plan.Jobs[0].Steps[0].Connections
+	if got["chat-main"]["token"] != "secret://acme/api/prod/CHAT_TOKEN" {
+		t.Fatalf("grant not materialized into the plan: %#v", got)
+	}
+}
+
+func TestPlanJobs_MissingGrantIsCompileError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "wf.yaml"), []byte(connWorkflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jp := NewJobPlanner(compositionWith(model.Step{Name: "notify", Workflow: "wf.yaml"}))
+	jp.WorkflowBaseDir = dir
+	_, err := jp.PlanJobs(legacyInstance("svc"))
+	if err == nil {
+		t.Fatalf("a workflow declaring connections must fail to compile without a grant")
+	}
+	// S-8: the error writes the migration for you.
+	if !strings.Contains(err.Error(), "connections:") || !strings.Contains(err.Error(), "chat-main") {
+		t.Fatalf("compile error should print the block to paste, got: %v", err)
+	}
+}
+
+func TestPlanJobs_StaleGrantIsCompileError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "wf.yaml"), []byte(connWorkflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jp := NewJobPlanner(compositionWith(model.Step{
+		Name:     "notify",
+		Workflow: "wf.yaml",
+		Connections: map[string]map[string]string{
+			"chat-main": {"token": "secret://acme/api/prod/CHAT_TOKEN"},
+			"misspeled": {"token": "secret://acme/api/prod/OTHER"},
+		},
+	}))
+	jp.WorkflowBaseDir = dir
+	if _, err := jp.PlanJobs(legacyInstance("svc")); err == nil {
+		t.Fatalf("a grant naming an undeclared connection must fail to compile")
 	}
 }

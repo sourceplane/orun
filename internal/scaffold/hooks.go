@@ -27,8 +27,10 @@ type hookRunner struct {
 	// engine runs workflow hooks; resolved lazily from the environment when a
 	// workflow hook is reached and none was injected.
 	engine workflowbackend.Engine
-	// credentials are the blueprint's secret inputs, injected in-memory (§6).
-	credentials map[string]any
+	// secrets are the blueprint's secret inputs (name → value), the pool the
+	// per-hook connections grant draws from. Only granted inputs are injected
+	// (orun-workflows-v2 §4); the pool itself never crosses wholesale.
+	secrets map[string]any
 	// digests pins hookID → content digest (from provenance) for re-verification.
 	digests map[string]string
 }
@@ -77,11 +79,17 @@ func (hr *hookRunner) runWorkflow(ctx context.Context, h Hook) error {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(hr.baseDir, h.Workflow)
 	}
+	// Materialize the hook's grant: only mapped secret inputs are injected,
+	// keyed by the workflow's own connection names (orun-workflows-v2 §4).
+	connections, err := hr.connectionPayloads(h)
+	if err != nil {
+		return err
+	}
 	res, err := workflowbackend.RunStep(ctx, eng, workflowbackend.StepSpec{
 		WorkflowPath:   path,
 		ExpectedDigest: hr.digests[h.ID],
 		With:           h.With,
-		Connections:    hr.credentials,
+		Connections:    connections,
 		Metadata:       map[string]any{"hook": h.ID, "workflowRef": h.Workflow},
 	})
 	if err != nil {
@@ -96,6 +104,80 @@ func (hr *hookRunner) runWorkflow(ctx context.Context, h Hook) error {
 		return fmt.Errorf("hook %q: scaffold succeeded but the hook workflow failed: %s", h.ID, msg)
 	}
 	return nil
+}
+
+// validateHookGrants enforces the connections grant for every workflow hook
+// before placement (orun-workflows-v2 §4): the pinned workflow file's declared
+// connections must be covered exactly, and every granted input must be a
+// declared secret: true blueprint input.
+func validateHookGrants(bp *Blueprint, baseDir string) error {
+	check := func(h Hook) error {
+		if !h.IsWorkflow() {
+			return nil
+		}
+		path := h.Workflow
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(baseDir, h.Workflow)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("hook %q: workflow %q: %w", h.ID, h.Workflow, err)
+		}
+		insp, err := workflowbackend.InspectWorkflow(data)
+		if err != nil {
+			return fmt.Errorf("hook %q: workflow %q: %w", h.ID, h.Workflow, err)
+		}
+		if err := workflowbackend.ValidateGrant("hook "+h.ID, insp.Connections, h.Connections); err != nil {
+			return err
+		}
+		for conn, fields := range h.Connections {
+			for field, inputName := range fields {
+				spec, ok := bp.Inputs[inputName]
+				if !ok {
+					return fmt.Errorf("hook %q connection %q field %q references undeclared input %q", h.ID, conn, field, inputName)
+				}
+				if !spec.Secret {
+					return fmt.Errorf("hook %q connection %q field %q references input %q, which is not declared secret: true — credentials must come from secret inputs", h.ID, conn, field, inputName)
+				}
+			}
+		}
+		return nil
+	}
+	for _, ph := range bp.Phases {
+		for _, h := range ph.Hooks {
+			if err := check(h); err != nil {
+				return err
+			}
+		}
+	}
+	for _, h := range bp.Hooks.PostInstantiate {
+		if err := check(h); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// connectionPayloads materializes a hook's connections grant from the
+// blueprint's secret inputs: payload[field] = the granted input's value. A grant
+// naming an uncollected input is an error, fail-closed.
+func (hr *hookRunner) connectionPayloads(h Hook) (map[string]any, error) {
+	if len(h.Connections) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]any, len(h.Connections))
+	for conn, fields := range h.Connections {
+		payload := make(map[string]any, len(fields))
+		for field, inputName := range fields {
+			value, ok := hr.secrets[inputName]
+			if !ok {
+				return nil, fmt.Errorf("hook %q connection %q field %q references input %q, which is not a collected secret input", h.ID, conn, field, inputName)
+			}
+			payload[field] = value
+		}
+		out[conn] = payload
+	}
+	return out, nil
 }
 
 // hookDigestMap indexes the provenance's pinned hook digests by hook id, for

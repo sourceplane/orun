@@ -201,23 +201,28 @@ type PlanPromotionGate struct {
 
 // PlanStep is a step in the final plan
 type PlanStep struct {
-	ID               string                 `json:"id,omitempty" yaml:"id,omitempty"`
-	Name             string                 `json:"name,omitempty" yaml:"name,omitempty"`
-	Phase            string                 `json:"phase,omitempty" yaml:"phase,omitempty"`
-	Order            int                    `json:"order,omitempty" yaml:"order,omitempty"`
-	Run              string                 `json:"run,omitempty" yaml:"run,omitempty"`
-	Use              string                 `json:"use,omitempty" yaml:"use,omitempty"`
+	ID    string `json:"id,omitempty" yaml:"id,omitempty"`
+	Name  string `json:"name,omitempty" yaml:"name,omitempty"`
+	Phase string `json:"phase,omitempty" yaml:"phase,omitempty"`
+	Order int    `json:"order,omitempty" yaml:"order,omitempty"`
+	Run   string `json:"run,omitempty" yaml:"run,omitempty"`
+	Use   string `json:"use,omitempty" yaml:"use,omitempty"`
 	// Workflow is the torkflow workflow file this step runs (the third execution
 	// vocabulary beside run/use); WorkflowDigest is the content digest pinned at
 	// compile time so the reference — never the outcome — is durable plan state
 	// (specs/orun-workflows §5/§7). Both fold into the plan checksum.
-	Workflow         string                 `json:"workflow,omitempty" yaml:"workflow,omitempty"`
-	WorkflowDigest   string                 `json:"workflowDigest,omitempty" yaml:"workflowDigest,omitempty"`
-	With             map[string]interface{} `json:"with,omitempty" yaml:"with,omitempty"`
-	Env              map[string]interface{} `json:"env,omitempty" yaml:"env,omitempty"`
-	Shell            string                 `json:"shell,omitempty" yaml:"shell,omitempty"`
-	WorkingDirectory string                 `json:"working-directory,omitempty" yaml:"working-directory,omitempty"`
-	Timeout          string                 `json:"timeout,omitempty" yaml:"timeout,omitempty"`
-	Retry            int                    `json:"retry,omitempty" yaml:"retry,omitempty"`
-	OnFailure        string                 `json:"onFailure,omitempty" yaml:"onFailure,omitempty"`
+	Workflow       string `json:"workflow,omitempty" yaml:"workflow,omitempty"`
+	WorkflowDigest string `json:"workflowDigest,omitempty" yaml:"workflowDigest,omitempty"`
+	// Connections is the compile-checked credential grant for a workflow step
+	// (orun-workflows-v2 §4): connection name → field → secret:// reference.
+	// Names and references only, never values — the plan IS the reviewable
+	// grant, and only mapped references cross to the engine at run time.
+	Connections      map[string]map[string]string `json:"connections,omitempty" yaml:"connections,omitempty"`
+	With             map[string]interface{}       `json:"with,omitempty" yaml:"with,omitempty"`
+	Env              map[string]interface{}       `json:"env,omitempty" yaml:"env,omitempty"`
+	Shell            string                       `json:"shell,omitempty" yaml:"shell,omitempty"`
+	WorkingDirectory string                       `json:"working-directory,omitempty" yaml:"working-directory,omitempty"`
+	Timeout          string                       `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Retry            int                          `json:"retry,omitempty" yaml:"retry,omitempty"`
+	OnFailure        string                       `json:"onFailure,omitempty" yaml:"onFailure,omitempty"`
 }
