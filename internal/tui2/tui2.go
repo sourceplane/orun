@@ -1,7 +1,8 @@
 // Package tui2 is the cockpit v2 (specs/orun-tui-v2): the terminal head of
 // orun cloud, rebuilt on a kernel that guarantees frame stability by
-// construction. It is gated behind `orun tui --next` / ORUN_TUI=next until
-// TR8 flips the default.
+// construction. It is opt-in behind `orun tui-next` / `orun tui --next` /
+// ORUN_TUI=next while it soaks; the default re-flips with TR8.1 (the flip
+// landed in #533 and was rolled back to opt-in in #537).
 package tui2
 
 import (
