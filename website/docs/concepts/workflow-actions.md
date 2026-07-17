@@ -137,6 +137,60 @@ The provider actions a workflow calls (`slack.*`, `github.*`, `http.*`, …) liv
 in **torkflow's action store**, never in orun. `orun`'s core names no provider —
 a build-time lint fails on any provider literal in the workflow execution code.
 
+## v2: the data-flow evolution
+
+The `orun-workflows-v2` epic grew the vocabulary in four user-visible ways:
+
+**Connections grant** — credentials cross the boundary only through a declared,
+compile-checked mapping from the workflow's own connection names to `secret://`
+references. The plan is the reviewable grant; unmapped secrets never cross.
+
+```yaml
+- name: notify
+  workflow: wf/notify.yaml
+  connections:
+    slack-main:
+      token: secret://acme/api/prod/SLACK_BOT_TOKEN
+```
+
+**Outputs** — a workflow declares named outputs (`spec.outputs`), and later
+steps of the same job consume them with `${{ steps.<id>.outputs.<name> }}`.
+References are validated at plan time against the pinned file's declared names;
+values are substituted at run time and sealed as run facts.
+
+```yaml
+- name: get-oncall
+  workflow: wf/oncall.yaml         # declares spec.outputs.email
+- name: page
+  run: ./page.sh ${{ steps.get-oncall.outputs.email }}
+```
+
+**Engine pin** — declare the engine in intent (`execution.workflowEngine:
+{ ref, digest }`); the pin materializes into the plan and a mismatched engine
+refuses to run. Author it with `orun workflow engine-digest`.
+
+**Resume & approvals** — `resume: true` beside `retry:` re-executes only the
+steps that failed (over the engine's run store); an `approval:` block pauses a
+workflow step for a human decision, resolved with `orun approve`, with a
+mandatory `timeout` and declared `onTimeout` policy. The pause and the verdict
+are sealed run facts — a plan is byte-identical whether it was approved or
+rejected.
+
+```yaml
+- name: promote
+  workflow: wf/promote.yaml
+  retry: 1
+  resume: true
+  approval:
+    prompt: "Promote to production?"
+    timeout: 24h
+    onTimeout: fail
+```
+
+Workflows can also ship **inside a composition Stack**: a reference that isn't
+in your repo resolves from the golden path's own package and is materialized at
+a content-addressed path, pinning identically to a local copy.
+
 ## Authoring standalone
 
 Before wiring a workflow into a step or hook, author and debug it directly:

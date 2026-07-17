@@ -111,8 +111,10 @@ const sidebars = {
       ],
     },
     {
+      // Renamed from "Workflows" (orun-workflows-v2 WX7): these are end-to-end
+      // guides; "workflow" now names the workflow-actions execution vocabulary.
       type: 'category',
-      label: 'Workflows',
+      label: 'Guides',
       items: [
         'examples/review-pull-request',
         'examples/run-github-actions',

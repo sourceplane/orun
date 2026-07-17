@@ -54,11 +54,19 @@ func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob
 		},
 	}
 
+	// Approval gate (orun-workflows-v2 §9): pause BEFORE invoking the engine.
+	// The pause and the verdict are sealed run facts; a rejected or
+	// fail-on-timeout gate fails the step without the workflow ever running.
+	approvalNote, err := r.awaitStepApproval(execCtx, job, step)
+	if err != nil {
+		return "", nil, err
+	}
+
 	res, err := workflowbackend.RunStep(execCtx.Context, eng, spec)
 	if err != nil {
 		return "", nil, err
 	}
-	output := formatWorkflowResult(step, res)
+	output := approvalNote + formatWorkflowResult(step, res)
 	if !res.Succeeded() {
 		msg := res.Error
 		if msg == "" {

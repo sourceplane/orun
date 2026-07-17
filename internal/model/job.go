@@ -63,8 +63,37 @@ type Step struct {
 	// (orun-workflows-v2 §8): a retry attempt passes the prior attempt's run
 	// dir and the engine re-executes only non-succeeded steps. Default (false)
 	// is re-run from the top — correct for idempotent flows.
-	Resume    bool   `yaml:"resume,omitempty" json:"resume,omitempty"`
-	OnFailure string `yaml:"onFailure,omitempty" json:"onFailure,omitempty"` // stop, continue
+	Resume bool `yaml:"resume,omitempty" json:"resume,omitempty"`
+	// Approval declares a human gate on a workflow step (orun-workflows-v2 §9):
+	// the run pauses BEFORE invoking the engine; the pause and the verdict are
+	// sealed run facts, never plan content. Timeout and OnTimeout are mandatory
+	// when the block is present — a forgotten gate must not hang CI silently.
+	Approval  *StepApproval `yaml:"approval,omitempty" json:"approval,omitempty"`
+	OnFailure string        `yaml:"onFailure,omitempty" json:"onFailure,omitempty"` // stop, continue
+}
+
+// StepApproval is the declared human gate: prompt, mandatory timeout, and the
+// declared timeout policy ("fail" or "proceed").
+type StepApproval struct {
+	Prompt    string `yaml:"prompt,omitempty" json:"prompt,omitempty"`
+	Timeout   string `yaml:"timeout" json:"timeout"`
+	OnTimeout string `yaml:"onTimeout" json:"onTimeout"`
+}
+
+// Validate enforces the gate's declaration rules (orun-workflows-v2 §9, S-6).
+func (a *StepApproval) Validate(stepName string) error {
+	if a == nil {
+		return nil
+	}
+	if strings.TrimSpace(a.Timeout) == "" {
+		return fmt.Errorf("step %q: approval requires a timeout (a gate without one hangs CI silently)", stepName)
+	}
+	switch a.OnTimeout {
+	case "fail", "proceed":
+	default:
+		return fmt.Errorf("step %q: approval onTimeout must be \"fail\" or \"proceed\", got %q", stepName, a.OnTimeout)
+	}
+	return nil
 }
 
 // ValidateExecForm enforces the step's execution-vocabulary invariant: a step is
@@ -234,6 +263,7 @@ type RenderedStep struct {
 	Timeout          string                       `json:"timeout"`
 	Retry            int                          `json:"retry"`
 	Resume           bool                         `json:"resume,omitempty"`
+	Approval         *StepApproval                `json:"approval,omitempty"`
 	OnFailure        string                       `json:"onFailure"`
 }
 
