@@ -30,22 +30,22 @@ type ComponentTreeDiscovery struct {
 
 // ComponentTreeComponent stores a single component entry in the discovery cache.
 type ComponentTreeComponent struct {
-	Name         string                 `yaml:"name" json:"name"`
-	Type         string                 `yaml:"type" json:"type"`
-	Domain       string                 `yaml:"domain,omitempty" json:"domain,omitempty"`
-	Enabled      bool                   `yaml:"enabled" json:"enabled"`
-	Path         string                 `yaml:"path,omitempty" json:"path,omitempty"`
-	Subscribe    ComponentSubscribe     `yaml:"subscribe,omitempty" json:"subscribe,omitempty"`
-	Env          map[string]string      `yaml:"env,omitempty" json:"env,omitempty"`
-	Parameters   map[string]interface{} `yaml:"parameters,omitempty" json:"parameters,omitempty"`
-	Overrides    ComponentOverrides     `yaml:"overrides,omitempty" json:"overrides,omitempty"`
-	Labels       map[string]string      `yaml:"labels,omitempty" json:"labels,omitempty"`
-	DependsOn    []Dependency           `yaml:"dependsOn,omitempty" json:"dependsOn,omitempty"`
-	Change       ComponentChange        `yaml:"change,omitempty" json:"change,omitempty"`
-	Source       string                 `yaml:"source" json:"source"`
-	SourcePath   string                 `yaml:"sourcePath,omitempty" json:"sourcePath,omitempty"`
-	FileSize     int64                  `yaml:"fileSize,omitempty" json:"fileSize,omitempty"`
-	FileModTime  string                 `yaml:"fileModTime,omitempty" json:"fileModTime,omitempty"`
+	Name        string                 `yaml:"name" json:"name"`
+	Type        string                 `yaml:"type" json:"type"`
+	Domain      string                 `yaml:"domain,omitempty" json:"domain,omitempty"`
+	Enabled     bool                   `yaml:"enabled" json:"enabled"`
+	Path        string                 `yaml:"path,omitempty" json:"path,omitempty"`
+	Subscribe   ComponentSubscribe     `yaml:"subscribe,omitempty" json:"subscribe,omitempty"`
+	Env         map[string]string      `yaml:"env,omitempty" json:"env,omitempty"`
+	Parameters  map[string]interface{} `yaml:"parameters,omitempty" json:"parameters,omitempty"`
+	Overrides   ComponentOverrides     `yaml:"overrides,omitempty" json:"overrides,omitempty"`
+	Labels      map[string]string      `yaml:"labels,omitempty" json:"labels,omitempty"`
+	DependsOn   []Dependency           `yaml:"dependsOn,omitempty" json:"dependsOn,omitempty"`
+	Change      ComponentChange        `yaml:"change,omitempty" json:"change,omitempty"`
+	Source      string                 `yaml:"source" json:"source"`
+	SourcePath  string                 `yaml:"sourcePath,omitempty" json:"sourcePath,omitempty"`
+	FileSize    int64                  `yaml:"fileSize,omitempty" json:"fileSize,omitempty"`
+	FileModTime string                 `yaml:"fileModTime,omitempty" json:"fileModTime,omitempty"`
 }
 
 // ToComponent converts a cache entry back into the internal component model.

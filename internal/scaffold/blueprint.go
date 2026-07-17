@@ -178,6 +178,12 @@ type Hook struct {
 	Workflow string `yaml:"workflow,omitempty" json:"workflow,omitempty"`
 	// With is the declared inputs handed to the workflow as its Trigger context.
 	With map[string]any `yaml:"with,omitempty" json:"with,omitempty"`
+	// Connections is the credential grant for a workflow hook
+	// (orun-workflows-v2 §4): workflow connection name → credential field →
+	// blueprint input name (which MUST be declared secret: true). Validated
+	// before placement against the connections the workflow file declares; only
+	// mapped inputs are injected.
+	Connections map[string]map[string]string `yaml:"connections,omitempty" json:"connections,omitempty"`
 }
 
 // IsWorkflow reports whether this hook runs a workflow (vs. an argv).

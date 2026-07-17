@@ -2,6 +2,7 @@ package planner
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -284,7 +285,11 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext) ([]
 		if err != nil {
 			return nil, err
 		}
-		workflowDigest, err := jp.pinWorkflowDigest(step.Name, renderedWorkflow)
+		workflowDigest, inspection, err := jp.pinWorkflow(step.Name, renderedWorkflow)
+		if err != nil {
+			return nil, err
+		}
+		renderedConnections, err := jp.renderConnections(compType, step.Name, step.Connections, inspection, workflowDigest != "", context)
 		if err != nil {
 			return nil, err
 		}
@@ -314,6 +319,7 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext) ([]
 			Use:              renderedUse,
 			Workflow:         renderedWorkflow,
 			WorkflowDigest:   workflowDigest,
+			Connections:      renderedConnections,
 			With:             renderedWith,
 			Env:              renderedEnv,
 			Shell:            renderedShell,
@@ -327,27 +333,58 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext) ([]
 	return rendered, nil
 }
 
-// pinWorkflowDigest resolves a rendered `workflow:` reference against the
-// planner's WorkflowBaseDir and returns its content digest (orun-workflows §5).
-// An empty reference yields an empty digest. When no base dir is configured the
-// reference is materialized without a digest (the digest folds in once a base is
-// available). A configured base with an unreadable workflow file is a compile
-// error — fail-closed, since a pinned reference that cannot be read is not a
-// reproducible plan input.
-func (jp *JobPlanner) pinWorkflowDigest(stepName, workflow string) (string, error) {
+// pinWorkflow resolves a rendered `workflow:` reference against the planner's
+// WorkflowBaseDir, returning its content digest and the compile-time
+// inspection of its declared names (orun-workflows §5, v2 §4/§5). An empty
+// reference yields zero values. When no base dir is configured the reference is
+// materialized without a digest or inspection (the pin folds in once a base is
+// available). A configured base with an unreadable or unparseable workflow file
+// is a compile error — fail-closed, since a pinned reference that cannot be
+// read is not a reproducible plan input.
+func (jp *JobPlanner) pinWorkflow(stepName, workflow string) (string, workflowbackend.Inspection, error) {
 	workflow = strings.TrimSpace(workflow)
 	if workflow == "" || jp.WorkflowBaseDir == "" {
-		return "", nil
+		return "", workflowbackend.Inspection{}, nil
 	}
 	path := workflow
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(jp.WorkflowBaseDir, workflow)
 	}
-	digest, err := workflowbackend.WorkflowDigest(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("step %q: workflow %q: %w", stepName, workflow, err)
+		return "", workflowbackend.Inspection{}, fmt.Errorf("step %q: workflow %q: %w", stepName, workflow, err)
 	}
-	return digest, nil
+	insp, err := workflowbackend.InspectWorkflow(data)
+	if err != nil {
+		return "", workflowbackend.Inspection{}, fmt.Errorf("step %q: workflow %q: %w", stepName, workflow, err)
+	}
+	return workflowbackend.DigestBytes(data), insp, nil
+}
+
+// renderConnections templates the grant's secret references and validates the
+// grant against the workflow's declared connections (orun-workflows-v2 §4).
+func (jp *JobPlanner) renderConnections(compType, stepName string, grant map[string]map[string]string, insp workflowbackend.Inspection, hasInspection bool, context map[string]interface{}) (map[string]map[string]string, error) {
+	var rendered map[string]map[string]string
+	if len(grant) > 0 {
+		rendered = make(map[string]map[string]string, len(grant))
+		for conn, fields := range grant {
+			renderedFields := make(map[string]string, len(fields))
+			for field, ref := range fields {
+				value, err := jp.renderTemplateString(compType, stepName, "connections."+conn+"."+field, ref, context)
+				if err != nil {
+					return nil, err
+				}
+				renderedFields[field] = value
+			}
+			rendered[conn] = renderedFields
+		}
+	}
+	if hasInspection {
+		if err := workflowbackend.ValidateGrant("step "+stepName, insp.Connections, rendered); err != nil {
+			return nil, err
+		}
+	}
+	return rendered, nil
 }
 
 func (jp *JobPlanner) renderTemplateString(componentType, stepName, fieldName, value string, context map[string]interface{}) (string, error) {

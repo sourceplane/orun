@@ -38,20 +38,20 @@ func (s *stagedWorkspace) Cleanup() {
 // itself and copying them defeats the purpose (they're the largest and most
 // volatile contents). Same approach the reverted da3ea7b used.
 var skipDirs = map[string]struct{}{
-	"node_modules": {},
-	".next":        {},
-	".nuxt":        {},
-	".turbo":       {},
-	".svelte-kit":  {},
-	"dist":         {},
-	"build":        {},
-	"target":       {},
-	".venv":        {},
-	"venv":         {},
-	"__pycache__":  {},
-	".terraform":   {},
-	".pytest_cache":{},
-	".mypy_cache":  {},
+	"node_modules":  {},
+	".next":         {},
+	".nuxt":         {},
+	".turbo":        {},
+	".svelte-kit":   {},
+	"dist":          {},
+	"build":         {},
+	"target":        {},
+	".venv":         {},
+	"venv":          {},
+	"__pycache__":   {},
+	".terraform":    {},
+	".pytest_cache": {},
+	".mypy_cache":   {},
 }
 
 // stageJobWorkspace creates an isolated working copy of sourceDir under

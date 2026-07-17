@@ -200,6 +200,7 @@ func (r *Renderer) convertSteps(steps []model.RenderedStep) []model.PlanStep {
 			Use:              step.Use,
 			Workflow:         step.Workflow,
 			WorkflowDigest:   step.WorkflowDigest,
+			Connections:      step.Connections,
 			With:             step.With,
 			Env:              step.Env,
 			Shell:            step.Shell,

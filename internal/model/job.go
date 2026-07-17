@@ -37,24 +37,29 @@ type JobSpec struct {
 
 // Step is a single execution unit within a job
 type Step struct {
-	ID               string                 `yaml:"id,omitempty" json:"id,omitempty"`
-	Name             string                 `yaml:"name" json:"name"`
-	Capability       string                 `yaml:"capability,omitempty" json:"capability,omitempty"`
-	Phase            string                 `yaml:"phase,omitempty" json:"phase,omitempty"`
-	Order            int                    `yaml:"order,omitempty" json:"order,omitempty"`
-	Run              string                 `yaml:"run,omitempty" json:"run,omitempty"`
-	Use              string                 `yaml:"use,omitempty" json:"use,omitempty"`
+	ID         string `yaml:"id,omitempty" json:"id,omitempty"`
+	Name       string `yaml:"name" json:"name"`
+	Capability string `yaml:"capability,omitempty" json:"capability,omitempty"`
+	Phase      string `yaml:"phase,omitempty" json:"phase,omitempty"`
+	Order      int    `yaml:"order,omitempty" json:"order,omitempty"`
+	Run        string `yaml:"run,omitempty" json:"run,omitempty"`
+	Use        string `yaml:"use,omitempty" json:"use,omitempty"`
 	// Workflow names a torkflow workflow file to run as this step — the third
 	// execution vocabulary beside run/use (specs/orun-workflows §3). Exactly one
 	// of Run/Use/Workflow may be set on a step.
-	Workflow         string                 `yaml:"workflow,omitempty" json:"workflow,omitempty"`
-	With             map[string]interface{} `yaml:"with,omitempty" json:"with,omitempty"`
-	Env              map[string]interface{} `yaml:"env,omitempty" json:"env,omitempty"`
-	Shell            string                 `yaml:"shell,omitempty" json:"shell,omitempty"`
-	WorkingDirectory string                 `yaml:"working-directory,omitempty" json:"working-directory,omitempty"`
-	Timeout          string                 `yaml:"timeout,omitempty" json:"timeout,omitempty"`
-	Retry            int                    `yaml:"retry,omitempty" json:"retry,omitempty"`
-	OnFailure        string                 `yaml:"onFailure,omitempty" json:"onFailure,omitempty"` // stop, continue
+	Workflow string `yaml:"workflow,omitempty" json:"workflow,omitempty"`
+	// Connections is the credential grant for a workflow step
+	// (orun-workflows-v2 §4): workflow connection name → credential field →
+	// secret:// reference. Compile-checked against the connections the pinned
+	// workflow file declares; only mapped references are resolved and injected.
+	Connections      map[string]map[string]string `yaml:"connections,omitempty" json:"connections,omitempty"`
+	With             map[string]interface{}       `yaml:"with,omitempty" json:"with,omitempty"`
+	Env              map[string]interface{}       `yaml:"env,omitempty" json:"env,omitempty"`
+	Shell            string                       `yaml:"shell,omitempty" json:"shell,omitempty"`
+	WorkingDirectory string                       `yaml:"working-directory,omitempty" json:"working-directory,omitempty"`
+	Timeout          string                       `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	Retry            int                          `yaml:"retry,omitempty" json:"retry,omitempty"`
+	OnFailure        string                       `yaml:"onFailure,omitempty" json:"onFailure,omitempty"` // stop, continue
 }
 
 // ValidateExecForm enforces the step's execution-vocabulary invariant: a step is
@@ -205,23 +210,25 @@ type PromotionGate struct {
 
 // RenderedStep is a step with all templates resolved
 type RenderedStep struct {
-	ID               string                 `json:"id,omitempty"`
-	Name             string                 `json:"name"`
-	Phase            string                 `json:"phase,omitempty"`
-	Order            int                    `json:"order,omitempty"`
-	Run              string                 `json:"run,omitempty"`
-	Use              string                 `json:"use,omitempty"`
+	ID    string `json:"id,omitempty"`
+	Name  string `json:"name"`
+	Phase string `json:"phase,omitempty"`
+	Order int    `json:"order,omitempty"`
+	Run   string `json:"run,omitempty"`
+	Use   string `json:"use,omitempty"`
 	// Workflow is the rendered torkflow workflow reference; WorkflowDigest is the
 	// content digest orun pinned for it at compile time (specs/orun-workflows §5).
-	Workflow         string                 `json:"workflow,omitempty"`
-	WorkflowDigest   string                 `json:"workflowDigest,omitempty"`
-	With             map[string]interface{} `json:"with,omitempty"`
-	Env              map[string]interface{} `json:"env,omitempty"`
-	Shell            string                 `json:"shell,omitempty"`
-	WorkingDirectory string                 `json:"workingDirectory,omitempty"`
-	Timeout          string                 `json:"timeout"`
-	Retry            int                    `json:"retry"`
-	OnFailure        string                 `json:"onFailure"`
+	Workflow       string `json:"workflow,omitempty"`
+	WorkflowDigest string `json:"workflowDigest,omitempty"`
+	// Connections is the rendered credential grant (names + refs, never values).
+	Connections      map[string]map[string]string `json:"connections,omitempty"`
+	With             map[string]interface{}       `json:"with,omitempty"`
+	Env              map[string]interface{}       `json:"env,omitempty"`
+	Shell            string                       `json:"shell,omitempty"`
+	WorkingDirectory string                       `json:"workingDirectory,omitempty"`
+	Timeout          string                       `json:"timeout"`
+	Retry            int                          `json:"retry"`
+	OnFailure        string                       `json:"onFailure"`
 }
 
 // JobGraph represents the logical DAG of all job instances
