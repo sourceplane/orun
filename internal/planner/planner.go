@@ -1,6 +1,7 @@
 package planner
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -267,6 +268,11 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext) ([]
 	context := tctx.Build()
 
 	compType := tctx.CompInst.Type
+	// Declared outputs of this job's workflow steps, keyed by step id and name —
+	// the compile-time source of truth for ${{ steps.X.outputs.Y }} references
+	// (orun-workflows-v2 §5). Populated only when inspection ran (base dir set).
+	declaredOutputs := map[string]map[string]struct{}{}
+	inspected := jp.WorkflowBaseDir != ""
 	for _, step := range sortedSteps {
 		// A step is exactly one of run/use/workflow (orun-workflows §3). Fail
 		// compilation before rendering when more than one is set.
@@ -292,6 +298,17 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext) ([]
 		renderedConnections, err := jp.renderConnections(compType, step.Name, step.Connections, inspection, workflowDigest != "", context)
 		if err != nil {
 			return nil, err
+		}
+		if renderedWorkflow != "" && workflowDigest != "" {
+			outs := make(map[string]struct{}, len(inspection.Outputs))
+			for _, name := range inspection.Outputs {
+				outs[name] = struct{}{}
+			}
+			for _, key := range []string{step.ID, step.Name} {
+				if key != "" {
+					declaredOutputs[key] = outs
+				}
+			}
 		}
 		renderedShell, err := jp.renderTemplateString(compType, step.Name, "shell", step.Shell, context)
 		if err != nil {
@@ -330,7 +347,46 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext) ([]
 		})
 	}
 
+	if inspected {
+		if err := validateOutputRefs(rendered, declaredOutputs); err != nil {
+			return nil, err
+		}
+	}
+
 	return rendered, nil
+}
+
+// validateOutputRefs checks every ${{ steps.X.outputs.Y }} reference in the
+// job's rendered steps against the declared outputs of its workflow steps
+// (orun-workflows-v2 §5): the referenced step must be an EARLIER workflow step
+// of the same job (cross-job references are rejected structurally — S-4), and
+// the name must be declared in its pinned file. Fail-closed at compile time.
+func validateOutputRefs(rendered []model.RenderedStep, declared map[string]map[string]struct{}) error {
+	available := map[string]map[string]struct{}{}
+	for _, step := range rendered {
+		blob, err := json.Marshal(step)
+		if err != nil {
+			return err
+		}
+		for _, ref := range workflowbackend.FindOutputRefs(string(blob)) {
+			outs, ok := available[ref.StepID]
+			if !ok {
+				return fmt.Errorf("step %q references ${{ steps.%s.outputs.%s }}, but %q is not an earlier workflow step in this job", step.Name, ref.StepID, ref.Name, ref.StepID)
+			}
+			if _, ok := outs[ref.Name]; !ok {
+				return fmt.Errorf("step %q references ${{ steps.%s.outputs.%s }}, but the workflow declares no output %q (spec.outputs)", step.Name, ref.StepID, ref.Name, ref.Name)
+			}
+		}
+		for _, key := range []string{step.ID, step.Name} {
+			if key == "" {
+				continue
+			}
+			if outs, ok := declared[key]; ok {
+				available[key] = outs
+			}
+		}
+	}
+	return nil
 }
 
 // pinWorkflow resolves a rendered `workflow:` reference against the planner's
@@ -392,11 +448,17 @@ func (jp *JobPlanner) renderTemplateString(componentType, stepName, fieldName, v
 		return "", nil
 	}
 
+	// Run-time output references (${{ steps.X.outputs.Y }}, orun-workflows-v2
+	// §5) are masked through the compile-time template pass and restored after:
+	// their values exist only at run time, so the compiler validates the names
+	// and leaves the spans for the runner to substitute.
+	masked, spans := workflowbackend.MaskOutputRefs(value)
+
 	cacheKey := fmt.Sprintf("%s:%s:%s", componentType, stepName, fieldName)
 	tmpl, exists := jp.templateCache[cacheKey]
 	if !exists {
 		var err error
-		tmpl, err = template.New(cacheKey).Parse(value)
+		tmpl, err = template.New(cacheKey).Parse(masked)
 		if err != nil {
 			return "", fmt.Errorf("invalid template in step %s %s: %w", stepName, fieldName, err)
 		}
@@ -408,7 +470,7 @@ func (jp *JobPlanner) renderTemplateString(componentType, stepName, fieldName, v
 		return "", fmt.Errorf("failed to execute template in step %s %s: %w", stepName, fieldName, err)
 	}
 
-	return buf.String(), nil
+	return workflowbackend.UnmaskOutputRefs(buf.String(), spans), nil
 }
 
 func (jp *JobPlanner) renderTemplateMap(componentType, stepName, fieldName string, values map[string]interface{}, context map[string]interface{}) (map[string]interface{}, error) {

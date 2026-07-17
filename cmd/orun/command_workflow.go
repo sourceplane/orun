@@ -144,6 +144,9 @@ func runWorkflowRun(ctx context.Context, cmd *cobra.Command, path string) error 
 	for _, s := range res.Steps {
 		fmt.Fprintf(out, "  - %s: %s\n", s.Name, s.Status)
 	}
+	for name, value := range res.Outputs {
+		fmt.Fprintf(out, "  output %s = %v\n", name, value)
+	}
 	if !res.Succeeded() {
 		msg := res.Error
 		if msg == "" {
