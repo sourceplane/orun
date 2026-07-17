@@ -37,6 +37,12 @@ type CompositionInfo struct {
 	DefaultJob        *model.JobSpec
 	ExecutionProfiles map[string]model.ExecutionProfile
 	JobMap            map[string]*model.JobSpec
+	// SourceDir is the resolved on-disk root of the composition source this
+	// composition came from (orun-workflows-v2 §7). A `workflow:` reference that
+	// does not resolve in the intent directory falls back here, so a golden path
+	// can ship its workflows in the same Stack — and the resolved bytes are
+	// materialized into the workspace so the plan pin is machine-portable.
+	SourceDir string
 }
 
 // NewJobPlanner creates a new job planner from a composition registry
@@ -120,7 +126,7 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 					JobID:    jobID,
 					JobName:  jobEntry.job.Name,
 				}
-				renderedSteps, err := jp.renderSteps(resolvedSteps, tctx)
+				renderedSteps, err := jp.renderSteps(resolvedSteps, tctx, compositionInfo.SourceDir)
 				if err != nil {
 					return nil, fmt.Errorf("failed to render steps for job %s: %w", jobID, err)
 				}
@@ -258,7 +264,7 @@ func applyProfileStepOverrides(steps []model.Step, overrides map[string]model.Pr
 }
 
 // Templates are cached to avoid re-parsing identical steps across multiple instances
-func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext) ([]model.RenderedStep, error) {
+func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext, compositionSourceDir string) ([]model.RenderedStep, error) {
 	rendered := make([]model.RenderedStep, 0, len(steps))
 	sortedSteps, err := sortStepsByPhaseAndOrder(steps)
 	if err != nil {
@@ -291,7 +297,7 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext) ([]
 		if err != nil {
 			return nil, err
 		}
-		workflowDigest, inspection, err := jp.pinWorkflow(step.Name, renderedWorkflow)
+		renderedWorkflow, workflowDigest, inspection, err := jp.pinWorkflow(step.Name, renderedWorkflow, compositionSourceDir)
 		if err != nil {
 			return nil, err
 		}
@@ -389,32 +395,63 @@ func validateOutputRefs(rendered []model.RenderedStep, declared map[string]map[s
 	return nil
 }
 
-// pinWorkflow resolves a rendered `workflow:` reference against the planner's
-// WorkflowBaseDir, returning its content digest and the compile-time
-// inspection of its declared names (orun-workflows §5, v2 §4/§5). An empty
-// reference yields zero values. When no base dir is configured the reference is
-// materialized without a digest or inspection (the pin folds in once a base is
-// available). A configured base with an unreadable or unparseable workflow file
-// is a compile error — fail-closed, since a pinned reference that cannot be
-// read is not a reproducible plan input.
-func (jp *JobPlanner) pinWorkflow(stepName, workflow string) (string, workflowbackend.Inspection, error) {
+// pinWorkflow resolves a rendered `workflow:` reference, returning the
+// (possibly rewritten) reference, its content digest, and the compile-time
+// inspection of its declared names (orun-workflows §5, v2 §4/§5/§7).
+//
+// Resolution order: the intent directory (WorkflowBaseDir), then the
+// composition's resolved source root — so a golden path can ship its workflows
+// in the same Stack (§7). A workflow resolved from a packaged source is
+// materialized into the workspace at a content-addressed path
+// (.orun/workflows/<digest12>-<name>) and the reference is rewritten to it:
+// the digest-derived name keeps the plan byte-identical across machines, and
+// the runner finds the file inside the workspace tree. One digest function over
+// the resolved bytes — the pin is source-agnostic (S-7).
+//
+// An empty reference or unset base dir yields zero values; an unresolvable or
+// unparseable reference is a compile error, fail-closed.
+func (jp *JobPlanner) pinWorkflow(stepName, workflow, sourceDir string) (string, string, workflowbackend.Inspection, error) {
 	workflow = strings.TrimSpace(workflow)
 	if workflow == "" || jp.WorkflowBaseDir == "" {
-		return "", workflowbackend.Inspection{}, nil
+		return workflow, "", workflowbackend.Inspection{}, nil
 	}
-	path := workflow
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(jp.WorkflowBaseDir, workflow)
+	localPath := workflow
+	if !filepath.IsAbs(localPath) {
+		localPath = filepath.Join(jp.WorkflowBaseDir, workflow)
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(localPath)
+	if err != nil && sourceDir != "" && !filepath.IsAbs(workflow) {
+		if pdata, perr := os.ReadFile(filepath.Join(sourceDir, workflow)); perr == nil {
+			data, err = pdata, nil
+			digest := workflowbackend.DigestBytes(data)
+			rel := filepath.ToSlash(filepath.Join(".orun", "workflows", digestShort(digest)+"-"+filepath.Base(workflow)))
+			dest := filepath.Join(jp.WorkflowBaseDir, filepath.FromSlash(rel))
+			if merr := os.MkdirAll(filepath.Dir(dest), 0o755); merr != nil {
+				return "", "", workflowbackend.Inspection{}, fmt.Errorf("step %q: materialize packaged workflow: %w", stepName, merr)
+			}
+			if werr := os.WriteFile(dest, data, 0o644); werr != nil {
+				return "", "", workflowbackend.Inspection{}, fmt.Errorf("step %q: materialize packaged workflow: %w", stepName, werr)
+			}
+			workflow = rel
+		}
+	}
 	if err != nil {
-		return "", workflowbackend.Inspection{}, fmt.Errorf("step %q: workflow %q: %w", stepName, workflow, err)
+		return "", "", workflowbackend.Inspection{}, fmt.Errorf("step %q: workflow %q: %w", stepName, workflow, err)
 	}
-	insp, err := workflowbackend.InspectWorkflow(data)
-	if err != nil {
-		return "", workflowbackend.Inspection{}, fmt.Errorf("step %q: workflow %q: %w", stepName, workflow, err)
+	insp, ierr := workflowbackend.InspectWorkflow(data)
+	if ierr != nil {
+		return "", "", workflowbackend.Inspection{}, fmt.Errorf("step %q: workflow %q: %w", stepName, workflow, ierr)
 	}
-	return workflowbackend.DigestBytes(data), insp, nil
+	return workflow, workflowbackend.DigestBytes(data), insp, nil
+}
+
+// digestShort returns the first 12 hex chars of a "sha256:<hex>" digest.
+func digestShort(digest string) string {
+	hex := strings.TrimPrefix(digest, "sha256:")
+	if len(hex) > 12 {
+		hex = hex[:12]
+	}
+	return hex
 }
 
 // renderConnections templates the grant's secret references and validates the
