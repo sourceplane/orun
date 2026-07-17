@@ -38,5 +38,9 @@ func toGHAContext(ctx ExecContext) gha.ExecContext {
 		JobEnv:       ctx.JobEnv,
 		StepEnv:      ctx.StepEnv,
 		Env:          ctx.Env,
+		// The resolved secret layer must cross into the GHA engine — dropping
+		// it here meant secrets resolved (and minted) successfully but never
+		// reached the step processes under `--runner github-actions`.
+		SecretEnv: ctx.SecretEnv,
 	}
 }

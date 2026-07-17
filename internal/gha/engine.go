@@ -47,6 +47,10 @@ type ExecContext struct {
 	JobEnv       map[string]string
 	StepEnv      map[string]string
 	Env          map[string]string
+	// SecretEnv carries the job's RESOLVED secret values (runner-integration.md
+	// §1): the top env layer, merged after JobEnv and never interpolated —
+	// values are opaque and already registered with the runner's redactor.
+	SecretEnv map[string]string
 }
 
 type Engine struct {
@@ -420,6 +424,14 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 
 	jobEvaluator := state.evaluator(state.rootScope(state.workDir), globalEnv, githubContext)
 	for key, value := range interpolateStringMap(ctx.JobEnv, jobEvaluator) {
+		state.globalEnv[key] = value
+	}
+	// Resolved secret env is the TOP layer (mirrors executor.MergeEnvironment
+	// order in the runner: base < job < step < secret). Merged after JobEnv so
+	// an injected secret always wins, and deliberately NOT interpolated —
+	// values are opaque, never expression-evaluated, and already registered
+	// with the runner's redactor before any step could echo them.
+	for key, value := range ctx.SecretEnv {
 		state.globalEnv[key] = value
 	}
 	if state.globalEnv["PATH"] != "" {
