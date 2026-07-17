@@ -1,0 +1,9 @@
+{
+  "contract": "v1",
+  "status": "failed",
+  "steps": [
+    { "name": "Get_oncall", "status": "success", "durationMs": 380 },
+    { "name": "Notify", "status": "failed", "error": "provider returned 429", "durationMs": 1204 }
+  ],
+  "error": "step Notify failed: provider returned 429"
+}

@@ -52,9 +52,9 @@ func TestResolveEngineDigestFromEnv(t *testing.T) {
 }
 
 func TestInvokeRoundTrip(t *testing.T) {
-	// Echo the JSON request back inside the result context, proving stdin
+	// Echo the JSON request back inside the result outputs, proving stdin
 	// delivery and stdout parsing across the process boundary.
-	bin := writeFakeEngine(t, `printf '{"status":"success","context":{"got":'; cat; printf '}}'`)
+	bin := writeFakeEngine(t, `printf '{"contract":"v1","status":"success","outputs":{"got":'; cat; printf '}}'`)
 	eng, err := ResolveEngine(EngineOptions{Bin: bin, Args: []string{}})
 	if err != nil {
 		t.Fatalf("ResolveEngine: %v", err)
@@ -71,12 +71,15 @@ func TestInvokeRoundTrip(t *testing.T) {
 	if !res.Succeeded() {
 		t.Fatalf("expected success, got status %q", res.Status)
 	}
-	got, ok := res.Context["got"].(map[string]any)
+	got, ok := res.Outputs["got"].(map[string]any)
 	if !ok {
-		t.Fatalf("context.got missing or wrong type: %#v", res.Context)
+		t.Fatalf("outputs.got missing or wrong type: %#v", res.Outputs)
 	}
 	if got["workflow"] != "workflows/notify.yaml" {
 		t.Fatalf("request did not reach the engine: %#v", got)
+	}
+	if got["contract"] != "v1" {
+		t.Fatalf("request was not stamped contract/v1: %#v", got)
 	}
 }
 

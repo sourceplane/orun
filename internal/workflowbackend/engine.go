@@ -83,9 +83,17 @@ type SubprocessEngine struct {
 func (e *SubprocessEngine) Digest() string { return e.digest }
 
 // Invoke streams req to the engine on stdin and decodes its Result from stdout.
+// The request is stamped contract/v1; a response carrying a different contract
+// version is rejected with a versioned error (design §3).
 func (e *SubprocessEngine) Invoke(ctx context.Context, req Request) (Result, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if req.Contract == "" {
+		req.Contract = ContractV1
+	}
+	if req.Contract != ContractV1 {
+		return Result{}, fmt.Errorf("unsupported workflow contract %q (this orun speaks %q)", req.Contract, ContractV1)
 	}
 	payload, err := json.Marshal(req)
 	if err != nil {
@@ -116,6 +124,9 @@ func (e *SubprocessEngine) Invoke(ctx context.Context, req Request) (Result, err
 	res, ok := decodeResult(stdout.Bytes())
 	if !ok {
 		return Result{}, fmt.Errorf("workflow engine produced invalid output: %q", stdout.String())
+	}
+	if res.Contract != "" && res.Contract != ContractV1 {
+		return Result{}, fmt.Errorf("workflow engine answered with contract %q, want %q — engine and orun disagree on the wire version", res.Contract, ContractV1)
 	}
 	return res, nil
 }

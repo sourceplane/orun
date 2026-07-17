@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sourceplane.io/contracts/workflow-backend/v1/response.schema.json",
+  "title": "Workflow backend response (contract/v1)",
+  "description": "The JSON document the workflow engine writes to stdout in `backend` mode. The engine returns declared outputs only — the full workflow context never crosses the boundary. Vendored identically in sourceplane/orun and sourceplane/torkflow.",
+  "type": "object",
+  "required": ["contract", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "contract": {
+      "const": "v1",
+      "description": "Contract version echoed by the engine."
+    },
+    "status": {
+      "enum": ["success", "failed", "paused"],
+      "description": "Terminal state of the run. `paused` is reserved for approval gates (WX7)."
+    },
+    "outputs": {
+      "type": "object",
+      "description": "The workflow's declared spec.outputs, evaluated. A workflow with no declared outputs returns an empty object; raw context is never returned."
+    },
+    "steps": {
+      "type": "array",
+      "description": "Structured per-step timeline, sealed by the caller as data.",
+      "items": {
+        "type": "object",
+        "required": ["name", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "status": { "enum": ["success", "failed", "skipped", "replayed"] },
+          "error": { "type": "string" },
+          "durationMs": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "error": {
+      "type": "string",
+      "description": "Failure detail when status is failed."
+    }
+  }
+}

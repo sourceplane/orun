@@ -13,9 +13,10 @@ type StepSpec struct {
 	ExpectedDigest string
 	// With is the declared inputs handed to the engine as its Trigger context.
 	With map[string]any
-	// Credentials are orun-resolved, in-memory secrets injected for this run
-	// (orun-workflows §6). Populated by the secret bridge (WF3); nil is fine.
-	Credentials map[string]any
+	// Connections are orun-resolved, in-memory credential payloads keyed by the
+	// workflow's own connection names (orun-workflows-v2 §3/§4). Populated by
+	// the connections grant; nil is fine for a workflow with no connections.
+	Connections map[string]any
 	// Metadata is run context (job/component/env for a step; blueprint for a hook).
 	Metadata map[string]any
 	// RunDir is a scratch directory the engine may use for its own run state.
@@ -42,9 +43,10 @@ func RunStep(ctx context.Context, eng Engine, spec StepSpec) (Result, error) {
 		}
 	}
 	return eng.Invoke(ctx, Request{
+		Contract:    ContractV1,
 		Workflow:    spec.WorkflowPath,
 		With:        spec.With,
-		Credentials: spec.Credentials,
+		Connections: spec.Connections,
 		Metadata:    spec.Metadata,
 		RunDir:      spec.RunDir,
 	})
