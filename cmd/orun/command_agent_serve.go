@@ -144,9 +144,25 @@ Identity comes from the sandbox environment (injected by the control plane):
 
 		// Now the (potentially blocking) brief + driver setup — the relay is
 		// already streaming and draining steers regardless of how this goes.
+		//
+		// A cloud serve boots into a bare sandbox: the orun-cloud bootstrap
+		// installs the binary and execs `orun agent serve` with NO prior
+		// `orun plan`, so there is no `.orun` object store on the box. That is
+		// expected, not an error — the brief here is assembled in-process from
+		// env (RunKind/Task/Persona), not pulled from a sealed graph, so serve
+		// only needs a WRITABLE store to seal that synthesized brief into.
+		// Initialize an empty local store when none exists (openObjectModel
+		// MkdirAll's it) instead of dying with "no object store"; a pre-seeded
+		// store from a real plan is used as-is. Without this every cloud session
+		// reaches `running` (heartbeat lands) then serve exits 1 here, leaving
+		// the console conversation empty and steers with no consumer.
 		store, refs, _, ok := openObjectStores()
 		if !ok {
-			return fmt.Errorf("no object store at .orun — pull the brief first")
+			var oerr error
+			if store, refs, _, oerr = openObjectModel(); oerr != nil {
+				return fmt.Errorf("initialize object store at .orun: %w", oerr)
+			}
+			fmt.Fprintf(errOut, "orun agent serve: no prior plan — initialized empty object store at .orun\n")
 		}
 		var persona []byte
 		var toolPolicy nodes.AgentToolPolicy
