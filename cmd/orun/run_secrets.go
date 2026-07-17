@@ -24,6 +24,13 @@ import (
 // resolve provenance onto the runner so the sealed run captures which secret
 // versions/decisions each job used (Invariant 6).
 func remoteSecretResolver(ctx context.Context, r *runner.Runner, client *remotestate.Client, backend statebackend.Backend, runID, runnerID string, stderr *os.File, color bool) func(string, []model.PlanSecretRef) (map[string]string, error) {
+	// The run is addressed on the wire by its contract run ULID, which the
+	// backend derived from the CLI exec id (RunULID) and stored InitRun under.
+	// Every coordination verb maps exec id → ULID via wireRunID before the wire
+	// call; the lease-bound resolve route is ULID-gated identically, so apply the
+	// SAME mapping here. Skipping it sends the raw exec id and the state-worker's
+	// isRunUlid guard rejects the path as "Route not found".
+	wireRunID := remotestate.RunULID(runID)
 	return func(jobID string, refs []model.PlanSecretRef) (map[string]string, error) {
 		refStrings := make([]string, 0, len(refs))
 		for _, ref := range refs {
@@ -35,7 +42,7 @@ func remoteSecretResolver(ctx context.Context, r *runner.Runner, client *remotes
 		if cb, ok := backend.(*statebackend.CoordBackend); ok {
 			epoch = cb.LeaseEpoch(jobID)
 		}
-		resolved, err := client.ResolveRunSecrets(ctx, runID, jobID, runnerID, epoch, refStrings)
+		resolved, err := client.ResolveRunSecrets(ctx, wireRunID, jobID, runnerID, epoch, refStrings)
 		if err != nil {
 			return nil, err
 		}

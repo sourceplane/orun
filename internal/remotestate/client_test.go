@@ -422,3 +422,45 @@ func asAPIError(err error, target **remotestate.APIError) bool {
 	}
 	return false
 }
+
+// Regression (secret-resolve run addressing): the resolve route is ULID-gated
+// on the backend (state-worker isRunUlid). ResolveRunSecrets must place the run
+// id it is given verbatim into …/runs/{id}/secrets/resolve — the caller is
+// responsible for passing the wire ULID (RunULID(execId)), exactly as every
+// coordination verb does via wireRunID. This guards the path shape.
+func TestClient_ResolveRunSecrets_PathCarriesRunID(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		writeJSON(w, 200, data(map[string]interface{}{
+			"secrets":    map[string]interface{}{"OGPIC_ORUN_SMOKE": "v"},
+			"ttlSeconds": 300,
+		}))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	wireID := remotestate.RunULID("29470560319-1") // the exec id → contract ULID
+	out, err := c.ResolveRunSecrets(context.Background(), wireID, "job-1", "runner-1", 7, []string{
+		"secret://sourceplane/ogpic/dev/OGPIC_ORUN_SMOKE",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Secrets["OGPIC_ORUN_SMOKE"] != "v" {
+		t.Errorf("expected resolved secret, got %v", out.Secrets)
+	}
+	if !strings.HasSuffix(gotPath, "/runs/"+wireID+"/secrets/resolve") {
+		t.Errorf("path must carry the wire ULID; got %q (wireID=%q)", gotPath, wireID)
+	}
+	// The raw exec id must never leak into the ULID-gated path.
+	if strings.Contains(gotPath, "29470560319-1") {
+		t.Errorf("raw exec id leaked into resolve path: %q", gotPath)
+	}
+	if gotBody["leaseEpoch"] != float64(7) || gotBody["jobId"] != "job-1" {
+		t.Errorf("expected leaseEpoch+jobId in body, got %v", gotBody)
+	}
+}
