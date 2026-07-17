@@ -69,6 +69,24 @@ var tuiNextCmd = &cobra.Command{
 	},
 }
 
+// runNextAgentTUI launches the cockpit v2 on the Agents surface — the
+// `orun agent --next` (and opted-in bare `orun agent`) front door.
+func runNextAgentTUI() error {
+	orunRoot, err := filepath.Abs(filepath.Join(storeDir(), ".orun"))
+	if err != nil {
+		return fmt.Errorf("resolve state root: %w", err)
+	}
+	_, err = tui2.NewProgram(tui2.Options{
+		OrunRoot:       orunRoot,
+		WorkspaceRoot:  storeDir(),
+		IntentFile:     intentFile,
+		ConfigDir:      configDir,
+		Version:        version,
+		InitialSurface: "agents",
+	}).Run()
+	return err
+}
+
 // runNextTUI launches the cockpit v2.
 func runNextTUI() error {
 	orunRoot, err := filepath.Abs(filepath.Join(storeDir(), ".orun"))
@@ -145,19 +163,7 @@ func buildTUIService() (services.OrunService, error) {
 // default while v2 soaks; ORUN_TUI=next opts into the v2 Agents surface.
 func runAgentTUI(ctx context.Context) error {
 	if useNextTUI() {
-		orunRoot, rerr := filepath.Abs(filepath.Join(storeDir(), ".orun"))
-		if rerr != nil {
-			return fmt.Errorf("resolve state root: %w", rerr)
-		}
-		_, err := tui2.NewProgram(tui2.Options{
-			OrunRoot:       orunRoot,
-			WorkspaceRoot:  storeDir(),
-			IntentFile:     intentFile,
-			ConfigDir:      configDir,
-			Version:        version,
-			InitialSurface: "agents",
-		}).Run()
-		return err
+		return runNextAgentTUI()
 	}
 	svc, err := buildTUIService()
 	if err != nil {

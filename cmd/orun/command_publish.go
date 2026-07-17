@@ -11,15 +11,15 @@ import (
 )
 
 var (
-	publishRoot     string
-	publishVersion  string
-	publishDryRun   bool
-	publishKeep     bool
-	packRoot        string
-	packOutput      string
-	loginUsername   string
-	loginPassword   string
-	loginPwdStdin   bool
+	publishRoot    string
+	publishVersion string
+	publishDryRun  bool
+	publishKeep    bool
+	packRoot       string
+	packOutput     string
+	loginUsername  string
+	loginPassword  string
+	loginPwdStdin  bool
 )
 
 var publishCmd = &cobra.Command{

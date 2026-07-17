@@ -34,8 +34,8 @@ func TestResolveBackendURLWithConfigPrefersExplicitSources(t *testing.T) {
 
 func TestParseGitHubRepoFullName(t *testing.T) {
 	cases := map[string]string{
-		"git@github.com:sourceplane/orun.git":    "sourceplane/orun",
-		"ssh://git@github.com/sourceplane/orun":  "sourceplane/orun",
+		"git@github.com:sourceplane/orun.git":     "sourceplane/orun",
+		"ssh://git@github.com/sourceplane/orun":   "sourceplane/orun",
 		"https://github.com/sourceplane/orun.git": "sourceplane/orun",
 	}
 	for input, want := range cases {

@@ -19,17 +19,25 @@ import (
 
 var agentContextSeal bool
 
+// agentNext opts the bare front door into the cockpit v2 Agents surface
+// (same opt-in family as `orun tui-next`; specs/orun-tui-v2).
+var agentNext bool
+
 var agentCmd = &cobra.Command{
 	Use:   "agent",
 	Short: "The agent runtime",
 	Long: "Delegate work to a coding agent (Claude Code first, any driver behind the seam).\n" +
 		"Agent types are content-addressed objects sealed from agents/*.md; runs are\n" +
 		"sealed and replayable. Run bare to open the interactive Agent surface (the TUI\n" +
-		"head). See specs/orun-agents/ and specs/orun-agents-live/.",
+		"head); --next opens the cockpit v2 Agents surface instead. See\n" +
+		"specs/orun-agents/, specs/orun-agents-live/, and specs/orun-tui-v2/.",
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Bare `orun agent` is the front door: the cockpit on the Agent
-		// surface (orun-agents-live AL3).
+		// surface (orun-agents-live AL3); --next selects the v2 head.
+		if agentNext {
+			return runNextAgentTUI()
+		}
 		return runAgentTUI(cmd.Context())
 	},
 }
@@ -307,5 +315,7 @@ func registerAgentCommand(root *cobra.Command) {
 	registerAgentRunCommand(agentCmd)
 	registerAgentServeCommand(agentCmd)
 	agentCmd.AddCommand(agentReplayCmd)
+	agentCmd.Flags().BoolVar(&agentNext, "next", false,
+		"Open the cockpit v2 Agents surface (same family as: orun tui-next)")
 	root.AddCommand(agentCmd)
 }
