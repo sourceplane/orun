@@ -420,3 +420,59 @@ func TestEngineEnvIsolationBetweenJobs(t *testing.T) {
 		t.Fatalf("env leaked between jobs: PRIVATE_VAR = %q in job-b", output)
 	}
 }
+
+// Regression (orun-secrets runner-integration §1): the resolved secret layer
+// must reach step processes under the github-actions engine. It was dropped
+// entirely — secrets resolved (and brokered credentials minted) successfully
+// but steps never saw them. SecretEnv is the TOP layer (beats JobEnv) and is
+// never expression-interpolated.
+func TestEngineRunStepReceivesSecretEnvAsTopLayer(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	engine := NewEngine(Options{
+		CacheDir:     filepath.Join(workspaceDir, ".cache", "actions"),
+		ToolCacheDir: filepath.Join(workspaceDir, ".cache", "tools"),
+	})
+	execCtx := ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: workspaceDir,
+		WorkDir:      workspaceDir,
+		BaseEnv: map[string]string{
+			"PATH": os.Getenv("PATH"),
+			"HOME": os.Getenv("HOME"),
+		},
+		JobEnv: map[string]string{
+			"SHADOWED": "from_job_env",
+		},
+		SecretEnv: map[string]string{
+			"TEST_SUPABASE_API": "sbp_minted_0123456789abcdef",
+			"SHADOWED":          "from_secret_env",
+			// Secrets are opaque: expression-ish content must stay literal.
+			"WEIRD_SECRET": "${{ not.evaluated }}",
+		},
+	}
+	if err := engine.Prepare(execCtx); err != nil {
+		t.Fatalf("engine.Prepare() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := engine.Cleanup(execCtx); err != nil {
+			t.Fatalf("engine.Cleanup() error = %v", err)
+		}
+	})
+
+	job := model.PlanJob{ID: "secret-env-job"}
+
+	output, err := engine.RunStep(execCtx, job, model.PlanStep{
+		ID:    "read-secret",
+		Run:   `printf '%s|%s|%s' "$TEST_SUPABASE_API" "$SHADOWED" "$WEIRD_SECRET"`,
+		Shell: "bash",
+	})
+	if err != nil {
+		t.Fatalf("engine.RunStep() read-secret error = %v", err)
+	}
+	want := "sbp_minted_0123456789abcdef|from_secret_env|${{ not.evaluated }}"
+	if output != want {
+		t.Fatalf("read-secret output = %q, want %q", output, want)
+	}
+}
