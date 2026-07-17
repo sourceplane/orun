@@ -3,6 +3,7 @@ package runner
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -38,6 +39,7 @@ func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob
 		ExpectedDigest: step.WorkflowDigest,
 		With:           step.With,
 		Connections:    connections,
+		RunDir:         r.workflowRunDir(execCtx, job, step),
 		Metadata: map[string]any{
 			"jobId":          job.ID,
 			"component":      job.Component,
@@ -66,17 +68,53 @@ func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob
 // workflowEngine returns the injected engine, or lazily resolves the pinned
 // engine from the environment, caching it on the runner. A run whose steps
 // declare no workflow: never calls this, so a missing engine is not an error for
-// ordinary plans (S-4).
+// ordinary plans (S-4). When the plan declares an engine pin, the resolved
+// engine's content digest must match — fail-closed (orun-workflows-v2 §6).
 func (r *Runner) workflowEngine() (workflowbackend.Engine, error) {
-	if r.WorkflowEngine != nil {
-		return r.WorkflowEngine, nil
+	eng := r.WorkflowEngine
+	if eng == nil {
+		resolved, err := workflowbackend.ResolveEngine(workflowbackend.EngineOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("cannot run workflow step: %w", err)
+		}
+		eng = resolved
 	}
-	eng, err := workflowbackend.ResolveEngine(workflowbackend.EngineOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("cannot run workflow step: %w", err)
+	if pin := strings.TrimSpace(r.WorkflowEnginePin); pin != "" && eng.Digest() != pin {
+		return nil, fmt.Errorf("workflow engine digest %s does not match the plan's declared pin %s (intent execution.workflowEngine) — refusing to run", eng.Digest(), pin)
 	}
 	r.WorkflowEngine = eng
 	return eng, nil
+}
+
+// workflowRunDir provisions the per-step scratch directory the engine keeps its
+// run state in (orun-workflows-v2 §6): an input to sealing under the workspace's
+// .orun tree, never the durable record. Best-effort — an empty string lets the
+// engine fall back to its own temp dir.
+func (r *Runner) workflowRunDir(execCtx executor.ExecContext, job model.PlanJob, step model.PlanStep) string {
+	base := execCtx.WorkspaceDir
+	if base == "" {
+		base = execCtx.WorkDir
+	}
+	if base == "" {
+		return ""
+	}
+	dir := filepath.Join(base, ".orun", "wfruns", r.ExecID, sanitizePathSegment(job.ID), sanitizePathSegment(stepIdentifier(step)))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	return dir
+}
+
+// sanitizePathSegment keeps job/step identifiers filesystem-safe.
+func sanitizePathSegment(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.', r == '@':
+			return r
+		default:
+			return '-'
+		}
+	}, s)
 }
 
 // resolveWorkflowPath resolves a workflow reference to an on-disk path against

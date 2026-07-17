@@ -161,6 +161,50 @@ func TestBuildConnectionPayloadsFailClosed(t *testing.T) {
 	}
 }
 
+func TestWorkflowEnginePinVerification(t *testing.T) {
+	dir, digest := writeWF(t)
+	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
+	step := model.PlanStep{Name: "s", Workflow: "wf.yaml", WorkflowDigest: digest}
+
+	// Matching pin: runs.
+	okRunner := &Runner{
+		WorkflowEngine:    &fakeWFEngine{res: workflowbackend.Result{Status: workflowbackend.StatusSuccess}},
+		WorkflowEnginePin: "sha256:fake", // fakeWFEngine.Digest()
+	}
+	if _, err := okRunner.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step); err != nil {
+		t.Fatalf("matching pin should run: %v", err)
+	}
+
+	// Mismatched pin: fail closed, engine never invoked.
+	eng := &fakeWFEngine{res: workflowbackend.Result{Status: workflowbackend.StatusSuccess}}
+	badRunner := &Runner{WorkflowEngine: eng, WorkflowEnginePin: "sha256:other"}
+	_, err := badRunner.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step)
+	if err == nil || !strings.Contains(err.Error(), "pin") {
+		t.Fatalf("mismatched pin must fail closed: %v", err)
+	}
+	if eng.gotReq.Workflow != "" {
+		t.Fatalf("engine must not be invoked under a mismatched pin")
+	}
+}
+
+func TestWorkflowRunDirProvisioned(t *testing.T) {
+	dir, digest := writeWF(t)
+	eng := &fakeWFEngine{res: workflowbackend.Result{Status: workflowbackend.StatusSuccess}}
+	r := &Runner{WorkflowEngine: eng, ExecID: "exec-1"}
+	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
+	step := model.PlanStep{Name: "s", Workflow: "wf.yaml", WorkflowDigest: digest}
+
+	if _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "web@prod.deploy"}, step); err != nil {
+		t.Fatal(err)
+	}
+	if eng.gotReq.RunDir == "" || !strings.Contains(eng.gotReq.RunDir, ".orun") {
+		t.Fatalf("runDir not provisioned under .orun: %q", eng.gotReq.RunDir)
+	}
+	if _, err := os.Stat(eng.gotReq.RunDir); err != nil {
+		t.Fatalf("runDir does not exist: %v", err)
+	}
+}
+
 func TestResolveWorkflowPath(t *testing.T) {
 	r := &Runner{}
 	ec := executor.ExecContext{WorkspaceDir: "/ws", WorkDir: "/ws/svc"}
