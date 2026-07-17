@@ -21,17 +21,15 @@ var (
 	tuiNext        bool
 )
 
-// tuiNextEnvVar selects the cockpit generation. The default flipped to v2
-// at TR8 (specs/orun-tui-v2); ORUN_TUI=legacy is the escape hatch until
-// the v1 cockpit is deleted at TR9.
+// tuiNextEnvVar selects the cockpit generation. The v1 cockpit is the
+// default while v2 soaks under `orun tui-next` (ORUN_TUI=next or
+// `orun tui --next` also opt in); the flip re-lands with TR8.1
+// (specs/orun-tui-v2, IMPLEMENTATION-STATUS.md).
 const tuiNextEnvVar = "ORUN_TUI"
 
 // useNextTUI reports whether this launch should run the cockpit v2.
 func useNextTUI() bool {
-	if os.Getenv(tuiNextEnvVar) == "legacy" || !tuiNext {
-		return false
-	}
-	return true
+	return tuiNext || os.Getenv(tuiNextEnvVar) == "next"
 }
 
 var tuiCmd = &cobra.Command{
@@ -51,8 +49,40 @@ func registerTuiCommand(root *cobra.Command) {
 		"Connect to orun-backend for remote run state")
 	tuiCmd.Flags().StringVar(&tuiBackendURL, "backend-url", "",
 		fmt.Sprintf("orun-backend URL (or set %s)", backendURLEnvVar))
-	tuiCmd.Flags().BoolVar(&tuiNext, "next", true,
-		fmt.Sprintf("Launch the cockpit v2 (default since TR8; %s=legacy restores the v1 cockpit)", tuiNextEnvVar))
+	tuiCmd.Flags().BoolVar(&tuiNext, "next", false,
+		fmt.Sprintf("Launch the cockpit v2 (same as: orun tui-next, or %s=next)", tuiNextEnvVar))
+	root.AddCommand(tuiNextCmd)
+}
+
+// tuiNextCmd is the cockpit v2's front door while it soaks
+// (specs/orun-tui-v2). It becomes `orun tui` once the TR8.1 cloud lanes
+// land and a release has soaked.
+var tuiNextCmd = &cobra.Command{
+	Use:   "tui-next",
+	Short: "Open the next-generation Orun Cockpit (preview)",
+	Long: "Launch the cockpit v2 (specs/orun-tui-v2): the terminal head of orun " +
+		"cloud — Home, Work, Agents, Activity, Catalog, and Events over the same " +
+		"state store, stream-driven and frame-stable. Preview: it becomes the " +
+		"default `orun tui` after the cloud lanes land and a release soaks.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runNextTUI()
+	},
+}
+
+// runNextTUI launches the cockpit v2.
+func runNextTUI() error {
+	orunRoot, err := filepath.Abs(filepath.Join(storeDir(), ".orun"))
+	if err != nil {
+		return fmt.Errorf("resolve state root: %w", err)
+	}
+	_, err = tui2.NewProgram(tui2.Options{
+		OrunRoot:      orunRoot,
+		WorkspaceRoot: storeDir(),
+		IntentFile:    intentFile,
+		ConfigDir:     configDir,
+		Version:       version,
+	}).Run()
+	return err
 }
 
 // resolveTUIBackend returns the remote state backend when --remote-state is
@@ -111,8 +141,8 @@ func buildTUIService() (services.OrunService, error) {
 }
 
 // runAgentTUI opens the cockpit straight onto the Agents surface — the bare
-// `orun agent` front door (orun-agents-live AL3; cockpit v2 since TR9 prep,
-// ORUN_TUI=legacy restores the v1 agent mode).
+// `orun agent` front door (orun-agents-live AL3). The v1 agent mode is the
+// default while v2 soaks; ORUN_TUI=next opts into the v2 Agents surface.
 func runAgentTUI(ctx context.Context) error {
 	if useNextTUI() {
 		orunRoot, rerr := filepath.Abs(filepath.Join(storeDir(), ".orun"))
@@ -139,18 +169,7 @@ func runAgentTUI(ctx context.Context) error {
 
 func runTUI(ctx context.Context) error {
 	if useNextTUI() {
-		orunRoot, rerr := filepath.Abs(filepath.Join(storeDir(), ".orun"))
-		if rerr != nil {
-			return fmt.Errorf("resolve state root: %w", rerr)
-		}
-		_, err := tui2.NewProgram(tui2.Options{
-			OrunRoot:      orunRoot,
-			WorkspaceRoot: storeDir(),
-			IntentFile:    intentFile,
-			ConfigDir:     configDir,
-			Version:       version,
-		}).Run()
-		return err
+		return runNextTUI()
 	}
 
 	// Auto-discover the intent root so the cockpit (and the state/log store
