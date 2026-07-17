@@ -285,6 +285,12 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext, com
 		if err := step.ValidateExecForm(); err != nil {
 			return nil, err
 		}
+		if err := step.Approval.Validate(step.Name); err != nil {
+			return nil, err
+		}
+		if step.Approval != nil && strings.TrimSpace(step.Workflow) == "" {
+			return nil, fmt.Errorf("step %q: approval gates are declared on workflow steps (orun-workflows-v2 §9)", step.Name)
+		}
 		renderedRun, err := jp.renderTemplateString(compType, step.Name, "run", step.Run, context)
 		if err != nil {
 			return nil, err
@@ -350,6 +356,7 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext, com
 			Timeout:          step.Timeout,
 			Retry:            step.Retry,
 			Resume:           step.Resume,
+			Approval:         step.Approval,
 			OnFailure:        step.OnFailure,
 		})
 	}

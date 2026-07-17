@@ -237,6 +237,9 @@ type PlanStep struct {
 	Retry            int                          `json:"retry,omitempty" yaml:"retry,omitempty"`
 	// Resume opts a workflow step into resume-from-failed-step on retry
 	// (orun-workflows-v2 §8).
-	Resume    bool   `json:"resume,omitempty" yaml:"resume,omitempty"`
-	OnFailure string `json:"onFailure,omitempty" yaml:"onFailure,omitempty"`
+	Resume bool `json:"resume,omitempty" yaml:"resume,omitempty"`
+	// Approval is the declared human gate (orun-workflows-v2 §9): the
+	// declaration is plan content; the pause and verdict are sealed run facts.
+	Approval  *StepApproval `json:"approval,omitempty" yaml:"approval,omitempty"`
+	OnFailure string        `json:"onFailure,omitempty" yaml:"onFailure,omitempty"`
 }

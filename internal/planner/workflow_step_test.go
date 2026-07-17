@@ -307,6 +307,42 @@ func TestPlanJobs_OutputRefToLaterOrUnknownStepIsCompileError(t *testing.T) {
 	}
 }
 
+func TestPlanJobs_ApprovalDeclarationPropagatesAndValidates(t *testing.T) {
+	dir := outputsFixture(t)
+	gate := &model.StepApproval{Prompt: "ship?", Timeout: "24h", OnTimeout: "fail"}
+	jp := NewJobPlanner(compositionWith(model.Step{Name: "get-oncall", Workflow: "oncall.yaml", Approval: gate}))
+	jp.WorkflowBaseDir = dir
+
+	ji, err := jp.PlanJobs(legacyInstance("svc"))
+	if err != nil {
+		t.Fatalf("valid approval should compile: %v", err)
+	}
+	plan := render.NewRenderer().RenderPlan(model.Metadata{Name: "p"}, ji, nil)
+	got := plan.Jobs[0].Steps[0].Approval
+	if got == nil || got.Timeout != "24h" || got.OnTimeout != "fail" {
+		t.Fatalf("approval declaration must propagate into the plan: %+v", got)
+	}
+	// S-9: a plan with an approval is deterministic — the checksum is a pure
+	// function of the declaration, never of any later verdict.
+	ji2, _ := jp.PlanJobs(legacyInstance("svc"))
+	if render.NewRenderer().RenderPlan(model.Metadata{Name: "p"}, ji2, nil).Metadata.Checksum != plan.Metadata.Checksum {
+		t.Fatalf("approval plans must be byte-identical across compiles")
+	}
+
+	// A gate without a timeout policy fails compilation (S-6).
+	bad := NewJobPlanner(compositionWith(model.Step{Name: "g", Workflow: "oncall.yaml", Approval: &model.StepApproval{Timeout: "1h"}}))
+	bad.WorkflowBaseDir = dir
+	if _, err := bad.PlanJobs(legacyInstance("svc")); err == nil {
+		t.Fatalf("a gate without onTimeout must fail compilation")
+	}
+	// An approval on a non-workflow step fails compilation.
+	nonWF := NewJobPlanner(compositionWith(model.Step{Name: "g", Run: "echo hi", Approval: gate}))
+	nonWF.WorkflowBaseDir = dir
+	if _, err := nonWF.PlanJobs(legacyInstance("svc")); err == nil {
+		t.Fatalf("approval on a run: step must fail compilation")
+	}
+}
+
 func TestPlanJobs_StaleGrantIsCompileError(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "wf.yaml"), []byte(connWorkflow), 0o644); err != nil {
