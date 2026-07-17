@@ -609,6 +609,11 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 		jobWorkingDir = resolveWorkingDirAt(stagedRoot, job.Path)
 	}
 	currentPhase := ""
+	// wfOutputs records each workflow step's declared outputs (by step id and
+	// name) for ${{ steps.X.outputs.Y }} substitution in later steps of this
+	// job (orun-workflows-v2 §5). Values are run facts: they live here and in
+	// the sealed step record, never in the plan.
+	wfOutputs := map[string]map[string]any{}
 	for idx, step := range job.Steps {
 		stepID := stepIdentifier(step)
 		stepPhase := normalizeStepPhase(step.Phase)
@@ -660,7 +665,18 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 		var output string
 		var stepErr error
 		var ghaOutput strings.Builder // accumulates per-attempt output for GHA
+		// Substitute run-time output references (${{ steps.X.outputs.Y }})
+		// before the exec context is built. A dangling reference is a step
+		// failure, not retryable (orun-workflows-v2 §5).
+		if substituted, subErr := substituteWorkflowOutputs(step, wfOutputs); subErr != nil {
+			stepErr = subErr
+		} else {
+			step = substituted
+		}
 		attempts := retryCount + 1
+		if stepErr != nil {
+			attempts = 0 // skip execution; the failure handling below applies
+		}
 		for attempt := 1; attempt <= attempts; attempt++ {
 			if attempts > 1 && attempt > 1 {
 				if r.inGHA() {
@@ -681,8 +697,17 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				// A workflow: step runs through the workflow backend regardless of
 				// the selected runner (orun-workflows §4). Its result is returned as
 				// this step's output and sealed into .orun/ via the same AfterStepLog
-				// path as any other step — no split-brain .runs/ (§7).
-				output, stepErr = r.runWorkflowStep(execContext, job, step)
+				// path as any other step — no split-brain .runs/ (§7). Declared
+				// outputs feed later steps' ${{ steps.X.outputs.Y }} references.
+				var stepOutputs map[string]any
+				output, stepOutputs, stepErr = r.runWorkflowStep(execContext, job, step)
+				if stepErr == nil {
+					for _, key := range []string{step.ID, step.Name} {
+						if key != "" {
+							wfOutputs[key] = stepOutputs
+						}
+					}
+				}
 			} else {
 				output, stepErr = r.Executor.RunStep(execContext, job, step)
 			}

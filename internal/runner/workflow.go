@@ -19,10 +19,10 @@ import (
 // the caller via the same AfterStepLog path as any other step (§7). A workflow
 // that fails yields a non-nil error so the step is marked failed and honors the
 // job's onFailure/retry policy (§8).
-func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob, step model.PlanStep) (string, error) {
+func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob, step model.PlanStep) (string, map[string]any, error) {
 	eng, err := r.workflowEngine()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// The connections grant (orun-workflows-v2 §4): resolve exactly the refs the
@@ -31,7 +31,7 @@ func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob
 	// and are masked by the runner's single redaction site.
 	connections, err := buildConnectionPayloads(job, step, execCtx.SecretEnv)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	spec := workflowbackend.StepSpec{
@@ -52,7 +52,7 @@ func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob
 
 	res, err := workflowbackend.RunStep(execCtx.Context, eng, spec)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	output := formatWorkflowResult(step, res)
 	if !res.Succeeded() {
@@ -60,9 +60,65 @@ func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob
 		if msg == "" {
 			msg = "workflow reported status " + res.Status
 		}
-		return output, fmt.Errorf("workflow step %q failed: %s", step.Name, msg)
+		return output, nil, fmt.Errorf("workflow step %q failed: %s", step.Name, msg)
 	}
-	return output, nil
+	return output, res.Outputs, nil
+}
+
+// substituteWorkflowOutputs resolves ${{ steps.X.outputs.Y }} references in a
+// step's executable fields from the outputs earlier workflow steps of this job
+// recorded (orun-workflows-v2 §5). The compiler validated the grammar against
+// declared names; a reference that still cannot resolve at run time (the
+// producing step skipped, or an engine under-delivered) fails the step closed.
+func substituteWorkflowOutputs(step model.PlanStep, outputs map[string]map[string]any) (model.PlanStep, error) {
+	lookup := func(stepID, name string) (string, bool) {
+		outs, ok := outputs[stepID]
+		if !ok {
+			return "", false
+		}
+		value, ok := outs[name]
+		if !ok {
+			return "", false
+		}
+		return fmt.Sprint(value), true
+	}
+	var err error
+	if step.Run, err = workflowbackend.SubstituteOutputRefs(step.Run, lookup); err != nil {
+		return step, fmt.Errorf("step %q: %w", step.Name, err)
+	}
+	if step.Use, err = workflowbackend.SubstituteOutputRefs(step.Use, lookup); err != nil {
+		return step, fmt.Errorf("step %q: %w", step.Name, err)
+	}
+	step.Env, err = substituteInMap(step.Env, lookup)
+	if err != nil {
+		return step, fmt.Errorf("step %q: %w", step.Name, err)
+	}
+	step.With, err = substituteInMap(step.With, lookup)
+	if err != nil {
+		return step, fmt.Errorf("step %q: %w", step.Name, err)
+	}
+	return step, nil
+}
+
+// substituteInMap applies output-reference substitution to every string value
+// (one level deep — the shape step env/with carry).
+func substituteInMap(m map[string]interface{}, lookup func(string, string) (string, bool)) (map[string]interface{}, error) {
+	if len(m) == 0 {
+		return m, nil
+	}
+	out := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		if s, ok := v.(string); ok {
+			substituted, err := workflowbackend.SubstituteOutputRefs(s, lookup)
+			if err != nil {
+				return nil, err
+			}
+			out[k] = substituted
+			continue
+		}
+		out[k] = v
+	}
+	return out, nil
 }
 
 // workflowEngine returns the injected engine, or lazily resolves the pinned

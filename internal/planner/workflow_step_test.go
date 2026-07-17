@@ -170,6 +170,69 @@ func TestPlanJobs_MissingGrantIsCompileError(t *testing.T) {
 	}
 }
 
+const outputsWF = `apiVersion: torkflow/v1
+kind: Workflow
+metadata: { name: oncall }
+spec:
+  outputs:
+    email: "{{ Steps.Get.user.email }}"
+  steps:
+    - name: Get
+      actionRef: core.js
+`
+
+func outputsFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "oncall.yaml"), []byte(outputsWF), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestPlanJobs_ValidOutputRefCompiles(t *testing.T) {
+	dir := outputsFixture(t)
+	jp := NewJobPlanner(compositionWith(
+		model.Step{Name: "get-oncall", Workflow: "oncall.yaml"},
+		model.Step{Name: "page", Run: "./page.sh ${{ steps.get-oncall.outputs.email }}"},
+	))
+	jp.WorkflowBaseDir = dir
+	ji, err := jp.PlanJobs(legacyInstance("svc"))
+	if err != nil {
+		t.Fatalf("valid output reference should compile: %v", err)
+	}
+	// The reference survives compile-time templating intact for the runner.
+	plan := render.NewRenderer().RenderPlan(model.Metadata{Name: "p"}, ji, nil)
+	if !strings.Contains(plan.Jobs[0].Steps[1].Run, "${{ steps.get-oncall.outputs.email }}") {
+		t.Fatalf("output reference must survive compile: %q", plan.Jobs[0].Steps[1].Run)
+	}
+}
+
+func TestPlanJobs_UndeclaredOutputRefIsCompileError(t *testing.T) {
+	dir := outputsFixture(t)
+	jp := NewJobPlanner(compositionWith(
+		model.Step{Name: "get-oncall", Workflow: "oncall.yaml"},
+		model.Step{Name: "page", Run: "./page.sh ${{ steps.get-oncall.outputs.phone }}"},
+	))
+	jp.WorkflowBaseDir = dir
+	if _, err := jp.PlanJobs(legacyInstance("svc")); err == nil {
+		t.Fatalf("a reference to an undeclared output must fail compilation")
+	}
+}
+
+func TestPlanJobs_OutputRefToLaterOrUnknownStepIsCompileError(t *testing.T) {
+	dir := outputsFixture(t)
+	// Reference points at a step that comes LATER in the job.
+	jp := NewJobPlanner(compositionWith(
+		model.Step{Name: "page", Run: "./page.sh ${{ steps.get-oncall.outputs.email }}"},
+		model.Step{Name: "get-oncall", Workflow: "oncall.yaml"},
+	))
+	jp.WorkflowBaseDir = dir
+	if _, err := jp.PlanJobs(legacyInstance("svc")); err == nil {
+		t.Fatalf("a reference to a later step must fail compilation")
+	}
+}
+
 func TestPlanJobs_StaleGrantIsCompileError(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "wf.yaml"), []byte(connWorkflow), 0o644); err != nil {

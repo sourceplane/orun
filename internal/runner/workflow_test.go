@@ -45,7 +45,7 @@ func TestRunWorkflowStepSuccess(t *testing.T) {
 	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
 	step := model.PlanStep{Name: "s", Workflow: "wf.yaml", WorkflowDigest: digest}
 
-	out, err := r.runWorkflowStep(ec, model.PlanJob{ID: "web@prod.deploy"}, step)
+	out, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "web@prod.deploy"}, step)
 	if err != nil {
 		t.Fatalf("runWorkflowStep: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestRunWorkflowStepFailureIsError(t *testing.T) {
 	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
 	step := model.PlanStep{Name: "s", Workflow: "wf.yaml", WorkflowDigest: digest}
 
-	out, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step)
+	out, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step)
 	if err == nil {
 		t.Fatalf("a failed workflow step must return an error")
 	}
@@ -79,7 +79,7 @@ func TestRunWorkflowStepDigestMismatchIsError(t *testing.T) {
 	// Pin a stale digest: the on-disk file no longer matches.
 	step := model.PlanStep{Name: "s", Workflow: "wf.yaml", WorkflowDigest: "sha256:stale"}
 
-	if _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step); err == nil {
+	if _, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step); err == nil {
 		t.Fatalf("expected an error when the pinned digest is stale")
 	}
 }
@@ -91,7 +91,7 @@ func TestRunWorkflowStepUnconfiguredEngineIsError(t *testing.T) {
 	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
 	step := model.PlanStep{Name: "s", Workflow: "wf.yaml", WorkflowDigest: digest}
 
-	if _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step); err == nil {
+	if _, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step); err == nil {
 		t.Fatalf("expected a clear error when no workflow engine is configured")
 	}
 }
@@ -123,7 +123,7 @@ func TestRunWorkflowStepGrantInjectsMappedOnly(t *testing.T) {
 		},
 	}
 
-	out, err := r.runWorkflowStep(ec, job, step)
+	out, _, err := r.runWorkflowStep(ec, job, step)
 	if err != nil {
 		t.Fatalf("runWorkflowStep: %v", err)
 	}
@@ -171,14 +171,14 @@ func TestWorkflowEnginePinVerification(t *testing.T) {
 		WorkflowEngine:    &fakeWFEngine{res: workflowbackend.Result{Status: workflowbackend.StatusSuccess}},
 		WorkflowEnginePin: "sha256:fake", // fakeWFEngine.Digest()
 	}
-	if _, err := okRunner.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step); err != nil {
+	if _, _, err := okRunner.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step); err != nil {
 		t.Fatalf("matching pin should run: %v", err)
 	}
 
 	// Mismatched pin: fail closed, engine never invoked.
 	eng := &fakeWFEngine{res: workflowbackend.Result{Status: workflowbackend.StatusSuccess}}
 	badRunner := &Runner{WorkflowEngine: eng, WorkflowEnginePin: "sha256:other"}
-	_, err := badRunner.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step)
+	_, _, err := badRunner.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step)
 	if err == nil || !strings.Contains(err.Error(), "pin") {
 		t.Fatalf("mismatched pin must fail closed: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestWorkflowRunDirProvisioned(t *testing.T) {
 	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
 	step := model.PlanStep{Name: "s", Workflow: "wf.yaml", WorkflowDigest: digest}
 
-	if _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "web@prod.deploy"}, step); err != nil {
+	if _, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "web@prod.deploy"}, step); err != nil {
 		t.Fatal(err)
 	}
 	if eng.gotReq.RunDir == "" || !strings.Contains(eng.gotReq.RunDir, ".orun") {
@@ -202,6 +202,34 @@ func TestWorkflowRunDirProvisioned(t *testing.T) {
 	}
 	if _, err := os.Stat(eng.gotReq.RunDir); err != nil {
 		t.Fatalf("runDir does not exist: %v", err)
+	}
+}
+
+func TestSubstituteWorkflowOutputs(t *testing.T) {
+	outputs := map[string]map[string]any{
+		"get-oncall": {"email": "sam@acme.dev"},
+	}
+	step := model.PlanStep{
+		Name: "page",
+		Run:  "./page.sh ${{ steps.get-oncall.outputs.email }}",
+		Env:  map[string]interface{}{"ONCALL": "${{ steps.get-oncall.outputs.email }}", "N": 1},
+	}
+	got, err := substituteWorkflowOutputs(step, outputs)
+	if err != nil {
+		t.Fatalf("substitute: %v", err)
+	}
+	if got.Run != "./page.sh sam@acme.dev" || got.Env["ONCALL"] != "sam@acme.dev" {
+		t.Fatalf("substitution incomplete: %+v", got)
+	}
+	// Dangling reference fails closed.
+	bad := model.PlanStep{Name: "b", Run: "${{ steps.get-oncall.outputs.absent }}"}
+	if _, err := substituteWorkflowOutputs(bad, outputs); err == nil {
+		t.Fatalf("dangling output reference must fail the step")
+	}
+	// A step with no references is untouched.
+	plain := model.PlanStep{Name: "p", Run: "echo hi"}
+	if got, err := substituteWorkflowOutputs(plain, nil); err != nil || got.Run != "echo hi" {
+		t.Fatalf("plain step should pass through: %v", err)
 	}
 }
 
