@@ -52,6 +52,13 @@ type RelayConfig struct {
 	PostRetries  int           // per-batch POST /events attempts before dropping (default 4)
 	RetryBackoff time.Duration // base backoff between attempts (default 500ms)
 	Log          io.Writer     // where write-path failures are reported (nil = discard)
+
+	// The wire (AN0 — relay_ws.go): the WS binding is preferred; the knobs
+	// below shape the fallback discipline. Zero values are production defaults.
+	DisableWS       bool          // hard opt-out: HTTP long-poll only
+	WSRetryEvery    time.Duration // HTTP window between wire re-probes (default 30s)
+	TokenCheckEvery time.Duration // rotation watch cadence on a live wire (default 30s)
+	WSHTTP          *http.Client  // handshake client override (tests); nil = timeout-free default
 }
 
 func (c RelayConfig) client() *http.Client {
@@ -124,12 +131,16 @@ func DialToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cfg
 	pctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	cfg.logf("orun agent serve: relay pumps launching — base %s\n", cfg.BaseURL)
+	// The shared wire handle (AN0): pumpDown owns its lifecycle, pumpUp borrows
+	// it for best-effort delta sends. With the wire disabled it stays empty and
+	// every send falls back to HTTP — the AL4 posture, unchanged.
+	wire := &wsWire{}
 	go func() {
 		defer close(done)
 		defer head.Detach()
 		errc := make(chan error, 2)
-		go func() { errc <- pumpUp(pctx, head, cfg, flush) }()
-		go func() { errc <- pumpDown(pctx, inputs, cfg, poll) }()
+		go func() { errc <- pumpUp(pctx, head, cfg, flush, wire) }()
+		go func() { errc <- pumpDown(pctx, inputs, cfg, poll, wire) }()
 		select {
 		case <-pctx.Done():
 			cfg.logf("orun agent serve: relay pumps stopping (context canceled)\n")
@@ -169,7 +180,7 @@ func ServeToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cf
 // ticker fires even when the frame stream is momentarily idle. Crucially, a POST
 // failure NEVER returns from the pump: postEventBatch retries, logs loudly, then
 // drops — one transient must not black out the rest of the session.
-func pumpUp(ctx context.Context, head *HeadConn, cfg RelayConfig, flush time.Duration) (err error) {
+func pumpUp(ctx context.Context, head *HeadConn, cfg RelayConfig, flush time.Duration, wire *wsWire) (err error) {
 	cfg.logf("orun agent serve: pumpUp started — POST %s/events\n", cfg.BaseURL)
 	defer func() { cfg.logf("orun agent serve: pumpUp exited: %v\n", err) }()
 	ticker := time.NewTicker(flush)
@@ -226,9 +237,12 @@ func pumpUp(ctx context.Context, head *HeadConn, cfg RelayConfig, flush time.Dur
 					send()
 				}
 			case TDelta:
-				// Ephemeral live-token streaming: SSE-only on the cloud, never in
-				// the durable poll model. Best-effort, never blocks the log.
-				_ = postJSON(ctx, cfg, "/stream", f)
+				// Ephemeral live-token streaming: best-effort, never blocks the
+				// log. Rides the wire when connected (AN0), else the shipped
+				// POST /stream.
+				if !wire.send(ctx, f) {
+					_ = postJSON(ctx, cfg, "/stream", f)
+				}
 			case TBye:
 				// Session over: flush the durable tail and stop. The terminal
 				// state itself reaches the log as a state_changed event, not via
@@ -303,15 +317,25 @@ func frameSeq(f Frame) string {
 	return strconv.Itoa(*f.Seq)
 }
 
-// pumpDown long-polls the input return-queue (the cloud holds GET /inputs open
-// ~25s) and feeds head inputs into the runtime, acking each so the console's
-// POST /input (which blocks up to 25s for the ack) resolves promptly with
-// ok:true. A cursor advances past consumed items. Persistent failures are
+// pumpDown selects the down-leg binding (AN0): the wire (WS push, preferred)
+// with the HTTP long-poll as fallback, or the long-poll alone when disabled.
+func pumpDown(ctx context.Context, inputs *agent.InputQueue, cfg RelayConfig, poll time.Duration, wire *wsWire) error {
+	if cfg.DisableWS {
+		return pumpDownPoll(ctx, inputs, cfg, poll)
+	}
+	return pumpDownWire(ctx, inputs, cfg, poll, wire)
+}
+
+// pumpDownPoll long-polls the input return-queue (the cloud holds GET /inputs
+// open ~25s) and feeds head inputs into the runtime, acking each so the
+// console's POST /input (which blocks up to 25s for the ack) resolves promptly
+// with ok:true. A cursor advances past consumed items. Persistent failures are
 // logged LOUDLY (a wedged return-queue silently swallows every steer) rather
-// than the old silent backoff.
-func pumpDown(ctx context.Context, inputs *agent.InputQueue, cfg RelayConfig, poll time.Duration) (err error) {
-	cfg.logf("orun agent serve: pumpDown started — long-poll GET %s/inputs\n", cfg.BaseURL)
-	defer func() { cfg.logf("orun agent serve: pumpDown exited: %v\n", err) }()
+// than the old silent backoff. The HTTP binding of the down leg — valid
+// indefinitely (AN0 lock 2).
+func pumpDownPoll(ctx context.Context, inputs *agent.InputQueue, cfg RelayConfig, poll time.Duration) (err error) {
+	cfg.logf("orun agent serve: pumpDown(long-poll) started — GET %s/inputs\n", cfg.BaseURL)
+	defer func() { cfg.logf("orun agent serve: pumpDown(long-poll) exited: %v\n", err) }()
 	cursor := 0
 	consecutiveErr := 0
 	for {
