@@ -349,6 +349,7 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext, com
 			WorkingDirectory: renderedWorkingDirectory,
 			Timeout:          step.Timeout,
 			Retry:            step.Retry,
+			Resume:           step.Resume,
 			OnFailure:        step.OnFailure,
 		})
 	}

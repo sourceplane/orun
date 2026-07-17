@@ -207,6 +207,7 @@ func (r *Renderer) convertSteps(steps []model.RenderedStep) []model.PlanStep {
 			WorkingDirectory: step.WorkingDirectory,
 			Timeout:          step.Timeout,
 			Retry:            step.Retry,
+			Resume:           step.Resume,
 			OnFailure:        step.OnFailure,
 		}
 	}

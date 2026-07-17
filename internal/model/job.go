@@ -59,7 +59,12 @@ type Step struct {
 	WorkingDirectory string                       `yaml:"working-directory,omitempty" json:"working-directory,omitempty"`
 	Timeout          string                       `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	Retry            int                          `yaml:"retry,omitempty" json:"retry,omitempty"`
-	OnFailure        string                       `yaml:"onFailure,omitempty" json:"onFailure,omitempty"` // stop, continue
+	// Resume opts a workflow step into resume-from-failed-step on retry
+	// (orun-workflows-v2 §8): a retry attempt passes the prior attempt's run
+	// dir and the engine re-executes only non-succeeded steps. Default (false)
+	// is re-run from the top — correct for idempotent flows.
+	Resume    bool   `yaml:"resume,omitempty" json:"resume,omitempty"`
+	OnFailure string `yaml:"onFailure,omitempty" json:"onFailure,omitempty"` // stop, continue
 }
 
 // ValidateExecForm enforces the step's execution-vocabulary invariant: a step is
@@ -228,6 +233,7 @@ type RenderedStep struct {
 	WorkingDirectory string                       `json:"workingDirectory,omitempty"`
 	Timeout          string                       `json:"timeout"`
 	Retry            int                          `json:"retry"`
+	Resume           bool                         `json:"resume,omitempty"`
 	OnFailure        string                       `json:"onFailure"`
 }
 
