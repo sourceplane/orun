@@ -700,7 +700,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				// path as any other step — no split-brain .runs/ (§7). Declared
 				// outputs feed later steps' ${{ steps.X.outputs.Y }} references.
 				var stepOutputs map[string]any
-				output, stepOutputs, stepErr = r.runWorkflowStep(execContext, job, step)
+				output, stepOutputs, stepErr = r.runWorkflowStep(execContext, job, step, step.Resume && attempt > 1)
 				if stepErr == nil {
 					for _, key := range []string{step.ID, step.Name} {
 						if key != "" {

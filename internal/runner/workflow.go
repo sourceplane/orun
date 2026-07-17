@@ -19,7 +19,7 @@ import (
 // the caller via the same AfterStepLog path as any other step (§7). A workflow
 // that fails yields a non-nil error so the step is marked failed and honors the
 // job's onFailure/retry policy (§8).
-func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob, step model.PlanStep) (string, map[string]any, error) {
+func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob, step model.PlanStep, resume bool) (string, map[string]any, error) {
 	eng, err := r.workflowEngine()
 	if err != nil {
 		return "", nil, err
@@ -40,6 +40,10 @@ func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob
 		With:           step.With,
 		Connections:    connections,
 		RunDir:         r.workflowRunDir(execCtx, job, step),
+		// Resume-from-failed-step (orun-workflows-v2 §8): only on a retry
+		// attempt of a step that opted in. Digest guards hold within a run —
+		// the same pinned workflow and engine served the failed attempt.
+		Resume: resume,
 		Metadata: map[string]any{
 			"jobId":          job.ID,
 			"component":      job.Component,

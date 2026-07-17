@@ -235,5 +235,8 @@ type PlanStep struct {
 	WorkingDirectory string                       `json:"working-directory,omitempty" yaml:"working-directory,omitempty"`
 	Timeout          string                       `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	Retry            int                          `json:"retry,omitempty" yaml:"retry,omitempty"`
-	OnFailure        string                       `json:"onFailure,omitempty" yaml:"onFailure,omitempty"`
+	// Resume opts a workflow step into resume-from-failed-step on retry
+	// (orun-workflows-v2 §8).
+	Resume    bool   `json:"resume,omitempty" yaml:"resume,omitempty"`
+	OnFailure string `json:"onFailure,omitempty" yaml:"onFailure,omitempty"`
 }

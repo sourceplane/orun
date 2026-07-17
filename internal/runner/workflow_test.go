@@ -45,7 +45,7 @@ func TestRunWorkflowStepSuccess(t *testing.T) {
 	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
 	step := model.PlanStep{Name: "s", Workflow: "wf.yaml", WorkflowDigest: digest}
 
-	out, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "web@prod.deploy"}, step)
+	out, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "web@prod.deploy"}, step, false)
 	if err != nil {
 		t.Fatalf("runWorkflowStep: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestRunWorkflowStepFailureIsError(t *testing.T) {
 	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
 	step := model.PlanStep{Name: "s", Workflow: "wf.yaml", WorkflowDigest: digest}
 
-	out, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step)
+	out, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step, false)
 	if err == nil {
 		t.Fatalf("a failed workflow step must return an error")
 	}
@@ -79,7 +79,7 @@ func TestRunWorkflowStepDigestMismatchIsError(t *testing.T) {
 	// Pin a stale digest: the on-disk file no longer matches.
 	step := model.PlanStep{Name: "s", Workflow: "wf.yaml", WorkflowDigest: "sha256:stale"}
 
-	if _, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step); err == nil {
+	if _, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step, false); err == nil {
 		t.Fatalf("expected an error when the pinned digest is stale")
 	}
 }
@@ -91,7 +91,7 @@ func TestRunWorkflowStepUnconfiguredEngineIsError(t *testing.T) {
 	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
 	step := model.PlanStep{Name: "s", Workflow: "wf.yaml", WorkflowDigest: digest}
 
-	if _, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step); err == nil {
+	if _, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step, false); err == nil {
 		t.Fatalf("expected a clear error when no workflow engine is configured")
 	}
 }
@@ -123,7 +123,7 @@ func TestRunWorkflowStepGrantInjectsMappedOnly(t *testing.T) {
 		},
 	}
 
-	out, _, err := r.runWorkflowStep(ec, job, step)
+	out, _, err := r.runWorkflowStep(ec, job, step, false)
 	if err != nil {
 		t.Fatalf("runWorkflowStep: %v", err)
 	}
@@ -171,14 +171,14 @@ func TestWorkflowEnginePinVerification(t *testing.T) {
 		WorkflowEngine:    &fakeWFEngine{res: workflowbackend.Result{Status: workflowbackend.StatusSuccess}},
 		WorkflowEnginePin: "sha256:fake", // fakeWFEngine.Digest()
 	}
-	if _, _, err := okRunner.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step); err != nil {
+	if _, _, err := okRunner.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step, false); err != nil {
 		t.Fatalf("matching pin should run: %v", err)
 	}
 
 	// Mismatched pin: fail closed, engine never invoked.
 	eng := &fakeWFEngine{res: workflowbackend.Result{Status: workflowbackend.StatusSuccess}}
 	badRunner := &Runner{WorkflowEngine: eng, WorkflowEnginePin: "sha256:other"}
-	_, _, err := badRunner.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step)
+	_, _, err := badRunner.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step, false)
 	if err == nil || !strings.Contains(err.Error(), "pin") {
 		t.Fatalf("mismatched pin must fail closed: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestWorkflowRunDirProvisioned(t *testing.T) {
 	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
 	step := model.PlanStep{Name: "s", Workflow: "wf.yaml", WorkflowDigest: digest}
 
-	if _, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "web@prod.deploy"}, step); err != nil {
+	if _, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "web@prod.deploy"}, step, false); err != nil {
 		t.Fatal(err)
 	}
 	if eng.gotReq.RunDir == "" || !strings.Contains(eng.gotReq.RunDir, ".orun") {
@@ -202,6 +202,31 @@ func TestWorkflowRunDirProvisioned(t *testing.T) {
 	}
 	if _, err := os.Stat(eng.gotReq.RunDir); err != nil {
 		t.Fatalf("runDir does not exist: %v", err)
+	}
+}
+
+func TestRunWorkflowStepResumePassesThrough(t *testing.T) {
+	dir, digest := writeWF(t)
+	eng := &fakeWFEngine{res: workflowbackend.Result{Status: workflowbackend.StatusSuccess}}
+	r := &Runner{WorkflowEngine: eng, ExecID: "exec-r"}
+	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
+	step := model.PlanStep{Name: "s", Workflow: "wf.yaml", WorkflowDigest: digest, Resume: true}
+
+	// First attempt (resume=false): the request must not ask for resume.
+	if _, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step, false); err != nil {
+		t.Fatal(err)
+	}
+	if eng.gotReq.Resume {
+		t.Fatalf("first attempt must not resume")
+	}
+	// Retry attempt (resume=true): the request carries resume and the SAME
+	// runDir, so the engine can seed from the failed attempt's state.
+	first := eng.gotReq.RunDir
+	if _, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step, true); err != nil {
+		t.Fatal(err)
+	}
+	if !eng.gotReq.Resume || eng.gotReq.RunDir != first || first == "" {
+		t.Fatalf("retry must resume over the same runDir: resume=%v dir=%q vs %q", eng.gotReq.Resume, eng.gotReq.RunDir, first)
 	}
 }
 

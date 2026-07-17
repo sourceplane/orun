@@ -21,6 +21,10 @@ type StepSpec struct {
 	Metadata map[string]any
 	// RunDir is a scratch directory the engine may use for its own run state.
 	RunDir string
+	// Resume asks the engine to re-execute only steps that did not succeed in
+	// the prior run recorded under RunDir (orun-workflows-v2 §8). The caller
+	// guards that workflow and engine digests match the failed attempt.
+	Resume bool
 }
 
 // RunStep verifies the pinned digest (if any) and then invokes the engine. It
@@ -49,6 +53,7 @@ func RunStep(ctx context.Context, eng Engine, spec StepSpec) (Result, error) {
 		Connections: spec.Connections,
 		Metadata:    spec.Metadata,
 		RunDir:      spec.RunDir,
+		Resume:      spec.Resume,
 	})
 }
 
