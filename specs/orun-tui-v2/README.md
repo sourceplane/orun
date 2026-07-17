@@ -71,16 +71,18 @@ faster of the two.
 
 | ID | Milestone | Status |
 |----|-----------|--------|
-| TR0 | The kernel: `tui2/{shell,frame,store}` — router + overlay stack, fixed-dim compositor with region memoization + animation scheduler, revisioned store; perf harness promoted from `profile.go`; budgets in CI | ☐ |
-| TR1 | Northwind Mono: the terminal design system — tokens from `cockpit/style`, components (status line, pills, tables, drawers, dialogs, palette, markdown-lite), golden frames | ☐ |
-| TR2 | The data plane: `tui2/data.Source` (Local/Mock), fs-watch subscriptions replacing the 3 s ticker, **step-level runner events** replacing the 600 ms disk poll | ☐ |
-| TR3 | Agents: sessions list + conversation head over attach v1 (fold parity goldens vs cloud fixtures), approvals, composer, launch dialog | ☐ |
-| TR4 | Activity: runs feed + run detail (jobs → steps → logs), fully stream-driven; log explorer folded in | ☐ |
-| TR5 | Catalog: entity explorer + detail + component work surface (compose/plan/run — Plan Studio folded in as the Compose flow) | ☐ |
-| TR6 | Work: items, rung lanes, item detail with timeline, session↔work links | ☐ |
-| TR7 | Home + palette + Events: overview, attention queue, latest activity; full command registry; events explorer | ☐ |
-| TR8 | Cloud connect: in-app device-flow login, scope switcher, CloudSource (platform reads, work SSE, attention, remote sessions via relay head, presence); **default flips to v2** | ☐ |
-| TR9 | Cutover: delete `internal/tui`, rename `tui2`→`tui`, docs, perf regression gates, narrow-terminal/no-color pass | ☐ |
+| TR0 | The kernel: `tui2/{shell,frame,store}` — router + overlay stack, fixed-dim compositor with region memoization + animation scheduler, revisioned store; perf harness promoted from `profile.go`; budgets in CI | ✅ |
+| TR1 | Northwind Mono: the terminal design system — tokens from `cockpit/style`, components (status line, pills, tables, drawers, dialogs, palette, markdown-lite), golden frames | ✅ |
+| TR2 | The data plane: `tui2/data.Source` (Local/Mock), fs-watch subscriptions replacing the 3 s ticker, **step-level runner events** replacing the 600 ms disk poll | ✅ |
+| TR3 | Agents: sessions list + conversation head over attach v1 (fold parity goldens vs cloud fixtures), approvals, composer, launch dialog | ✅ |
+| TR4 | Activity: runs feed + run detail (jobs → steps → logs), fully stream-driven; log explorer folded in | ✅ |
+| TR5 | Catalog: entity explorer + detail + component work surface (compose/plan/run — Plan Studio folded in as the Compose flow) | ✅ |
+| TR6 | Work: items, rung lanes, item detail with timeline, session↔work links | ✅ |
+| TR7 | Home + palette + Events: overview, attention queue, latest activity; full command registry; events explorer | ✅ |
+| TR8 | Cloud connect: in-app device-flow login, scope switcher, CloudSource (platform reads, work SSE, attention, remote sessions via relay head, presence); **default flips to v2** | ◐ — flip landed in #533, rolled back to opt-in (`orun tui-next`) in #537 while v2 soaks; live cloud lanes are TR8.1 |
+| TR9 | Cutover: delete `internal/tui`, rename `tui2`→`tui`, docs, perf regression gates, narrow-terminal/no-color pass | ◐ — prep only (`orun agent --next`, #538); deletion gated on TR8.1 + a soaked release |
+
+Statuses here are the at-a-glance view; [`IMPLEMENTATION-STATUS.md`](./IMPLEMENTATION-STATUS.md) stays the authoritative per-PR ledger.
 
 ## Scope boundary
 
