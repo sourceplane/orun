@@ -351,6 +351,12 @@ func generatePlan() error {
 	renderer := render.NewRenderer()
 	plan := renderer.RenderPlanWithOrder(intent.Metadata, jobInstances, jobBindings, sorted)
 	plan.Spec.CompositionSources = compositionRegistry.Sources
+	// Materialize the declared workflow-engine pin (orun-workflows-v2 §6): a
+	// deterministic function of the intent, folded into the plan checksum. The
+	// runner refuses an engine whose content digest does not match.
+	if we := intent.Execution.WorkflowEngine; we != nil {
+		plan.Spec.WorkflowEngine = &model.PlanWorkflowEngine{Ref: we.Ref, Digest: we.Digest}
+	}
 	plan.Metadata.Selection = planSelection
 
 	// --- M5A: always resolve TriggerOccurrence and write a PlanRevision.

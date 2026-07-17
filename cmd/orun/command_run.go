@@ -319,6 +319,11 @@ func runPlan() error {
 		runEnv,
 	)
 	r.PlanID = planID
+	// The plan's declared workflow-engine pin (orun-workflows-v2 §6): workflow
+	// steps refuse an engine whose content digest does not match.
+	if plan.Spec.WorkflowEngine != nil {
+		r.WorkflowEnginePin = plan.Spec.WorkflowEngine.Digest
+	}
 	r.Isolation = runner.IsolationMode(strings.ToLower(strings.TrimSpace(runIsolation)))
 	r.KeepWorkspaces = runKeepWorkspaces
 	r.ComponentConcurrency = runComponentConcurrency

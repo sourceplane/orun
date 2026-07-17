@@ -250,6 +250,10 @@ func (s *LiveOrunService) GeneratePlan(ctx context.Context, req PlanRequest) (*P
 	renderer := render.NewRenderer()
 	plan := renderer.RenderPlanWithOrder(intent.Metadata, jobInstances, jobBindings, sorted)
 	plan.Spec.CompositionSources = compositionRegistry.Sources
+	// Declared workflow-engine pin (orun-workflows-v2 §6), matching the CLI.
+	if we := intent.Execution.WorkflowEngine; we != nil {
+		plan.Spec.WorkflowEngine = &model.PlanWorkflowEngine{Ref: we.Ref, Digest: we.Digest}
+	}
 
 	if triggerResolution != nil {
 		plan.Metadata.Trigger = &model.PlanTrigger{

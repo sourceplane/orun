@@ -62,6 +62,20 @@ var workflowRunCmd = &cobra.Command{
 	},
 }
 
+var workflowEngineDigestCmd = &cobra.Command{
+	Use:   "engine-digest",
+	Short: "Print the resolved workflow engine's content digest (for intent execution.workflowEngine)",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		eng, err := workflowbackend.ResolveEngine(workflowbackend.EngineOptions{})
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), eng.Digest())
+		return nil
+	},
+}
+
 var workflowViewCmd = &cobra.Command{
 	Use:   "view <file>",
 	Short: "Render a workflow's DAG via the pinned engine",
@@ -77,6 +91,7 @@ func registerWorkflowCommand(root *cobra.Command) {
 	workflowCmd.AddCommand(workflowDigestCmd)
 	workflowCmd.AddCommand(workflowRunCmd)
 	workflowCmd.AddCommand(workflowViewCmd)
+	workflowCmd.AddCommand(workflowEngineDigestCmd)
 
 	workflowRunCmd.Flags().StringArrayVar(&workflowRunSet, "set", nil, "Set a Trigger input as key=value (repeatable)")
 }

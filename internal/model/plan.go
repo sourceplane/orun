@@ -122,6 +122,17 @@ type PlanExecution struct {
 type PlanSpec struct {
 	JobBindings        map[string]string           `json:"jobBindings,omitempty" yaml:"jobBindings,omitempty"` // model -> JobRegistry name mapping
 	CompositionSources []ResolvedCompositionSource `json:"compositionSources,omitempty" yaml:"compositionSources,omitempty"`
+	// WorkflowEngine is the declared engine pin materialized from
+	// intent.execution.workflowEngine (orun-workflows-v2 §6). It folds into the
+	// plan checksum; at run time the resolved engine's content digest must match
+	// or the run fails closed. "Which engine ran this" is plan content.
+	WorkflowEngine *PlanWorkflowEngine `json:"workflowEngine,omitempty" yaml:"workflowEngine,omitempty"`
+}
+
+// PlanWorkflowEngine is the in-plan workflow-engine pin.
+type PlanWorkflowEngine struct {
+	Ref    string `json:"ref,omitempty" yaml:"ref,omitempty"`
+	Digest string `json:"digest" yaml:"digest"`
 }
 
 // ResolvedCompositionSource records which sources were used to compile the plan.
