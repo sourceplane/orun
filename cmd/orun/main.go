@@ -82,6 +82,9 @@ func generatePlan() error {
 			DefaultJob:        defaultJob,
 			ExecutionProfiles: composition.ExecutionProfiles,
 			JobMap:            composition.JobMap,
+			// Stack-shipped workflows resolve against the composition's source
+			// root when absent from the intent dir (orun-workflows-v2 §7).
+			SourceDir: compositionRegistry.SourceRoots[composition.SourceName],
 		}
 	}
 

@@ -108,13 +108,87 @@ func TestPlanJobs_MissingWorkflowFileIsCompileError(t *testing.T) {
 func TestPinWorkflow(t *testing.T) {
 	jp := &JobPlanner{}
 	// No base dir: reference materialized without a digest or inspection.
-	if d, _, err := jp.pinWorkflow("s", "wf.yaml"); err != nil || d != "" {
+	if _, d, _, err := jp.pinWorkflow("s", "wf.yaml", ""); err != nil || d != "" {
 		t.Fatalf("no base dir should yield empty digest: %q err %v", d, err)
 	}
 	// Empty reference: empty digest.
 	jp.WorkflowBaseDir = t.TempDir()
-	if d, _, err := jp.pinWorkflow("s", ""); err != nil || d != "" {
+	if _, d, _, err := jp.pinWorkflow("s", "", ""); err != nil || d != "" {
 		t.Fatalf("empty workflow should yield empty digest: %q err %v", d, err)
+	}
+}
+
+func TestPlanJobs_StackShippedWorkflowResolvesAndMaterializes(t *testing.T) {
+	intentDir := t.TempDir()
+	sourceDir := t.TempDir() // the composition Stack's resolved root
+	body := []byte("apiVersion: torkflow/v1\nkind: Workflow\nmetadata: { name: packaged }\n")
+	if err := os.MkdirAll(filepath.Join(sourceDir, "wf"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "wf", "notify.yaml"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	comps := compositionWith(model.Step{Name: "notify", Workflow: "wf/notify.yaml"})
+	comps["svc"].SourceDir = sourceDir
+	jp := NewJobPlanner(comps)
+	jp.WorkflowBaseDir = intentDir // NOT carrying the workflow
+
+	ji, err := jp.PlanJobs(legacyInstance("svc"))
+	if err != nil {
+		t.Fatalf("Stack-shipped workflow should resolve via the source root: %v", err)
+	}
+	plan := render.NewRenderer().RenderPlan(model.Metadata{Name: "p"}, ji, nil)
+	step := plan.Jobs[0].Steps[0]
+
+	// The pin is source-agnostic: same bytes, same digest as a local copy (S-7).
+	if want := workflowbackend.DigestBytes(body); step.WorkflowDigest != want {
+		t.Fatalf("digest parity broken: %q want %q", step.WorkflowDigest, want)
+	}
+	// The reference is rewritten to a content-addressed workspace path …
+	if !strings.HasPrefix(step.Workflow, ".orun/workflows/") {
+		t.Fatalf("packaged workflow not rewritten into the workspace: %q", step.Workflow)
+	}
+	// … and the bytes are materialized there for the runner.
+	materialized, err := os.ReadFile(filepath.Join(intentDir, filepath.FromSlash(step.Workflow)))
+	if err != nil || string(materialized) != string(body) {
+		t.Fatalf("materialized copy missing or diverged: %v", err)
+	}
+	// Determinism: recompiling yields the same reference and digest.
+	ji2, err := jp.PlanJobs(legacyInstance("svc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan2 := render.NewRenderer().RenderPlan(model.Metadata{Name: "p"}, ji2, nil)
+	if plan2.Jobs[0].Steps[0].Workflow != step.Workflow || plan2.Metadata.Checksum != plan.Metadata.Checksum {
+		t.Fatalf("packaged resolution not deterministic")
+	}
+}
+
+func TestPlanJobs_LocalWorkflowWinsOverPackaged(t *testing.T) {
+	intentDir := t.TempDir()
+	sourceDir := t.TempDir()
+	local := []byte("apiVersion: torkflow/v1\nkind: Workflow\nmetadata: { name: local }\n")
+	packaged := []byte("apiVersion: torkflow/v1\nkind: Workflow\nmetadata: { name: packaged }\n")
+	if err := os.WriteFile(filepath.Join(intentDir, "wf.yaml"), local, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "wf.yaml"), packaged, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	comps := compositionWith(model.Step{Name: "s", Workflow: "wf.yaml"})
+	comps["svc"].SourceDir = sourceDir
+	jp := NewJobPlanner(comps)
+	jp.WorkflowBaseDir = intentDir
+
+	ji, err := jp.PlanJobs(legacyInstance("svc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := render.NewRenderer().RenderPlan(model.Metadata{Name: "p"}, ji, nil)
+	step := plan.Jobs[0].Steps[0]
+	if step.Workflow != "wf.yaml" || step.WorkflowDigest != workflowbackend.DigestBytes(local) {
+		t.Fatalf("the repo's own workflow must win over the packaged one: %+v", step)
 	}
 }
 
