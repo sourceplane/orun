@@ -39,7 +39,7 @@ func TestRunWorkflowStepSuccess(t *testing.T) {
 	r := &Runner{WorkflowEngine: &fakeWFEngine{res: workflowbackend.Result{
 		Status:  workflowbackend.StatusSuccess,
 		Steps:   []workflowbackend.StepResult{{Name: "notify", Status: "success"}},
-		Context: map[string]any{"prUrl": "https://example/pr/1"},
+		Outputs: map[string]any{"prUrl": "https://example/pr/1"},
 	}}}
 	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
 	step := model.PlanStep{Name: "s", Workflow: "wf.yaml", WorkflowDigest: digest}
@@ -112,8 +112,8 @@ func TestRunWorkflowStepInjectsCredentials(t *testing.T) {
 		t.Fatalf("runWorkflowStep: %v", err)
 	}
 	// The resolved secret reaches the engine in-memory via the request.
-	if eng.gotReq.Credentials["GITHUB_TOKEN"] != "ghp_s3cr3t" {
-		t.Fatalf("credential not injected into the engine request: %#v", eng.gotReq.Credentials)
+	if eng.gotReq.Connections["GITHUB_TOKEN"] != "ghp_s3cr3t" {
+		t.Fatalf("credential not injected into the engine request: %#v", eng.gotReq.Connections)
 	}
 	// It must never appear in the sealed step output (the summary carries no
 	// credentials; the runner's redactor is the second line of defense).

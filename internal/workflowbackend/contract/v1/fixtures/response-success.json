@@ -1,0 +1,11 @@
+{
+  "contract": "v1",
+  "status": "success",
+  "outputs": {
+    "email": "oncall@example.dev"
+  },
+  "steps": [
+    { "name": "Get_oncall", "status": "success", "durationMs": 412 },
+    { "name": "Notify", "status": "success", "durationMs": 230 }
+  ]
+}

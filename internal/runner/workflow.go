@@ -28,12 +28,12 @@ func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob
 		WorkflowPath:   r.resolveWorkflowPath(execCtx, step.Workflow),
 		ExpectedDigest: step.WorkflowDigest,
 		With:           step.With,
-		// Secret bridge (WF3, §6): the credentials the job already resolved from
-		// orun-secrets (execCtx.SecretEnv) are injected into the engine request
-		// in-memory. They are never written to the workflow file, the plan, or the
-		// sealed run; the runner's single redaction site (seeded with these same
-		// values) masks any that surface in the workflow's output.
-		Credentials: credentialsFromSecretEnv(execCtx.SecretEnv),
+		// Secret bridge (WF3/WX0, §6): the credentials the job already resolved
+		// from orun-secrets (execCtx.SecretEnv) are injected into the engine
+		// request in-memory, never persisted, and masked by the runner's single
+		// redaction site. Until the WX2 connections grant lands, the payloads are
+		// keyed by the resolved secret names.
+		Connections: credentialsFromSecretEnv(execCtx.SecretEnv),
 		Metadata: map[string]any{
 			"jobId":          job.ID,
 			"component":      job.Component,
@@ -119,9 +119,9 @@ func formatWorkflowResult(step model.PlanStep, res workflowbackend.Result) strin
 			fmt.Fprintf(&b, "  - %s: %s\n", s.Name, s.Status)
 		}
 	}
-	if len(res.Context) > 0 {
-		if ctx, err := json.MarshalIndent(res.Context, "", "  "); err == nil {
-			fmt.Fprintf(&b, "context:\n%s\n", ctx)
+	if len(res.Outputs) > 0 {
+		if out, err := json.MarshalIndent(res.Outputs, "", "  "); err == nil {
+			fmt.Fprintf(&b, "outputs:\n%s\n", out)
 		}
 	}
 	if res.Error != "" {

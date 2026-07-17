@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sourceplane.io/contracts/workflow-backend/v1/request.schema.json",
+  "title": "Workflow backend request (contract/v1)",
+  "description": "The JSON document orun streams to the workflow engine's stdin in `backend` mode. Vendored identically in sourceplane/orun and sourceplane/torkflow; both CIs run conformance against the same fixtures. A wire change is a new contract version, never an edit to this file.",
+  "type": "object",
+  "required": ["contract", "workflow"],
+  "additionalProperties": false,
+  "properties": {
+    "contract": {
+      "const": "v1",
+      "description": "Contract version. Both sides reject unknown values with a versioned error."
+    },
+    "workflow": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path to the torkflow/v1 workflow file to execute."
+    },
+    "with": {
+      "type": "object",
+      "description": "Declared inputs, handed to the engine as the workflow's Trigger context."
+    },
+    "connections": {
+      "type": "object",
+      "description": "Resolved credential payloads keyed by the workflow's own connection names. The engine fans each payload to steps referencing `connection: <name>`, bypassing its file registry. Values never persist on either side.",
+      "additionalProperties": true
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Run context: jobId/component/environment/step for a plan step; hook id for a blueprint hook."
+    },
+    "runDir": {
+      "type": "string",
+      "description": "Scratch directory for the engine's own run state. An input to sealing, never the durable record."
+    },
+    "actionStores": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional action-store directories the engine should load provider modules from. Omitted: the engine applies its own default resolution."
+    },
+    "resume": {
+      "type": "boolean",
+      "description": "Reserved (WX6): when true, re-execute only steps that did not succeed in the prior run recorded under runDir."
+    }
+  }
+}

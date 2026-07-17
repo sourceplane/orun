@@ -1,0 +1,23 @@
+{
+  "contract": "v1",
+  "workflow": "wf/notify-oncall.yaml",
+  "with": {
+    "channel": "ops",
+    "component": "web-api",
+    "environment": "prod"
+  },
+  "connections": {
+    "chat-main": { "token": "xoxb-REDACTED-FIXTURE" },
+    "vcs-app": { "token": "ghp-REDACTED-FIXTURE", "appId": "12345" }
+  },
+  "metadata": {
+    "jobId": "web-api@prod.deploy",
+    "component": "web-api",
+    "environment": "prod",
+    "step": "notify-oncall",
+    "workflowRef": "wf/notify-oncall.yaml",
+    "workflowDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "runDir": ".orun/wfruns/exec-1/notify-oncall",
+  "actionStores": ["actionStore"]
+}

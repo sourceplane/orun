@@ -35,13 +35,13 @@ func writeWorkflow(t *testing.T, body string) (dir, path, digest string) {
 
 func TestRunStepInvokesWhenDigestMatches(t *testing.T) {
 	_, path, digest := writeWorkflow(t, "apiVersion: torkflow/v1\n")
-	eng := &fakeEngine{res: Result{Status: StatusSuccess, Context: map[string]any{"ok": true}}}
+	eng := &fakeEngine{res: Result{Status: StatusSuccess, Outputs: map[string]any{"ok": true}}}
 
 	res, err := RunStep(context.Background(), eng, StepSpec{
 		WorkflowPath:   path,
 		ExpectedDigest: digest,
 		With:           map[string]any{"channel": "ops"},
-		Credentials:    map[string]any{"token": "s3cr3t"},
+		Connections:    map[string]any{"token": "s3cr3t"},
 		Metadata:       map[string]any{"jobId": "j"},
 		RunDir:         "/tmp/run",
 	})
@@ -55,7 +55,7 @@ func TestRunStepInvokesWhenDigestMatches(t *testing.T) {
 		t.Fatalf("engine invoked %d times, want 1", eng.calls)
 	}
 	if eng.gotReq.Workflow != path || eng.gotReq.With["channel"] != "ops" ||
-		eng.gotReq.Credentials["token"] != "s3cr3t" || eng.gotReq.RunDir != "/tmp/run" {
+		eng.gotReq.Connections["token"] != "s3cr3t" || eng.gotReq.RunDir != "/tmp/run" {
 		t.Fatalf("request not passed through faithfully: %#v", eng.gotReq)
 	}
 }

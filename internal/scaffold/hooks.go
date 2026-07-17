@@ -81,7 +81,7 @@ func (hr *hookRunner) runWorkflow(ctx context.Context, h Hook) error {
 		WorkflowPath:   path,
 		ExpectedDigest: hr.digests[h.ID],
 		With:           h.With,
-		Credentials:    hr.credentials,
+		Connections:    hr.credentials,
 		Metadata:       map[string]any{"hook": h.ID, "workflowRef": h.Workflow},
 	})
 	if err != nil {
