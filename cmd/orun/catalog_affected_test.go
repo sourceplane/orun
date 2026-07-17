@@ -67,8 +67,8 @@ func runAffectedCmd(t *testing.T) catalogAffectedData {
 	cmd.SetContext(context.Background())
 	out := captureStdout(t, func() error { return runCatalogAffected(cmd, nil) })
 	var env struct {
-		Kind string               `json:"kind"`
-		Data catalogAffectedData  `json:"data"`
+		Kind string              `json:"kind"`
+		Data catalogAffectedData `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(out), &env); err != nil {
 		t.Fatalf("decode envelope: %v\n%s", err, out)

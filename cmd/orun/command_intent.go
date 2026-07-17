@@ -164,4 +164,3 @@ func renderIntent() error {
 
 	return nil
 }
-
