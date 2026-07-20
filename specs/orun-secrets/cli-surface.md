@@ -10,17 +10,25 @@
 ## 1. `orun secrets` — manage values (write-only + metadata)
 
 ```
-orun secrets set      <KEY> --env <env> [--project <p> | --workspace | --account]
+orun secrets set      <KEY> [--env <env> | --project | --workspace] [--account]
                             [--personal] [--value-stdin | --value <v>]
-                            [--rotation <policy>] [--locked]
-orun secrets import   --from-dotenv <file> --env <env> [--write-refs]     # bulk onboarding, write-only
-orun secrets list     [--env <env>] [--chain] [--json]                    # metadata only — never values
-orun secrets rotate   <KEY> --env <env> [--value-stdin]                   # append version; raises onRotate (SD-13)
-orun secrets revoke   <KEY> --env <env> [--version <n>]                   # tombstone; alias: rm
-orun secrets reveal   <KEY> --env <env> --break-glass --reason <s>        # SINGLE audited human reveal (SD-3)
-orun secrets versions <KEY> --env <env>                                   # version history (metadata)
-orun secrets syncs    [--env <env>] [--entity <ref>]                      # materialization state (SD-13)
+                            [--rotation <policy>] [--locked] [--json]
+orun secrets import   --from-dotenv <file> --env <env> [--write-refs] [--json]      # bulk onboarding, write-only
+orun secrets list     [--env <env> | --project | --workspace] [--chain] [--json]    # metadata only — never values
+orun secrets rotate   <KEY> [--env <env> | --project | --workspace] [--value-stdin] [--json]  # append version; raises onRotate (SD-13)
+orun secrets revoke   <KEY> [--env <env> | --project | --workspace] [--json]        # tombstone; alias: rm
+orun secrets reveal   <KEY> [--env <env> | --project | --workspace] --break-glass --reason <s>   # SINGLE audited human reveal (SD-3)
+orun secrets versions <KEY> [--env <env> | --project | --workspace] [--json]        # version history (metadata)
+orun secrets syncs    [--env <env>] [--entity <ref>]                                # materialization state (SD-13)
 ```
+
+Every subcommand takes the same rung selectors (`--env <slug>` / `--project` /
+`--workspace`) and `--json`. `rotate`, `revoke`, `versions`, and `reveal`
+previously accepted `--env` only, which made a workspace- or project-scoped
+secret impossible to rotate, inspect, or break-glass from the CLI; they now
+resolve scope through the shared selector, so any rung a secret can live at is
+reachable from every verb. `--json` emits metadata only — a value is never
+routed to it, on any subcommand.
 
 - **Scope flags (v3, replaces v2's `--namespace`).** Default scope is the
   linked **project** at the given `--env` (environment scope). `--project <p>`
@@ -49,9 +57,17 @@ orun secrets syncs    [--env <env>] [--entity <ref>]                      # mate
   deploy profiles will re-materialize (`onRotate`), with run links as they
   fire.
 - **`reveal`** is the only value-returning human command: requires
-  `--break-glass` + `--reason`, is gated by the elevated `secret.reveal`
-  action (owner/admin only), and emits a `secret.revealed` alert event.
-  Expected to be near-zero use.
+  `--break-glass` + `--reason` + a scope selector, is gated by the elevated
+  `secret.reveal` action (owner/admin only), and emits a `secret.revealed`
+  alert event. Expected to be near-zero use. Its preconditions are checked
+  **together** — a caller who supplies none is shown every missing piece at
+  once (break-glass, reason, scope) plus a ready-to-run example, rather than
+  discovering them one failed invocation at a time.
+- **Typo handling.** An unknown subcommand (`orun secrets revieal`) fails with
+  a non-zero exit and a "did you mean `reveal`" suggestion — reusing the shared
+  Levenshtein matcher (`internal/ui`), so it speaks the same "did you mean"
+  dialect as the env/component typo paths — instead of silently printing the
+  group help and exiting 0.
 
 ## 2. `orun policy` — manage and test access (portable)
 

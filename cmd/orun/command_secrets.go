@@ -49,6 +49,16 @@ metadata. The surface is write-only — values go up, only metadata comes back.
 
 Scope defaults to the linked project: --env <env> targets an environment rung,
 --project the project-wide rung, --workspace the workspace-shared rung.`,
+		// The group itself has no action, but a RunE lets us intercept an
+		// unknown subcommand (a typo like `secrets revieal`) and fail with a
+		// "did you mean" suggestion and a non-zero exit — cobra would otherwise
+		// treat the typo as args to a non-runnable group and silently print help.
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			return unknownSecretsSubcommand(cmd, args[0])
+		},
 	}
 	secretsCmd.PersistentFlags().StringVar(&secretsBackendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
 	secretsCmd.PersistentFlags().StringVar(&secretsOrgFlag, "org", "", "Workspace slug/id override for scope resolution (defaults to the linked workspace)")
@@ -67,6 +77,7 @@ Scope defaults to the linked project: --env <env> targets an environment rung,
 	setCmd.Flags().StringVar(&secretsValueFlag, "value", "", "Secret value (prefer stdin: --value may land in shell history)")
 	setCmd.Flags().StringVar(&secretsRotation, "rotation", "", "Rotation policy for the key")
 	setCmd.Flags().StringVar(&secretsDisplayName, "display-name", "", "Human display name for the key")
+	addSecretsJSONFlag(setCmd)
 
 	importCmd := &cobra.Command{
 		Use:   "import --from-dotenv <file> --env <env>",
@@ -78,6 +89,7 @@ Scope defaults to the linked project: --env <env> targets an environment rung,
 	}
 	importCmd.Flags().StringVar(&secretsFromDotenv, "from-dotenv", "", "Path to the .env file to import")
 	importCmd.Flags().StringVar(&secretsEnvFlag, "env", "", "Target environment (slug)")
+	addSecretsJSONFlag(importCmd)
 	_ = importCmd.MarkFlagRequired("from-dotenv")
 
 	listCmd := &cobra.Command{
@@ -100,8 +112,9 @@ Scope defaults to the linked project: --env <env> targets an environment rung,
 			return runSecretsRotate(cmd, args[0])
 		},
 	}
-	rotateCmd.Flags().StringVar(&secretsEnvFlag, "env", "", "Target environment (slug)")
+	addSecretsScopeFlags(rotateCmd)
 	rotateCmd.Flags().StringVar(&secretsValueFlag, "value", "", "New secret value (prefer stdin: --value may land in shell history)")
+	addSecretsJSONFlag(rotateCmd)
 
 	revokeCmd := &cobra.Command{
 		Use:     "revoke <KEY>",
@@ -113,6 +126,7 @@ Scope defaults to the linked project: --env <env> targets an environment rung,
 		},
 	}
 	addSecretsScopeFlags(revokeCmd)
+	addSecretsJSONFlag(revokeCmd)
 
 	versionsCmd := &cobra.Command{
 		Use:   "versions <KEY> --env <env>",
@@ -122,7 +136,8 @@ Scope defaults to the linked project: --env <env> targets an environment rung,
 			return runSecretsVersions(cmd, args[0])
 		},
 	}
-	versionsCmd.Flags().StringVar(&secretsEnvFlag, "env", "", "Target environment (slug)")
+	addSecretsScopeFlags(versionsCmd)
+	addSecretsJSONFlag(versionsCmd)
 
 	revealCmd := &cobra.Command{
 		Use:   "reveal <KEY> --env <env> --break-glass --reason <why>",
@@ -139,7 +154,7 @@ Expect near-zero use outside incident recovery.`,
 			return runSecretsReveal(cmd, args[0])
 		},
 	}
-	revealCmd.Flags().StringVar(&secretsEnvFlag, "env", "", "Target environment (slug)")
+	addSecretsScopeFlags(revealCmd)
 	revealCmd.Flags().BoolVar(&secretsBreakGlass, "break-glass", false, "Required acknowledgement that this is an audited emergency reveal")
 	revealCmd.Flags().StringVar(&secretsReason, "reason", "", "Required justification, recorded in the audit log")
 
@@ -147,25 +162,78 @@ Expect near-zero use outside incident recovery.`,
 	root.AddCommand(secretsCmd)
 }
 
+// addSecretsJSONFlag registers the shared --json flag so every secrets
+// subcommand can emit machine-readable output for scripts and CI (metadata
+// only — never a value).
+func addSecretsJSONFlag(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&secretsJSONOut, "json", false, "Emit machine-readable JSON instead of the human table")
+}
+
+// emitJSON writes v to stdout as indented JSON — the shared --json output path.
+// Callers pass only metadata structs; no secret value is ever routed here.
+func emitJSON(v interface{}) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding JSON: %w", err)
+	}
+	fmt.Println(string(data))
+	return nil
+}
+
+// unknownSecretsSubcommand turns a typo'd `orun secrets <x>` into an actionable
+// error with a "did you mean" suggestion and a non-zero exit, instead of the
+// silent generic help cobra prints for a non-runnable group. It reuses the
+// shared Levenshtein suggester (ui.SuggestMatch) already used for env/component
+// typos, so the whole CLI speaks one "did you mean" dialect.
+func unknownSecretsSubcommand(parent *cobra.Command, name string) error {
+	canonical, candidates := secretsSubcommandNames(parent)
+	var b strings.Builder
+	fmt.Fprintf(&b, "unknown subcommand %q for %q", name, parent.CommandPath())
+	if suggestion := ui.SuggestMatch(name, candidates); suggestion != "" {
+		fmt.Fprintf(&b, "\n\ndid you mean:\n  %s %s", parent.CommandPath(), suggestion)
+	}
+	if len(canonical) > 0 {
+		b.WriteString("\n\navailable subcommands:\n")
+		for _, n := range canonical {
+			fmt.Fprintf(&b, "  %s\n", n)
+		}
+	}
+	return fmt.Errorf("%s", strings.TrimRight(b.String(), "\n"))
+}
+
+// secretsSubcommandNames returns the invokable subcommands under `secrets`,
+// sorted: `canonical` is the printable list (names only), `candidates` also
+// includes aliases (e.g. `rm`) so a near-miss can still resolve to one.
+func secretsSubcommandNames(parent *cobra.Command) (canonical, candidates []string) {
+	for _, c := range parent.Commands() {
+		if c.Hidden || c.Name() == "help" || c.Name() == "completion" {
+			continue
+		}
+		canonical = append(canonical, c.Name())
+		candidates = append(candidates, c.Name())
+		candidates = append(candidates, c.Aliases...)
+	}
+	sort.Strings(canonical)
+	sort.Strings(candidates)
+	return canonical, candidates
+}
+
 // runSecretsReveal implements the break-glass reveal — the one value-returning
 // command (SD-3). It hard-requires --break-glass and --reason, prints the value
 // to stdout only (with a stderr warning), and never writes it to any file.
 func runSecretsReveal(cmd *cobra.Command, key string) error {
 	ctx := cmd.Context()
-	if !secretsBreakGlass {
-		return fmt.Errorf("reveal requires --break-glass: this is an audited emergency action, not the normal path (workloads receive secrets via `orun run`)")
-	}
-	if strings.TrimSpace(secretsReason) == "" {
-		return fmt.Errorf("reveal requires --reason: the justification is recorded in the audit log")
+	// Validate every precondition up front and report them together, so a
+	// caller isn't walked through --break-glass, then --reason, then a scope
+	// selector across three separate failed runs.
+	if err := revealPreflight(key); err != nil {
+		return err
 	}
 	rt, err := newSecretsRuntime(ctx)
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(secretsEnvFlag) == "" {
-		return rt.errEnvRequired(false)
-	}
-	scope, label, err := rt.environmentScope(ctx, secretsEnvFlag)
+	scope, label, err := rt.targetScope(ctx, false)
 	if err != nil {
 		return err
 	}
@@ -184,6 +252,60 @@ func runSecretsReveal(cmd *cobra.Command, key string) error {
 	// is never written to a file by orun.
 	fmt.Println(revealed.Value)
 	return nil
+}
+
+// revealPreflight collects the reveal preconditions that are missing (the
+// break-glass acknowledgement, the audit reason, and a scope selector) and, if
+// any, returns a single error listing all of them at once with a ready-to-run
+// example. It inspects flags only — no auth or network — so it runs before the
+// runtime is built and the caller sees the whole gate in one shot.
+func revealPreflight(key string) error {
+	type want struct{ flag, why string }
+	var missing []want
+	if !secretsBreakGlass {
+		missing = append(missing, want{"--break-glass", "acknowledge this is an audited, alerted emergency action"})
+	}
+	if strings.TrimSpace(secretsReason) == "" {
+		missing = append(missing, want{`--reason "<why>"`, "recorded in the audit log"})
+	}
+
+	intent := loadIntentForCloudConfig()
+	envNames := intentEnvironmentNames(intent)
+	if !anySecretsScopeSelector() {
+		hint := "<env>"
+		if len(envNames) > 0 {
+			hint = "<" + strings.Join(envNames, "|") + ">"
+		}
+		missing = append(missing, want{"--env " + hint, "which rung to reveal from (or --project / --workspace)"})
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+
+	width := 0
+	for _, m := range missing {
+		if len(m.flag) > width {
+			width = len(m.flag)
+		}
+	}
+	var b strings.Builder
+	b.WriteString("reveal needs more to proceed:\n")
+	for _, m := range missing {
+		fmt.Fprintf(&b, "    %s   %s\n", padRight(m.flag, width), m.why)
+	}
+	exampleScope := "--env <env>"
+	if len(envNames) > 0 {
+		exampleScope = "--env " + envNames[0]
+	}
+	fmt.Fprintf(&b, "\n  example:\n    orun secrets reveal %s %s --break-glass --reason \"incident #123\"", key, exampleScope)
+	return fmt.Errorf("%s", b.String())
+}
+
+// anySecretsScopeSelector reports whether the caller named any rung selector
+// (--env / --project / --workspace). Presence only; mutual-exclusion and slug
+// resolution are handled downstream by targetScope.
+func anySecretsScopeSelector() bool {
+	return strings.TrimSpace(secretsEnvFlag) != "" || secretsProjectFlag || secretsWorkspFlag
 }
 
 // addSecretsScopeFlags registers the rung-selector flags shared by set/list/
@@ -425,6 +547,9 @@ func runSecretsSet(cmd *cobra.Command, key string) error {
 	if err != nil {
 		return renderSecretsWriteError(err, key)
 	}
+	if secretsJSONOut {
+		return emitJSON(meta)
+	}
 
 	color := ui.ColorEnabledForWriter(os.Stdout)
 	detail := label
@@ -517,6 +642,12 @@ func runSecretsImport(cmd *cobra.Command) error {
 	}
 
 	rows := mergeImportSummary(entries, results)
+	if secretsJSONOut {
+		if err := emitJSON(rows); err != nil {
+			return err
+		}
+		return importErr
+	}
 	fmt.Print(renderImportSummary(rows))
 	fmt.Printf("\n%s → %s: %s\n", secretsFromDotenv, label, summarizeImportCounts(rows))
 	if importErr != nil {
@@ -527,8 +658,8 @@ func runSecretsImport(cmd *cobra.Command) error {
 
 // importSummaryRow is one line of the import summary; it carries no value.
 type importSummaryRow struct {
-	Key    string
-	Result string
+	Key    string `json:"key"`
+	Result string `json:"result"`
 }
 
 // mergeImportSummary joins parse results with server per-key outcomes,
@@ -821,10 +952,7 @@ func runSecretsRotate(cmd *cobra.Command, key string) error {
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(secretsEnvFlag) == "" {
-		return rt.errEnvRequired(false)
-	}
-	scope, label, err := rt.environmentScope(ctx, secretsEnvFlag)
+	scope, label, err := rt.targetScope(ctx, false)
 	if err != nil {
 		return err
 	}
@@ -839,6 +967,9 @@ func runSecretsRotate(cmd *cobra.Command, key string) error {
 	meta, err := rt.client.RotateSecret(ctx, scope, id, value)
 	if err != nil {
 		return renderSecretsWriteError(err, key)
+	}
+	if secretsJSONOut {
+		return emitJSON(meta)
 	}
 	color := ui.ColorEnabledForWriter(os.Stdout)
 	detail := label
@@ -866,6 +997,9 @@ func runSecretsRevoke(cmd *cobra.Command, key string) error {
 	if err := rt.client.DeleteSecret(ctx, scope, id); err != nil {
 		return renderSecretsWriteError(err, key)
 	}
+	if secretsJSONOut {
+		return emitJSON(map[string]interface{}{"key": key, "scope": string(scope.Kind), "revoked": true})
+	}
 	color := ui.ColorEnabledForWriter(os.Stdout)
 	fmt.Printf("%s revoked %s (%s)\n", ui.Green(color, "✓"), key, label)
 	return nil
@@ -877,10 +1011,7 @@ func runSecretsVersions(cmd *cobra.Command, key string) error {
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(secretsEnvFlag) == "" {
-		return rt.errEnvRequired(false)
-	}
-	scope, label, err := rt.environmentScope(ctx, secretsEnvFlag)
+	scope, label, err := rt.targetScope(ctx, false)
 	if err != nil {
 		return err
 	}
@@ -891,6 +1022,9 @@ func runSecretsVersions(cmd *cobra.Command, key string) error {
 	versions, err := rt.client.ListVersions(ctx, scope, id)
 	if err != nil {
 		return err
+	}
+	if secretsJSONOut {
+		return emitJSON(versions)
 	}
 	if len(versions) == 0 {
 		fmt.Printf("No versions for %s in %s.\n", key, label)
@@ -916,13 +1050,4 @@ func renderVersionsTable(versions []configsurface.SecretVersion) string {
 		})
 	}
 	return renderColumns([]string{"VERSION", "STATUS", "CREATED", "CREATED BY"}, rows)
-}
-
-// jsonCompact is a tiny helper kept for --json symmetry with other commands.
-func jsonCompact(v interface{}) string {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return "[]"
-	}
-	return string(data)
 }
