@@ -157,6 +157,19 @@ type SecretMeta struct {
 	// when the health lookup was unreachable (health unknown, NOT orphaned).
 	BindingStatus string `json:"bindingStatus,omitempty"`
 	Orphaned      *bool  `json:"orphaned,omitempty"`
+	// Rotation is the provider-rotation producer provenance (provider-rotated-
+	// secrets RS4): present when the stored value is re-minted from a connected
+	// parent on the rotation schedule. Display-only — never params, never a value.
+	Rotation *SecretRotationInfo `json:"rotation,omitempty"`
+}
+
+// SecretRotationInfo is the display projection of a rotated secret's producer.
+type SecretRotationInfo struct {
+	Provider      string `json:"provider"`
+	ConnectionID  string `json:"connectionId"`
+	Template      string `json:"template"`
+	GraceSeconds  *int   `json:"graceSeconds,omitempty"`
+	DeliverTarget string `json:"deliverTarget,omitempty"`
 }
 
 // EffectiveScope returns the serving scope name, tolerating either the
@@ -222,14 +235,33 @@ type SecretVersion struct {
 }
 
 // CreateSecretRequest is the body for POST …/config/secrets. Value is
-// write-only: it is sent and never surfaced again by this package.
+// write-only: it is sent and never surfaced again by this package. Exactly one
+// of Value or Rotation is set: a rotated create (provider-rotated-secrets RS1)
+// carries NO value — the server mints v1 from the connected parent.
 type CreateSecretRequest struct {
 	SecretKey      string `json:"secretKey"`
-	Value          string `json:"value"`
+	Value          string `json:"value,omitempty"`
 	DisplayName    string `json:"displayName,omitempty"`
 	RotationPolicy string `json:"rotationPolicy,omitempty"`
 	Personal       bool   `json:"personal,omitempty"`
 	Overridable    *bool  `json:"overridable,omitempty"`
+	Rotation       *SecretRotationBinding `json:"rotation,omitempty"`
+}
+
+// SecretRotationBinding is the provider-rotation producer half of a rotated
+// create (RS1): which connected parent mints the value, under which broker
+// scope template. Never carries credential material.
+type SecretRotationBinding struct {
+	// ConnectionID is the integration connection public id (int_<32 hex>).
+	ConnectionID string `json:"connectionId"`
+	// Template is the broker scope template (e.g. "workers-deploy").
+	Template string `json:"template"`
+	// GraceSeconds is the overlap the prior token stays valid after a rotation.
+	// Nil = the server default (24h).
+	GraceSeconds *int `json:"graceSeconds,omitempty"`
+	// DeliverTarget is the materialize target re-delivered on rotation, for a
+	// long-lived consumer that HOLDS the value. Empty = per-run consumers only.
+	DeliverTarget string `json:"deliverTarget,omitempty"`
 }
 
 // ImportSecret is one item of a dotenv bulk import.
@@ -323,8 +355,11 @@ func (c *Client) RotateSecret(ctx context.Context, scope Scope, id, value string
 	if err != nil {
 		return nil, err
 	}
+	// Value is omitted when empty: an empty-body rotate is the metadata-only
+	// bump for a static head and the re-mint for a provider-rotated head (the
+	// server dispatches on the head, RS3) — sending `"value":""` would 422.
 	body := struct {
-		Value string `json:"value"`
+		Value string `json:"value,omitempty"`
 	}{Value: value}
 	var meta secretEnvelope
 	if err := c.doJSON(ctx, http.MethodPost, path+"/"+urlSegment(id)+"/rotate", body, &meta, false); err != nil {
