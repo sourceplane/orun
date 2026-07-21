@@ -38,6 +38,12 @@ var (
 	secretsFromDotenv  string
 	secretsBreakGlass  bool
 	secretsReason      string
+	// provider-rotated-secrets RS4: create-from-parent + rotate-now flags.
+	secretsFromBroker    string
+	secretsConnection    string
+	secretsGraceSeconds  int
+	secretsDeliverTarget string
+	secretsRemint        bool
 )
 
 func registerSecretsCommand(root *cobra.Command) {
@@ -77,6 +83,12 @@ Scope defaults to the linked project: --env <env> targets an environment rung,
 	setCmd.Flags().StringVar(&secretsValueFlag, "value", "", "Secret value (prefer stdin: --value may land in shell history)")
 	setCmd.Flags().StringVar(&secretsRotation, "rotation", "", "Rotation policy for the key")
 	setCmd.Flags().StringVar(&secretsDisplayName, "display-name", "", "Human display name for the key")
+	// provider-rotated-secrets RS4: create-from-parent — no value is read; the
+	// server mints v1 from the connected parent and rotates it on schedule.
+	setCmd.Flags().StringVar(&secretsFromBroker, "from-broker", "", "Create a provider-rotated secret from a broker template (e.g. cloudflare/workers-deploy); no value is read")
+	setCmd.Flags().StringVar(&secretsConnection, "connection", "", "Integration connection public id (int_…) the value is minted against (with --from-broker)")
+	setCmd.Flags().IntVar(&secretsGraceSeconds, "grace-seconds", 0, "Overlap seconds the prior token stays valid after a rotation (with --from-broker; default: server 24h)")
+	setCmd.Flags().StringVar(&secretsDeliverTarget, "deliver-target", "", "Materialize target re-delivered on rotation for a long-lived consumer (with --from-broker)")
 	addSecretsJSONFlag(setCmd)
 
 	importCmd := &cobra.Command{
@@ -114,6 +126,9 @@ Scope defaults to the linked project: --env <env> targets an environment rung,
 	}
 	addSecretsScopeFlags(rotateCmd)
 	rotateCmd.Flags().StringVar(&secretsValueFlag, "value", "", "New secret value (prefer stdin: --value may land in shell history)")
+	// provider-rotated-secrets RS4: rotate-now for a provider-rotated secret —
+	// no value is read; the server re-mints from the connected parent (RS3).
+	rotateCmd.Flags().BoolVar(&secretsRemint, "remint", false, "Re-mint a provider-rotated secret from its connected parent (no value is read)")
 	addSecretsJSONFlag(rotateCmd)
 
 	revokeCmd := &cobra.Command{
@@ -527,17 +542,34 @@ func runSecretsSet(cmd *cobra.Command, key string) error {
 		return err
 	}
 
-	value, err := readSecretValue(cmd)
-	if err != nil {
-		return err
-	}
-
 	req := configsurface.CreateSecretRequest{
 		SecretKey:      key,
-		Value:          value,
 		DisplayName:    secretsDisplayName,
 		RotationPolicy: secretsRotation,
 		Personal:       secretsPersonal,
+	}
+	if secretsFromBroker != "" {
+		// Create-from-parent (provider-rotated-secrets RS4): NO value is read —
+		// the server mints v1 from the connected parent and the engine rotates
+		// it on schedule. The template arg is provider/template for readability;
+		// the server derives the provider from the connection.
+		rotation, err := buildRotationBinding(secretsFromBroker, secretsConnection, secretsGraceSeconds, secretsDeliverTarget)
+		if err != nil {
+			return err
+		}
+		if secretsValueFlag != "" {
+			return fmt.Errorf("--from-broker and --value are mutually exclusive: the value is minted from the connected parent")
+		}
+		if secretsPersonal {
+			return fmt.Errorf("--from-broker cannot be personal: broker authority binds at shared scopes only")
+		}
+		req.Rotation = rotation
+	} else {
+		value, err := readSecretValue(cmd)
+		if err != nil {
+			return err
+		}
+		req.Value = value
 	}
 	if secretsLocked {
 		overridable := false
@@ -960,9 +992,17 @@ func runSecretsRotate(cmd *cobra.Command, key string) error {
 	if err != nil {
 		return err
 	}
-	value, err := readSecretValue(cmd)
-	if err != nil {
-		return err
+	// --remint (RS4): rotate-now for a provider-rotated secret — send an empty
+	// body; the server re-mints from the connected parent (RS3). No value is
+	// read, so nothing secret ever touches this process.
+	value := ""
+	if !secretsRemint {
+		value, err = readSecretValue(cmd)
+		if err != nil {
+			return err
+		}
+	} else if secretsValueFlag != "" {
+		return fmt.Errorf("--remint and --value are mutually exclusive: the value is minted from the connected parent")
 	}
 	meta, err := rt.client.RotateSecret(ctx, scope, id, value)
 	if err != nil {
@@ -1050,4 +1090,34 @@ func renderVersionsTable(versions []configsurface.SecretVersion) string {
 		})
 	}
 	return renderColumns([]string{"VERSION", "STATUS", "CREATED", "CREATED BY"}, rows)
+}
+
+// buildRotationBinding parses the create-from-parent flags (RS4) into the wire
+// binding. The --from-broker arg is "provider/template" for readability; the
+// server derives the authoritative provider from the connection, so the CLI
+// only validates shape and passes the template through.
+func buildRotationBinding(fromBroker, connection string, graceSeconds int, deliverTarget string) (*configsurface.SecretRotationBinding, error) {
+	parts := strings.SplitN(fromBroker, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return nil, fmt.Errorf("--from-broker must be provider/template (e.g. cloudflare/workers-deploy)")
+	}
+	template := parts[1]
+	if connection == "" {
+		return nil, fmt.Errorf("--from-broker requires --connection <int_…> (find it with the console's integration hub or connection detail page)")
+	}
+	if !strings.HasPrefix(connection, "int_") {
+		return nil, fmt.Errorf("--connection must be an integration connection public id (int_…)")
+	}
+	if graceSeconds < 0 {
+		return nil, fmt.Errorf("--grace-seconds must be non-negative")
+	}
+	binding := &configsurface.SecretRotationBinding{
+		ConnectionID:  connection,
+		Template:      template,
+		DeliverTarget: deliverTarget,
+	}
+	if graceSeconds > 0 {
+		binding.GraceSeconds = &graceSeconds
+	}
+	return binding, nil
 }
