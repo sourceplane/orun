@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sourceplane/orun/internal/configsurface"
+	"github.com/sourceplane/orun/internal/integrationscli"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -45,6 +46,16 @@ var (
 const integrationsUsageLine = "orun integrations <provider> secret create <KEY> --connection <int_…> --template <id> [--mode brokered|rotated]"
 
 func registerIntegrationsCommand(root *cobra.Command) {
+	integrationsCmd, state := newIntegrationsCommand()
+	root.AddCommand(integrationsCmd)
+	// The dynamic layer (orun-integrations-cli ICL1): when a cached registry
+	// exists for the resolved workspace, provider verb trees mount as real
+	// subcommands. Guarded so non-integrations invocations pay nothing.
+	maybeMountDynamicIntegrations(integrationsCmd, state)
+}
+
+func newIntegrationsCommand() (*cobra.Command, *integrationsDynamicState) {
+	state := &integrationsDynamicState{}
 	integrationsCmd := &cobra.Command{
 		Use:   "integrations <provider> secret create <KEY>",
 		Short: "Integration-owned secret authoring (providers and templates come from the platform, not the CLI)",
@@ -69,11 +80,26 @@ Examples:
 		// The provider is a positional (providers are unknown offline), so the
 		// static grammar underneath it is parsed by hand: a RunE with free args
 		// keeps `orun integrations <anything>` inside this one command while
-		// still failing typos loudly with suggestions (SP-A7).
+		// still failing typos loudly with suggestions (SP-A7). With a cached
+		// registry mounted (ICL1), known providers dispatch to their rendered
+		// subtrees before this RunE ever sees them; what reaches here is then
+		// either the listing (no args) or an unknown/dormant provider.
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				return cmd.Help()
+				if state.cache != nil {
+					fmt.Print(integrationscli.RenderProviderListing(state.cache.Registry))
+					if state.stale {
+						fmt.Fprintln(os.Stderr, integrationsStaleNote)
+					}
+					return nil
+				}
+				err := cmd.Help()
+				fmt.Fprintln(os.Stderr, "\n"+integrationsSyncHint)
+				return err
+			}
+			if state.cache != nil {
+				return unknownIntegrationProvider(state.cache, args[0])
 			}
 			provider, key, err := parseIntegrationsSecretArgs(args)
 			if err != nil {
@@ -94,7 +120,8 @@ Examples:
 	integrationsCmd.Flags().IntVar(&secretsGraceSeconds, "grace-seconds", 0, "Overlap seconds the prior token stays valid after a rotation (rotated mode; default: server 24h)")
 	integrationsCmd.Flags().StringVar(&secretsDeliverTarget, "deliver-target", "", "Materialize target re-delivered on rotation for a long-lived consumer (rotated mode)")
 	integrationsCmd.Flags().StringVar(&secretsDisplayName, "display-name", "", "Human display name for the key")
-	root.AddCommand(integrationsCmd)
+	integrationsCmd.AddCommand(newIntegrationsSyncCommand())
+	return integrationsCmd, state
 }
 
 // parseIntegrationsSecretArgs parses the positional grammar
