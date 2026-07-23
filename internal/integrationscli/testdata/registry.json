@@ -1,0 +1,81 @@
+{
+  "registry": [
+    {
+      "id": "cloudflare",
+      "displayName": "Cloudflare",
+      "category": "infrastructure",
+      "tagline": "Workers, Pages, DNS",
+      "connect": [
+        {
+          "kind": "token",
+          "live": true,
+          "recipe": {
+            "intro": "Create an API token scoped for Orun:",
+            "items": [
+              {"name": "Account.Workers Scripts:Edit", "why": "deploy Workers"},
+              {"name": "Zone.DNS:Edit", "why": "manage DNS records"}
+            ],
+            "links": [
+              {"label": "Create token", "url": "https://dash.example.test/profile/api-tokens"}
+            ]
+          }
+        }
+      ],
+      "multiConnection": true,
+      "capabilities": ["secrets", "credential-broker"],
+      "connectedCount": 2,
+      "space": {"tabs": ["overview", "connections"], "modules": ["secrets"], "authoring": "custom"},
+      "cli": {
+        "verbs": [
+          {
+            "path": ["connections", "list"],
+            "summary": "List Cloudflare connections (served)",
+            "args": [],
+            "invoke": {"plane": "integrations", "op": "integrations.listConnections", "bind": {}}
+          },
+          {
+            "path": ["dns", "audit"],
+            "summary": "Audit DNS posture for a zone",
+            "args": [
+              {"name": "zone", "kind": "flag", "type": "string", "required": true, "help": "Zone id"}
+            ],
+            "invoke": {"plane": "integrations", "op": "integrations.dnsAudit.v2", "bind": {"zone": "zoneId"}}
+          }
+        ]
+      },
+      "entitlement": "pro",
+      "version": 3,
+      "status": "live",
+      "entitled": true
+    },
+    {
+      "id": "github",
+      "displayName": "GitHub",
+      "category": "scm",
+      "capabilities": ["credential-broker"],
+      "connectedCount": 1,
+      "status": "live"
+    },
+    {
+      "id": "slack",
+      "displayName": "Slack",
+      "category": "messaging",
+      "capabilities": [],
+      "status": "live"
+    },
+    {
+      "id": "supabase",
+      "displayName": "Supabase",
+      "category": "database",
+      "capabilities": ["secrets", "provision"],
+      "status": "live"
+    },
+    {
+      "id": "aws",
+      "displayName": "Amazon Web Services",
+      "category": "infrastructure",
+      "capabilities": [],
+      "status": "dormant"
+    }
+  ]
+}

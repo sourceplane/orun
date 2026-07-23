@@ -20,7 +20,7 @@ seam that can extend a namespace but never contradict it.
 
 | Field | Value |
 |-------|-------|
-| Status | **Draft — for review** |
+| Status | **ICL0–ICL3 implemented** (this PR) — registry client + cache, runtime renderer, allowlisted execution, native-extension seam; SP5 surface byte-identical (goldens unchanged) |
 | Cluster | **ICL** (integration CLI — pairs `orun-cloud` epic **IR**, milestone IR7) |
 | Owner(s) | `internal/configsurface` (registry read + cache) · `cmd/orun/command_integrations.go` (renderer mount) · new `internal/integrationscli` (descriptor → cobra renderer, invoke mapper, native-extension registry) |
 | Target branch | `claude/integration-registry-unified-ui-wg3c6o` |
