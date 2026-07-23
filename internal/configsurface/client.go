@@ -236,8 +236,10 @@ type SecretVersion struct {
 
 // CreateSecretRequest is the body for POST …/config/secrets. Value is
 // write-only: it is sent and never surfaced again by this package. Exactly one
-// of Value or Rotation is set: a rotated create (provider-rotated-secrets RS1)
-// carries NO value — the server mints v1 from the connected parent.
+// of Value, Binding, or Rotation is set: a brokered create (IH7) and a rotated
+// create (provider-rotated-secrets RS1) carry NO value — the value is minted
+// from the connected parent (at resolve time for brokered; once + on schedule
+// for rotated).
 type CreateSecretRequest struct {
 	SecretKey      string `json:"secretKey"`
 	Value          string `json:"value,omitempty"`
@@ -245,7 +247,22 @@ type CreateSecretRequest struct {
 	RotationPolicy string `json:"rotationPolicy,omitempty"`
 	Personal       bool   `json:"personal,omitempty"`
 	Overridable    *bool  `json:"overridable,omitempty"`
+	Binding        *SecretBrokerBinding   `json:"binding,omitempty"`
 	Rotation       *SecretRotationBinding `json:"rotation,omitempty"`
+}
+
+// SecretBrokerBinding is the brokered-pointer half of a brokered create (IH7,
+// contracts CreateBrokeredSecretRequest): the value is minted just-in-time
+// from the connection at resolve, never stored. Never carries credential
+// material.
+type SecretBrokerBinding struct {
+	// ConnectionID is the integration connection public id (int_<32 hex>).
+	ConnectionID string `json:"connectionId"`
+	// Template is the broker scope template (e.g. "workers-deploy").
+	Template string `json:"template"`
+	// Params are the template params, validated server-side against the
+	// template's declared param names.
+	Params map[string]string `json:"params,omitempty"`
 }
 
 // SecretRotationBinding is the provider-rotation producer half of a rotated
@@ -256,12 +273,73 @@ type SecretRotationBinding struct {
 	ConnectionID string `json:"connectionId"`
 	// Template is the broker scope template (e.g. "workers-deploy").
 	Template string `json:"template"`
+	// Params are the template params, validated server-side against the
+	// template's declared param names.
+	Params map[string]string `json:"params,omitempty"`
 	// GraceSeconds is the overlap the prior token stays valid after a rotation.
 	// Nil = the server default (24h).
 	GraceSeconds *int `json:"graceSeconds,omitempty"`
 	// DeliverTarget is the materialize target re-delivered on rotation, for a
 	// long-lived consumer that HOLDS the value. Empty = per-run consumers only.
 	DeliverTarget string `json:"deliverTarget,omitempty"`
+}
+
+// ── Secrets capabilities (saas-secrets-platform SP0c/SP-A1, read by SP5) ──────
+
+// ScopeTemplate is one named, versioned credential scope a provider can mint
+// against (contracts IntegrationScopeTemplate). Safe descriptor — never a
+// credential.
+type ScopeTemplate struct {
+	ID            string   `json:"id"`
+	Provider      string   `json:"provider"`
+	Version       int      `json:"version"`
+	DisplayName   string   `json:"displayName"`
+	Description   string   `json:"description"`
+	Params        []string `json:"params"`
+	MaxTTLSeconds int      `json:"maxTtlSeconds"`
+	CustodyKind   string   `json:"custodyKind,omitempty"`
+	// Origin is where the template is authored: "declared" (adapter code
+	// catalog) or "custom" (org-curated, SP4). Empty means declared.
+	Origin       string `json:"origin,omitempty"`
+	BaseTemplate string `json:"baseTemplate,omitempty"`
+	// Status soft-retires a template from create surfaces while existing
+	// bindings keep resolving (SP-A6). Empty means active.
+	Status string `json:"status,omitempty"`
+}
+
+// Active reports whether the template may back a NEW create: a retired
+// template stays resolvable for bound secrets but disappears from authoring
+// (SP-A6). Absent status means active.
+func (t ScopeTemplate) Active() bool { return t.Status != "retired" }
+
+// SecretsCapability is one provider's DESCRIBE declaration (contracts
+// ProviderSecretsCapability): its template catalog, the secret modes its mint
+// can back, and the materialize targets a rotated value can be delivered into.
+// The CLI derives all authoring validation from this — it carries no catalog
+// of its own.
+type SecretsCapability struct {
+	Provider        string          `json:"provider"`
+	ScopeTemplates  []ScopeTemplate `json:"scopeTemplates"`
+	SupportedModes  []string        `json:"supportedModes"`
+	DeliveryTargets []string        `json:"deliveryTargets"`
+	Authoring       string          `json:"authoring,omitempty"`
+}
+
+// ListSecretsCapabilities calls the org-scoped bulk capability read
+// (GET /v1/organizations/{org}/integrations/secrets-capabilities, SP-A1):
+// every capability-declaring provider in one response. Pure metadata.
+func (c *Client) ListSecretsCapabilities(ctx context.Context, org string) ([]SecretsCapability, error) {
+	if strings.TrimSpace(org) == "" {
+		return nil, fmt.Errorf("configsurface: capability listing needs an organization")
+	}
+	path := "/v1/organizations/" + urlSegment(org) + "/integrations/secrets-capabilities"
+	var payload struct {
+		Capabilities []SecretsCapability `json:"capabilities"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &payload, true); err != nil {
+		return nil, fmt.Errorf("list secrets capabilities: %w", err)
+	}
+	return payload.Capabilities, nil
 }
 
 // ImportSecret is one item of a dotenv bulk import.
