@@ -24,6 +24,14 @@ const browserLoginTimeout = 10 * time.Minute
 // /token until the grant is approved; there is no loopback callback).
 const browserPollInterval = 2 * time.Second
 
+// maxConsecutivePollFailures caps back-to-back transport-level poll failures
+// (timeouts, connection resets, dropped connections — anything that is not an
+// *APIError) tolerated by the login poll loops. A single stalled request must
+// not kill an otherwise healthy login (observed live: the 30s client timeout
+// tripping once on device/poll), but a real outage should still surface
+// instead of silently polling until the grant expires.
+const maxConsecutivePollFailures = 4
+
 // Platform auth endpoint paths (state-api-contract.md §1). Browser-loopback
 // login polls cli/token with grantType "cli_code" until the console approves
 // the grant; the device flow polls device/poll. Refresh reuses cli/token with
@@ -564,6 +572,7 @@ func BrowserLogin(ctx context.Context, backendURL, version string, out io.Writer
 	defer cancel()
 	deadline := start.deadline(time.Now())
 
+	transportFails := 0
 	for {
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("browser login expired before approval")
@@ -577,6 +586,31 @@ func BrowserLogin(ctx context.Context, backendURL, version string, out io.Writer
 			return creds, nil
 		}
 		if cliCodePending(err) {
+			transportFails = 0
+			if !sleepCtx(loginCtx, browserPollInterval) {
+				if errors.Is(loginCtx.Err(), context.DeadlineExceeded) {
+					return nil, fmt.Errorf("browser login timed out")
+				}
+				return nil, loginCtx.Err()
+			}
+			continue
+		}
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) {
+			// Transport-level failure (timeout, reset, dropped connection):
+			// the backend never answered, so this poll proves nothing about
+			// the grant. Retry a few times before surfacing a real outage.
+			// Context expiry/cancellation is never retried.
+			if loginCtx.Err() != nil {
+				if errors.Is(loginCtx.Err(), context.DeadlineExceeded) {
+					return nil, fmt.Errorf("browser login timed out")
+				}
+				return nil, loginCtx.Err()
+			}
+			transportFails++
+			if transportFails >= maxConsecutivePollFailures {
+				return nil, fmt.Errorf("redeem Orun login: giving up after %d consecutive poll failures: %w", transportFails, err)
+			}
 			if !sleepCtx(loginCtx, browserPollInterval) {
 				if errors.Is(loginCtx.Err(), context.DeadlineExceeded) {
 					return nil, fmt.Errorf("browser login timed out")
@@ -608,6 +642,7 @@ func DeviceLogin(ctx context.Context, backendURL, version string, out io.Writer)
 		interval = 5
 	}
 	deadline := start.deadline(time.Now())
+	transportFails := 0
 	for {
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("device login expired")
@@ -643,9 +678,25 @@ func DeviceLogin(ctx context.Context, backendURL, version string, out io.Writer)
 					}
 					continue
 				}
+				return nil, err
 			}
-			return nil, err
+			// Transport-level failure (timeout, reset, dropped connection):
+			// the backend never answered, so this poll proves nothing about
+			// the grant. Retry a few times before surfacing a real outage.
+			// Parent-context cancellation is never retried.
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			transportFails++
+			if transportFails >= maxConsecutivePollFailures {
+				return nil, fmt.Errorf("device login: giving up after %d consecutive poll failures: %w", transportFails, err)
+			}
+			if !sleepCtx(ctx, time.Duration(interval)*time.Second) {
+				return nil, ctx.Err()
+			}
+			continue
 		}
+		transportFails = 0
 		if pending != nil {
 			// RFC-8628 slow_down: back off the poll interval.
 			if strings.EqualFold(pending.Error, "slow_down") {
