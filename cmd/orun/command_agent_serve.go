@@ -74,6 +74,18 @@ Identity comes from the sandbox environment (injected by the control plane):
 		if err := checkServeIdentity(cloudAPI, orgID, sessionID, token); err != nil {
 			return err
 		}
+		// Model credential diagnostics (redacted): which of the harness env
+		// vars actually reached this process. The provision path injects either
+		// ANTHROPIC_API_KEY (an Anthropic connection) or ANTHROPIC_BASE_URL +
+		// ANTHROPIC_AUTH_TOKEN (a gateway connection), plus ANTHROPIC_MODEL —
+		// a missing credential fails only on the harness's FIRST TURN, after
+		// the session already reads `running`, so name it at boot instead.
+		fmt.Fprintf(errOut, "orun agent serve: model env — ANTHROPIC_API_KEY=%s ANTHROPIC_AUTH_TOKEN=%s ANTHROPIC_BASE_URL=%s ANTHROPIC_MODEL=%s\n",
+			redactSecret(os.Getenv("ANTHROPIC_API_KEY")), redactSecret(os.Getenv("ANTHROPIC_AUTH_TOKEN")),
+			orMissing(os.Getenv("ANTHROPIC_BASE_URL")), orMissing(os.Getenv("ANTHROPIC_MODEL")))
+		if os.Getenv("ANTHROPIC_API_KEY") == "" && os.Getenv("ANTHROPIC_AUTH_TOKEN") == "" {
+			fmt.Fprintf(errOut, "orun agent serve: WARNING no model credential in env — the harness will fail its first turn (check the workspace's model connection in Settings › AI providers)\n")
+		}
 		relayBase := fmt.Sprintf("%s/v1/organizations/%s/agents/sessions/%s", cloudAPI, orgID, sessionID)
 		ctx := cmd.Context()
 
@@ -166,6 +178,7 @@ Identity comes from the sandbox environment (injected by the control plane):
 		}
 		var persona []byte
 		var toolPolicy nodes.AgentToolPolicy
+		var typeModel string
 		if typeName != "" {
 			d, issues := agenttype.Load(filepath.Join("agents", typeName+".md"))
 			if d == nil {
@@ -173,6 +186,7 @@ Identity comes from the sandbox environment (injected by the control plane):
 			}
 			persona = d.Body
 			toolPolicy = d.Tools
+			typeModel = d.Model
 		}
 		fmt.Fprintf(errOut, "orun agent serve: assembling brief (type=%q task=%q)\n", typeName, task)
 		brief, err := agent.AssembleBrief(ctx, store, agent.BriefInput{
@@ -194,7 +208,7 @@ Identity comes from the sandbox environment (injected by the control plane):
 				return mErr
 			}
 			mcpConfigPath = setup.ConfigPath
-			drv = &driver.ClaudeCode{ExtraArgs: setup.HarnessArgs()}
+			drv = &driver.ClaudeCode{ExtraArgs: append(setup.HarnessArgs(), harnessModelArgs(typeModel)...)}
 		}
 		if serveDriver == "stub" && runKind == nodes.RunKindInteractive {
 			drv = &driver.Stub{Interactive: true}
@@ -234,6 +248,19 @@ Identity comes from the sandbox environment (injected by the control plane):
 		fmt.Fprintf(errOut, "orun agent serve: session %s ended: %s\n", res.SessionID, res.Outcome.Status)
 		return nil
 	},
+}
+
+// harnessModelArgs pins the agent type's `model:` frontmatter on the harness
+// (--model). This was declared-but-never-applied for four releases: agenttype
+// parsed the field, HarnessArgs only ever emitted tool gates, and the claude
+// CLI silently ran its own default model. The env pin wins when present —
+// ANTHROPIC_MODEL is the provision path's explicit choice (profile model or
+// the connection's pinned model), and the --model flag would override it.
+func harnessModelArgs(model string) []string {
+	if model == "" || os.Getenv("ANTHROPIC_MODEL") != "" {
+		return nil
+	}
+	return []string{"--model", model}
 }
 
 // orMissing renders a non-secret env value for the dial-home diagnostic, or a
