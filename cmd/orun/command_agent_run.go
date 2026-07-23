@@ -65,6 +65,7 @@ snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
 		// truth), falling back to a sealed one by ref.
 		var persona []byte
 		var toolPolicy nodes.AgentToolPolicy
+		var typeModel string
 		if runType != "" {
 			d, issues := agenttype.Load(filepath.Join("agents", runType+".md"))
 			if d == nil {
@@ -72,6 +73,7 @@ snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
 			}
 			persona = d.Body
 			toolPolicy = d.Tools
+			typeModel = d.Model
 		}
 
 		// Resolve the contract from a pulled spec snapshot, if present.
@@ -153,7 +155,7 @@ snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
 				return mErr
 			}
 			mcpConfigPath = setup.ConfigPath
-			drv = &driver.ClaudeCode{ExtraArgs: setup.HarnessArgs()}
+			drv = &driver.ClaudeCode{ExtraArgs: append(setup.HarnessArgs(), harnessModelArgs(typeModel)...)}
 		}
 		branch := ""
 		if runTask != "" {
