@@ -564,6 +564,23 @@ func runSecretsSet(cmd *cobra.Command, key string) error {
 			return fmt.Errorf("--from-broker cannot be personal: broker authority binds at shared scopes only")
 		}
 		req.Rotation = rotation
+		// Deprecation (saas-secrets-platform SP5, SP-A7): authoring an
+		// integration-bound secret moves to the integration namespace. Keep
+		// working for one release, printing the EXACT namespaced substitute
+		// for this invocation — stderr only, so --json and pipes stay clean.
+		fmt.Fprintln(os.Stderr, fromBrokerDeprecationNotice(replacementSpec{
+			Key:           key,
+			Provider:      strings.SplitN(secretsFromBroker, "/", 2)[0],
+			Template:      rotation.Template,
+			Connection:    secretsConnection,
+			Rotation:      secretsRotation,
+			GraceSeconds:  secretsGraceSeconds,
+			DeliverTarget: secretsDeliverTarget,
+			DisplayName:   secretsDisplayName,
+			Env:           secretsEnvFlag,
+			Project:       secretsProjectFlag,
+			Workspace:     secretsWorkspFlag,
+		}))
 	} else {
 		value, err := readSecretValue(cmd)
 		if err != nil {

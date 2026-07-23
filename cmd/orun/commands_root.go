@@ -272,6 +272,7 @@ func init() {
 	registerCatalogCommand(rootCmd)
 	registerObjectsCommand(rootCmd)
 	registerSecretsCommand(rootCmd)
+	registerIntegrationsCommand(rootCmd)
 	registerPolicyCommand(rootCmd)
 	registerWorkCommand(rootCmd)
 	registerSpecCommand(rootCmd)
