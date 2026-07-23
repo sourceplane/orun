@@ -286,10 +286,20 @@ func (l *runLoop) foldEvent(e driver.Event) {
 		log.Append(nodes.SessionEventMessageAgent, textPayload(e), e.RequestID)
 	case driver.EventToolCall:
 		tool, _ := e.Fields["tool"].(string)
-		dec := opts.Policy.Decide(tool)
+		// The harness reports orun MCP tools under their harness-visible name
+		// (mcp__orun__work_query) while the policy lists the bare name
+		// (work_query) — the same normalization WriteMCPConfig applies in the
+		// other direction. Without it every policy-ALLOWED MCP tool was logged
+		// as denied here (the authority disagreeing with its own config).
+		dec := opts.Policy.Decide(policyToolName(tool))
 		log.Append(nodes.SessionEventToolCall, map[string]any{"tool": tool, "decision": dec.String()}, "")
 		if dec == DecisionDeny {
-			log.Append(nodes.SessionEventError, map[string]any{"tool": tool, "error": "denied by tool policy"}, "")
+			log.Append(nodes.SessionEventError, map[string]any{
+				"tool": tool, "error": "denied by tool policy",
+				// The head folds `text` into the transcript — name the denial
+				// there instead of relaying an empty line.
+				"text": fmt.Sprintf("%s denied by tool policy", tool),
+			}, "")
 		}
 	case driver.EventToolResult:
 		log.Append(nodes.SessionEventToolResult, textPayload(e), e.RequestID)

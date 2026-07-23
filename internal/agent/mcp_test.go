@@ -89,3 +89,18 @@ func TestWriteMCPConfigMergesExtraServers(t *testing.T) {
 		t.Fatal("orun server must always be present")
 	}
 }
+
+func TestPolicyToolNameNormalization(t *testing.T) {
+	// The runtime authority must speak the same names as its own config:
+	// harness-reported mcp__orun__* maps back to the bare policy name.
+	if got := policyToolName("mcp__orun__work_query"); got != "work_query" {
+		t.Fatalf("got %q", got)
+	}
+	if got := policyToolName("Bash"); got != "Bash" {
+		t.Fatalf("harness tools pass through, got %q", got)
+	}
+	p := NewToolPolicy(nodes.AgentToolPolicy{Allow: []string{"work_query"}, Deny: []string{"*"}})
+	if p.Decide(policyToolName("mcp__orun__work_query")) != DecisionAllow {
+		t.Fatal("an allowed MCP tool must not be denied by the authority")
+	}
+}

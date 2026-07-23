@@ -9,8 +9,13 @@ runtime:
   maxTokens: 64000
 autonomyDefault: assist
 tools:
-  allow: [work_query, work_get, spec_get, catalog_get_component, catalog_affected, task_comment]
-  ask: [contract_propose, task_assign]
+  # Work-plane reads + the harness's read/plan tools pass; everything that
+  # writes (shell, edits, web, work-plane mutations) rides the ask lane —
+  # autonomy `assist` means a head approves each one. deny:["*"] backstops.
+  allow: [work_query, work_get, spec_get, catalog_get_component, catalog_affected, task_comment, connection_info,
+          Read, Glob, Grep, LS, TodoWrite, NotebookRead]
+  ask: [contract_propose, task_assign,
+        Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch]
   deny: ["*"]
 owner: sourceplane/team/platform
 extends: base-orun-literacy

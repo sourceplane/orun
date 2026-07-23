@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
+	shipped "github.com/sourceplane/orun/agents"
 	"github.com/sourceplane/orun/internal/nodes"
 )
 
@@ -114,6 +116,36 @@ func Load(path string) (*Decl, []Issue) {
 	if err != nil {
 		return nil, []Issue{{Path: path, Level: "error", Message: err.Error()}}
 	}
+	return parse(path, raw)
+}
+
+// typeNameRE guards LoadNamed against path-shaped names: a type name is a
+// bare slug, never a path segment.
+var typeNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// LoadNamed resolves an agent type by NAME: the workspace's authored
+// agents/<name>.md wins (the source-of-truth path Load has always taken);
+// the shipped copy embedded in the binary is the fallback. The fallback is
+// what makes a bare cloud sandbox work — the box has only the released
+// binary, so without it serve boots type-less and deny-by-default denies
+// every tool the session tries.
+func LoadNamed(name string) (*Decl, []Issue) {
+	diskPath := filepath.Join("agents", name+".md")
+	if !typeNameRE.MatchString(name) {
+		return nil, []Issue{{Path: diskPath, Level: "error", Message: fmt.Sprintf("invalid agent type name %q", name)}}
+	}
+	if _, err := os.Stat(diskPath); err == nil {
+		return Load(diskPath)
+	}
+	raw, err := shipped.FS.ReadFile(name + ".md")
+	if err != nil {
+		return nil, []Issue{{Path: diskPath, Level: "error",
+			Message: fmt.Sprintf("no authored agents/%s.md and no shipped type of that name", name)}}
+	}
+	return parse("embedded:agents/"+name+".md", raw)
+}
+
+func parse(path string, raw []byte) (*Decl, []Issue) {
 	fmBytes, body, ok := split(raw)
 	if !ok {
 		return nil, []Issue{{Path: path, Level: "notice", Message: "no frontmatter — not an agent type, skipped"}}

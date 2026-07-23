@@ -174,3 +174,62 @@ One Ready task to a merged-quality PR.
 		t.Fatalf("key order changed identity: %s vs %s", id1, id2)
 	}
 }
+
+func TestLoadNamedEmbeddedFallback(t *testing.T) {
+	// A bare directory — no agents/ checkout, like a cloud sandbox.
+	t.Chdir(t.TempDir())
+
+	d, issues := LoadNamed("implementer")
+	if d == nil {
+		t.Fatalf("shipped implementer must load from the embedded FS: %v", issues)
+	}
+	if d.Harness != "claude-code" || d.Model == "" {
+		t.Fatalf("unexpected shipped decl: %+v", d)
+	}
+	if len(d.Tools.Allow) == 0 || len(d.Tools.Ask) == 0 {
+		t.Fatalf("shipped implementer policy must carry allow+ask lanes: %+v", d.Tools)
+	}
+	if !strings.HasPrefix(d.Path, "embedded:") {
+		t.Fatalf("fallback path must name the embedded source, got %q", d.Path)
+	}
+
+	// Unknown type: an actionable error, never a panic.
+	if d, issues := LoadNamed("no-such-type"); d != nil || len(issues) == 0 {
+		t.Fatalf("unknown type must fail loud: %v %v", d, issues)
+	}
+	// Path-shaped names are rejected outright.
+	if d, _ := LoadNamed("../implementer"); d != nil {
+		t.Fatal("path-shaped names must be rejected")
+	}
+}
+
+func TestLoadNamedAuthoredFileWins(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.MkdirAll(filepath.Join(dir, "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	authored := `---
+name: implementer
+kind: agent-type
+apiVersion: orun.io/v1
+harness: claude-code
+model: claude-haiku-4-5-20251001
+autonomyDefault: assist
+tools:
+  allow: [work_get]
+owner: t/o
+---
+custom persona
+`
+	if err := os.WriteFile(filepath.Join(dir, "agents", "implementer.md"), []byte(authored), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d, issues := LoadNamed("implementer")
+	if d == nil {
+		t.Fatalf("authored file must load: %v", issues)
+	}
+	if d.Model != "claude-haiku-4-5-20251001" {
+		t.Fatalf("authored file must win over the embedded copy, got model %q", d.Model)
+	}
+}
