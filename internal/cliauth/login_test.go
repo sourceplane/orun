@@ -45,6 +45,15 @@ type platformAuthServer struct {
 	// handling resumes — mimics api-edge throttling the identity scope.
 	deviceRateLimitFirst int
 
+	// deviceDropFirst is the number of device/poll calls whose connection is
+	// dropped without a response (transport-level failure, e.g. a stalled or
+	// reset request). Applied before rate-limit/pending handling.
+	deviceDropFirst int
+
+	// browserDropFirst is the number of cli/token (grantType cli_code) polls
+	// whose connection is dropped without a response.
+	browserDropFirst int
+
 	// refresh rotation state.
 	currentRefresh string
 	rotateTo       string
@@ -104,7 +113,11 @@ func newPlatformAuthServer(t *testing.T) *platformAuthServer {
 				return
 			}
 			n := atomic.AddInt32(&p.browserPolls, 1)
-			if int(n) <= p.browserApproveAfter {
+			if int(n) <= p.browserDropFirst {
+				dropConn(w)
+				return
+			}
+			if int(n) <= p.browserDropFirst+p.browserApproveAfter {
 				// Pending: platform returns HTTP 400 "Not yet approved".
 				writeError(w, 400, "validation_failed", "Not yet approved")
 				return
@@ -135,14 +148,19 @@ func newPlatformAuthServer(t *testing.T) *platformAuthServer {
 			writeError(w, 410, "expired", "Device code expired")
 			return
 		}
-		if int(n) <= p.deviceRateLimitFirst {
+		if int(n) <= p.deviceDropFirst {
+			// Transport-level failure: drop the connection unanswered.
+			dropConn(w)
+			return
+		}
+		if int(n) <= p.deviceDropFirst+p.deviceRateLimitFirst {
 			// api-edge throttling the identity scope: 429 rate_limited with
 			// a short Retry-After. The CLI must treat this as transient.
 			w.Header().Set("Retry-After", "1")
 			writeError(w, 429, "rate_limited", "Too many requests")
 			return
 		}
-		if int(n) <= p.deviceRateLimitFirst+p.deviceApproveAfter {
+		if int(n) <= p.deviceDropFirst+p.deviceRateLimitFirst+p.deviceApproveAfter {
 			// Pending: status under data, error mirrors RFC-8628.
 			writeData(w, 200, map[string]any{"status": "pending", "error": "authorization_pending"})
 			return
@@ -158,6 +176,21 @@ func newPlatformAuthServer(t *testing.T) *platformAuthServer {
 	p.srv = httptest.NewServer(mux)
 	t.Cleanup(p.srv.Close)
 	return p
+}
+
+// dropConn hijacks the connection and closes it without writing a response,
+// so the client sees a transport-level error (EOF/connection reset) rather
+// than any HTTP status.
+func dropConn(w http.ResponseWriter) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		panic("test server does not support hijacking")
+	}
+	conn, _, err := hj.Hijack()
+	if err != nil {
+		panic(err)
+	}
+	_ = conn.Close()
 }
 
 // writeData emits the platform's { data, meta } success envelope (OP1).
@@ -471,6 +504,71 @@ func TestDeviceLogin_RateLimitedContinuesPolling(t *testing.T) {
 	// 2 rate-limited polls + 1 pending + 1 complete.
 	if got := atomic.LoadInt32(&p.devicePolls); got < 4 {
 		t.Errorf("expected at least 4 polls (2 throttled + pending + complete), got %d", got)
+	}
+}
+
+func TestDeviceLogin_TransientTransportErrorsRetried(t *testing.T) {
+	fileStoreHome(t)
+	p := newPlatformAuthServer(t)
+	p.session = sampleSession()
+	// The first two polls die at the transport level (dropped connection —
+	// same class as a stalled request hitting the 30s client timeout). They
+	// must be retried, not treated as terminal.
+	p.deviceDropFirst = 2
+	p.deviceApproveAfter = 1 // then one pending poll, then a session
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	creds, err := DeviceLogin(ctx, p.srv.URL, "test", nil)
+	if err != nil {
+		t.Fatalf("DeviceLogin error = %v; a transient transport failure must not kill the flow", err)
+	}
+	if creds.AccessToken != "access-tok" {
+		t.Errorf("AccessToken = %q, want access-tok", creds.AccessToken)
+	}
+	// 2 dropped polls + 1 pending + 1 complete.
+	if got := atomic.LoadInt32(&p.devicePolls); got < 4 {
+		t.Errorf("expected at least 4 polls (2 dropped + pending + complete), got %d", got)
+	}
+}
+
+func TestDeviceLogin_TransportOutageTerminal(t *testing.T) {
+	fileStoreHome(t)
+	p := newPlatformAuthServer(t)
+	p.session = sampleSession()
+	// Every poll dies at the transport level: a real outage. The flow must
+	// give up after maxConsecutivePollFailures instead of polling silently
+	// until the device code expires.
+	p.deviceDropFirst = 1 << 20
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err := DeviceLogin(ctx, p.srv.URL, "test", nil)
+	if err == nil || !strings.Contains(err.Error(), "consecutive poll failures") {
+		t.Fatalf("DeviceLogin error = %v, want a consecutive-poll-failures error", err)
+	}
+	if got := atomic.LoadInt32(&p.devicePolls); got != maxConsecutivePollFailures {
+		t.Errorf("polls = %d, want exactly %d before giving up", got, maxConsecutivePollFailures)
+	}
+}
+
+func TestBrowserLogin_TransientTransportErrorsRetried(t *testing.T) {
+	fileStoreHome(t)
+	p := newPlatformAuthServer(t)
+	p.session = sampleSession()
+	// Two dropped cli/token polls, then one pending, then approval.
+	p.browserDropFirst = 2
+	p.browserApproveAfter = 1
+
+	creds, err := BrowserLogin(context.Background(), p.srv.URL, "test", nil, func(string) error { return nil })
+	if err != nil {
+		t.Fatalf("BrowserLogin error = %v; a transient transport failure must not kill the flow", err)
+	}
+	if creds.AccessToken != "access-tok" {
+		t.Errorf("AccessToken = %q, want access-tok", creds.AccessToken)
+	}
+	if got := atomic.LoadInt32(&p.browserPolls); got < 4 {
+		t.Errorf("expected at least 4 polls (2 dropped + pending + redeem), got %d", got)
 	}
 }
 
