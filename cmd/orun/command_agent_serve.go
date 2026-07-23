@@ -180,13 +180,21 @@ Identity comes from the sandbox environment (injected by the control plane):
 		var toolPolicy nodes.AgentToolPolicy
 		var typeModel string
 		if typeName != "" {
-			d, issues := agenttype.Load(filepath.Join("agents", typeName+".md"))
+			// LoadNamed: authored agents/<type>.md wins; the shipped copy
+			// embedded in the binary is the fallback — a bare cloud sandbox
+			// has no checkout, and a type-less serve deny-by-defaults every
+			// tool the session tries.
+			d, issues := agenttype.LoadNamed(typeName)
 			if d == nil {
 				return fmt.Errorf("agent type %q: %v", typeName, issues)
 			}
 			persona = d.Body
 			toolPolicy = d.Tools
 			typeModel = d.Model
+			fmt.Fprintf(errOut, "orun agent serve: agent type %s loaded (%s) — tools allow=%d ask=%d deny=%d\n",
+				typeName, d.Path, len(toolPolicy.Allow), len(toolPolicy.Ask), len(toolPolicy.Deny))
+		} else {
+			fmt.Fprintf(errOut, "orun agent serve: WARNING no agent type (--type / ORUN_AGENT_TYPE) — the tool policy is deny-by-default, so every tool call will be denied\n")
 		}
 		fmt.Fprintf(errOut, "orun agent serve: assembling brief (type=%q task=%q)\n", typeName, task)
 		brief, err := agent.AssembleBrief(ctx, store, agent.BriefInput{

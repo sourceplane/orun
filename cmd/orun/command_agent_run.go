@@ -67,7 +67,9 @@ snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
 		var toolPolicy nodes.AgentToolPolicy
 		var typeModel string
 		if runType != "" {
-			d, issues := agenttype.Load(filepath.Join("agents", runType+".md"))
+			// Authored file wins; the shipped embedded copy is the fallback
+			// (same resolution as serve — see agenttype.LoadNamed).
+			d, issues := agenttype.LoadNamed(runType)
 			if d == nil {
 				return fmt.Errorf("agent type %q: %v", runType, issues)
 			}

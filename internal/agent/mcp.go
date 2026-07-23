@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // mcp.go — the driver's hands (specs/orun-agents/design.md §5, landed with
@@ -39,6 +40,12 @@ type MCPSetup struct {
 
 // orunMCPToolName is the harness-visible name of an orun MCP tool.
 func orunMCPToolName(tool string) string { return "mcp__orun__" + tool }
+
+// policyToolName maps a harness-reported tool name back to the name the
+// policy speaks: orun MCP tools shed their mcp__orun__ prefix (the inverse of
+// orunMCPToolName); every other name (Bash, Read, other MCP servers) passes
+// through unchanged.
+func policyToolName(tool string) string { return strings.TrimPrefix(tool, "mcp__orun__") }
 
 // WriteMCPConfig writes the driver MCP config into dir and derives the
 // harness tool gates from policy over the orun MCP tool surface (toolNames —
