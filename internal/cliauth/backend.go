@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -59,6 +60,10 @@ type APIError struct {
 	// Details carries the platform error envelope's optional structured detail
 	// (e.g. 412 entitlement denials carry { reason: "limit_reached" }).
 	Details json.RawMessage `json:"-"`
+	// RetryAfter carries the parsed Retry-After header on throttled responses
+	// (api-edge 429 rate_limited), so poll loops can back off instead of dying.
+	// Zero when the header is absent or unparseable.
+	RetryAfter time.Duration `json:"-"`
 }
 
 // DetailReason extracts the "reason" field from the error envelope details, if
@@ -619,6 +624,24 @@ func DeviceLogin(ctx context.Context, backendURL, version string, out io.Writer)
 				case apiErr.Status == http.StatusGone ||
 					strings.EqualFold(apiErr.Code, "expired"):
 					return nil, fmt.Errorf("device login expired")
+				case apiErr.Status == http.StatusTooManyRequests ||
+					strings.EqualFold(apiErr.Code, "rate_limited"):
+					// api-edge throttles the identity scope aggressively; a
+					// 429 mid-poll is transient, not a denial. Honor
+					// Retry-After when present (never polling faster than the
+					// grant's interval); otherwise back off like RFC-8628
+					// slow_down and keep polling.
+					wait := apiErr.RetryAfter
+					if wait <= 0 {
+						interval += 5
+						wait = time.Duration(interval) * time.Second
+					} else if minWait := time.Duration(interval) * time.Second; wait < minWait {
+						wait = minWait
+					}
+					if !sleepCtx(ctx, wait) {
+						return nil, ctx.Err()
+					}
+					continue
 				}
 			}
 			return nil, err
@@ -801,9 +824,33 @@ func (c *BackendClient) do(ctx context.Context, method, path string, headers map
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return nil, resp.StatusCode, decodeAuthError(data, resp.StatusCode)
+		apiErr := decodeAuthError(data, resp.StatusCode)
+		apiErr.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
+		return nil, resp.StatusCode, apiErr
 	}
 	return data, resp.StatusCode, nil
+}
+
+// parseRetryAfter parses a Retry-After header value (delta-seconds or an
+// HTTP-date, RFC 9110 §10.2.3) into a duration. Returns 0 when the value is
+// absent, unparseable, or in the past.
+func parseRetryAfter(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil {
+		if secs <= 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 // decodeAuthError parses both the platform's nested error envelope

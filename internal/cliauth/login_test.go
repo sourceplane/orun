@@ -40,6 +40,11 @@ type platformAuthServer struct {
 	// "denied" → 403 access_denied, "expired" → 410 expired.
 	deviceTerminal string
 
+	// deviceRateLimitFirst is the number of device/poll calls that return
+	// 429 rate_limited (Retry-After: 1) before normal pending/complete
+	// handling resumes — mimics api-edge throttling the identity scope.
+	deviceRateLimitFirst int
+
 	// refresh rotation state.
 	currentRefresh string
 	rotateTo       string
@@ -130,7 +135,14 @@ func newPlatformAuthServer(t *testing.T) *platformAuthServer {
 			writeError(w, 410, "expired", "Device code expired")
 			return
 		}
-		if int(n) <= p.deviceApproveAfter {
+		if int(n) <= p.deviceRateLimitFirst {
+			// api-edge throttling the identity scope: 429 rate_limited with
+			// a short Retry-After. The CLI must treat this as transient.
+			w.Header().Set("Retry-After", "1")
+			writeError(w, 429, "rate_limited", "Too many requests")
+			return
+		}
+		if int(n) <= p.deviceRateLimitFirst+p.deviceApproveAfter {
 			// Pending: status under data, error mirrors RFC-8628.
 			writeData(w, 200, map[string]any{"status": "pending", "error": "authorization_pending"})
 			return
@@ -434,5 +446,55 @@ func TestDeviceLogin_ExpiredTerminal(t *testing.T) {
 	_, err := DeviceLogin(ctx, p.srv.URL, "test", nil)
 	if err == nil || !strings.Contains(err.Error(), "expired") {
 		t.Fatalf("DeviceLogin error = %v, want expired", err)
+	}
+}
+
+func TestDeviceLogin_RateLimitedContinuesPolling(t *testing.T) {
+	fileStoreHome(t)
+	p := newPlatformAuthServer(t)
+	p.session = sampleSession()
+	// api-edge throttles the identity scope: the first two polls answer 429
+	// rate_limited (Retry-After: 1). A 429 mid-poll must NOT be terminal — the
+	// CLI honors Retry-After and keeps polling until approval.
+	p.deviceRateLimitFirst = 2
+	p.deviceApproveAfter = 1 // then one pending poll, then a session
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	creds, err := DeviceLogin(ctx, p.srv.URL, "test", nil)
+	if err != nil {
+		t.Fatalf("DeviceLogin error = %v; a mid-poll 429 rate_limited must not kill the flow", err)
+	}
+	if creds.AccessToken != "access-tok" {
+		t.Errorf("AccessToken = %q, want access-tok", creds.AccessToken)
+	}
+	// 2 rate-limited polls + 1 pending + 1 complete.
+	if got := atomic.LoadInt32(&p.devicePolls); got < 4 {
+		t.Errorf("expected at least 4 polls (2 throttled + pending + complete), got %d", got)
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	cases := []struct {
+		in   string
+		want time.Duration
+	}{
+		{"", 0},
+		{"1", time.Second},
+		{" 30 ", 30 * time.Second},
+		{"0", 0},
+		{"-5", 0},
+		{"garbage", 0},
+		{time.Now().Add(-time.Minute).UTC().Format(http.TimeFormat), 0}, // HTTP-date in the past
+	}
+	for _, c := range cases {
+		if got := parseRetryAfter(c.in); got != c.want {
+			t.Errorf("parseRetryAfter(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+	// HTTP-date in the future: accept anything in (0, 90s].
+	future := time.Now().Add(time.Minute).UTC().Format(http.TimeFormat)
+	if got := parseRetryAfter(future); got <= 0 || got > 90*time.Second {
+		t.Errorf("parseRetryAfter(%q) = %v, want ~1m", future, got)
 	}
 }
