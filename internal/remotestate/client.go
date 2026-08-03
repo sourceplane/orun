@@ -407,9 +407,15 @@ type ResolvedSecretMeta struct {
 // ResolvedSecrets is the resolve response. Values live only in runner memory,
 // honor TTLSeconds, and are never persisted client-side.
 type ResolvedSecrets struct {
-	Secrets    map[string]string    `json:"secrets"`
-	Resolved   []ResolvedSecretMeta `json:"resolved,omitempty"`
-	TTLSeconds int                  `json:"ttlSeconds"`
+	Secrets map[string]string `json:"secrets"`
+	// SecretsByEnv is the SE5-multi shape: values grouped by environment slug,
+	// so one resolve may serve the same key for several environments (the BF6
+	// deploy renders a template whose OTHER env sections need their wiring
+	// documents too). The flat Secrets map remains for single-env resolves and
+	// keeps last-group-wins semantics on collision.
+	SecretsByEnv map[string]map[string]string `json:"secretsByEnv,omitempty"`
+	Resolved     []ResolvedSecretMeta         `json:"resolved,omitempty"`
+	TTLSeconds   int                          `json:"ttlSeconds"`
 }
 
 // ── API methods (v1 contract §2) ───────────────────────────────────────────────

@@ -58,7 +58,17 @@ func remoteSecretResolver(ctx context.Context, r *runner.Runner, client *remotes
 			if perr != nil {
 				return nil, perr
 			}
-			value, ok := resolved.Secrets[parsed.Key]
+			// SE5-multi: prefer the env-grouped shape — the same key may be
+			// served for several environments in one resolve (BF6 wiring), and
+			// only the grouped map is collision-free. Fall back to the legacy
+			// flat map for older backends.
+			value, ok := "", false
+			if byEnv := resolved.SecretsByEnv[parsed.Env]; byEnv != nil {
+				value, ok = byEnv[parsed.Key]
+			}
+			if !ok {
+				value, ok = resolved.Secrets[parsed.Key]
+			}
 			if !ok {
 				// A best-effort reference whose key is not stored (yet) is
 				// simply skipped — the wire-now-seed-later shape.
