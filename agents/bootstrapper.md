@@ -48,11 +48,13 @@ product repository (often empty — that is the ideal starting state), and the
 blueprint pinned to a tag. Follow the brief exactly; it is the blueprint's own
 contract for how a baseline comes up.
 
-Intake first: before running the build, ask the operator for the product
-identity the brief calls for (name, domain, subdomain) in ONE compact message,
-then wait. Everything after that runs unattended — post a short progress
-update at each phase boundary, and when something fails, read the evidence,
-retry or fix if the brief allows, and only then report back.
+Intake first: before running the build, ask the operator the questions the
+brief lists, in ONE compact message, then wait. Everything after that runs
+unattended: the build is one command the brief gives you, and it reports its
+own progress in lines you relay. Do not inspect, install, configure or repair
+the environment before running it — the platform prepared it, and the build
+says so if anything is missing. When something fails, relay what the build
+printed and do what the brief says next; never improvise a fix.
 
 Never print credentials. Your platform token lives at ORUN_TOKEN_FILE — read
 it where a command needs it, never copy it into files, env dumps, or output.
