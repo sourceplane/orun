@@ -367,3 +367,26 @@ func TestPenMountsOnTheCheckout(t *testing.T) {
 		t.Fatalf("outside a checkout the pen must skip with its reason: %+v", rep)
 	}
 }
+
+// TestMcpPolicyToolNamesIsTheComposedRoster: the names the harness gates are
+// derived from cover every plane `orun mcp serve` lists — the pen, the
+// platform (the bootstrapper's epic_create among them) and connection_info —
+// so an allowed platform tool is pre-approved rather than prompted for, and
+// a denied one is absent rather than merely refused after the call.
+func TestMcpPolicyToolNamesIsTheComposedRoster(t *testing.T) {
+	have := map[string]bool{}
+	for _, n := range mcpPolicyToolNames() {
+		if have[n] {
+			t.Errorf("duplicate tool name %q in the composed roster", n)
+		}
+		have[n] = true
+	}
+	for _, want := range []string{"pr_open", "epic_create", "milestone_create", "task_get", "task_list", "connection_info"} {
+		if !have[want] {
+			t.Errorf("composed roster is missing %q", want)
+		}
+	}
+	if n := len(have); n != countMcpRoster().total() {
+		t.Errorf("composed roster has %d names, countMcpRoster().total() = %d", n, countMcpRoster().total())
+	}
+}

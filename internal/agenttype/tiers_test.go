@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sourceplane/orun/internal/penmcp"
+	"github.com/sourceplane/orun/internal/platformmcp"
 )
 
 // TestShippedTierMatrices: the shipped agent types carry the allow/ask/deny
@@ -27,6 +28,13 @@ func TestShippedTierMatrices(t *testing.T) {
 	// internal/platformmcp, and harness tools are the driver's.
 	local := map[string]bool{}
 	for _, name := range penmcp.ToolNames() {
+		local[name] = true
+	}
+	// The platform plane is served by this binary too (composed with the pen
+	// in `orun mcp serve`), so its vendored roster is part of what a policy
+	// may name — epic_create / milestone_create / task_get / task_list are
+	// the bootstrapper's programme tools.
+	for _, name := range platformmcp.ToolNames() {
 		local[name] = true
 	}
 	local["connection_info"] = true // mcpserve's built-in, mounted on every serve

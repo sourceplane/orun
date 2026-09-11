@@ -19,7 +19,6 @@ import (
 	"github.com/sourceplane/orun/internal/agenttype"
 	"github.com/sourceplane/orun/internal/contract"
 	"github.com/sourceplane/orun/internal/nodes"
-	"github.com/sourceplane/orun/internal/penmcp"
 	"github.com/spf13/cobra"
 )
 
@@ -150,7 +149,7 @@ over the bytes on disk and recorded on the run.`,
 		var mcpConfigPath string
 		if runDriver == driver.ClaudeCodeID {
 			setup, mErr := agent.WriteMCPConfig(filepath.Join(".orun", "agent-mcp"),
-				agent.NewToolPolicy(toolPolicy), penmcp.ToolNames(), nil)
+				agent.NewToolPolicy(toolPolicy), mcpPolicyToolNames(), nil)
 			if mErr != nil {
 				return mErr
 			}

@@ -18,6 +18,13 @@ tools:
   # the plane (orun-work-teardown WT2).
   allow: [catalog_get_component, catalog_affected,
           pr_open, connection_info,
+          # The bootstrap is tracked work (saas-baseline-tracking): the brief's
+          # Step 1b lays the programme out — one epic, a milestone per phase —
+          # over the task plane before the first commit, and reads the rollup
+          # at the end. Tasks stay the flows' to mint at landing time (the
+          # brief forbids the agent creating one), so task_create is NOT here
+          # and the deny backstop enforces what the brief says.
+          epic_create, milestone_create, task_get, task_list,
           Read, Glob, Grep, LS, TodoWrite, NotebookRead,
           Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch,
           # The brief mandates running the umbrella in the background and
