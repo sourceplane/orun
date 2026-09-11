@@ -25,6 +25,21 @@ type mcpRosterCounts struct {
 // total is the whole advertised surface of a fully mounted serve.
 func (c mcpRosterCounts) total() int { return c.pen + c.platform + c.server }
 
+// mcpPolicyToolNames is every tool `orun mcp serve` can list — pen, platform
+// and the server's own connection_info — for deriving the harness gates
+// (--allowedTools / --disallowedTools) from an agent type's policy. It used
+// to be the pen's names alone, so a platform tool an agent type ALLOWED
+// (epic_create for the bootstrapper) was in neither harness list: the
+// harness prompted on every call, and a platform tool the type DENIED
+// stayed reachable until the runtime fold refused it. Over the composed
+// roster an allowed tool is pre-approved and a denied one is absent, which
+// is what the driver config was designed to do.
+func mcpPolicyToolNames() []string {
+	names := append([]string{}, penmcp.ToolNames()...)
+	names = append(names, platformmcp.ToolNames()...)
+	return append(names, mcpserve.ConnectionInfoToolName)
+}
+
 func countMcpRoster() mcpRosterCounts {
 	var c mcpRosterCounts
 	c.pen = len(penmcp.Tools())

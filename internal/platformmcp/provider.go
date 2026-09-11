@@ -102,6 +102,18 @@ const maxToolBytes = 64 * 1024
 // maxEntityLookupPages bounds catalog_get_entity's list-emulation walk.
 const maxEntityLookupPages = 5
 
+// ToolNames returns the full platform plane's tool names in manifest order
+// (reads and writes) — the roster a tool policy is matched against, the
+// twin of penmcp.ToolNames.
+func ToolNames() []string {
+	defs := (&Provider{}).Tools()
+	names := make([]string, len(defs))
+	for i, d := range defs {
+		names[i] = d.Name
+	}
+	return names
+}
+
 // Tools implements mcpserve.ToolProvider: the manifest's tools, verbatim
 // (writes filtered out under ReadOnly), with `workspace` demoted from
 // required when a default is active.
