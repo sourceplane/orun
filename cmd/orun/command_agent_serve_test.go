@@ -97,3 +97,51 @@ func TestRedactSecretNeverLeaks(t *testing.T) {
 		t.Fatalf("redaction should report length, got %q", got)
 	}
 }
+
+// TestHarnessPlatformEnvSeedsBackendURL: the harness env carries the backend
+// URL the CLI resolves from, seeded from the dial-home identity, so the
+// `orun mcp serve` it spawns mounts the platform plane instead of booting
+// "degraded: no backend URL" (the skipped-Step-1b transcript). An explicit
+// ORUN_BACKEND_URL in the sandbox still wins; no identity, nothing seeded.
+func TestHarnessPlatformEnvSeedsBackendURL(t *testing.T) {
+	envOf := func(m map[string]string) func(string) string {
+		return func(k string) string { return m[k] }
+	}
+	has := func(env []string, want string) bool {
+		for _, e := range env {
+			if e == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	env := harnessPlatformEnv(envOf(map[string]string{
+		"ORUN_CLOUD_API": "https://api-edge-test.oruncloud.workers.dev",
+		"ORUN_WORKSPACE": "org_1",
+	}), "/tmp/tok")
+	for _, want := range []string{
+		"ORUN_TOKEN_FILE=/tmp/tok",
+		"ORUN_WORKSPACE=org_1",
+		"ORUN_BACKEND_URL=https://api-edge-test.oruncloud.workers.dev",
+	} {
+		if !has(env, want) {
+			t.Errorf("harness env missing %q: %v", want, env)
+		}
+	}
+
+	env = harnessPlatformEnv(envOf(map[string]string{
+		"ORUN_CLOUD_API":   "https://api-edge-test.oruncloud.workers.dev",
+		"ORUN_BACKEND_URL": "https://backend.example",
+	}), "/tmp/tok")
+	if has(env, "ORUN_BACKEND_URL=https://api-edge-test.oruncloud.workers.dev") {
+		t.Errorf("an explicit ORUN_BACKEND_URL must not be overridden: %v", env)
+	}
+
+	env = harnessPlatformEnv(envOf(map[string]string{}), "/tmp/tok")
+	for _, e := range env {
+		if strings.HasPrefix(e, "ORUN_BACKEND_URL=") || strings.HasPrefix(e, "ORUN_WORKSPACE=") {
+			t.Errorf("nothing to seed from must seed nothing: %v", env)
+		}
+	}
+}
