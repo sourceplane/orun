@@ -40,7 +40,9 @@ the steer/verdict/interrupt return-queue dials back. The console and a remote
 'orun agent attach as_…' are interchangeable heads over the same stream.
 
 Identity comes from the sandbox environment (injected by the control plane):
-  ORUN_CLOUD_API    the api-edge base URL
+  ORUN_CLOUD_API    the api-edge base URL (also seeded to the harness as
+                    ORUN_BACKEND_URL when that is unset, so the orun MCP
+                    server and every in-sandbox 'orun' verb find the platform)
   ORUN_ORG_ID       the workspace (org_…) id
   ORUN_SESSION_ID   the as_… session id (overridable with --session)
   ORUN_SESSION_TOKEN the session bearer (the service-principal credential)
@@ -291,13 +293,11 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 			// callers). Compatibility only — git itself never reads this; it
 			// goes through the credential helper, which mints per operation and
 			// so never goes stale. This one does, at the token's TTL.
-			// GS2: the workspace handle + the rotating credential's location, so
-			// `orun cloud check`, state reads, and policy-gated secret resolves
+			// GS2: the workspace handle, the rotating credential's location and
+			// the backend URL, so `orun cloud check`, state reads, policy-gated
+			// secret resolves — and the `orun mcp serve` the harness spawns —
 			// all work in-sandbox with zero flags.
-			cc.Env = append(cc.Env, "ORUN_TOKEN_FILE="+tokenFile)
-			if ws := strings.TrimSpace(os.Getenv("ORUN_WORKSPACE")); ws != "" {
-				cc.Env = append(cc.Env, "ORUN_WORKSPACE="+ws)
-			}
+			cc.Env = append(cc.Env, harnessPlatformEnv(os.Getenv, tokenFile)...)
 			if workdir != "" {
 				if tok, tErr := mintHarnessGitToken(ctx); tErr == nil {
 					cc.Env = append(cc.Env, "GITHUB_TOKEN="+tok)
@@ -447,4 +447,31 @@ func mintHarnessGitToken(ctx context.Context) (string, error) {
 		_ = wErr
 	}
 	return tok.Token, nil
+}
+
+// harnessPlatformEnv is the platform plumbing the harness needs — and every
+// `orun` it spawns: the MCP server named in the driver config, the flows' own
+// `orun task …` verbs — to reach the workspace with zero flags (GS2): the
+// rotating credential's location, the workspace handle, and the backend URL.
+//
+// The backend URL is the one that was missing. serve dials home on
+// ORUN_CLOUD_API, but the CLI resolves its platform backend from
+// ORUN_BACKEND_URL (flag > env > intent.yaml > ~/.orun/config.yaml), and a
+// sandbox has none of the other three: no intent.yaml on a fresh product, no
+// `orun auth login`. So `orun mcp serve` booted "degraded: no backend URL",
+// the platform tool plane never mounted, and a baseline brief's Step 1b was
+// skipped for want of `epic_create` (observed live). The two names are the
+// same host — api-edge serves /v1/organizations/… for both — so the seed is
+// exact, and an explicit ORUN_BACKEND_URL in the sandbox env still wins.
+func harnessPlatformEnv(getenv func(string) string, tokenFile string) []string {
+	env := []string{"ORUN_TOKEN_FILE=" + tokenFile}
+	if ws := strings.TrimSpace(getenv("ORUN_WORKSPACE")); ws != "" {
+		env = append(env, "ORUN_WORKSPACE="+ws)
+	}
+	if strings.TrimSpace(getenv(backendURLEnvVar)) == "" {
+		if api := strings.TrimSpace(getenv("ORUN_CLOUD_API")); api != "" {
+			env = append(env, backendURLEnvVar+"="+api)
+		}
+	}
+	return env
 }
