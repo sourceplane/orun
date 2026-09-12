@@ -289,9 +289,22 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 			materializeHarnessSkills(ctx, "", "", skillWorkdir, errOut)
 			cc := &driver.ClaudeCode{ExtraArgs: append(setup.HarnessArgs(), harnessModelArgs(typeModel)...)}
 			// GS1: seed a token for tools that read GITHUB_TOKEN (gh, API
-			// callers). Compatibility only — git itself never reads this; it
-			// goes through the credential helper, which mints per operation and
-			// so never goes stale. This one does, at the token's TTL.
+			// callers). Compatibility only — orun's own credential helper mints
+			// per operation and never goes stale. THIS one does, at the token's
+			// TTL (≤1h), while a baseline build runs for hours, so treat it as
+			// a value that WILL be dead for most of the session.
+			//
+			// Two consequences, both seen live:
+			//
+			//   - `gh` prefers GITHUB_TOKEN over its own stored auth, so a flow
+			//     that sets `credential.helper '!gh auth git-credential'` routes
+			//     git through this dead value too. The staleness is not confined
+			//     to API callers; point git at `orun git-credential` instead.
+			//   - A rejected credential is worse than none: a PUBLIC repo that
+			//     needs no token at all answers 401 when handed a dead one. A
+			//     re-run of `orun workflow run github:sourceplane/cirrus@…`
+			//     failed for exactly this reason. internal/flow now drops a
+			//     refused credential and retries anonymously.
 			// GS2: the workspace handle, the rotating credential's location and
 			// the backend URL, so `orun cloud check`, state reads, policy-gated
 			// secret resolves — and the `orun mcp serve` the harness spawns —
