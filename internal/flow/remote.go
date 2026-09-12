@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,35 @@ import (
 	"strings"
 	"time"
 )
+
+// httpStatusError is a non-200 response, carrying the status so a caller can
+// react to WHICH refusal it was without pattern-matching an error string. Its
+// message is unchanged from the plain fmt.Errorf it replaced.
+type httpStatusError struct {
+	URL    string
+	Status int
+	Body   string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("GET %s: HTTP %d: %s", e.URL, e.Status, e.Body)
+}
+
+// credentialRejected reports whether GitHub refused the credential we sent, as
+// distinct from refusing US (404 on a private repo, 403 for rate limits or
+// permissions). 401 is the unambiguous case; GitHub also answers 403 with
+// "Bad credentials" for some malformed tokens.
+func credentialRejected(err error) bool {
+	var se *httpStatusError
+	if !errors.As(err, &se) {
+		return false
+	}
+	if se.Status == http.StatusUnauthorized {
+		return true
+	}
+	return se.Status == http.StatusForbidden &&
+		strings.Contains(strings.ToLower(se.Body), "bad credentials")
+}
 
 // SourceMeta records where a remotely fetched workflow came from — repo,
 // the ref as given, and the resolved commit SHA. It is exported to every
@@ -79,7 +109,7 @@ func FetchRemote(ctx context.Context, ref string) (string, *SourceMeta, func(), 
 			return nil, err
 		}
 		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("GET %s: HTTP %d: %s", url, resp.StatusCode, firstLine(body))
+			return nil, &httpStatusError{URL: url, Status: resp.StatusCode, Body: firstLine(body)}
 		}
 		return body, nil
 	}
@@ -121,18 +151,45 @@ func FetchRemote(ctx context.Context, ref string) (string, *SourceMeta, func(), 
 	}
 
 	headers := map[string]string{"Accept": "application/vnd.github.raw"}
-	if tok := githubToken(); tok != "" {
-		headers["Authorization"] = "Bearer " + tok
+	ambient := githubToken()
+	if ambient != "" {
+		headers["Authorization"] = "Bearer " + ambient
 	}
 	fileURL := fmt.Sprintf("%s/repos/%s/contents/%s", githubAPIBase(), repo, strings.TrimPrefix(path, "/"))
 	if gitRef != "" {
 		fileURL += "?ref=" + gitRef
 	}
 	body, err := get(fileURL, headers)
+	// A credential the server REJECTS is worse than no credential at all: for a
+	// public repo, sending nothing succeeds where an expired token returns 401.
+	// An agent sandbox hits this every time, because `orun agent serve` seeds
+	// GITHUB_TOKEN once at boot from a ≤1h installation token while a baseline
+	// build runs for hours — so the first `orun workflow run
+	// github:sourceplane/cirrus@…` works and every later one fails 401 against
+	// a PUBLIC repository that never needed the token. Observed live: a
+	// baseline build that had already succeeded once could not be re-run.
+	//
+	// So: drop the rejected credential and ask again as a stranger. If the repo
+	// is public we are simply past it; if it is private the anonymous attempt
+	// fails too and the ORIGINAL error is what the caller sees, since "your
+	// token was refused" is the useful half of that story.
+	if err != nil && ambient != "" && credentialRejected(err) {
+		anon := map[string]string{"Accept": "application/vnd.github.raw"}
+		if anonBody, anonErr := get(fileURL, anon); anonErr == nil {
+			fmt.Fprintf(os.Stderr,
+				"orun: the ambient GITHUB_TOKEN was rejected by GitHub; %s is readable without it, continuing unauthenticated\n"+
+					"orun: (in an agent sandbox this usually means the seeded token has expired — nothing you need to fix to proceed)\n",
+				repo)
+			body, err, ambient = anonBody, nil, ""
+		}
+	}
 	if err != nil {
 		hint := ""
-		if githubToken() == "" {
+		switch {
+		case ambient == "":
 			hint = " (private repo? set GITHUB_TOKEN)"
+		case credentialRejected(err):
+			hint = " (GITHUB_TOKEN/GH_TOKEN was rejected — it is expired or not valid for this repo; unset it to try anonymously)"
 		}
 		return "", nil, noop, fmt.Errorf("fetch workflow%s: %w", hint, err)
 	}
@@ -145,8 +202,11 @@ func FetchRemote(ctx context.Context, ref string) (string, *SourceMeta, func(), 
 		shaRef = "HEAD"
 	}
 	shaHeaders := map[string]string{"Accept": "application/vnd.github+json"}
-	if tok := githubToken(); tok != "" {
-		shaHeaders["Authorization"] = "Bearer " + tok
+	// `ambient`, not githubToken(): if the file fetch above abandoned a rejected
+	// credential, re-attaching it here would 401 the SHA resolve too and the
+	// flow would silently lose its self-pin for the same dead token.
+	if ambient != "" {
+		shaHeaders["Authorization"] = "Bearer " + ambient
 	}
 	if shaBody, shaErr := get(fmt.Sprintf("%s/repos/%s/commits/%s", githubAPIBase(), repo, shaRef), shaHeaders); shaErr == nil {
 		var commit struct {

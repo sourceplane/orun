@@ -112,3 +112,106 @@ func TestRun_ExportsSourceMetaToSteps(t *testing.T) {
 		t.Fatalf("source meta not in step env: %+v", st)
 	}
 }
+
+// fakePublicGitHub serves a PUBLIC repo the way GitHub does: anonymous reads
+// succeed, but a credential the server does not recognise is rejected with 401
+// rather than ignored. That asymmetry is the whole bug — presenting a dead
+// token to a repo that needed no token at all turns a working fetch into a
+// hard failure. It records how many requests arrived with an Authorization
+// header so a test can prove the retry really dropped it.
+func fakePublicGitHub(t *testing.T, flowBody string, authed *int) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			*authed++
+			http.Error(w, `{"message":"Bad credentials"}`, http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case strings.Contains(r.URL.Path, "/contents/"):
+			w.Write([]byte(flowBody))
+		case strings.Contains(r.URL.Path, "/commits/"):
+			_ = json.NewEncoder(w).Encode(map[string]string{"sha": "abc123def4567890abc123def4567890abc123de"})
+		default:
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+}
+
+// An expired GITHUB_TOKEN must not break a fetch from a public repo. `orun
+// agent serve` seeds that variable once at boot from a ≤1h installation token
+// while a baseline build runs for hours, so every re-run of
+// `orun workflow run github:sourceplane/cirrus@…` arrived with a dead
+// credential and failed 401 against a repository that never needed one.
+func TestFetchRemote_ExpiredTokenFallsBackToAnonymous(t *testing.T) {
+	authed := 0
+	srv := fakePublicGitHub(t, remoteFlowBody, &authed)
+	defer srv.Close()
+	t.Setenv("ORUN_GITHUB_API_URL", srv.URL)
+	t.Setenv("GITHUB_TOKEN", "expired-installation-token")
+	t.Setenv("GH_TOKEN", "")
+
+	path, meta, cleanup, err := FetchRemote(context.Background(), "github:sourceplane/cirrus@baseline-v3//flows/agent/workflow.yaml")
+	if err != nil {
+		t.Fatalf("a dead token must not fail a public fetch: %v", err)
+	}
+	defer cleanup()
+	data, _ := os.ReadFile(path)
+	if string(data) != remoteFlowBody {
+		t.Errorf("body mismatch: %q", data)
+	}
+	// Exactly one rejected attempt: the file fetch. The SHA resolve must not
+	// re-attach the credential the file fetch just abandoned — if it did, the
+	// flow would lose its self-pin to the same dead token.
+	if authed != 1 {
+		t.Errorf("expected 1 rejected authenticated request, got %d", authed)
+	}
+	if len(meta.SHA) != 40 {
+		t.Errorf("sha not resolved after the anonymous retry: %q", meta.SHA)
+	}
+}
+
+// The fallback must not paper over a repo that genuinely needs a credential:
+// when the anonymous retry fails too, the caller sees the refusal and a hint
+// naming the rejected token rather than the misleading "set GITHUB_TOKEN".
+func TestFetchRemote_RejectedTokenOnPrivateRepoStillFails(t *testing.T) {
+	srv := fakeGitHub(t, remoteFlowBody, "the-right-token")
+	defer srv.Close()
+	t.Setenv("ORUN_GITHUB_API_URL", srv.URL)
+	t.Setenv("GITHUB_TOKEN", "the-wrong-token")
+	t.Setenv("GH_TOKEN", "")
+
+	_, _, _, err := FetchRemote(context.Background(), "github:acme/base@v1//flow.yaml")
+	if err == nil {
+		t.Fatal("expected failure when neither the token nor anonymous access works")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("original refusal should survive: %v", err)
+	}
+	if !strings.Contains(err.Error(), "was rejected") {
+		t.Errorf("hint should name the rejected credential, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "private repo? set GITHUB_TOKEN") {
+		t.Errorf("must not advise setting a token that IS set and refused: %v", err)
+	}
+}
+
+// A 404 is not a credential problem, so it must not spend a second request.
+func TestFetchRemote_NotFoundDoesNotRetryAnonymously(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	}))
+	defer srv.Close()
+	t.Setenv("ORUN_GITHUB_API_URL", srv.URL)
+	t.Setenv("GITHUB_TOKEN", "tok")
+	t.Setenv("GH_TOKEN", "")
+
+	if _, _, _, err := FetchRemote(context.Background(), "github:acme/base@v1//flow.yaml"); err == nil {
+		t.Fatal("expected a 404 failure")
+	}
+	if requests != 1 {
+		t.Errorf("a 404 must not trigger the credential retry: %d requests", requests)
+	}
+}
