@@ -13,7 +13,7 @@ shipped and every place it departed from the spec.
 | **BE-O5a** | ✅ Shipped | `task/ensure`, `task/rollup` — the task plane |
 | **BE-O5b** | ✅ Shipped | `doctor/check`, `integrations/reconcile`, `secrets/exists` |
 | **BE-O5c** | ✅ Shipped | `repo/ensure`, `run/watch` — **the action set is complete (9)** |
-| BE-O6 | 🗓️ Planned | |
+| **BE-O6** | ✅ Shipped | the event stream, narration, `--progress` |
 | BE-O7 | 🗓️ Planned | |
 | BE-O8 | 🗓️ Planned | |
 
@@ -447,3 +447,62 @@ for "absent", no runs returning nil, and skipped/neutral jobs not counting as
 failures. `forge_actions_test.go` covers green, resume-then-green, the budget
 exhausted naming the lanes, the diagnosis surviving a refused resume, pending
 rather than blocking, no-run-at-all, and a malformed repo.
+
+## BE-O6 — the engine reports itself
+
+### Why
+
+A bootstrap takes about an hour and a person needs to know what it is doing.
+Today that job belongs to a model relaying a script's output, and orun-cloud's
+build page records what that costs in its own header: the status strip is *"the
+agent's latest line, verbatim"*, and **two of its six row states cannot be drawn
+at all** because the agent brief instructs the agent to post each line *"in
+plain words, without the prefix"* — stripping the very markers that carry them.
+
+### Two registers, never confused
+
+- **`detail`** — the machine's line. High volume, verbatim, for a log.
+- **`narration`** — the line the **baseline** authored, one per transition, for
+  a feed. Reviewed in a pull request, diffed like code, identical on every run.
+
+### Three rules that keep narration honest
+
+1. **It is a template over state**, rendered through the same constrained
+   funcmap as every module — no filesystem, exec, network or clock.
+2. **It may not assert a state.** `state` is the truth; narration is the
+   caption. A line containing a bare state word outside an expression is a
+   **parse error**: *"The edge answers /health"* describes the world, *"05-edge:
+   done"* is a claim the engine alone gets to make. Whole-word matched, so
+   "incompleteness" does not fire, and expression spans are exempt because a
+   field reference is not an assertion.
+3. **A missing line renders a generated one** — never silence, which reads as a
+   stalled build. A template that fails to render falls back too: a broken
+   caption must never fail a build that otherwise succeeded.
+
+### The engine supplies the numbers
+
+A `done` event carries `files`, `elapsed` and the declared `expectedMinutes`.
+The YAML supplies the words, the engine supplies the facts, and **neither can
+lie about the other** — which is the whole reason the transition line is
+composed rather than authored.
+
+### One stream, four renderings
+
+`--progress auto | plain | verbose | json`. They differ only in what they SHOW,
+never in what happened — which is what makes `--progress json` something a
+baseline's end-to-end CI can assert the operator-visible sequence against. The
+envelope carries `schema: bootstrap-event/v1`, because a stream four repos
+depend on is an interface whether or not it is called one, and `seq` is
+monotonic so a consumer that reconnects resumes from what it holds.
+
+Every phase the blueprint declares but a run is not placing is reported once as
+`skipped`, so a feed shows the whole shape rather than only the part that moved.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./...` green. `events_test.go` covers
+authored narration being emitted, an unnarrated phase still speaking, an
+excluded phase reported as skipped, the envelope and monotonic ordering, done
+events carrying the engine's facts, three state-asserting narrations refused, a
+state word inside an expression allowed, whole-word matching, a broken template
+falling back, and the composed transition line.

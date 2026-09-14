@@ -21,10 +21,10 @@ import (
 
 	"github.com/sourceplane/orun/internal/cliauth"
 	"github.com/sourceplane/orun/internal/mcpserve"
+	"github.com/sourceplane/orun/internal/penmcp"
 	"github.com/sourceplane/orun/internal/platformmcp"
 	"github.com/sourceplane/orun/internal/provenance"
 	"github.com/sourceplane/orun/internal/remotestate"
-	"github.com/sourceplane/orun/internal/penmcp"
 )
 
 // mcpMountReport is the serve-time resolution outcome, per concern. It

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/sourceplane/orun/internal/actions"
 	"github.com/sourceplane/orun/internal/objectstore"
@@ -40,6 +41,12 @@ type Options struct {
 	// (orun-bootstrap-engine BE-O1); a test or a dry-run simulator substitutes
 	// a recording runner here.
 	Actions ActionRunner
+
+	// Events receives the build event stream (orun-bootstrap-engine BE-O6).
+	// Nil means nobody is listening, which is the default and costs nothing.
+	Events EventSink
+	// RunID names this attempt in the stream. Empty means one is derived.
+	RunID string
 
 	// Phase selection (orun-bootstrap-engine BE-O2). Empty/false = every
 	// phase, which is today's behavior.
@@ -181,6 +188,18 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	// phase order, then the global postInstantiate hooks. Step-1 overlay: hooks
 	// run after the tree is fully written (atomic); interleaved-per-phase writes
 	// + approval gates are the planned resumable follow-on.
+	em := newEmitter(opts.Events, runIDOf(opts))
+	// Every phase the blueprint declares but this run is not placing is
+	// reported once, so a feed shows the whole shape rather than only the part
+	// that moved.
+	for _, ph := range plan.phases {
+		if !containsPhase(phases, ph.Name) {
+			decl := plan.declOf(ph.Name)
+			em.emit(ctx, Event{Phase: ph.Name, State: EventSkipped,
+				Narration: renderNarration("", phaseTitle(decl, ph.Name), EventSkipped, nil)})
+		}
+	}
+
 	var hooksRun []string
 	if opts.RunHooks {
 		runner := opts.Actions
@@ -194,32 +213,60 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			secrets: values.SecretMap(),
 			digests: hookDigestMap(prov),
 		}
-		for _, phase := range phases {
+		for i, phase := range phases {
 			decl := plan.declOf(phase.Name)
+			title := phaseTitle(decl, phase.Name)
+			started := time.Now()
+			em.emit(ctx, Event{Phase: phase.Name, State: EventStarted,
+				Narration: renderNarration(decl.NarrateLine(EventStarted), title, EventStarted, nil),
+				Meta:      phaseMeta(decl, plan.byPhase[phase.Name])})
 			// pre and post are retried per the phase's declared policy;
 			// outputs are scoped to the phase and reset on every attempt.
 			ran, herr := runPhaseHooks(ctx, hr, decl, append(append([]Hook{}, phase.Hooks.Pre...), phase.Hooks.Post...))
 			hooksRun = append(hooksRun, ran...)
 			if pe, waiting := actions.IsPending(herr); waiting {
 				parked := &ParkedError{Phase: phase.Name, Hook: pe.ID, Reason: pe.Reason, RetryAfter: pe.RetryAfter}
+				em.emit(ctx, Event{Phase: phase.Name, Step: pe.ID, State: EventWaiting,
+					Narration: renderNarration(decl.NarrateLine(EventWaiting), title, EventWaiting, nil),
+					Detail:    pe.Reason})
 				writeRunState(opts.OutDir, parked)
 				return nil, parked
 			}
 			if herr != nil {
+				em.emit(ctx, Event{Phase: phase.Name, State: EventFailed,
+					Narration: renderNarration(decl.NarrateLine(EventFailed), title, EventFailed, nil),
+					Detail:    herr.Error()})
 				return nil, fmt.Errorf("phase %q: %w", phase.Name, herr)
 			}
+			emitHookNarrations(ctx, em, phase.Name, phase.Hooks.Pre, phase.Hooks.Post)
 			// await runs OUTSIDE the retry policy. Retrying a wait would turn
 			// "still running" into an error after N attempts, when the honest
 			// answer is that it is still running.
 			awaited, aerr := runAwait(ctx, hr, phase.Name, phase.Hooks.Await)
 			hooksRun = append(hooksRun, awaited...)
 			if parked, ok := aerr.(*ParkedError); ok {
+				em.emit(ctx, Event{Phase: phase.Name, Step: parked.Hook, State: EventWaiting,
+					Narration: renderNarration(decl.NarrateLine(EventWaiting), title, EventWaiting, nil),
+					Detail:    parked.Reason})
 				writeRunState(opts.OutDir, parked)
 				return nil, parked
 			}
 			if aerr != nil {
+				em.emit(ctx, Event{Phase: phase.Name, State: EventFailed,
+					Narration: renderNarration(decl.NarrateLine(EventFailed), title, EventFailed, nil),
+					Detail:    aerr.Error()})
 				return nil, fmt.Errorf("phase %q: %w", phase.Name, aerr)
 			}
+			emitHookNarrations(ctx, em, phase.Name, phase.Hooks.Await)
+
+			meta := phaseMeta(decl, plan.byPhase[phase.Name])
+			meta["elapsed"] = time.Since(started).Round(time.Second).String()
+			if i+1 < len(phases) {
+				meta["next"] = phases[i+1].Name
+			}
+			em.emit(ctx, Event{Phase: phase.Name, State: EventDone,
+				Narration: renderNarration(decl.NarrateLine(EventDone), title, EventDone, nil),
+				Meta:      meta})
 		}
 		// Nothing is waiting any more.
 		clearRunState(opts.OutDir)

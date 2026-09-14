@@ -180,6 +180,8 @@ type Hook struct {
 	// time, so a misspelled parameter is a blueprint error naming the line
 	// rather than an exit code partway through a bootstrap.
 	Uses string `yaml:"uses,omitempty" json:"uses,omitempty"`
+	// Narrate is one authored line, emitted when this hook completes (BE-O6).
+	Narrate string `yaml:"narrate,omitempty" json:"narrate,omitempty"`
 	// Workflow names an orun workflow file (resolved against the blueprint's
 	// directory) to run as this hook. Exactly one of Run/Workflow may be set.
 	Workflow string `yaml:"workflow,omitempty" json:"workflow,omitempty"`
@@ -247,6 +249,43 @@ type Phase struct {
 	// deterministic and retrying it changes nothing; hooks reach the network
 	// and are where a transient failure actually lives.
 	Retry *RetrySpec `yaml:"retry,omitempty" json:"retry,omitempty"`
+
+	// Title is what a person calls this phase. Empty falls back to Name.
+	Title string `yaml:"title,omitempty" json:"title,omitempty"`
+	// ExpectedMinutes is a measured budget, shown so an operator knows whether
+	// to wait. Zero means unstated.
+	ExpectedMinutes int `yaml:"expectedMinutes,omitempty" json:"expectedMinutes,omitempty"`
+	// Narrate is the prose THIS BASELINE authored for the phase's transitions
+	// (orun-bootstrap-engine BE-O6). Reviewed in a pull request, diffed like
+	// code, identical on every run — which is the whole difference from a model
+	// paraphrasing a transcript.
+	Narrate *Narration `yaml:"narrate,omitempty" json:"narrate,omitempty"`
+}
+
+// Narration is a phase's authored lines, one per transition.
+type Narration struct {
+	Start  string `yaml:"start,omitempty" json:"start,omitempty"`
+	Await  string `yaml:"await,omitempty" json:"await,omitempty"`
+	Done   string `yaml:"done,omitempty" json:"done,omitempty"`
+	Failed string `yaml:"failed,omitempty" json:"failed,omitempty"`
+}
+
+// Line returns the authored line for a state, or empty.
+func (n *Narration) Line(state EventState) string {
+	if n == nil {
+		return ""
+	}
+	switch state {
+	case EventStarted:
+		return n.Start
+	case EventWaiting:
+		return n.Await
+	case EventDone:
+		return n.Done
+	case EventFailed:
+		return n.Failed
+	}
+	return ""
 }
 
 // PhaseHooks are a phase's three hook slots (orun-bootstrap-engine BE-O4).
@@ -496,6 +535,14 @@ func (bp *Blueprint) validatePhaseGates() error {
 		where := fmt.Sprintf("phases[%d] (%s)", pi, ph.Name)
 		if err := compileCondition(ph.When, where+" when"); err != nil {
 			return err
+		}
+		if err := validateNarration(where, ph.Narrate); err != nil {
+			return err
+		}
+		for hi, h := range ph.Hooks.All() {
+			if err := checkNarrationLine(fmt.Sprintf("%s hooks[%d] (%s) narrate", where, hi, h.ID), h.Narrate); err != nil {
+				return err
+			}
 		}
 		if ph.Retry != nil {
 			if ph.Retry.Attempts < 1 {
