@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,6 +24,11 @@ var (
 	scaffoldOut        string
 	scaffoldSet        []string
 	scaffoldRunHooks   bool
+	scaffoldStatus     bool
+	scaffoldJSON       bool
+	scaffoldPhase      string
+	scaffoldUntil      string
+	scaffoldResume     bool
 
 	upgradeBlueprint string
 	upgradeOut       string
@@ -68,6 +74,11 @@ func registerNewCommand(root *cobra.Command) {
 	scaffoldNewCmd.Flags().StringVar(&scaffoldOut, "out", ".", "Output directory (created if absent)")
 	scaffoldNewCmd.Flags().StringArrayVar(&scaffoldSet, "set", nil, "Set an input as key=value (repeatable; overrides --values)")
 	scaffoldNewCmd.Flags().BoolVar(&scaffoldRunHooks, "run-hooks", false, "Execute declared postInstantiate hooks (outside the sandbox)")
+	scaffoldNewCmd.Flags().BoolVar(&scaffoldStatus, "status", false, "Derive and print each phase's state without writing anything")
+	scaffoldNewCmd.Flags().BoolVar(&scaffoldJSON, "json", false, "With --status, emit JSON")
+	scaffoldNewCmd.Flags().StringVar(&scaffoldPhase, "phase", "", "Place only this phase")
+	scaffoldNewCmd.Flags().StringVar(&scaffoldUntil, "until", "", "Place every phase through this one")
+	scaffoldNewCmd.Flags().BoolVar(&scaffoldResume, "resume", false, "Place every phase not already derived as done")
 	_ = scaffoldNewCmd.MarkFlagRequired("blueprint")
 
 	scaffoldUpgradeCmd.Flags().StringVar(&upgradeBlueprint, "blueprint", "", "Path to the newer Blueprint (defaults to the one pinned in the lock)")
@@ -90,6 +101,14 @@ func runScaffoldNew(ctx context.Context) error {
 	if err != nil {
 		return exitErr(6, "%v", err)
 	}
+	// Recover what this product was already built with, BEFORE prompting: a
+	// resumed run in a fresh container has no values file and must not ask
+	// again for values the tree already records. A flag that disagrees with
+	// the record is refused rather than applied (BE-O2).
+	inputs, err = scaffold.RecoverInputs(scaffoldOut, inputs)
+	if err != nil {
+		return err
+	}
 	if err := promptMissingInputs(bp.Inputs, inputs); err != nil {
 		return err
 	}
@@ -98,14 +117,36 @@ func runScaffoldNew(ctx context.Context) error {
 		return err
 	}
 
-	res, err := scaffold.Run(ctx, scaffold.Options{
+	opts := scaffold.Options{
 		Blueprint:     bpBytes,
 		Inputs:        inputs,
 		OutDir:        scaffoldOut,
 		Store:         store,
 		RunHooks:      scaffoldRunHooks,
 		SourceBaseDir: filepath.Dir(scaffoldBlueprint),
-	})
+		Only:          scaffoldPhase,
+		Until:         scaffoldUntil,
+		Resume:        scaffoldResume,
+	}
+
+	// --status derives and reports; it writes nothing. This is the read a
+	// different session performs to answer "where did this product get to?"
+	// (orun-bootstrap-engine BE-O2).
+	if scaffoldStatus {
+		st, derr := scaffold.Derive(ctx, opts)
+		if derr != nil {
+			return derr
+		}
+		if scaffoldJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(st)
+		}
+		fmt.Print(st.String())
+		return nil
+	}
+
+	res, err := scaffold.Run(ctx, opts)
 	if err != nil {
 		return err // *scaffold.ExitError carries the exit code
 	}
