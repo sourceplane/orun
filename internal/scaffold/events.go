@@ -206,14 +206,25 @@ func phaseMeta(decl *Phase, files map[string]PlacedFile) map[string]string {
 	return meta
 }
 
-// emitHookNarrations emits one event per hook that authored a line.
-func emitHookNarrations(ctx context.Context, em *emitter, phase string, groups ...[]Hook) {
+// emitHookNarrations emits one event per hook that authored a line, rendered
+// against the same scope a phase's lines see — including this phase's hook
+// outputs, which is the thing a hook's own caption most wants to name ("PR
+// {{ .hooks.land.outputs.number }} merged").
+func emitHookNarrations(ctx context.Context, em *emitter, phase string, scope map[string]any, groups ...[]Hook) {
 	for _, group := range groups {
 		for _, h := range group {
 			if strings.TrimSpace(h.Narrate) == "" {
 				continue
 			}
-			em.emit(ctx, Event{Phase: phase, Step: h.ID, State: EventDone, Narration: h.Narrate})
+			line := h.Narrate
+			if strings.Contains(line, "{{") {
+				out, err := Render("narrate."+phase+"."+h.ID, line, scope)
+				if err != nil {
+					continue
+				}
+				line = string(out)
+			}
+			em.emit(ctx, Event{Phase: phase, Step: h.ID, State: EventDone, Narration: line})
 		}
 	}
 }

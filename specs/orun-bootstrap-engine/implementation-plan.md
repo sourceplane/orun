@@ -1,6 +1,6 @@
 # orun-bootstrap-engine — Implementation Plan
 
-Status: Normative for BE-O1–BE-O9. Model in [`design.md`](./design.md).
+Status: Normative for BE-O1–BE-O10. Model in [`design.md`](./design.md).
 Cross-repo: **BE1–BE6** cirrus, **BE-K1–BE-K4** orun-cloud.
 
 Two ordering rules hold, and both are safety properties rather than preferences:
@@ -160,6 +160,36 @@ which is precisely what that action's own doc comment says must not happen.
 **Done when** a blueprint can write the design §2 phase verbatim and a task the
 bootstrap creates can fold to done on its merge.
 
+## BE-O10 — The engine's own words, and what it will not claim
+
+**Added during implementation, not planned.** Found the same way BE-O9 was —
+by writing cirrus BE1 and BE2 against what shipped. Two halves, both about a
+phase reporting itself honestly.
+
+**Narration was never rendered.** `renderNarration` took a scope and every call
+site passed `nil`, so `{{ .phase.title }}` — the example design §4 rule 1 gives
+— rendered nothing and fell back to the generated line. "A template over state"
+was true of the type and false of the values, and the degrade was silent, so a
+baseline author would never learn their prose was not shown. Narration now
+renders against `.phase`, `.inputs` (secret-free), `.meta` (the engine's facts:
+files, expectedMinutes, elapsed, next) and `.hooks` — the same vocabulary a
+hook's `with:` block uses, so an author learns one. A template that cannot
+compile is a parse-time error; one that fails at run time says so in the line
+rather than vanishing. A hook's `narrate:` is rendered and validated like a
+phase's — it was emitted verbatim, the one place a caption could assert a
+state.
+
+**A hook-only phase claimed to be done.** `derivePhase` returned `PhaseDone`
+for a phase that places no files. Correct for a consume-only phase; wrong for
+one whose whole content is hooks, whose work lives in the task plane and the
+deployment. `PhaseUnknown` is the honest answer: `--resume` re-runs it (hooks
+are idempotent by construction, so a needless re-run costs API calls while a
+wrong skip leaves a bootstrap silently incomplete) and `requires.phases` fails
+closed naming the reason.
+
+**Done when** a baseline can write design §4's example verbatim and see it, and
+cirrus's `04-workers-restore` and `08-docs` stop reporting done before they run.
+
 ## Cross-repo edges
 
 | Milestone | Unblocks |
@@ -171,3 +201,4 @@ bootstrap creates can fold to done on its merge.
 | BE-O7 | cirrus BE6, orun-cloud BE-K4 |
 | BE-O8 | cirrus BE4 |
 | BE-O9 | cirrus BE1 |
+| BE-O10 | cirrus BE2, BE4 |
