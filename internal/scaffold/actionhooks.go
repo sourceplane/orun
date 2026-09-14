@@ -167,6 +167,18 @@ func validateActionHooks(bp *Blueprint, loc *hookLocator) error {
 				return err
 			}
 		}
+		if ph.Requires == nil {
+			continue
+		}
+		for hi, h := range ph.Requires.Probe {
+			label := fmt.Sprintf("phases[%d] (%s) requires.probe[%d] (%s)", pi, ph.Name, hi, h.ID)
+			// Probes are not in the hook locator's index (it walks `hooks:`),
+			// so these report without a line. Naming the phase and the probe
+			// id is enough to find it.
+			if err := check("", label, h); err != nil {
+				return err
+			}
+		}
 	}
 	for hi, h := range bp.Hooks.PostInstantiate {
 		path := fmt.Sprintf("hooks.postInstantiate[%d]", hi)

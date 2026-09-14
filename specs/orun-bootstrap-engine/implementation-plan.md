@@ -59,8 +59,13 @@ with no local artifacts, reports exactly the phases that are done.
 ## BE-O3 — `requires`, `when`, `retry`, the lease
 
 `Phase.Requires{Phases, Probe}`; `Phase.When` as CEL over inputs;
-`Phase.Retry{Attempts, Backoff}`; a per-(workspace, product repo) lease with a
-TTL and a holder, so a second runner reports who holds it and since when.
+`Phase.Retry{Attempts, Backoff}`.
+
+> **The lease moved.** It was listed here and does not belong in the binary: a
+> lease held in a container dies with the container, which is the opposite of
+> what a lease is for. It belongs in orun-cloud, keyed (workspace, product
+> repo) — the binary asks for it and reports the holder. Tracked as orun-cloud
+> **BE-K4**, alongside the runner that would hold it.
 
 **Done when** `--phase 04-workers` refuses on a product whose phase 03 never
 published its wiring secrets, and names which probe failed.

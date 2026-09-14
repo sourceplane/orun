@@ -130,6 +130,32 @@ func buildPlanWith(ctx context.Context, opts Options, bp *Blueprint, values Valu
 	return plan, nil
 }
 
+// declOf returns the blueprint's declaration for a planned phase.
+func (p *runPlan) declOf(name string) *Phase {
+	for i := range p.bp.Phases {
+		if p.bp.Phases[i].Name == name {
+			return &p.bp.Phases[i]
+		}
+	}
+	return nil
+}
+
+// skipped reports whether a phase's `when` condition excludes it. A condition
+// that does not evaluate is an ERROR, never a silent skip: "this phase did
+// nothing and nobody knows why" is the failure the parse-time compile check
+// exists to prevent, and the same reasoning holds at run time.
+func (p *runPlan) skipped(name string, inputs map[string]any) (bool, error) {
+	decl := p.declOf(name)
+	if decl == nil || decl.When == "" {
+		return false, nil
+	}
+	ok, err := evalCondition(decl.When, inputs)
+	if err != nil {
+		return false, gateErr("phase %q: %v", name, err)
+	}
+	return !ok, nil
+}
+
 // phaseNames lists the plan's phases in order.
 func (p *runPlan) phaseNames() []string {
 	out := make([]string, 0, len(p.phases))
@@ -181,6 +207,16 @@ func (p *runPlan) selectPhases(opts Options) ([]PhasePlan, bool, error) {
 	default: // Resume
 		out := make([]PhasePlan, 0, len(p.phases))
 		for _, ph := range p.phases {
+			// A phase the condition excludes is not "not yet done" — it is not
+			// wanted. Resuming into it would place a tree the operator asked
+			// not to have.
+			skip, err := p.skipped(ph.Name, p.values.Fields)
+			if err != nil {
+				return nil, false, err
+			}
+			if skip {
+				continue
+			}
 			st := derivePhase(opts.OutDir, ph.Name, p.byPhase[ph.Name])
 			// Drift is not skipped: re-placing restores the phase to what the
 			// blueprint says, which is what a resume is for. It is reported by

@@ -45,6 +45,12 @@ const (
 	// edited the product, or the blueprint moved. Re-running would overwrite,
 	// so this is reported and never silently resolved.
 	PhaseDrifted PhaseState = "drifted"
+	// PhaseSkipped: the phase's own `when` condition excludes it for these
+	// inputs (BE-O3). Distinct from pending, and the distinction matters: a
+	// pending phase is work outstanding, a skipped one is work not wanted, and
+	// a status that called them both "pending" would report a finished product
+	// as unfinished forever.
+	PhaseSkipped PhaseState = "skipped"
 )
 
 // PhaseStatus is what Derive reports per phase.
@@ -86,10 +92,18 @@ func Derive(ctx context.Context, opts Options) (*Status, error) {
 		status.Inputs = prov.Inputs
 	}
 	for _, phase := range plan.phases {
+		skip, serr := plan.skipped(phase.Name, plan.values.Fields)
+		if serr != nil {
+			return nil, serr
+		}
+		if skip {
+			status.Phases = append(status.Phases, PhaseStatus{Name: phase.Name, State: PhaseSkipped})
+			continue
+		}
 		status.Phases = append(status.Phases, derivePhase(opts.OutDir, phase.Name, plan.byPhase[phase.Name]))
 	}
 	for _, p := range status.Phases {
-		if p.State != PhaseDone {
+		if p.State != PhaseDone && p.State != PhaseSkipped {
 			status.Next = p.Name
 			break
 		}
@@ -135,7 +149,8 @@ func (s *Status) String() string {
 	var b strings.Builder
 	for _, p := range s.Phases {
 		mark := map[PhaseState]string{
-			PhaseDone: "✓", PhasePending: "·", PhasePartial: "◐", PhaseDrifted: "!",
+			PhaseDone: "✓", PhasePending: "·", PhasePartial: "◐",
+			PhaseDrifted: "!", PhaseSkipped: "–",
 		}[p.State]
 		fmt.Fprintf(&b, "%s %-24s %-8s %d file(s)", mark, p.Name, p.State, p.Files)
 		if n := len(p.Missing); n > 0 {

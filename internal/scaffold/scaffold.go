@@ -116,6 +116,32 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		placed = plan.filesFor(selected)
 	}
 
+	// Drop phases the blueprint's own condition excludes (BE-O3). A declared
+	// condition beats a caller remembering not to ask for the phase.
+	kept := make([]PhasePlan, 0, len(phases))
+	for _, ph := range phases {
+		skip, serr := plan.skipped(ph.Name, values.Fields)
+		if serr != nil {
+			return nil, serr
+		}
+		if !skip {
+			kept = append(kept, ph)
+		}
+	}
+	if len(kept) != len(phases) {
+		phases = kept
+		placed = plan.filesFor(kept)
+		partial = true
+	}
+
+	// Preconditions, before anything is written. `requires.phases` derives the
+	// tree; `requires.probe` asks reality.
+	for _, ph := range phases {
+		if err := checkRequires(ctx, plan, opts, ph, opts.Actions); err != nil {
+			return nil, err
+		}
+	}
+
 	// Output gate (design §10, component depth): every generated component.yaml
 	// must pass both parsers before anything is written. Fail closed.
 	for path, f := range placed {
@@ -168,11 +194,11 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			digests: hookDigestMap(prov),
 		}
 		for _, phase := range phases {
-			// Action outputs are scoped to their phase — see resetOutputs.
-			hr.resetOutputs()
-			ran, herr := hr.run(ctx, phase.Hooks)
+			// Hooks are retried per the phase's declared policy; outputs are
+			// scoped to the phase and reset on every attempt.
+			ran, herr := runPhaseHooks(ctx, hr, plan.declOf(phase.Name), phase.Hooks)
 			if herr != nil {
-				return nil, herr
+				return nil, fmt.Errorf("phase %q: %w", phase.Name, herr)
 			}
 			hooksRun = append(hooksRun, ran...)
 		}
