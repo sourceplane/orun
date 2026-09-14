@@ -169,9 +169,15 @@ type Hooks struct {
 // Hook is one declared post-step. It is exactly one of:
 //   - Run: an explicit argv, no shell (the ecosystem escape), or
 //   - Uses: a typed orun action resolved in-process (orun-bootstrap-engine
-//     BE-O1), parameterized by With and yielding addressable Outputs, or
-//   - Workflow: an orun workflow file run through the in-process flow engine
-//     (specs/orun-workflows §3, Surface B). Retired by BE-O8.
+//     BE-O1), parameterized by With and yielding addressable Outputs.
+//
+// A third kind — an orun workflow file run through the in-process flow engine —
+// existed until BE-O8 and is gone. It was the only way a hook could reach a
+// capability an argv could not express, and typed actions are that way now: in
+// process, parameter-checked at parse time, with addressable outputs and a
+// closed set. Keeping both would have meant two answers to one question, and
+// the workflow answer was the one that needed a credential grant, a digest pin
+// and a whole engine behind it.
 type Hook struct {
 	ID  string   `yaml:"id" json:"id"`
 	Run []string `yaml:"run,omitempty" json:"run,omitempty"`
@@ -182,26 +188,15 @@ type Hook struct {
 	Uses string `yaml:"uses,omitempty" json:"uses,omitempty"`
 	// Narrate is one authored line, emitted when this hook completes (BE-O6).
 	Narrate string `yaml:"narrate,omitempty" json:"narrate,omitempty"`
-	// Workflow names an orun workflow file (resolved against the blueprint's
-	// directory) to run as this hook. Exactly one of Run/Workflow may be set.
-	Workflow string `yaml:"workflow,omitempty" json:"workflow,omitempty"`
-	// With is the declared inputs handed to the workflow as its Trigger context.
+	// With is the action's parameters, validated at parse time against the
+	// action's declared contract.
 	With map[string]any `yaml:"with,omitempty" json:"with,omitempty"`
-	// Connections is the credential grant for a workflow hook
-	// (orun-workflows-v2 §4): workflow connection name → credential field →
-	// blueprint input name (which MUST be declared secret: true). Validated
-	// before placement against the connections the workflow file declares; only
-	// mapped inputs are injected.
-	Connections map[string]map[string]string `yaml:"connections,omitempty" json:"connections,omitempty"`
 }
-
-// IsWorkflow reports whether this hook runs a workflow (vs. an argv or action).
-func (h Hook) IsWorkflow() bool { return strings.TrimSpace(h.Workflow) != "" }
 
 // IsAction reports whether this hook calls a registered orun action.
 func (h Hook) IsAction() bool { return strings.TrimSpace(h.Uses) != "" }
 
-// validate enforces that a hook is exactly ONE of run / uses / workflow.
+// validate enforces that a hook is exactly ONE of run / uses.
 // Fail-closed: two is ambiguous and zero is a hook that does nothing, and both
 // are far more likely to be an unfinished edit than an intention.
 func (h Hook) validate() error {
@@ -212,14 +207,11 @@ func (h Hook) validate() error {
 	if h.IsAction() {
 		set = append(set, "uses")
 	}
-	if h.IsWorkflow() {
-		set = append(set, "workflow")
-	}
 	switch len(set) {
 	case 1:
 		return nil
 	case 0:
-		return fmt.Errorf("hook %q sets none of run, uses or workflow", h.ID)
+		return fmt.Errorf("hook %q sets neither run nor uses", h.ID)
 	default:
 		return fmt.Errorf("hook %q sets %s — a hook must use exactly one", h.ID, strings.Join(set, " and "))
 	}

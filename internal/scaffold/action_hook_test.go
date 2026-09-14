@@ -181,7 +181,7 @@ hooks:
 	}
 }
 
-func TestHookValidateIsExclusiveAcrossThreeKinds(t *testing.T) {
+func TestHookValidateIsExclusiveAcrossItsKinds(t *testing.T) {
 	cases := []struct {
 		name string
 		hook Hook
@@ -189,9 +189,7 @@ func TestHookValidateIsExclusiveAcrossThreeKinds(t *testing.T) {
 	}{
 		{"run only", Hook{ID: "a", Run: []string{"true"}}, true},
 		{"uses only", Hook{ID: "b", Uses: "orun.http/probe@v1"}, true},
-		{"workflow only", Hook{ID: "c", Workflow: "wf.yaml"}, true},
 		{"run and uses", Hook{ID: "d", Run: []string{"true"}, Uses: "orun.http/probe@v1"}, false},
-		{"uses and workflow", Hook{ID: "e", Uses: "orun.http/probe@v1", Workflow: "wf.yaml"}, false},
 		{"none", Hook{ID: "f"}, false},
 	}
 	for _, tc := range cases {
