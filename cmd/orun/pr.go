@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -37,6 +38,7 @@ func registerPrCommand(root *cobra.Command) {
 		},
 	}
 	cmd.AddCommand(newPrOpenCommand())
+	cmd.AddCommand(newPrLandCommand())
 	cmd.AddCommand(newPrCheckCommand())
 	root.AddCommand(cmd)
 
@@ -132,6 +134,61 @@ prints the compare URL plus the body to paste — honest either way.`,
 	cmd.Flags().StringVar(&branchSlug, "branch-slug", "", "slug half of the branch verbatim (orun/<task>-<slug>) instead of slugifying the title; [a-z0-9-]")
 	cmd.Flags().StringVar(&epic, "epic", "", "the epic this task belongs to, for the manifest (epc_… or its slug)")
 	cmd.Flags().StringVar(&bodyFile, "body-file", "", "file with the PR body's prose ('-' for stdin); the manifest block is appended")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON")
+	return cmd
+}
+
+// newPrLandCommand finishes what `pr open` starts: wait for the checks, merge,
+// and return to a pulled base. It is a thin wrapper over provenance.Pen.Land —
+// the same call orun.pr/land@v1 makes — so the command and the action cannot
+// describe a landing differently (orun-bootstrap-engine BE-O1b).
+func newPrLandCommand() *cobra.Command {
+	var (
+		asJSON      bool
+		number      int
+		base        string
+		wait        bool
+		timeoutSecs int
+		method      string
+	)
+	cmd := &cobra.Command{
+		Use:   "land",
+		Short: "Wait for a PR's checks, merge it, and return to a pulled base",
+		Long: `Land a pull request the pen opened: poll its checks until every one has a
+conclusion, merge it pinned to the commit those checks ran on, and return the
+working tree to a pulled base.
+
+A repository with no checks yet passes rather than waits — the first landing of
+a bootstrap creates the repo and its CI together, so there is nothing to wait
+for. A check that is merely queued is not a passing check.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if number <= 0 {
+				return fmt.Errorf("orun pr land: --number is required")
+			}
+			var timeout time.Duration
+			if wait {
+				timeout = time.Duration(timeoutSecs) * time.Second
+			}
+			pen := &provenance.Pen{Workdir: ".", Token: cliauth.GitHubTokenFromEnv}
+			out, err := pen.Land(cmd.Context(), provenance.LandRequest{
+				Number: number, Base: base, CheckTimeout: timeout, MergeMethod: method,
+			})
+			if err != nil {
+				return fmt.Errorf("orun pr land: %w", err)
+			}
+			if asJSON {
+				return encodeJSON(cmd, out)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "merged #%d as %s (%d check(s) seen)\n", number, out.MergeSHA, out.ChecksSeen)
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&number, "number", 0, "the pull request to land")
+	cmd.Flags().StringVar(&base, "base", "main", "base branch, and the branch to return to")
+	cmd.Flags().BoolVar(&wait, "wait", true, "wait for checks before merging")
+	cmd.Flags().IntVar(&timeoutSecs, "check-timeout", 1800, "seconds to wait for checks to settle")
+	cmd.Flags().StringVar(&method, "merge-method", "squash", "squash | merge | rebase")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON")
 	return cmd
 }

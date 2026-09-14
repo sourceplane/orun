@@ -303,6 +303,12 @@ func IntParam(in Input, name string) int {
 	return 0
 }
 
+// BoolParam reads a declared bool parameter.
+func BoolParam(in Input, name string) bool {
+	b, _ := in.Params[name].(bool)
+	return b
+}
+
 // StringListParam reads a declared stringList parameter.
 func StringListParam(in Input, name string) []string {
 	items, _ := in.Params[name].([]any)
