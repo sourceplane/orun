@@ -17,6 +17,7 @@ shipped and every place it departed from the spec.
 | **BE-O7** | ✅ Shipped (register/publish deferred) | `orun baseline list\|show\|check`, the registry client |
 | **BE-O8** | ✅ Shipped | `Hook.Workflow` deleted; `internal/scaffold` no longer imports `internal/flow` |
 | **BE-O9** | ✅ Shipped | the `with:` scope, `ActionInput.BaseDir`, `task/ensure` `contract:` |
+| **BE-O10** | ✅ Shipped | narration renders against state; `PhaseUnknown` for a hook-only phase |
 | BE-O7b | 🗓️ Planned | `baseline new\|register\|publish` (needs orun-cloud BE-K4) |
 
 ## BE-O1 — the action mechanism
@@ -761,3 +762,93 @@ and a rendered argv element stays exactly one argument. Five on the contract —
 attached on create, attached on re-find, the baseline-vs-product path swap, no
 minted key for a malformed document, and nothing attached when none is
 declared.
+
+
+## BE-O10 — the engine's own words, and what it will not claim
+
+**Not in the original plan.** Found the same way BE-O9 was: by writing a real
+baseline against what shipped rather than against the design. cirrus BE1 landed
+the phases; starting BE2 — the narration contract — turned up the first half,
+and BE1's own two hook-only phases turned up the second.
+
+### Narration was never rendered
+
+design.md §4 rule 1: *"It is a template over state, never prose about facts.
+`{{ .phase.title }} is live on {{ .envs | join }}` cannot assert what the state
+does not hold."*
+
+`renderNarration` took a `scope map[string]any`. Every call site passed `nil`:
+
+```go
+Narration: renderNarration(decl.NarrateLine(EventStarted), title, EventStarted, nil),
+```
+
+So the rule was true of the **type** and false of the **values**. An authored
+line containing any expression failed to render and fell back to the generated
+line — and the fallback is what makes it bad rather than merely broken: a line
+that never rendered looks exactly like a phase that authored nothing. A
+baseline author would write the prose, review it in a pull request, watch the
+build, and never learn that what they wrote was not what was shown.
+
+Three fixes, in the order a mistake should be caught:
+
+1. **Parse time** — a narration template that cannot compile is a blueprint
+   error naming the line (`narrate.done`). Finding out at run time means
+   finding out in front of the operator it was written for.
+2. **Run time** — a render that fails now appends `(narration unavailable: …)`
+   to the generated line instead of silently substituting it. A build must not
+   die because a caption did not, but nor should the caption disappear.
+3. **The scope itself** — `.phase.{name,title}`, `.inputs.<name>` (secret-free,
+   as everywhere), `.meta.<key>` and `.hooks.<id>.outputs.<key>`.
+
+`.meta` is the half that matters: it is **the engine's facts** — files placed,
+`expectedMinutes`, `elapsed`, the next phase — not the author's. design §4 ends
+with *"the YAML supplies the prose, the engine supplies the numbers, and
+neither can lie about the other"*, and until now a line had no way to reach the
+numbers. The scope deliberately mirrors a hook's `with:` scope: a baseline
+author should not have to learn two vocabularies for one document.
+
+**A hook's `narrate:` was the one unvalidated, unrendered line in the
+blueprint.** `emitHookNarrations` emitted `h.Narrate` verbatim, so a hook
+caption could assert a state — the exact thing `validateNarration` refuses on a
+phase's lines — and could carry a template that would never render. It now
+goes through both.
+
+### A hook-only phase claimed to be done
+
+```go
+// A phase that places nothing — every module consume-mode — is done by
+// definition; there is nothing that could be missing.
+if len(files) == 0 { st.State = PhaseDone; return st }
+```
+
+True for the case the comment names. False for a phase whose whole content is
+hooks, which is what cirrus BE1 produced two of: `04-workers-restore` re-adds
+service bindings, `08-docs` records the deployment. Neither writes a file the
+product tree keeps, and both do real work. Reporting them done meant `--resume`
+skipping them and `requires.phases` passing on a phase that never ran.
+
+`PhaseUnknown` separates the two situations honestly — no files **and** no
+hooks is done; no files **with** hooks is something placement cannot answer,
+because the record is in the task plane and the deployment.
+
+Where it lands:
+
+- **`--resume` re-runs an unknown phase.** That is the safe direction: a
+  bootstrap's hooks are idempotent by construction (find-or-create, additive
+  apply), so re-running one that was already done costs a few API calls, while
+  skipping one that was not leaves a bootstrap silently incomplete.
+- **`requires.phases` fails closed** and the message explains why, rather than
+  reporting a bare `unknown` the reader has to decode.
+- **`--status` shows `?`**, which is what the operator should see.
+
+This answers cirrus's open question 7 and lets `04-workers-restore` and
+`08-docs` be depended on.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./...` green. Seven new tests: four
+on narration (every scope key renders; a failed render says so; an uncompilable
+template is a parse error; a hook line is held to the state-word rule) and
+three on derivation (hooks + no files is unknown; neither is still done;
+`--resume` does not skip an unknown phase).

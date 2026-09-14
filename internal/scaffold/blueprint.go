@@ -328,6 +328,14 @@ func (h PhaseHooks) All() []Hook {
 // Len is the total hook count.
 func (h PhaseHooks) Len() int { return len(h.Pre) + len(h.Post) + len(h.Await) }
 
+// hasHooks reports whether this phase does anything beyond placing files.
+func (p *Phase) hasHooks() bool {
+	if p == nil {
+		return false
+	}
+	return len(p.Hooks.All()) > 0
+}
+
 // PhaseRequires is a phase's precondition, in two halves that answer different
 // questions (orun-bootstrap-engine BE-O3).
 //
@@ -455,6 +463,17 @@ func (bp *Blueprint) validateHooks() error {
 		for i, h := range ph.Hooks.All() {
 			if err := h.validate(); err != nil {
 				return fmt.Errorf("phases[%d] (%s) hooks[%d]: %w", pi, ph.Name, i, err)
+			}
+			// A hook's line is held to the same rules as a phase's. It was
+			// not, before BE-O10 — which made `narrate:` on a hook the one
+			// place in the document where a caption could assert a state, and
+			// the only narration that never rendered at all.
+			at := fmt.Sprintf("phases[%d] (%s) hooks[%d] (%s) narrate", pi, ph.Name, i, h.ID)
+			if err := checkNarrationLine(at, h.Narrate); err != nil {
+				return err
+			}
+			if err := compileNarration(at, h.Narrate); err != nil {
+				return err
 			}
 		}
 	}

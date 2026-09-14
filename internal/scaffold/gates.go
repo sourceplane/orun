@@ -26,14 +26,19 @@ func checkRequires(ctx context.Context, plan *runPlan, opts Options, phase Phase
 
 	var unmet []string
 	for _, need := range decl.Requires.Phases {
-		st := derivePhase(opts.OutDir, need, plan.byPhase[need])
+		st := derivePhaseOf(opts.OutDir, need, plan.byPhase[need], plan.declOf(need))
 		if st.State != PhaseDone {
 			unmet = append(unmet, fmt.Sprintf("%s (%s)", need, st.State))
 		}
 	}
 	if len(unmet) > 0 {
-		return gateErr("phase %q requires %s — run %s first",
-			phase.Name, strings.Join(unmet, ", "), strings.Join(decl.Requires.Phases, ", "))
+		// `unknown` reads differently from `pending` and the message says so:
+		// a required hook-only phase is not something the tree can vouch for,
+		// so the gate fails CLOSED and names the reason rather than passing on
+		// the strength of a phase having written no files.
+		return gateErr("phase %q requires %s — run %s first%s",
+			phase.Name, strings.Join(unmet, ", "), strings.Join(decl.Requires.Phases, ", "),
+			unknownNote(unmet))
 	}
 
 	if len(decl.Requires.Probe) == 0 {
@@ -114,4 +119,14 @@ func runPhaseHooks(ctx context.Context, hr *hookRunner, decl *Phase, hooks []Hoo
 		return nil, fmt.Errorf("after %d attempt(s): %w", attempts, lastErr)
 	}
 	return nil, lastErr
+}
+
+// unknownNote explains a requirement the product tree cannot answer.
+func unknownNote(unmet []string) string {
+	for _, u := range unmet {
+		if strings.Contains(u, string(PhaseUnknown)) {
+			return ". A phase reported `unknown` places no files, so placement cannot tell whether it ran — its record is in the task plane and the deployment, not in this repository"
+		}
+	}
+	return ""
 }

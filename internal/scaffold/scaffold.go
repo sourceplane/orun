@@ -213,9 +213,17 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 				hr.phase = *decl
 			}
 			started := time.Now()
+			// What an authored line may reference (BE-O10). `narrate` rebuilds
+			// it as the phase progresses, because the facts a caption wants —
+			// elapsed, the hook outputs — are not known when the phase starts.
+			startMeta := phaseMeta(decl, plan.byPhase[phase.Name])
+			narrate := func(state EventState, meta map[string]string) string {
+				return renderNarration(decl.NarrateLine(state), title, state,
+					narrationScope(phase.Name, title, hr.inputs, meta, hr.outputs))
+			}
 			em.emit(ctx, Event{Phase: phase.Name, State: EventStarted,
-				Narration: renderNarration(decl.NarrateLine(EventStarted), title, EventStarted, nil),
-				Meta:      phaseMeta(decl, plan.byPhase[phase.Name])})
+				Narration: narrate(EventStarted, startMeta),
+				Meta:      startMeta})
 			// pre and post are retried per the phase's declared policy;
 			// outputs are scoped to the phase and reset on every attempt.
 			ran, herr := runPhaseHooks(ctx, hr, decl, append(append([]Hook{}, phase.Hooks.Pre...), phase.Hooks.Post...))
@@ -223,18 +231,20 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			if pe, waiting := actions.IsPending(herr); waiting {
 				parked := &ParkedError{Phase: phase.Name, Hook: pe.ID, Reason: pe.Reason, RetryAfter: pe.RetryAfter}
 				em.emit(ctx, Event{Phase: phase.Name, Step: pe.ID, State: EventWaiting,
-					Narration: renderNarration(decl.NarrateLine(EventWaiting), title, EventWaiting, nil),
+					Narration: narrate(EventWaiting, startMeta),
 					Detail:    pe.Reason})
 				writeRunState(opts.OutDir, parked)
 				return nil, parked
 			}
 			if herr != nil {
 				em.emit(ctx, Event{Phase: phase.Name, State: EventFailed,
-					Narration: renderNarration(decl.NarrateLine(EventFailed), title, EventFailed, nil),
+					Narration: narrate(EventFailed, startMeta),
 					Detail:    herr.Error()})
 				return nil, fmt.Errorf("phase %q: %w", phase.Name, herr)
 			}
-			emitHookNarrations(ctx, em, phase.Name, phase.Hooks.Pre, phase.Hooks.Post)
+			emitHookNarrations(ctx, em, phase.Name,
+				narrationScope(phase.Name, title, hr.inputs, startMeta, hr.outputs),
+				phase.Hooks.Pre, phase.Hooks.Post)
 			// await runs OUTSIDE the retry policy. Retrying a wait would turn
 			// "still running" into an error after N attempts, when the honest
 			// answer is that it is still running.
@@ -242,26 +252,27 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			hooksRun = append(hooksRun, awaited...)
 			if parked, ok := aerr.(*ParkedError); ok {
 				em.emit(ctx, Event{Phase: phase.Name, Step: parked.Hook, State: EventWaiting,
-					Narration: renderNarration(decl.NarrateLine(EventWaiting), title, EventWaiting, nil),
+					Narration: narrate(EventWaiting, startMeta),
 					Detail:    parked.Reason})
 				writeRunState(opts.OutDir, parked)
 				return nil, parked
 			}
 			if aerr != nil {
 				em.emit(ctx, Event{Phase: phase.Name, State: EventFailed,
-					Narration: renderNarration(decl.NarrateLine(EventFailed), title, EventFailed, nil),
+					Narration: narrate(EventFailed, startMeta),
 					Detail:    aerr.Error()})
 				return nil, fmt.Errorf("phase %q: %w", phase.Name, aerr)
 			}
-			emitHookNarrations(ctx, em, phase.Name, phase.Hooks.Await)
-
 			meta := phaseMeta(decl, plan.byPhase[phase.Name])
 			meta["elapsed"] = time.Since(started).Round(time.Second).String()
 			if i+1 < len(phases) {
 				meta["next"] = phases[i+1].Name
 			}
+			emitHookNarrations(ctx, em, phase.Name,
+				narrationScope(phase.Name, title, hr.inputs, meta, hr.outputs),
+				phase.Hooks.Await)
 			em.emit(ctx, Event{Phase: phase.Name, State: EventDone,
-				Narration: renderNarration(decl.NarrateLine(EventDone), title, EventDone, nil),
+				Narration: narrate(EventDone, meta),
 				Meta:      meta})
 		}
 		// Nothing is waiting any more.

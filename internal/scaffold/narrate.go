@@ -3,6 +3,7 @@ package scaffold
 import (
 	"fmt"
 	"strings"
+	"text/template"
 )
 
 // Narration's honesty rules (orun-bootstrap-engine BE-O6).
@@ -34,7 +35,11 @@ func validateNarration(where string, n *Narration) error {
 	for label, line := range map[string]string{
 		"start": n.Start, "await": n.Await, "done": n.Done, "failed": n.Failed,
 	} {
-		if err := checkNarrationLine(fmt.Sprintf("%s narrate.%s", where, label), line); err != nil {
+		at := fmt.Sprintf("%s narrate.%s", where, label)
+		if err := checkNarrationLine(at, line); err != nil {
+			return err
+		}
+		if err := compileNarration(at, line); err != nil {
 			return err
 		}
 	}
@@ -110,7 +115,59 @@ func renderNarration(authored, phase string, state EventState, scope map[string]
 	}
 	out, err := Render("narrate."+phase, authored, scope)
 	if err != nil {
-		return generatedNarration(phase, state)
+		// A line that cannot render falls back rather than failing the phase —
+		// a build must not die because a caption did not. It is not silent,
+		// though: the parse-time check in validateNarration refuses a template
+		// that cannot compile, so reaching here means the SCOPE was missing a
+		// key at run time, and the operator is told which.
+		return fmt.Sprintf("%s (narration unavailable: %v)", generatedNarration(phase, state), err)
 	}
 	return string(out)
+}
+
+// narrationScope is what an authored line may reference (BE-O10).
+//
+// Before BE-O10 every call site passed nil, so `{{ .phase.title }}` — the
+// example design §4 rule 1 gives — rendered nothing and silently degraded to
+// the generated line. "A template over state" was true of the type and false
+// of the values.
+//
+// Four things, and the shape mirrors a hook's `with:` scope deliberately: a
+// baseline author should not have to learn two vocabularies for the same
+// blueprint.
+//
+//   - `.phase.name` / `.phase.title`
+//   - `.inputs.<name>` — secret-free, as everywhere else
+//   - `.meta.<key>` — THE ENGINE'S FACTS, not the author's: files placed,
+//     expectedMinutes, elapsed, the next phase. This is the half the YAML
+//     cannot lie about, which is the whole point of composing the line from
+//     both.
+//   - `.hooks.<id>.outputs.<key>` — what this phase's hooks produced
+func narrationScope(phase, title string, inputs map[string]any, meta map[string]string, hooks map[string]map[string]string) map[string]any {
+	if inputs == nil {
+		inputs = map[string]any{}
+	}
+	m := make(map[string]any, len(meta))
+	for k, v := range meta {
+		m[k] = v
+	}
+	return map[string]any{
+		"phase":  map[string]any{"name": phase, "title": title},
+		"inputs": inputs,
+		"meta":   m,
+		"hooks":  hookScope(hooks),
+	}
+}
+
+// compileNarration checks at PARSE time that a line is a valid template. A
+// caption that cannot compile is an authoring mistake, and finding out at run
+// time means finding out in front of the operator it was written for.
+func compileNarration(where, line string) error {
+	if !strings.Contains(line, "{{") {
+		return nil
+	}
+	if _, err := template.New(where).Funcs(constrainedFuncMap()).Parse(line); err != nil {
+		return fmt.Errorf("%s: %w", where, err)
+	}
+	return nil
 }

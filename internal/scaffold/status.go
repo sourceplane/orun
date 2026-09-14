@@ -51,6 +51,17 @@ const (
 	// a status that called them both "pending" would report a finished product
 	// as unfinished forever.
 	PhaseSkipped PhaseState = "skipped"
+	// PhaseUnknown: the phase places no files but has hooks, so the TREE
+	// CANNOT ANSWER (BE-O10). Its work happened elsewhere — a landing folded
+	// in the task plane, a deployment answering a probe — and derivation from
+	// the product repo is silent about it.
+	//
+	// This is the honest state, and it is not the same as done. A cirrus
+	// bootstrap has two such phases: `04-workers-restore`, which re-adds
+	// service bindings, and `08-docs`, which records the deployment. Calling
+	// either done because it wrote nothing would make `--resume` skip real
+	// work and make `requires.phases` pass on a phase that never ran.
+	PhaseUnknown PhaseState = "unknown"
 )
 
 // PhaseStatus is what Derive reports per phase.
@@ -100,7 +111,8 @@ func Derive(ctx context.Context, opts Options) (*Status, error) {
 			status.Phases = append(status.Phases, PhaseStatus{Name: phase.Name, State: PhaseSkipped})
 			continue
 		}
-		status.Phases = append(status.Phases, derivePhase(opts.OutDir, phase.Name, plan.byPhase[phase.Name]))
+		status.Phases = append(status.Phases,
+			derivePhaseOf(opts.OutDir, phase.Name, plan.byPhase[phase.Name], plan.declOf(phase.Name)))
 	}
 	for _, p := range status.Phases {
 		if p.State != PhaseDone && p.State != PhaseSkipped {
@@ -111,12 +123,28 @@ func Derive(ctx context.Context, opts Options) (*Status, error) {
 	return status, nil
 }
 
-// derivePhase compares one phase's rendered files against the tree.
+// derivePhase compares one phase's rendered files against the tree. It is the
+// declaration-free form, kept for callers that have only the file set; a phase
+// that places nothing is reported done, which is correct only when the phase
+// has nothing else to do. Prefer derivePhaseOf.
 func derivePhase(outDir, name string, files map[string]PlacedFile) PhaseStatus {
+	return derivePhaseOf(outDir, name, files, nil)
+}
+
+// derivePhaseOf derives a phase's state, consulting its declaration to tell a
+// phase with nothing to do from a phase whose work the tree cannot see.
+func derivePhaseOf(outDir, name string, files map[string]PlacedFile, decl *Phase) PhaseStatus {
 	st := PhaseStatus{Name: name, Files: len(files)}
-	// A phase that places nothing — every module consume-mode — is done by
-	// definition; there is nothing that could be missing.
 	if len(files) == 0 {
+		// Two different situations, and conflating them was the bug. A phase
+		// with no files AND no hooks — every module consume-mode — is done by
+		// definition: there is nothing that could be missing. A phase with no
+		// files but WITH hooks did its work somewhere the tree does not
+		// record, so placement has no opinion and must not invent one.
+		if decl != nil && decl.hasHooks() {
+			st.State = PhaseUnknown
+			return st
+		}
 		st.State = PhaseDone
 		return st
 	}
@@ -150,7 +178,7 @@ func (s *Status) String() string {
 	for _, p := range s.Phases {
 		mark := map[PhaseState]string{
 			PhaseDone: "✓", PhasePending: "·", PhasePartial: "◐",
-			PhaseDrifted: "!", PhaseSkipped: "–",
+			PhaseDrifted: "!", PhaseSkipped: "–", PhaseUnknown: "?",
 		}[p.State]
 		fmt.Fprintf(&b, "%s %-24s %-8s %d file(s)", mark, p.Name, p.State, p.Files)
 		if n := len(p.Missing); n > 0 {

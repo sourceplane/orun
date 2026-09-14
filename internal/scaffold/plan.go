@@ -217,10 +217,17 @@ func (p *runPlan) selectPhases(opts Options) ([]PhasePlan, bool, error) {
 			if skip {
 				continue
 			}
-			st := derivePhase(opts.OutDir, ph.Name, p.byPhase[ph.Name])
+			st := derivePhaseOf(opts.OutDir, ph.Name, p.byPhase[ph.Name], p.declOf(ph.Name))
 			// Drift is not skipped: re-placing restores the phase to what the
 			// blueprint says, which is what a resume is for. It is reported by
 			// --status so nobody is surprised by it here.
+			//
+			// PhaseUnknown is not skipped either, and that is the safe way
+			// round: a hook-only phase's work lives where the tree cannot see
+			// it, and its hooks are idempotent by construction (find-or-create,
+			// additive apply), so re-running one that was already done costs a
+			// few API calls. Skipping one that was NOT done leaves a bootstrap
+			// silently incomplete.
 			if st.State == PhaseDone {
 				continue
 			}
