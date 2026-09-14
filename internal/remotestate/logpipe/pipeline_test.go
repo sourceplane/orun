@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/sourceplane/orun/internal/statebackend"
 	"time"
 )
 
@@ -16,10 +18,11 @@ type recordingUploader struct {
 	mu    sync.Mutex
 	fail  bool
 	got   []string // "job:content"
+	steps []*statebackend.LogStep
 	calls int
 }
 
-func (u *recordingUploader) up(_ context.Context, _ string, jobID, content string) error {
+func (u *recordingUploader) up(_ context.Context, _ string, jobID, content string, step *statebackend.LogStep) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.calls++
@@ -27,6 +30,7 @@ func (u *recordingUploader) up(_ context.Context, _ string, jobID, content strin
 		return errors.New("backend unreachable")
 	}
 	u.got = append(u.got, jobID+":"+content)
+	u.steps = append(u.steps, step)
 	return nil
 }
 
@@ -47,8 +51,8 @@ func TestPipeline_HappyPath_DeliversInOrder(t *testing.T) {
 	p := New(u.up, Options{})
 	ctx := context.Background()
 
-	p.Append(ctx, "run1", "jobA", "one\n")
-	p.Append(ctx, "run1", "jobA", "two\n")
+	p.Append(ctx, "run1", "jobA", "one\n", nil)
+	p.Append(ctx, "run1", "jobA", "two\n", nil)
 	rep := p.Close(ctx)
 
 	if rep.Undrained != 0 {
@@ -69,9 +73,9 @@ func TestPipeline_BuffersWhileDown_DrainsOnRecover(t *testing.T) {
 
 	// Backend down: appends buffer, nothing delivered.
 	u.setFail(true)
-	p.Append(ctx, "r", "j", "a\n")
+	p.Append(ctx, "r", "j", "a\n", nil)
 	now = now.Add(2 * time.Second) // past backoff so the next Append retries
-	p.Append(ctx, "r", "j", "b\n")
+	p.Append(ctx, "r", "j", "b\n", nil)
 	if n := len(u.delivered()); n != 0 {
 		t.Fatalf("delivered %d while down, want 0", n)
 	}
@@ -80,7 +84,7 @@ func TestPipeline_BuffersWhileDown_DrainsOnRecover(t *testing.T) {
 	// new chunk.
 	u.setFail(false)
 	now = now.Add(2 * time.Second)
-	p.Append(ctx, "r", "j", "c\n")
+	p.Append(ctx, "r", "j", "c\n", nil)
 	rep := p.Close(ctx)
 
 	if rep.Undrained != 0 {
@@ -102,8 +106,8 @@ func TestPipeline_SpillsToFile_WhenMemoryBoundExceeded(t *testing.T) {
 	ctx := context.Background()
 
 	u.setFail(true)
-	p.Append(ctx, "r", "j", "aaaaaa\n") // exceeds bound → spilled
-	p.Append(ctx, "r", "j", "bbbbbb\n") // exceeds bound → spilled
+	p.Append(ctx, "r", "j", "aaaaaa\n", nil) // exceeds bound → spilled
+	p.Append(ctx, "r", "j", "bbbbbb\n", nil) // exceeds bound → spilled
 
 	data, err := os.ReadFile(spill)
 	if err != nil {
@@ -137,8 +141,8 @@ func TestPipeline_UndrainedAtClose_PersistsAndReports(t *testing.T) {
 
 	// Backend never recovers.
 	u.setFail(true)
-	p.Append(ctx, "r", "j", "x\n")
-	p.Append(ctx, "r", "j", "y\n")
+	p.Append(ctx, "r", "j", "x\n", nil)
+	p.Append(ctx, "r", "j", "y\n", nil)
 
 	rep := p.Close(ctx)
 	if rep.Undrained != 2 {
@@ -164,15 +168,15 @@ func TestPipeline_RetryBackoff_SuppressesHammering(t *testing.T) {
 	ctx := context.Background()
 	u.setFail(true)
 
-	p.Append(ctx, "r", "j", "a\n") // attempt 1 (fails)
-	p.Append(ctx, "r", "j", "b\n") // within backoff → no upload attempt
-	p.Append(ctx, "r", "j", "c\n") // within backoff → no upload attempt
+	p.Append(ctx, "r", "j", "a\n", nil) // attempt 1 (fails)
+	p.Append(ctx, "r", "j", "b\n", nil) // within backoff → no upload attempt
+	p.Append(ctx, "r", "j", "c\n", nil) // within backoff → no upload attempt
 	if u.calls != 1 {
 		t.Fatalf("upload attempts = %d, want 1 (backoff should suppress the rest)", u.calls)
 	}
 
-	now = now.Add(11 * time.Second) // past backoff
-	p.Append(ctx, "r", "j", "d\n")  // attempt 2 (fails)
+	now = now.Add(11 * time.Second)     // past backoff
+	p.Append(ctx, "r", "j", "d\n", nil) // attempt 2 (fails)
 	if u.calls != 2 {
 		t.Fatalf("upload attempts = %d, want 2 after backoff elapsed", u.calls)
 	}
@@ -181,7 +185,7 @@ func TestPipeline_RetryBackoff_SuppressesHammering(t *testing.T) {
 func TestPipeline_EmptyContent_NoOp(t *testing.T) {
 	u := &recordingUploader{}
 	p := New(u.up, Options{})
-	p.Append(context.Background(), "r", "j", "")
+	p.Append(context.Background(), "r", "j", "", nil)
 	if rep := p.Close(context.Background()); rep.Undrained != 0 {
 		t.Fatalf("Undrained = %d, want 0", rep.Undrained)
 	}

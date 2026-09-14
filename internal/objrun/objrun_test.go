@@ -84,7 +84,7 @@ func TestLivePathSeals(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("project: %v", err)
 	}
-	r.Hooks.AfterStepLog("api@deploy", "build", "build output\n")
+	r.Hooks.AfterStepLog("api@deploy", runner.StepRecord{ID: "build", Index: 0, Total: 1, Status: runner.StepSucceeded}, "build output\n")
 
 	id, err := sess.Finish(ctx, r, nil)
 	if err != nil {

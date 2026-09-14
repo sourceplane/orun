@@ -361,12 +361,50 @@ type UpdateJobRequest struct {
 
 // AppendLogRequest is the body for a log-chunk append.
 type AppendLogRequest struct {
-	RunnerID string `json:"runnerId"`
-	Content  string `json:"content"`
+	RunnerID string         `json:"runnerId"`
+	Content  string         `json:"content"`
+	Step     *AppendLogStep `json:"step,omitempty"`
+}
+
+// AppendLogStep is the step coordinate on an append (orun-cloud saas-step-logs
+// SL3/SL-R1).
+//
+// A step boundary is ALREADY a moment the runner writes a chunk, so the
+// platform learns about steps by tagging the write that already happens rather
+// than by adding a verb to the lease-gated claim path. Omitted entirely by a
+// runner with nothing to say, and the server then serves that job as one
+// whole-job step exactly as it did before any of this existed.
+//
+// Deliberately carries no name and no phase: those are per-step constants that
+// would repeat on every chunk of a 400-chunk job, and the server reads them
+// from the plan it already stores.
+type AppendLogStep struct {
+	// StepID must be the runner's own step identity (stepIdentifier), or the
+	// server's plan-declared step and this record are two rows about one step.
+	StepID string `json:"stepId"`
+	// Index is 0-BASED. The runner's presenter counts from 1; the wire does not,
+	// and the conversion happens once, at the hook.
+	Index int `json:"index"`
+	// Event is start | chunk | end. A step whose output outgrows one chunk sends
+	// `chunk` for every piece but the last, so the server sees exactly one
+	// terminal event per step.
+	Event string `json:"event"`
+	// Status is carried on `end` only, in the server's RunJobStatus vocabulary.
+	Status string `json:"status,omitempty"`
+	// ExitCode is carried on `end` when the step's command returned one. Nil is
+	// "no exit code to report", which is not the same as zero — and zero is a
+	// real outcome.
+	ExitCode *int `json:"exitCode,omitempty"`
 }
 
 type appendLogResponse struct {
 	Seq int `json:"seq"`
+	// StepRejected names the step fields the server could not read. The chunk
+	// still landed — the server stores the bytes and drops only the coordinate,
+	// because losing a runner's log over an optional field is the wrong trade.
+	// Decoded so a caller can surface it; a silent drop is how a release ships
+	// with no attribution and nobody notices.
+	StepRejected map[string][]string `json:"stepRejected,omitempty"`
 }
 
 // ReadLogResult is the assembled-read response with the live-tail cursor.
@@ -528,11 +566,11 @@ func (c *Client) UpdateJob(ctx context.Context, runID, jobID, runnerID, status, 
 // AppendLog calls POST …/state/runs/{runID}/logs/{jobID} with a single log
 // chunk (≤ 1 MiB) under the runner's live lease, returning the assigned seq.
 // A 409 lease_lost surfaces as an *APIError. Uses the longer log timeout.
-func (c *Client) AppendLog(ctx context.Context, runID, jobID, runnerID, content string) (int, error) {
+func (c *Client) AppendLog(ctx context.Context, runID, jobID, runnerID, content string, step *AppendLogStep) (int, error) {
 	path := c.statePath("/runs/" + urlSegment(runID) + "/logs/" + urlSegment(jobID))
 	var resp appendLogResponse
 	if err := c.doJSONWith(ctx, c.logClient, http.MethodPost, path,
-		AppendLogRequest{RunnerID: runnerID, Content: content}, &resp); err != nil {
+		AppendLogRequest{RunnerID: runnerID, Content: content, Step: step}, &resp); err != nil {
 		return 0, fmt.Errorf("append log %s: %w", jobID, err)
 	}
 	return resp.Seq, nil

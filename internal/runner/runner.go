@@ -34,13 +34,55 @@ const (
 	IsolationNone      IsolationMode = "none"
 )
 
+// StepRecord is a step's identity and outcome, as the runner knows them at the
+// moment it hands over the step's output.
+//
+// Kept in the runner's own vocabulary — no transport type crosses this seam.
+// The caller that uploads translates it; the cockpit, which only renders, can
+// ignore everything but the id.
+type StepRecord struct {
+	// ID is the runner's step identity (stepIdentifier): id, else name, else
+	// use, else "unnamed-step". Anything matching a step across systems must
+	// use this, not the display name.
+	ID string
+	// Index is 0-BASED, matching the plan's own ordering. OnStepStart reports a
+	// 1-based index because it is rendering "step 3 of 7"; this one is an
+	// address, and the two are deliberately different numbers.
+	Index int
+	// Total is the job's step count.
+	Total int
+	// Status is "succeeded" or "failed" — the step's outcome, known by the time
+	// its output is handed over.
+	Status string
+	// ExitCode is the command's exit status when it returned one. Nil is "none
+	// to report" (a timeout, a cancellation, a substitution error), which is
+	// not the same as zero — and zero is a real outcome a sink must be able to
+	// record.
+	ExitCode *int
+}
+
+// Step outcome vocabulary for StepRecord.Status.
+const (
+	StepSucceeded = "succeeded"
+	StepFailed    = "failed"
+)
+
 // RunnerHooks allow external code to observe step and job lifecycle events
 // without coupling the runner to a specific backend implementation.
 type RunnerHooks struct {
-	// AfterStepLog is called after each step completes with the step output.
-	// It is called synchronously; implementations should be non-blocking or
-	// fast to avoid delaying execution.
-	AfterStepLog func(jobID, stepID, output string)
+	// AfterStepLog is called after each step completes with the step output
+	// and the step's own record — its identity, its 0-based position in the
+	// job, and how it ended.
+	//
+	// The record is what lets a log sink ATTRIBUTE the block rather than just
+	// carry it (orun-cloud saas-step-logs). It used to pass `stepID` alone,
+	// which meant the one sink that uploads logs knew the step and dropped it
+	// on the way to the wire, and the console could not answer "which step
+	// broke" about a job whose every step it had just watched run.
+	//
+	// Called synchronously; implementations should be non-blocking or fast to
+	// avoid delaying execution.
+	AfterStepLog func(jobID string, step StepRecord, output string)
 	// OnStepStart is called when a step begins executing, with its 1-based
 	// index and the job's step count. Advisory and rendering-oriented: live
 	// views (the cockpit, status --watch) key step progress off these
@@ -736,9 +778,21 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 		view := analyzeStepOutput(step, output)
 		jobReport.observeStep(job.ID, stepID, view)
 
-		// Write step log
+		// Write step log. The outcome is already decided here — `stepErr` is in
+		// hand — so the block goes out attributed rather than as loose bytes a
+		// sink has to guess the owner of.
 		if r.Hooks != nil && r.Hooks.AfterStepLog != nil && strings.TrimSpace(output) != "" {
-			r.Hooks.AfterStepLog(job.ID, stepID, output)
+			record := StepRecord{ID: stepID, Index: idx, Total: len(job.Steps), Status: StepSucceeded}
+			if stepErr != nil {
+				record.Status = StepFailed
+				if code, ok := stepExitCode(stepErr); ok {
+					record.ExitCode = &code
+				}
+			} else {
+				zero := 0
+				record.ExitCode = &zero
+			}
+			r.Hooks.AfterStepLog(job.ID, record, output)
 		}
 
 		if r.inGHA() {
@@ -1830,6 +1884,22 @@ func summarizeExecError(err error) string {
 	}
 
 	return err.Error()
+}
+
+// stepExitCode reports the command's exit status when the failure carries one.
+//
+// A timeout, a cancellation or a substitution error is a real failure with NO
+// exit code, and reporting 0 for those would say "succeeded cleanly" — so the
+// bool is the answer, not a sentinel.
+func stepExitCode(err error) (int, bool) {
+	if err == nil {
+		return 0, false
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode(), true
+	}
+	return 0, false
 }
 
 func stepFailureHint(err error, workingDir string) string {

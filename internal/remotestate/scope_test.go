@@ -101,7 +101,7 @@ func TestScopedPath_ClaimAndLogsAndUpload(t *testing.T) {
 		t.Errorf("claim path = %q, want %q", *gotPath, wantClaim)
 	}
 
-	if _, err := c.AppendLog(context.Background(), "run-1", "job-1", "runner-1", "out"); err != nil {
+	if _, err := c.AppendLog(context.Background(), "run-1", "job-1", "runner-1", "out", nil); err != nil {
 		t.Fatalf("AppendLog error: %v", err)
 	}
 	wantLog := "/v1/organizations/o/projects/p/state/runs/run-1/logs/job-1"

@@ -20,11 +20,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sourceplane/orun/internal/statebackend"
 )
 
 // Uploader sends one already-formed log block for (runID, jobID). It is the
 // backend's AppendStepLog; logpipe adds the buffering/spill/retry around it.
-type Uploader func(ctx context.Context, runID, jobID, content string) error
+type Uploader func(ctx context.Context, runID, jobID, content string, step *statebackend.LogStep) error
 
 // Defaults.
 const (
@@ -61,6 +63,16 @@ type entry struct {
 	RunID   string `json:"r"`
 	JobID   string `json:"j"`
 	Content string `json:"c"`
+	// Step is the chunk's step coordinate (saas-step-logs SL-R1), spilled with
+	// it so an outage does not cost the attribution.
+	//
+	// `omitempty` and a pointer are what make the spill format backward
+	// compatible BOTH ways: a file written by a binary that predates this field
+	// decodes with Step nil and uploads exactly as it always did, and a file
+	// written by this binary is still readable by the older decoder, which
+	// ignores the key. A spill file outlives the binary that wrote it — that is
+	// the whole point of one — so neither direction is hypothetical.
+	Step *statebackend.LogStep `json:"s,omitempty"`
 }
 
 func (e entry) size() int { return len(e.RunID) + len(e.JobID) + len(e.Content) }
@@ -106,14 +118,14 @@ func New(up Uploader, opts Options) *Pipeline {
 // Append buffers content for (runID, jobID) and opportunistically flushes.
 // Empty content is a no-op. It never returns an error — delivery failures are
 // absorbed and reported by Close.
-func (p *Pipeline) Append(ctx context.Context, runID, jobID, content string) {
+func (p *Pipeline) Append(ctx context.Context, runID, jobID, content string, step *statebackend.LogStep) {
 	if content == "" {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.pending = append(p.pending, entry{RunID: runID, JobID: jobID, Content: content})
+	p.pending = append(p.pending, entry{RunID: runID, JobID: jobID, Content: content, Step: step})
 	p.pendingBytes += len(runID) + len(jobID) + len(content)
 	p.spillOverflowLocked()
 
@@ -201,7 +213,7 @@ func (p *Pipeline) flushLocked(ctx context.Context) error {
 	}
 	for len(p.pending) > 0 {
 		e := p.pending[0]
-		if err := p.up(ctx, e.RunID, e.JobID, e.Content); err != nil {
+		if err := p.up(ctx, e.RunID, e.JobID, e.Content, e.Step); err != nil {
 			p.markFailed()
 			return err
 		}
@@ -239,7 +251,7 @@ func (p *Pipeline) flushSpillLocked(ctx context.Context) error {
 			sent++ // unparseable line: drop it rather than wedge the pipe
 			continue
 		}
-		if err := p.up(ctx, e.RunID, e.JobID, e.Content); err != nil {
+		if err := p.up(ctx, e.RunID, e.JobID, e.Content, e.Step); err != nil {
 			uploadErr = err
 			break
 		}

@@ -88,7 +88,7 @@ func TestSecretsRedactedFromAllOutputSinks(t *testing.T) {
 		ResolveJobSecrets: func(string, []model.PlanSecretRef) (map[string]string, error) {
 			return map[string]string{"DATABASE_URL": secret}, nil
 		},
-		AfterStepLog: func(jobID, stepID, output string) {
+		AfterStepLog: func(jobID string, step StepRecord, output string) {
 			hookOutput = output
 		},
 	}

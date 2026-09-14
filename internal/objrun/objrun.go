@@ -145,12 +145,12 @@ func (s *Session) InstallHooks(r *runner.Runner) {
 		}
 	}
 	prevLog := r.Hooks.AfterStepLog
-	r.Hooks.AfterStepLog = func(jobID, stepID, output string) {
+	r.Hooks.AfterStepLog = func(jobID string, step runner.StepRecord, output string) {
 		if prevLog != nil {
-			prevLog(jobID, stepID, output)
+			prevLog(jobID, step, output)
 		}
 		if output != "" {
-			_ = s.wt.SetStepLog(jobID, stepID, []byte(output))
+			_ = s.wt.SetStepLog(jobID, step.ID, []byte(output))
 		}
 	}
 }

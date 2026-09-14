@@ -719,17 +719,32 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 				jobCancel()
 			})
 		},
-		AfterStepLog: func(jobID, stepID, output string) {
+		AfterStepLog: func(jobID string, step runner.StepRecord, output string) {
 			// v1 logs are append-only chunks: upload only this step's block. The
 			// old cumulative upload would re-append every prior step on each call
 			// and corrupt the assembled log.
-			chunk := "=== " + stepID + " ===\n" + output
+			chunk := "=== " + step.ID + " ===\n" + output
 			if !strings.HasSuffix(chunk, "\n") {
 				chunk += "\n"
 			}
+			// The step coordinate rides the chunk (orun-cloud saas-step-logs).
+			// This block IS the step's whole output, so it carries the step's
+			// terminal event — one append per step, no extra request, and the
+			// server needs nothing else to draw the step that broke.
+			//
+			// The banner above stays: `orun logs` and anyone reading the raw
+			// stream still has only the text, and dropping it would take the
+			// step boundaries away from every reader that is not the console.
+			coord := &statebackend.LogStep{
+				StepID:   step.ID,
+				Index:    step.Index,
+				Event:    statebackend.LogStepEnd,
+				Status:   step.Status,
+				ExitCode: step.ExitCode,
+			}
 			// Buffered, non-blocking: the pipeline absorbs transport errors
 			// (spill + retry); undelivered chunks are reported at run end.
-			logPipeline.Append(ctx, handle.RunID, jobID, chunk)
+			logPipeline.Append(ctx, handle.RunID, jobID, chunk, coord)
 		},
 		AfterJobTerminal: func(jobID string, success bool, errText string) {
 			leaseMu.Lock()
