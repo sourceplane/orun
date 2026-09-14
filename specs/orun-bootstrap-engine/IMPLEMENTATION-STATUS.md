@@ -11,7 +11,8 @@ shipped and every place it departed from the spec.
 | **BE-O3** | ✅ Shipped (lease deferred) | `when`, `requires.{phases,probe}`, `retry` |
 | **BE-O4** | ✅ Shipped | `hooks.{pre,post,await}`, `pending`, the park, `.orun/run.state` |
 | **BE-O5a** | ✅ Shipped | `task/ensure`, `task/rollup` — the task plane |
-| BE-O5b | 🗓️ Planned | doctor/check, integrations/reconcile, repo/ensure, run/watch, secrets/exists |
+| **BE-O5b** | ✅ Shipped | `doctor/check`, `integrations/reconcile`, `secrets/exists` |
+| BE-O5c | 🗓️ Planned | `repo/ensure`, `run/watch` — the two GitHub-side actions |
 | BE-O6 | 🗓️ Planned | |
 | BE-O7 | 🗓️ Planned | |
 | BE-O8 | 🗓️ Planned | |
@@ -326,3 +327,53 @@ path, not around it), milestone idempotent by name and created when new, a
 milestone with no epic refused, task idempotent by title, a task born clubbed
 and briefed, an unknown kind refused, and rollup reporting progress, completion,
 and an empty epic not counting as complete.
+
+## BE-O5b — the workspace actions
+
+Three of the five. `repo/ensure` and `run/watch` are both GitHub-API work of a
+different shape and move to **BE-O5c**, keeping each diff reviewable.
+
+### What shipped
+
+- **`orun.doctor/check@v1`** — require the named providers to be connected,
+  optionally waiting. A missing connection reports **pending**, not failure:
+  connecting a provider is a consent a person clicks in a console, and a
+  bootstrap that treats "the human has not clicked yet" as a broken build tears
+  itself down for being early. This is ~40 lines of polling shell in every
+  baseline today.
+- **`orun.secrets/exists@v1`** — require keys to exist. Missing is **pending**
+  for the same reason: the phase that publishes them may simply not have run.
+- **`orun.integrations/reconcile@v1`** — create the declared brokered secrets
+  that do not exist. This is the verb `create-secrets.sh` was reaching for:
+  it walks a declared table, skipping what exists and creating what does not.
+
+### Brokered, which is the whole point
+
+A brokered secret carries **no value** — it is a pointer at a connection and a
+scope template, and the value is minted just-in-time at resolve. So this action
+creates every credential a bootstrap needs while being *incapable* of holding,
+logging or reading one. `TestReconcileCreatesBrokeredPointersWithNoValue` pins
+that: the create request's `Value` must be empty.
+
+**Keys that exist are kept.** Re-running a phase must not rotate a credential
+the rest of the product is already using.
+
+### Two orderings that matter
+
+- **A failing READ is a failure, never a wait.** Mistaking "the command did not
+  work" for "not connected yet" polls forever against a broken credential.
+  `TestDoctorFailsLoudlyWhenTheReadItselfFails` asserts it does not even poll
+  twice.
+- **A write refusal after successful reads names its likely cause.**
+  Resource-hiding masks authorization as not-found, so a bare `not_found` after
+  two working reads sends people hunting for a missing scope when the answer is
+  that the credential is below the admin floor.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./...` green. `doctor_test.go`
+covers all-connected, a missing consent as pending, an inactive connection not
+counting, waiting until a consent arrives, a failing read erroring immediately,
+secrets present/missing, reconcile creating only what is missing, brokered
+pointers carrying no value, not-connected waiting, and the write-refusal
+explanation.
