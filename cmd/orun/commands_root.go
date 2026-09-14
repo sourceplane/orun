@@ -291,6 +291,7 @@ func init() {
 	registerTaskCommand(rootCmd)
 	registerSpecCommand(rootCmd)
 	registerPrCommand(rootCmd)
+	registerBaselineCommand(rootCmd)
 	registerMcpCommand(rootCmd)
 	registerAgentCommand(rootCmd)
 	registerGitCredentialCommand(rootCmd)

@@ -811,9 +811,17 @@ func renderContractVersionError(apiErr *APIError) error {
 }
 
 func (c *Client) doJSONOnce(ctx context.Context, httpClient *http.Client, method, path string, body, out interface{}) error {
-	token, err := c.tokenSrc.Token(ctx)
-	if err != nil {
-		return fmt.Errorf("resolving auth token: %w", err)
+	// A nil token source is ANONYMOUS, not a programming error. The public
+	// baseline catalogue is readable without a session — that is what "public"
+	// means — and a client built to read it has nothing to resolve
+	// (orun-bootstrap-engine BE-O7).
+	var token string
+	if c.tokenSrc != nil {
+		var err error
+		token, err = c.tokenSrc.Token(ctx)
+		if err != nil {
+			return fmt.Errorf("resolving auth token: %w", err)
+		}
 	}
 
 	var reqBody io.Reader
@@ -829,7 +837,9 @@ func (c *Client) doJSONOnce(ctx context.Context, httpClient *http.Client, method
 	if err != nil {
 		return fmt.Errorf("building request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set(contractVersionHeader, ContractVersion)
 	if body != nil {

@@ -14,7 +14,7 @@ shipped and every place it departed from the spec.
 | **BE-O5b** | ✅ Shipped | `doctor/check`, `integrations/reconcile`, `secrets/exists` |
 | **BE-O5c** | ✅ Shipped | `repo/ensure`, `run/watch` — **the action set is complete (9)** |
 | **BE-O6** | ✅ Shipped | the event stream, narration, `--progress` |
-| BE-O7 | 🗓️ Planned | |
+| **BE-O7** | ✅ Shipped (register/publish deferred) | `orun baseline list\|show\|check`, the registry client |
 | BE-O8 | 🗓️ Planned | |
 
 ## BE-O1 — the action mechanism
@@ -506,3 +506,59 @@ excluded phase reported as skipped, the envelope and monotonic ordering, done
 events carrying the engine's facts, three state-asserting narrations refused, a
 state word inside an expression allowed, whole-word matching, a broken template
 falling back, and the composed transition line.
+
+## BE-O7 — `orun baseline`
+
+### The gap it closes
+
+The binary had **no baseline verbs at all**: `grep -rli baseline cmd/orun/` hit
+only `tasks.go` and `agent_serve.go`, and `internal/remotestate/` had
+`catalog.go`, `tasks.go`, `epics.go`, `skills.go` and no `baselines.go`. Every
+registry surface was console-or-API, so the "one command" story broke at step
+one — an operator had to open a console to learn an id and a tag before the CLI
+could do anything with either.
+
+### What shipped
+
+- **`internal/remotestate/baselines.go`** — the registry client. Each method
+  maps 1:1 onto a route the platform already serves; **nothing here decides
+  anything.** The paid gate, the admin grant and the bootstrap session live
+  behind one door on the server, and a CLI that re-derived any of them would be
+  a second answer to a question the platform already answers.
+- **`orun baseline list`** — the workspace-scoped catalogue by default (the
+  public set **plus** what the account registered), because a signed-in reader
+  should see their own private baseline at the one moment it matters.
+  `--public` reads what a stranger sees.
+- **`orun baseline show <id[@tag]>`** — the row, plus whether this workspace can
+  build it. A **stale pin resolves and says so**: the visitor clicking a link
+  from a blog post wants to build the platform, not to litigate a version.
+- **`orun baseline check <id>`** — readiness as an **exit code**, for a script
+  or a CI gate, naming the unconnected providers. Writes nothing, starts
+  nothing.
+
+### A bug this found in the client
+
+`Client.doJSONOnce` dereferenced `tokenSrc` unconditionally, so a client built
+to read the **public** catalogue panicked. A nil token source is *anonymous*,
+not a programming error — the public read needs no session, which is what
+"public" means, and requiring a login to read it would make the signed-out
+catalogue a lie. Both the resolve and the `Authorization` header are now
+guarded, and a test asserts the public read sends no credential.
+
+### Deferred: `new`, `register`, `publish`
+
+`orun baseline new --via-platform` is a thin POST the client already supports
+(`Bootstrap`), but it needs a **repo link id** the CLI has no verb to resolve
+yet; `--local` needs the blueprint fetched at the registry's tag, which is
+`orun new` over a `git` source and belongs with the cirrus-side work that
+authors one. `register` and `publish` need the orun-cloud publish door
+(**BE-K4**). All three move to **BE-O7b**, rather than shipping a verb that
+half-works.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./...` green. `baselines_test.go`
+covers the public read sending no credential, the workspace-scoped route being
+used by default, readiness carried through, a stale pin resolving and being
+reported while the build still uses what the registry publishes, the bootstrap
+POST carrying the repo link, and `Retired()`.
