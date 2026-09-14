@@ -20,13 +20,14 @@ var (
 
 // workflowCmd is the standalone authoring on-ramp for orun workflows
 // (specs/orun-workflows-v3): validate / digest / run / view a workflow file
-// directly, before dropping it into a `workflow:` plan step or blueprint hook.
+// directly, before dropping it into a `workflow:` plan step. (A blueprint hook
+// was a third home until BE-O8 retired it in favour of typed actions.)
 // Everything runs in-process — there is no external engine (design §11).
 var workflowCmd = &cobra.Command{
 	Use:   "workflow",
 	Short: "Validate, digest, run, or view an orun workflow file",
 	Long: `Author and debug orun workflows standalone, before wiring them into a
-workflow: plan step or blueprint hook.
+workflow: plan step.
 
   orun workflow validate <file>   fully validate the workflow file
   orun workflow digest   <file>   print the content digest orun would pin

@@ -93,14 +93,6 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Validate every workflow hook's connections grant BEFORE any placement
-	// (orun-workflows-v2 §4): the grant must cover exactly the connections the
-	// workflow file declares, and every granted input must be a declared
-	// secret input. Fail-closed, with nothing written.
-	if err := validateHookGrants(bp, opts.SourceBaseDir); err != nil {
-		return nil, err
-	}
-
 	plan, err := buildPlanWith(ctx, opts, bp, values)
 	if err != nil {
 		return nil, err
@@ -210,8 +202,6 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			outDir:  opts.OutDir,
 			baseDir: opts.SourceBaseDir,
 			actions: runner,
-			secrets: values.SecretMap(),
-			digests: hookDigestMap(prov),
 		}
 		for i, phase := range phases {
 			decl := plan.declOf(phase.Name)

@@ -15,7 +15,8 @@ shipped and every place it departed from the spec.
 | **BE-O5c** | ✅ Shipped | `repo/ensure`, `run/watch` — **the action set is complete (9)** |
 | **BE-O6** | ✅ Shipped | the event stream, narration, `--progress` |
 | **BE-O7** | ✅ Shipped (register/publish deferred) | `orun baseline list\|show\|check`, the registry client |
-| BE-O8 | 🗓️ Planned | |
+| **BE-O8** | ✅ Shipped | `Hook.Workflow` deleted; `internal/scaffold` no longer imports `internal/flow` |
+| BE-O7b | 🗓️ Planned | `baseline new\|register\|publish` (needs orun-cloud BE-K4) |
 
 ## BE-O1 — the action mechanism
 
@@ -562,3 +563,50 @@ covers the public read sending no credential, the workspace-scoped route being
 used by default, readiness carried through, a stale pin resolving and being
 reported while the build still uses what the registry publishes, the bootstrap
 POST carrying the repo link, and `Retired()`.
+
+## BE-O8 — the workflow hook is gone
+
+### What was deleted
+
+`Hook.Workflow`, `Hook.Connections`, `Hook.IsWorkflow`, `hookRunner.runWorkflow`,
+`validateHookGrants`, `connectionPayloads`, `hookDigestMap`, `Provenance.Hooks`,
+`ProvHook`, `pinHookDigests`, and `workflow_hook_test.go`. A hook is now exactly
+one of `run:` or `uses:`.
+
+### Why it could go
+
+The workflow hook existed because it was **the only way a hook could reach a
+capability an argv could not express** — a real gap, and it cost a credential
+grant, a content-digest pin and an entire engine reachable from the scaffold
+path. Typed actions are that way now: in process, parameter-checked at parse
+time, with addressable outputs and a closed set. Keeping both would have meant
+two answers to one question, and the workflow answer was the expensive one.
+
+**This is why the ordering was a safety property, not a preference.** BE-O8
+could only land after BE-O5 completed the action set — invert them and a
+baseline has no way to express a bootstrap in between. The plan said so in its
+header from the start, and the sequence held.
+
+### What did NOT go
+
+`orun workflow` and `internal/flow` are untouched and very much alive:
+`kind: Workflow` remains a first-class document and a `workflow:` plan step
+still runs one. What ended is **instantiation** reaching for it. The command's
+help text advertised "or blueprint hook" and now does not — a stale sentence
+about a retired capability is exactly the drift this cluster exists to stop.
+
+### Two tests hold the line
+
+- `TestScaffoldDoesNotImportTheFlowEngine` fails if any file in
+  `internal/scaffold` imports `internal/flow` again. A dependency that is easy
+  to re-add by reflex is the kind worth writing down.
+- `TestAWorkflowHookIsNowRefusedWithAPointer` asserts that a blueprint still
+  carrying `workflow:` fails **with a message naming what a hook may be** —
+  rather than parsing with a silently ignored field and a hook that does
+  nothing, which is the worse outcome by far.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./...` green. `orun workflow --help`
+verified by hand. Net across the epic so far: **+3,631 / −619** lines in the
+binary.

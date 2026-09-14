@@ -11,7 +11,6 @@ import (
 
 	yaml "gopkg.in/yaml.v3"
 
-	"github.com/sourceplane/orun/internal/flow"
 	"github.com/sourceplane/orun/internal/objectstore"
 )
 
@@ -37,14 +36,8 @@ type Provenance struct {
 	Inputs     map[string]any `yaml:"inputs" json:"inputs"`
 	Modules    []ProvModule   `yaml:"modules" json:"modules"`
 	Consumed   []ProvConsumed `yaml:"consumed,omitempty" json:"consumed,omitempty"`
-	// Hooks pins each declared workflow hook by content digest (orun-workflows
-	// §7). Reference + digest only — never the hook's runtime outcome. Recorded
-	// even when hooks are not executed (--run-hooks off), so `upgrade` can tell
-	// whether a hook workflow changed. argv hooks are not pinned (no file).
-	Hooks []ProvHook `yaml:"hooks,omitempty" json:"hooks,omitempty"`
 }
 
-// ProvHook pins one workflow hook: its id, the workflow reference, and the
 // content digest orun pinned for it (never the outcome — orun-workflows §7).
 type ProvHook struct {
 	ID       string `yaml:"id" json:"id"`
@@ -89,10 +82,6 @@ func buildProvenance(ctx context.Context, store objectstore.ObjectStore, rawBlue
 
 	// Pin every workflow hook by content digest — reference + digest only, never
 	// the outcome (orun-workflows §7). Recorded even when --run-hooks is off.
-	provHooks, err := pinHookDigests(bp, hookBaseDir)
-	if err != nil {
-		return Provenance{}, err
-	}
 
 	// Per-module targets, from the placed set.
 	targetsByModule := map[string][]string{}
@@ -134,43 +123,7 @@ func buildProvenance(ctx context.Context, store objectstore.ObjectStore, rawBlue
 		Inputs:     ns,
 		Modules:    modules,
 		Consumed:   provConsumed,
-		Hooks:      provHooks,
 	}, nil
-}
-
-// pinHookDigests resolves every workflow hook's file against baseDir and returns
-// the pinned ProvHook records (phase hooks in phase order, then postInstantiate).
-// A workflow hook whose file cannot be read is a fail-closed error — a pinned
-// reference that cannot be resolved is not a reproducible scaffold. argv hooks
-// have no file and are skipped.
-func pinHookDigests(bp *Blueprint, baseDir string) ([]ProvHook, error) {
-	var hooks []ProvHook
-	add := func(phase string, list []Hook) error {
-		for _, h := range list {
-			if !h.IsWorkflow() {
-				continue
-			}
-			path := h.Workflow
-			if !filepath.IsAbs(path) {
-				path = filepath.Join(baseDir, h.Workflow)
-			}
-			digest, derr := flow.Digest(path)
-			if derr != nil {
-				return fmt.Errorf("hook %q: workflow %q: %w", h.ID, h.Workflow, derr)
-			}
-			hooks = append(hooks, ProvHook{ID: h.ID, Phase: phase, Workflow: h.Workflow, Digest: digest})
-		}
-		return nil
-	}
-	for _, ph := range bp.Phases {
-		if err := add(ph.Name, ph.Hooks.All()); err != nil {
-			return nil, err
-		}
-	}
-	if err := add("", bp.Hooks.PostInstantiate); err != nil {
-		return nil, err
-	}
-	return hooks, nil
 }
 
 // inputsHash is a stable sha256 over the secret-free inputs (design §8/§11):

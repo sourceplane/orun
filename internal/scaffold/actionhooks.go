@@ -145,7 +145,7 @@ func validateActionHooks(bp *Blueprint, loc *hookLocator) error {
 			// the With block would be silently ignored. Say so: a hook that
 			// quietly drops half its declaration is the bug this epic exists
 			// to stop shipping.
-			if len(h.With) > 0 && !h.IsWorkflow() {
+			if len(h.With) > 0 {
 				return atLine(loc.line(path, ""), "%s: sets `with:` but no `uses:` — parameters belong to an action", label)
 			}
 			return nil

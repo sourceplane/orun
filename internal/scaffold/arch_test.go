@@ -85,3 +85,87 @@ func TestEcosystemNeutrality(t *testing.T) {
 		})
 	}
 }
+
+// TestScaffoldDoesNotImportTheFlowEngine binds BE-O8's deletion.
+//
+// A hook could once run an orun workflow file: it was the only way to reach a
+// capability an argv could not express, and it cost a credential grant, a
+// digest pin and a whole engine behind the scaffold path. Typed actions are
+// that way now — in process, parameter-checked at parse time, with addressable
+// outputs and a closed set — so two answers to one question became one.
+//
+// `orun workflow` itself is untouched and `internal/flow` is very much alive.
+// What this asserts is that INSTANTIATION no longer reaches for it, because a
+// dependency that is easy to re-add by reflex is exactly the kind worth
+// writing down.
+func TestScaffoldDoesNotImportTheFlowEngine(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package dir: %v", err)
+	}
+	fset := token.NewFileSet()
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		for _, imp := range f.Imports {
+			if strings.Trim(imp.Path.Value, `"`) == "github.com/sourceplane/orun/internal/flow" {
+				t.Errorf("%s imports internal/flow — the workflow hook was retired in BE-O8; a hook reaches a capability through a typed action (internal/actions) or an argv escape", name)
+			}
+		}
+	}
+}
+
+// TestHookIsExactlyRunOrUses binds the two-kind rule the deletion leaves.
+func TestHookIsExactlyRunOrUses(t *testing.T) {
+	cases := []struct {
+		name string
+		hook Hook
+		ok   bool
+	}{
+		{"run", Hook{ID: "a", Run: []string{"true"}}, true},
+		{"uses", Hook{ID: "b", Uses: "orun.http/probe@v1"}, true},
+		{"both", Hook{ID: "c", Run: []string{"true"}, Uses: "orun.http/probe@v1"}, false},
+		{"neither", Hook{ID: "d"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.hook.validate()
+			if tc.ok != (err == nil) {
+				t.Fatalf("validate() = %v, want ok=%v", err, tc.ok)
+			}
+		})
+	}
+}
+
+// A blueprint still carrying `workflow:` on a hook must fail with a message
+// that says where the capability went — not with a silently ignored field.
+func TestAWorkflowHookIsNowRefusedWithAPointer(t *testing.T) {
+	src := `
+apiVersion: orun.dev/v1
+kind: Blueprint
+metadata:
+  name: legacy
+modules:
+  - name: only
+    mode: template
+    files:
+      a.txt: "a"
+hooks:
+  postInstantiate:
+    - id: notify
+      workflow: notify.yaml
+`
+	_, err := ParseBlueprint([]byte(src))
+	if err == nil {
+		t.Fatal("a hook that sets only `workflow:` now sets neither run nor uses, and must be refused rather than silently doing nothing")
+	}
+	if !strings.Contains(err.Error(), "run") || !strings.Contains(err.Error(), "uses") {
+		t.Errorf("the error should name what a hook may be; got %v", err)
+	}
+}
