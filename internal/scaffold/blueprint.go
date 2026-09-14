@@ -235,6 +235,41 @@ type Phase struct {
 	// Hooks run after this phase's modules are placed, before later phases'
 	// hooks (opt-in via --run-hooks, outside the sandbox — design §12).
 	Hooks []Hook `yaml:"hooks,omitempty" json:"hooks,omitempty"`
+
+	// When is a CEL expression over `inputs`. A phase whose condition is false
+	// is skipped — declared, rather than a caller remembering not to ask for
+	// it (orun-bootstrap-engine BE-O3). Empty means always.
+	When string `yaml:"when,omitempty" json:"when,omitempty"`
+	// Requires states what must already be true before this phase may run.
+	Requires *PhaseRequires `yaml:"requires,omitempty" json:"requires,omitempty"`
+	// Retry governs this phase's HOOKS, not its placement. Placement is
+	// deterministic and retrying it changes nothing; hooks reach the network
+	// and are where a transient failure actually lives.
+	Retry *RetrySpec `yaml:"retry,omitempty" json:"retry,omitempty"`
+}
+
+// PhaseRequires is a phase's precondition, in two halves that answer different
+// questions (orun-bootstrap-engine BE-O3).
+//
+// Phases is a PLACEMENT check, answered by deriving the tree — never by
+// reading a record that says a phase ran.
+//
+// Probe is a REALITY check, answered by running actions. It exists because
+// placement cannot know whether what an earlier phase deployed is still there.
+// A baseline's own docs carry this knowledge as prose today — "this lane fails
+// because phase 03 is incomplete; re-run phase 03" — and prose cannot gate
+// anything.
+type PhaseRequires struct {
+	Phases []string `yaml:"phases,omitempty" json:"phases,omitempty"`
+	Probe  []Hook   `yaml:"probe,omitempty" json:"probe,omitempty"`
+}
+
+// RetrySpec bounds retries of a phase's hooks.
+type RetrySpec struct {
+	Attempts int `yaml:"attempts" json:"attempts"`
+	// BackoffSeconds is the base delay; the wait is attempt × backoff, so a
+	// phase that fails three times waits 1×, then 2×, then 3×.
+	BackoffSeconds int `yaml:"backoffSeconds,omitempty" json:"backoffSeconds,omitempty"`
 }
 
 // ParseBlueprint decodes and structurally validates a Blueprint document.
@@ -393,6 +428,55 @@ func (bp *Blueprint) validatePhases(moduleNames map[string]struct{}) error {
 			if phaseOf[dep] > phaseOf[m.Name] {
 				return fmt.Errorf("module %q (phase %q) depends on %q (phase %q) which is placed later — a dependency may not cross a phase barrier forward",
 					m.Name, bp.Phases[phaseOf[m.Name]].Name, dep, bp.Phases[phaseOf[dep]].Name)
+			}
+		}
+	}
+	return bp.validatePhaseGates()
+}
+
+// validatePhaseGates checks `when`, `requires` and `retry` (BE-O3). Every one
+// of these fails at parse time or not at all: a phase that silently never runs
+// because its condition does not compile is the worst outcome, since nothing
+// appears to be wrong.
+func (bp *Blueprint) validatePhaseGates() error {
+	index := make(map[string]int, len(bp.Phases))
+	for i, ph := range bp.Phases {
+		index[ph.Name] = i
+	}
+	for pi, ph := range bp.Phases {
+		where := fmt.Sprintf("phases[%d] (%s)", pi, ph.Name)
+		if err := compileCondition(ph.When, where+" when"); err != nil {
+			return err
+		}
+		if ph.Retry != nil {
+			if ph.Retry.Attempts < 1 {
+				return fmt.Errorf("%s retry.attempts must be at least 1, got %d", where, ph.Retry.Attempts)
+			}
+			if ph.Retry.BackoffSeconds < 0 {
+				return fmt.Errorf("%s retry.backoffSeconds may not be negative", where)
+			}
+		}
+		if ph.Requires == nil {
+			continue
+		}
+		for _, need := range ph.Requires.Phases {
+			at, ok := index[need]
+			if !ok {
+				return fmt.Errorf("%s requires unknown phase %q", where, need)
+			}
+			// A phase may only require one placed BEFORE it. Requiring a later
+			// phase is unsatisfiable by construction, and requiring itself is a
+			// loop — both are edits nobody meant to make.
+			if at >= pi {
+				return fmt.Errorf("%s requires phase %q, which is not placed earlier — a requirement may only point backwards", where, need)
+			}
+		}
+		for hi, h := range ph.Requires.Probe {
+			if !h.IsAction() {
+				return fmt.Errorf("%s requires.probe[%d] (%s): a probe must be an action (`uses:`) — it answers a question, it does not run a command", where, hi, h.ID)
+			}
+			if err := h.validate(); err != nil {
+				return fmt.Errorf("%s requires.probe[%d]: %w", where, hi, err)
 			}
 		}
 	}

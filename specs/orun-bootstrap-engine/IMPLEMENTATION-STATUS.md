@@ -8,7 +8,7 @@ shipped and every place it departed from the spec.
 | **BE-O1** | ✅ Shipped | the action mechanism + `orun.http/probe@v1` |
 | **BE-O1b** | ✅ Shipped | `Pen.Land`, `orun.pr/land@v1`, `orun pr land` |
 | **BE-O2** | ✅ Shipped | `Derive`, `--status`, `--phase`/`--until`/`--resume`, input recovery |
-| BE-O3 | 🗓️ Planned | |
+| **BE-O3** | ✅ Shipped (lease deferred) | `when`, `requires.{phases,probe}`, `retry` |
 | BE-O4 | 🗓️ Planned | |
 | BE-O5 | 🗓️ Planned | |
 | BE-O6 | 🗓️ Planned | |
@@ -175,3 +175,61 @@ phase that collides with one it was not asked to place is still a collision.
 the empty tree, the full run, survival of a deleted `.orun`, each selector,
 resume-is-a-no-op-when-done, drift, partial, two selectors at once refused, an
 unknown phase, the merged module record, and all three input-recovery paths.
+
+## BE-O3 — preconditions, conditions, retry
+
+### What shipped
+
+- **`when:`** — a CEL expression over `inputs`. CEL for the reason
+  orun-workflows-v3 already settled: a condition must be side-effect-free and
+  terminating, and *"whatever a template engine accepts"* is not a contract.
+  Compiled at **parse time**, because a phase that silently never runs because
+  its condition has a typo is the worse failure — nothing appears to be wrong.
+  A condition that is not boolean is refused with what it must produce.
+- **A fifth phase state, `skipped`.** Distinct from `pending`, and the
+  distinction is load-bearing: pending is work outstanding, skipped is work not
+  wanted, and calling both "pending" would report a finished product as
+  unfinished forever.
+- **`requires.phases`** — a placement check, answered by **deriving**, never by
+  reading a record claiming a phase ran. A requirement may only point
+  *backwards*; forward is unsatisfiable by construction and self-reference is a
+  loop, so both are parse errors.
+- **`requires.probe`** — a reality check, answered by running actions. It exists
+  because placement cannot know whether what an earlier phase *deployed* is
+  still there. A baseline carries this knowledge as prose today — *"this lane
+  fails because phase 03 is incomplete; re-run phase 03"* — and prose cannot
+  gate anything. A probe **must** be an action: it answers a question, it does
+  not run a command.
+- **`retry`** — governs a phase's **hooks**, not its placement. Placement is
+  deterministic, so a second attempt renders exactly what the first did; hooks
+  reach the network, which is where a transient failure actually lives. The
+  whole hook list is retried rather than resuming mid-list, because resuming
+  would require knowing which hooks are safe to skip — a claim only the hook
+  could make. With no declared policy a hook runs **once**: a silent default
+  retry would hide a real failure behind a delay.
+
+### The narrower CEL environment, on purpose
+
+A phase condition sees `inputs` and nothing else — not another phase's result.
+A phase must be answerable alone, and a condition depending on what a previous
+phase produced could not be evaluated by a resumed run in a container that never
+ran it. That is BE-O2's derivation rule constraining BE-O3's surface.
+
+### Deferred: the lease
+
+The plan listed a per-product lease here. It is **not** in this milestone, and
+on reflection it does not belong in the binary at all — `risks-and-open-questions.md`
+open question 5 already leaned this way. A lease held in a container dies with
+the container, which is the opposite of what a lease is for. It belongs in
+orun-cloud, keyed (workspace, product repo); the binary asks for it and reports
+the holder. Tracked as orun-cloud **BE-K4**, where the runner that would hold it
+lives.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./...` green. `gates_test.go` covers
+condition true/false/uncompilable/non-boolean, resume not placing an excluded
+phase, a skipped phase not blocking `Done()`, requires unmet and then met,
+forward and unknown requirements refused, a probe that shells out refused, retry
+succeeding within budget, retry exhausting and saying how many attempts, and no
+policy meaning exactly one attempt.
