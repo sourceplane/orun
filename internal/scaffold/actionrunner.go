@@ -26,8 +26,9 @@ import (
 // ActionInput is what an action receives. It mirrors actions.Input so callers
 // of this package need not import the registry to drive the engine.
 type ActionInput struct {
-	Dir    string
-	Params map[string]any
+	Dir     string
+	BaseDir string
+	Params  map[string]any
 }
 
 // ActionRunner executes a registered action by id and returns its outputs.
@@ -39,7 +40,7 @@ type ActionRunner interface {
 type registryRunner struct{}
 
 func (registryRunner) Run(ctx context.Context, id string, in ActionInput) (map[string]string, error) {
-	res, err := actions.Run(ctx, id, actions.Input{Dir: in.Dir, Params: in.Params})
+	res, err := actions.Run(ctx, id, actions.Input{Dir: in.Dir, BaseDir: in.BaseDir, Params: in.Params})
 	if err != nil {
 		return res.Outputs, err
 	}

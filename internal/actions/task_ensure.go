@@ -2,10 +2,12 @@ package actions
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/sourceplane/orun/internal/remotestate"
+	"github.com/sourceplane/orun/internal/taskfile"
 )
 
 // orun.task/ensure@v1 and orun.task/rollup@v1 — the bootstrap's hand on the
@@ -51,6 +53,8 @@ func init() {
 				Description: "task only: what the task is for"},
 			Param{Name: "prefix", Type: ParamString, Default: "ORUN",
 				Description: "task only: key prefix when a key is minted"},
+			Param{Name: "contract", Type: ParamString,
+				Description: "task only: a TaskContract document to attach, relative to the blueprint"},
 			Param{Name: "exitCriteria", Type: ParamStringList,
 				Description: "milestone only: what finishing it means"},
 		),
@@ -78,6 +82,7 @@ type taskPlane interface {
 	CreateMilestone(ctx context.Context, org, epicRef string, req remotestate.MilestoneCreateRequest) (*remotestate.PublicMilestone, error)
 	ListTasksWhere(ctx context.Context, org string, filter remotestate.TaskListFilter) (*remotestate.TasksList, error)
 	CreateTask(ctx context.Context, org string, req remotestate.TaskCreateRequest) (*remotestate.PublicTask, error)
+	AttachTaskContract(ctx context.Context, org, keyOrID string, wire json.RawMessage, hash string) (*remotestate.TaskContractSeal, error)
 }
 
 func runTaskEnsure(ctx context.Context, in Input) (Result, error) {
@@ -150,14 +155,41 @@ func ensureMilestone(ctx context.Context, c taskPlane, org string, in Input) (Re
 }
 
 // ensureTask finds a task by TITLE WITHIN ITS EPIC, or creates it contracted.
+//
+// The contract is not an embellishment. A task created without one parks at
+// `in_review` after its merge — gates unknown to us are not gates passed — so
+// a bootstrap that creates its tasks seconds before their PRs would leave
+// every landing it makes un-folded forever. `contract:` names the document
+// that says what finishing means, and a baseline keeps that document beside
+// its blueprint, which is why the path resolves against the BASELINE.
 func ensureTask(ctx context.Context, c taskPlane, org string, in Input) (Result, error) {
 	title := StringParam(in, "name")
 	epicRef := StringParam(in, "epic")
+
+	// Read the document BEFORE anything is created. A malformed contract must
+	// not cost a minted key — the same discipline `orun task create` keeps.
+	var template *taskfile.Document
+	if path := PathParam(in, "contract"); path != "" {
+		doc, err := taskfile.LoadTemplate(path)
+		if err != nil {
+			return Result{}, fmt.Errorf("task %q: contract: %w", title, err)
+		}
+		template = doc
+	}
+
 	if epicRef != "" {
 		list, err := c.ListTasksWhere(ctx, org, remotestate.TaskListFilter{Epic: epicRef})
 		if err == nil && list != nil {
 			for _, t := range list.Tasks {
 				if t.TitleMirror == title {
+					// Re-attach on the found path too. A bootstrap re-runs, and
+					// the run that made this task may have predated its
+					// contract — or failed between the create and the attach.
+					// Attaching the same bytes is a no-op by content hash, so
+					// the re-run heals instead of leaving a parked landing.
+					if err := attachContract(ctx, c, org, t.Key, template); err != nil {
+						return Result{}, fmt.Errorf("task %q: %w", title, err)
+					}
 					return Result{Outputs: map[string]string{"id": t.ID, "key": t.Key, "existed": "true"}}, nil
 				}
 			}
@@ -173,7 +205,19 @@ func ensureTask(ctx context.Context, c taskPlane, org string, in Input) (Result,
 	if err != nil {
 		return Result{}, fmt.Errorf("creating task %q: %w", title, err)
 	}
+	if err := attachContract(ctx, c, org, created.Key, template); err != nil {
+		return Result{}, fmt.Errorf("task %q: %w", created.Key, err)
+	}
 	return Result{Outputs: map[string]string{"id": created.ID, "key": created.Key, "existed": "false"}}, nil
+}
+
+// attachContract seals the authored document and attaches it to the key,
+// through the same helper `orun task create` uses. A nil template means the
+// caller declared none, which stays legal — an uncontracted task is an honest
+// state, just not one a bootstrap wants.
+func attachContract(ctx context.Context, c taskPlane, org, key string, template *taskfile.Document) error {
+	_, err := taskfile.Attach(ctx, c, org, key, template)
+	return err
 }
 
 func runTaskRollup(ctx context.Context, in Input) (Result, error) {

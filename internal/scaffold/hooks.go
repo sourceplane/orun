@@ -29,6 +29,14 @@ type hookRunner struct {
 	// `{{ .hooks.<id>.outputs.<key> }}` in a later hook's `with:` block. Scoped
 	// to one phase: see resetOutputs.
 	outputs map[string]map[string]string
+	// inputs are the blueprint's collected input values, SECRET-FREE — a
+	// secret field reads as the literal "<secret>". A hook that needs a
+	// credential gets it from the platform at resolve time (the brokered
+	// path), never from an input rendered into an argv or a parameter.
+	inputs map[string]any
+	// phase names the phase whose hooks are running, for `{{ .phase.name }}`.
+	// Empty outside a phase (the global postInstantiate list).
+	phase Phase
 }
 
 // run executes a list of hooks in order, returning the ids that ran.
@@ -72,7 +80,7 @@ func (hr *hookRunner) runAction(ctx context.Context, h Hook) error {
 	if hr.actions == nil {
 		return fmt.Errorf("hook %q: no action runner configured", h.ID)
 	}
-	out, err := hr.actions.Run(ctx, h.Uses, ActionInput{Dir: hr.outDir, Params: params})
+	out, err := hr.actions.Run(ctx, h.Uses, ActionInput{Dir: hr.outDir, BaseDir: hr.baseDir, Params: params})
 	if err != nil {
 		return fmt.Errorf("hook %q (%s): %w", h.ID, h.Uses, err)
 	}
@@ -90,7 +98,7 @@ func (hr *hookRunner) resolveWith(h Hook) (map[string]any, error) {
 	if len(h.With) == 0 {
 		return nil, nil
 	}
-	scope := map[string]any{"hooks": hookScope(hr.outputs)}
+	scope := hr.scope()
 	out := make(map[string]any, len(h.With))
 	for name, value := range h.With {
 		s, ok := value.(string)
@@ -105,6 +113,40 @@ func (hr *hookRunner) resolveWith(h Hook) (map[string]any, error) {
 		out[name] = string(rendered)
 	}
 	return out, nil
+}
+
+// scope is what a hook's `with:` block can see.
+//
+// Three things, and the omission is as deliberate as the inclusions:
+//
+//   - `.inputs.<name>` — what the operator answered. Secret-free (a secret
+//     field reads as "<secret>"), so a blueprint cannot route a credential
+//     into a parameter by writing an expression.
+//   - `.phase.name` / `.phase.title` — which phase is running, so a hook can
+//     name it in a branch, a title or a milestone without the blueprint
+//     repeating the phase name on every line.
+//   - `.hooks.<id>.outputs.<key>` — what an earlier hook IN THIS PHASE
+//     produced, also reachable as `.phase.hooks.<id>.outputs.<key>`.
+//
+// What is NOT here: the placed file set, the provenance lock, anything about
+// an earlier phase. Templates run under missingkey=error, so reaching for one
+// of those is a failure at the line that reached, not an empty string that
+// travels into a parameter and means something else.
+func (hr *hookRunner) scope() map[string]any {
+	hooks := hookScope(hr.outputs)
+	inputs := hr.inputs
+	if inputs == nil {
+		inputs = map[string]any{}
+	}
+	return map[string]any{
+		"inputs": inputs,
+		"hooks":  hooks,
+		"phase": map[string]any{
+			"name":  hr.phase.Name,
+			"title": phaseTitle(&hr.phase, hr.phase.Name),
+			"hooks": hooks,
+		},
+	}
 }
 
 // hookScope shapes recorded outputs as `.hooks.<id>.outputs.<key>`. The extra

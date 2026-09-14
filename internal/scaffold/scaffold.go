@@ -202,10 +202,16 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			outDir:  opts.OutDir,
 			baseDir: opts.SourceBaseDir,
 			actions: runner,
+			inputs:  values.nonSecretFields(),
 		}
 		for i, phase := range phases {
 			decl := plan.declOf(phase.Name)
 			title := phaseTitle(decl, phase.Name)
+			// What `{{ .phase.name }}` resolves to for this phase's hooks.
+			hr.phase = Phase{}
+			if decl != nil {
+				hr.phase = *decl
+			}
 			started := time.Now()
 			em.emit(ctx, Event{Phase: phase.Name, State: EventStarted,
 				Narration: renderNarration(decl.NarrateLine(EventStarted), title, EventStarted, nil),
@@ -260,6 +266,9 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		}
 		// Nothing is waiting any more.
 		clearRunState(opts.OutDir)
+		// postInstantiate belongs to no phase, and says so: `{{ .phase.name }}`
+		// there renders empty rather than silently carrying the last phase.
+		hr.phase = Phase{}
 		hr.resetOutputs()
 		ran, herr := hr.run(ctx, bp.Hooks.PostInstantiate)
 		if herr != nil {

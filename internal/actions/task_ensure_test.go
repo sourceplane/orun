@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -30,6 +32,10 @@ type fakePlane struct {
 	// slug is taken: with the existing epic, not a conflict.
 	existingSlug string
 	lastTask     remotestate.TaskCreateRequest
+	// attached records every contract attach, keyed by task key, so a test can
+	// assert that a landing's task was born able to fold.
+	attached  map[string]string
+	attachErr error
 }
 
 func (f *fakePlane) CreateEpic(_ context.Context, _ string, req remotestate.EpicCreateRequest) (*remotestate.PublicEpic, error) {
@@ -59,6 +65,17 @@ func (f *fakePlane) CreateMilestone(_ context.Context, _, epicRef string, req re
 
 func (f *fakePlane) ListTasksWhere(_ context.Context, _ string, filter remotestate.TaskListFilter) (*remotestate.TasksList, error) {
 	return &remotestate.TasksList{Tasks: f.tasks[filter.Epic]}, nil
+}
+
+func (f *fakePlane) AttachTaskContract(_ context.Context, _, keyOrID string, _ json.RawMessage, hash string) (*remotestate.TaskContractSeal, error) {
+	if f.attachErr != nil {
+		return nil, f.attachErr
+	}
+	if f.attached == nil {
+		f.attached = map[string]string{}
+	}
+	f.attached[keyOrID] = hash
+	return &remotestate.TaskContractSeal{}, nil
 }
 
 func (f *fakePlane) CreateTask(_ context.Context, _ string, req remotestate.TaskCreateRequest) (*remotestate.PublicTask, error) {
@@ -230,5 +247,157 @@ func TestRollupOnAnEmptyEpicIsNotComplete(t *testing.T) {
 	res, _ := rollupOn(context.Background(), f, "ws_1", Input{Params: resolved})
 	if res.Outputs["complete"] != "false" {
 		t.Errorf("an empty epic must not report complete, got %v", res.Outputs)
+	}
+}
+
+// The contract (orun-bootstrap-engine BE-O9).
+//
+// This action's own reason for existing says a bootstrap must create its tasks
+// CONTRACTED: a task whose contract never declared gates parks at `in_review`
+// after its merge, and a bootstrap creates its tasks seconds before their PRs.
+// Until BE-O9 the action had no way to say it — every landing it made would
+// have sat un-folded forever.
+
+const contractDoc = `apiVersion: orun.io/v1
+kind: TaskContract
+spec:
+  goal: The API edge is the single front door
+  affects:
+    - apps/api-edge
+  doneWhen:
+    - stage and prod answer /health
+  gates: []
+`
+
+// writeContract puts a contract document in a fake BASELINE directory and
+// returns that directory — never the product tree, which is the distinction
+// the path resolution exists for.
+func writeContract(t *testing.T, name, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestEnsureTaskAttachesTheDeclaredContract(t *testing.T) {
+	base := writeContract(t, "tasks/05-edge.TaskContract.yaml", contractDoc)
+	f := &fakePlane{epics: map[string]*remotestate.EpicView{}}
+
+	res, err := ensureOn(context.Background(), f, "ws_1", Input{
+		Dir:     t.TempDir(),
+		BaseDir: base,
+		Params: map[string]any{
+			"kind": "task", "name": "phase(05-edge): api-edge",
+			"epic": "infra-baselining", "contract": "tasks/05-edge.TaskContract.yaml",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	key := res.Outputs["key"]
+	if f.attached[key] == "" {
+		t.Fatalf("task %s was created without a contract — its landing would park at in_review", key)
+	}
+}
+
+// The path is the BASELINE's. A contract lives beside the blueprint and is
+// deliberately not copied into the product, so resolving it against the
+// product tree would find nothing — silently, if the action shrugged.
+func TestTheContractPathResolvesAgainstTheBaselineNotTheProduct(t *testing.T) {
+	base := writeContract(t, "tasks/05-edge.TaskContract.yaml", contractDoc)
+	product := t.TempDir() // deliberately empty: the product carries no contracts
+
+	f := &fakePlane{epics: map[string]*remotestate.EpicView{}}
+	if _, err := ensureOn(context.Background(), f, "ws_1", Input{
+		Dir: product, BaseDir: base,
+		Params: map[string]any{"kind": "task", "name": "t", "contract": "tasks/05-edge.TaskContract.yaml"},
+	}); err != nil {
+		t.Fatalf("resolving against the baseline should have found the document: %v", err)
+	}
+
+	// With the two swapped there is nothing to find, and that is an error
+	// rather than a task quietly created uncontracted.
+	f2 := &fakePlane{epics: map[string]*remotestate.EpicView{}}
+	_, err := ensureOn(context.Background(), f2, "ws_1", Input{
+		Dir: base, BaseDir: product,
+		Params: map[string]any{"kind": "task", "name": "t", "contract": "tasks/05-edge.TaskContract.yaml"},
+	})
+	if err == nil {
+		t.Fatal("a missing contract document must fail, not create an uncontracted task")
+	}
+	if f2.createdTsk != 0 {
+		t.Errorf("a missing contract cost %d minted key(s)", f2.createdTsk)
+	}
+}
+
+// A malformed document must not cost a minted key — the same discipline
+// `orun task create` keeps, for the same reason: the key is the scarce thing.
+func TestAMalformedContractCostsNoMintedKey(t *testing.T) {
+	base := writeContract(t, "tasks/bad.TaskContract.yaml", "apiVersion: orun.io/v1\nkind: NotAContract\n")
+	f := &fakePlane{epics: map[string]*remotestate.EpicView{}}
+
+	_, err := ensureOn(context.Background(), f, "ws_1", Input{
+		Dir: t.TempDir(), BaseDir: base,
+		Params: map[string]any{"kind": "task", "name": "t", "contract": "tasks/bad.TaskContract.yaml"},
+	})
+	if err == nil {
+		t.Fatal("expected a malformed contract to fail")
+	}
+	if f.createdTsk != 0 {
+		t.Errorf("a malformed contract cost %d minted key(s)", f.createdTsk)
+	}
+}
+
+// A re-run finds the task it made last time — and re-attaches. The run that
+// created it may have predated its contract, or died between the create and
+// the attach; attaching the same bytes is a no-op by content hash, so the
+// re-run heals rather than leaving a parked landing behind.
+func TestAFoundTaskHasItsContractReattached(t *testing.T) {
+	base := writeContract(t, "tasks/05-edge.TaskContract.yaml", contractDoc)
+	f := &fakePlane{
+		epics: map[string]*remotestate.EpicView{},
+		tasks: map[string][]remotestate.PublicTask{
+			"infra-baselining": {{ID: "tsk_1", Key: "BASE-7", TitleMirror: "phase(05-edge): api-edge"}},
+		},
+	}
+	res, err := ensureOn(context.Background(), f, "ws_1", Input{
+		Dir: t.TempDir(), BaseDir: base,
+		Params: map[string]any{
+			"kind": "task", "name": "phase(05-edge): api-edge",
+			"epic": "infra-baselining", "contract": "tasks/05-edge.TaskContract.yaml",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if res.Outputs["existed"] != "true" {
+		t.Fatalf("expected the existing task to be found, got %v", res.Outputs)
+	}
+	if f.attached["BASE-7"] == "" {
+		t.Error("a re-run left the found task uncontracted")
+	}
+	if f.createdTsk != 0 {
+		t.Errorf("a found task was created again (%d)", f.createdTsk)
+	}
+}
+
+// No `contract:` is still legal. An uncontracted task is an honest state —
+// just not one a bootstrap wants — so the action does not invent a document.
+func TestNoContractDeclaredAttachesNothing(t *testing.T) {
+	f := &fakePlane{epics: map[string]*remotestate.EpicView{}}
+	if _, err := ensureOn(context.Background(), f, "ws_1", Input{
+		Dir:    t.TempDir(),
+		Params: map[string]any{"kind": "task", "name": "t"},
+	}); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if len(f.attached) != 0 {
+		t.Errorf("attached %d contract(s) when none was declared", len(f.attached))
 	}
 }

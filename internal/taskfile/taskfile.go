@@ -9,6 +9,8 @@ package taskfile
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +20,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/sourceplane/orun/internal/contract"
+	"github.com/sourceplane/orun/internal/remotestate"
 )
 
 const (
@@ -201,4 +204,32 @@ func Missing(c *contract.Contract) []string {
 		out = append(out, "gates (declare a list, or an explicit empty list)")
 	}
 	return out
+}
+
+// Attacher is the one thing attaching a contract needs from the platform
+// client. Narrow on purpose: *remotestate.Client satisfies it, and so does a
+// fake, which is what lets the callers that attach contracts — `orun task
+// create` and the bootstrap's `orun.task/ensure@v1` action — share one
+// implementation of the seal-then-attach step instead of keeping two that can
+// drift apart.
+type Attacher interface {
+	AttachTaskContract(ctx context.Context, org, keyOrID string, wire json.RawMessage, hash string) (*remotestate.TaskContractSeal, error)
+}
+
+// Attach seals a template's contract and attaches it to key, returning the
+// content hash it was sealed under. The hash IS the identity: attaching the
+// same document twice is the same attach, which is what makes a bootstrap's
+// re-run heal a task rather than conflict with itself.
+func Attach(ctx context.Context, to Attacher, org, key string, template *Document) (string, error) {
+	if template == nil {
+		return "", nil
+	}
+	hash, wire, err := contract.ContractID(template.Contract)
+	if err != nil {
+		return "", fmt.Errorf("sealing contract %s: %w", template.Path, err)
+	}
+	if _, err := to.AttachTaskContract(ctx, org, key, wire, hash); err != nil {
+		return hash, fmt.Errorf("attaching contract %s: %w", template.Path, err)
+	}
+	return hash, nil
 }

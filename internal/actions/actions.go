@@ -34,6 +34,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -106,9 +107,37 @@ func (s Spec) HasOutput(name string) bool {
 type Input struct {
 	// Dir is the directory the action operates in — the product tree.
 	Dir string
+	// BaseDir is the BASELINE's own directory — where the blueprint that
+	// declared this hook lives. It is not the same place as Dir and the
+	// difference is load-bearing: a baseline's machinery (a task contract, a
+	// policy document) is authored beside the blueprint and is deliberately
+	// not copied into the product, so a parameter naming one of those files
+	// has to resolve here. Empty when the caller has no blueprint directory,
+	// in which case a relative path falls back to Dir.
+	BaseDir string
 	// Params are the resolved parameters: declared defaults applied, and every
 	// template expression already rendered.
 	Params map[string]any
+}
+
+// PathParam resolves a path parameter the way a baseline's author means it:
+// relative to the BASELINE (BaseDir), because the files a hook names — a task
+// contract, a policy — are the baseline's, not the product's. An absolute path
+// is taken as given, and an empty BaseDir falls back to Dir so a caller that
+// drives an action directly still resolves something sensible.
+func PathParam(in Input, name string) string {
+	raw := strings.TrimSpace(StringParam(in, name))
+	if raw == "" || filepath.IsAbs(raw) {
+		return raw
+	}
+	base := in.BaseDir
+	if base == "" {
+		base = in.Dir
+	}
+	if base == "" {
+		return raw
+	}
+	return filepath.Join(base, filepath.FromSlash(raw))
 }
 
 // Result is what an action hands back.
