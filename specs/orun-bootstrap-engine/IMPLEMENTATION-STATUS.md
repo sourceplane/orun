@@ -16,6 +16,7 @@ shipped and every place it departed from the spec.
 | **BE-O6** | ✅ Shipped | the event stream, narration, `--progress` |
 | **BE-O7** | ✅ Shipped (register/publish deferred) | `orun baseline list\|show\|check`, the registry client |
 | **BE-O8** | ✅ Shipped | `Hook.Workflow` deleted; `internal/scaffold` no longer imports `internal/flow` |
+| **BE-O9** | ✅ Shipped | the `with:` scope, `ActionInput.BaseDir`, `task/ensure` `contract:` |
 | BE-O7b | 🗓️ Planned | `baseline new\|register\|publish` (needs orun-cloud BE-K4) |
 
 ## BE-O1 — the action mechanism
@@ -610,3 +611,153 @@ about a retired capability is exactly the drift this cluster exists to stop.
 `go build ./...`, `go vet ./...`, `go test ./...` green. `orun workflow --help`
 verified by hand. Net across the epic so far: **+3,631 / −619** lines in the
 binary.
+
+
+## BE-O9 — a hook can say what it means
+
+**Not in the original plan.** BE-O9 is a split, recorded rather than absorbed,
+and it was not found by re-reading the design — it was found by starting to
+write cirrus BE1 against what actually shipped. Two things the design takes for
+granted turned out not to exist, and neither was visible from the orun side
+because no orun test had ever written the expressions a real baseline writes.
+
+### Gap 1 — a hook's parameters could see almost nothing
+
+`design.md` §2 sketches a phase whose hooks say `{{ .inputs.epicslug }}`,
+`{{ .phase.name }}` and `{{ .phase.hooks.task.outputs.key }}`. What BE-O1
+shipped put exactly one key in scope:
+
+```go
+scope := map[string]any{"hooks": hookScope(hr.outputs)}
+```
+
+Templates render under `missingkey=error`, so every one of those expressions
+was a **run-time failure**, not an empty string. That is the good failure mode
+— but it meant the design's own worked example could not be authored, and the
+only way for a baseline to name its phase in a branch, a PR title or a
+milestone was to type the phase name again on every line that needed it.
+
+The scope now carries three things:
+
+- `.inputs.<name>` — **secret-free**. `nonSecretFields()` already renders a
+  secret field as the literal `<secret>`, so a blueprint that reaches for a
+  credential gets the redaction. A hook that needs one gets it brokered at
+  resolve time; an input rendered into a parameter would travel onward through
+  an argv, a PR body or a task brief.
+- `.phase.name` / `.phase.title` — with `title` falling back to the name, so a
+  phase that never titled itself does not put a bare colon in a PR title.
+- `.hooks.<id>.outputs.<key>`, also reachable as `.phase.hooks.…` — both
+  spellings work, so the design's text is literally true and the short form a
+  hook already used keeps working.
+
+What is deliberately **not** in scope: the placed file set, the provenance
+lock, anything about an earlier phase. Reaching for one of those fails at the
+line that reached, which is the behaviour BE-O1 chose and this keeps.
+
+### Gap 2 — `orun.task/ensure@v1` could not contract a task
+
+The action's own doc comment, shipped in BE-O5a, states the requirement:
+
+> The plane parks a merged PR at `in_review` when its task never declared
+> gates — gates unknown to us are not gates passed. A bootstrap creates its
+> tasks seconds before their PRs, so it has to be able to say "merge alone
+> finishes this" at birth, or every landing it makes sits un-folded forever.
+
+The code did not do it. `TaskCreateRequest` carries no contract, nothing
+attached one, and the action had no parameter to name a document with. A
+bootstrap switched from `track.sh` to this action would have created exactly
+the un-folded landings the comment warns about — and `orun task create --help`
+says the same thing in the user's own words: *"one created without a contract
+parks at in_review after its merge."* Three places agreed on the rule and the
+implementation quietly did not.
+
+`contract:` now names a TaskContract document. It is:
+
+- **read before anything is created**, so a malformed document costs no minted
+  key — the discipline `orun task create` already kept, for the same reason;
+- **attached on the found path as well as the created one**, because a
+  bootstrap re-runs: the run that made this task may have predated its
+  contract, or died between the create and the attach. Attaching the same bytes
+  is a no-op by content hash, so the re-run heals instead of leaving a parked
+  landing behind;
+- **optional**. An uncontracted task stays an honest state; the action does not
+  invent a document.
+
+### Gap 3 (consequence) — an action could not name a baseline file
+
+A contract lives beside the blueprint and is deliberately **not** copied into
+the product — it is the factory's machinery, not the product's. But an action
+received only `Dir`, the product tree, so a relative path could only ever
+resolve to the wrong place.
+
+`ActionInput.BaseDir` carries the blueprint's own directory, and
+`actions.PathParam` resolves a path parameter against it (absolute paths as
+given; an empty `BaseDir` falls back to `Dir` for a caller driving an action
+directly). A test swaps the two directories and asserts the swap **fails**
+rather than creating an uncontracted task.
+
+### Gap 4 — a templated LIST passed through unrendered
+
+Found the same way, one layer down. `resolveWith` rendered string parameters
+and let everything else through:
+
+```go
+s, ok := value.(string)
+if !ok || !strings.Contains(s, "{{") { out[name] = value; continue }
+```
+
+Every parameter a baseline actually needs to template is a **list**: the URLs
+a phase probes, the secret keys it requires. Those are exactly the values that
+depend on what the operator answered — a product's health endpoint is its own
+repo name and its own workers subdomain. So the one shape that had to render
+was the one shape that did not, and the symptom would have been an HTTP
+request to the literal text `{{ .inputs.repoName }}` reported as a failed
+probe: a wrong answer dressed as a real one.
+
+`renderValue` now recurses into `[]any`, element by element, and names the
+element on failure (`urls[1]`, not `urls`) — "urls is wrong" sends a reader to
+a block of six, `urls[1]` sends them to a line. Anything that is not a string
+or a list still passes through untouched: only text can carry an expression.
+
+### Gap 5 — a `run:` hook could not name the baseline
+
+design.md §2 writes an argv hook as:
+
+```yaml
+- id: rebrand
+  run: [node, "{{ .baseline.dir }}/tooling/rebrand/rebrand.mjs", --values, .rebrand/values.json]
+```
+
+`runArgv` exec'd `h.Run` verbatim — no rendering at all. And an argv hook runs
+in the PRODUCT tree, where a baseline's machinery is deliberately absent: the
+rebrand tool and the bootstrap helpers are the factory's, not the product's.
+So the hook could only name files the product carries, which is precisely the
+set that excludes every tool a bootstrap runs. cirrus's own blueprint already
+carried `run: ["node", "tooling/rebrand/rebrand.mjs", …]` and a comment
+explaining that "hook argv is not templated" — a latent failure that nothing
+had hit only because nothing ran those hooks.
+
+Each argv element now renders through the same engine, with the same scope
+plus `.baseline.dir`. This is **not** a widening of what a hook may reach: an
+argv is a list, not a command line, and nothing between the elements
+interprets anything — a rendered element is exactly one argument however it
+renders, which a test pins with a value containing `; rm -rf /`.
+
+### One implementation, two callers
+
+The seal-then-attach step now lives once, in `taskfile.Attach`, behind a
+one-method `Attacher` interface. `orun task create` and the action both call
+it. The alternative was two copies of the same eight lines in packages that
+cannot see each other — fine today, drift the first time attach gains an
+argument.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./...` green. Fifteen new tests.
+Ten on the scope — a secret input reaches no parameter; an unknown key is an
+error rather than an empty string; an expression inside a list renders and a
+failure inside one names the element; the baseline is nameable from an argv
+and a rendered argv element stays exactly one argument. Five on the contract —
+attached on create, attached on re-find, the baseline-vs-product path swap, no
+minted key for a malformed document, and nothing attached when none is
+declared.

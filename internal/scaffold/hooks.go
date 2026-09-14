@@ -29,6 +29,14 @@ type hookRunner struct {
 	// `{{ .hooks.<id>.outputs.<key> }}` in a later hook's `with:` block. Scoped
 	// to one phase: see resetOutputs.
 	outputs map[string]map[string]string
+	// inputs are the blueprint's collected input values, SECRET-FREE — a
+	// secret field reads as the literal "<secret>". A hook that needs a
+	// credential gets it from the platform at resolve time (the brokered
+	// path), never from an input rendered into an argv or a parameter.
+	inputs map[string]any
+	// phase names the phase whose hooks are running, for `{{ .phase.name }}`.
+	// Empty outside a phase (the global postInstantiate list).
+	phase Phase
 }
 
 // run executes a list of hooks in order, returning the ids that ran.
@@ -72,7 +80,7 @@ func (hr *hookRunner) runAction(ctx context.Context, h Hook) error {
 	if hr.actions == nil {
 		return fmt.Errorf("hook %q: no action runner configured", h.ID)
 	}
-	out, err := hr.actions.Run(ctx, h.Uses, ActionInput{Dir: hr.outDir, Params: params})
+	out, err := hr.actions.Run(ctx, h.Uses, ActionInput{Dir: hr.outDir, BaseDir: hr.baseDir, Params: params})
 	if err != nil {
 		return fmt.Errorf("hook %q (%s): %w", h.ID, h.Uses, err)
 	}
@@ -90,21 +98,94 @@ func (hr *hookRunner) resolveWith(h Hook) (map[string]any, error) {
 	if len(h.With) == 0 {
 		return nil, nil
 	}
-	scope := map[string]any{"hooks": hookScope(hr.outputs)}
+	scope := hr.scope()
 	out := make(map[string]any, len(h.With))
 	for name, value := range h.With {
-		s, ok := value.(string)
-		if !ok || !strings.Contains(s, "{{") {
-			out[name] = value
-			continue
-		}
-		rendered, err := Render("hook."+h.ID+"."+name, s, scope)
+		rendered, err := hr.renderValue("hook."+h.ID+"."+name, value, scope)
 		if err != nil {
 			return nil, fmt.Errorf("hook %q parameter %q: %w", h.ID, name, err)
 		}
-		out[name] = string(rendered)
+		out[name] = rendered
 	}
 	return out, nil
+}
+
+// renderValue renders one parameter value. Strings carry expressions; LISTS OF
+// STRINGS carry them element by element.
+//
+// The list case is not a generalization for its own sake. Every parameter a
+// baseline needs to template is a list: the URLs a phase probes, the secret
+// keys it requires. Those are the values that depend on what the operator
+// answered — a product's health endpoint is its own repo name and its own
+// workers subdomain — so a stringList that passed through unrendered would put
+// the literal text `{{ .inputs.repoName }}` into an HTTP request and report it
+// as a failed probe.
+//
+// Anything else passes through untouched: only text can carry an expression,
+// and a number that looked like one would be a different bug.
+func (hr *hookRunner) renderValue(where string, value any, scope map[string]any) (any, error) {
+	switch v := value.(type) {
+	case string:
+		if !strings.Contains(v, "{{") {
+			return value, nil
+		}
+		rendered, err := Render(where, v, scope)
+		if err != nil {
+			return nil, err
+		}
+		return string(rendered), nil
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			r, err := hr.renderValue(fmt.Sprintf("%s[%d]", where, i), item, scope)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = r
+		}
+		return out, nil
+	default:
+		return value, nil
+	}
+}
+
+// scope is what a hook's `with:` block can see.
+//
+// Three things, and the omission is as deliberate as the inclusions:
+//
+//   - `.inputs.<name>` — what the operator answered. Secret-free (a secret
+//     field reads as "<secret>"), so a blueprint cannot route a credential
+//     into a parameter by writing an expression.
+//   - `.phase.name` / `.phase.title` — which phase is running, so a hook can
+//     name it in a branch, a title or a milestone without the blueprint
+//     repeating the phase name on every line.
+//   - `.hooks.<id>.outputs.<key>` — what an earlier hook IN THIS PHASE
+//     produced, also reachable as `.phase.hooks.<id>.outputs.<key>`.
+//
+// What is NOT here: the placed file set, the provenance lock, anything about
+// an earlier phase. Templates run under missingkey=error, so reaching for one
+// of those is a failure at the line that reached, not an empty string that
+// travels into a parameter and means something else.
+func (hr *hookRunner) scope() map[string]any {
+	hooks := hookScope(hr.outputs)
+	inputs := hr.inputs
+	if inputs == nil {
+		inputs = map[string]any{}
+	}
+	return map[string]any{
+		"inputs": inputs,
+		"hooks":  hooks,
+		"phase": map[string]any{
+			"name":  hr.phase.Name,
+			"title": phaseTitle(&hr.phase, hr.phase.Name),
+			"hooks": hooks,
+		},
+		// Where the blueprint itself lives. An argv hook runs IN THE PRODUCT
+		// tree, and a baseline's machinery — the rebrand tool, a bootstrap
+		// helper — is deliberately not copied into the product, so without
+		// this a `run:` hook could only name files the product carries.
+		"baseline": map[string]any{"dir": hr.baseDir},
+	}
 }
 
 // hookScope shapes recorded outputs as `.hooks.<id>.outputs.<key>`. The extra
@@ -124,16 +205,46 @@ func hookScope(outputs map[string]map[string]string) map[string]any {
 }
 
 // runArgv execs a hook's argv directly — no shell, so nothing is interpreted.
+//
+// Each element renders through the same constrained engine a `with:` parameter
+// does. That is not a widening of what a hook may reach: an argv is a LIST, not
+// a command line, and nothing between the elements interprets anything, so a
+// rendered element is exactly one argument however it renders. What it buys is
+// the ability to name the baseline — `{{ .baseline.dir }}/tooling/…` — which an
+// argv running in the product tree otherwise cannot do, and which design §2
+// writes verbatim.
 func (hr *hookRunner) runArgv(h Hook) error {
 	if len(h.Run) == 0 {
 		return fmt.Errorf("hook %q: empty run argv", h.ID)
 	}
-	cmd := exec.Command(h.Run[0], h.Run[1:]...) //nolint:gosec // declared argv, no shell, opt-in
+	argv, err := hr.renderArgv(h)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(argv[0], argv[1:]...) //nolint:gosec // declared argv, no shell, opt-in
 	cmd.Dir = hr.outDir
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("hook %q (%s): %w", h.ID, strings.Join(h.Run, " "), err)
+		return fmt.Errorf("hook %q (%s): %w", h.ID, strings.Join(argv, " "), err)
 	}
 	return nil
+}
+
+// renderArgv renders each argv element, naming the position on failure.
+func (hr *hookRunner) renderArgv(h Hook) ([]string, error) {
+	scope := hr.scope()
+	argv := make([]string, len(h.Run))
+	for i, arg := range h.Run {
+		if !strings.Contains(arg, "{{") {
+			argv[i] = arg
+			continue
+		}
+		rendered, err := Render(fmt.Sprintf("hook.%s.run[%d]", h.ID, i), arg, scope)
+		if err != nil {
+			return nil, fmt.Errorf("hook %q run[%d]: %w", h.ID, i, err)
+		}
+		argv[i] = string(rendered)
+	}
+	return argv, nil
 }

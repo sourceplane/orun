@@ -45,7 +45,15 @@ func checkRequires(ctx context.Context, plan *runPlan, opts Options, phase Phase
 	// Probes run through the same runner as hooks, so a recording runner in a
 	// simulation sees them too — a phase's preconditions are part of what it
 	// does, not a hidden preamble.
-	hr := &hookRunner{outDir: opts.OutDir, baseDir: opts.SourceBaseDir, actions: runner}
+	hr := &hookRunner{
+		outDir:  opts.OutDir,
+		baseDir: opts.SourceBaseDir,
+		actions: runner,
+		inputs:  plan.values.nonSecretFields(),
+	}
+	if decl != nil {
+		hr.phase = *decl
+	}
 	hr.resetOutputs()
 	for _, probe := range decl.Requires.Probe {
 		if err := hr.runAction(ctx, probe); err != nil {

@@ -794,14 +794,8 @@ func attachDocumentIfPresent(ctx context.Context, client *remotestate.Client, or
 // so the local seal records it like a repo-authored one.
 func attachTemplate(ctx context.Context, client *remotestate.Client, org, key string, template *taskfile.Document) (*taskfile.Document, string, error) {
 	doc := &taskfile.Document{Key: key, Path: template.Path, Contract: template.Contract}
-	hash, wire, err := contract.ContractID(doc.Contract)
-	if err != nil {
-		return doc, "", err
-	}
-	if _, err := client.AttachTaskContract(ctx, org, key, wire, hash); err != nil {
-		return doc, hash, err
-	}
-	return doc, hash, nil
+	hash, err := taskfile.Attach(ctx, client, org, key, doc)
+	return doc, hash, err
 }
 
 // sealTaskLocally records the issuance (and contract, when present) in the

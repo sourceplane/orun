@@ -1,6 +1,6 @@
 # orun-bootstrap-engine — Implementation Plan
 
-Status: Normative for BE-O1–BE-O8. Model in [`design.md`](./design.md).
+Status: Normative for BE-O1–BE-O9. Model in [`design.md`](./design.md).
 Cross-repo: **BE1–BE6** cirrus, **BE-K1–BE-K4** orun-cloud.
 
 Two ordering rules hold, and both are safety properties rather than preferences:
@@ -129,6 +129,37 @@ instantiation.
 blueprint with `workflow:` in a hook fails to parse with a message pointing at
 the action registry.
 
+## BE-O9 — A hook can say what it means
+
+**Added during implementation, not planned.** Found by starting to write cirrus
+BE1 against what shipped rather than against the design: the phase §2 sketches
+could not be authored, because a hook's `with:` block saw only earlier hooks'
+outputs — `{{ .inputs.* }}` and `{{ .phase.* }}` failed under
+`missingkey=error` — and `orun.task/ensure@v1` had no way to attach a task
+contract, so every landing a bootstrap made would have parked at `in_review`,
+which is precisely what that action's own doc comment says must not happen.
+
+- The `with:` scope gains `inputs` (secret-free) and `phase` (`name`, `title`,
+  `hooks`). Nothing else: the placed set and the lock stay out, so reaching for
+  one fails at the line that reached.
+- `ActionInput.BaseDir` carries the blueprint's own directory, and
+  `actions.PathParam` resolves a path parameter against it — a baseline's
+  machinery is authored beside the blueprint and is not copied into the
+  product.
+- `orun.task/ensure@v1` gains `contract:`, read before the create (a malformed
+  document costs no minted key) and attached on the found path as well as the
+  created one (a re-run heals a task made before its contract existed).
+- A parameter that is a LIST of strings renders element by element. Every
+  parameter a baseline needs to template is one — probe URLs, secret keys —
+  so the one shape that had to render was the one shape that did not.
+- A `run:` hook's argv renders too, with `.baseline.dir` in scope. An argv runs
+  in the product tree and a baseline's tools are not copied there, so without
+  it a hook could only name files the product carries. An argv is a list, not a
+  command line: a rendered element is exactly one argument.
+
+**Done when** a blueprint can write the design §2 phase verbatim and a task the
+bootstrap creates can fold to done on its merge.
+
 ## Cross-repo edges
 
 | Milestone | Unblocks |
@@ -139,3 +170,4 @@ the action registry.
 | BE-O6 | cirrus BE2, orun-cloud BE-K2 |
 | BE-O7 | cirrus BE6, orun-cloud BE-K4 |
 | BE-O8 | cirrus BE4 |
+| BE-O9 | cirrus BE1 |
