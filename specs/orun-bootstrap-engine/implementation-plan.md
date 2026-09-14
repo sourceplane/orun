@@ -29,12 +29,18 @@ become addressable in later hooks of the same phase.
 > advertises what it cannot run is the failure this epic exists to end. See
 > `IMPLEMENTATION-STATUS.md`.
 
-## BE-O1b — extract the command-layer logic
+## BE-O1b — the landing tail, and `orun.pr/land@v1`
 
-Move PR landing and run watching out of `cmd/orun/{pr,run}.go` into packages an
-action can call, then register `orun.pr/land@v1` and `orun.run/watch@v1`. The
-CLI verbs become thin wrappers over the same code, so the command and the action
-cannot diverge.
+> **Corrected as built.** BE-O1 claimed the landing logic lived inside
+> `cmd/orun/pr.go`. It does not: `provenance.Pen.Open()` is a callable package
+> API and the command was already a thin wrapper. What was missing was only the
+> **tail** — wait for checks, merge, return to a pulled base — so this milestone
+> is an addition to `Pen`, not an extraction.
+
+Add `Pen.Land`, register `orun.pr/land@v1` over it, and add the matching
+`orun pr land` verb so the command and the action share one implementation.
+`orun.run/watch@v1` reads workflow runs rather than pull requests and moves to
+**BE-O5** with the rest of the action set.
 
 **Done when** a blueprint declaring `uses: orun.pr/land@v1` with a misspelled
 parameter fails `orun validate` with the offending line, and a phase's `land`

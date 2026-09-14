@@ -6,6 +6,7 @@ shipped and every place it departed from the spec.
 | Milestone | Status | Landed |
 |---|---|---|
 | **BE-O1** | ✅ Shipped | the action mechanism + `orun.http/probe@v1` |
+| **BE-O1b** | ✅ Shipped | `Pen.Land`, `orun.pr/land@v1`, `orun pr land` |
 | BE-O2 | 🗓️ Planned | |
 | BE-O3 | 🗓️ Planned | |
 | BE-O4 | 🗓️ Planned | |
@@ -51,13 +52,18 @@ shipped and every place it departed from the spec.
 on the stated grounds that *"neither needs anything new: the pen exists, and
 `orun run --retry` exists."*
 
-Reading the code showed that premise was half right. `internal/provenance` has
-the pen's *primitives* — `BranchName`, `TaskTrailer`, `RenderManifest`,
-`Verify` — but the **landing logic** (open, wait for checks, merge, return to a
-pulled main) lives inside the cobra command in `cmd/orun/pr.go`, not in a
-package an action can call. Same for the convergence watch. Making either action
-real means first extracting that logic out of the command layer, which is a
-genuine piece of work and not a detail of this milestone.
+Reading the code showed that premise was half right — and **BE-O1's own account
+of why was itself partly wrong; corrected here in BE-O1b.**
+
+What BE-O1 said: *"the landing logic lives inside the cobra command in
+`cmd/orun/pr.go`, not in a package an action can call."* That is **false for the
+open half.** `provenance.Pen.Open()` is a fully callable package API, and
+`cmd/orun/pr.go` was already a thin wrapper over it. Nothing needed extracting.
+
+What was actually missing was only the **tail**: wait for checks, merge, return
+to a pulled base. `Pen` had `Open` and nothing after it. So BE-O1b is smaller
+than BE-O1 predicted — an addition to an existing type, not an extraction from
+the command layer.
 
 So BE-O1 shipped the **mechanism** plus `orun.http/probe@v1`, which needed
 nothing extracted and is a real action a baseline's verify step uses.
@@ -67,12 +73,45 @@ working implementations. A registry that advertises what it cannot run is
 exactly the failure this epic exists to end — the platform offering a baseline
 it cannot build. They arrive with their extraction, tracked as **BE-O1b**.
 
-### BE-O1b — extract the command-layer logic (new, from the above)
+## BE-O1b — the landing tail, and `orun.pr/land@v1`
 
-Move PR landing and run watching out of `cmd/orun/{pr,run}.go` into packages an
-action can call, then register `orun.pr/land@v1` and `orun.run/watch@v1`. The
-CLI verbs become thin wrappers over the same code, so there is one
-implementation and the command and the action cannot diverge.
+### What shipped
+
+- **`provenance.Pen.Land`** — the gesture `Open` starts and nothing finished:
+  poll the PR's checks until every run has a **conclusion**, merge **pinned to
+  the commit those checks ran on**, and return the tree to a pulled base.
+  Three behaviours carry the weight:
+  - **No checks is a pass, not a wait.** A bootstrap's first landing creates the
+    repository and its CI together, so at merge time there is nothing to wait
+    for. Hanging there is the most common way an unattended run stalls.
+  - **Queued is not passing.** Polling stops when every run has concluded, not
+    when none has failed yet.
+  - **A refusal carries GitHub's own message.** "405" is not something an
+    operator can act on; "Pull Request is not mergeable" is.
+  `neutral` and `skipped` count as passing — a skipped matrix leg is the normal
+  shape of a conditional CI, and treating it as red would block every landing.
+- **`orun.pr/land@v1`** — opens through the pen and lands. A draft is opened and
+  deliberately **not** merged. No ambient credential is an **error**, not a
+  quiet success: the pen's "branch pushed, open it here" is honest for a human
+  at a terminal and useless to an unattended bootstrap, which cannot click it.
+- **`orun pr land`** — the CLI verb over the same `Pen.Land`, so the command and
+  the action cannot describe a landing differently.
+
+### Still open
+
+`orun.run/watch@v1` is **not** in this milestone. Watching a convergence is a
+different subject from landing a PR — it reads workflow runs, not pull requests
+— and folding it in here would have made one change do two things. It moves to
+**BE-O5** with the rest of the action set.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./...` green.
+`internal/provenance/land_test.go` drives a fake GitHub and a fake git: no
+checks, queued-then-green, still-running at timeout, a failed check named,
+neutral/skipped passing, GitHub's refusal surfaced, the return to a pulled base,
+the merge pinned to the checked SHA, an unknown merge method, and an anonymous
+landing refused.
 
 ### Verification
 
