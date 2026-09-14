@@ -12,7 +12,7 @@ shipped and every place it departed from the spec.
 | **BE-O4** | ✅ Shipped | `hooks.{pre,post,await}`, `pending`, the park, `.orun/run.state` |
 | **BE-O5a** | ✅ Shipped | `task/ensure`, `task/rollup` — the task plane |
 | **BE-O5b** | ✅ Shipped | `doctor/check`, `integrations/reconcile`, `secrets/exists` |
-| BE-O5c | 🗓️ Planned | `repo/ensure`, `run/watch` — the two GitHub-side actions |
+| **BE-O5c** | ✅ Shipped | `repo/ensure`, `run/watch` — **the action set is complete (9)** |
 | BE-O6 | 🗓️ Planned | |
 | BE-O7 | 🗓️ Planned | |
 | BE-O8 | 🗓️ Planned | |
@@ -377,3 +377,73 @@ counting, waiting until a consent arrives, a failing read erroring immediately,
 secrets present/missing, reconcile creating only what is missing, brokered
 pointers carrying no value, not-connected waiting, and the write-refusal
 explanation.
+
+## BE-O5c — the GitHub-side actions, and the set is complete
+
+### What shipped
+
+- **`internal/forge`** — the small GitHub surface beyond the pen: does this
+  repository exist, and is this workflow run finished. Deliberately **not** in
+  `internal/provenance`: that package is the pen, the gesture that binds a PR to
+  a task, and creating a repository or watching a convergence is neither.
+- **`orun.repo/ensure@v1`** — find-or-create, for the same reason every other
+  bootstrap write is: phase 01 is re-run like any other phase, and the second
+  run must find the repository the first made rather than fail on a collision.
+  An **organization and a user take different endpoints**, and that is not
+  cosmetic — GitHub reads the owner of `POST /user/repos` off the token's own
+  identity. A missing credential is refused rather than attempted, because an
+  anonymous 404 is indistinguishable from "absent".
+- **`orun.run/watch@v1`** — watch a convergence to green, resuming through
+  transient failures.
+
+### `run/watch` is the one that gets BETTER by moving
+
+A baseline polls GitHub's Actions API to ask about an execution **orun owns**,
+then calls `orun run --retry` to resume it. The binary knows which lanes are its
+own and which are retriable; GitHub's `conclusion` field knows neither. This is
+the single place in the epic where moving code into the binary improves it
+rather than merely shortening it.
+
+Three judgements it now makes:
+
+- **A failure may be resumed, up to a budget.** The CI is resume-capable, so a
+  convergence that trips on propagation or an evicted runner heals in place. A
+  real regression fails every resume and surfaces after the budget — which is
+  what a budget is *for*: "flake" is not a root cause, and an unbounded loop
+  retries a genuine break forever.
+- **The resume is best effort; the diagnosis is not.** GitHub refuses a re-run
+  for a token without `actions: write`, for a run with no retriable jobs, and
+  for one past retention. Losing the failed-lane list because the retry could
+  not be issued is the part that costs someone an afternoon, so both are
+  reported.
+- **No run at all is a real answer.** A repository whose CI has not landed yet
+  has nothing to converge; waiting for a run that will never exist would hang
+  the first phase of every bootstrap.
+
+With `waitSeconds: 0` it reports **pending** rather than blocking — which is
+what makes a convergence watchable by a console that polls, instead of only by a
+process willing to sit for forty minutes.
+
+### The registry, complete
+
+```
+orun.doctor/check@v1            orun.repo/ensure@v1      orun.task/ensure@v1
+orun.http/probe@v1              orun.run/watch@v1        orun.task/rollup@v1
+orun.integrations/reconcile@v1  orun.secrets/exists@v1
+orun.pr/land@v1
+```
+
+Nine actions — one more than the eight the design budgeted, the extra being
+`secrets/exists`, which `requires.probe` needed and which the design named but
+did not count. Every one is implemented and tested; none is registered that
+cannot run.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./...` green. `forge_test.go` covers
+finding an existing repo, creating an absent one via the org endpoint, the user
+endpoint outside an org, an anonymous ensure refused, a 403 not being mistaken
+for "absent", no runs returning nil, and skipped/neutral jobs not counting as
+failures. `forge_actions_test.go` covers green, resume-then-green, the budget
+exhausted naming the lanes, the diagnosis surviving a refused resume, pending
+rather than blocking, no-run-at-all, and a malformed repo.
