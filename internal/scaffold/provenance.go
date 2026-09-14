@@ -38,14 +38,6 @@ type Provenance struct {
 	Consumed   []ProvConsumed `yaml:"consumed,omitempty" json:"consumed,omitempty"`
 }
 
-// content digest orun pinned for it (never the outcome — orun-workflows §7).
-type ProvHook struct {
-	ID       string `yaml:"id" json:"id"`
-	Phase    string `yaml:"phase,omitempty" json:"phase,omitempty"`
-	Workflow string `yaml:"workflow" json:"workflow"`
-	Digest   string `yaml:"digest" json:"digest"`
-}
-
 // ProvBlueprint pins the blueprint document by digest.
 type ProvBlueprint struct {
 	Name   string `yaml:"name" json:"name"`
@@ -74,14 +66,11 @@ type ProvConsumed struct {
 	Digest string `yaml:"digest,omitempty" json:"digest,omitempty"`
 }
 
-func buildProvenance(ctx context.Context, store objectstore.ObjectStore, rawBlueprint []byte, bp *Blueprint, values Values, sources map[string]ResolvedSource, placed map[string]PlacedFile, consumed []ConsumedDep, hookBaseDir string) (Provenance, error) {
+func buildProvenance(ctx context.Context, store objectstore.ObjectStore, rawBlueprint []byte, bp *Blueprint, values Values, sources map[string]ResolvedSource, placed map[string]PlacedFile, consumed []ConsumedDep) (Provenance, error) {
 	bpDigest, err := store.PutBlob(ctx, rawBlueprint)
 	if err != nil {
 		return Provenance{}, err
 	}
-
-	// Pin every workflow hook by content digest — reference + digest only, never
-	// the outcome (orun-workflows §7). Recorded even when --run-hooks is off.
 
 	// Per-module targets, from the placed set.
 	targetsByModule := map[string][]string{}

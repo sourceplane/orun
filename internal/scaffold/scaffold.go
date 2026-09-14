@@ -160,7 +160,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 
 	// Provenance (design §11): blueprint@digest + source@digest(s) + inputs-hash
 	// + per-module mode/target. Written even for a single scaffolded component.
-	prov, err := buildProvenance(ctx, opts.Store, opts.Blueprint, bp, values, sources, placed, consumed, opts.SourceBaseDir)
+	prov, err := buildProvenance(ctx, opts.Store, opts.Blueprint, bp, values, sources, placed, consumed)
 	if err != nil {
 		return nil, err
 	}
