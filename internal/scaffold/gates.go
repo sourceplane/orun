@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sourceplane/orun/internal/actions"
 )
 
 // Phase preconditions and retry (orun-bootstrap-engine BE-O3).
@@ -79,6 +81,13 @@ func runPhaseHooks(ctx context.Context, hr *hookRunner, decl *Phase, hooks []Hoo
 		ran, err := hr.run(ctx, hooks)
 		if err == nil {
 			return ran, nil
+		}
+		// Pending is never retried, in any slot. Retrying a wait turns "still
+		// running" into an error after N attempts, when the honest answer is
+		// that it is still running. `await` is where a wait BELONGS, not the
+		// only place one is honoured.
+		if _, waiting := actions.IsPending(err); waiting {
+			return ran, err
 		}
 		lastErr = err
 		if attempt == attempts {

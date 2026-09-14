@@ -163,7 +163,7 @@ func pinHookDigests(bp *Blueprint, baseDir string) ([]ProvHook, error) {
 		return nil
 	}
 	for _, ph := range bp.Phases {
-		if err := add(ph.Name, ph.Hooks); err != nil {
+		if err := add(ph.Name, ph.Hooks.All()); err != nil {
 			return nil, err
 		}
 	}

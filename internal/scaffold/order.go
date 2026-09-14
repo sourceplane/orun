@@ -31,7 +31,7 @@ func orderModules(bp *Blueprint) ([][]string, error) {
 type PhasePlan struct {
 	Name    string
 	Batches [][]string
-	Hooks   []Hook
+	Hooks   PhaseHooks
 }
 
 // planPhases lowers a blueprint into ordered phases. With no declared phases it
@@ -45,7 +45,7 @@ func planPhases(bp *Blueprint) ([]PhasePlan, error) {
 		if err != nil {
 			return nil, err
 		}
-		return []PhasePlan{{Name: "", Batches: batches, Hooks: nil}}, nil
+		return []PhasePlan{{Name: "", Batches: batches}}, nil
 	}
 
 	byName := make(map[string]Module, len(bp.Modules))

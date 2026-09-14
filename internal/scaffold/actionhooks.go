@@ -160,7 +160,7 @@ func validateActionHooks(bp *Blueprint, loc *hookLocator) error {
 	}
 
 	for pi, ph := range bp.Phases {
-		for hi, h := range ph.Hooks {
+		for hi, h := range ph.Hooks.All() {
 			path := fmt.Sprintf("phases[%d].hooks[%d]", pi, hi)
 			label := fmt.Sprintf("phases[%d] (%s) hooks[%d] (%s)", pi, ph.Name, hi, h.ID)
 			if err := check(path, label, h); err != nil {

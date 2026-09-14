@@ -245,7 +245,7 @@ func validateHookGrants(bp *Blueprint, baseDir string) error {
 		return nil
 	}
 	for _, ph := range bp.Phases {
-		for _, h := range ph.Hooks {
+		for _, h := range ph.Hooks.All() {
 			if err := check(h); err != nil {
 				return err
 			}

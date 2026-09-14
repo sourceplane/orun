@@ -232,9 +232,10 @@ type Phase struct {
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 	// Modules names the modules placed in this phase (by module name).
 	Modules []string `yaml:"modules" json:"modules"`
-	// Hooks run after this phase's modules are placed, before later phases'
-	// hooks (opt-in via --run-hooks, outside the sandbox — design §12).
-	Hooks []Hook `yaml:"hooks,omitempty" json:"hooks,omitempty"`
+	// Hooks run around this phase's placement (opt-in via --run-hooks, outside
+	// the sandbox — design §12). A bare list is `post`, which is what a phase's
+	// hooks have always meant.
+	Hooks PhaseHooks `yaml:"hooks,omitempty" json:"hooks,omitempty"`
 
 	// When is a CEL expression over `inputs`. A phase whose condition is false
 	// is skipped — declared, rather than a caller remembering not to ask for
@@ -247,6 +248,54 @@ type Phase struct {
 	// and are where a transient failure actually lives.
 	Retry *RetrySpec `yaml:"retry,omitempty" json:"retry,omitempty"`
 }
+
+// PhaseHooks are a phase's three hook slots (orun-bootstrap-engine BE-O4).
+//
+//	pre    before placement — create the work item, announce the phase
+//	post   after placement  — the ecosystem escape, the landing
+//	await  after post       — the WAIT: an action here may report `pending`,
+//	                          which parks the phase instead of failing it
+//
+// Authored either as a bare list, which means `post` and is what a phase's
+// hooks have always meant, or as a mapping naming the slots. Both forms parse,
+// so no existing blueprint changes and a phase that needs a wait says so.
+type PhaseHooks struct {
+	Pre   []Hook `yaml:"pre,omitempty" json:"pre,omitempty"`
+	Post  []Hook `yaml:"post,omitempty" json:"post,omitempty"`
+	Await []Hook `yaml:"await,omitempty" json:"await,omitempty"`
+}
+
+// UnmarshalYAML accepts the legacy list form and the slot mapping.
+func (h *PhaseHooks) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.SequenceNode:
+		return value.Decode(&h.Post)
+	case yaml.MappingNode:
+		// A named type, so decoding the mapping does not recurse into this
+		// method forever.
+		type slots PhaseHooks
+		var s slots
+		if err := value.Decode(&s); err != nil {
+			return err
+		}
+		*h = PhaseHooks(s)
+		return nil
+	default:
+		return fmt.Errorf("phase hooks must be a list or a mapping of pre/post/await, got %v", value.Kind)
+	}
+}
+
+// All returns every hook in run order.
+func (h PhaseHooks) All() []Hook {
+	out := make([]Hook, 0, len(h.Pre)+len(h.Post)+len(h.Await))
+	out = append(out, h.Pre...)
+	out = append(out, h.Post...)
+	out = append(out, h.Await...)
+	return out
+}
+
+// Len is the total hook count.
+func (h PhaseHooks) Len() int { return len(h.Pre) + len(h.Post) + len(h.Await) }
 
 // PhaseRequires is a phase's precondition, in two halves that answer different
 // questions (orun-bootstrap-engine BE-O3).
@@ -372,7 +421,7 @@ func (bp *Blueprint) validateHooks() error {
 		}
 	}
 	for pi, ph := range bp.Phases {
-		for i, h := range ph.Hooks {
+		for i, h := range ph.Hooks.All() {
 			if err := h.validate(); err != nil {
 				return fmt.Errorf("phases[%d] (%s) hooks[%d]: %w", pi, ph.Name, i, err)
 			}
