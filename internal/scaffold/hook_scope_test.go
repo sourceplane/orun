@@ -373,3 +373,93 @@ phases:
 		t.Errorf("the error should name the offending element; got %v", err)
 	}
 }
+
+// An argv hook runs in the PRODUCT tree, and a baseline's machinery — the
+// rebrand tool, a bootstrap helper — is deliberately not copied there. Without
+// `{{ .baseline.dir }}` such a hook can only name files the product carries,
+// which is exactly the set that does not include the tools the bootstrap runs.
+func TestAnArgvHookCanNameTheBaseline(t *testing.T) {
+	const body = `
+apiVersion: orun.dev/v1
+kind: Blueprint
+metadata:
+  name: bp
+inputs:
+  repoName:
+    type: string
+    default: acme-cloud
+modules:
+  - name: only
+    mode: template
+    files:
+      README.md: "hi"
+phases:
+  - name: 01-scaffold
+    modules: [only]
+    hooks:
+      - id: rebrand
+        run: ["/bin/echo", "{{ .baseline.dir }}/tooling/rebrand/rebrand.mjs", "--repo", "{{ .inputs.repoName }}"]
+`
+	bp, err := ParseBlueprint([]byte(body))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	hr := &hookRunner{
+		outDir:  t.TempDir(),
+		baseDir: "/baselines/cirrus",
+		inputs:  map[string]any{"repoName": "acme-cloud"},
+		phase:   bp.Phases[0],
+	}
+	argv, err := hr.renderArgv(bp.Phases[0].Hooks.All()[0])
+	if err != nil {
+		t.Fatalf("render argv: %v", err)
+	}
+	want := []string{"/bin/echo", "/baselines/cirrus/tooling/rebrand/rebrand.mjs", "--repo", "acme-cloud"}
+	for i := range want {
+		if argv[i] != want[i] {
+			t.Errorf("argv[%d] = %q, want %q", i, argv[i], want[i])
+		}
+	}
+}
+
+// A rendered element is exactly ONE argument however it renders — there is no
+// shell between the elements, so a value carrying spaces or a semicolon stays
+// a single argv entry rather than becoming two commands.
+func TestARenderedArgvElementStaysOneArgument(t *testing.T) {
+	const body = `
+apiVersion: orun.dev/v1
+kind: Blueprint
+metadata:
+  name: bp
+inputs:
+  productName:
+    type: string
+    default: "Acme Cloud; rm -rf /"
+modules:
+  - name: only
+    mode: template
+    files:
+      README.md: "hi"
+phases:
+  - name: 01-scaffold
+    modules: [only]
+    hooks:
+      - id: brand
+        run: ["/bin/echo", "{{ .inputs.productName }}"]
+`
+	bp, err := ParseBlueprint([]byte(body))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	hr := &hookRunner{outDir: t.TempDir(), inputs: map[string]any{"productName": "Acme Cloud; rm -rf /"}, phase: bp.Phases[0]}
+	argv, err := hr.renderArgv(bp.Phases[0].Hooks.All()[0])
+	if err != nil {
+		t.Fatalf("render argv: %v", err)
+	}
+	if len(argv) != 2 {
+		t.Fatalf("argv = %#v, want exactly 2 elements", argv)
+	}
+	if argv[1] != "Acme Cloud; rm -rf /" {
+		t.Errorf("argv[1] = %q, want the value verbatim as one argument", argv[1])
+	}
+}

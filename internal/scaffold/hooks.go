@@ -180,6 +180,11 @@ func (hr *hookRunner) scope() map[string]any {
 			"title": phaseTitle(&hr.phase, hr.phase.Name),
 			"hooks": hooks,
 		},
+		// Where the blueprint itself lives. An argv hook runs IN THE PRODUCT
+		// tree, and a baseline's machinery — the rebrand tool, a bootstrap
+		// helper — is deliberately not copied into the product, so without
+		// this a `run:` hook could only name files the product carries.
+		"baseline": map[string]any{"dir": hr.baseDir},
 	}
 }
 
@@ -200,16 +205,46 @@ func hookScope(outputs map[string]map[string]string) map[string]any {
 }
 
 // runArgv execs a hook's argv directly — no shell, so nothing is interpreted.
+//
+// Each element renders through the same constrained engine a `with:` parameter
+// does. That is not a widening of what a hook may reach: an argv is a LIST, not
+// a command line, and nothing between the elements interprets anything, so a
+// rendered element is exactly one argument however it renders. What it buys is
+// the ability to name the baseline — `{{ .baseline.dir }}/tooling/…` — which an
+// argv running in the product tree otherwise cannot do, and which design §2
+// writes verbatim.
 func (hr *hookRunner) runArgv(h Hook) error {
 	if len(h.Run) == 0 {
 		return fmt.Errorf("hook %q: empty run argv", h.ID)
 	}
-	cmd := exec.Command(h.Run[0], h.Run[1:]...) //nolint:gosec // declared argv, no shell, opt-in
+	argv, err := hr.renderArgv(h)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(argv[0], argv[1:]...) //nolint:gosec // declared argv, no shell, opt-in
 	cmd.Dir = hr.outDir
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("hook %q (%s): %w", h.ID, strings.Join(h.Run, " "), err)
+		return fmt.Errorf("hook %q (%s): %w", h.ID, strings.Join(argv, " "), err)
 	}
 	return nil
+}
+
+// renderArgv renders each argv element, naming the position on failure.
+func (hr *hookRunner) renderArgv(h Hook) ([]string, error) {
+	scope := hr.scope()
+	argv := make([]string, len(h.Run))
+	for i, arg := range h.Run {
+		if !strings.Contains(arg, "{{") {
+			argv[i] = arg
+			continue
+		}
+		rendered, err := Render(fmt.Sprintf("hook.%s.run[%d]", h.ID, i), arg, scope)
+		if err != nil {
+			return nil, fmt.Errorf("hook %q run[%d]: %w", h.ID, i, err)
+		}
+		argv[i] = string(rendered)
+	}
+	return argv, nil
 }

@@ -152,6 +152,10 @@ which is precisely what that action's own doc comment says must not happen.
 - A parameter that is a LIST of strings renders element by element. Every
   parameter a baseline needs to template is one — probe URLs, secret keys —
   so the one shape that had to render was the one shape that did not.
+- A `run:` hook's argv renders too, with `.baseline.dir` in scope. An argv runs
+  in the product tree and a baseline's tools are not copied there, so without
+  it a hook could only name files the product carries. An argv is a list, not a
+  command line: a rendered element is exactly one argument.
 
 **Done when** a blueprint can write the design §2 phase verbatim and a task the
 bootstrap creates can fold to done on its merge.

@@ -719,6 +719,30 @@ element on failure (`urls[1]`, not `urls`) — "urls is wrong" sends a reader to
 a block of six, `urls[1]` sends them to a line. Anything that is not a string
 or a list still passes through untouched: only text can carry an expression.
 
+### Gap 5 — a `run:` hook could not name the baseline
+
+design.md §2 writes an argv hook as:
+
+```yaml
+- id: rebrand
+  run: [node, "{{ .baseline.dir }}/tooling/rebrand/rebrand.mjs", --values, .rebrand/values.json]
+```
+
+`runArgv` exec'd `h.Run` verbatim — no rendering at all. And an argv hook runs
+in the PRODUCT tree, where a baseline's machinery is deliberately absent: the
+rebrand tool and the bootstrap helpers are the factory's, not the product's.
+So the hook could only name files the product carries, which is precisely the
+set that excludes every tool a bootstrap runs. cirrus's own blueprint already
+carried `run: ["node", "tooling/rebrand/rebrand.mjs", …]` and a comment
+explaining that "hook argv is not templated" — a latent failure that nothing
+had hit only because nothing ran those hooks.
+
+Each argv element now renders through the same engine, with the same scope
+plus `.baseline.dir`. This is **not** a widening of what a hook may reach: an
+argv is a list, not a command line, and nothing between the elements
+interprets anything — a rendered element is exactly one argument however it
+renders, which a test pins with a value containing `; rm -rf /`.
+
 ### One implementation, two callers
 
 The seal-then-attach step now lives once, in `taskfile.Attach`, behind a
@@ -729,10 +753,11 @@ argument.
 
 ### Verification
 
-`go build ./...`, `go vet ./...`, `go test ./...` green. Thirteen new tests:
-eight on the scope — including that a secret input reaches no parameter, that
-an unknown key is an error rather than an empty string, that an expression
-inside a list renders, and that a failure inside a list names the element —
-and five on the contract (attached on create, attached on re-find, the
-baseline-vs-product path swap, no minted key for a malformed document, and
-nothing attached when none is declared).
+`go build ./...`, `go vet ./...`, `go test ./...` green. Fifteen new tests.
+Ten on the scope — a secret input reaches no parameter; an unknown key is an
+error rather than an empty string; an expression inside a list renders and a
+failure inside one names the element; the baseline is nameable from an argv
+and a rendered argv element stays exactly one argument. Five on the contract —
+attached on create, attached on re-find, the baseline-vs-product path swap, no
+minted key for a malformed document, and nothing attached when none is
+declared.
