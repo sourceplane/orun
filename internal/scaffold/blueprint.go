@@ -167,12 +167,19 @@ type Hooks struct {
 }
 
 // Hook is one declared post-step. It is exactly one of:
-//   - Run: an explicit argv, no shell (the shipped form), or
+//   - Run: an explicit argv, no shell (the ecosystem escape), or
+//   - Uses: a typed orun action resolved in-process (orun-bootstrap-engine
+//     BE-O1), parameterized by With and yielding addressable Outputs, or
 //   - Workflow: an orun workflow file run through the in-process flow engine
-//     (specs/orun-workflows §3, Surface B).
+//     (specs/orun-workflows §3, Surface B). Retired by BE-O8.
 type Hook struct {
 	ID  string   `yaml:"id" json:"id"`
 	Run []string `yaml:"run,omitempty" json:"run,omitempty"`
+	// Uses names a registered action — `<namespace>/<verb>@v<major>`. Its With
+	// block is validated against the action's declared parameters at PARSE
+	// time, so a misspelled parameter is a blueprint error naming the line
+	// rather than an exit code partway through a bootstrap.
+	Uses string `yaml:"uses,omitempty" json:"uses,omitempty"`
 	// Workflow names an orun workflow file (resolved against the blueprint's
 	// directory) to run as this hook. Exactly one of Run/Workflow may be set.
 	Workflow string `yaml:"workflow,omitempty" json:"workflow,omitempty"`
@@ -186,21 +193,34 @@ type Hook struct {
 	Connections map[string]map[string]string `yaml:"connections,omitempty" json:"connections,omitempty"`
 }
 
-// IsWorkflow reports whether this hook runs a workflow (vs. an argv).
+// IsWorkflow reports whether this hook runs a workflow (vs. an argv or action).
 func (h Hook) IsWorkflow() bool { return strings.TrimSpace(h.Workflow) != "" }
 
-// validate enforces that a hook is exactly one of run / workflow (Surface B
-// mutual exclusion, orun-workflows §3). Fail-closed.
+// IsAction reports whether this hook calls a registered orun action.
+func (h Hook) IsAction() bool { return strings.TrimSpace(h.Uses) != "" }
+
+// validate enforces that a hook is exactly ONE of run / uses / workflow.
+// Fail-closed: two is ambiguous and zero is a hook that does nothing, and both
+// are far more likely to be an unfinished edit than an intention.
 func (h Hook) validate() error {
-	hasRun := len(h.Run) > 0
-	hasWorkflow := strings.TrimSpace(h.Workflow) != ""
-	switch {
-	case hasRun && hasWorkflow:
-		return fmt.Errorf("hook %q sets both run and workflow — a hook must use exactly one", h.ID)
-	case !hasRun && !hasWorkflow:
-		return fmt.Errorf("hook %q sets neither run nor workflow", h.ID)
+	var set []string
+	if len(h.Run) > 0 {
+		set = append(set, "run")
 	}
-	return nil
+	if h.IsAction() {
+		set = append(set, "uses")
+	}
+	if h.IsWorkflow() {
+		set = append(set, "workflow")
+	}
+	switch len(set) {
+	case 1:
+		return nil
+	case 0:
+		return fmt.Errorf("hook %q sets none of run, uses or workflow", h.ID)
+	default:
+		return fmt.Errorf("hook %q sets %s — a hook must use exactly one", h.ID, strings.Join(set, " and "))
+	}
 }
 
 // Phase is one operational stage: an ordered group of modules placed as a
@@ -218,12 +238,19 @@ type Phase struct {
 }
 
 // ParseBlueprint decodes and structurally validates a Blueprint document.
+//
+// Action hooks are checked here rather than at placement time (BE-O1): a
+// misspelled parameter must be a parse error naming the line, not a failure
+// discovered partway through writing a customer's repository.
 func ParseBlueprint(data []byte) (*Blueprint, error) {
 	var bp Blueprint
 	if err := yaml.Unmarshal(data, &bp); err != nil {
 		return nil, fmt.Errorf("parse blueprint: %w", err)
 	}
 	if err := bp.validate(); err != nil {
+		return nil, err
+	}
+	if err := validateActionHooks(&bp, newHookLocator(data)); err != nil {
 		return nil, err
 	}
 	return &bp, nil
