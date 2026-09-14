@@ -223,13 +223,34 @@ func (r *RemoteStateBackend) UpdateJob(ctx context.Context, runID string, jobID 
 	return r.client.UpdateJob(ctx, wireRunID(runID), jobID, runnerID, wireStatus, errText)
 }
 
-func (r *RemoteStateBackend) AppendStepLog(ctx context.Context, runID string, jobID string, content string) error {
+func (r *RemoteStateBackend) AppendStepLog(ctx context.Context, runID string, jobID string, content string, step *LogStep) error {
 	if content == "" {
 		return nil
 	}
 	ulid := wireRunID(runID)
-	for _, chunk := range chunkUTF8(content, logChunkSafeBytes) {
-		if _, err := r.client.AppendLog(ctx, ulid, jobID, r.runnerID, chunk); err != nil {
+	chunks := chunkUTF8(content, logChunkSafeBytes)
+	for i, chunk := range chunks {
+		// A step's output can outgrow one chunk. Only the LAST piece carries the
+		// step's terminal event and its outcome; the rest are `chunk`, so the
+		// server sees exactly one `end` per step rather than one per megabyte.
+		var wire *remotestate.AppendLogStep
+		if step != nil {
+			last := i == len(chunks)-1
+			w := remotestate.AppendLogStep{
+				StepID: step.StepID,
+				Index:  step.Index,
+				Event:  step.Event,
+			}
+			if !last && step.Event == LogStepEnd {
+				w.Event = LogStepChunk
+			}
+			if w.Event == LogStepEnd {
+				w.Status = step.Status
+				w.ExitCode = step.ExitCode
+			}
+			wire = &w
+		}
+		if _, err := r.client.AppendLog(ctx, ulid, jobID, r.runnerID, chunk, wire); err != nil {
 			return err
 		}
 	}

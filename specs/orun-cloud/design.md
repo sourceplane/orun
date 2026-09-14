@@ -153,6 +153,29 @@ secret-sourced. At execution time, per claimed job:
 | `--remote-state`, repo unlinked | fail fast: "run `orun cloud link`" |
 | Backend unreachable at run start | error with `--local` escape hatch suggested; **no silent fallback** (a team expecting shared state must notice) |
 | Backend lost mid-run | runner keeps executing current jobs, buffers log chunks (bounded, memory + spill file), retries with backoff; exits non-zero with "state may be stale on the server" if buffers can't drain |
+
+### Log chunks carry their step
+
+Each block the runner uploads is one step's output, and it goes out with that
+step's coordinate — id, 0-based index, lifecycle event, and how the step ended
+(`saas-step-logs` in orun-cloud). This is what lets the console answer *which
+step broke* and *where did the six minutes go* about a job it has only ever
+received flat bytes for.
+
+It costs nothing extra on the wire: a step boundary is already a moment the
+runner writes a chunk, so the coordinate rides the write that already happens
+rather than adding a verb to the lease-gated claim path. A block that outgrows
+the per-chunk cap is split, and only the LAST piece carries the step's terminal
+event — the server must see one `end` per step, not one per megabyte.
+
+Every field is optional end to end. A runner that sends none writes exactly the
+request it wrote before, and the platform serves that job as a single whole-job
+step; a malformed coordinate costs the coordinate and never the bytes, with the
+refusal reported back rather than thrown or swallowed. The spill file is
+compatible in both directions for the same reason — it outlives the binary that
+wrote it.
+
+
 | Secret resolve fails | the dependent job fails closed; independent jobs continue |
 | Catalog push fails | warning, exit 0 for the underlying command (push is enrichment) |
 | Contract version mismatch | loud, actionable, immediate (§4) |

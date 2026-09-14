@@ -215,7 +215,7 @@ func TestClient_AppendLog(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	seq, err := newTestClient(srv).AppendLog(context.Background(), "run-1", "job-1", "runner-1", "some log output")
+	seq, err := newTestClient(srv).AppendLog(context.Background(), "run-1", "job-1", "runner-1", "some log output", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

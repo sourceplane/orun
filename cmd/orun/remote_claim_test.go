@@ -62,7 +62,7 @@ func (f *fakeBackend) UpdateJob(_ context.Context, _, _, _ string, _ statebacken
 	return nil
 }
 
-func (f *fakeBackend) AppendStepLog(_ context.Context, _, _, _ string) error {
+func (f *fakeBackend) AppendStepLog(_ context.Context, _, _, _ string, _ *statebackend.LogStep) error {
 	return nil
 }
 

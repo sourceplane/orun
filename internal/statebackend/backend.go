@@ -7,6 +7,35 @@ import (
 	"github.com/sourceplane/orun/internal/model"
 )
 
+// LogStep is the step a log chunk belongs to, and how that step ended
+// (orun-cloud saas-step-logs).
+//
+// The backend-facing vocabulary, mapped to the wire by the remote backend. Nil
+// everywhere it is optional: a runner that says nothing about steps writes the
+// chunk it always wrote, and the server serves that job as one whole-job step.
+type LogStep struct {
+	// StepID is the runner's own step identity. It must match what the plan
+	// resolves to, or the server's declared step and this record are two rows
+	// about one step.
+	StepID string
+	// Index is 0-based, matching the plan's own ordering.
+	Index int
+	// Event is start | chunk | end.
+	Event string
+	// Status is set on `end`: "succeeded" or "failed".
+	Status string
+	// ExitCode is set on `end` when the command returned one. Nil is "none to
+	// report" — distinct from zero, which is a real outcome.
+	ExitCode *int
+}
+
+// Log step lifecycle events.
+const (
+	LogStepStart = "start"
+	LogStepChunk = "chunk"
+	LogStepEnd   = "end"
+)
+
 // JobStatus mirrors the backend API terminal status values.
 type JobStatus string
 
@@ -86,8 +115,10 @@ type Backend interface {
 	// UpdateJob sends the terminal status for a job.
 	UpdateJob(ctx context.Context, runID string, jobID string, runnerID string, status JobStatus, errText string) error
 
-	// AppendStepLog appends step output to the job-level log.
-	AppendStepLog(ctx context.Context, runID string, jobID string, content string) error
+	// AppendStepLog appends step output to the job-level log. `step` is the
+	// optional step coordinate (saas-step-logs SL-R1); nil writes exactly the
+	// chunk this method wrote before the coordinate existed.
+	AppendStepLog(ctx context.Context, runID string, jobID string, content string, step *LogStep) error
 
 	// RunnableJobs returns the list of job IDs that are currently runnable for the given run.
 	RunnableJobs(ctx context.Context, runID string) ([]string, error)

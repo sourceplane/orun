@@ -223,8 +223,8 @@ func (b *CoordBackend) WaitForRunEvents(ctx context.Context, runID string, since
 
 // ── Delegated to the inner backend (native surface does not yet own these) ──
 
-func (b *CoordBackend) AppendStepLog(ctx context.Context, runID, jobID, content string) error {
-	return b.inner.AppendStepLog(ctx, runID, jobID, content)
+func (b *CoordBackend) AppendStepLog(ctx context.Context, runID, jobID, content string, step *LogStep) error {
+	return b.inner.AppendStepLog(ctx, runID, jobID, content, step)
 }
 
 // LoadRunState reads run state from the authoritative native event log: it folds
