@@ -32,10 +32,12 @@ package actions
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ParamType is the closed set of parameter types an action may declare.
@@ -113,6 +115,9 @@ type Input struct {
 type Result struct {
 	// Outputs are readable by later hooks in the same phase.
 	Outputs map[string]string
+	// Pending, when set, means the action is waiting rather than done or
+	// failed — see Pending.
+	Pending *Pending
 }
 
 // RunFunc executes one action.
@@ -278,7 +283,14 @@ func Run(ctx context.Context, id string, in Input) (Result, error) {
 		return Result{}, err
 	}
 	in.Params = params
-	return e.run(ctx, in)
+	res, err := e.run(ctx, in)
+	if err != nil {
+		return res, err
+	}
+	if res.Pending != nil {
+		return res, &PendingError{ID: id, Pending: *res.Pending}
+	}
+	return res, nil
 }
 
 // String helpers for action implementations: the params map is already
@@ -319,4 +331,43 @@ func StringListParam(in Input, name string) []string {
 		}
 	}
 	return out
+}
+
+// Pending is an action reporting that it is not finished and not failed
+// (orun-bootstrap-engine BE-O4).
+//
+// A convergence is still running; a provider connection has not been made yet.
+// Neither is an error — nothing is wrong — and neither is success. Collapsing
+// them into one or the other is how an unattended bootstrap either hangs or
+// reports a product live that is not.
+type Pending struct {
+	// Reason is shown to a person. It should say what is being waited on.
+	Reason string
+	// RetryAfter is how long the action suggests waiting before asking again.
+	// Zero means the caller decides.
+	RetryAfter time.Duration
+}
+
+// PendingError carries a Pending out through the error channel, so every
+// existing caller of an action keeps its two-value signature and only callers
+// that care about waiting have to know the type exists.
+type PendingError struct {
+	ID string
+	Pending
+}
+
+func (e *PendingError) Error() string {
+	if e.Reason == "" {
+		return e.ID + ": pending"
+	}
+	return e.ID + ": pending — " + e.Reason
+}
+
+// IsPending reports whether err is an action parking rather than failing.
+func IsPending(err error) (*PendingError, bool) {
+	var pe *PendingError
+	if errors.As(err, &pe) {
+		return pe, true
+	}
+	return nil, false
 }

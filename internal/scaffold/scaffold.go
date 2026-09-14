@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/sourceplane/orun/internal/actions"
 	"github.com/sourceplane/orun/internal/objectstore"
 )
 
@@ -194,14 +195,34 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			digests: hookDigestMap(prov),
 		}
 		for _, phase := range phases {
-			// Hooks are retried per the phase's declared policy; outputs are
-			// scoped to the phase and reset on every attempt.
-			ran, herr := runPhaseHooks(ctx, hr, plan.declOf(phase.Name), phase.Hooks)
+			decl := plan.declOf(phase.Name)
+			// pre and post are retried per the phase's declared policy;
+			// outputs are scoped to the phase and reset on every attempt.
+			ran, herr := runPhaseHooks(ctx, hr, decl, append(append([]Hook{}, phase.Hooks.Pre...), phase.Hooks.Post...))
+			hooksRun = append(hooksRun, ran...)
+			if pe, waiting := actions.IsPending(herr); waiting {
+				parked := &ParkedError{Phase: phase.Name, Hook: pe.ID, Reason: pe.Reason, RetryAfter: pe.RetryAfter}
+				writeRunState(opts.OutDir, parked)
+				return nil, parked
+			}
 			if herr != nil {
 				return nil, fmt.Errorf("phase %q: %w", phase.Name, herr)
 			}
-			hooksRun = append(hooksRun, ran...)
+			// await runs OUTSIDE the retry policy. Retrying a wait would turn
+			// "still running" into an error after N attempts, when the honest
+			// answer is that it is still running.
+			awaited, aerr := runAwait(ctx, hr, phase.Name, phase.Hooks.Await)
+			hooksRun = append(hooksRun, awaited...)
+			if parked, ok := aerr.(*ParkedError); ok {
+				writeRunState(opts.OutDir, parked)
+				return nil, parked
+			}
+			if aerr != nil {
+				return nil, fmt.Errorf("phase %q: %w", phase.Name, aerr)
+			}
 		}
+		// Nothing is waiting any more.
+		clearRunState(opts.OutDir)
 		hr.resetOutputs()
 		ran, herr := hr.run(ctx, bp.Hooks.PostInstantiate)
 		if herr != nil {

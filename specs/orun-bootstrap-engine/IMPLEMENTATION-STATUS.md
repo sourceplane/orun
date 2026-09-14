@@ -9,7 +9,7 @@ shipped and every place it departed from the spec.
 | **BE-O1b** | ✅ Shipped | `Pen.Land`, `orun.pr/land@v1`, `orun pr land` |
 | **BE-O2** | ✅ Shipped | `Derive`, `--status`, `--phase`/`--until`/`--resume`, input recovery |
 | **BE-O3** | ✅ Shipped (lease deferred) | `when`, `requires.{phases,probe}`, `retry` |
-| BE-O4 | 🗓️ Planned | |
+| **BE-O4** | ✅ Shipped | `hooks.{pre,post,await}`, `pending`, the park, `.orun/run.state` |
 | BE-O5 | 🗓️ Planned | |
 | BE-O6 | 🗓️ Planned | |
 | BE-O7 | 🗓️ Planned | |
@@ -233,3 +233,53 @@ phase, a skipped phase not blocking `Done()`, requires unmet and then met,
 forward and unknown requirements refused, a probe that shells out refused, retry
 succeeding within budget, retry exhausting and saying how many attempts, and no
 policy meaning exactly one attempt.
+
+## BE-O4 — the wait
+
+### What shipped
+
+- **`hooks.{pre, post, await}`** — three slots: before placement, after
+  placement, and the wait. **A bare list still parses and still means `post`**,
+  which is what a phase's hooks have always meant, so no existing blueprint
+  changes.
+- **`pending`** — an action reporting that it is neither done nor failed. A
+  convergence is still running; a provider connection has not been made.
+  Collapsing that into success or failure is how an unattended bootstrap either
+  reports a product live that is not, or tears down one that is merely
+  mid-deploy. It travels as a typed `*actions.PendingError` so every existing
+  caller keeps its two-value signature.
+- **The park.** A pending stops the run with a `ParkedError` naming the phase,
+  the hook, the reason and a suggested retry — and **the placed tree stays on
+  disk**, which is what makes resuming from there meaningful. Exit code 75
+  (EX_TEMPFAIL), deliberately not 1: a caller that reads "waiting" as "broken"
+  will tear down a working product.
+- **`.orun/run.state`** — what the run is waiting on, so a person can ask
+  without re-running anything.
+
+This is what `blueprint.go` promised two milestones ago: *"Approval gates +
+resumable pausing are a planned follow-on."*
+
+### Two things the tests changed
+
+**Pending parks from any slot, not just `await`.** The first implementation
+honoured `pending` only in `await`; a pending from a `pre` hook was retried
+three times and then reported as a failure. `await` is where a wait *belongs* —
+it is not the only place one is *honoured*.
+
+**Pending is never retried.** Retrying a wait turns "still running" into an
+error after N attempts, when the honest answer is that it is still running.
+
+### The cache rule, enforced
+
+`TestDeletingRunStateChangesNothing` parks a run, deletes `.orun/run.state`,
+and resumes successfully — the resume re-runs the await and learns the same
+answer from the world. The cache is a convenience; it is never the truth. If it
+ever becomes load-bearing, that test fails.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./...` green. `park_test.go` covers
+slot ordering, the legacy list form, a park rather than a failure, the tree
+surviving a park, the run-state record, deleting it changing nothing, it being
+cleared once the wait is over, await not being retried, and a real failure in an
+await still being a failure.

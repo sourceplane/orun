@@ -156,9 +156,10 @@ func runScaffoldNew(ctx context.Context) error {
 	for _, phase := range res.Phases {
 		if phased {
 			label := phase.Name
-			if len(phase.Hooks) > 0 {
-				hookIDs := make([]string, len(phase.Hooks))
-				for i, h := range phase.Hooks {
+			if phase.Hooks.Len() > 0 {
+				all := phase.Hooks.All()
+				hookIDs := make([]string, len(all))
+				for i, h := range all {
 					hookIDs[i] = h.ID
 				}
 				label = fmt.Sprintf("%s (hooks: %s)", phase.Name, strings.Join(hookIDs, ", "))

@@ -68,7 +68,7 @@ func TestActionHookOutputsAreReadableByALaterHookInThePhase(t *testing.T) {
 	hr := &hookRunner{outDir: t.TempDir(), actions: rec}
 	hr.resetOutputs()
 
-	if _, err := hr.run(context.Background(), bp.Phases[0].Hooks); err != nil {
+	if _, err := hr.run(context.Background(), bp.Phases[0].Hooks.All()); err != nil {
 		t.Fatalf("run hooks: %v", err)
 	}
 	if len(rec.calls) != 2 {
