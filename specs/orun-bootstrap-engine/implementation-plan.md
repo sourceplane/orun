@@ -19,9 +19,22 @@ errors. `Hook.validate()` becomes XOR over `run`/`uses`/`workflow`. Parse-time
 validation of `with:` against the param struct, with a line number. Hook outputs
 become addressable in later hooks of the same phase.
 
-Ship **two** actions — `orun.pr/land@v1` and `orun.run/watch@v1` — because they
-are the highest-value pair and neither needs anything new: the pen exists, and
-`orun run --retry` exists.
+> **As built, this changed.** The premise above — *"neither needs anything
+> new"* — was half right. `internal/provenance` carries the pen's primitives,
+> but the landing logic lives inside `cmd/orun/pr.go`, not in a package an
+> action can call; the same is true of the convergence watch. BE-O1 therefore
+> shipped the mechanism plus **`orun.http/probe@v1`**, which needed nothing
+> extracted. `pr/land` and `run/watch` move to **BE-O1b**, with the extraction.
+> Registering specs without implementations was rejected: a registry that
+> advertises what it cannot run is the failure this epic exists to end. See
+> `IMPLEMENTATION-STATUS.md`.
+
+## BE-O1b — extract the command-layer logic
+
+Move PR landing and run watching out of `cmd/orun/{pr,run}.go` into packages an
+action can call, then register `orun.pr/land@v1` and `orun.run/watch@v1`. The
+CLI verbs become thin wrappers over the same code, so the command and the action
+cannot diverge.
 
 **Done when** a blueprint declaring `uses: orun.pr/land@v1` with a misspelled
 parameter fails `orun validate` with the offending line, and a phase's `land`

@@ -34,6 +34,11 @@ type Options struct {
 	// Workflow hooks run through the in-process flow engine (orun-workflows-v3
 	// WA5) — there is no external engine to configure.
 	RunHooks bool
+
+	// Actions runs `uses:` hooks. Nil selects the real registry
+	// (orun-bootstrap-engine BE-O1); a test or a dry-run simulator substitutes
+	// a recording runner here.
+	Actions ActionRunner
 }
 
 // Result summarizes a completed scaffold.
@@ -172,19 +177,27 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	// + approval gates are the planned resumable follow-on.
 	var hooksRun []string
 	if opts.RunHooks {
+		runner := opts.Actions
+		if runner == nil {
+			runner = DefaultActionRunner()
+		}
 		hr := &hookRunner{
 			outDir:  opts.OutDir,
 			baseDir: opts.SourceBaseDir,
+			actions: runner,
 			secrets: values.SecretMap(),
 			digests: hookDigestMap(prov),
 		}
 		for _, phase := range phases {
+			// Action outputs are scoped to their phase — see resetOutputs.
+			hr.resetOutputs()
 			ran, herr := hr.run(ctx, phase.Hooks)
 			if herr != nil {
 				return nil, herr
 			}
 			hooksRun = append(hooksRun, ran...)
 		}
+		hr.resetOutputs()
 		ran, herr := hr.run(ctx, bp.Hooks.PostInstantiate)
 		if herr != nil {
 			return nil, herr
