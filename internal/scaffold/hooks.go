@@ -101,18 +101,52 @@ func (hr *hookRunner) resolveWith(h Hook) (map[string]any, error) {
 	scope := hr.scope()
 	out := make(map[string]any, len(h.With))
 	for name, value := range h.With {
-		s, ok := value.(string)
-		if !ok || !strings.Contains(s, "{{") {
-			out[name] = value
-			continue
-		}
-		rendered, err := Render("hook."+h.ID+"."+name, s, scope)
+		rendered, err := hr.renderValue("hook."+h.ID+"."+name, value, scope)
 		if err != nil {
 			return nil, fmt.Errorf("hook %q parameter %q: %w", h.ID, name, err)
 		}
-		out[name] = string(rendered)
+		out[name] = rendered
 	}
 	return out, nil
+}
+
+// renderValue renders one parameter value. Strings carry expressions; LISTS OF
+// STRINGS carry them element by element.
+//
+// The list case is not a generalization for its own sake. Every parameter a
+// baseline needs to template is a list: the URLs a phase probes, the secret
+// keys it requires. Those are the values that depend on what the operator
+// answered — a product's health endpoint is its own repo name and its own
+// workers subdomain — so a stringList that passed through unrendered would put
+// the literal text `{{ .inputs.repoName }}` into an HTTP request and report it
+// as a failed probe.
+//
+// Anything else passes through untouched: only text can carry an expression,
+// and a number that looked like one would be a different bug.
+func (hr *hookRunner) renderValue(where string, value any, scope map[string]any) (any, error) {
+	switch v := value.(type) {
+	case string:
+		if !strings.Contains(v, "{{") {
+			return value, nil
+		}
+		rendered, err := Render(where, v, scope)
+		if err != nil {
+			return nil, err
+		}
+		return string(rendered), nil
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			r, err := hr.renderValue(fmt.Sprintf("%s[%d]", where, i), item, scope)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = r
+		}
+		return out, nil
+	default:
+		return value, nil
+	}
 }
 
 // scope is what a hook's `with:` block can see.

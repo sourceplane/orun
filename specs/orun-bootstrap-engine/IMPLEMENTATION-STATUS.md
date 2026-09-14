@@ -696,6 +696,29 @@ given; an empty `BaseDir` falls back to `Dir` for a caller driving an action
 directly). A test swaps the two directories and asserts the swap **fails**
 rather than creating an uncontracted task.
 
+### Gap 4 — a templated LIST passed through unrendered
+
+Found the same way, one layer down. `resolveWith` rendered string parameters
+and let everything else through:
+
+```go
+s, ok := value.(string)
+if !ok || !strings.Contains(s, "{{") { out[name] = value; continue }
+```
+
+Every parameter a baseline actually needs to template is a **list**: the URLs
+a phase probes, the secret keys it requires. Those are exactly the values that
+depend on what the operator answered — a product's health endpoint is its own
+repo name and its own workers subdomain. So the one shape that had to render
+was the one shape that did not, and the symptom would have been an HTTP
+request to the literal text `{{ .inputs.repoName }}` reported as a failed
+probe: a wrong answer dressed as a real one.
+
+`renderValue` now recurses into `[]any`, element by element, and names the
+element on failure (`urls[1]`, not `urls`) — "urls is wrong" sends a reader to
+a block of six, `urls[1]` sends them to a line. Anything that is not a string
+or a list still passes through untouched: only text can carry an expression.
+
 ### One implementation, two callers
 
 The seal-then-attach step now lives once, in `taskfile.Attach`, behind a
@@ -706,9 +729,10 @@ argument.
 
 ### Verification
 
-`go build ./...`, `go vet ./...`, `go test ./...` green. Eleven new tests:
-six on the scope (including that a secret input reaches no parameter, and that
-an unknown key is an error rather than an empty string) and five on the
-contract (attached on create, attached on re-find, the baseline-vs-product
-path swap, no minted key for a malformed document, and nothing attached when
-none is declared).
+`go build ./...`, `go vet ./...`, `go test ./...` green. Thirteen new tests:
+eight on the scope — including that a secret input reaches no parameter, that
+an unknown key is an error rather than an empty string, that an expression
+inside a list renders, and that a failure inside a list names the element —
+and five on the contract (attached on create, attached on re-find, the
+baseline-vs-product path swap, no minted key for a malformed document, and
+nothing attached when none is declared).

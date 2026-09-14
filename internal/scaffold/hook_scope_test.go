@@ -286,3 +286,90 @@ func (b *baseDirRunner) Run(_ context.Context, _ string, in ActionInput) (map[st
 	b.dir, b.baseDir = in.Dir, in.BaseDir
 	return nil, nil
 }
+
+// Every parameter a baseline actually needs to template is a LIST: the URLs a
+// phase probes, the secret keys it requires. A stringList that passed through
+// unrendered would put the literal text `{{ .inputs.repoName }}` into an HTTP
+// request and then report it as a failed probe — a wrong answer dressed as a
+// real one.
+func TestExpressionsInsideAListParameterAreRendered(t *testing.T) {
+	const body = `
+apiVersion: orun.dev/v1
+kind: Blueprint
+metadata:
+  name: bp
+inputs:
+  repoName:
+    type: string
+    default: acme-cloud
+  workersDevSubdomain:
+    type: string
+    default: acme
+modules:
+  - name: only
+    mode: template
+    files:
+      README.md: "hi"
+phases:
+  - name: 05-edge
+    modules: [only]
+    hooks:
+      - id: verify
+        uses: orun.http/probe@v1
+        with:
+          urls:
+            - "https://{{ .inputs.repoName }}-api-edge-stage.{{ .inputs.workersDevSubdomain }}.workers.dev/health"
+            - "https://example.test/static"
+`
+	params := runScopeHooks(t, body, map[string]any{"repoName": "acme-cloud", "workersDevSubdomain": "acme"})
+	urls, ok := params["urls"].([]any)
+	if !ok {
+		t.Fatalf("urls = %#v, want a list", params["urls"])
+	}
+	want := "https://acme-cloud-api-edge-stage.acme.workers.dev/health"
+	if urls[0] != want {
+		t.Errorf("urls[0] = %v, want %q", urls[0], want)
+	}
+	if urls[1] != "https://example.test/static" {
+		t.Errorf("a list element with no expression should pass through; got %v", urls[1])
+	}
+}
+
+// The failure inside a list names the element, not just the parameter. "urls
+// is wrong" sends a reader to a block of six; "urls[3]" sends them to a line.
+func TestAFailureInsideAListNamesTheElement(t *testing.T) {
+	const body = `
+apiVersion: orun.dev/v1
+kind: Blueprint
+metadata:
+  name: bp
+modules:
+  - name: only
+    mode: template
+    files:
+      README.md: "hi"
+phases:
+  - name: 05-edge
+    modules: [only]
+    hooks:
+      - id: verify
+        uses: orun.http/probe@v1
+        with:
+          urls:
+            - "https://example.test/ok"
+            - "https://{{ .nope.here }}/bad"
+`
+	bp, err := ParseBlueprint([]byte(body))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	hr := &hookRunner{outDir: t.TempDir(), actions: &recordingRunner{}, phase: bp.Phases[0]}
+	hr.resetOutputs()
+	_, err = hr.run(context.Background(), bp.Phases[0].Hooks.All())
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "urls[1]") {
+		t.Errorf("the error should name the offending element; got %v", err)
+	}
+}

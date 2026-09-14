@@ -149,6 +149,9 @@ which is precisely what that action's own doc comment says must not happen.
 - `orun.task/ensure@v1` gains `contract:`, read before the create (a malformed
   document costs no minted key) and attached on the found path as well as the
   created one (a re-run heals a task made before its contract existed).
+- A parameter that is a LIST of strings renders element by element. Every
+  parameter a baseline needs to template is one — probe URLs, secret keys —
+  so the one shape that had to render was the one shape that did not.
 
 **Done when** a blueprint can write the design §2 phase verbatim and a task the
 bootstrap creates can fold to done on its merge.
