@@ -79,6 +79,12 @@ nothing but a re-derivation**, asserted by a test.
 
 ## BE-O5 — The remaining actions
 
+> **Split as built.** Seven actions in one change is not a reviewable diff.
+> **BE-O5a** shipped the task plane (`task/ensure`, `task/rollup`), which
+> retires `track.sh` — the largest of a baseline's shell scripts. **BE-O5b**
+> carries the rest: `doctor/check`, `integrations/reconcile`, `repo/ensure`,
+> `run/watch`, `secrets/exists`.
+
 `doctor/check`, `task/ensure`, `task/rollup`, `integrations/reconcile`,
 `http/probe`, `repo/ensure`, `secrets/exists`, `cloudflare/subdomain`.
 `task/ensure` is find-or-create by identity — the semantics a baseline's

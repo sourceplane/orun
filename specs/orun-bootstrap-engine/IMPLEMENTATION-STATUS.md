@@ -10,7 +10,8 @@ shipped and every place it departed from the spec.
 | **BE-O2** | ✅ Shipped | `Derive`, `--status`, `--phase`/`--until`/`--resume`, input recovery |
 | **BE-O3** | ✅ Shipped (lease deferred) | `when`, `requires.{phases,probe}`, `retry` |
 | **BE-O4** | ✅ Shipped | `hooks.{pre,post,await}`, `pending`, the park, `.orun/run.state` |
-| BE-O5 | 🗓️ Planned | |
+| **BE-O5a** | ✅ Shipped | `task/ensure`, `task/rollup` — the task plane |
+| BE-O5b | 🗓️ Planned | doctor/check, integrations/reconcile, repo/ensure, run/watch, secrets/exists |
 | BE-O6 | 🗓️ Planned | |
 | BE-O7 | 🗓️ Planned | |
 | BE-O8 | 🗓️ Planned | |
@@ -283,3 +284,45 @@ slot ordering, the legacy list form, a park rather than a failure, the tree
 surviving a park, the run-state record, deleting it changing nothing, it being
 cleared once the wait is over, await not being retried, and a real failure in an
 await still being a failure.
+
+## BE-O5a — the task-plane actions
+
+BE-O5 named seven actions. Seven in one change is not a reviewable diff, so it
+is split: **BE-O5a** is the task plane, **BE-O5b** the rest. This half retires
+the largest of a baseline's shell scripts (`track.sh`, 210 lines).
+
+### What shipped
+
+- **`orun.task/ensure@v1`** — find-or-create an epic, milestone or task **by
+  identity**. A bootstrap is re-runnable by construction, so every write it
+  makes must be idempotent: an epic by slug, a milestone by **name within its
+  epic**, a task by **title within its epic**. `create` is the wrong verb, which
+  is why a baseline hand-rolls list-then-create three times today.
+- **`orun.task/rollup@v1`** — an epic's total / done / blocked, and whether it is
+  complete. **Outstanding work is never an error**: a landing the observation
+  drain has not folded yet is a cron that has not run, not a failed build.
+- A task is created **clubbed and briefed in the same call**. The plane resolves
+  the epic and milestone *before* minting the key, so a bad ref is a 422 rather
+  than a half-made task — and a bootstrap creates tasks seconds before their
+  PRs, so it must be able to say what they belong to at birth.
+
+### Two seams, for two different reasons
+
+- **`cloudClient`** resolves a workspace from the `org` parameter then `ORUN_ORG`
+  — and deliberately *not* from the repo link or `intent.yaml` the way the CLI
+  does. An action is not a person at a terminal: it runs inside a bootstrap that
+  already knows which workspace it builds into, and the blueprint says so.
+  Anything cleverer would let an action act on a workspace its blueprint never
+  named. It never prompts, because it runs unattended.
+- **`taskPlane`** is the narrow interface the ensure logic speaks, so the
+  find-or-create rules — the part that is easy to get subtly wrong — are tested
+  against a fake with no auth handshake and no backend.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./...` green. `task_ensure_test.go`
+covers epic created and epic adopted (through the real `ExistingEpicOf` 409
+path, not around it), milestone idempotent by name and created when new, a
+milestone with no epic refused, task idempotent by title, a task born clubbed
+and briefed, an unknown kind refused, and rollup reporting progress, completion,
+and an empty epic not counting as complete.
