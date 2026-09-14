@@ -7,7 +7,7 @@ shipped and every place it departed from the spec.
 |---|---|---|
 | **BE-O1** | ✅ Shipped | the action mechanism + `orun.http/probe@v1` |
 | **BE-O1b** | ✅ Shipped | `Pen.Land`, `orun.pr/land@v1`, `orun pr land` |
-| BE-O2 | 🗓️ Planned | |
+| **BE-O2** | ✅ Shipped | `Derive`, `--status`, `--phase`/`--until`/`--resume`, input recovery |
 | BE-O3 | 🗓️ Planned | |
 | BE-O4 | 🗓️ Planned | |
 | BE-O5 | 🗓️ Planned | |
@@ -121,3 +121,57 @@ landing refused.
 and misspelled parameters, type mismatches, templated values deferred to
 runtime, defaults, the line-numbered parse failure, cross-phase output
 isolation, and the three-way hook exclusivity.
+
+## BE-O2 — derivation
+
+### What shipped
+
+- **`Derive`** renders the blueprint exactly as `Run` does — same inputs, same
+  order, same bytes — and compares against the tree. It writes nothing. Both go
+  through one `buildPlan`, because if "is this phase done?" were answered by a
+  different renderer than the one that placed it, the answer would mean nothing.
+- **Four states, not two.** `done` / `pending` / `partial` / `drifted`.
+  `partial` is an interrupted run and re-running completes it; `drifted` is a
+  file someone edited or a blueprint that moved, and is **reported rather than
+  silently overwritten**.
+- **`--status`** (and `--status --json`) — the read a different session performs
+  to answer "where did this product get to?".
+- **`--phase` / `--until` / `--resume`**, mutually exclusive, with an unknown
+  phase naming the ones that exist.
+- **Input recovery.** A resumed run reads what the product was built with from
+  its own lock, before prompting, so a fresh container with no values file asks
+  nothing. A flag that **disagrees** with the record is refused naming both
+  values — not applied. Half a tree rendered with one value and half with
+  another is a silent, expensive failure, and changing an input after the fact
+  is `upgrade`'s operation.
+- **Partial runs merge the module record**, so `--phase 05-edge` does not write
+  a lock naming five files and lose everything phases 01–04 placed.
+
+### The rule this milestone exists to make real
+
+**Phase state is derived; a stored file is a cache and must be safe to delete.**
+`TestDeriveSurvivesDeletingTheLocalArtifacts` deletes the entire `.orun`
+directory and asserts the answer is unchanged. That is the property the paced
+bootstrap already depends on — `.orun/*` is gitignored in every product, so the
+records the flows archive have never survived a container — and it is now
+enforced rather than assumed.
+
+### A bug the tests caught
+
+The first implementation returned `nil` from phase selection both when no
+selection was asked for **and** when `--resume` selected zero phases. A finished
+product therefore re-placed its entire tree on `--resume`. Selection now reports
+*whether a selection was asked for* separately from *what it selected*.
+
+### Narrowing is about writing, not computing
+
+The whole blueprint is always rendered even when one phase is selected: collision
+detection and the output gate are only meaningful against the complete set — a
+phase that collides with one it was not asked to place is still a collision.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./...` green. `status_test.go` covers
+the empty tree, the full run, survival of a deleted `.orun`, each selector,
+resume-is-a-no-op-when-done, drift, partial, two selectors at once refused, an
+unknown phase, the merged module record, and all three input-recovery paths.

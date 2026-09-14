@@ -1,0 +1,235 @@
+package scaffold
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+)
+
+// The shared plan (orun-bootstrap-engine BE-O2).
+//
+// Run and Derive must compute the SAME bytes, or "is this phase done?" is
+// answered by a different renderer than the one that placed it and the answer
+// means nothing. So both go through buildPlan: resolve sources, order phases,
+// render every module. Run then writes; Derive then compares.
+
+type runPlan struct {
+	bp       *Blueprint
+	values   Values
+	phases   []PhasePlan
+	sources  map[string]ResolvedSource
+	placed   map[string]PlacedFile
+	byPhase  map[string]map[string]PlacedFile
+	consumed []ConsumedDep
+	order    [][]string
+	cleanup  func()
+}
+
+// buildPlan parses, collects inputs and renders. Callers that already have a
+// parsed blueprint and values use buildPlanWith.
+func buildPlan(ctx context.Context, opts Options) (*runPlan, error) {
+	if opts.Store == nil {
+		return nil, fmt.Errorf("scaffold: object store is required")
+	}
+	bp, err := ParseBlueprint(opts.Blueprint)
+	if err != nil {
+		return nil, notFoundErr("%v", err)
+	}
+	values, err := CollectInputs(bp.Inputs, opts.Inputs)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := buildPlanWith(ctx, opts, bp, values)
+	if err != nil {
+		return nil, err
+	}
+	if plan.cleanup != nil {
+		defer plan.cleanup()
+	}
+	return plan, nil
+}
+
+// buildPlanWith renders every module of a parsed blueprint, recording which
+// phase each file came from.
+func buildPlanWith(ctx context.Context, opts Options, bp *Blueprint, values Values) (*runPlan, error) {
+	workDir := opts.WorkDir
+	cleanup := func() {}
+	if workDir == "" {
+		dir, err := os.MkdirTemp("", "orun-scaffold-")
+		if err != nil {
+			return nil, err
+		}
+		workDir = dir
+		cleanup = func() { _ = os.RemoveAll(dir) }
+	}
+
+	sources, err := resolveSources(ctx, opts.Store, bp.Sources, bp.Ignore, opts.SourceBaseDir, workDir)
+	if err != nil {
+		cleanup()
+		return nil, err
+	}
+	phases, err := planPhases(bp)
+	if err != nil {
+		cleanup()
+		return nil, err
+	}
+	modulesByName := make(map[string]Module, len(bp.Modules))
+	for _, m := range bp.Modules {
+		modulesByName[m.Name] = m
+	}
+
+	plan := &runPlan{
+		bp: bp, values: values, phases: phases, sources: sources,
+		placed:  map[string]PlacedFile{},
+		byPhase: map[string]map[string]PlacedFile{},
+		cleanup: cleanup,
+	}
+
+	// Place modules phase by phase, batch by batch, in dependency order. Detect
+	// cross-module target collisions (S-10) — a silent last-writer is a failure.
+	for _, phase := range phases {
+		plan.byPhase[phase.Name] = map[string]PlacedFile{}
+		for _, batch := range phase.Batches {
+			plan.order = append(plan.order, batch)
+			for _, name := range batch {
+				m := modulesByName[name]
+				var tree FileTree
+				if m.Source != "" {
+					rs, ok := sources[m.Source]
+					if !ok {
+						cleanup()
+						return nil, notFoundErr("module %q references unresolved source %q", m.Name, m.Source)
+					}
+					tree = rs.Tree
+				}
+				out, err := placeModule(m, tree, values)
+				if err != nil {
+					cleanup()
+					return nil, err
+				}
+				if out.consumed != nil {
+					dep := *out.consumed
+					if rs, ok := sources[dep.Source]; ok {
+						dep.Digest = string(rs.Digest)
+					}
+					plan.consumed = append(plan.consumed, dep)
+				}
+				for _, f := range out.files {
+					if prev, dup := plan.placed[f.Path]; dup {
+						cleanup()
+						return nil, gateErr("target collision at %q: modules %q and %q both write it (design §5/§9)", f.Path, prev.Module, f.Module)
+					}
+					plan.placed[f.Path] = f
+					plan.byPhase[phase.Name][f.Path] = f
+				}
+			}
+		}
+	}
+	return plan, nil
+}
+
+// phaseNames lists the plan's phases in order.
+func (p *runPlan) phaseNames() []string {
+	out := make([]string, 0, len(p.phases))
+	for _, ph := range p.phases {
+		out = append(out, ph.Name)
+	}
+	return out
+}
+
+// selectPhases narrows the plan per Only/Until/Resume.
+//
+// The bool reports whether a selection was ASKED FOR, which is not the same as
+// whether it selected anything: `--resume` on a finished product selects zero
+// phases, and that is the correct answer. Conflating "no selection" with "an
+// empty selection" made a completed product re-place its whole tree.
+func (p *runPlan) selectPhases(opts Options) ([]PhasePlan, bool, error) {
+	set := 0
+	for _, on := range []bool{opts.Only != "", opts.Until != "", opts.Resume} {
+		if on {
+			set++
+		}
+	}
+	if set == 0 {
+		return nil, false, nil
+	}
+	if set > 1 {
+		return nil, false, gateErr("scaffold: --phase, --until and --resume select phases three different ways; use one")
+	}
+
+	switch {
+	case opts.Only != "":
+		for _, ph := range p.phases {
+			if ph.Name == opts.Only {
+				return []PhasePlan{ph}, true, nil
+			}
+		}
+		return nil, false, notFoundErr("scaffold: no phase named %q (this blueprint declares: %s)", opts.Only, strings.Join(p.phaseNames(), ", "))
+
+	case opts.Until != "":
+		out := make([]PhasePlan, 0, len(p.phases))
+		for _, ph := range p.phases {
+			out = append(out, ph)
+			if ph.Name == opts.Until {
+				return out, true, nil
+			}
+		}
+		return nil, false, notFoundErr("scaffold: no phase named %q (this blueprint declares: %s)", opts.Until, strings.Join(p.phaseNames(), ", "))
+
+	default: // Resume
+		out := make([]PhasePlan, 0, len(p.phases))
+		for _, ph := range p.phases {
+			st := derivePhase(opts.OutDir, ph.Name, p.byPhase[ph.Name])
+			// Drift is not skipped: re-placing restores the phase to what the
+			// blueprint says, which is what a resume is for. It is reported by
+			// --status so nobody is surprised by it here.
+			if st.State == PhaseDone {
+				continue
+			}
+			out = append(out, ph)
+		}
+		return out, true, nil
+	}
+}
+
+// filesFor is the union of the selected phases' files.
+func (p *runPlan) filesFor(phases []PhasePlan) map[string]PlacedFile {
+	out := make(map[string]PlacedFile)
+	for _, ph := range phases {
+		for path, f := range p.byPhase[ph.Name] {
+			out[path] = f
+		}
+	}
+	return out
+}
+
+// mergeModuleRecords folds a previous lock's module records into this run's, so
+// a partial run does not erase the record of the phases it did not touch.
+//
+// Without this, `--phase 05-edge` would write a provenance.lock naming five
+// files and nothing else — and the product would have lost the record of
+// everything phases 01 to 04 placed.
+func mergeModuleRecords(prev, current []ProvModule) []ProvModule {
+	byName := make(map[string]ProvModule, len(prev)+len(current))
+	var order []string
+	for _, m := range prev {
+		if _, seen := byName[m.Name]; !seen {
+			order = append(order, m.Name)
+		}
+		byName[m.Name] = m
+	}
+	for _, m := range current {
+		if _, seen := byName[m.Name]; !seen {
+			order = append(order, m.Name)
+		}
+		byName[m.Name] = m // this run's record wins for a module it placed
+	}
+	sort.Strings(order)
+	out := make([]ProvModule, 0, len(order))
+	for _, name := range order {
+		out = append(out, byName[name])
+	}
+	return out
+}

@@ -39,6 +39,16 @@ type Options struct {
 	// (orun-bootstrap-engine BE-O1); a test or a dry-run simulator substitutes
 	// a recording runner here.
 	Actions ActionRunner
+
+	// Phase selection (orun-bootstrap-engine BE-O2). Empty/false = every
+	// phase, which is today's behavior.
+	//
+	// Only names one phase to place. Until places every phase through the
+	// named one. Resume places every phase Derive does not already report as
+	// done. At most one may be set.
+	Only   string
+	Until  string
+	Resume bool
 }
 
 // Result summarizes a completed scaffold.
@@ -83,66 +93,27 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		return nil, err
 	}
 
-	workDir := opts.WorkDir
-	if workDir == "" {
-		workDir, err = os.MkdirTemp("", "orun-scaffold-")
-		if err != nil {
-			return nil, err
-		}
-		defer os.RemoveAll(workDir)
-	}
-
-	sources, err := resolveSources(ctx, opts.Store, bp.Sources, bp.Ignore, opts.SourceBaseDir, workDir)
+	plan, err := buildPlanWith(ctx, opts, bp, values)
 	if err != nil {
 		return nil, err
 	}
+	if plan.cleanup != nil {
+		defer plan.cleanup()
+	}
+	phases, sources, placed, consumed, order := plan.phases, plan.sources, plan.placed, plan.consumed, plan.order
 
-	phases, err := planPhases(bp)
+	// Phase selection (BE-O2): narrow what is WRITTEN, never what is COMPUTED.
+	// The whole blueprint is always rendered, because collision detection and
+	// the output gate are only meaningful against the complete set — a phase
+	// that collides with one it was not asked to place is still a collision.
+	selected, narrowed, err := plan.selectPhases(opts)
 	if err != nil {
 		return nil, err
 	}
-	modulesByName := make(map[string]Module, len(bp.Modules))
-	for _, m := range bp.Modules {
-		modulesByName[m.Name] = m
-	}
-
-	// Place modules phase by phase, batch by batch, in dependency order. Detect
-	// cross-module target collisions (S-10) — a silent last-writer is a failure.
-	placed := map[string]PlacedFile{}
-	var consumed []ConsumedDep
-	var order [][]string
-	for _, phase := range phases {
-		for _, batch := range phase.Batches {
-			order = append(order, batch)
-			for _, name := range batch {
-				m := modulesByName[name]
-				var tree FileTree
-				if m.Source != "" {
-					rs, ok := sources[m.Source]
-					if !ok {
-						return nil, notFoundErr("module %q references unresolved source %q", m.Name, m.Source)
-					}
-					tree = rs.Tree
-				}
-				out, err := placeModule(m, tree, values)
-				if err != nil {
-					return nil, err
-				}
-				if out.consumed != nil {
-					dep := *out.consumed
-					if rs, ok := sources[dep.Source]; ok {
-						dep.Digest = string(rs.Digest)
-					}
-					consumed = append(consumed, dep)
-				}
-				for _, f := range out.files {
-					if prev, dup := placed[f.Path]; dup {
-						return nil, gateErr("target collision at %q: modules %q and %q both write it (design §5/§9)", f.Path, prev.Module, f.Module)
-					}
-					placed[f.Path] = f
-				}
-			}
-		}
+	partial := narrowed && len(selected) != len(plan.phases)
+	if narrowed {
+		phases = selected
+		placed = plan.filesFor(selected)
 	}
 
 	// Output gate (design §10, component depth): every generated component.yaml
@@ -166,6 +137,14 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	prov, err := buildProvenance(ctx, opts.Store, opts.Blueprint, bp, values, sources, placed, consumed, opts.SourceBaseDir)
 	if err != nil {
 		return nil, err
+	}
+	// A partial run must not erase the record of the phases it did not touch:
+	// `--phase 05-edge` writing a lock that names only five files would lose
+	// everything phases 01-04 placed.
+	if partial {
+		if prev, rerr := ReadProvenance(opts.OutDir); rerr == nil {
+			prov.Modules = mergeModuleRecords(prev.Modules, prov.Modules)
+		}
 	}
 	if err := writeProvenance(opts.OutDir, prov); err != nil {
 		return nil, err
