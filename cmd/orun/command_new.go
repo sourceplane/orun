@@ -29,6 +29,7 @@ var (
 	scaffoldPhase      string
 	scaffoldUntil      string
 	scaffoldResume     bool
+	scaffoldProgress   string
 
 	upgradeBlueprint string
 	upgradeOut       string
@@ -79,6 +80,7 @@ func registerNewCommand(root *cobra.Command) {
 	scaffoldNewCmd.Flags().StringVar(&scaffoldPhase, "phase", "", "Place only this phase")
 	scaffoldNewCmd.Flags().StringVar(&scaffoldUntil, "until", "", "Place every phase through this one")
 	scaffoldNewCmd.Flags().BoolVar(&scaffoldResume, "resume", false, "Place every phase not already derived as done")
+	scaffoldNewCmd.Flags().StringVar(&scaffoldProgress, "progress", "auto", "Progress rendering: auto | plain | verbose | json")
 	_ = scaffoldNewCmd.MarkFlagRequired("blueprint")
 
 	scaffoldUpgradeCmd.Flags().StringVar(&upgradeBlueprint, "blueprint", "", "Path to the newer Blueprint (defaults to the one pinned in the lock)")
@@ -117,6 +119,11 @@ func runScaffoldNew(ctx context.Context) error {
 		return err
 	}
 
+	mode, err := parseProgressMode(scaffoldProgress)
+	if err != nil {
+		return exitErr(1, "%v", err)
+	}
+
 	opts := scaffold.Options{
 		Blueprint:     bpBytes,
 		Inputs:        inputs,
@@ -127,6 +134,7 @@ func runScaffoldNew(ctx context.Context) error {
 		Only:          scaffoldPhase,
 		Until:         scaffoldUntil,
 		Resume:        scaffoldResume,
+		Events:        &progressSink{out: os.Stdout, mode: mode},
 	}
 
 	// --status derives and reports; it writes nothing. This is the read a
