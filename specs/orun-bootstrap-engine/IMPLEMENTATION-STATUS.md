@@ -20,7 +20,9 @@ shipped and every place it departed from the spec.
 | **BE-O10** | ✅ Shipped | narration renders against state; `PhaseUnknown` for a hook-only phase |
 | **BE-O11** | ✅ Shipped | a whole-blueprint run satisfies its own `requires`; a probe gates the work, not the bytes |
 | **BE-O12** | ✅ Shipped | drift satisfies `requires.phases`, and `--resume` no longer un-brands a product |
-| BE-O7b | 🟡 Partial | `baseline new --local` shipped; `--via-platform` needs a repo-link verb, `register`/`publish` need orun-cloud BE-K4 |
+| **BE-O13** | ✅ Shipped | the platform sink — the engine's account of a build, delivered to the platform showing it |
+| **BE-O14** | ✅ Shipped | the bootstrap driver — serve supervises a build, with no model attached |
+| BE-O7b | 🟡 Partial | `baseline new --local`, `register` and `publish` shipped; `--via-platform` still needs a repo-link verb |
 
 ## BE-O1 — the action mechanism
 
@@ -1102,3 +1104,94 @@ The network is one seam (`fetchBaselineSource`), so the join is tested end to
 end without one; behind it is orun's own git source resolver, so a baseline
 fetched here and a `kind: git` source fetched during placement come down the
 same shallow, tag-or-branch, pinned path.
+
+## BE-O7b — `baseline register` and `baseline publish`
+
+### What shipped
+
+`orun baseline register <id>` and `orun baseline publish <id> <tag>`, over the
+doors orun-cloud BR3 and BE-K4c serve. With `baseline new --local` already in,
+BE-O7b is complete but for `--via-platform`.
+
+### The order publish exists to remove
+
+A baseline's version lives in two repositories: the git tag in its own source,
+and the pin in the platform's registry. They have to move in that order —
+what a build first reads is fetched from the source repo AT THE REGISTRY'S TAG
+— so a pin moved before the tag is pushed means every build of that baseline
+404s until somebody notices. The catalogue file warns about this in a comment,
+which is the only place the rule lived.
+
+One verb cannot get the order wrong. Push the tag, then run this: if the tag is
+not there, the registry does not move.
+
+### Nothing is decided here, and the refusal is verbatim
+
+The door proves the tag — that it IS a tag and not a branch, that the files a
+build enters through resolve at it, that the build contract parses with the
+platform's own parser — and this reports what it said. A client that formed its
+own opinion would be a second answer to a question the platform already
+answers, and the two would drift the first time the contract changed.
+
+That decides how a refusal is printed: the door's message names the file and
+the line and what to do about it, and a CLI that replaced it with "publish
+failed" would throw away the only part worth reading.
+
+### The one thing publish refuses on its own
+
+`id@tag` is the READ vocabulary — `show`, `check` and `new` all take it, and
+there the tag says WHICH VERSION TO LOOK AT. Here the tag is what CHANGES, so
+`orun baseline publish cirrus@baseline-v5 baseline-v6` has two tags in it and
+no reading of it is obviously right. Refused rather than guessed: the wrong
+guess moves a registry pin.
+
+### `register`'s two rules
+
+**`--brief` and `--umbrella` are a pair.** A baseline with a brief is run
+through its umbrella; one with NEITHER is blueprint-driven and its build
+document declares every phase — the shape this epic made canonical and the one
+`baseline new --local` builds. Half a shell layer is a row somebody edited
+halfway, and a build of it fetches a file that is not there. Declaring neither
+sends neither field, rather than two empty strings: the door distinguishes "not
+declared" from "declared empty", and sending fields nobody set is a claim about
+paths the caller never mentioned.
+
+**`--visibility public` is refused**, naming the flag the caller typed. A
+public baseline is a repository an agent clones into a stranger's workspace and
+runs guardrails from, so it is the platform's to grant. The door refuses it —
+that is the boundary — and this refuses it one round trip earlier.
+
+Neither refusal replaces the door's. Both are the courtesy of not spending a
+round trip to be told something this binary already knew.
+
+### `--manifest`, and why it could not work until now
+
+`register` gained `--manifest` because orun-cloud's write door gained the field
+in the same change (BE-K4c). Until then there was no key for it at all, so the
+column's default was the only value an account-registered row could ever hold —
+and `stratus-coolify`, two rows over one tree, is the case that makes it a path
+rather than a convention.
+
+### Still deferred
+
+`baseline new --via-platform` needs a repo link id this CLI has no verb to
+resolve. That is unchanged from BE-O7, and it is the one remaining bullet.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./...` green. Fifteen mutants,
+fifteen caught. The publish client: the tag never reaching the door, a blind
+retry of a write, and the wrong HTTP verb. The publish command: `id@tag`
+accepted, blank arguments accepted, and the verb never registered. The register
+client: a blind retry, `manifestPath` not serialized, and the account-scoped
+door. The register command: half a shell layer accepted, `public` accepted,
+empty shell paths sent anyway, `manifestPath` dropped, missing flags unchecked,
+`private` sent explicitly rather than as the door's own default, and the verb
+never registered.
+
+Both writes are NOT RETRYABLE, and both tests prove it by counting requests. A
+blind retry of a publish that timed out after the registry moved is a second
+publish of a tag the caller has already been told about; a blind retry of a
+register that timed out after the row was created reports the door's 409 — the
+allocator posture, carrying the existing row — as a failure of the thing that
+in fact succeeded.

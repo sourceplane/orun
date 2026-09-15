@@ -142,6 +142,98 @@ func (c *Client) Bootstrap(ctx context.Context, org, id string, req BootstrapReq
 	return &out, nil
 }
 
+// ── Register (orun-bootstrap-engine BE-O7b) ────────────────────────────────
+
+// RegisterBaselineRequest is what an account may write about its own baseline.
+//
+// `visibility` is deliberately absent from the happy path of this struct's
+// doc: an account may say `private` or `unlisted` and the door refuses
+// `public` outright, because a public baseline is a repo an agent clones into
+// a stranger's workspace — so it is the platform's to grant, not a field.
+//
+// The two SHELL paths are a pair. A baseline with a brief is run through its
+// umbrella; a BLUEPRINT-DRIVEN one has neither and its build document is the
+// build. Omitting both is how you say the second, and declaring one of the two
+// is refused by the door as half a shell layer.
+type RegisterBaselineRequest struct {
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Summary         string   `json:"summary,omitempty"`
+	Stack           []string `json:"stack,omitempty"`
+	SourceRepo      string   `json:"sourceRepo"`
+	Tag             string   `json:"tag"`
+	Requires        []string `json:"requires,omitempty"`
+	ExpectedMinutes int      `json:"expectedMinutes"`
+	Visibility      string   `json:"visibility,omitempty"`
+	BriefPath       *string  `json:"briefPath,omitempty"`
+	UmbrellaPath    *string  `json:"umbrellaPath,omitempty"`
+	// ManifestPath names the build contract inside the source repo. Omitted
+	// leaves the platform's conventional default; named when a repository
+	// holds two baselines over one tree, which is what `stratus-coolify` is.
+	ManifestPath string `json:"manifestPath,omitempty"`
+}
+
+// RegisterBaselineResult is the row the platform created.
+type RegisterBaselineResult struct {
+	Baseline Baseline `json:"baseline"`
+}
+
+// RegisterBaseline adds a baseline under the caller's account.
+//
+// NOT RETRYABLE: the door refuses a duplicate id with a 409 carrying the
+// existing row, which is the allocator posture — a blind retry of a request
+// that timed out after the row was created would report that conflict as a
+// failure of the thing that in fact succeeded.
+func (c *Client) RegisterBaseline(
+	ctx context.Context,
+	org string,
+	req RegisterBaselineRequest,
+) (*RegisterBaselineResult, error) {
+	var out RegisterBaselineResult
+	path := "/v1/organizations/" + urlSegment(org) + "/baselines"
+	if err := c.doJSON(ctx, http.MethodPost, path, req, &out, false); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ── Publish (orun-bootstrap-engine BE-O7b) ─────────────────────────────────
+
+// PublishResult is what the door hands back once the tag is proven.
+type PublishResult struct {
+	Baseline     Baseline `json:"baseline"`
+	PublishedTag string   `json:"publishedTag"`
+}
+
+// PublishBaseline moves a registered baseline to a tag, once the platform has
+// proven the tag carries what a build reads.
+//
+// The ORDER is what this verb exists to remove. A baseline's tag lives in two
+// repositories — the git tag in the source repo, and the pin in the registry —
+// and getting them the wrong way round means every build of that baseline 404s
+// until somebody notices. Push the tag, then run this: the door refuses a pin
+// that is a branch, a tag missing the files a build enters through, or a build
+// contract that does not parse, and the registry simply does not move.
+//
+// NOTHING IS DECIDED HERE. The CLI does not pre-check the tag and it must not:
+// a client that formed its own opinion would be a second answer to a question
+// the platform already answers, and the two would drift the first time the
+// contract changed. This is a request.
+func (c *Client) PublishBaseline(ctx context.Context, org, id, tag string) (*PublishResult, error) {
+	var out PublishResult
+	body := struct {
+		Tag string `json:"tag"`
+	}{Tag: tag}
+	path := fmt.Sprintf(
+		"/v1/organizations/%s/baselines/%s/publish",
+		urlSegment(org), urlSegment(id),
+	)
+	if err := c.doJSON(ctx, http.MethodPost, path, body, &out, false); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // ── The build event stream (orun-bootstrap-engine BE-O13) ──────────────────
 
 // BuildEvent is one `bootstrap-event/v1` object as the platform's ingest door
