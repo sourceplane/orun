@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sourceplane/orun/internal/agent/driver"
+
 	"github.com/sourceplane/orun/internal/scaffold"
 )
 
@@ -64,3 +66,23 @@ func TestFanOutSinkFeedsEveryListenerAndToleratesNil(t *testing.T) {
 type countingSink struct{ n int }
 
 func (c *countingSink) Emit(context.Context, scaffold.Event) { c.n++ }
+
+// The driver registry is the thing the control plane names in `--driver`, and
+// a driver this process has never heard of is a runner that fails at boot with
+// `no driver "bootstrap"`. The unit tests for the driver itself cannot catch
+// that — registration happens here, in an init nothing imports for its value.
+func TestBootstrapDriverIsRegistered(t *testing.T) {
+	d, err := driver.Get("bootstrap")
+	if err != nil {
+		t.Fatalf("the control plane cannot select the bootstrap driver: %v", err)
+	}
+	if d.ID() != "bootstrap" {
+		t.Fatalf("registered under %q", d.ID())
+	}
+	// And the ones that were already there still are.
+	for _, id := range []string{"stub", driver.ClaudeCodeID} {
+		if _, err := driver.Get(id); err != nil {
+			t.Fatalf("registering bootstrap displaced %q: %v", id, err)
+		}
+	}
+}
