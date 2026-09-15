@@ -206,6 +206,7 @@ func (p *runPlan) selectPhases(opts Options) ([]PhasePlan, bool, error) {
 
 	default: // Resume
 		out := make([]PhasePlan, 0, len(p.phases))
+		var drifted []string
 		for _, ph := range p.phases {
 			// A phase the condition excludes is not "not yet done" — it is not
 			// wanted. Resuming into it would place a tree the operator asked
@@ -218,9 +219,33 @@ func (p *runPlan) selectPhases(opts Options) ([]PhasePlan, bool, error) {
 				continue
 			}
 			st := derivePhaseOf(opts.OutDir, ph.Name, p.byPhase[ph.Name], p.declOf(ph.Name))
-			// Drift is not skipped: re-placing restores the phase to what the
-			// blueprint says, which is what a resume is for. It is reported by
-			// --status so nobody is surprised by it here.
+			// DRIFT IS SKIPPED, and this reverses an earlier decision here.
+			//
+			// It used to read "re-placing restores the phase to what the
+			// blueprint says, which is what a resume is for" — which assumes
+			// the product's files are meant to equal the blueprint's
+			// rendering. A baseline that BRANDS what it places breaks that
+			// assumption on purpose: cirrus's `01-scaffold` rewrites the
+			// baseline's identity out of every file it just wrote, so from
+			// then on every placed phase is permanently drifted, and drift is
+			// the product's normal steady state rather than an anomaly.
+			//
+			// Under the old rule `--resume` on such a product re-placed those
+			// phases and reverted the branding — observed: a product's
+			// package.json `name` went from "acme-cloud" back to "cirrus".
+			// "Reported by --status so nobody is surprised" does not save it:
+			// a resume is what an automated bootstrap runs, not a human who
+			// has just read a status table.
+			//
+			// So drift is treated as PLACED. Every file the phase writes is on
+			// disk, which is the question resume asks; whether their contents
+			// still match the blueprint is the product's business, and
+			// `status.go` already says drift is "reported and never silently
+			// resolved". Re-placing a phase whose blueprint genuinely moved is
+			// still available, as the deliberate act it should be: `--phase`.
+			//
+			// PhasePartial is NOT skipped — some files are missing, so the
+			// placement really is unfinished and re-running completes it.
 			//
 			// PhaseUnknown is not skipped either, and that is the safe way
 			// round: a hook-only phase's work lives where the tree cannot see
@@ -228,10 +253,20 @@ func (p *runPlan) selectPhases(opts Options) ([]PhasePlan, bool, error) {
 			// additive apply), so re-running one that was already done costs a
 			// few API calls. Skipping one that was NOT done leaves a bootstrap
 			// silently incomplete.
-			if st.State == PhaseDone {
+			if st.State == PhaseDone || st.State == PhaseDrifted {
+				if st.State == PhaseDrifted {
+					drifted = append(drifted, ph.Name)
+				}
 				continue
 			}
 			out = append(out, ph)
+		}
+		// Skipping is not silent. A resume that passes over a phase says so and
+		// says why, on the run that does it, because the alternative is an
+		// operator wondering why their branded product was left alone.
+		if len(drifted) > 0 {
+			fmt.Fprintf(os.Stderr, "resume: leaving %s as placed — every file is present but differs from the blueprint (branded, or edited). Re-place one deliberately with --phase <name>.\n",
+				strings.Join(drifted, ", "))
 		}
 		return out, true, nil
 	}

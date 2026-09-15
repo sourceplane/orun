@@ -206,6 +206,73 @@ func TestResumeOnACompleteProductPlacesNothing(t *testing.T) {
 	}
 }
 
+// RESUME MUST NOT UN-BRAND A PRODUCT (BE-O12).
+//
+// This used to re-place a drifted phase, on the reasoning that "re-placing
+// restores the phase to what the blueprint says, which is what a resume is
+// for". For a baseline that brands what it places, what the blueprint says is
+// the UNBRANDED baseline — so a resume reverted the product's identity.
+// Observed on cirrus's real blueprint: package.json's `name` went from
+// "acme-cloud" back to "cirrus".
+func TestResumeLeavesADriftedPhaseAlone(t *testing.T) {
+	out := t.TempDir()
+	if _, err := Run(context.Background(), opts(t, out)); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	branded := []byte("two, branded for the product")
+	if err := os.WriteFile(filepath.Join(out, "b.txt"), branded, 0o644); err != nil {
+		t.Fatalf("brand: %v", err)
+	}
+	again := opts(t, out)
+	again.Resume = true
+	res, err := Run(context.Background(), again)
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	for _, ph := range res.Phases {
+		if ph.Name == "second" {
+			t.Error("resume re-placed a drifted phase — on a branded product that reverts the branding")
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(out, "b.txt"))
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(got) != string(branded) {
+		t.Errorf("the product's own content must survive a resume; got %q", got)
+	}
+}
+
+// Skipping drift must not become skipping an unfinished placement: `partial`
+// means some files are missing, so re-running is what completes it.
+func TestResumeStillPlacesAPartialPhase(t *testing.T) {
+	out := t.TempDir()
+	if _, err := Run(context.Background(), opts(t, out)); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if err := os.Remove(filepath.Join(out, "b.txt")); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	again := opts(t, out)
+	again.Resume = true
+	res, err := Run(context.Background(), again)
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	var placed bool
+	for _, ph := range res.Phases {
+		if ph.Name == "second" {
+			placed = true
+		}
+	}
+	if !placed {
+		t.Error("a phase missing one of its files is unfinished, and resume must finish it")
+	}
+	if !statusOf(t, opts(t, out)).Done() {
+		t.Error("the product should be complete again after the resume")
+	}
+}
+
 func TestDriftIsReportedRatherThanIgnored(t *testing.T) {
 	out := t.TempDir()
 	if _, err := Run(context.Background(), opts(t, out)); err != nil {
