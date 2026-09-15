@@ -144,6 +144,18 @@ func snapshotDigest(ctx context.Context, store objectstore.ObjectStore, tree osT
 
 // fetchGit resolves repo@ref to an immutable commit and materializes its tree
 // into a scratch dir (design §5). This is the one genuinely new fetch path.
+// FetchGitRef clones repo at ref — a branch or a tag — into workDir and
+// returns the checkout path.
+//
+// Exported for `orun baseline new --local` (orun-bootstrap-engine BE-O7b),
+// which is the one caller that needs the FETCH without the pipeline: it has a
+// repo and a pinned tag from the registry and no blueprint yet, because the
+// blueprint is inside the thing it is about to fetch. Everything else reaches
+// this through a `kind: git` source, where the blueprint is already in hand.
+func FetchGitRef(repo, ref, workDir, name string) (string, error) {
+	return fetchGit(SourceSpec{Name: name, Kind: SourceGit, Repo: repo, Ref: ref}, workDir)
+}
+
 func fetchGit(s SourceSpec, workDir string) (string, error) {
 	if s.Repo == "" {
 		return "", notFoundErr("source %q (git): repo is required", s.Name)

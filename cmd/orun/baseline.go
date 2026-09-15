@@ -27,6 +27,7 @@ func registerBaselineCommand(root *cobra.Command) {
 	cmd.AddCommand(newBaselineListCommand())
 	cmd.AddCommand(newBaselineShowCommand())
 	cmd.AddCommand(newBaselineCheckCommand())
+	cmd.AddCommand(newBaselineNewCommand())
 	root.AddCommand(cmd)
 }
 
