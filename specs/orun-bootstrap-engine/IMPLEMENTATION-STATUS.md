@@ -19,6 +19,7 @@ shipped and every place it departed from the spec.
 | **BE-O9** | ✅ Shipped | the `with:` scope, `ActionInput.BaseDir`, `task/ensure` `contract:` |
 | **BE-O10** | ✅ Shipped | narration renders against state; `PhaseUnknown` for a hook-only phase |
 | **BE-O11** | ✅ Shipped | a whole-blueprint run satisfies its own `requires`; a probe gates the work, not the bytes |
+| **BE-O12** | ✅ Shipped | drift satisfies `requires.phases`, and `--resume` no longer un-brands a product |
 | BE-O7b | 🗓️ Planned | `baseline new\|register\|publish` (needs orun-cloud BE-K4) |
 
 ## BE-O1 — the action mechanism
@@ -925,3 +926,111 @@ is cirrus BE5b's Tier 1 in full, working.
 Four new tests: a whole-blueprint run satisfies its own requires; `--until`
 does too, inside its selection; a placement with no hooks does not probe; a run
 that executes hooks still does. `go build/vet/test ./...` green.
+
+## BE-O12 — what drift means to a product that has been branded
+
+### The two failures
+
+Found the way BE-O9, BE-O10 and BE-O11 were: by running cirrus's real
+blueprint through the sequence a bootstrap actually performs. BE-O11 made a
+whole-blueprint run possible, which made it possible to ask the next question —
+*what happens on the second phase of a phase-by-phase bootstrap?* — and the
+answer was that it did not happen at all.
+
+**1. A requirement could not be satisfied by a branded predecessor.**
+
+```
+✕ phase "02-foundation" requires 01-scaffold (drifted) — run 01-scaffold first
+```
+
+cirrus's `01-scaffold` places the tree and then **rewrites the baseline's
+identity out of every file it just wrote** — that is the whole point of the
+phase, and BE1 moved that hook chain into it. So from the moment phase 01 ends,
+`01-scaffold` derives `drifted`, permanently. `checkRequires` accepted only
+`done`, so every later phase was refused, and the bootstrap died at step two.
+
+**2. `--resume` reverted the product's identity.**
+
+```
+before resume:  "name": "acme-cloud"
+after  resume:  "name": "cirrus"
+```
+
+`selectPhases` re-placed any phase not `done`, drift included. On a branded
+product that is every placed phase, so a resume overwrote the branded tree with
+the baseline's own rendering — silently, and in the file a product is
+identified by.
+
+### Why it was wrong, which is not the same as being an oversight
+
+Both sites had a stated reason, and they contradicted each other. `status.go`:
+
+> **PhaseDrifted**: every file is present but at least one differs. Someone
+> edited the product, or the blueprint moved. Re-running would overwrite, so
+> this is reported and never silently resolved.
+
+`plan.go`, on the same state:
+
+> Drift is not skipped: re-placing restores the phase to what the blueprint
+> says, which is what a resume is for. It is reported by `--status` so nobody
+> is surprised by it here.
+
+The second rests on an assumption the first does not make: that a product's
+files are *meant* to equal the blueprint's rendering, so any difference is
+damage. A baseline that brands what it places breaks that assumption **by
+design**. What the blueprint says is the unbranded baseline; restoring the
+product to it is not a repair.
+
+And "reported by `--status` so nobody is surprised" does not survive contact
+with the phased bootstrap either: a resume is what an automated build runs
+between phases, not what a person types after reading a status table.
+
+### What changed
+
+**`requires.phases` accepts `drifted`.** The question a requirement asks is
+*will the predecessor's files be there when my hooks run*, and for a drifted
+phase every one of them is. `pending`, `partial` and `unknown` still fail, and
+each for a reason the tree can back: nothing placed, a placement interrupted,
+or — per BE-O10 — a phase the tree cannot answer for at all.
+
+**`--resume` treats `drifted` as placed and skips it, out loud:**
+
+```
+resume: leaving 02-foundation, 04-workers as placed — every file is present but
+differs from the blueprint (branded, or edited). Re-place one deliberately with
+--phase <name>.
+```
+
+Re-placing a phase whose blueprint genuinely moved is still available, as the
+deliberate act it should be. `partial` is untouched: files really are missing,
+and re-running is what completes it.
+
+### Verification
+
+Four tests, each shown to fail on the old rule before the change:
+
+| Test | On the old code |
+|---|---|
+| a requirement is satisfied by a drifted predecessor | `requires infrastructure (drifted) — run infrastructure first` |
+| a partial predecessor still fails the requirement | passes — accepting drift must not become accepting anything |
+| resume leaves a drifted phase alone | `resume re-placed a drifted phase`; `b.txt` read back `"two"`, not the branded content |
+| resume still places a partial phase | passes — the guard against over-correcting |
+
+And against the thing that failed: cirrus's real `repo-blueprint.yaml`, offline,
+placing `01-scaffold`, running `rebrand.mjs` over it exactly as that phase's
+hooks do, then `02-foundation`, `03-infrastructure` and `04-workers` — all
+three now place, where the first refused before.
+
+### One thing this does NOT fix, in the baseline rather than here
+
+`05-edge` still refuses, and correctly:
+
+```
+✕ phase "05-edge" requires 04-workers-restore (unknown) — …
+```
+
+`04-workers-restore` places no files, so BE-O10's `PhaseUnknown` fails closed —
+which is the honest answer and is not softened here. The defect is that
+cirrus's blueprint gates on a phase the tree can never answer for; that is
+cirrus's to fix, and the engine should keep refusing it until a hook-only phase
+can declare its own evidence (a `doneWhen`, or its `requires.probe`).

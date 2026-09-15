@@ -3,6 +3,8 @@ package scaffold
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -160,6 +162,60 @@ func TestRequiresPassesOnceTheEarlierPhaseIsPlaced(t *testing.T) {
 		Store: objectstore.NewMemStore(objectstore.AlgoSHA256), Only: "workers"}
 	if _, err := Run(context.Background(), next); err != nil {
 		t.Fatalf("workers should be allowed once its requirement is placed: %v", err)
+	}
+}
+
+// THE BOOTSTRAP THIS BROKE (BE-O12). A baseline that brands what it places
+// rewrites the files it just wrote, so its first phase reads `drifted` from
+// then on — and every later phase requiring it was refused at step two of the
+// bootstrap the blueprint exists to perform. Every file IS there, which is the
+// question a requirement asks.
+func TestARequirementIsSatisfiedByADriftedPredecessor(t *testing.T) {
+	out := t.TempDir()
+	base := Options{Blueprint: []byte(requiresBlueprint), OutDir: out,
+		Store: objectstore.NewMemStore(objectstore.AlgoSHA256), Only: "infrastructure"}
+	if _, err := Run(context.Background(), base); err != nil {
+		t.Fatalf("infrastructure: %v", err)
+	}
+	// What rebrand does: the placed file, with the baseline's identity gone.
+	if err := os.WriteFile(filepath.Join(out, "infra.txt"), []byte("infra, branded"), 0o644); err != nil {
+		t.Fatalf("brand: %v", err)
+	}
+	st, err := Derive(context.Background(), Options{Blueprint: []byte(requiresBlueprint),
+		OutDir: out, Store: objectstore.NewMemStore(objectstore.AlgoSHA256)})
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	if got := stateOf(st, "infrastructure"); got != PhaseDrifted {
+		t.Fatalf("this test is only meaningful if the predecessor reads drifted, got %s", got)
+	}
+	next := Options{Blueprint: []byte(requiresBlueprint), OutDir: out,
+		Store: objectstore.NewMemStore(objectstore.AlgoSHA256), Only: "workers"}
+	if _, err := Run(context.Background(), next); err != nil {
+		t.Fatalf("a drifted predecessor has placed every one of its files, so the requirement holds: %v", err)
+	}
+}
+
+// The states that still fail, each for a reason the tree can back.
+func TestAPartialPredecessorStillFailsTheRequirement(t *testing.T) {
+	out := t.TempDir()
+	base := Options{Blueprint: []byte(requiresBlueprint), OutDir: out,
+		Store: objectstore.NewMemStore(objectstore.AlgoSHA256), Only: "infrastructure"}
+	if _, err := Run(context.Background(), base); err != nil {
+		t.Fatalf("infrastructure: %v", err)
+	}
+	// Not edited — REMOVED. The placement is unfinished, not branded.
+	if err := os.Remove(filepath.Join(out, "infra.txt")); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	next := Options{Blueprint: []byte(requiresBlueprint), OutDir: out,
+		Store: objectstore.NewMemStore(objectstore.AlgoSHA256), Only: "workers"}
+	_, err := Run(context.Background(), next)
+	if err == nil {
+		t.Fatal("a predecessor missing its files must still refuse — accepting drift must not become accepting anything")
+	}
+	if !strings.Contains(err.Error(), "infrastructure") {
+		t.Errorf("the error should name what is missing; got %v", err)
 	}
 }
 

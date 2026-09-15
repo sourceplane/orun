@@ -38,7 +38,23 @@ func checkRequires(ctx context.Context, plan *runPlan, opts Options, phase Phase
 			continue
 		}
 		st := derivePhaseOf(opts.OutDir, need, plan.byPhase[need], plan.declOf(need))
-		if st.State != PhaseDone {
+		// DRIFTED SATISFIES A REQUIREMENT. The question is "will the
+		// predecessor's files be there when my hooks run", and for a drifted
+		// phase every one of them is — that is what drift means, as against
+		// `partial`, where some are missing.
+		//
+		// Requiring `done` here made a phased bootstrap impossible for any
+		// baseline that brands what it places. cirrus's `01-scaffold` rewrites
+		// the baseline's identity out of the tree it just wrote, so by the time
+		// `02-foundation` asks, `01-scaffold` reads `drifted` — and the run
+		// died at step two of the bootstrap it exists to perform:
+		//
+		//     ✕ phase "02-foundation" requires 01-scaffold (drifted)
+		//
+		// `pending`, `partial` and `unknown` still fail, and each for a reason
+		// the tree can back: nothing placed, a placement interrupted, or a
+		// phase the tree cannot answer for at all.
+		if st.State != PhaseDone && st.State != PhaseDrifted {
 			unmet = append(unmet, fmt.Sprintf("%s (%s)", need, st.State))
 		}
 	}
