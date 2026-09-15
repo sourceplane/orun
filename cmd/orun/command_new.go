@@ -124,6 +124,20 @@ func runScaffoldNew(ctx context.Context) error {
 		return exitErr(1, "%v", err)
 	}
 
+	// The build's own account, rendered to stdout as always — and, inside a
+	// platform sandbox, delivered to the build page that is showing it to
+	// somebody (BE-O13). `platformEventSink` is nil outside one, and a nil sink
+	// is what `events.go` already defines as "nobody is listening", so a local
+	// run is byte-for-byte what it was.
+	platform := platformEventSink()
+	var events scaffold.EventSink = &progressSink{out: os.Stdout, mode: mode}
+	if platform != nil {
+		events = fanOutSink{events, platform}
+		// The LAST events are the ones that matter most: a build page whose
+		// stream ends mid-phase cannot tell a finished build from a hung one.
+		defer platform.Close(ctx)
+	}
+
 	opts := scaffold.Options{
 		Blueprint:     bpBytes,
 		Inputs:        inputs,
@@ -134,7 +148,7 @@ func runScaffoldNew(ctx context.Context) error {
 		Only:          scaffoldPhase,
 		Until:         scaffoldUntil,
 		Resume:        scaffoldResume,
-		Events:        &progressSink{out: os.Stdout, mode: mode},
+		Events:        events,
 	}
 
 	// --status derives and reports; it writes nothing. This is the read a

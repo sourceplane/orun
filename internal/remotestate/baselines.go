@@ -141,3 +141,60 @@ func (c *Client) Bootstrap(ctx context.Context, org, id string, req BootstrapReq
 	}
 	return &out, nil
 }
+
+// ── The build event stream (orun-bootstrap-engine BE-O13) ──────────────────
+
+// BuildEvent is one `bootstrap-event/v1` object as the platform's ingest door
+// takes it. The engine's own `scaffold.Event` is the source; this is the wire
+// shape, kept separate so a change to one is a deliberate change to the other.
+//
+// `schema` and `runId` are deliberately ABSENT. The door takes the run id from
+// the path and has no use for the envelope version — a body that carried its
+// own would be two sources of truth for one fact, with the tenant boundary on
+// the losing side.
+type BuildEvent struct {
+	Seq       int               `json:"seq"`
+	At        string            `json:"at"`
+	Phase     string            `json:"phase,omitempty"`
+	Step      string            `json:"step,omitempty"`
+	State     string            `json:"state"`
+	Narration string            `json:"narration,omitempty"`
+	Detail    string            `json:"detail,omitempty"`
+	Meta      map[string]string `json:"meta,omitempty"`
+}
+
+// AppendBuildEventsResult is what the door reports back. `LatestSeq` is the
+// acknowledgement that matters: it is the highest seq the platform now holds,
+// and the next batch must start at or below it plus one.
+type AppendBuildEventsResult struct {
+	Appended  int `json:"appended"`
+	Received  int `json:"received"`
+	LatestSeq int `json:"latestSeq"`
+}
+
+// AppendBuildEvents delivers a batch of what the engine emitted.
+//
+// NOT RETRYABLE at this layer, deliberately. The door is idempotent by
+// (org, run, seq), so re-sending is safe — but it also REFUSES a batch that
+// would leave a gap, and the caller is the only thing that knows which seq it
+// has had acknowledged. A blind transport retry that raced a partial success
+// would be re-sending the wrong window; the sender above this retries from its
+// own high-water mark instead, which is the only place that fact lives.
+func (c *Client) AppendBuildEvents(
+	ctx context.Context,
+	org, runID string,
+	events []BuildEvent,
+) (*AppendBuildEventsResult, error) {
+	var out AppendBuildEventsResult
+	body := struct {
+		Events []BuildEvent `json:"events"`
+	}{Events: events}
+	path := fmt.Sprintf(
+		"/v1/organizations/%s/agents/builds/%s/events",
+		urlSegment(org), urlSegment(runID),
+	)
+	if err := c.doJSON(ctx, http.MethodPost, path, body, &out, false); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
