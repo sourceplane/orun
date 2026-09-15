@@ -296,3 +296,28 @@ func TestRegisterBaselineDoesNotRetry(t *testing.T) {
 		t.Errorf("register was attempted %d times; a write must not be retried blindly", calls)
 	}
 }
+
+func TestListRepoLinksReadsTheWorkspacesLinks(t *testing.T) {
+	var path string
+	c := baselineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]any{"repoLinks": []map[string]any{
+			{"id": "repl_2", "repoFullName": "acme/storefront", "status": "active", "agentAccess": "write"},
+		}})
+	})
+	links, err := c.ListRepoLinks(context.Background(), "ws_1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if path != "/v1/organizations/ws_1/repo-links" {
+		t.Errorf("wrong door: %q", path)
+	}
+	if len(links) != 1 || links[0].ID != "repl_2" || links[0].RepoFullName != "acme/storefront" {
+		t.Errorf("unexpected links: %+v", links)
+	}
+	// The ceiling has to survive the wire: a build resolved against a link
+	// whose `agentAccess` came back empty would look writable when it is not.
+	if links[0].AgentAccess != "write" {
+		t.Errorf("agentAccess lost: %+v", links[0])
+	}
+}
