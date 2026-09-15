@@ -20,7 +20,7 @@ shipped and every place it departed from the spec.
 | **BE-O10** | ✅ Shipped | narration renders against state; `PhaseUnknown` for a hook-only phase |
 | **BE-O11** | ✅ Shipped | a whole-blueprint run satisfies its own `requires`; a probe gates the work, not the bytes |
 | **BE-O12** | ✅ Shipped | drift satisfies `requires.phases`, and `--resume` no longer un-brands a product |
-| BE-O7b | 🗓️ Planned | `baseline new\|register\|publish` (needs orun-cloud BE-K4) |
+| BE-O7b | 🟡 Partial | `baseline new --local` shipped; `--via-platform` needs a repo-link verb, `register`/`publish` need orun-cloud BE-K4 |
 
 ## BE-O1 — the action mechanism
 
@@ -1034,3 +1034,71 @@ which is the honest answer and is not softened here. The defect is that
 cirrus's blueprint gates on a phase the tree can never answer for; that is
 cirrus's to fix, and the engine should keep refusing it until a hook-only phase
 can declare its own evidence (a `doneWhen`, or its `requires.probe`).
+
+
+## BE-O7b (part) — `baseline new --local`
+
+### What shipped
+
+`orun baseline new <id[@tag]> --local --out <dir>` builds a registered
+baseline from its own source, on this machine. Three facts, composed: the
+registry says WHERE the baseline lives and WHICH COMMIT is published, its
+manifest says WHICH DOCUMENT in that tree is the build, and `orun new` places
+that document's phases. An operator held all three before this and joined them
+by hand.
+
+### What unblocked it, and what it is still missing
+
+BE-O7 deferred all three verbs rather than "shipping a verb that half-works",
+and named `--local`'s blocker: the blueprint had to be "fetched at the
+registry's tag, which is `orun new` over a `git` source and belongs with the
+cirrus-side work that authors one". Both halves arrived:
+
+- cirrus BE4 made `repo-blueprint.yaml` the one artifact, and BE4c declares it.
+- orun-cloud **BE-K1e** accepts `spec.bootstrap.blueprint` in the manifest;
+  **BE-K1f** serves `manifestPath` on the row the CLI already resolves through.
+
+`--via-platform` still needs a repo-link id this CLI cannot resolve, and
+`register`/`publish` still need orun-cloud BE-K4. So `--local` is REQUIRED
+rather than defaulted: the two shapes have different failure modes and
+different places to watch them, and a flag that silently picks one surprises
+somebody at the worst moment.
+
+### Why the manifest, and not `blueprint.yaml`
+
+`blueprint.yaml` is what every registered row but one names. `stratus-coolify`
+is that one — two rows over a single tree, each with its own manifest — so a
+caller guessing the convention serves the Azure contract to a Coolify build.
+That substitution has happened on the platform side already, with the agent
+brief, which is why the row carries a path. A test builds both rows from one
+tree and asserts they resolve to DIFFERENT documents; a convention-based
+implementation passes every other test in the file and fails that one.
+
+### Readiness is a gate
+
+A bootstrap that starts without its providers does not fail at the door. It
+fails thirty minutes in, having created a repo and half a product, and the
+operator reads a Cloudflare error rather than "you never connected
+Cloudflare". `baseline check` exists to ask in advance; this asks again,
+because the answer can change in between, and refuses by name.
+
+### One pipeline, not two
+
+The verb sets the same options `orun new` sets and calls `runScaffoldNew`. A
+second path to place a blueprint is a second path to place one wrongly, and
+every gate the first carries — the two-parser output check, the phase barrier,
+the requirement gate — is one this build needs exactly as much.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./...` green. Twelve cases over the
+build-document read: the declared path, a nested one, and the refusals —
+absent, empty, whitespace, absolute, escaping, escaping only AFTER cleaning,
+unparseable, an unnamed `manifestPath`, a document not in the tree, a missing
+manifest. Three mutants, three failures: guessing the convention, checking the
+raw path for `..` instead of the cleaned one, and defaulting an empty key.
+
+The network is one seam (`fetchBaselineSource`), so the join is tested end to
+end without one; behind it is orun's own git source resolver, so a baseline
+fetched here and a `kind: git` source fetched during placement come down the
+same shallow, tag-or-branch, pinned path.

@@ -51,11 +51,21 @@ type ReadinessProvider struct {
 // whether that workspace could build it right now.
 type BlueprintView struct {
 	Blueprint struct {
-		ID              string `json:"id"`
-		Name            string `json:"name"`
-		Summary         string `json:"summary"`
-		SourceRepo      string `json:"sourceRepo"`
-		Tag             string `json:"tag"`
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		Summary    string `json:"summary"`
+		SourceRepo string `json:"sourceRepo"`
+		Tag        string `json:"tag"`
+		// ManifestPath is the build contract's path INSIDE SourceRepo, served
+		// since orun-cloud BE-K1f. Without it a caller holds a repo and a tag
+		// and still cannot find the contract in them: `blueprint.yaml` is the
+		// convention every row but one follows, and `stratus-coolify` is that
+		// one — two rows over a single tree, each with its own manifest — so a
+		// caller that guesses serves the Azure contract to a Coolify build.
+		//
+		// Empty against a platform that predates BE-K1f, which is why every
+		// reader here treats it as a fact to check rather than one to assume.
+		ManifestPath    string `json:"manifestPath"`
 		ExpectedMinutes int    `json:"expectedMinutes"`
 		Readiness       struct {
 			IntegrationsReady bool                `json:"integrationsReady"`
