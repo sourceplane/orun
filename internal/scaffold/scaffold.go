@@ -136,10 +136,16 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 
 	// Preconditions, before anything is written. `requires.phases` derives the
 	// tree; `requires.probe` asks reality.
+	//
+	// `placing` accumulates in phase order, so when phase N is checked it holds
+	// exactly the phases this run writes before N. A requirement satisfied by
+	// this run is satisfied (BE-O11).
+	placing := make(map[string]bool, len(phases))
 	for _, ph := range phases {
-		if err := checkRequires(ctx, plan, opts, ph, opts.Actions); err != nil {
+		if err := checkRequires(ctx, plan, opts, ph, opts.Actions, placing); err != nil {
 			return nil, err
 		}
+		placing[ph.Name] = true
 	}
 
 	// Output gate (design §10, component depth): every generated component.yaml

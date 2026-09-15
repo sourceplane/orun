@@ -18,6 +18,7 @@ shipped and every place it departed from the spec.
 | **BE-O8** | ✅ Shipped | `Hook.Workflow` deleted; `internal/scaffold` no longer imports `internal/flow` |
 | **BE-O9** | ✅ Shipped | the `with:` scope, `ActionInput.BaseDir`, `task/ensure` `contract:` |
 | **BE-O10** | ✅ Shipped | narration renders against state; `PhaseUnknown` for a hook-only phase |
+| **BE-O11** | ✅ Shipped | a whole-blueprint run satisfies its own `requires`; a probe gates the work, not the bytes |
 | BE-O7b | 🗓️ Planned | `baseline new\|register\|publish` (needs orun-cloud BE-K4) |
 
 ## BE-O1 — the action mechanism
@@ -852,3 +853,75 @@ on narration (every scope key renders; a failed render says so; an uncompilable
 template is a parse error; a hook line is held to the state-word rule) and
 three on derivation (hooks + no files is unknown; neither is still done;
 `--resume` does not skip an unknown phase).
+
+
+## BE-O11 — a whole-blueprint run, and what a probe is for
+
+**Found by cirrus BE5a's Tier 1, on its first execution.** Not by reading the
+code — by a baseline trying to do the most ordinary thing there is.
+
+### A run could not satisfy its own requirements
+
+Preconditions are checked before the first byte is written:
+
+```go
+for _, ph := range phases {
+    if err := checkRequires(ctx, plan, opts, ph, opts.Actions); err != nil {
+```
+
+So a run placing every phase had `02-foundation` ask whether `01-scaffold` was
+on disk **during the very run that was about to write it**, and always hear no:
+
+```
+✕ phase "02-foundation" requires 01-scaffold (pending) — run 01-scaffold first
+```
+
+A bootstrap never noticed: it runs phase by phase, and the tree accumulates
+between runs. But any blueprint declaring `requires.phases` could only ever be
+run one phase at a time — and a dry instantiation, which is the check that
+tells a baseline what its product looks like before an hour of real cloud, was
+impossible.
+
+`checkRequires` now takes the phases this run places **earlier**, accumulated
+in phase order, and treats them as satisfied. The question a requirement is
+really asking is *"will this be there when my hooks run"*, and for a phase
+ordered earlier in the same run the answer is yes.
+
+What this must not soften is the case the requirement was written for, and two
+tests that predate BE-O11 hold it: a phase run alone still refuses when its
+predecessor is genuinely absent, and still passes once it is on disk.
+
+### A probe gates the work, not the bytes
+
+`requires.probe` ran on every placement. But placement writes files — it does
+not deploy, and it does not read a secret. What a probe protects is the phase's
+**hooks**: the landing, the convergence, the thing that fails if the database
+binding an earlier phase published has since been deleted.
+
+With `--run-hooks` off — the default — there is nothing to protect, and probing
+anyway means a placement that cannot happen without a workspace and a live
+provider. That is not hypothetical: it is the other half of what stopped a
+baseline from ever running its own dry instantiation.
+
+Probes now run only when hooks do. `requires.phases` still applies either way:
+it asks the tree, which is always there to ask. This answers the standing open
+question about reaching the substitute-runner seam from the CLI — **no flag was
+needed**, because the rule was already implicit in what the two halves mean.
+
+### Verified against the thing that failed
+
+cirrus's real `repo-blueprint.yaml`, offline, no credential, no workspace:
+
+```
+  │ components: admin-worker, admin-worker-tests, api-edge, api-edge-tests (+38 more)
+  │ plan: fb41a4ea0904
+  repo gate: validate + plan --dry-run passed
+--- files placed: 1085
+```
+
+and `rebrand --verify` on the result: *"no baseline-identity leftovers"*. That
+is cirrus BE5b's Tier 1 in full, working.
+
+Four new tests: a whole-blueprint run satisfies its own requires; `--until`
+does too, inside its selection; a placement with no hooks does not probe; a run
+that executes hooks still does. `go build/vet/test ./...` green.
