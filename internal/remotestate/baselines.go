@@ -115,6 +115,39 @@ func (c *Client) GetBlueprint(ctx context.Context, org, id string) (*BlueprintVi
 	return &view, nil
 }
 
+// ── Repo links (orun-bootstrap-engine BE-O7b) ──────────────────────────────
+
+// RepoLink is one of a workspace's linked repositories, as the platform serves
+// it. Only the fields a build needs: what it IS, whether an agent may write to
+// it, and the id every door takes.
+type RepoLink struct {
+	ID            string `json:"id"`
+	RepoFullName  string `json:"repoFullName"`
+	DefaultBranch string `json:"defaultBranch"`
+	Status        string `json:"status"`
+	AgentAccess   string `json:"agentAccess"`
+}
+
+// ListRepoLinks reads the workspace's linked repositories, across every
+// project.
+//
+// This exists because a repo link id is the ONE fact a platform-run build
+// needs that a person standing in a repository does not have: they know the
+// repository, and the platform knows the `repl_…` that names it here. BE-O7
+// deferred `--via-platform` for exactly this, calling it "a repo link id the
+// CLI has no verb to resolve" — the resolution is this list plus a name match,
+// and it belongs in the binary rather than in a person's clipboard.
+func (c *Client) ListRepoLinks(ctx context.Context, org string) ([]RepoLink, error) {
+	var resp struct {
+		RepoLinks []RepoLink `json:"repoLinks"`
+	}
+	path := "/v1/organizations/" + urlSegment(org) + "/repo-links"
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return resp.RepoLinks, nil
+}
+
 // BootstrapRequest starts a platform-run build.
 type BootstrapRequest struct {
 	RepoLinkID string            `json:"repoLinkId"`

@@ -22,7 +22,7 @@ shipped and every place it departed from the spec.
 | **BE-O12** | ✅ Shipped | drift satisfies `requires.phases`, and `--resume` no longer un-brands a product |
 | **BE-O13** | ✅ Shipped | the platform sink — the engine's account of a build, delivered to the platform showing it |
 | **BE-O14** | ✅ Shipped | the bootstrap driver — serve supervises a build, with no model attached |
-| BE-O7b | 🟡 Partial | `baseline new --local`, `register` and `publish` shipped; `--via-platform` still needs a repo-link verb |
+| **BE-O7b** | ✅ Shipped | `baseline new --local` / `--via-platform`, `register`, `publish` — **the write verbs are complete** |
 
 ## BE-O1 — the action mechanism
 
@@ -1195,3 +1195,64 @@ publish of a tag the caller has already been told about; a blind retry of a
 register that timed out after the row was created reports the door's 409 — the
 allocator posture, carrying the existing row — as a failure of the thing that
 in fact succeeded.
+
+## BE-O7b — `--via-platform`, and the verb BE-O7 could not resolve
+
+### What unblocked it
+
+BE-O7 deferred this for one reason, in its own words: it *"needs a repo link id
+the CLI has no verb to resolve yet"*. That verb is a list and a name match.
+`GET /v1/organizations/{org}/repo-links` has served the workspace's links,
+across every project, since GS6 — id, full name, status and `agentAccess` —
+and a person standing in a repository knows the repository. Joining those two
+belongs in the binary rather than in somebody's clipboard.
+
+### The only unacceptable behaviour here is guessing
+
+This chooses where an hour of automated commits lands: branches created, pull
+requests merged, terraform applied against a real cloud account. So:
+
+- **An ambiguous match refuses**, naming both ids. A workspace can hold two
+  links to one repository — GitHub resolves `Acme/Storefront` and
+  `acme/storefront` to the same place, which is why orun-cloud's build lease is
+  keyed lowercased — and "the first one" is not a reason.
+- **Matching is case-insensitive**, for the same reason GitHub is. A
+  case-sensitive match would send somebody to link a repository already linked.
+- **`agentAccess: off` refuses**, naming the switch to flip. The door refuses
+  it too; that is the boundary, and this costs no round trip.
+- **The repository is printed before anything starts.** An hour of commits into
+  the wrong repository is not recoverable by pressing ctrl-c afterwards.
+- **A "no link for X" refusal names what IS linked**, because otherwise it
+  sends somebody to the console to read a list this command already holds.
+
+### Neither shape is the default
+
+`--local` writes into a directory here; `--via-platform` writes an entire
+product into somebody's linked repository. They are different operations with
+different failure modes and different places to watch them, so exactly one must
+be named — and naming both is a question rather than a preference. `--out`
+stays required for `--local` alone: a platform build has no local output, and
+demanding a directory nothing writes to would be a flag for its own sake.
+
+### Nothing is decided here
+
+The admin requirement, the paid gate, readiness, the repo grounding, the
+one-build-per-repository lease and the time-boxed admin grant all live on the
+server. Readiness is re-checked here only because the answer arrives before
+anything is created, and the door's refusals are printed VERBATIM: they name a
+plan, a missing input, or the person already building into this repository, and
+every one of those is more useful than "bootstrap failed".
+
+Inputs go through `collectScaffoldInputs` — the same function `--local` uses —
+so the two shapes cannot disagree about what a `--values` file means.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./...` green. Seven mutants, seven
+caught: picking the first of two links, a case-sensitive match, `agentAccess:
+off` accepted, the nearby-links hint dropped, neither shape accepted, both
+shapes accepted, and `agentAccess` not deserialized off the wire — which would
+make a build resolve against a link that looks writable and is not.
+
+With this, BE-O7b's three deferred verbs are all in: `new --local`,
+`new --via-platform`, `register` and `publish`.

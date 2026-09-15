@@ -1,10 +1,13 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 // The build document is the one path in a baseline manifest this binary
@@ -221,5 +224,55 @@ func TestTheRowsManifestDecidesTheBuild(t *testing.T) {
 	}
 	if filepath.Base(coolify) != "repo-blueprint-coolify.yaml" {
 		t.Fatalf("the coolify row built %q", filepath.Base(coolify))
+	}
+}
+
+// ── TWO SHAPES, AND NEITHER IS THE DEFAULT (BE-O7b) ────────────────────────
+//
+// `--local` writes into a directory here. `--via-platform` writes an entire
+// product into somebody's linked repository over about an hour, against a real
+// cloud account. A flag that silently picked between those would surprise
+// somebody at the worst possible moment, so exactly one must be named — and
+// naming both is a question, not a preference.
+
+func runBaselineNew(t *testing.T, args ...string) error {
+	t.Helper()
+	root := &cobra.Command{Use: "orun", SilenceUsage: true, SilenceErrors: true}
+	registerBaselineCommand(root)
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	root.SetArgs(append([]string{"baseline", "new"}, args...))
+	return root.Execute()
+}
+
+func TestBaselineNewRefusesNeitherShape(t *testing.T) {
+	err := runBaselineNew(t, "cirrus")
+	if err == nil {
+		t.Fatal("ran a build without being told where")
+	}
+	for _, want := range []string{"--local", "--via-platform"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not offer %q: %v", want, err)
+		}
+	}
+}
+
+func TestBaselineNewRefusesBothShapes(t *testing.T) {
+	err := runBaselineNew(t, "cirrus", "--local", "--via-platform", "--out", t.TempDir())
+	if err == nil {
+		t.Fatal("accepted both --local and --via-platform")
+	}
+	if !strings.Contains(err.Error(), "two different builds") {
+		t.Errorf("the refusal does not say why: %v", err)
+	}
+}
+
+// `--out` is where a LOCAL build places the product. A platform build has no
+// local output at all, so requiring it there would be asking for a directory
+// nothing writes to.
+func TestBaselineNewStillRequiresOutForALocalBuild(t *testing.T) {
+	err := runBaselineNew(t, "cirrus", "--local")
+	if err == nil || !strings.Contains(err.Error(), "--out") {
+		t.Fatalf("a local build without --out: %v", err)
 	}
 }

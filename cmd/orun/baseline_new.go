@@ -110,47 +110,80 @@ func readBuildDocument(checkout, manifestPath string) (string, error) {
 	return abs, nil
 }
 
-// newBaselineNewCommand builds a registered baseline from its own source.
+// newBaselineNewCommand builds a registered baseline, here or on the platform.
 //
-// Only `--local` exists today, and it is required rather than defaulted: the
-// other shape — a platform-run build — is a different operation with different
-// failure modes and a different place to watch it, and a flag that silently
-// picks one is a flag that surprises somebody at the worst moment. When
-// `--via-platform` lands it will be the other explicit half.
+// TWO SHAPES, AND NEITHER IS THE DEFAULT. `--local` builds in a directory on
+// this machine; `--via-platform` asks the platform to run it in a sandbox. They
+// are different operations with different failure modes and different places
+// to watch them — one writes to your disk, the other writes an entire product
+// into a linked repository over about an hour — so exactly one must be named.
+// A flag that silently picked would surprise somebody at the worst moment.
 func newBaselineNewCommand() *cobra.Command {
 	var (
-		workspace  string
-		backendURL string
-		local      bool
-		out        string
-		sets       []string
-		valuesFile string
-		runHooks   bool
-		resume     bool
-		phase      string
-		until      string
-		progress   string
-		keepWork   bool
+		workspace   string
+		backendURL  string
+		local       bool
+		viaPlatform bool
+		repo        string
+		repoLink    string
+		profileID   string
+		out         string
+		sets        []string
+		valuesFile  string
+		runHooks    bool
+		resume      bool
+		phase       string
+		until       string
+		progress    string
+		keepWork    bool
 	)
 	cmd := &cobra.Command{
-		Use:   "new <id[@tag]> --local --out <dir>",
-		Short: "Build a registered baseline from its own source, on this machine",
-		Long: `Build a registered baseline into a directory on this machine.
+		Use:   "new <id[@tag]> (--local --out <dir> | --via-platform)",
+		Short: "Build a registered baseline — here, or on the platform",
+		Long: `Build a registered baseline, here or on the platform. Name one.
 
-The registry says where the baseline lives and which commit is published; its
-manifest says which document inside that tree is the build; and this places
-that document's phases. Every one of those is a fact the platform publishes,
-so joining them by hand — clone at the tag, find the manifest, read a key out
-of it, invoke ` + "`orun new`" + ` — is work nobody should repeat.
+--local places it into --out on this machine. The registry says where the
+baseline lives and which commit is published; its manifest says which document
+inside that tree is the build; and this places that document's phases. Every
+one of those is a fact the platform publishes, so joining them by hand — clone
+at the tag, find the manifest, read a key out of it, invoke ` + "`orun new`" + ` — is work
+nobody should repeat.
+
+--via-platform asks the platform to build into a repository this workspace has
+LINKED, in its own sandbox, and prints a session to watch. That writes an
+entire product over about an hour — branches, merged pull requests, terraform
+against a real cloud account — so the repository is resolved and printed before
+anything starts, and an ambiguous one refuses rather than picks. Nothing about
+it is decided here: the admin requirement, the paid gate, readiness, the
+grounding and the one-build-per-repository lease all live on the server.
+
+The repository defaults to this checkout's origin; --repo names another, and
+--repo-link takes a repl_… id for the case where one repository has more than
+one link.
 
 The tag is the registry's, not yours: addressing ` + "`id@tag`" + ` that the registry has
 since moved past RESOLVES to what it publishes now, and says so.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !local {
-				return exitErr(2, "orun baseline new: --local is required.\n"+
-					"A platform-run build (--via-platform) is not in this release: it needs a repo link id\n"+
-					"the CLI cannot resolve yet. Until then this verb builds here, and says so.")
+			switch {
+			case local && viaPlatform:
+				return exitErr(2, "orun baseline new: --local and --via-platform are two different builds.\n"+
+					"One writes into a directory here; the other writes an entire product into a linked\n"+
+					"repository, on the platform, over about an hour. Name one.")
+			case !local && !viaPlatform:
+				return exitErr(2, "orun baseline new: name --local or --via-platform.\n"+
+					"--local builds into --out on this machine. --via-platform asks the platform to build\n"+
+					"into a repository this workspace has linked, and returns a session to watch.")
+			case viaPlatform:
+				return runBaselineViaPlatform(cmd, args[0], platformBuildOpts{
+					backendURL: backendURL,
+					workspace:  workspace,
+					repo:       repo,
+					repoLink:   repoLink,
+					profileID:  profileID,
+					sets:       sets,
+					valuesFile: valuesFile,
+				})
 			}
 			if strings.TrimSpace(out) == "" {
 				return exitErr(2, "orun baseline new: --out is required — it is where the product is placed")
@@ -226,8 +259,12 @@ since moved past RESOLVES to what it publishes now, and says so.`,
 			return runScaffoldNew(ctx)
 		},
 	}
-	cmd.Flags().BoolVar(&local, "local", false, "Build here, from a checkout of the baseline at the registry's tag (required)")
-	cmd.Flags().StringVar(&out, "out", "", "Output directory for the product (required)")
+	cmd.Flags().BoolVar(&local, "local", false, "Build here, from a checkout of the baseline at the registry's tag")
+	cmd.Flags().BoolVar(&viaPlatform, "via-platform", false, "Ask the platform to build into a linked repository, and return a session to watch")
+	cmd.Flags().StringVar(&repo, "repo", "", "owner/name to build into (--via-platform); defaults to this checkout's origin")
+	cmd.Flags().StringVar(&repoLink, "repo-link", "", "repl_… id to build into, when one repository has more than one link")
+	cmd.Flags().StringVar(&profileID, "profile", "", "agent profile to run the build as (--via-platform); the door prepares one otherwise")
+	cmd.Flags().StringVar(&out, "out", "", "Output directory for the product (required with --local)")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace to resolve the baseline for")
 	cmd.Flags().StringVar(&backendURL, "backend-url", "", "Backend URL")
 	cmd.Flags().StringArrayVar(&sets, "set", nil, "Set a blueprint input as key=value (repeatable)")
