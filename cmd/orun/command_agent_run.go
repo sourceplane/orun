@@ -29,6 +29,12 @@ func init() {
 	// until the live smoke has soaked (risks Q2).
 	driver.Register(&driver.Stub{})
 	driver.Register(&driver.ClaudeCode{})
+	// The BOOTSTRAP driver (orun-bootstrap-engine BE-O14): `orun agent serve`
+	// supervises a product BUILD with no model attached. Registered here beside
+	// the others because this init is the registry — a driver the control plane
+	// can name in `--driver` and this process has never heard of is a runner
+	// that fails at boot with "no driver \"bootstrap\"".
+	driver.Register(&driver.Bootstrap{})
 }
 
 var (
