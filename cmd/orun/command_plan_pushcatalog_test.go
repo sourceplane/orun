@@ -17,12 +17,17 @@ func TestPlanPushCatalogFlagRegistered(t *testing.T) {
 	}
 }
 
-// TestPushCatalogAfterPlan_NoBackendConfigured asserts the explicit flag fails
-// loud with an actionable message when no backend is configured — rather than
-// panicking or silently doing nothing.
-func TestPushCatalogAfterPlan_NoBackendConfigured(t *testing.T) {
+// TestPushCatalogAfterPlan_NothingConfiguredDialsTheCloud: with no
+// --backend-url, ORUN_BACKEND_URL, intent or config file, the backend chain
+// ends at the production API instead of refusing — so the explicit flag gets
+// past the URL and fails on the NEXT gate (this bare directory has no
+// catalogs/current), still loud and actionable, never a panic or a silent
+// no-op. (This test used to want a "backend URL" hint here; that described
+// the chain before it had a last rung.)
+func TestPushCatalogAfterPlan_NothingConfiguredDialsTheCloud(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("ORUN_BACKEND_URL", "")
+	t.Chdir(t.TempDir()) // no local catalog here
 
 	saved := intentFile
 	intentFile = "" // no intent → loadIntentForCloudConfig returns nil
@@ -30,9 +35,12 @@ func TestPushCatalogAfterPlan_NoBackendConfigured(t *testing.T) {
 
 	err := pushCatalogAfterPlan(context.Background())
 	if err == nil {
-		t.Fatal("pushCatalogAfterPlan = nil, want a 'missing backend URL' error")
+		t.Fatal("pushCatalogAfterPlan = nil in an empty directory, want the no-catalog error")
 	}
-	if !strings.Contains(err.Error(), "backend URL") {
-		t.Fatalf("error = %q, want a backend-URL hint", err.Error())
+	if strings.Contains(err.Error(), "backend URL") {
+		t.Fatalf("error = %q: the chain refused instead of falling to the default", err.Error())
+	}
+	if !strings.Contains(err.Error(), "no local catalog") {
+		t.Fatalf("error = %q, want the gate after the URL (no local catalog)", err.Error())
 	}
 }

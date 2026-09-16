@@ -99,15 +99,26 @@ func runAuthStatus() error {
 		return err
 	}
 	color := ui.ColorEnabledForWriter(os.Stdout)
-	resolvedBackend := backendURL
+	// Status is about the SESSION, so the backend to report is the one the
+	// login recorded — every command checks the session against the URL it
+	// resolves, and refuses on a mismatch. The resolved URL used to be the
+	// first choice here, which was harmless while it could be empty; now the
+	// chain always ends somewhere (the production API), so leading with it
+	// would print the default over a self-hosted login and call it the
+	// session's. Lead with the session, and say when the shell disagrees.
+	resolvedBackend := creds.BackendURL
 	if resolvedBackend == "" {
-		resolvedBackend = creds.BackendURL
+		resolvedBackend = backendURL
 	}
 	fmt.Printf("User: %s\n", valueOrUnknown(creds.DisplayUser()))
 	if creds.User.Email != "" && creds.User.Email != creds.DisplayUser() {
 		fmt.Printf("Email: %s\n", creds.User.Email)
 	}
 	fmt.Printf("Backend URL: %s\n", valueOrUnknown(resolvedBackend))
+	if creds.BackendURL != "" && backendURL != "" && !sameBackendURL(creds.BackendURL, backendURL) {
+		fmt.Printf("  %s this shell resolves %s; commands will refuse this session until `orun auth login --backend-url %s`\n",
+			ui.Yellow(color, "!"), backendURL, backendURL)
+	}
 	if len(creds.Orgs) > 0 {
 		fmt.Printf("Orgs:\n")
 		for _, org := range creds.Orgs {

@@ -48,9 +48,14 @@ func resolveBackendURLWithConfig(intent *model.Intent, explicit string) string {
 		if cfg.UsesDeprecatedBackendURL() {
 			warnBackendURLDeprecated()
 		}
-		return cfg.ResolvedBackendURL()
+		if u := cfg.ResolvedBackendURL(); u != "" {
+			return u
+		}
 	}
-	return ""
+	// Nothing named one. The production API is where a CLI with no other
+	// instruction goes — see defaultCloudURL for why, and for why it is the
+	// last rung rather than the first.
+	return defaultCloudURL
 }
 
 // warnBackendURLDeprecated prints the one-line deprecation notice for the

@@ -277,9 +277,9 @@ func TestMcpVerboseSummary(t *testing.T) {
 
 // TestBuildMcpMountReportDegraded drives the real builder with a scrubbed
 // environment: no OIDC, no ORUN_TOKEN, no session on disk. With a backend
-// URL it degrades to absent auth; with none it also records the backend
-// miss. Neither path may produce a client — and serve therefore mounts only
-// connection_info.
+// URL it degrades to absent auth; with none named anywhere the chain ends at
+// the production API and it degrades the same way, on auth. Neither path may
+// produce a client — and serve therefore mounts only connection_info.
 func TestBuildMcpMountReportDegraded(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "")
 	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", "")
@@ -304,16 +304,19 @@ func TestBuildMcpMountReportDegraded(t *testing.T) {
 		t.Fatalf("platform skip reason must carry the fix: %q", rep.platformReason)
 	}
 
-	// No backend URL either: same degraded shape, backend miss recorded.
+	// Nothing names a backend: the chain ends at the production API rather
+	// than at a miss, so the report carries that URL and no backend error —
+	// and still degrades on auth, with the login fix. (Before the chain had a
+	// last rung this recorded a backend miss with an ORUN_BACKEND_URL fix.)
 	client, rep = buildMcpMountReport(context.Background(), "", "")
-	if client != nil || rep.backendURL != "" || rep.backendErr == "" {
-		t.Fatalf("no-backend report = %+v (client=%v)", rep, client)
+	if client != nil || rep.backendURL != defaultCloudURL || rep.backendErr != "" {
+		t.Fatalf("nothing-configured report = %+v (client=%v)", rep, client)
 	}
-	if rep.platformMounted {
-		t.Fatalf("no-backend platform plane must skip: %+v", rep)
+	if rep.platformMounted || rep.authState != "absent" {
+		t.Fatalf("nothing-configured platform plane must skip on auth: %+v", rep)
 	}
-	if fix := rep.connectionInfo().Fix; !strings.Contains(fix, "ORUN_BACKEND_URL") {
-		t.Fatalf("no-backend fix = %q", fix)
+	if fix := rep.connectionInfo().Fix; !strings.Contains(fix, "orun auth login") {
+		t.Fatalf("nothing-configured fix = %q", fix)
 	}
 }
 
