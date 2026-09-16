@@ -276,3 +276,75 @@ func TestBaselineNewStillRequiresOutForALocalBuild(t *testing.T) {
 		t.Fatalf("a local build without --out: %v", err)
 	}
 }
+
+// ── THE REGISTRY'S `owner/name` IS NOT A HOST ──────────────────────────────
+//
+// Reported from a real `--local` build, and it broke every one of them:
+//
+//	✕ clone sourceplane/cirrus@baseline-v5: Get
+//	  "https://sourceplane/cirrus/info/refs?service=git-upload-pack":
+//	  dial tcp: lookup sourceplane: no such host
+//
+// `fetchGit` takes a bare HOST/path and prefixes `https://` when there is no
+// scheme. A registry row's `sourceRepo` has no host, because GitHub is the
+// registry's standing assumption — every platform read of a baseline goes to
+// `raw.githubusercontent.com/<sourceRepo>/<tag>/…`.
+
+func TestBaselineCloneURLQualifiesTheRegistrysOwnerName(t *testing.T) {
+	// The reported case, exactly.
+	if got := baselineCloneURL("sourceplane/cirrus"); got != "github.com/sourceplane/cirrus" {
+		t.Fatalf("got %q, want github.com/sourceplane/cirrus", got)
+	}
+}
+
+// `fetchGit`'s own contract must keep working: a blueprint author writing
+// `repo: gitlab.com/acme/x` is following it, and qualifying that would send
+// their clone to the wrong forge.
+func TestBaselineCloneURLLeavesAnythingDialableAlone(t *testing.T) {
+	for _, repo := range []string{
+		"github.com/sourceplane/cirrus",
+		"gitlab.com/acme/product",
+		"https://github.com/sourceplane/cirrus",
+		"git@github.com:sourceplane/cirrus.git",
+		"ssh://git@example.com/acme/x",
+		// An scp-style remote whose host has no dot — a LAN git server. Two
+		// segments and no dot in the first, so only the scheme/scp guard
+		// keeps it from being rewritten to `github.com/git@gitserver:team/x`.
+		// Found by mutation: without this case the guard is dead code.
+		"git@gitserver:team/x",
+		// Three segments is already host/path.
+		"example.com/group/sub/repo",
+	} {
+		if got := baselineCloneURL(repo); got != repo {
+			t.Errorf("rewrote %q to %q", repo, got)
+		}
+	}
+}
+
+func TestBaselineCloneURLHandlesNothing(t *testing.T) {
+	if got := baselineCloneURL("   "); got != "" {
+		t.Errorf("got %q", got)
+	}
+}
+
+// The SEAM must apply the qualification, not merely the helper. Without this,
+// deleting `baselineCloneURL(...)` from the seam leaves every unit test above
+// green and every real build broken — which is exactly the shape of the bug
+// this fixes.
+func TestFetchBaselineSourceDialsTheQualifiedURL(t *testing.T) {
+	var dialed string
+	restore := gitRef
+	t.Cleanup(func() { gitRef = restore })
+	gitRef = func(repo, _, _, _ string) (string, error) {
+		dialed = repo
+		return "/tmp/checkout", nil
+	}
+
+	if _, err := fetchBaselineSource("sourceplane/cirrus", "baseline-v7", t.TempDir()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialed != "github.com/sourceplane/cirrus" {
+		t.Fatalf("the seam dialed %q — a host called %q does not exist",
+			dialed, strings.Split(dialed, "/")[0])
+	}
+}

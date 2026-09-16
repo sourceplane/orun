@@ -80,8 +80,54 @@ func buildDocument(manifest []byte, manifestPath string) (string, error) {
 // implementation is orun's own git source resolver, so a baseline fetched here
 // and a `kind: git` source fetched during placement come down the same code
 // path — shallow, tag-or-branch, pinned.
+// gitRef is the resolver the seam dials through. A variable so a test can
+// assert WHAT URL it is handed — the qualification below is the whole fix, and
+// a test that only exercised the helper would pass with the seam still
+// dialling the registry's unqualified `owner/name`.
+var gitRef = scaffold.FetchGitRef
+
 var fetchBaselineSource = func(repo, ref, workDir string) (string, error) {
-	return scaffold.FetchGitRef(repo, ref, workDir, "baseline")
+	return gitRef(baselineCloneURL(repo), ref, workDir, "baseline")
+}
+
+// baselineCloneURL turns the registry's `sourceRepo` into something the git
+// resolver can dial.
+//
+// THE TWO ARE NOT THE SAME SHAPE, and the gap cost a clean error message for
+// every `--local` build:
+//
+//	✕ clone sourceplane/cirrus@baseline-v5: Get
+//	  "https://sourceplane/cirrus/info/refs?service=git-upload-pack":
+//	  dial tcp: lookup sourceplane: no such host
+//
+// `fetchGit` takes a bare HOST/path — `github.com/org/repo` — and prefixes
+// `https://` when there is no scheme, which its own comment says. A registry
+// row's `sourceRepo` is `owner/name` with no host at all, because GitHub is
+// the registry's standing assumption: every platform read of a baseline goes
+// to `raw.githubusercontent.com/<sourceRepo>/<tag>/…`, in the manifest door,
+// the catalogue preflight and the publish check alike.
+//
+// So the qualification belongs HERE, where the registry's convention is
+// already known, rather than in the general source resolver — a blueprint
+// author writing `repo: gitlab.com/acme/x` is following `fetchGit`'s contract
+// and must keep working.
+func baselineCloneURL(sourceRepo string) string {
+	repo := strings.TrimSpace(sourceRepo)
+	if repo == "" {
+		return repo
+	}
+	// Already dialable: a scheme, an scp-style remote, or a local path.
+	if strings.Contains(repo, "://") || strings.HasPrefix(repo, "git@") {
+		return repo
+	}
+	parts := strings.Split(repo, "/")
+	// A leading segment with a dot is a HOST (`github.com/acme/x`,
+	// `gitlab.com/acme/x`), which `fetchGit` already handles. Anything else
+	// with exactly two segments is the registry's `owner/name`.
+	if len(parts) == 2 && !strings.Contains(parts[0], ".") {
+		return "github.com/" + repo
+	}
+	return repo
 }
 
 // readBuildDocument joins a checkout to the build document inside it.
