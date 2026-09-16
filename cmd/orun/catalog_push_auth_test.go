@@ -20,12 +20,12 @@ type fakePushTokenSource struct {
 
 func (f fakePushTokenSource) Token(context.Context) (string, error) { return f.token, f.err }
 
-func TestValidatePushToken(t *testing.T) {
+func TestValidateToken(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("valid token passes", func(t *testing.T) {
-		if err := validatePushToken(ctx, fakePushTokenSource{token: "ok"}); err != nil {
-			t.Fatalf("validatePushToken = %v, want nil", err)
+		if err := validateToken(ctx, fakePushTokenSource{token: "ok"}); err != nil {
+			t.Fatalf("validateToken = %v, want nil", err)
 		}
 	})
 
@@ -41,9 +41,9 @@ func TestValidatePushToken(t *testing.T) {
 		{"revoked session", cliauth.ErrSessionRevoked},
 	} {
 		t.Run(tc.name+" maps to not-logged-in", func(t *testing.T) {
-			err := validatePushToken(ctx, fakePushTokenSource{err: tc.err})
+			err := validateToken(ctx, fakePushTokenSource{err: tc.err})
 			if err == nil {
-				t.Fatalf("validatePushToken = nil, want not-logged-in error")
+				t.Fatalf("validateToken = nil, want not-logged-in error")
 			}
 			if got := err.Error(); !strings.Contains(got, "auth login") {
 				t.Fatalf("error = %q, want the `orun auth login` hint", got)
@@ -57,9 +57,9 @@ func TestValidatePushToken(t *testing.T) {
 
 	t.Run("other auth error is wrapped, not swallowed", func(t *testing.T) {
 		sentinel := errors.New("connection refused")
-		err := validatePushToken(ctx, fakePushTokenSource{err: sentinel})
+		err := validateToken(ctx, fakePushTokenSource{err: sentinel})
 		if err == nil {
-			t.Fatal("validatePushToken = nil, want wrapped error")
+			t.Fatal("validateToken = nil, want wrapped error")
 		}
 		if !errors.Is(err, sentinel) {
 			t.Fatalf("error = %v, want it to wrap %v", err, sentinel)

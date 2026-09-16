@@ -50,6 +50,17 @@ func cloudClient(ctx context.Context, backendURLFlag, orgFlag string) (*remotest
 		}
 		return nil, fmt.Errorf("remote state auth: %w", err)
 	}
+	// THE SOURCE ABOVE IS A HANDLE, NOT A TOKEN. ResolveTokenSource proves a
+	// session is stored; it does not prove the session can still mint
+	// anything. A stored session that has expired past its refresh, or been
+	// revoked, sailed through here and failed inside the FIRST REQUEST as
+	// "resolving auth token: file does not exist" (live, on `baseline new`) —
+	// the raw store error, with no mention of what to do. Read one token now,
+	// so that case fails at the door with the same "run `orun auth login`"
+	// every other not-logged-in case gets.
+	if err := validateToken(ctx, tokenSrc); err != nil {
+		return nil, err
+	}
 	return remotestate.NewClientWithScope(backendURL, version, tokenSrc, scope), nil
 }
 

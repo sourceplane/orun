@@ -29,7 +29,22 @@ const (
 	// Remote state env vars
 	remoteStateEnvVar = "ORUN_REMOTE_STATE"
 	backendURLEnvVar  = "ORUN_BACKEND_URL"
-	tokenEnvVar       = "ORUN_TOKEN"
+	// defaultCloudURL is where the CLI dials when nothing names a backend:
+	// not the flag, not ORUN_BACKEND_URL, not intent.yaml, not
+	// ~/.orun/config.yaml. It is the LAST rung of that chain, so every
+	// explicit source still wins — a self-hosted backend, a sandbox whose
+	// control plane injected its own URL, a CI job pinned to stage.
+	//
+	// Before this there was no last rung, and `orun baseline new cirrus` on a
+	// fresh machine failed with "missing backend URL" before doing anything.
+	// The platform has one production API; a CLI that makes every user find
+	// and type its address is a CLI that gets typed wrong.
+	//
+	// The workers.dev hostname, deliberately, for now: `api.orunbase.com` is
+	// the estate's intended name but is only being attached as this ships.
+	// Flip this constant once it resolves; nothing else needs to change.
+	defaultCloudURL = "https://api-edge-prod.oruncloud.workers.dev"
+	tokenEnvVar     = "ORUN_TOKEN"
 	// Org/project scope env vars (CI scoping; design §8 precedence).
 	// workspaceEnvVar is the leading spelling; orgEnvVar is the retained alias
 	// (read either, prefer workspace — saas-workspaces A4).

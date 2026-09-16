@@ -60,16 +60,17 @@ named environment head instead of the project-wide head.`,
 	parent.AddCommand(cmd)
 }
 
-// validatePushToken eagerly resolves a session/static token before any object
-// sync. ResolveTokenSource only constructs a SessionTokenSource from whatever
+// validateToken eagerly resolves a session/static token before any request.
+// ResolveTokenSource only constructs a SessionTokenSource from whatever
 // session file is present — it does not prove a token can be minted — so a
 // logged-out or expired/revoked session otherwise slips through and surfaces as
-// a raw token error from deep inside objremote.Sync (after a refresh
+// a raw token error from deep inside the first request (after a refresh
 // round-trip's delay), and only deterministically as the actionable login
 // message on the *next* run once the stale session is cleared. Resolving here
-// maps the failure to the clean message on every run and skips the wasted sync.
-// (OIDC sources are exchanged + validated by the caller, so they skip this.)
-func validatePushToken(ctx context.Context, tokenSrc remotestate.TokenSource) error {
+// maps the failure to the clean message on every run and skips the wasted call.
+// Shared by `catalog push` and cloudClient (every workspace-scoped command).
+// (catalog push exchanges + validates OIDC sources itself, so they skip this.)
+func validateToken(ctx context.Context, tokenSrc remotestate.TokenSource) error {
 	if _, err := tokenSrc.Token(ctx); err != nil {
 		if isNoLoginErr(err) {
 			return errNotLoggedIn()
@@ -156,7 +157,7 @@ func pushResolvedCatalog(ctx context.Context, backendURL, orgFlag, projectFlag, 
 		if p := strings.TrimSpace(scope.ProjectID); (p == "" || !strings.HasPrefix(p, "prj_")) && exProject != "" {
 			scope.ProjectID = exProject
 		}
-	} else if err := validatePushToken(ctx, tokenSrc); err != nil {
+	} else if err := validateToken(ctx, tokenSrc); err != nil {
 		return err
 	}
 	// Outside CI the same slug-vs-id gap applies (mirrors `orun run`, #606).
