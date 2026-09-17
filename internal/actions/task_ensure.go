@@ -48,7 +48,7 @@ func init() {
 			Param{Name: "epic", Type: ParamString,
 				Description: "milestone and task: the epic (slug, EP-n or epc_…)"},
 			Param{Name: "milestone", Type: ParamString,
-				Description: "task only: the milestone to club under"},
+				Description: "task only: the milestone to club under (mls_…, or a name found-or-created within `epic`)"},
 			Param{Name: "brief", Type: ParamString,
 				Description: "task only: what the task is for"},
 			Param{Name: "prefix", Type: ParamString, Default: "ORUN",
@@ -134,24 +134,63 @@ func ensureMilestone(ctx context.Context, c taskPlane, org string, in Input) (Re
 	if epicRef == "" {
 		return Result{}, fmt.Errorf("a milestone needs its `epic`")
 	}
-	name := StringParam(in, "name")
+	id, existed, err := milestoneByName(ctx, c, org, epicRef, StringParam(in, "name"), StringListParam(in, "exitCriteria"))
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Outputs: map[string]string{"id": id, "key": id, "existed": fmt.Sprint(existed)}}, nil
+}
+
+// milestoneByName is that find-or-create, reachable from both the `milestone`
+// kind and a task clubbing under one.
+func milestoneByName(ctx context.Context, c taskPlane, org, epicRef, name string, exitCriteria []string) (string, bool, error) {
 	view, err := c.GetEpic(ctx, org, epicRef)
 	if err != nil {
-		return Result{}, fmt.Errorf("reading epic %q: %w", epicRef, err)
+		return "", false, fmt.Errorf("reading epic %q: %w", epicRef, err)
 	}
 	for _, m := range view.Milestones {
 		if m.Name == name {
-			return Result{Outputs: map[string]string{"id": m.ID, "key": m.ID, "existed": "true"}}, nil
+			return m.ID, true, nil
 		}
 	}
 	created, err := c.CreateMilestone(ctx, org, epicRef, remotestate.MilestoneCreateRequest{
 		Name:         name,
-		ExitCriteria: StringListParam(in, "exitCriteria"),
+		ExitCriteria: exitCriteria,
 	})
 	if err != nil {
-		return Result{}, fmt.Errorf("creating milestone %q in %q: %w", name, epicRef, err)
+		return "", false, fmt.Errorf("creating milestone %q in %q: %w", name, epicRef, err)
 	}
-	return Result{Outputs: map[string]string{"id": created.ID, "key": created.ID, "existed": "false"}}, nil
+	return created.ID, false, nil
+}
+
+// milestoneRefForTask turns whatever a hook wrote in `milestone` into the
+// mls_… the task plane accepts there.
+//
+// The plane takes an epic as a slug, an EP-n or an epc_…, and a milestone as
+// an id and nothing else. A blueprint author reading "the milestone to club
+// under" writes the name — `milestone: "{{ .phase.name }}"` — and got:
+//
+//	✕ hook "task" (orun.task/ensure@v1): creating task "phase(01-scaffold):
+//	  repo born": Validation failed: milestone: must be a milestone ref (mls_…)
+//
+// every time, in every workspace. The identity the author used is the one
+// ensureMilestone was built around — its own comment says "it re-runs a phase
+// called 03-infrastructure and must find the milestone it made last time" —
+// so a name resolves through exactly that path, find-or-create, and the task
+// clubs under the milestone the phase means. An mls_… passes straight through.
+func milestoneRefForTask(ctx context.Context, c taskPlane, org, epicRef, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || strings.HasPrefix(ref, "mls_") {
+		return ref, nil
+	}
+	if epicRef == "" {
+		return "", fmt.Errorf("milestone %q is a name, so it needs its `epic` to be found within — or pass an mls_… id", ref)
+	}
+	id, _, err := milestoneByName(ctx, c, org, epicRef, ref, nil)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
 }
 
 // ensureTask finds a task by TITLE WITHIN ITS EPIC, or creates it contracted.
@@ -195,12 +234,18 @@ func ensureTask(ctx context.Context, c taskPlane, org string, in Input) (Result,
 			}
 		}
 	}
+	// Resolved BEFORE the create, so a milestone that cannot be found costs no
+	// minted key — the same discipline the contract above keeps.
+	milestoneRef, err := milestoneRefForTask(ctx, c, org, epicRef, StringParam(in, "milestone"))
+	if err != nil {
+		return Result{}, fmt.Errorf("task %q: %w", title, err)
+	}
 	created, err := c.CreateTask(ctx, org, remotestate.TaskCreateRequest{
 		MintPrefix:  StringParam(in, "prefix"),
 		TitleMirror: title,
 		Brief:       StringParam(in, "brief"),
 		Epic:        epicRef,
-		Milestone:   StringParam(in, "milestone"),
+		Milestone:   milestoneRef,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("creating task %q: %w", title, err)
