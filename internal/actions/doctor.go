@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -30,13 +29,7 @@ func configClient(ctx context.Context, in Input) (*configsurface.Client, string,
 	if org == "" {
 		return nil, "", errNoWorkspace()
 	}
-	backend := strings.TrimSpace(StringParam(in, "backendUrl"))
-	if backend == "" {
-		backend = strings.TrimSpace(os.Getenv("ORUN_BACKEND_URL"))
-	}
-	if backend == "" {
-		return nil, "", fmt.Errorf("no backend URL: pass `backendUrl` or set ORUN_BACKEND_URL")
-	}
+	backend := backendURL(in)
 	tokenSrc, _, _, err := remotestate.ResolveTokenSource(ctx, remotestate.ResolveOptions{
 		BackendURL: backend, Version: actionsVersion, Interactive: false, RequireLogin: true, Org: org,
 	})
@@ -44,6 +37,28 @@ func configClient(ctx context.Context, in Input) (*configsurface.Client, string,
 		return nil, "", fmt.Errorf("resolving a credential for %s: %w", org, err)
 	}
 	return configsurface.NewClient(backend, actionsVersion, tokenSrc), org, nil
+}
+
+// secretScope is the rung an action's secrets live on: the workspace, or a
+// project when the hook names one.
+//
+// KIND IS NOT OPTIONAL. The client builds its request path by switching on it
+// and rejects an empty one, so a Scope assembled without it names nothing:
+//
+//	✕ phase "04-workers" precondition "wiring" is not met: hook "wiring"
+//	  (orun.secrets/exists@v1): reading secrets for ws_79BDXAZQ:
+//	  configsurface: unknown scope kind ""
+//
+// Both actions that read or write secrets built one that way, so neither could
+// ever have worked against a real backend. Their tests passed because the fake
+// took the Scope and looked at nothing in it — true of the types, false of the
+// values. The fakes now record it and the tests read it.
+func secretScope(org string, in Input) configsurface.Scope {
+	project := strings.TrimSpace(StringParam(in, "project"))
+	if project == "" {
+		return configsurface.Scope{Kind: configsurface.ScopeWorkspace, Org: org}
+	}
+	return configsurface.Scope{Kind: configsurface.ScopeProject, Org: org, Project: project}
 }
 
 // connections is the slice of the client these actions read, so the decision
@@ -170,7 +185,7 @@ func runSecretsExists(ctx context.Context, in Input) (Result, error) {
 // that publishes it may simply not have run yet, and a precondition that fails
 // hard here would turn "run phase 03 first" into a broken bootstrap.
 func secretsExistOn(ctx context.Context, c secretsLister, org string, in Input) (Result, error) {
-	scope := configsurface.Scope{Org: org, Project: StringParam(in, "project")}
+	scope := secretScope(org, in)
 	live, _, err := c.ListSecrets(ctx, scope, true)
 	if err != nil {
 		return Result{}, fmt.Errorf("reading secrets for %s: %w", org, err)

@@ -68,7 +68,33 @@ func checkRequires(ctx context.Context, plan *runPlan, opts Options, phase Phase
 			unknownNote(unmet))
 	}
 
-	if len(decl.Requires.Probe) == 0 {
+	return checkProbes(ctx, plan, opts, phase, runner)
+}
+
+// checkProbes evaluates a phase's `requires.probe`.
+//
+// A PENDING answer comes back AS IS, not wrapped as a gate failure, because
+// "not yet" is not "never" and only the caller knows which one matters where.
+// Up front, before anything is written, a pending probe means the phase that
+// satisfies it has not run — possibly a phase THIS RUN is about to place — so
+// the sweep defers it. At phase time it means what a pending hook means, and
+// parks the same way.
+//
+// Conflating the two is what made a full bootstrap impossible: phase 04 asks
+// whether phase 03 published its D1 and KV bindings, and up front the honest
+// answer is always no:
+//
+//	✕ phase "04-workers" precondition "wiring" is not met: hook "wiring"
+//	  (orun.secrets/exists@v1): pending — secret(s) not published yet:
+//	  WIRING_CLOUDFLARE_D1, WIRING_CLOUDFLARE_KV
+//
+// The action had already made the distinction — its own comment says a missing
+// secret is "pending, not failure … a precondition that fails hard here would
+// turn 'run phase 03 first' into a broken bootstrap" — and the gate threw it
+// away.
+func checkProbes(ctx context.Context, plan *runPlan, opts Options, phase PhasePlan, runner ActionRunner) error {
+	decl := plan.declOf(phase.Name)
+	if decl == nil || decl.Requires == nil || len(decl.Requires.Probe) == 0 {
 		return nil
 	}
 	// A PROBE GATES THE WORK, NOT THE BYTES.
@@ -105,6 +131,9 @@ func checkRequires(ctx context.Context, plan *runPlan, opts Options, phase Phase
 	hr.resetOutputs()
 	for _, probe := range decl.Requires.Probe {
 		if err := hr.runAction(ctx, probe); err != nil {
+			if _, waiting := actions.IsPending(err); waiting {
+				return err
+			}
 			return gateErr("phase %q precondition %q is not met: %v", phase.Name, probe.ID, err)
 		}
 	}
