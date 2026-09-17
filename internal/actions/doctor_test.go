@@ -21,6 +21,10 @@ type fakeConfig struct {
 	created    []configsurface.CreateSecretRequest
 	listCalls  int
 	connectsAt int // after this many list calls, the provider becomes active
+	// lastScope records what the action ASKED FOR. Taking the Scope and
+	// looking at nothing in it is how an unset Kind — which the real client
+	// rejects outright — survived every test here.
+	lastScope configsurface.Scope
 }
 
 func (f *fakeConfig) ListConnections(context.Context, string) ([]configsurface.Connection, error) {
@@ -34,14 +38,16 @@ func (f *fakeConfig) ListConnections(context.Context, string) ([]configsurface.C
 	return f.conns, nil
 }
 
-func (f *fakeConfig) ListSecrets(context.Context, configsurface.Scope, bool) ([]configsurface.SecretMeta, json.RawMessage, error) {
+func (f *fakeConfig) ListSecrets(_ context.Context, scope configsurface.Scope, _ bool) ([]configsurface.SecretMeta, json.RawMessage, error) {
+	f.lastScope = scope
 	if f.secretErr != nil {
 		return nil, nil, f.secretErr
 	}
 	return f.secrets, nil, nil
 }
 
-func (f *fakeConfig) CreateSecret(_ context.Context, _ configsurface.Scope, req configsurface.CreateSecretRequest) (*configsurface.SecretMeta, error) {
+func (f *fakeConfig) CreateSecret(_ context.Context, scope configsurface.Scope, req configsurface.CreateSecretRequest) (*configsurface.SecretMeta, error) {
+	f.lastScope = scope
 	if f.createErr != nil {
 		return nil, f.createErr
 	}

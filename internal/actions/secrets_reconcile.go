@@ -61,7 +61,7 @@ func reconcileOn(ctx context.Context, c secretsPlane, org string, in Input) (Res
 	provider := strings.ToLower(strings.TrimSpace(StringParam(in, "provider")))
 	template := StringParam(in, "template")
 	keys := StringListParam(in, "keys")
-	scope := configsurface.Scope{Org: org, Project: StringParam(in, "project")}
+	scope := secretScope(org, in)
 
 	conns, err := c.ListConnections(ctx, org)
 	if err != nil {
