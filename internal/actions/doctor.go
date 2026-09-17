@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -30,13 +29,7 @@ func configClient(ctx context.Context, in Input) (*configsurface.Client, string,
 	if org == "" {
 		return nil, "", errNoWorkspace()
 	}
-	backend := strings.TrimSpace(StringParam(in, "backendUrl"))
-	if backend == "" {
-		backend = strings.TrimSpace(os.Getenv("ORUN_BACKEND_URL"))
-	}
-	if backend == "" {
-		return nil, "", fmt.Errorf("no backend URL: pass `backendUrl` or set ORUN_BACKEND_URL")
-	}
+	backend := backendURL(in)
 	tokenSrc, _, _, err := remotestate.ResolveTokenSource(ctx, remotestate.ResolveOptions{
 		BackendURL: backend, Version: actionsVersion, Interactive: false, RequireLogin: true, Org: org,
 	})

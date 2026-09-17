@@ -48,6 +48,22 @@ func errNoWorkspace() error {
 	return fmt.Errorf("no workspace: pass `org`, or set ORUN_WORKSPACE (or ORUN_ORG)")
 }
 
+// backendURL resolves the platform address for an action: the `backendUrl`
+// parameter, then ORUN_BACKEND_URL, then the same default the CLI dials. It
+// cannot fail — a hook started by a CLI that reached the platform must be able
+// to reach it too, and before this it could not: the command layer grew a
+// default and the actions kept refusing, so a bootstrap died at its first
+// platform-facing hook on a machine where the CLI itself worked.
+func backendURL(in Input) string {
+	if b := strings.TrimSpace(StringParam(in, "backendUrl")); b != "" {
+		return b
+	}
+	if b := strings.TrimSpace(os.Getenv("ORUN_BACKEND_URL")); b != "" {
+		return b
+	}
+	return remotestate.DefaultCloudURL
+}
+
 // cloudClient builds a platform client for an action.
 func cloudClient(ctx context.Context, in Input) (*remotestate.Client, string, error) {
 	org := strings.TrimSpace(StringParam(in, "org"))
@@ -57,13 +73,7 @@ func cloudClient(ctx context.Context, in Input) (*remotestate.Client, string, er
 	if org == "" {
 		return nil, "", errNoWorkspace()
 	}
-	backend := strings.TrimSpace(StringParam(in, "backendUrl"))
-	if backend == "" {
-		backend = strings.TrimSpace(os.Getenv("ORUN_BACKEND_URL"))
-	}
-	if backend == "" {
-		return nil, "", fmt.Errorf("no backend URL: pass `backendUrl` or set ORUN_BACKEND_URL")
-	}
+	backend := backendURL(in)
 	tokenSrc, _, _, err := remotestate.ResolveTokenSource(ctx, remotestate.ResolveOptions{
 		BackendURL:   backend,
 		Version:      actionsVersion,
@@ -84,6 +94,6 @@ func orgParams() []Param {
 		{Name: "org", Type: ParamString,
 			Description: "workspace id (ws_…/org_…) or slug; defaults to ORUN_WORKSPACE, then ORUN_ORG"},
 		{Name: "backendUrl", Type: ParamString,
-			Description: "platform base URL; defaults to ORUN_BACKEND_URL"},
+			Description: "platform base URL; defaults to ORUN_BACKEND_URL, then Orun Cloud"},
 	}
 }
