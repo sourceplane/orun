@@ -24,17 +24,30 @@ func cloudClient(ctx context.Context, backendURLFlag, orgFlag string) (*remotest
 	if err != nil {
 		return nil, err
 	}
-	repo, err := resolveRepoContext(backendURL)
-	if err != nil {
-		return nil, err
-	}
+	// THE REPO LINK IS A FALLBACK, NOT A PREREQUISITE. resolveRepoContext
+	// reads the cached link for the checkout you are standing in, which is one
+	// of four ways a workspace can be named — and the weakest. Treating its
+	// failure as fatal meant `orun baseline new --local --workspace ws_…`,
+	// which names the workspace outright and builds into --out, died outside a
+	// git repo with `detect git remote.origin.url: exit status 1` (hit live).
+	// The same command one directory over, inside any checkout, worked.
+	// `mcp serve` already degrades here rather than exiting (UM5); so does
+	// this now, and the no-workspace error below stays the one that fires when
+	// nothing names one.
 	linkOrg, linkProject := "", ""
-	if repo != nil {
+	repo, repoErr := resolveRepoContext(backendURL)
+	if repoErr == nil && repo != nil {
 		linkOrg, linkProject = repo.OrgID, repo.ProjectID
 	}
 	intentOrg, intentProject, _ := intentScope(loadIntentForCloudConfig())
 	scope := resolveScope(orgFlag, "", intentOrg, intentProject, linkOrg, linkProject)
 	if scope.OrgID == "" {
+		// Nothing named a workspace AND the link could not be consulted: say
+		// why, so "link the repo" does not read as advice that was already
+		// tried and silently failed.
+		if repoErr != nil {
+			return nil, fmt.Errorf("no workspace resolved; pass --workspace or set %s (the repo link was not consulted: %v)", workspaceEnvVar, repoErr)
+		}
 		return nil, fmt.Errorf("no workspace resolved; pass --workspace or link the repo (orun auth login)")
 	}
 	tokenSrc, _, _, err := remotestate.ResolveTokenSource(ctx, remotestate.ResolveOptions{
