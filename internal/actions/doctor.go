@@ -21,14 +21,14 @@ import (
 
 // configClient builds the connections/secrets client for an action, using the
 // same narrow workspace resolution as the task-plane actions: the `org`
-// parameter, then ORUN_ORG, and nothing cleverer.
+// parameter, then the environment (workspaceFromEnv), and nothing cleverer.
 func configClient(ctx context.Context, in Input) (*configsurface.Client, string, error) {
 	org := strings.TrimSpace(StringParam(in, "org"))
 	if org == "" {
-		org = strings.TrimSpace(os.Getenv("ORUN_ORG"))
+		org = workspaceFromEnv()
 	}
 	if org == "" {
-		return nil, "", fmt.Errorf("no workspace: pass `org` or set ORUN_ORG")
+		return nil, "", errNoWorkspace()
 	}
 	backend := strings.TrimSpace(StringParam(in, "backendUrl"))
 	if backend == "" {
