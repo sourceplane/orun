@@ -141,9 +141,18 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	// exactly the phases this run writes before N. A requirement satisfied by
 	// this run is satisfied (BE-O11).
 	placing := make(map[string]bool, len(phases))
+	// A probe that answers "not yet" up here is DEFERRED, not fatal. Its
+	// subject may be something a phase this very run is about to do — phase 04
+	// asks for the bindings phase 03 publishes — so the only honest time to
+	// ask is immediately before the phase runs. Recorded here, re-asked there.
+	// A probe that fails outright still fails now, before a byte is written.
+	deferredProbes := make(map[string]bool, len(phases))
 	for _, ph := range phases {
 		if err := checkRequires(ctx, plan, opts, ph, opts.Actions, placing); err != nil {
-			return nil, err
+			if _, waiting := actions.IsPending(err); !waiting {
+				return nil, err
+			}
+			deferredProbes[ph.Name] = true
 		}
 		placing[ph.Name] = true
 	}
@@ -230,6 +239,23 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			em.emit(ctx, Event{Phase: phase.Name, State: EventStarted,
 				Narration: narrate(EventStarted, startMeta),
 				Meta:      startMeta})
+			// The deferred probe, asked at the only moment its answer means
+			// anything: the phases before it have now run. Still pending parks
+			// the run exactly as a pending hook does, so `--resume` picks it up
+			// when the thing it waits for exists.
+			if deferredProbes[phase.Name] {
+				if perr := checkProbes(ctx, plan, opts, phase, runner); perr != nil {
+					if pe, waiting := actions.IsPending(perr); waiting {
+						parked := &ParkedError{Phase: phase.Name, Hook: pe.ID, Reason: pe.Reason, RetryAfter: pe.RetryAfter}
+						em.emit(ctx, Event{Phase: phase.Name, Step: pe.ID, State: EventWaiting,
+							Narration: narrate(EventWaiting, startMeta),
+							Detail:    pe.Reason})
+						writeRunState(opts.OutDir, parked)
+						return nil, parked
+					}
+					return nil, perr
+				}
+			}
 			// pre and post are retried per the phase's declared policy;
 			// outputs are scoped to the phase and reset on every attempt.
 			ran, herr := runPhaseHooks(ctx, hr, decl, append(append([]Hook{}, phase.Hooks.Pre...), phase.Hooks.Post...))
