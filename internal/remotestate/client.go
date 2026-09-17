@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -108,6 +109,18 @@ type APIError struct {
 
 func (e *APIError) Error() string {
 	parts := e.Message
+	// THE DETAIL IS THE WHOLE ANSWER. The platform says WHICH field it
+	// rejected — `{"fields":{"epic":["no epic with that ref, key or slug"]}}`
+	// — and this dropped it, leaving every 422 reading the same:
+	//
+	//	✕ hook "task" (orun.task/ensure@v1): creating task "phase(01-scaffold):
+	//	  repo born": Validation failed (code: validation_failed) [requestId: …]
+	//
+	// which names the request and not one thing about what was wrong with it.
+	// Parsed into Details since the envelope was first read, printed nowhere.
+	if d := detailSummary(e.Details); d != "" {
+		parts = fmt.Sprintf("%s: %s", parts, d)
+	}
 	if e.Code != "" {
 		parts = fmt.Sprintf("%s (code: %s)", parts, e.Code)
 	}
@@ -115,6 +128,56 @@ func (e *APIError) Error() string {
 		parts = fmt.Sprintf("%s [requestId: %s]", parts, e.RequestID)
 	}
 	return parts
+}
+
+// detailSummary renders the platform's structured detail as one line.
+//
+// The shape it is built for is the validation envelope — {"fields": {"epic":
+// ["no epic with that ref, key or slug"]}} — rendered as `epic: no epic with
+// that ref, key or slug`, fields in sorted order so the message is stable.
+// Anything else recognisable is summarised generically rather than dropped,
+// and an unreadable detail yields "" so a bad payload can never turn an error
+// message into noise.
+func detailSummary(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var env struct {
+		// A POINTER, so "the envelope carried no fields key" and "it carried
+		// an empty one" stay distinguishable: the second is still the
+		// validation shape and has nothing to add, so it must render nothing
+		// rather than fall through and print `{"fields":{}}` at the operator.
+		Fields *map[string][]string `json:"fields"`
+	}
+	if err := json.Unmarshal(raw, &env); err == nil && env.Fields != nil {
+		fields := *env.Fields
+		if len(fields) == 0 {
+			return ""
+		}
+		names := make([]string, 0, len(fields))
+		for name := range fields {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		parts := make([]string, 0, len(names))
+		for _, name := range names {
+			msgs := fields[name]
+			if len(msgs) == 0 {
+				parts = append(parts, name)
+				continue
+			}
+			parts = append(parts, name+": "+strings.Join(msgs, ", "))
+		}
+		return strings.Join(parts, "; ")
+	}
+	// Not the validation shape: pass a short, flat payload through verbatim
+	// rather than inventing a summary for something we do not model. A long
+	// or structured one is left to `--json`, where it is not truncated.
+	flat := strings.Join(strings.Fields(string(raw)), " ")
+	if len(flat) > 200 || flat == "{}" || flat == "null" {
+		return ""
+	}
+	return flat
 }
 
 // IsAuth reports whether the error is an authentication/authorization failure.
