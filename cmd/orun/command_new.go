@@ -16,6 +16,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/objectstore"
 	"github.com/sourceplane/orun/internal/scaffold"
+	"github.com/sourceplane/orun/internal/ui"
 )
 
 var (
@@ -109,6 +110,16 @@ func runScaffoldNew(ctx context.Context) error {
 	// the record is refused rather than applied (BE-O2).
 	inputs, err = scaffold.RecoverInputs(scaffoldOut, inputs)
 	if err != nil {
+		return err
+	}
+	// A key the blueprint does not declare is wrong BEFORE any question is
+	// asked. CollectInputs already fails closed on one, but it runs after the
+	// prompts, so a single typo in a values file cost a full interrogation and
+	// then rejected the lot — seen live, a file carrying `githubOrg` against a
+	// blueprint declaring `githuborg`: seven prompts answered, then
+	// `unknown input "githubOrg"`. Refusing here spends the operator's typing
+	// on a run that can still succeed.
+	if err := rejectUndeclaredInputs(bp.Inputs, inputs); err != nil {
 		return err
 	}
 	if err := promptMissingInputs(bp.Inputs, inputs); err != nil {
@@ -289,6 +300,43 @@ func collectScaffoldInputs() (map[string]string, error) {
 		inputs[parts[0]] = parts[1]
 	}
 	return inputs, nil
+}
+
+// rejectUndeclaredInputs refuses supplied keys the blueprint does not declare.
+// The suggestion comes from the CLI's shared Levenshtein suggester, so a
+// mistyped input key reads like every other typo the CLI catches — and a
+// case-only miss (`githubOrg` for `githuborg`) is distance 0 once folded, so
+// it always names the key the operator meant.
+func rejectUndeclaredInputs(specs map[string]scaffold.InputSpec, inputs map[string]string) error {
+	declared := make([]string, 0, len(specs))
+	for name := range specs {
+		declared = append(declared, name)
+	}
+	sort.Strings(declared)
+
+	unknown := make([]string, 0)
+	for name := range inputs {
+		if _, ok := specs[name]; !ok {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	sort.Strings(unknown)
+
+	var b strings.Builder
+	for i, name := range unknown {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(&b, "unknown input %q (not declared in blueprint inputs)", name)
+		if s := ui.SuggestMatch(name, declared); s != "" {
+			fmt.Fprintf(&b, " — did you mean %q?", s)
+		}
+	}
+	fmt.Fprintf(&b, "\ndeclared inputs: %s\nNothing has been written.", strings.Join(declared, ", "))
+	return exitErr(1, "%s", b.String())
 }
 
 // promptMissingInputs fills in any declared input the flags/values did not
