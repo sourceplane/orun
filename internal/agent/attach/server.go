@@ -143,6 +143,14 @@ func (s *Server) Close(reason string) {
 	}
 }
 
+// Closed reports whether Close has run: the body has said its last word and
+// every head has been sent its bye.
+func (s *Server) Closed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
 func (s *Server) presenceLocked() Frame {
 	heads := make([]Head, 0, len(s.heads))
 	for h := range s.heads {

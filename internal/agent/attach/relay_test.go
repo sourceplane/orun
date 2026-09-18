@@ -494,3 +494,167 @@ func TestServeAndRemoteAttachOverRelay(t *testing.T) {
 	head.Detach()
 	serveCancel()
 }
+
+// THE LAST LINES ARE THE ONES THAT SAY WHY. serve ends a session by closing
+// the attach server (a bye to every head) and then the relay — and the relay
+// used to cancel its pumps at once, dropping whatever the body had said but
+// the pump had not yet flushed. That is always the tail: the build's own error
+// and the driver's "the build did not finish". A console build died on
+//
+//	✕ phase "04-workers" precondition "wiring" is not met: …
+//
+// and its transcript ended at "building repo-blueprint.yaml", with nothing on
+// the page saying why. Close must deliver what was already said.
+func TestRelayCloseDeliversWhatTheBodyAlreadySaid(t *testing.T) {
+	// Many rounds: the loss was a race between the pump's flush and Close's
+	// cancel, and one lucky round proves nothing.
+	for round := 0; round < 20; round++ {
+		var mu sync.Mutex
+		var posted []Frame
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.URL.Path == "/events" {
+				var batch []Frame
+				json.NewDecoder(req.Body).Decode(&batch)
+				mu.Lock()
+				posted = append(posted, batch...)
+				mu.Unlock()
+			}
+			w.WriteHeader(200)
+		}))
+
+		srv := NewServer(SessionInfo{SessionID: "as_tail", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
+		sess, err := DialToRelay(context.Background(), srv, agent.NewInputQueue(), RelayConfig{
+			BaseURL: ts.URL, Token: "tok", HTTP: ts.Client(),
+			// Nothing flushes on a timer here: only a full batch, the bye, or
+			// Close can deliver these.
+			FlushEvery: time.Hour, PollEvery: 5 * time.Millisecond, DisableWS: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		const said = 5
+		for i := 0; i < said; i++ {
+			srv.Observe(agent.SessionEvent{Seq: i, Kind: nodes.SessionEventMessageAgent,
+				Payload: map[string]any{"text": fmt.Sprintf("line %d", i)}})
+		}
+		// serve's own teardown order.
+		srv.Close("terminal")
+		sess.Close()
+
+		mu.Lock()
+		got := 0
+		for _, f := range posted {
+			if f.T == TEvent {
+				got++
+			}
+		}
+		mu.Unlock()
+		ts.Close()
+		if got != said {
+			t.Fatalf("round %d: the body said %d thing(s) and the relay delivered %d — Close dropped the tail", round, said, got)
+		}
+	}
+}
+
+// capturingRelay counts the event frames posted to /events.
+func capturingRelay(t *testing.T, block <-chan struct{}) (*httptest.Server, func() int) {
+	t.Helper()
+	var mu sync.Mutex
+	got := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/events" {
+			if block != nil {
+				select {
+				case <-block:
+				case <-req.Context().Done():
+					return
+				}
+			}
+			var batch []Frame
+			json.NewDecoder(req.Body).Decode(&batch)
+			mu.Lock()
+			for _, f := range batch {
+				if f.T == TEvent {
+					got++
+				}
+			}
+			mu.Unlock()
+		}
+		w.WriteHeader(200)
+	}))
+	t.Cleanup(ts.Close)
+	return ts, func() int { mu.Lock(); defer mu.Unlock(); return got }
+}
+
+func say(srv *Server, n int) {
+	for i := 0; i < n; i++ {
+		srv.Observe(agent.SessionEvent{Seq: i, Kind: nodes.SessionEventMessageAgent,
+			Payload: map[string]any{"text": fmt.Sprintf("line %d", i)}})
+	}
+}
+
+// A parent going away (serve's own context canceled) is not a Close and sends
+// no bye — but what the pump has already batched is still the body's account,
+// and gets one bounded attempt rather than being dropped.
+func TestRelayCutOffStillSendsWhatItHadBatched(t *testing.T) {
+	ts, posted := capturingRelay(t, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := NewServer(SessionInfo{SessionID: "as_cut", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
+	sess, err := DialToRelay(ctx, srv, agent.NewInputQueue(), RelayConfig{
+		BaseURL: ts.URL, Token: "tok", HTTP: ts.Client(),
+		FlushEvery: time.Hour, PollEvery: 5 * time.Millisecond, DisableWS: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	say(srv, 3)
+	time.Sleep(100 * time.Millisecond) // let the pump batch them; nothing flushes on its own
+	cancel()
+	sess.Close()
+	if got := posted(); got != 3 {
+		t.Fatalf("a cut-off pump dropped its batch: delivered %d of 3", got)
+	}
+}
+
+// With the server still open no bye is coming, so there is nothing to wait
+// for: Close must not sit out the grace.
+func TestRelayCloseWithoutAByeDoesNotWait(t *testing.T) {
+	ts, _ := capturingRelay(t, nil)
+	srv := NewServer(SessionInfo{SessionID: "as_open", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
+	sess, err := DialToRelay(context.Background(), srv, agent.NewInputQueue(), RelayConfig{
+		BaseURL: ts.URL, Token: "tok", HTTP: ts.Client(),
+		PollEvery: 5 * time.Millisecond, DisableWS: true, CloseGrace: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	sess.Close()
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("Close with the server open waited %v for a bye that was never coming", d)
+	}
+}
+
+// The grace is a bound. A relay that never answers must not hold the session's
+// exit hostage — Close gives up after it, whatever is still in flight.
+func TestRelayCloseGivesUpAfterTheGrace(t *testing.T) {
+	block := make(chan struct{})
+	defer close(block)
+	ts, _ := capturingRelay(t, block)
+	srv := NewServer(SessionInfo{SessionID: "as_hung", RunKind: "interactive", Harness: "stub"}, agent.NewInputQueue())
+	sess, err := DialToRelay(context.Background(), srv, agent.NewInputQueue(), RelayConfig{
+		BaseURL: ts.URL, Token: "tok", HTTP: ts.Client(),
+		FlushEvery: time.Hour, PollEvery: 5 * time.Millisecond, DisableWS: true,
+		CloseGrace: 200 * time.Millisecond, PostRetries: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	say(srv, 2)
+	srv.Close("terminal")
+	start := time.Now()
+	sess.Close()
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("Close waited %v on a relay that never answers; the grace is 200ms", d)
+	}
+}
