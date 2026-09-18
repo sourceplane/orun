@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"testing"
 
 	"gopkg.in/yaml.v3"
 )
@@ -470,6 +471,18 @@ func (s *keychainCredentialStore) available() bool {
 		return false
 	case "keychain":
 		return runtime.GOOS == "darwin"
+	}
+	// A TEST BINARY NEVER REACHES THE DEVELOPER'S KEYCHAIN unless it names
+	// the keychain explicitly (above). The keychain does not follow $HOME, so
+	// the t.Setenv("HOME", t.TempDir()) every session test relies on isolated
+	// only the FILE store: a test that saved a fake session or cleared one
+	// (cmd/orun's personal-org tests do both) wrote to the real login item of
+	// whoever ran `go test` on a Mac, and a refresh test that expects a
+	// revocation deletes it. Whether that happened depended on which test in
+	// the process probed first, since the probe is memoized. It showed up as
+	// a developer's `orun auth login` vanishing mid-session.
+	if testing.Testing() {
+		return false
 	}
 	if runtime.GOOS != "darwin" {
 		return false
