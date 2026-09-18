@@ -254,3 +254,54 @@ func TestReconcileExplainsAWriteRefusalAfterSuccessfulReads(t *testing.T) {
 		t.Errorf("the error should name the likely cause; got %v", err)
 	}
 }
+
+func strptr(s string) *string { return &s }
+
+// The platform sees a repository's pushes and PRs only through the App
+// installation on the account that owns it. A workspace whose one GitHub
+// connection is a user account's must not pass for a product built under an
+// org: found live, where every PR of sourceplane/altocumulus stayed invisible
+// to a workspace connected only to `adampullely`.
+func TestDoctorGithubCountsOnlyThroughTheOwnersConnection(t *testing.T) {
+	f := &fakeConfig{conns: []configsurface.Connection{
+		{ID: "int_gh", Provider: "github", Status: "active", ExternalAccountLogin: strptr("adampullely")},
+		{ID: "int_cf", Provider: "cloudflare", Status: "active"},
+	}}
+	in := doctorInput(t, map[string]any{"providers": []any{"github", "cloudflare"}, "githubOwner": "sourceplane"})
+	res, err := doctorOn(context.Background(), f, "ws_1", in, func(time.Duration) {})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	if res.Pending == nil {
+		t.Fatalf("a connection to another account satisfied github: %v", res.Outputs)
+	}
+	for _, want := range []string{"github for sourceplane", "connected: adampullely"} {
+		if !strings.Contains(res.Pending.Reason, want) {
+			t.Errorf("the reason should name %q; got %q", want, res.Pending.Reason)
+		}
+	}
+}
+
+func TestDoctorGithubPassesThroughTheOwnersConnection(t *testing.T) {
+	f := &fakeConfig{conns: []configsurface.Connection{
+		{ID: "int_user", Provider: "github", Status: "active", ExternalAccountLogin: strptr("adampullely")},
+		{ID: "int_org", Provider: "github", Status: "active", ExternalAccountLogin: strptr("SourcePlane")},
+	}}
+	in := doctorInput(t, map[string]any{"providers": []any{"github"}, "githubOwner": "sourceplane"})
+	res, err := doctorOn(context.Background(), f, "ws_1", in, func(time.Duration) {})
+	if err != nil || res.Pending != nil {
+		t.Fatalf("the owner's connection should satisfy github; err=%v pending=%v", err, res.Pending)
+	}
+}
+
+// Without githubOwner, any active GitHub connection still counts, as before.
+func TestDoctorGithubWithoutAnOwnerIsUnchanged(t *testing.T) {
+	f := &fakeConfig{conns: []configsurface.Connection{
+		{ID: "int_user", Provider: "github", Status: "active", ExternalAccountLogin: strptr("adampullely")},
+	}}
+	in := doctorInput(t, map[string]any{"providers": []any{"github"}})
+	res, err := doctorOn(context.Background(), f, "ws_1", in, func(time.Duration) {})
+	if err != nil || res.Pending != nil {
+		t.Fatalf("any github connection should count without an owner; err=%v pending=%v", err, res.Pending)
+	}
+}
