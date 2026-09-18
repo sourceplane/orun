@@ -18,6 +18,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/sourceplane/orun/internal/githubretry"
 )
 
 // Client talks to the GitHub API.
@@ -35,7 +37,13 @@ type Client struct {
 	HTTP    *http.Client
 }
 
+// do performs one API call; a READ that fails in transit or on a 429/5xx is
+// asked again (githubretry).
 func (c *Client) do(ctx context.Context, method, path string, body []byte, out any) (int, error) {
+	return githubretry.Do(ctx, method, func() (int, error) { return c.once(ctx, method, path, body, out) })
+}
+
+func (c *Client) once(ctx context.Context, method, path string, body []byte, out any) (int, error) {
 	base := c.APIBase
 	if base == "" {
 		base = "https://api.github.com"

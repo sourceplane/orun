@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/sourceplane/orun/internal/githubretry"
 )
 
 // Landing a PR the pen opened (orun-bootstrap-engine BE-O1b).
@@ -307,6 +309,16 @@ func (p *Pen) merge(ctx context.Context, owner, repo string, number int, sha, me
 // GitHub's own message through, because "422" alone is not something an
 // operator can act on.
 func (p *Pen) apiJSON(ctx context.Context, method, path, token string, body []byte, out any) error {
+	// A READ that fails in transit or on a 429/5xx is asked again: the check
+	// wait polls for up to an hour, and one dropped connection must not end a
+	// landing whose CI is fine (githubretry).
+	_, err := githubretry.Do(ctx, method, func() (int, error) {
+		return p.apiOnce(ctx, method, path, token, body, out)
+	})
+	return err
+}
+
+func (p *Pen) apiOnce(ctx context.Context, method, path, token string, body []byte, out any) (int, error) {
 	apiBase := p.APIBase
 	if apiBase == "" {
 		apiBase = "https://api.github.com"
@@ -317,7 +329,7 @@ func (p *Pen) apiJSON(ctx context.Context, method, path, token string, body []by
 	}
 	req, err := http.NewRequestWithContext(ctx, method, apiBase+path, reader)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	// Asked again for EVERY request, with the one the landing started with as
 	// the fallback: the check wait below runs up to an hour, and a minted
@@ -338,7 +350,7 @@ func (p *Pen) apiJSON(ctx context.Context, method, path, token string, body []by
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("provenance: %s %s: %w", method, path, err)
+		return 0, fmt.Errorf("provenance: %s %s: %w", method, path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -351,15 +363,15 @@ func (p *Pen) apiJSON(ctx context.Context, method, path, token string, body []by
 		if detail == "" {
 			detail = truncate(string(raw))
 		}
-		return fmt.Errorf("provenance: GitHub answered %d for %s: %s", resp.StatusCode, path, detail)
+		return resp.StatusCode, fmt.Errorf("provenance: GitHub answered %d for %s: %s", resp.StatusCode, path, detail)
 	}
 	if out == nil {
-		return nil
+		return resp.StatusCode, nil
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("provenance: decoding %s: %w", path, err)
+		return resp.StatusCode, fmt.Errorf("provenance: decoding %s: %w", path, err)
 	}
-	return nil
+	return resp.StatusCode, nil
 }
 
 // originRepo resolves owner/repo from the origin remote.
