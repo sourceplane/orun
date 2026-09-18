@@ -45,15 +45,34 @@ func init() {
 			{Name: "mergeMethod", Type: ParamString, Default: "squash",
 				Description: "squash | merge | rebase"},
 		},
-		Outputs: []string{"branch", "number", "url", "merged", "mergeSha"},
+		Outputs: []string{"branch", "number", "url", "merged", "mergeSha", "landed"},
 	}, runPRLand)
 }
 
 func runPRLand(ctx context.Context, in Input) (Result, error) {
-	pen := &provenance.Pen{Workdir: in.Dir, Token: cliauth.GitHubTokenFromEnv}
+	return landWith(ctx, &provenance.Pen{Workdir: in.Dir, Token: cliauth.GitHubTokenFromEnv}, in)
+}
+
+// landWith is the landing against a given pen — the seam a test points at a
+// fake GitHub while the git underneath stays real.
+func landWith(ctx context.Context, pen *provenance.Pen, in Input) (Result, error) {
+	task := StringParam(in, "task")
+	title := StringParam(in, "title")
+	if title == "" {
+		title = task
+	}
+	prep, err := prepareLanding(ctx, gitDir(in.Dir), StringParam(in, "base"), title, task)
+	if err != nil {
+		return Result{}, err
+	}
+	if prep.nothing {
+		return Result{Outputs: map[string]string{
+			"branch": "", "number": "", "url": "", "merged": "false", "mergeSha": "", "landed": "false",
+		}}, nil
+	}
 
 	opened, err := pen.Open(ctx, provenance.OpenRequest{
-		TaskKey:    StringParam(in, "task"),
+		TaskKey:    task,
 		Title:      StringParam(in, "title"),
 		Base:       StringParam(in, "base"),
 		BranchSlug: StringParam(in, "branchSlug"),
@@ -68,12 +87,19 @@ func runPRLand(ctx context.Context, in Input) (Result, error) {
 		return Result{}, err
 	}
 
+	// The pen has its grammar branch now, carrying the scratch commit; the
+	// scratch branch has done its job.
+	if prep.scratch != "" && opened.Branch != prep.scratch {
+		_, _ = gitDir(in.Dir).run(ctx, "branch", "-q", "-D", prep.scratch)
+	}
+
 	out := map[string]string{
 		"branch":   opened.Branch,
 		"number":   fmt.Sprint(opened.Number),
 		"url":      opened.URL,
 		"merged":   "false",
 		"mergeSha": "",
+		"landed":   "true",
 	}
 	// No credential: the pen prepared everything and printed the compare URL.
 	// That is honest for a human at a terminal and useless to an unattended

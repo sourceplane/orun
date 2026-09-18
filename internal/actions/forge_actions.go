@@ -26,7 +26,7 @@ func init() {
 			{Name: "inOrg", Type: ParamBool, Default: true,
 				Description: "owner is an organization; false creates in the token's own account"},
 		},
-		Outputs: []string{"fullName", "cloneUrl", "created"},
+		Outputs: []string{"fullName", "cloneUrl", "created", "remote"},
 	}, runRepoEnsure)
 
 	register(Spec{
@@ -63,13 +63,17 @@ func runRepoEnsure(ctx context.Context, in Input) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	res, err := client.EnsureRepo(ctx, StringParam(in, "owner"), StringParam(in, "name"),
-		BoolParam(in, "private"), BoolParam(in, "inOrg"))
+	owner, name := StringParam(in, "owner"), StringParam(in, "name")
+	res, err := client.EnsureRepo(ctx, owner, name, BoolParam(in, "private"), BoolParam(in, "inOrg"))
 	if err != nil {
 		return Result{}, err
 	}
+	remote, err := wireOrigin(ctx, in.Dir, owner, name)
+	if err != nil {
+		return Result{}, fmt.Errorf("the repository exists, but wiring it as origin failed: %w", err)
+	}
 	return Result{Outputs: map[string]string{
-		"fullName": res.FullName, "cloneUrl": res.CloneURL, "created": fmt.Sprint(res.Created),
+		"fullName": res.FullName, "cloneUrl": res.CloneURL, "created": fmt.Sprint(res.Created), "remote": remote,
 	}}, nil
 }
 

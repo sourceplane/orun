@@ -153,7 +153,11 @@ func checkProbes(ctx context.Context, plan *runPlan, opts Options, phase PhasePl
 // and re-running from the top is the behaviour a baseline's phases already
 // document. Resuming mid-list would require knowing which hooks are safe to
 // skip, which is a claim only the hook itself could make.
-func runPhaseHooks(ctx context.Context, hr *hookRunner, decl *Phase, hooks []Hook) ([]string, error) {
+//
+// `place` writes the phase's files between pre and post, inside the attempt, so
+// a retry starts from what the phase places rather than from whatever a failed
+// post hook left half-edited. Nil places nothing.
+func runPhaseHooks(ctx context.Context, hr *hookRunner, decl *Phase, pre []Hook, place func() error, post []Hook) ([]string, error) {
 	attempts := 1
 	backoff := 0
 	if decl != nil && decl.Retry != nil {
@@ -163,7 +167,7 @@ func runPhaseHooks(ctx context.Context, hr *hookRunner, decl *Phase, hooks []Hoo
 	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
 		hr.resetOutputs()
-		ran, err := hr.run(ctx, hooks)
+		ran, err := runPrePlacePost(ctx, hr, pre, place, post)
 		if err == nil {
 			return ran, nil
 		}
@@ -191,6 +195,23 @@ func runPhaseHooks(ctx context.Context, hr *hookRunner, decl *Phase, hooks []Hoo
 		return nil, fmt.Errorf("after %d attempt(s): %w", attempts, lastErr)
 	}
 	return nil, lastErr
+}
+
+// runPrePlacePost is one attempt: the pre hooks, the placement, the post hooks.
+// Outputs recorded by a pre hook stay readable by a post hook — the placement
+// between them does not reset the phase's scope.
+func runPrePlacePost(ctx context.Context, hr *hookRunner, pre []Hook, place func() error, post []Hook) ([]string, error) {
+	ran, err := hr.run(ctx, pre)
+	if err != nil {
+		return ran, err
+	}
+	if place != nil {
+		if err := place(); err != nil {
+			return ran, fmt.Errorf("placing the phase's files: %w", err)
+		}
+	}
+	more, err := hr.run(ctx, post)
+	return append(ran, more...), err
 }
 
 // unknownNote explains a requirement the product tree cannot answer.

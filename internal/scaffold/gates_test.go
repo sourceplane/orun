@@ -274,7 +274,7 @@ func TestPhaseRetryRerunsTheHooks(t *testing.T) {
 	hr := &hookRunner{outDir: t.TempDir(), actions: &flakyRunner{failures: 2}}
 	decl := &Phase{Name: "p", Retry: &RetrySpec{Attempts: 3}}
 	hooks := []Hook{{ID: "h", Uses: "orun.http/probe@v1"}}
-	if _, err := runPhaseHooks(context.Background(), hr, decl, hooks); err != nil {
+	if _, err := runPhaseHooks(context.Background(), hr, decl, nil, nil, hooks); err != nil {
 		t.Fatalf("two transient failures inside a budget of three should succeed: %v", err)
 	}
 }
@@ -283,7 +283,7 @@ func TestPhaseRetryGivesUpAndSaysHowManyTimesItTried(t *testing.T) {
 	hr := &hookRunner{outDir: t.TempDir(), actions: &flakyRunner{failures: 99}}
 	decl := &Phase{Name: "p", Retry: &RetrySpec{Attempts: 2}}
 	hooks := []Hook{{ID: "h", Uses: "orun.http/probe@v1"}}
-	_, err := runPhaseHooks(context.Background(), hr, decl, hooks)
+	_, err := runPhaseHooks(context.Background(), hr, decl, nil, nil, hooks)
 	if err == nil {
 		t.Fatal("a persistent failure must surface")
 	}
@@ -298,7 +298,7 @@ func TestWithoutARetryPolicyAHookRunsOnce(t *testing.T) {
 	flaky := &flakyRunner{failures: 1}
 	hr := &hookRunner{outDir: t.TempDir(), actions: flaky}
 	hooks := []Hook{{ID: "h", Uses: "orun.http/probe@v1"}}
-	if _, err := runPhaseHooks(context.Background(), hr, nil, hooks); err == nil {
+	if _, err := runPhaseHooks(context.Background(), hr, nil, nil, nil, hooks); err == nil {
 		t.Fatal("with no policy the single failure should surface")
 	}
 	if flaky.calls != 1 {
