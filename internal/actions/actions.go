@@ -37,6 +37,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -221,7 +222,7 @@ func Validate(id string, with map[string]any) error {
 		if templated(value) {
 			continue
 		}
-		if err := checkType(p, value); err != nil {
+		if _, err := coerceType(p, value); err != nil {
 			return fmt.Errorf("action %s parameter %q: %w", id, name, err)
 		}
 	}
@@ -236,18 +237,41 @@ func Validate(id string, with map[string]any) error {
 	return nil
 }
 
-// checkType enforces one parameter's declared type against a concrete value.
-// YAML decoding is generous about numbers, so an int parameter accepts any
-// integral value; a fractional one is refused rather than silently truncated.
-func checkType(p Param, value any) error {
+// coerceType enforces one parameter's declared type and returns the value in
+// the shape the action will read it back in. YAML decoding is generous about
+// numbers, so an int parameter accepts any integral value; a fractional one is
+// refused rather than silently truncated.
+//
+// A STRING IS WHAT A TEMPLATE PRODUCES, and for a `bool` or `int` parameter it
+// is the only thing one can produce: renderValue returns text. So a blueprint
+// could declare a boolean input and never reach a boolean parameter with it —
+//
+//	private: "{{ .inputs.repoPrivate }}"
+//	✕ action orun.repo/ensure@v1 parameter "private": expects a boolean, got string
+//
+// — which left `orun.repo/ensure@v1`'s `private` hard-coded in every blueprint
+// that used it. A string that parses as the declared type is therefore
+// converted HERE, once, so BoolParam and IntParam always read a real bool or
+// int and no action has to know where its value came from. A string that does
+// not parse is still an error, and a value of any other wrong type still is.
+func coerceType(p Param, value any) (any, error) {
 	switch p.Type {
 	case ParamString:
 		if _, ok := value.(string); !ok {
-			return fmt.Errorf("expects a string, got %T", value)
+			return nil, fmt.Errorf("expects a string, got %T", value)
 		}
 	case ParamBool:
-		if _, ok := value.(bool); !ok {
-			return fmt.Errorf("expects a boolean, got %T", value)
+		switch b := value.(type) {
+		case bool:
+			return b, nil
+		case string:
+			parsed, err := strconv.ParseBool(strings.TrimSpace(b))
+			if err != nil {
+				return nil, fmt.Errorf("expects a boolean, got %q (a rendered template must read true or false)", b)
+			}
+			return parsed, nil
+		default:
+			return nil, fmt.Errorf("expects a boolean, got %T", value)
 		}
 	case ParamInt:
 		switch n := value.(type) {
@@ -255,25 +279,31 @@ func checkType(p Param, value any) error {
 		case int64:
 		case float64:
 			if n != float64(int64(n)) {
-				return fmt.Errorf("expects a whole number, got %v", n)
+				return nil, fmt.Errorf("expects a whole number, got %v", n)
 			}
+		case string:
+			parsed, err := strconv.Atoi(strings.TrimSpace(n))
+			if err != nil {
+				return nil, fmt.Errorf("expects a whole number, got %q (a rendered template must read as one)", n)
+			}
+			return parsed, nil
 		default:
-			return fmt.Errorf("expects a number, got %T", value)
+			return nil, fmt.Errorf("expects a number, got %T", value)
 		}
 	case ParamStringList:
 		items, ok := value.([]any)
 		if !ok {
-			return fmt.Errorf("expects a list of strings, got %T", value)
+			return nil, fmt.Errorf("expects a list of strings, got %T", value)
 		}
 		for i, item := range items {
 			if _, ok := item.(string); !ok {
-				return fmt.Errorf("expects a list of strings; item %d is %T", i, item)
+				return nil, fmt.Errorf("expects a list of strings; item %d is %T", i, item)
 			}
 		}
 	default:
-		return fmt.Errorf("declares unknown type %q", p.Type)
+		return nil, fmt.Errorf("declares unknown type %q", p.Type)
 	}
-	return nil
+	return value, nil
 }
 
 // Resolve applies declared defaults and re-checks every value's type. It runs
@@ -293,10 +323,11 @@ func Resolve(id string, with map[string]any) (map[string]any, error) {
 			}
 			continue
 		}
-		if err := checkType(p, value); err != nil {
+		coerced, err := coerceType(p, value)
+		if err != nil {
 			return nil, fmt.Errorf("action %s parameter %q: %w", id, p.Name, err)
 		}
-		out[p.Name] = value
+		out[p.Name] = coerced
 	}
 	return out, nil
 }

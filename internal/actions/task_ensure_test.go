@@ -177,8 +177,16 @@ func TestEnsureTaskIsIdempotentByTitleWithinItsEpic(t *testing.T) {
 	}
 }
 
+// THIS TEST USED TO ASSERT THE DEFECT. It required the milestone NAME to ride
+// the create — `f.lastTask.Milestone != "05-edge"` — which is precisely what
+// the real plane refuses: `milestone: must be a milestone ref (mls_…)`. The
+// fake accepted the string the plane would have rejected, so the hook could
+// never work in any workspace while this stayed green. What must ride the
+// create is the mls_… the name resolves to.
 func TestEnsureTaskClubsItUnderEpicAndMilestone(t *testing.T) {
-	f := &fakePlane{}
+	f := &fakePlane{epics: map[string]*remotestate.EpicView{
+		"infra-baselining": {Milestones: []remotestate.PublicMilestone{{ID: "mls_edge", Name: "05-edge"}}},
+	}}
 	if _, err := ensure(t, f, map[string]any{
 		"kind": "task", "name": "phase(05-edge): api-edge",
 		"epic": "infra-baselining", "milestone": "05-edge", "brief": "the edge",
@@ -187,11 +195,71 @@ func TestEnsureTaskClubsItUnderEpicAndMilestone(t *testing.T) {
 	}
 	// Epic and milestone must ride the SAME create — the plane resolves them
 	// before minting the key, so a bad ref is a 422 rather than a half-made task.
-	if f.lastTask.Epic != "infra-baselining" || f.lastTask.Milestone != "05-edge" {
-		t.Errorf("the task should be born clubbed, got %+v", f.lastTask)
+	if f.lastTask.Epic != "infra-baselining" || f.lastTask.Milestone != "mls_edge" {
+		t.Errorf("the task should be born clubbed to the resolved milestone, got %+v", f.lastTask)
+	}
+	if f.createdMs != 0 {
+		t.Errorf("the milestone already existed; %d were created", f.createdMs)
 	}
 	if f.lastTask.Brief != "the edge" {
 		t.Errorf("the brief should ride the create, got %q", f.lastTask.Brief)
+	}
+}
+
+// A phase whose milestone does not exist yet gets it made, by the same
+// find-or-create the `milestone` kind uses — that is what lets a bootstrap
+// name its phases and re-find them on a re-run.
+func TestEnsureTaskMakesTheMilestoneItNamesWhenItIsMissing(t *testing.T) {
+	f := &fakePlane{epics: map[string]*remotestate.EpicView{
+		"infra-baselining": {},
+	}}
+	if _, err := ensure(t, f, map[string]any{
+		"kind": "task", "name": "phase(01-scaffold): repo born",
+		"epic": "infra-baselining", "milestone": "01-scaffold",
+	}); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if f.createdMs != 1 {
+		t.Fatalf("the named milestone should have been created once, got %d", f.createdMs)
+	}
+	if f.lastTask.Milestone != "mls_new" {
+		t.Fatalf("the task should club under the milestone just made, got %q", f.lastTask.Milestone)
+	}
+}
+
+// An mls_… is already the thing the plane wants: passed through untouched, and
+// no epic read to do it.
+func TestEnsureTaskPassesAMilestoneIDStraightThrough(t *testing.T) {
+	f := &fakePlane{}
+	if _, err := ensure(t, f, map[string]any{
+		"kind": "task", "name": "t", "epic": "infra-baselining", "milestone": "mls_given",
+	}); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if f.lastTask.Milestone != "mls_given" {
+		t.Fatalf("milestone = %q, want it passed through", f.lastTask.Milestone)
+	}
+	if f.createdMs != 0 {
+		t.Errorf("an id needs no milestone created, %d were", f.createdMs)
+	}
+}
+
+// A name with no epic cannot be found within anything. Say that, rather than
+// letting the plane answer with its own stricter rule about a field the hook
+// did not get wrong.
+func TestEnsureTaskRefusesAMilestoneNameWithNoEpic(t *testing.T) {
+	f := &fakePlane{}
+	_, err := ensure(t, f, map[string]any{
+		"kind": "task", "name": "t", "milestone": "05-edge",
+	})
+	if err == nil {
+		t.Fatal("a milestone name with no epic must not reach the plane")
+	}
+	if !strings.Contains(err.Error(), "`epic`") || !strings.Contains(err.Error(), "mls_") {
+		t.Fatalf("error = %q, want it to name the epic it needs and the id that would do instead", err)
+	}
+	if f.createdTsk != 0 {
+		t.Error("a task was minted despite the unresolvable milestone")
 	}
 }
 
