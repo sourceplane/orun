@@ -39,6 +39,8 @@ func init() {
 				Description: "branch whose newest run is watched"},
 			{Name: "runId", Type: ParamInt, Default: 0,
 				Description: "watch this run instead of the branch's newest"},
+			{Name: "sha", Type: ParamString,
+				Description: "watch the run for this commit — e.g. the landing's mergeSha — waiting for it to appear"},
 			{Name: "waitSeconds", Type: ParamInt, Default: 0,
 				Description: "how long to watch; 0 reports pending as soon as it is not finished"},
 			{Name: "pollSeconds", Type: ParamInt, Default: 40,
@@ -81,6 +83,7 @@ func runRepoEnsure(ctx context.Context, in Input) (Result, error) {
 // the part with a budget and a judgement in it — is testable without GitHub.
 type watcher interface {
 	LatestRun(ctx context.Context, owner, repo, branch string) (*forge.Run, error)
+	RunForCommit(ctx context.Context, owner, repo, branch, sha string) (*forge.Run, error)
 	GetRun(ctx context.Context, owner, repo string, id int64) (*forge.Run, error)
 	RerunFailed(ctx context.Context, owner, repo string, id int64) error
 	FailedJobs(ctx context.Context, owner, repo string, id int64) ([]string, error)
@@ -128,9 +131,35 @@ func watchOn(ctx context.Context, c watcher, in Input, sleep func(time.Duration)
 
 	var run *forge.Run
 	var err error
-	if id := int64(IntParam(in, "runId")); id > 0 {
+	sha := strings.TrimSpace(StringParam(in, "sha"))
+	switch id := int64(IntParam(in, "runId")); {
+	case id > 0:
 		run, err = c.GetRun(ctx, owner, repo, id)
-	} else {
+	case sha != "":
+		// THE RUN FOR THE COMMIT THAT WAS LANDED, not the branch's newest.
+		//
+		// A convergence is watched the moment its landing merges, and GitHub
+		// registers the push's run a few seconds later. In that gap the
+		// branch's newest run is the PREVIOUS phase's — already green — or,
+		// after the very first landing, there is none at all, which reads as
+		// "nothing to converge". Either way the watch answered "converged" for
+		// a run that had not started, and the next phase went ahead of it.
+		//
+		// So a named commit is waited for until its run exists: absent is
+		// "not yet", reported pending once the wait runs out, never success.
+		for {
+			if run, err = c.RunForCommit(ctx, owner, repo, branch, sha); err != nil || run != nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				return Result{
+					Outputs: map[string]string{"runId": "0", "conclusion": "", "url": "", "resumes": "0"},
+					Pending: &Pending{Reason: fmt.Sprintf("no run on %s for %s yet", branch, sha), RetryAfter: poll},
+				}, nil
+			}
+			sleep(poll)
+		}
+	default:
 		run, err = c.LatestRun(ctx, owner, repo, branch)
 	}
 	if err != nil {
