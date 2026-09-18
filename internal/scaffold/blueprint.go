@@ -97,7 +97,23 @@ type InputSpec struct {
 	// MUST NOT be written into any generated file (design §8).
 	Secret      bool   `yaml:"secret,omitempty" json:"secret,omitempty"`
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+	// From names a fact of the run that supplies this input when nobody set
+	// it (InputFrom*). A value that was set — flag, values file, or the tree's
+	// own record — always wins; the fact fills only a gap.
+	From string `yaml:"from,omitempty" json:"from,omitempty"`
 }
+
+// InputFromWorkspace fills an input with the Orun workspace the build runs
+// in: `--workspace` where the command takes one, else ORUN_WORKSPACE (else
+// ORUN_ORG) — which a platform sandbox always sets.
+//
+// It exists because a console build had no other way to say it. cirrus takes
+// its workspace as an input (`orunWorkspace`: the product CI's remote state,
+// its secret refs, its repository link), the console never sends it, and a
+// build without it wrote `workspace: ws_SET_ME` into the product and pointed
+// every secret ref at the repository's name — while the sandbox it ran in
+// knew the answer all along.
+const InputFromWorkspace = "workspace"
 
 // SourceKind enumerates the closed set of source resolvers (design §5).
 type SourceKind string
@@ -393,6 +409,11 @@ func (bp *Blueprint) validate() error {
 	}
 	if len(bp.Modules) == 0 {
 		return fmt.Errorf("blueprint must declare at least one module")
+	}
+	for name, in := range bp.Inputs {
+		if in.From != "" && in.From != InputFromWorkspace {
+			return fmt.Errorf("input %q: from must be %q, got %q", name, InputFromWorkspace, in.From)
+		}
 	}
 
 	sourceNames := make(map[string]struct{}, len(bp.Sources))
