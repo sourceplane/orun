@@ -92,6 +92,8 @@ func init() {
 				Description: "how long to wait for a missing consent; 0 reports pending immediately"},
 			Param{Name: "pollSeconds", Type: ParamInt, Default: 20,
 				Description: "how often to re-read the connections while waiting"},
+			Param{Name: "githubOwner", Type: ParamString,
+				Description: "the GitHub org or user the product repository belongs to; github then counts only through a connection to that account"},
 		),
 		Outputs: []string{"connected", "missing"},
 	}, runDoctorCheck)
@@ -140,16 +142,47 @@ func doctorOn(ctx context.Context, c connections, org string, in Input, sleep fu
 			// broken credential, which is the failure this ordering prevents.
 			return Result{}, fmt.Errorf("reading connections for %s: %w", org, err)
 		}
+		// A GITHUB CONNECTION TO THE WRONG ACCOUNT IS NOT A GITHUB CONNECTION
+		// for this product. The platform learns of a repository's pushes and
+		// pull requests only through the App installation on the account that
+		// OWNS the repository; any other installation never sees them. So
+		// "github is connected" held for a workspace whose only connection was
+		// a user account's, the product was built under an org, and every PR
+		// it opened stayed invisible to the platform — no PR rows, no task
+		// filing — with nothing in the bootstrap saying why. With githubOwner
+		// set, only a connection to that account satisfies `github`.
+		owner := strings.TrimSpace(StringParam(in, "githubOwner"))
 		active := map[string]bool{}
+		var githubAccounts []string
 		for _, conn := range live {
-			if strings.EqualFold(conn.Status, "active") {
-				active[strings.ToLower(conn.Provider)] = true
+			if !strings.EqualFold(conn.Status, "active") {
+				continue
 			}
+			provider := strings.ToLower(conn.Provider)
+			if provider == "github" && owner != "" {
+				login := ""
+				if conn.ExternalAccountLogin != nil {
+					login = *conn.ExternalAccountLogin
+				}
+				githubAccounts = append(githubAccounts, login)
+				if !strings.EqualFold(login, owner) {
+					continue
+				}
+			}
+			active[provider] = true
 		}
 		var missing []string
 		for _, p := range want {
 			if !active[strings.ToLower(strings.TrimSpace(p))] {
-				missing = append(missing, p)
+				label := p
+				if strings.EqualFold(strings.TrimSpace(p), "github") && owner != "" {
+					label = fmt.Sprintf("github for %s", owner)
+					if len(githubAccounts) > 0 {
+						sort.Strings(githubAccounts)
+						label += fmt.Sprintf(" (connected: %s)", strings.Join(githubAccounts, ", "))
+					}
+				}
+				missing = append(missing, label)
 			}
 		}
 		sort.Strings(missing)
