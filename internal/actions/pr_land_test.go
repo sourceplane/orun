@@ -90,7 +90,11 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, prefix+"/"):
 		pr := f.pr(r.URL.Path, prefix)
 		head := gitT(f.t, f.bare, "rev-parse", "refs/heads/"+pr["head"].(string))
-		_ = json.NewEncoder(w).Encode(map[string]any{"head": map[string]any{"sha": head}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"head": map[string]any{"sha": head, "ref": pr["head"]}})
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, fmt.Sprintf("/repos/%s/%s/git/refs/heads/", landOwner, landRepo)):
+		ref := strings.TrimPrefix(r.URL.Path, fmt.Sprintf("/repos/%s/%s/git/refs/", landOwner, landRepo))
+		gitT(f.t, f.bare, "update-ref", "-d", "refs/"+ref)
+		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/merge"):
 		pr := f.pr(strings.TrimSuffix(r.URL.Path, "/merge"), prefix)
 		head, base := pr["head"].(string), pr["base"].(string)
@@ -264,6 +268,29 @@ func TestNothingToLandIsNotAnError(t *testing.T) {
 	}
 	if len(r.gh.opened) != 1 {
 		t.Errorf("a re-run opened another pull request (%d total)", len(r.gh.opened))
+	}
+}
+
+// A phase re-run after a fix lands the same task again, and so computes the
+// same branch name. The first landing's branch must be gone by then: after a
+// squash merge its head is no ancestor of anything new, and the push that
+// re-used the name was refused as non-fast-forward — a phase could land once.
+func TestATaskCanLandASecondTime(t *testing.T) {
+	r := newLandRig(t)
+	r.write(t, map[string]string{"README.md": "hi\n"})
+	if _, err := r.land(t, "BASE-2", "02-foundation"); err != nil {
+		t.Fatalf("first landing: %v", err)
+	}
+	if heads := gitT(t, r.bare, "for-each-ref", "--format=%(refname)", "refs/heads/orun/"); heads != "" {
+		t.Errorf("the merged branch is still on the remote: %s", heads)
+	}
+	r.write(t, map[string]string{"pnpm-lock.yaml": "lockfileVersion: '9.0'\n"})
+	res, err := r.land(t, "BASE-2", "02-foundation")
+	if err != nil {
+		t.Fatalf("second landing of the same task: %v", err)
+	}
+	if res.Outputs["merged"] != "true" || len(r.gh.opened) != 2 {
+		t.Errorf("want a second merged PR, got %v with %d PRs", res.Outputs, len(r.gh.opened))
 	}
 }
 

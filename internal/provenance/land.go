@@ -58,6 +58,8 @@ type LandResult struct {
 	ChecksSeen int
 	// MergeSHA is the resulting commit on the base branch.
 	MergeSHA string
+	// BranchDeleted: the merged head branch is gone from the remote.
+	BranchDeleted bool
 }
 
 // checkRun is the subset of a GitHub check run this cares about.
@@ -98,7 +100,7 @@ func (p *Pen) Land(ctx context.Context, req LandRequest) (*LandResult, error) {
 		return nil, fmt.Errorf("provenance: landing needs a GitHub credential (GITHUB_TOKEN / GH_TOKEN / gh auth)")
 	}
 
-	head, err := p.prHeadSHA(ctx, owner, repo, req.Number, token)
+	head, headRef, err := p.prHead(ctx, owner, repo, req.Number, token)
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +128,22 @@ func (p *Pen) Land(ctx context.Context, req LandRequest) (*LandResult, error) {
 	}
 	if _, err := p.git(ctx, "pull", "--ff-only", "origin", base); err != nil {
 		return out, fmt.Errorf("provenance: merged, but pulling %s failed: %w", base, err)
+	}
+
+	// THE MERGED BRANCH GOES, as it did in the shell this replaced
+	// (`gh pr merge --squash --delete-branch`). It is not tidiness. The branch
+	// name is derived from the task, so a task landed a second time (a phase
+	// re-run after a fix) computes the SAME name. After a squash merge, the
+	// old branch's head is no ancestor of the new commit, so the push was
+	// refused as non-fast-forward, and a phase could land exactly once. Best
+	// effort: a repository whose settings already delete merged branches has
+	// nothing left to delete, and failing a landing that merged over the
+	// cleanup would report the wrong thing.
+	if headRef != "" && headRef != base {
+		if err := p.apiJSON(ctx, http.MethodDelete, fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", owner, repo, headRef), token, nil, nil); err == nil {
+			out.BranchDeleted = true
+		}
+		_, _ = p.git(ctx, "branch", "-D", headRef)
 	}
 	return out, nil
 }
@@ -189,20 +207,21 @@ func (p *Pen) checkRuns(ctx context.Context, owner, repo, sha, token string) ([]
 	return payload.CheckRuns, nil
 }
 
-func (p *Pen) prHeadSHA(ctx context.Context, owner, repo string, number int, token string) (string, error) {
+func (p *Pen) prHead(ctx context.Context, owner, repo string, number int, token string) (string, string, error) {
 	var payload struct {
 		Head struct {
 			SHA string `json:"sha"`
+			Ref string `json:"ref"`
 		} `json:"head"`
 	}
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, number)
 	if err := p.apiJSON(ctx, http.MethodGet, path, token, nil, &payload); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if payload.Head.SHA == "" {
-		return "", fmt.Errorf("provenance: pull request #%d has no head commit", number)
+		return "", "", fmt.Errorf("provenance: pull request #%d has no head commit", number)
 	}
-	return payload.Head.SHA, nil
+	return payload.Head.SHA, payload.Head.Ref, nil
 }
 
 func (p *Pen) merge(ctx context.Context, owner, repo string, number int, sha, method, token string) (string, error) {
