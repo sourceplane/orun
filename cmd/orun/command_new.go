@@ -112,6 +112,12 @@ func runScaffoldNew(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// AFTER recovery: a value the tree already records is what this product
+	// was built with, and the workspace this shell happens to be in must not
+	// change it. The fact only fills a gap.
+	inputs = scaffold.FillInputsFromFacts(bp.Inputs, inputs, scaffold.InputFacts{
+		Workspace: buildWorkspace(os.Getenv),
+	})
 	// A key the blueprint does not declare is wrong BEFORE any question is
 	// asked. CollectInputs already fails closed on one, but it runs after the
 	// prompts, so a single typo in a values file cost a full interrogation and
@@ -466,4 +472,17 @@ func repoScaleGate(intentPath string) error {
 		return fmt.Errorf("plan: %w", err)
 	}
 	return nil
+}
+
+// buildWorkspace is the workspace a build runs in, for inputs declared
+// `from: workspace`: ORUN_WORKSPACE, else ORUN_ORG — the order every action
+// resolves its workspace in, so the input and the hooks that use it cannot
+// disagree. A platform sandbox sets ORUN_WORKSPACE for every session.
+func buildWorkspace(getenv func(string) string) string {
+	for _, v := range []string{getenv("ORUN_WORKSPACE"), getenv("ORUN_ORG")} {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
+		}
+	}
+	return ""
 }

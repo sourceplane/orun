@@ -68,6 +68,37 @@ func (v Values) nonSecretFields() map[string]any {
 	return out
 }
 
+// InputFacts are what the run itself knows, for inputs declared `from:` one.
+type InputFacts struct {
+	// Workspace is the Orun workspace the build runs in (InputFromWorkspace).
+	Workspace string
+}
+
+// FillInputsFromFacts returns raw with every unset `from:` input filled from
+// facts. A key already present — set by a flag, a values file, or recovered
+// from the tree's record — is left exactly as it is, including an empty
+// value someone set on purpose; an empty fact fills nothing, so the input's
+// default still applies. raw is not modified.
+//
+// Filled here, into the RAW inputs, rather than inside the engine: a filled
+// value is then recorded, hashed and recovered exactly like a typed one, so a
+// resume in another container and an upgrade both see what the build saw.
+func FillInputsFromFacts(specs map[string]InputSpec, raw map[string]string, facts InputFacts) map[string]string {
+	out := make(map[string]string, len(raw)+1)
+	for k, v := range raw {
+		out[k] = v
+	}
+	for name, spec := range specs {
+		if _, set := out[name]; set {
+			continue
+		}
+		if spec.From == InputFromWorkspace && strings.TrimSpace(facts.Workspace) != "" {
+			out[name] = strings.TrimSpace(facts.Workspace)
+		}
+	}
+	return out
+}
+
 // CollectInputs validates raw string-keyed input assignments (from --<input>
 // flags or a portal form) against the blueprint's inputs schema, producing a
 // typed, validated Values (design §7 collection, §8 secret rule). It does not
