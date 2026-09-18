@@ -319,6 +319,22 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 			}
 			drv = cc
 		}
+		if serveDriver == (&driver.Bootstrap{}).ID() {
+			// The bootstrap child is an `orun` too, and needs the same platform
+			// plumbing the harness gets: every build event it reports and every
+			// hook it runs (blueprint resolve, task plane, secrets) is a
+			// platform call. It had none of it. The sandbox's credential is
+			// ORUN_SESSION_TOKEN, which the CLI's token chain does not read, so
+			// the child's FIRST call died —
+			//
+			//   no local Orun login found; run `orun auth login --device` or set ORUN_TOKEN
+			//
+			// — before its event sink existed, and every console build sat on
+			// "Starting the build … Nothing reported yet" until the sweep
+			// failed it. ORUN_TOKEN_FILE is the rotating credential serve keeps
+			// current, which is also what an hour-long build needs.
+			drv = &driver.Bootstrap{Env: bootstrapChildEnv(os.Environ(), os.Getenv, tokenFile)}
+		}
 		if serveDriver == "stub" && runKind == nodes.RunKindInteractive {
 			drv = &driver.Stub{Interactive: true}
 		}
@@ -475,6 +491,13 @@ func mintHarnessGitToken(ctx context.Context) (string, error) {
 // skipped for want of `epic_create` (observed live). The two names are the
 // same host — api-edge serves /v1/organizations/… for both — so the seed is
 // exact, and an explicit ORUN_BACKEND_URL in the sandbox env still wins.
+// bootstrapChildEnv is serve's own environment plus the platform plumbing, for
+// the bootstrap driver's child. Appended last, so it wins over anything serve
+// inherited under the same name (os/exec keeps the last value of a key).
+func bootstrapChildEnv(environ []string, getenv func(string) string, tokenFile string) []string {
+	return append(append([]string{}, environ...), harnessPlatformEnv(getenv, tokenFile)...)
+}
+
 func harnessPlatformEnv(getenv func(string) string, tokenFile string) []string {
 	env := []string{"ORUN_TOKEN_FILE=" + tokenFile}
 	if ws := strings.TrimSpace(getenv("ORUN_WORKSPACE")); ws != "" {

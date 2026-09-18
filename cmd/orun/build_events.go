@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/scaffold"
@@ -40,11 +41,11 @@ func platformEventSink() *scaffold.PlatformSink {
 	api := os.Getenv("ORUN_CLOUD_API")
 	org := os.Getenv("ORUN_ORG_ID")
 	session := os.Getenv("ORUN_SESSION_ID")
-	token := os.Getenv("ORUN_SESSION_TOKEN")
-	if api == "" || org == "" || session == "" || token == "" {
+	tokens := eventSinkTokenSource(os.Getenv)
+	if api == "" || org == "" || session == "" || tokens == nil {
 		return nil
 	}
-	client := remotestate.NewClient(api, version, remotestate.NewStaticTokenSource(token))
+	client := remotestate.NewClient(api, version, tokens)
 	return scaffold.NewPlatformSink(
 		buildEventPoster{client: client},
 		org,
@@ -53,6 +54,22 @@ func platformEventSink() *scaffold.PlatformSink {
 			fmt.Fprintf(os.Stderr, format+"\n", args...)
 		},
 	)
+}
+
+// eventSinkTokenSource prefers the rotating credential. ORUN_SESSION_TOKEN is
+// the boot token, and serve rotates the session's credential about every 15
+// minutes, writing each one to ORUN_TOKEN_FILE. A sink holding the boot token
+// went quiet a quarter-hour into an hour-long build, and its failures reached
+// only this process's stderr. The static token stays the fallback, for a
+// caller that sets nothing else.
+func eventSinkTokenSource(getenv func(string) string) remotestate.TokenSource {
+	if path := strings.TrimSpace(getenv("ORUN_TOKEN_FILE")); path != "" {
+		return remotestate.NewFileTokenSource(path)
+	}
+	if token := strings.TrimSpace(getenv("ORUN_SESSION_TOKEN")); token != "" {
+		return remotestate.NewStaticTokenSource(token)
+	}
+	return nil
 }
 
 // buildEventPoster adapts the platform client to the engine's narrow need.
