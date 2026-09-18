@@ -25,6 +25,28 @@ type fakeConfig struct {
 	// looking at nothing in it is how an unset Kind — which the real client
 	// rejects outright — survived every test here.
 	lastScope configsurface.Scope
+	// envSecrets are the secrets a given environment rung resolves, keyed by
+	// its env_… id. When set, ListSecrets answers by scope, the way the real
+	// plane does: a workspace read does NOT see an environment's secrets.
+	envSecrets map[string][]configsurface.SecretMeta
+	scopes     []configsurface.Scope
+}
+
+func (f *fakeConfig) ResolveProjectID(_ context.Context, _, project string) (string, error) {
+	if project == "" {
+		return "", fmt.Errorf("no project")
+	}
+	return "prj_" + project, nil
+}
+
+// As strict as the plane: environments are listed by the project's prj_… id,
+// and a slug is not_found. The first version of this fake took any string,
+// and the slug it was handed failed the moment it met the real API.
+func (f *fakeConfig) ResolveEnvironmentID(_ context.Context, _, project, env string) (string, error) {
+	if !strings.HasPrefix(project, "prj_") {
+		return "", fmt.Errorf("list environments: Not found (code: not_found)")
+	}
+	return "env_" + env, nil
 }
 
 func (f *fakeConfig) ListConnections(context.Context, string) ([]configsurface.Connection, error) {
@@ -40,8 +62,15 @@ func (f *fakeConfig) ListConnections(context.Context, string) ([]configsurface.C
 
 func (f *fakeConfig) ListSecrets(_ context.Context, scope configsurface.Scope, _ bool) ([]configsurface.SecretMeta, json.RawMessage, error) {
 	f.lastScope = scope
+	f.scopes = append(f.scopes, scope)
 	if f.secretErr != nil {
 		return nil, nil, f.secretErr
+	}
+	if f.envSecrets != nil {
+		if scope.Kind == configsurface.ScopeEnvironment {
+			return f.envSecrets[scope.EnvID], nil, nil
+		}
+		return f.secrets, nil, nil
 	}
 	return f.secrets, nil, nil
 }
@@ -303,5 +332,62 @@ func TestDoctorGithubWithoutAnOwnerIsUnchanged(t *testing.T) {
 	res, err := doctorOn(context.Background(), f, "ws_1", in, func(time.Duration) {})
 	if err != nil || res.Pending != nil {
 		t.Fatalf("any github connection should count without an owner; err=%v pending=%v", err, res.Pending)
+	}
+}
+
+func metas(keys ...string) []configsurface.SecretMeta {
+	out := make([]configsurface.SecretMeta, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, configsurface.SecretMeta{SecretKey: k})
+	}
+	return out
+}
+
+// A job's output secrets are published to the project's ENVIRONMENT rungs.
+// Reading the workspace scope never saw them: cirrus's 03-infrastructure parked
+// on "secret(s) not published yet: WIRING_CLOUDFLARE_D1, WIRING_CLOUDFLARE_KV"
+// with both published on stage and prod.
+func TestSecretsExistReadsEachNamedEnvironment(t *testing.T) {
+	f := &fakeConfig{envSecrets: map[string][]configsurface.SecretMeta{
+		"env_stage": metas("WIRING_CLOUDFLARE_D1", "WIRING_CLOUDFLARE_KV"),
+		"env_prod":  metas("WIRING_CLOUDFLARE_D1", "WIRING_CLOUDFLARE_KV"),
+	}}
+	in := secretsInput(t, map[string]any{
+		"keys": []any{"WIRING_CLOUDFLARE_D1", "WIRING_CLOUDFLARE_KV"}, "project": "altocumulus",
+		"environments": []any{"stage", "prod"},
+	})
+	res, err := secretsExistOn(context.Background(), f, "ws_1", in)
+	if err != nil {
+		t.Fatalf("exists: %v", err)
+	}
+	if res.Pending != nil {
+		t.Fatalf("published environment secrets read as missing: %s", res.Pending.Reason)
+	}
+	if len(f.scopes) != 2 || f.scopes[0].Kind != configsurface.ScopeEnvironment || f.scopes[1].EnvID != "env_prod" {
+		t.Errorf("should read each environment's rung, read %+v", f.scopes)
+	}
+}
+
+func TestSecretsExistNamesTheEnvironmentAKeyIsMissingFrom(t *testing.T) {
+	f := &fakeConfig{envSecrets: map[string][]configsurface.SecretMeta{
+		"env_stage": metas("WIRING_CLOUDFLARE_D1"),
+		"env_prod":  metas(),
+	}}
+	in := secretsInput(t, map[string]any{
+		"keys": []any{"WIRING_CLOUDFLARE_D1"}, "project": "altocumulus", "environments": []any{"stage", "prod"},
+	})
+	res, err := secretsExistOn(context.Background(), f, "ws_1", in)
+	if err != nil {
+		t.Fatalf("exists: %v", err)
+	}
+	if res.Pending == nil || !strings.Contains(res.Pending.Reason, "WIRING_CLOUDFLARE_D1 (prod)") || strings.Contains(res.Pending.Reason, "(stage)") {
+		t.Fatalf("want pending naming only prod, got %+v", res.Pending)
+	}
+}
+
+func TestSecretsExistEnvironmentsNeedAProject(t *testing.T) {
+	in := secretsInput(t, map[string]any{"keys": []any{"K"}, "environments": []any{"stage"}})
+	if _, err := secretsExistOn(context.Background(), &fakeConfig{}, "ws_1", in); err == nil {
+		t.Fatal("environments without a project should be refused")
 	}
 }

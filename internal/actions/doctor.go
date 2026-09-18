@@ -73,6 +73,19 @@ type secretsLister interface {
 	ListSecrets(ctx context.Context, scope configsurface.Scope, chain bool) ([]configsurface.SecretMeta, json.RawMessage, error)
 }
 
+// environmentResolver turns a project slug and an environment slug into the
+// prj_… and env_… ids a scope needs.
+type environmentResolver interface {
+	ResolveProjectID(ctx context.Context, org, project string) (string, error)
+	ResolveEnvironmentID(ctx context.Context, org, project, env string) (string, error)
+}
+
+// secretsReader is what secrets/exists reads through.
+type secretsReader interface {
+	secretsLister
+	environmentResolver
+}
+
 // secretsPlane is what reconciling needs: read the connections, read what
 // secrets exist, and create the ones that do not.
 type secretsPlane interface {
@@ -106,6 +119,8 @@ func init() {
 				Description: "secret keys that must already exist"},
 			Param{Name: "project", Type: ParamString,
 				Description: "project scope; empty reads the workspace scope"},
+			Param{Name: "environments", Type: ParamStringList,
+				Description: "environment slugs (needs `project`): every key must resolve on each environment's rung"},
 		),
 		Outputs: []string{"present", "missing"},
 	}, runSecretsExists)
@@ -217,22 +232,89 @@ func runSecretsExists(ctx context.Context, in Input) (Result, error) {
 // A missing secret is **pending**, not failure, for the same reason: the phase
 // that publishes it may simply not have run yet, and a precondition that fails
 // hard here would turn "run phase 03 first" into a broken bootstrap.
-func secretsExistOn(ctx context.Context, c secretsLister, org string, in Input) (Result, error) {
-	scope := secretScope(org, in)
+func secretsExistOn(ctx context.Context, c secretsReader, org string, in Input) (Result, error) {
+	keys := StringListParam(in, "keys")
+	envs := StringListParam(in, "environments")
+
+	// WHERE a key is published decides where it must be looked for. A job's
+	// output secrets (WIRING_CLOUDFLARE_D1, …) are lease-published to the
+	// PROJECT'S ENVIRONMENT rungs, one per environment, so a check that read
+	// the workspace scope never saw them: cirrus's 03-infrastructure parked on
+	//
+	//   secret(s) not published yet: WIRING_CLOUDFLARE_D1, WIRING_CLOUDFLARE_KV
+	//
+	// with both published on stage and prod minutes earlier. `environments`
+	// reads each named environment with its inheritance chain — exactly what
+	// a lane on that environment resolves — and a key missing on any of them
+	// is missing.
+	if len(envs) == 0 {
+		have, err := secretKeys(ctx, c, secretScope(org, in), org)
+		if err != nil {
+			return Result{}, err
+		}
+		return secretsVerdict(keys, func(k string) []string {
+			if have[k] {
+				return nil
+			}
+			return []string{k}
+		}), nil
+	}
+	project := strings.TrimSpace(StringParam(in, "project"))
+	if project == "" {
+		return Result{}, fmt.Errorf("`environments` names a project's environments, so `project` is required")
+	}
+	// The plane lists a project's environments by its prj_… id and answers a
+	// slug with not_found — which a fake that took any string had hidden. A
+	// blueprint names its project by slug (the repo name), so resolve it.
+	projectID, err := c.ResolveProjectID(ctx, org, project)
+	if err != nil {
+		return Result{}, fmt.Errorf("resolving project %q: %w", project, err)
+	}
+	byEnv := make(map[string]map[string]bool, len(envs))
+	for _, env := range envs {
+		envID, err := c.ResolveEnvironmentID(ctx, org, projectID, env)
+		if err != nil {
+			return Result{}, fmt.Errorf("resolving environment %q of %s: %w", env, project, err)
+		}
+		scope := configsurface.Scope{Kind: configsurface.ScopeEnvironment, Org: org, Project: projectID, EnvID: envID}
+		have, err := secretKeys(ctx, c, scope, org)
+		if err != nil {
+			return Result{}, err
+		}
+		byEnv[env] = have
+	}
+	return secretsVerdict(keys, func(k string) []string {
+		var gone []string
+		for _, env := range envs {
+			if !byEnv[env][k] {
+				gone = append(gone, fmt.Sprintf("%s (%s)", k, env))
+			}
+		}
+		return gone
+	}), nil
+}
+
+func secretKeys(ctx context.Context, c secretsLister, scope configsurface.Scope, org string) (map[string]bool, error) {
 	live, _, err := c.ListSecrets(ctx, scope, true)
 	if err != nil {
-		return Result{}, fmt.Errorf("reading secrets for %s: %w", org, err)
+		return nil, fmt.Errorf("reading secrets for %s: %w", org, err)
 	}
-	have := map[string]bool{}
+	have := make(map[string]bool, len(live))
 	for _, s := range live {
 		have[s.SecretKey] = true
 	}
+	return have, nil
+}
+
+// secretsVerdict reports present and missing keys; missingFor names what is
+// missing for one key (the key itself, or the key per environment).
+func secretsVerdict(keys []string, missingFor func(string) []string) Result {
 	var missing, present []string
-	for _, k := range StringListParam(in, "keys") {
-		if have[k] {
-			present = append(present, k)
+	for _, k := range keys {
+		if gone := missingFor(k); len(gone) > 0 {
+			missing = append(missing, gone...)
 		} else {
-			missing = append(missing, k)
+			present = append(present, k)
 		}
 	}
 	sort.Strings(missing)
@@ -241,7 +323,7 @@ func secretsExistOn(ctx context.Context, c secretsLister, org string, in Input) 
 	if len(missing) > 0 {
 		return Result{Outputs: out, Pending: &Pending{
 			Reason: fmt.Sprintf("secret(s) not published yet: %s", strings.Join(missing, ", ")),
-		}}, nil
+		}}
 	}
-	return Result{Outputs: out}, nil
+	return Result{Outputs: out}
 }
