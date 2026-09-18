@@ -366,3 +366,43 @@ func TestResolveAuthUsesTokenFileBeforeLocalSession(t *testing.T) {
 		t.Errorf("token = %q, %v", tok, err)
 	}
 }
+
+// A store that could not be READ is not a store that is empty (2026-09-18).
+// Calling a corrupt or unreadable store "no local Orun login found" sent people
+// to log in again over a login that might still be valid.
+func TestResolveAuthReportsAnUnreadableStoreAsSuch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ORUN_CREDENTIAL_STORE", "file")
+	t.Setenv("ORUN_TOKEN", "")
+	t.Setenv("ORUN_TOKEN_FILE", "")
+	dir := filepath.Join(home, ".orun")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "credentials.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := remotestate.ResolveAuth(context.Background(), remotestate.ResolveOptions{BackendURL: "https://api.example", Interactive: true})
+	if err == nil {
+		t.Fatal("want an error for an unreadable store")
+	}
+	if strings.Contains(err.Error(), "no local Orun login found") {
+		t.Errorf("an unreadable store was reported as no login: %v", err)
+	}
+	if !strings.Contains(err.Error(), "read the stored Orun login") {
+		t.Errorf("err = %v, want it to say the stored login could not be read", err)
+	}
+}
+
+func TestResolveAuthStillSaysNoLoginWhenThereIsNone(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ORUN_CREDENTIAL_STORE", "file")
+	t.Setenv("ORUN_TOKEN", "")
+	t.Setenv("ORUN_TOKEN_FILE", "")
+	_, err := remotestate.ResolveAuth(context.Background(), remotestate.ResolveOptions{BackendURL: "https://api.example", Interactive: true})
+	if err == nil || !strings.Contains(err.Error(), "no local Orun login found") {
+		t.Errorf("err = %v, want 'no local Orun login found'", err)
+	}
+}

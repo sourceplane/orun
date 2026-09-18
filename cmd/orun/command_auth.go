@@ -20,6 +20,7 @@ var (
 	authAudience   string
 	authLinkOrg    string
 	authNoLink     bool
+	authOffline    bool
 )
 
 var authCmd = &cobra.Command{
@@ -46,10 +47,15 @@ func registerAuthCommand(root *cobra.Command) {
 	statusCmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show current Orun CLI login status",
+		Long: "Show the stored Orun CLI login, then check that it still works: an\n" +
+			"expired access token is refreshed the way any command would refresh it,\n" +
+			"so a login the server no longer honours is reported here rather than\n" +
+			"at the next real command. --offline skips the check.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAuthStatus()
 		},
 	}
+	statusCmd.Flags().BoolVar(&authOffline, "offline", false, "Report the stored login only; do not check it with the backend")
 
 	logoutCmd := &cobra.Command{
 		Use:   "logout",
@@ -134,6 +140,10 @@ func runAuthStatus() error {
 		}
 		fmt.Printf("Access token: %s (%s)\n", exp.Format(time.RFC3339), state)
 	}
+	liveErr := error(nil)
+	if !authOffline && resolvedBackend != "" {
+		liveErr = reportSessionLiveness(color, resolvedBackend, creds)
+	}
 	repo, repoErr := resolveRepoContext(resolvedBackend)
 	if repoErr == nil && repo != nil && repo.RepoFullName != "" {
 		status := ui.Yellow(color, "not connected")
@@ -144,6 +154,40 @@ func runAuthStatus() error {
 		}
 		fmt.Printf("Current Git remote: %s (%s)\n", repo.RepoFullName, status)
 	}
+	return liveErr
+}
+
+// reportSessionLiveness says whether the stored login still WORKS, not just
+// whether one is stored. Status used to print the stored user and orgs and stop,
+// so a login the server no longer honoured read as healthy until the next real
+// command failed — which is exactly how the 2026-09-18 logouts looked from the
+// terminal (the server had stranded the refresh chain; see orun-cloud #1582).
+//
+// It checks exactly what a command would use:
+//   - a still-valid access token is usable now — nothing is called, and the
+//     output says the refresh token is checked when it is next needed;
+//   - an expired one is REFRESHED through the same token source every command
+//     uses (cross-process lock, rotation, persist), which is the only real test
+//     of the refresh chain. Revoked or invalid → ✕ and a non-zero exit; a
+//     network or backend error → "could not verify", never a guess.
+func reportSessionLiveness(color bool, backendURL string, creds *cliauth.Credentials) error {
+	if exp := creds.AccessExpiryTime(); !exp.IsZero() && time.Now().Before(exp) {
+		fmt.Printf("Session: %s usable (access token valid for %s; the refresh token is checked when it is next needed)\n",
+			ui.Green(color, "✓"), time.Until(exp).Round(time.Minute))
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	source := &remotestate.SessionTokenSource{BackendURL: backendURL, Version: version}
+	if _, err := source.Token(ctx); err != nil {
+		if errors.Is(err, cliauth.ErrSessionRevoked) {
+			fmt.Printf("Session: %s no longer valid — the backend refused the refresh; run `orun auth login`\n", ui.Red(color, "✕"))
+			return cliauth.ErrSessionRevoked
+		}
+		fmt.Printf("Session: %s could not verify with %s: %v\n", ui.Yellow(color, "!"), backendURL, err)
+		return nil
+	}
+	fmt.Printf("Session: %s active (refreshed just now)\n", ui.Green(color, "✓"))
 	return nil
 }
 
