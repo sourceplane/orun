@@ -23,10 +23,20 @@ import (
 // Three behaviours are load-bearing and are the reason this is not three lines
 // of API calls:
 //
-//   - A repository with NO checks yet passes. The first phase of a bootstrap
-//     creates the repo and its CI in the same landing, so at merge time there
-//     is nothing to wait for. Waiting forever there is the single most common
-//     way an unattended bootstrap hangs.
+//   - A repository with NO CI passes — but only once CI has had time to
+//     appear. GitHub registers a pull request's workflow runs and check runs
+//     seconds AFTER the PR exists, so "none yet" read the moment it opens is
+//     not "none": that reading merged every PR a bootstrap opened without
+//     waiting for a single lane. And a PR that adds its own workflow (a
+//     bootstrap's first) DOES run it — pull_request workflows come from the
+//     PR's head. So nothing counts as "no CI" until CIGrace has passed with
+//     nothing registered; waiting forever on a repo that has no CI at all is
+//     still the way an unattended bootstrap hangs, which the grace bounds.
+//   - A workflow is done when its RUN is, not when the checks that exist so
+//     far are. A plan-then-matrix workflow creates its lane jobs only after
+//     the plan job finishes, so for a moment the only check run is a green
+//     `plan`, and "every check concluded" merged a PR whose lanes had not
+//     started. The workflow run stays in progress until its last job ends.
 //   - A check that is merely QUEUED is not a passing check. Polling stops when
 //     every run has a conclusion, not when none has failed yet.
 //   - A refused merge reports WHY. "422" is not an answer an operator can act
@@ -44,6 +54,9 @@ type LandRequest struct {
 	CheckTimeout time.Duration
 	// PollInterval between check polls. Default 15s.
 	PollInterval time.Duration
+	// CIGrace is how long to wait for any CI to register before concluding
+	// the repository has none. Default 2m, never longer than CheckTimeout.
+	CIGrace time.Duration
 	// MergeMethod is squash | merge | rebase. Default squash.
 	MergeMethod string
 }
@@ -155,15 +168,37 @@ func (p *Pen) waitForChecks(ctx context.Context, owner, repo, sha, token string,
 	if interval <= 0 {
 		interval = 15 * time.Second
 	}
-	deadline := time.Now().Add(req.CheckTimeout)
+	start := time.Now()
+	deadline := start.Add(req.CheckTimeout)
+	grace := req.CIGrace
+	if grace <= 0 {
+		grace = 2 * time.Minute
+	}
+	if grace > req.CheckTimeout {
+		grace = req.CheckTimeout
+	}
 	for {
 		runs, err := p.checkRuns(ctx, owner, repo, sha, token)
 		if err != nil {
 			return 0, err
 		}
-		// No checks at all is a pass, not a wait. See the file comment.
-		if len(runs) == 0 {
-			return 0, nil
+		// Workflow runs are best effort: a token that cannot read Actions
+		// still waits on the check runs it can see.
+		workflows, _ := p.workflowRuns(ctx, owner, repo, sha, token)
+		// Nothing registered: a wait until the grace has passed, a pass after.
+		if len(runs) == 0 && len(workflows) == 0 {
+			if time.Since(start) >= grace {
+				return 0, nil
+			}
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-time.After(interval):
+			}
+			continue
+		}
+		for _, w := range workflows {
+			runs = append(runs, checkRun{Name: "workflow " + w.Name, Status: w.Status, Conclusion: w.Conclusion})
 		}
 		var pending, failed []string
 		for _, r := range runs {
@@ -205,6 +240,24 @@ func (p *Pen) checkRuns(ctx context.Context, owner, repo, sha, token string) ([]
 		return nil, err
 	}
 	return payload.CheckRuns, nil
+}
+
+// workflowRun is the subset of a GitHub Actions workflow run this cares about.
+type workflowRun struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}
+
+func (p *Pen) workflowRuns(ctx context.Context, owner, repo, sha, token string) ([]workflowRun, error) {
+	var payload struct {
+		Runs []workflowRun `json:"workflow_runs"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs?head_sha=%s&per_page=100", owner, repo, sha)
+	if err := p.apiJSON(ctx, http.MethodGet, path, token, nil, &payload); err != nil {
+		return nil, err
+	}
+	return payload.Runs, nil
 }
 
 func (p *Pen) prHead(ctx context.Context, owner, repo string, number int, token string) (string, string, error) {
