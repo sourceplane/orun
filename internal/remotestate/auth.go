@@ -408,11 +408,19 @@ func ResolveAuth(ctx context.Context, opts ResolveOptions) (*ResolvedAuth, error
 		return nil, fmt.Errorf("missing backend URL for local Orun session auth")
 	}
 	creds, err := cliauth.LoadSession()
+	if err != nil && errors.Is(err, os.ErrNotExist) {
+		// No session stored — the file store reports it as ErrNotExist (the
+		// keychain as nil, nil, handled below). Either way: genuinely no login.
+		creds, err = nil, nil
+	}
 	if err != nil {
-		if opts.Interactive {
-			return nil, fmt.Errorf("no local Orun login found; run `orun auth login` or `orun auth login --device`")
-		}
-		return nil, fmt.Errorf("no local Orun login found; run `orun auth login --device` or set ORUN_TOKEN")
+		// A store that could not be READ is not a store that is empty: this is a
+		// keychain that refused or timed out, a held store lock, or a corrupt
+		// credentials file. Calling that "no local Orun login found" sent people to
+		// log in again over a login that was still there (it read that way during
+		// the 2026-09-18 logout investigation: `auth status` showed the user and
+		// `auth token`, a moment later, said there was no login at all).
+		return nil, fmt.Errorf("read the stored Orun login: %w (the login may still be valid; retry, or set ORUN_CREDENTIAL_STORE=file if the keychain keeps failing)", err)
 	}
 	if creds == nil {
 		if opts.Interactive {
