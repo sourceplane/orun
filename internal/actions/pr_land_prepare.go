@@ -205,6 +205,11 @@ func wireOrigin(ctx context.Context, dir, owner, name string) (string, error) {
 		return "", nil
 	}
 	g := gitDir(dir)
+	if inPlatformSession() {
+		if err := useOrunCredentialHelper(ctx, g); err != nil {
+			return "", fmt.Errorf("configuring the platform credential helper: %w", err)
+		}
+	}
 	if url, err := g.run(ctx, "remote", "get-url", "origin"); err == nil {
 		return url, nil
 	}
@@ -216,8 +221,27 @@ func wireOrigin(ctx context.Context, dir, owner, name string) (string, error) {
 }
 
 func originURL(owner, name string) string {
-	if strings.TrimSpace(os.Getenv("GITHUB_TOKEN")) != "" || strings.TrimSpace(os.Getenv("GH_TOKEN")) != "" {
+	// A platform sandbox has no SSH key and no GITHUB_TOKEN; git reaches
+	// GitHub there over https, through `orun git-credential`.
+	if strings.TrimSpace(os.Getenv("GITHUB_TOKEN")) != "" || strings.TrimSpace(os.Getenv("GH_TOKEN")) != "" || inPlatformSession() {
 		return "https://github.com/" + owner + "/" + name + ".git"
 	}
 	return "git@github.com:" + owner + "/" + name + ".git"
+}
+
+// useOrunCredentialHelper points THIS repository's git at `orun
+// git-credential` — the helper that mints the platform's repo token per
+// operation. Repo-local by design, like the grounded clone's (no global git
+// state), and a command rather than a credential: nothing secret is written.
+//
+// Without it the product repository a build creates in its sandbox had no way
+// to push: the grounded clone carries the helper, and this is a different
+// repository.
+func useOrunCredentialHelper(ctx context.Context, g gitDir) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	_, err = g.run(ctx, "config", "credential.https://github.com.helper", "!"+exe+" git-credential")
+	return err
 }

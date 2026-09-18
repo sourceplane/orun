@@ -44,27 +44,34 @@ type SessionEnv struct {
 	CloudAPI  string // ORUN_CLOUD_API
 	OrgID     string // ORUN_ORG_ID (the workspace)
 	SessionID string // ORUN_SESSION_ID
-	Token     string // ORUN_SESSION_TOKEN, else the ORUN_TOKEN_FILE contents
+	Token     string // the ORUN_TOKEN_FILE contents, else ORUN_SESSION_TOKEN
 	FullName  string // ORUN_REPO_FULL_NAME — the ONLY repo this session may mint for
 }
 
-// SessionFromEnv reads the session identity, preferring the live session
-// bearer and falling back to the rotation-carrying token file (GS2 writes it;
-// reading it here means the helper keeps working across a rotation).
+// SessionFromEnv reads the session identity, preferring the rotation-carrying
+// token file (GS2: serve writes every token the session holds to it) and
+// falling back to ORUN_SESSION_TOKEN.
+//
+// THE FILE FIRST. ORUN_SESSION_TOKEN is the BOOT token: serve rotates the
+// session's credential about every fifteen minutes and publishes each one to
+// the file, but the environment keeps the first. Every process serve starts
+// inherits both, so preferring the environment minted with a credential that
+// had died a quarter-hour into the session — a build hours long asks for a
+// repo token long after that.
 func SessionFromEnv(getenv func(string) string) (SessionEnv, error) {
 	s := SessionEnv{
 		CloudAPI:  strings.TrimSpace(getenv("ORUN_CLOUD_API")),
 		OrgID:     strings.TrimSpace(getenv("ORUN_ORG_ID")),
 		SessionID: strings.TrimSpace(getenv("ORUN_SESSION_ID")),
-		Token:     strings.TrimSpace(getenv("ORUN_SESSION_TOKEN")),
 		FullName:  strings.TrimSpace(getenv("ORUN_REPO_FULL_NAME")),
 	}
-	if s.Token == "" {
-		if path := strings.TrimSpace(getenv("ORUN_TOKEN_FILE")); path != "" {
-			if b, err := os.ReadFile(path); err == nil {
-				s.Token = strings.TrimSpace(string(b))
-			}
+	if path := strings.TrimSpace(getenv("ORUN_TOKEN_FILE")); path != "" {
+		if b, err := os.ReadFile(path); err == nil {
+			s.Token = strings.TrimSpace(string(b))
 		}
+	}
+	if s.Token == "" {
+		s.Token = strings.TrimSpace(getenv("ORUN_SESSION_TOKEN"))
 	}
 	var missing []string
 	for _, f := range []struct {
@@ -242,4 +249,31 @@ func WriteSessionToken(path, token string) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// RepoTokenFromEnv is a GitHub token for the repository this sandbox session
+// is grounded on: the cached one while it is comfortably valid, else a fresh
+// mint from the platform (which is re-authorised against the link on every
+// mint). An error means this process is not in a grounded session, or the
+// platform refused.
+//
+// Cheap to call per request: a cache hit is one small file read, and a mint
+// happens once per token lifetime — which is what lets a build that waits an
+// hour on CI keep a credential that expires in one.
+func RepoTokenFromEnv(ctx context.Context, getenv func(string) string) (string, error) {
+	session, err := SessionFromEnv(getenv)
+	if err != nil {
+		return "", err
+	}
+	cachePath := CachePath(getenv)
+	if tok, ok := ReadCachedToken(cachePath, time.Now()); ok {
+		return tok.Token, nil
+	}
+	tok, err := MintRepoToken(ctx, nil, session)
+	if err != nil {
+		return "", err
+	}
+	// A working token in hand beats a cache.
+	_ = WriteCachedToken(cachePath, tok)
+	return tok.Token, nil
 }

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sourceplane/orun/internal/cliauth"
 	"github.com/sourceplane/orun/internal/forge"
 )
 
@@ -52,16 +51,16 @@ func init() {
 	}, runRunWatch)
 }
 
-func forgeClient() (*forge.Client, error) {
-	token := cliauth.GitHubTokenFromEnv()
+func forgeClient(ctx context.Context) (*forge.Client, error) {
+	token := githubToken(ctx)
 	if token == "" {
-		return nil, fmt.Errorf("a GitHub credential is required (GITHUB_TOKEN / GH_TOKEN / gh auth)")
+		return nil, fmt.Errorf("a GitHub credential is required (GITHUB_TOKEN / GH_TOKEN / gh auth, or a platform session grounded on the repository)")
 	}
-	return &forge.Client{Token: token}, nil
+	return &forge.Client{Token: token, TokenFn: func() string { return githubToken(ctx) }}, nil
 }
 
 func runRepoEnsure(ctx context.Context, in Input) (Result, error) {
-	client, err := forgeClient()
+	client, err := forgeClient(ctx)
 	if err != nil {
 		return Result{}, err
 	}
@@ -90,7 +89,7 @@ type watcher interface {
 }
 
 func runRunWatch(ctx context.Context, in Input) (Result, error) {
-	client, err := forgeClient()
+	client, err := forgeClient(ctx)
 	if err != nil {
 		return Result{}, err
 	}

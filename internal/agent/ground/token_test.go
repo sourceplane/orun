@@ -174,7 +174,7 @@ func TestTokenCacheRoundTripAndExpiry(t *testing.T) {
 	}
 }
 
-func TestSessionFromEnvPrefersBearerThenTokenFile(t *testing.T) {
+func TestSessionFromEnvPrefersTheTokenFileThenTheBearer(t *testing.T) {
 	base := map[string]string{
 		"ORUN_CLOUD_API":      "https://api.example",
 		"ORUN_ORG_ID":         "org_1",
@@ -185,7 +185,7 @@ func TestSessionFromEnvPrefersBearerThenTokenFile(t *testing.T) {
 		return func(k string) string { return m[k] }
 	}
 
-	// The live bearer wins.
+	// No token file: the bearer.
 	withBearer := map[string]string{"ORUN_SESSION_TOKEN": "bearer"}
 	for k, v := range base {
 		withBearer[k] = v
@@ -208,6 +208,25 @@ func TestSessionFromEnvPrefersBearerThenTokenFile(t *testing.T) {
 	s, err = SessionFromEnv(get(withFile))
 	if err != nil || s.Token != "rotated" {
 		t.Fatalf("file path: token=%q err=%v", s.Token, err)
+	}
+
+	// BOTH: the file. The environment keeps the BOOT token, which serve
+	// rotates away within a quarter-hour; the file carries every rotation.
+	// Preferring the environment minted with a dead credential for the rest
+	// of an hours-long build.
+	both := map[string]string{"ORUN_SESSION_TOKEN": "boot", "ORUN_TOKEN_FILE": f}
+	for k, v := range base {
+		both[k] = v
+	}
+	s, err = SessionFromEnv(get(both))
+	if err != nil || s.Token != "rotated" {
+		t.Fatalf("both set: token=%q err=%v, want the rotated file", s.Token, err)
+	}
+	// An unreadable file falls back rather than failing.
+	both["ORUN_TOKEN_FILE"] = filepath.Join(t.TempDir(), "absent")
+	s, err = SessionFromEnv(get(both))
+	if err != nil || s.Token != "boot" {
+		t.Fatalf("absent file: token=%q err=%v, want the bearer", s.Token, err)
 	}
 
 	// No credential at all: not a grounded session, and the error names what
@@ -312,5 +331,45 @@ func TestTokenFilePathDefaultsToRuntimeState(t *testing.T) {
 	})
 	if want := filepath.Join(dir, "orun", "session-token"); got != want {
 		t.Errorf("TokenFilePath = %q, want %q", got, want)
+	}
+}
+
+// One resolver for "a GitHub token for this session's repository": the cache
+// while it is comfortably valid, a mint when it is not — so a caller can ask
+// per request, which is what keeps an hour-long wait authenticated.
+func TestRepoTokenFromEnvCachesThenMints(t *testing.T) {
+	var calls int32
+	door := okDoor(t, "ghs_minted", time.Hour, &calls)
+	runtime := t.TempDir()
+	env := map[string]string{
+		"ORUN_CLOUD_API":      door.URL,
+		"ORUN_ORG_ID":         "org_1",
+		"ORUN_SESSION_ID":     "as_1",
+		"ORUN_SESSION_TOKEN":  "session-bearer",
+		"ORUN_REPO_FULL_NAME": "acme/storefront",
+		"XDG_RUNTIME_DIR":     runtime,
+	}
+	get := func(k string) string { return env[k] }
+	for i := 0; i < 3; i++ {
+		tok, err := RepoTokenFromEnv(context.Background(), get)
+		if err != nil || tok != "ghs_minted" {
+			t.Fatalf("call %d: %q, %v", i, tok, err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("minted %d times for three asks within one lifetime, want 1", calls)
+	}
+	// Near expiry the cache is not trusted, and the next ask mints.
+	if err := WriteCachedToken(CachePath(get), RepoToken{Token: "ghs_old", ExpiresAt: time.Now().Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if tok, err := RepoTokenFromEnv(context.Background(), get); err != nil || tok != "ghs_minted" || calls != 2 {
+		t.Fatalf("an expiring cache must be replaced: %q, %v, mints=%d", tok, err, calls)
+	}
+}
+
+func TestRepoTokenFromEnvOutsideASessionIsAnError(t *testing.T) {
+	if _, err := RepoTokenFromEnv(context.Background(), func(string) string { return "" }); err == nil {
+		t.Fatal("no session in the environment must be an error, not an empty token")
 	}
 }

@@ -179,12 +179,17 @@ func (p *Pen) waitForChecks(ctx context.Context, owner, repo, sha, token string,
 	}
 	for {
 		runs, err := p.checkRuns(ctx, owner, repo, sha, token)
-		if err != nil {
-			return 0, err
-		}
 		// Workflow runs are best effort: a token that cannot read Actions
 		// still waits on the check runs it can see.
-		workflows, _ := p.workflowRuns(ctx, owner, repo, sha, token)
+		workflows, werr := p.workflowRuns(ctx, owner, repo, sha, token)
+		// And the other way round. A GitHub App token cut to a repository's
+		// write tier reads Actions but not Checks (`checks` is a separate App
+		// permission), so the check-runs listing refuses it — and a product
+		// whose CI is GitHub Actions is fully described by its workflow runs.
+		// Only when NEITHER can be read is there nothing to wait on honestly.
+		if err != nil && werr != nil {
+			return 0, err
+		}
 		// Nothing registered: a wait until the grace has passed, a pass after.
 		if len(runs) == 0 && len(workflows) == 0 {
 			if time.Since(start) >= grace {
@@ -313,6 +318,14 @@ func (p *Pen) apiJSON(ctx context.Context, method, path, token string, body []by
 	req, err := http.NewRequestWithContext(ctx, method, apiBase+path, reader)
 	if err != nil {
 		return err
+	}
+	// Asked again for EVERY request, with the one the landing started with as
+	// the fallback: the check wait below runs up to an hour, and a minted
+	// credential (a build in a platform sandbox) can expire inside it.
+	if p.Token != nil {
+		if fresh := p.Token(); fresh != "" {
+			token = fresh
+		}
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")

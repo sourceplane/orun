@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/sourceplane/orun/internal/agent"
 	"github.com/sourceplane/orun/internal/agent/attach"
@@ -458,23 +457,7 @@ func registerAgentServeCommand(parent *cobra.Command) {
 // (GS1 compatibility seeding). It reuses the credential helper's own cache, so
 // boot and the first git operation share a mint rather than spending two.
 func mintHarnessGitToken(ctx context.Context) (string, error) {
-	session, err := ground.SessionFromEnv(os.Getenv)
-	if err != nil {
-		return "", err
-	}
-	cachePath := ground.CachePath(os.Getenv)
-	if tok, ok := ground.ReadCachedToken(cachePath, time.Now()); ok {
-		return tok.Token, nil
-	}
-	tok, err := ground.MintRepoToken(ctx, nil, session)
-	if err != nil {
-		return "", err
-	}
-	if wErr := ground.WriteCachedToken(cachePath, tok); wErr != nil {
-		// A working token in hand beats a cache.
-		_ = wErr
-	}
-	return tok.Token, nil
+	return ground.RepoTokenFromEnv(ctx, os.Getenv)
 }
 
 // harnessPlatformEnv is the platform plumbing the harness needs — and every
