@@ -12,19 +12,34 @@ import (
 
 // fakeWatcher plays a scripted sequence of run states.
 type fakeWatcher struct {
-	states   []forge.Run // one per GetRun call; the last repeats
-	latest   *forge.Run
-	calls    int
-	reruns   int
-	rerunErr error
-	failed   []string
+	states []forge.Run // one per GetRun call; the last repeats
+	latest *forge.Run
+	// forCommit is the run GitHub has for the watched commit; it appears only
+	// after commitAfter lookups, the way a push's run does.
+	forCommit   *forge.Run
+	commitAfter int
+	lookups     int
+	watched     []int64 // the run ids GetRun was asked about
+	calls       int
+	reruns      int
+	rerunErr    error
+	failed      []string
 }
 
 func (f *fakeWatcher) LatestRun(context.Context, string, string, string) (*forge.Run, error) {
 	return f.latest, nil
 }
 
+func (f *fakeWatcher) RunForCommit(context.Context, string, string, string, string) (*forge.Run, error) {
+	f.lookups++
+	if f.forCommit == nil || f.lookups <= f.commitAfter {
+		return nil, nil
+	}
+	return f.forCommit, nil
+}
+
 func (f *fakeWatcher) GetRun(_ context.Context, _, _ string, id int64) (*forge.Run, error) {
+	f.watched = append(f.watched, id)
 	i := f.calls
 	f.calls++
 	if i >= len(f.states) {
@@ -176,5 +191,47 @@ func TestWatchRejectsAMalformedRepo(t *testing.T) {
 	in := watchInput(t, map[string]any{"repo": "product"})
 	if _, err := watchOn(context.Background(), f, in, func(time.Duration) {}); err == nil {
 		t.Fatal("repo must be owner/name")
+	}
+}
+
+// The landing merged a moment ago; GitHub has not registered its run yet, and
+// the branch's newest run is the PREVIOUS phase's, already green. The watch
+// must wait for the landed commit's run rather than report that one.
+func TestWatchWaitsForTheLandedCommitsRunNotTheBranchsNewest(t *testing.T) {
+	f := &fakeWatcher{
+		latest:      &forge.Run{ID: 1, Status: "completed", Conclusion: "success"},
+		forCommit:   &forge.Run{ID: 9},
+		commitAfter: 2,
+		states:      []forge.Run{{Status: "in_progress"}, {Status: "completed", Conclusion: "success"}},
+	}
+	in := watchInput(t, map[string]any{"repo": "acme/product", "sha": "abc123", "waitSeconds": 600, "pollSeconds": 1})
+	res, err := watchOn(context.Background(), f, in, func(time.Duration) {})
+	if err != nil {
+		t.Fatalf("watch: %v", err)
+	}
+	if res.Outputs["runId"] != "9" {
+		t.Errorf("watched run %s, want the landed commit's run 9", res.Outputs["runId"])
+	}
+	for _, id := range f.watched {
+		if id == 1 {
+			t.Error("the previous phase's run was consulted as if it were this landing's convergence")
+		}
+	}
+}
+
+// If the commit's run never appears inside the wait, that is "not yet" —
+// pending — and never "converged", however green the branch looks.
+func TestWatchIsPendingWhileTheLandedCommitHasNoRun(t *testing.T) {
+	f := &fakeWatcher{latest: &forge.Run{ID: 1, Status: "completed", Conclusion: "success"}}
+	in := watchInput(t, map[string]any{"repo": "acme/product", "sha": "abc123"})
+	res, err := watchOn(context.Background(), f, in, func(time.Duration) {})
+	if err != nil {
+		t.Fatalf("watch: %v", err)
+	}
+	if res.Pending == nil {
+		t.Fatalf("want pending, got outputs %v", res.Outputs)
+	}
+	if !strings.Contains(res.Pending.Reason, "abc123") {
+		t.Errorf("the pending reason should name the commit, got %q", res.Pending.Reason)
 	}
 }

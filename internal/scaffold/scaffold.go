@@ -167,34 +167,75 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		}
 	}
 
-	// Write the tree. Containment was enforced during placement; re-check at
-	// write time against the real OutDir (symlink-out guard, design §9).
-	if err := writeTree(opts.OutDir, placed); err != nil {
-		return nil, err
-	}
-
 	// Provenance (design §11): blueprint@digest + source@digest(s) + inputs-hash
-	// + per-module mode/target. Written even for a single scaffolded component.
-	prov, err := buildProvenance(ctx, opts.Store, opts.Blueprint, bp, values, sources, placed, consumed)
-	if err != nil {
-		return nil, err
-	}
+	// + per-module mode/target. Written even for a single scaffolded component,
+	// and re-written as each phase lands on disk, so the lock never names a
+	// file that is not there.
+	//
 	// A partial run must not erase the record of the phases it did not touch:
 	// `--phase 05-edge` writing a lock that names only five files would lose
-	// everything phases 01-04 placed.
+	// everything phases 01-04 placed. The previous lock is read ONCE, before
+	// this run writes anything, so a lock re-written between phases is never
+	// mistaken for the one the run started from.
+	var prevProv *Provenance
 	if partial {
 		if prev, rerr := ReadProvenance(opts.OutDir); rerr == nil {
-			prov.Modules = mergeModuleRecords(prev.Modules, prov.Modules)
+			prevProv = &prev
 		}
 	}
-	if err := writeProvenance(opts.OutDir, prov); err != nil {
-		return nil, err
+	written := make(map[string]PlacedFile, len(placed))
+	var prov Provenance
+	// place writes files — containment was enforced during placement; writeTree
+	// re-checks against the real OutDir (symlink-out guard, design §9) — and
+	// records everything written so far.
+	place := func(files map[string]PlacedFile) error {
+		if err := writeTree(opts.OutDir, files); err != nil {
+			return err
+		}
+		for path, f := range files {
+			written[path] = f
+		}
+		p, err := buildProvenance(ctx, opts.Store, opts.Blueprint, bp, values, sources, written, consumed)
+		if err != nil {
+			return err
+		}
+		if prevProv != nil {
+			p.Modules = mergeModuleRecords(prevProv.Modules, p.Modules)
+		}
+		if err := writeProvenance(opts.OutDir, p); err != nil {
+			return err
+		}
+		prov = p
+		return nil
+	}
+
+	// WHEN THE TREE IS WRITTEN depends on whether anything runs between the
+	// phases.
+	//
+	// Without hooks, nothing does, so the whole tree is written at once — the
+	// gates above have already passed against the complete set.
+	//
+	// With hooks, each phase's files are written between its `pre` and `post`
+	// hooks, which is what those slots have always been documented to mean
+	// ("pre: before placement", "post: after placement"). Writing the whole
+	// tree up front meant a phase's post hooks ran over every LATER phase's
+	// files too, and a bootstrap's phase 01 landed the entire product:
+	//
+	//	orun baseline new cirrus --local --run-hooks
+	//	→ 01-scaffold stages 1075 files — every worker, the console, terraform
+	//
+	// before 03-infrastructure had minted a single credential those files
+	// deploy with. Phases exist so each one lands, converges and is verified
+	// before the next is on disk; that is only true if the next is not on disk.
+	if !opts.RunHooks || len(phases) == 0 {
+		if err := place(placed); err != nil {
+			return nil, err
+		}
 	}
 
 	// Hooks (opt-in, outside the sandbox — design §12). Per-phase hooks run in
-	// phase order, then the global postInstantiate hooks. Step-1 overlay: hooks
-	// run after the tree is fully written (atomic); interleaved-per-phase writes
-	// + approval gates are the planned resumable follow-on.
+	// phase order, each phase placed between its pre and post hooks, then the
+	// global postInstantiate hooks.
 	em := newEmitter(opts.Events, runIDOf(opts))
 	// Every phase the blueprint declares but this run is not placing is
 	// reported once, so a feed shows the whole shape rather than only the part
@@ -256,9 +297,12 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 					return nil, perr
 				}
 			}
-			// pre and post are retried per the phase's declared policy;
-			// outputs are scoped to the phase and reset on every attempt.
-			ran, herr := runPhaseHooks(ctx, hr, decl, append(append([]Hook{}, phase.Hooks.Pre...), phase.Hooks.Post...))
+			// pre, placement and post are retried together per the phase's
+			// declared policy; outputs are scoped to the phase and reset on
+			// every attempt.
+			phaseFiles := plan.filesFor([]PhasePlan{phase})
+			ran, herr := runPhaseHooks(ctx, hr, decl, phase.Hooks.Pre,
+				func() error { return place(phaseFiles) }, phase.Hooks.Post)
 			hooksRun = append(hooksRun, ran...)
 			if pe, waiting := actions.IsPending(herr); waiting {
 				parked := &ParkedError{Phase: phase.Name, Hook: pe.ID, Reason: pe.Reason, RetryAfter: pe.RetryAfter}
@@ -320,8 +364,8 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		hooksRun = append(hooksRun, ran...)
 	}
 
-	files := make([]string, 0, len(placed))
-	for p := range placed {
+	files := make([]string, 0, len(written))
+	for p := range written {
 		files = append(files, p)
 	}
 	sort.Strings(files)

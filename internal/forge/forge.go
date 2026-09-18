@@ -158,6 +158,23 @@ func (c *Client) LatestRun(ctx context.Context, owner, repo, branch string) (*Ru
 	return &payload.Runs[0], nil
 }
 
+// RunForCommit returns the newest workflow run on a branch for one commit, or
+// nil when GitHub has not registered one yet. A push's run appears a few
+// seconds after the push, so "none" here means "not yet", not "never".
+func (c *Client) RunForCommit(ctx context.Context, owner, repo, branch, sha string) (*Run, error) {
+	var payload struct {
+		Runs []Run `json:"workflow_runs"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs?branch=%s&head_sha=%s&per_page=1", owner, repo, branch, sha)
+	if _, err := c.do(ctx, http.MethodGet, path, nil, &payload); err != nil {
+		return nil, err
+	}
+	if len(payload.Runs) == 0 {
+		return nil, nil
+	}
+	return &payload.Runs[0], nil
+}
+
 // GetRun reads one run by id.
 func (c *Client) GetRun(ctx context.Context, owner, repo string, id int64) (*Run, error) {
 	var run Run
