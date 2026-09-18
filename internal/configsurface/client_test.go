@@ -3,6 +3,7 @@ package configsurface
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -239,4 +240,69 @@ func asAPIError(err error, target **APIError) bool {
 		err = u.Unwrap()
 	}
 	return false
+}
+
+// A slug that is not in the list is an ANSWER — "no such project" — and a
+// read that fails is not one. A bootstrap asks about the project its own first
+// phase is about to create, so the caller has to be able to tell them apart:
+// errors.Is on the first, never on the second.
+func TestResolveProjectIDTellsNotFoundFromAFailedRead(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"projects": []map[string]any{
+			{"id": "prj_1", "slug": "cirrus"},
+		}}})
+	})
+	if id, err := client.ResolveProjectID(context.Background(), "org_1", "cirrus"); err != nil || id != "prj_1" {
+		t.Fatalf("ResolveProjectID(cirrus) = %q, %v", id, err)
+	}
+	_, err := client.ResolveProjectID(context.Background(), "org_1", "newne")
+	if !errors.Is(err, ErrProjectNotFound) {
+		t.Fatalf("an unlisted slug must be ErrProjectNotFound, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "cirrus") {
+		t.Errorf("the message should still name what is there, got %v", err)
+	}
+	// Asked again, from the cache: the same answer, not a different error.
+	if _, err := client.ResolveProjectID(context.Background(), "org_1", "newne"); !errors.Is(err, ErrProjectNotFound) {
+		t.Fatalf("a cached miss must still be ErrProjectNotFound, got %v", err)
+	}
+
+	empty, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"projects": []any{}}})
+	})
+	if _, err := empty.ResolveProjectID(context.Background(), "org_1", "newne"); !errors.Is(err, ErrProjectNotFound) {
+		t.Fatalf("a workspace with no projects must be ErrProjectNotFound, got %v", err)
+	}
+
+	broken, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "forbidden", "message": "Not authorized"}})
+	})
+	_, err = broken.ResolveProjectID(context.Background(), "org_1", "newne")
+	if err == nil || errors.Is(err, ErrProjectNotFound) {
+		t.Fatalf("a refused read is an error and never ErrProjectNotFound, got %v", err)
+	}
+}
+
+func TestResolveEnvironmentIDTellsNotFoundFromAFailedRead(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"environments": []map[string]any{
+			{"id": "env_abc", "slug": "prod"},
+		}}})
+	})
+	if _, err := client.ResolveEnvironmentID(context.Background(), "org_1", "prj_2", "stage"); !errors.Is(err, ErrEnvironmentNotFound) {
+		t.Fatalf("an unlisted environment must be ErrEnvironmentNotFound, got %v", err)
+	}
+	none, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"environments": []any{}}})
+	})
+	if _, err := none.ResolveEnvironmentID(context.Background(), "org_1", "prj_2", "stage"); !errors.Is(err, ErrEnvironmentNotFound) {
+		t.Fatalf("a project with no environments must be ErrEnvironmentNotFound, got %v", err)
+	}
+	broken, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	if _, err := broken.ResolveEnvironmentID(context.Background(), "org_1", "prj_2", "stage"); err == nil || errors.Is(err, ErrEnvironmentNotFound) {
+		t.Fatalf("a failed read is an error and never ErrEnvironmentNotFound, got %v", err)
+	}
 }
