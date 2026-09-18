@@ -3,6 +3,7 @@ package actions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -266,13 +267,32 @@ func secretsExistOn(ctx context.Context, c secretsReader, org string, in Input) 
 	// The plane lists a project's environments by its prj_… id and answers a
 	// slug with not_found — which a fake that took any string had hidden. A
 	// blueprint names its project by slug (the repo name), so resolve it.
+	//
+	// A PROJECT OR ENVIRONMENT THAT DOES NOT EXIST YET IS "NOT YET", NOT AN
+	// ERROR. Nothing can have been published to a project nobody has created,
+	// and a bootstrap asks exactly that: its preconditions are swept before
+	// the first phase runs, and the first phase is what creates the project
+	// (linking the repository). As an error it failed every fresh build before
+	// a byte was written or an event reported —
+	//
+	//   ✕ phase "04-workers" precondition "wiring" is not met: … resolving
+	//     project "newne": project "newne" not found
+	//
+	// — a console build that printed "building repo-blueprint.yaml" and died.
+	// Only a missing answer is pending: a read that failed is still an error.
 	projectID, err := c.ResolveProjectID(ctx, org, project)
+	if errors.Is(err, configsurface.ErrProjectNotFound) {
+		return notPublishedTo(keys, envs, fmt.Sprintf("project %q does not exist yet", project)), nil
+	}
 	if err != nil {
 		return Result{}, fmt.Errorf("resolving project %q: %w", project, err)
 	}
 	byEnv := make(map[string]map[string]bool, len(envs))
 	for _, env := range envs {
 		envID, err := c.ResolveEnvironmentID(ctx, org, projectID, env)
+		if errors.Is(err, configsurface.ErrEnvironmentNotFound) {
+			return notPublishedTo(keys, envs, fmt.Sprintf("environment %q of %s does not exist yet", env, project)), nil
+		}
 		if err != nil {
 			return Result{}, fmt.Errorf("resolving environment %q of %s: %w", env, project, err)
 		}
@@ -308,6 +328,23 @@ func secretKeys(ctx context.Context, c secretsLister, scope configsurface.Scope,
 
 // secretsVerdict reports present and missing keys; missingFor names what is
 // missing for one key (the key itself, or the key per environment).
+// notPublishedTo is the verdict for a scope that does not exist: every key is
+// missing on every environment, and the reason says why rather than listing
+// them as though they had been looked for.
+func notPublishedTo(keys, envs []string, why string) Result {
+	var missing []string
+	for _, k := range keys {
+		for _, env := range envs {
+			missing = append(missing, fmt.Sprintf("%s (%s)", k, env))
+		}
+	}
+	sort.Strings(missing)
+	return Result{
+		Outputs: map[string]string{"present": "", "missing": strings.Join(missing, ",")},
+		Pending: &Pending{Reason: fmt.Sprintf("secret(s) not published yet: %s", why)},
+	}
+}
+
 func secretsVerdict(keys []string, missingFor func(string) []string) Result {
 	var missing, present []string
 	for _, k := range keys {

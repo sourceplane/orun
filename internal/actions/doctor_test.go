@@ -30,11 +30,34 @@ type fakeConfig struct {
 	// plane does: a workspace read does NOT see an environment's secrets.
 	envSecrets map[string][]configsurface.SecretMeta
 	scopes     []configsurface.Scope
+	// projects are the workspace's projects by slug, each with its
+	// environments. Nil means the one project the tests below build against,
+	// `altocumulus` with stage and prod. A slug that is not here does not
+	// exist — the fake used to answer prj_<anything>, which is how a project
+	// that a fresh bootstrap has not created yet passed every test here and
+	// failed every console build.
+	projects   map[string][]string
+	projectErr error
 }
 
+func (f *fakeConfig) workspaceProjects() map[string][]string {
+	if f.projects != nil {
+		return f.projects
+	}
+	return map[string][]string{"altocumulus": {"stage", "prod"}}
+}
+
+// As strict as the plane: a slug the workspace does not hold is the client's
+// typed not-found, and a failed list is a plain error.
 func (f *fakeConfig) ResolveProjectID(_ context.Context, _, project string) (string, error) {
+	if f.projectErr != nil {
+		return "", f.projectErr
+	}
 	if project == "" {
 		return "", fmt.Errorf("no project")
+	}
+	if _, ok := f.workspaceProjects()[project]; !ok {
+		return "", fmt.Errorf("project %q not found: %w", project, configsurface.ErrProjectNotFound)
 	}
 	return "prj_" + project, nil
 }
@@ -46,7 +69,12 @@ func (f *fakeConfig) ResolveEnvironmentID(_ context.Context, _, project, env str
 	if !strings.HasPrefix(project, "prj_") {
 		return "", fmt.Errorf("list environments: Not found (code: not_found)")
 	}
-	return "env_" + env, nil
+	for _, e := range f.workspaceProjects()[strings.TrimPrefix(project, "prj_")] {
+		if e == env {
+			return "env_" + env, nil
+		}
+	}
+	return "", fmt.Errorf("environment %q not found: %w", env, configsurface.ErrEnvironmentNotFound)
 }
 
 func (f *fakeConfig) ListConnections(context.Context, string) ([]configsurface.Connection, error) {
@@ -389,5 +417,63 @@ func TestSecretsExistEnvironmentsNeedAProject(t *testing.T) {
 	in := secretsInput(t, map[string]any{"keys": []any{"K"}, "environments": []any{"stage"}})
 	if _, err := secretsExistOn(context.Background(), &fakeConfig{}, "ws_1", in); err == nil {
 		t.Fatal("environments without a project should be refused")
+	}
+}
+
+// A FRESH BOOTSTRAP ASKS ABOUT A PROJECT IT HAS NOT CREATED YET. Its
+// preconditions are swept before the first phase runs, and the first phase is
+// what creates the project. "Not found" there is "not yet": pending, so the
+// sweep defers the probe to its phase. As an error it killed every console
+// build before it reported anything:
+//
+//	✕ phase "04-workers" precondition "wiring" is not met: … resolving
+//	  project "newne": project "newne" not found
+func TestSecretsExistAProjectNotCreatedYetIsPending(t *testing.T) {
+	f := &fakeConfig{projects: map[string][]string{"cirrus": {"stage", "prod"}}}
+	in := secretsInput(t, map[string]any{
+		"keys": []any{"WIRING_CLOUDFLARE_D1", "WIRING_CLOUDFLARE_KV"}, "project": "newne",
+		"environments": []any{"stage", "prod"},
+	})
+	res, err := secretsExistOn(context.Background(), f, "ws_1", in)
+	if err != nil {
+		t.Fatalf("a project that does not exist yet is not an error: %v", err)
+	}
+	if res.Pending == nil || !strings.Contains(res.Pending.Reason, `project "newne" does not exist yet`) {
+		t.Fatalf("want pending naming the missing project, got %+v", res)
+	}
+	if got := res.Outputs["missing"]; got != "WIRING_CLOUDFLARE_D1 (prod),WIRING_CLOUDFLARE_D1 (stage),WIRING_CLOUDFLARE_KV (prod),WIRING_CLOUDFLARE_KV (stage)" {
+		t.Errorf("every key is missing on every environment, got %q", got)
+	}
+	if len(f.scopes) != 0 {
+		t.Errorf("nothing to read in a project that does not exist, read %+v", f.scopes)
+	}
+}
+
+// The link creates the project; its environments can arrive after it.
+func TestSecretsExistAnEnvironmentNotCreatedYetIsPending(t *testing.T) {
+	f := &fakeConfig{projects: map[string][]string{"newne": {"stage"}}}
+	in := secretsInput(t, map[string]any{
+		"keys": []any{"WIRING_CLOUDFLARE_D1"}, "project": "newne", "environments": []any{"stage", "prod"},
+	})
+	res, err := secretsExistOn(context.Background(), f, "ws_1", in)
+	if err != nil {
+		t.Fatalf("an environment that does not exist yet is not an error: %v", err)
+	}
+	if res.Pending == nil || !strings.Contains(res.Pending.Reason, `environment "prod" of newne does not exist yet`) {
+		t.Fatalf("want pending naming the missing environment, got %+v", res)
+	}
+}
+
+// Only an ANSWER is pending. A read that fails — a refused credential, an
+// outage — must stay an error, or a bootstrap polls forever against a broken
+// token believing the project will turn up.
+func TestSecretsExistAFailedProjectReadIsStillAnError(t *testing.T) {
+	f := &fakeConfig{projectErr: fmt.Errorf("list projects: Not authorized (code: forbidden)")}
+	in := secretsInput(t, map[string]any{
+		"keys": []any{"WIRING_CLOUDFLARE_D1"}, "project": "newne", "environments": []any{"stage"},
+	})
+	res, err := secretsExistOn(context.Background(), f, "ws_1", in)
+	if err == nil {
+		t.Fatalf("a refused read must be an error, got %+v", res)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -643,16 +644,35 @@ func (c *Client) ResolveProjectID(ctx context.Context, org, project string) (str
 	return "", c.unknownProjectError(project, byslug)
 }
 
+// ErrProjectNotFound and ErrEnvironmentNotFound mark an ANSWER, not a
+// failure: the list was read and the slug is not in it. A caller that can
+// tell "does not exist yet" from "could not ask" needs them — a bootstrap
+// asks about a project its own first phase is about to create, and must hear
+// "not yet" there, while a refused credential stays an error.
+var (
+	ErrProjectNotFound     = errors.New("project not found")
+	ErrEnvironmentNotFound = errors.New("environment not found")
+)
+
+// notFound keeps the message a person reads and answers errors.Is for its kind.
+type notFound struct {
+	msg  string
+	kind error
+}
+
+func (e *notFound) Error() string { return e.msg }
+func (e *notFound) Unwrap() error { return e.kind }
+
 func (c *Client) unknownProjectError(project string, byslug map[string]string) error {
 	if len(byslug) == 0 {
-		return fmt.Errorf("project %q not found: the workspace has no projects", project)
+		return &notFound{fmt.Sprintf("project %q not found: the workspace has no projects", project), ErrProjectNotFound}
 	}
 	slugs := make([]string, 0, len(byslug))
 	for s := range byslug {
 		slugs = append(slugs, s)
 	}
 	sort.Strings(slugs)
-	return fmt.Errorf("project %q not found; available: %s", project, strings.Join(slugs, ", "))
+	return &notFound{fmt.Sprintf("project %q not found; available: %s", project, strings.Join(slugs, ", ")), ErrProjectNotFound}
 }
 
 // ResolveEnvironmentID resolves an environment slug to its public env_… id
@@ -692,14 +712,14 @@ func (c *Client) ResolveEnvironmentID(ctx context.Context, org, project, env str
 
 func (c *Client) unknownEnvError(env string, byslug map[string]string) error {
 	if len(byslug) == 0 {
-		return fmt.Errorf("environment %q not found: the linked project declares no environments", env)
+		return &notFound{fmt.Sprintf("environment %q not found: the linked project declares no environments", env), ErrEnvironmentNotFound}
 	}
 	slugs := make([]string, 0, len(byslug))
 	for s := range byslug {
 		slugs = append(slugs, s)
 	}
 	sort.Strings(slugs)
-	return fmt.Errorf("environment %q not found; available: %s", env, strings.Join(slugs, ", "))
+	return &notFound{fmt.Sprintf("environment %q not found; available: %s", env, strings.Join(slugs, ", ")), ErrEnvironmentNotFound}
 }
 
 // ── Materialization provenance (SD-13 — data-model.md §7e/§8) ─────────────────
