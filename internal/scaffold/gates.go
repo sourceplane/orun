@@ -68,7 +68,9 @@ func checkRequires(ctx context.Context, plan *runPlan, opts Options, phase Phase
 			unknownNote(unmet))
 	}
 
-	return checkProbes(ctx, plan, opts, phase, runner)
+	// Asked ONCE up here, never waited on: this sweep runs before the first
+	// event, so a wait here is a wait nobody can see (withoutWait).
+	return checkProbes(ctx, plan, opts, phase, runner, false)
 }
 
 // checkProbes evaluates a phase's `requires.probe`.
@@ -92,7 +94,10 @@ func checkRequires(ctx context.Context, plan *runPlan, opts Options, phase Phase
 // secret is "pending, not failure … a precondition that fails hard here would
 // turn 'run phase 03 first' into a broken bootstrap" — and the gate threw it
 // away.
-func checkProbes(ctx context.Context, plan *runPlan, opts Options, phase PhasePlan, runner ActionRunner) error {
+//
+// `wait` false asks each probe once, whatever `waitSeconds` it declares
+// (withoutWait); true lets it wait as declared.
+func checkProbes(ctx context.Context, plan *runPlan, opts Options, phase PhasePlan, runner ActionRunner, wait bool) error {
 	decl := plan.declOf(phase.Name)
 	if decl == nil || decl.Requires == nil || len(decl.Requires.Probe) == 0 {
 		return nil
@@ -130,6 +135,9 @@ func checkProbes(ctx context.Context, plan *runPlan, opts Options, phase PhasePl
 	}
 	hr.resetOutputs()
 	for _, probe := range decl.Requires.Probe {
+		if !wait {
+			probe = withoutWait(probe)
+		}
 		if err := hr.runAction(ctx, probe); err != nil {
 			if _, waiting := actions.IsPending(err); waiting {
 				return err
@@ -222,4 +230,27 @@ func unknownNote(unmet []string) string {
 		}
 	}
 	return ""
+}
+
+// withoutWait is a probe asked once: its `waitSeconds`, if it declares one, is
+// 0 — and an action with that parameter reports pending at once rather than
+// polling.
+//
+// A WAIT NOBODY CAN SEE IS A HANG. The preconditions sweep runs before the
+// run's first event, so cirrus's GitHub probe — `waitSeconds: 600`, for an
+// operator to fix the connection — held a build on a silent page for ten
+// minutes, and then its phase 03 probe for ten more, before the build said a
+// word; the console read it as a build that never started. Waiting belongs at
+// the phase, AFTER the build has said what it is waiting for.
+func withoutWait(h Hook) Hook {
+	if _, ok := h.With["waitSeconds"]; !ok {
+		return h
+	}
+	with := make(map[string]any, len(h.With))
+	for k, v := range h.With {
+		with[k] = v
+	}
+	with["waitSeconds"] = 0
+	h.With = with
+	return h
 }

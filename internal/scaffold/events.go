@@ -136,6 +136,8 @@ func generatedNarration(phase string, state EventState) string {
 		return fmt.Sprintf("%s is complete.", phase)
 	case EventFailed:
 		return fmt.Sprintf("%s did not complete.", phase)
+	case EventRunning:
+		return fmt.Sprintf("Continuing %s.", phase)
 	case EventWaiting:
 		return fmt.Sprintf("%s is waiting.", phase)
 	case EventSkipped:
@@ -227,4 +229,18 @@ func emitHookNarrations(ctx context.Context, em *emitter, phase string, scope ma
 			em.emit(ctx, Event{Phase: phase, Step: h.ID, State: EventDone, Narration: line})
 		}
 	}
+}
+
+// withWaitingOn is meta plus what the phase is waiting on (`waitingOn`), which
+// an authored `await` line may name as `{{ .meta.waitingOn }}` and the
+// generated one names itself. meta is not modified.
+func withWaitingOn(meta map[string]string, reason string) map[string]string {
+	out := make(map[string]string, len(meta)+1)
+	for k, v := range meta {
+		out[k] = v
+	}
+	if r := strings.TrimSpace(reason); r != "" {
+		out["waitingOn"] = r
+	}
+	return out
 }

@@ -280,17 +280,39 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			em.emit(ctx, Event{Phase: phase.Name, State: EventStarted,
 				Narration: narrate(EventStarted, startMeta),
 				Meta:      startMeta})
+			// A waiting event names what it waits on, in the detail and — as
+			// `.meta.waitingOn` — in the line, so the headline says it too.
+			waitingFor := func(step, reason string) Event {
+				meta := withWaitingOn(startMeta, reason)
+				return Event{Phase: phase.Name, Step: step, State: EventWaiting,
+					Narration: narrate(EventWaiting, meta), Detail: reason, Meta: meta}
+			}
 			// The deferred probe, asked at the only moment its answer means
 			// anything: the phases before it have now run. Still pending parks
 			// the run exactly as a pending hook does, so `--resume` picks it up
 			// when the thing it waits for exists.
+			//
+			// SAY SO, THEN WAIT. Asked once first: if the answer is not yet, the
+			// build reports what it is waiting on BEFORE it spends the probe's
+			// `waitSeconds` on it, so the operator who has to fix it is told
+			// while there is still time to — not ten silent minutes later.
 			if deferredProbes[phase.Name] {
-				if perr := checkProbes(ctx, plan, opts, phase, runner); perr != nil {
+				perr := checkProbes(ctx, plan, opts, phase, runner, false)
+				if pe, waiting := actions.IsPending(perr); waiting {
+					em.emit(ctx, waitingFor(pe.ID, pe.Reason))
+					perr = checkProbes(ctx, plan, opts, phase, runner, true)
+					if perr == nil {
+						// Came good while waiting. Said, too: the page drew this
+						// phase as waiting on somebody, and nothing else the
+						// phase emits arrives until its hooks have finished.
+						em.emit(ctx, Event{Phase: phase.Name, State: EventRunning,
+							Narration: narrate(EventRunning, startMeta), Meta: startMeta})
+					}
+				}
+				if perr != nil {
 					if pe, waiting := actions.IsPending(perr); waiting {
 						parked := &ParkedError{Phase: phase.Name, Hook: pe.ID, Reason: pe.Reason, RetryAfter: pe.RetryAfter}
-						em.emit(ctx, Event{Phase: phase.Name, Step: pe.ID, State: EventWaiting,
-							Narration: narrate(EventWaiting, startMeta),
-							Detail:    pe.Reason})
+						em.emit(ctx, waitingFor(pe.ID, pe.Reason))
 						writeRunState(opts.OutDir, parked)
 						return nil, parked
 					}
@@ -306,9 +328,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			hooksRun = append(hooksRun, ran...)
 			if pe, waiting := actions.IsPending(herr); waiting {
 				parked := &ParkedError{Phase: phase.Name, Hook: pe.ID, Reason: pe.Reason, RetryAfter: pe.RetryAfter}
-				em.emit(ctx, Event{Phase: phase.Name, Step: pe.ID, State: EventWaiting,
-					Narration: narrate(EventWaiting, startMeta),
-					Detail:    pe.Reason})
+				em.emit(ctx, waitingFor(pe.ID, pe.Reason))
 				writeRunState(opts.OutDir, parked)
 				return nil, parked
 			}
@@ -327,9 +347,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			awaited, aerr := runAwait(ctx, hr, phase.Name, phase.Hooks.Await)
 			hooksRun = append(hooksRun, awaited...)
 			if parked, ok := aerr.(*ParkedError); ok {
-				em.emit(ctx, Event{Phase: phase.Name, Step: parked.Hook, State: EventWaiting,
-					Narration: narrate(EventWaiting, startMeta),
-					Detail:    parked.Reason})
+				em.emit(ctx, waitingFor(parked.Hook, parked.Reason))
 				writeRunState(opts.OutDir, parked)
 				return nil, parked
 			}

@@ -111,6 +111,11 @@ func isWordByte(b byte) bool {
 // broken caption must never fail a build that otherwise succeeded.
 func renderNarration(authored, phase string, state EventState, scope map[string]any) string {
 	if strings.TrimSpace(authored) == "" {
+		// "01-scaffold is waiting." is true and useless: the row already says
+		// so. What the reader needs is WHAT on, which the engine knows.
+		if on := waitingOnIn(scope); state == EventWaiting && on != "" {
+			return fmt.Sprintf("%s: %s", phase, on)
+		}
 		return generatedNarration(phase, state)
 	}
 	out, err := Render("narrate."+phase, authored, scope)
@@ -170,4 +175,11 @@ func compileNarration(where, line string) error {
 		return fmt.Errorf("%s: %w", where, err)
 	}
 	return nil
+}
+
+// waitingOnIn reads `.meta.waitingOn` out of a narration scope.
+func waitingOnIn(scope map[string]any) string {
+	meta, _ := scope["meta"].(map[string]any)
+	on, _ := meta["waitingOn"].(string)
+	return strings.TrimSpace(on)
 }
