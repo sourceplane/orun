@@ -8,6 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/sourceplane/orun/internal/githubretry"
 )
 
 func client(t *testing.T, h http.HandlerFunc) *Client {
@@ -172,5 +175,62 @@ func TestClientAsksForTheTokenOnEveryRequest(t *testing.T) {
 	}
 	if got := auths[len(auths)-1]; got != "Bearer fallback" {
 		t.Fatalf("an empty TokenFn answer falls back to Token, got %q", got)
+	}
+}
+
+// resetOnce drops the first n connections without a response — what a
+// sandbox's network did to a convergence watch — and answers after that.
+func resetOnce(t *testing.T, n int, answer func(w http.ResponseWriter, r *http.Request)) (*httptest.Server, *int) {
+	t.Helper()
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls <= n {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = conn.Close()
+			}
+			return
+		}
+		answer(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &calls
+}
+
+// THE WATCH THAT DIED ON ONE PACKET. Phase 02's convergence watch polled
+// GitHub, one read came back "connection reset by peer", and the build ended
+// with its pull request merged and its CI running fine.
+func TestAReadThatIsResetIsAskedAgain(t *testing.T) {
+	prev := githubretry.Backoff
+	githubretry.Backoff = []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond}
+	defer func() { githubretry.Backoff = prev }()
+	srv, calls := resetOnce(t, 1, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": []map[string]any{
+			{"id": 7, "status": "completed", "conclusion": "success", "head_sha": "abc"},
+		}})
+	})
+	c := &Client{Token: "t", APIBase: srv.URL}
+	run, err := c.RunForCommit(context.Background(), "acme", "product", "main", "abc")
+	if err != nil {
+		t.Fatalf("one reset connection ended the watch: %v", err)
+	}
+	if run == nil || run.ID != 7 || *calls != 2 {
+		t.Fatalf("run = %+v after %d call(s), want run 7 on the second", run, *calls)
+	}
+}
+
+// A create that was reset may have happened; asking again is not this
+// client's call to make.
+func TestAWriteThatIsResetIsNotRepeated(t *testing.T) {
+	srv, calls := resetOnce(t, 5, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	c := &Client{Token: "t", APIBase: srv.URL}
+	if err := c.RerunFailed(context.Background(), "acme", "product", 7); err == nil {
+		t.Fatal("a reset write should surface, not succeed")
+	}
+	if *calls != 1 {
+		t.Fatalf("a write was sent %d times", *calls)
 	}
 }
