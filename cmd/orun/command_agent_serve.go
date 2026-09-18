@@ -332,7 +332,7 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 			// "Starting the build … Nothing reported yet" until the sweep
 			// failed it. ORUN_TOKEN_FILE is the rotating credential serve keeps
 			// current, which is also what an hour-long build needs.
-			drv = &driver.Bootstrap{Env: bootstrapChildEnv(os.Environ(), os.Getenv, tokenFile)}
+			drv = &driver.Bootstrap{Env: bootstrapChildEnv(os.Environ(), os.Getenv, tokenFile, workdir)}
 		}
 		if serveDriver == "stub" && runKind == nodes.RunKindInteractive {
 			drv = &driver.Stub{Interactive: true}
@@ -477,8 +477,22 @@ func mintHarnessGitToken(ctx context.Context) (string, error) {
 // bootstrapChildEnv is serve's own environment plus the platform plumbing, for
 // the bootstrap driver's child. Appended last, so it wins over anything serve
 // inherited under the same name (os/exec keeps the last value of a key).
-func bootstrapChildEnv(environ []string, getenv func(string) string, tokenFile string) []string {
-	return append(append([]string{}, environ...), harnessPlatformEnv(getenv, tokenFile)...)
+//
+// A GROUNDED session builds IN its grounded clone. The platform names an empty
+// directory (ORUN_BASELINE_OUT) and every console build started from nothing,
+// so a build that stopped mid-way could never be continued: a new Build placed
+// phase 01 into an empty tree, found main already holding phase 02, and
+// refused to land over it. The grounded clone IS the product repository, at
+// its default branch, with git's credential helper already on it — so a build
+// placed there resumes where the repository is (`--resume` leaves every phase
+// whose files are all present), and a product's first build is unchanged: an
+// empty repository clones empty.
+func bootstrapChildEnv(environ []string, getenv func(string) string, tokenFile, workdir string) []string {
+	env := append(append([]string{}, environ...), harnessPlatformEnv(getenv, tokenFile)...)
+	if strings.TrimSpace(workdir) != "" {
+		env = append(env, "ORUN_BASELINE_OUT="+workdir)
+	}
+	return env
 }
 
 func harnessPlatformEnv(getenv func(string) string, tokenFile string) []string {

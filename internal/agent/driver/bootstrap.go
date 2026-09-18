@@ -345,13 +345,17 @@ func send(ctx context.Context, out chan<- Event, e Event) {
 	}
 }
 
+// lookup reads a key from an environment slice the way os/exec will hand it
+// to the child: the LAST value of a duplicated key wins. Reading the first
+// built the arguments from one value while the child ran with another.
 func lookup(env []string, key string) string {
+	value := ""
 	for _, kv := range env {
-		if name, value, ok := strings.Cut(kv, "="); ok && name == key {
-			return value
+		if name, v, ok := strings.Cut(kv, "="); ok && name == key {
+			value = v
 		}
 	}
-	return ""
+	return value
 }
 
 type bootstrapProc struct {

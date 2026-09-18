@@ -55,7 +55,7 @@ func TestTheBootstrapChildResolvesTheSessionCredential(t *testing.T) {
 		}
 		return ""
 	}
-	child := bootstrapChildEnv(sandboxEnv, getenv, tokenFile)
+	child := bootstrapChildEnv(sandboxEnv, getenv, tokenFile, "")
 
 	applyEnv(t, child)
 	auth, err := remotestate.ResolveAuth(context.Background(), remotestate.ResolveOptions{
@@ -111,4 +111,32 @@ func TestTheEventSinkFollowsTheRotatingToken(t *testing.T) {
 	if eventSinkTokenSource(func(string) string { return "" }) != nil {
 		t.Error("no credential at all should mean no sink")
 	}
+}
+
+// A GROUNDED build is placed in its grounded clone — the product repository
+// itself — so a Build after a stopped one resumes where the repository is,
+// instead of placing phase 01 into an empty directory and refusing to land it
+// over a main that already holds phase 02.
+func TestAGroundedBuildIsPlacedInItsClone(t *testing.T) {
+	env := append(append([]string{}, sandboxEnv...), "ORUN_BASELINE_OUT=/home/daytona/product")
+	getenv := func(string) string { return "" }
+	child := bootstrapChildEnv(env, getenv, "/tmp/token", "/home/daytona/work/newne")
+	if got := lastValue(child, "ORUN_BASELINE_OUT"); got != "/home/daytona/work/newne" {
+		t.Fatalf("a grounded build places into %q, want its clone", got)
+	}
+	// No clone, no change: the platform's directory stands.
+	ungrounded := bootstrapChildEnv(env, getenv, "/tmp/token", "")
+	if got := lastValue(ungrounded, "ORUN_BASELINE_OUT"); got != "/home/daytona/product" {
+		t.Fatalf("an ungrounded build places into %q, want the platform's directory", got)
+	}
+}
+
+func lastValue(env []string, key string) string {
+	v := ""
+	for _, kv := range env {
+		if k, val, ok := strings.Cut(kv, "="); ok && k == key {
+			v = val
+		}
+	}
+	return v
 }
