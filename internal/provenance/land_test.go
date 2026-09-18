@@ -18,11 +18,15 @@ type landHarness struct {
 	mu        sync.Mutex
 	checkSets [][]checkRun // one entry per poll; the last repeats
 	polls     int
-	merged    bool
-	mergeBody map[string]any
-	gitCalls  []string
-	mergeCode int
-	mergeMsg  string
+	// workflowSets are the Actions runs for the head, one entry per poll; the
+	// last repeats. Empty means the repository has no workflows.
+	workflowSets [][]workflowRun
+	wpolls       int
+	merged       bool
+	mergeBody    map[string]any
+	gitCalls     []string
+	mergeCode    int
+	mergeMsg     string
 }
 
 func (h *landHarness) pen(t *testing.T) *Pen {
@@ -31,6 +35,17 @@ func (h *landHarness) pen(t *testing.T) *Pen {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/actions/runs"):
+			var runs []workflowRun
+			if len(h.workflowSets) > 0 {
+				idx := h.wpolls
+				if idx >= len(h.workflowSets) {
+					idx = len(h.workflowSets) - 1
+				}
+				runs = h.workflowSets[idx]
+			}
+			h.wpolls++
+			_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": runs})
 		case strings.HasSuffix(r.URL.Path, "/check-runs"):
 			idx := h.polls
 			if idx >= len(h.checkSets) {
@@ -76,7 +91,7 @@ func (h *landHarness) pen(t *testing.T) *Pen {
 }
 
 func req(n int) LandRequest {
-	return LandRequest{Number: n, CheckTimeout: time.Second, PollInterval: time.Millisecond}
+	return LandRequest{Number: n, CheckTimeout: time.Second, PollInterval: time.Millisecond, CIGrace: 20 * time.Millisecond}
 }
 
 // A freshly scaffolded repository has no CI yet. Waiting forever there is the
@@ -219,5 +234,84 @@ func TestLandNeedsACredential(t *testing.T) {
 		RunGit: func(context.Context, ...string) (string, error) { return "https://github.com/a/b.git", nil }}
 	if _, err := p.Land(context.Background(), req(7)); err == nil {
 		t.Fatal("landing anonymously must be refused, not silently skipped")
+	}
+}
+
+// GitHub registers a pull request's CI seconds after the PR exists, so "no
+// checks" read the moment it opens would merge every PR a bootstrap lands
+// without waiting for a single lane. (Found reading this while moving the
+// bootstrap's landings from wait: false to wait: true.) CI that turns up
+// inside the grace is waited on.
+func TestLandWaitsForCIThatRegistersAfterThePROpens(t *testing.T) {
+	h := &landHarness{
+		checkSets: [][]checkRun{{}, {}, {}, {{Name: "plan", Status: "completed", Conclusion: "success"}}},
+		workflowSets: [][]workflowRun{{}, {}, {},
+			{{Name: "CI", Status: "in_progress"}},
+			{{Name: "CI", Status: "completed", Conclusion: "success"}}},
+	}
+	r := req(7)
+	r.CIGrace = time.Second
+	res, err := h.pen(t).Land(context.Background(), r)
+	if err != nil {
+		t.Fatalf("land: %v", err)
+	}
+	if !res.Merged || res.ChecksSeen == 0 {
+		t.Errorf("should merge after the late CI concluded; merged=%v seen=%d", res.Merged, res.ChecksSeen)
+	}
+	if h.wpolls < 5 {
+		t.Errorf("merged before the CI that registered late had concluded (polled %d)", h.wpolls)
+	}
+}
+
+// A plan-then-matrix workflow creates its lanes only after the plan job ends,
+// so for a moment the only check run is a green `plan`. The workflow run is
+// what says whether the lanes are done.
+func TestLandWaitsForTheWorkflowRunNotJustTheChecksThatExistSoFar(t *testing.T) {
+	h := &landHarness{
+		checkSets: [][]checkRun{{{Name: "plan", Status: "completed", Conclusion: "success"}}},
+		workflowSets: [][]workflowRun{
+			{{Name: "CI", Status: "in_progress"}},
+			{{Name: "CI", Status: "in_progress"}},
+			{{Name: "CI", Status: "completed", Conclusion: "success"}},
+		},
+	}
+	res, err := h.pen(t).Land(context.Background(), req(7))
+	if err != nil {
+		t.Fatalf("land: %v", err)
+	}
+	if !res.Merged {
+		t.Fatal("should merge once the workflow run completes")
+	}
+	if h.wpolls < 3 {
+		t.Errorf("merged on a green plan while the workflow was still running (polled %d)", h.wpolls)
+	}
+}
+
+func TestLandRefusesWhenTheWorkflowRunFails(t *testing.T) {
+	h := &landHarness{
+		checkSets:    [][]checkRun{{{Name: "plan", Status: "completed", Conclusion: "success"}}},
+		workflowSets: [][]workflowRun{{{Name: "CI", Status: "completed", Conclusion: "failure"}}},
+	}
+	_, err := h.pen(t).Land(context.Background(), req(7))
+	if err == nil || !strings.Contains(err.Error(), "workflow CI (failure)") {
+		t.Fatalf("want a refusal naming the failed workflow, got %v", err)
+	}
+	if h.merged {
+		t.Error("must not merge over a failed workflow run")
+	}
+}
+
+// With no CI at all, the landing still merges — once the grace has passed.
+func TestLandPassesARepoWithNoCIOnceTheGraceHasPassed(t *testing.T) {
+	h := &landHarness{checkSets: [][]checkRun{{}}}
+	r := req(7)
+	r.CIGrace = 30 * time.Millisecond
+	started := time.Now()
+	res, err := h.pen(t).Land(context.Background(), r)
+	if err != nil || !res.Merged {
+		t.Fatalf("a repo with no CI should merge; merged=%v err=%v", res != nil && res.Merged, err)
+	}
+	if time.Since(started) < r.CIGrace {
+		t.Error("concluded \"no CI\" before the grace had passed")
 	}
 }
