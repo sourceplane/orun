@@ -42,6 +42,9 @@ type RelayConfig struct {
 	HTTP       *http.Client
 	FlushEvery time.Duration // event-batch flush cadence (default 200ms)
 	PollEvery  time.Duration // input long-poll spacing on empty (default 1s)
+	// CloseGrace bounds how long Close waits for the pumps to deliver what the
+	// body already said before cutting them off (default 10s).
+	CloseGrace time.Duration
 
 	// Write-path resilience. POST /events is the DURABLE console log (the cloud
 	// DB the console polls via GET /events) — not a handshake and not liveness
@@ -91,13 +94,32 @@ func (c RelayConfig) logf(format string, args ...any) {
 type RelaySession struct {
 	cancel context.CancelFunc
 	done   chan struct{}
+	grace  time.Duration
+	srv    *Server
 }
 
-// Close stops the pumps and waits for them to drain (so a sealed bye posted on
-// teardown makes it out before the process exits). Idempotent.
+// Close delivers what the body already said, then stops the pumps. Idempotent.
+//
+// THE LAST LINES ARE THE ONES THAT SAY WHY. serve ends a session by closing
+// the attach server — a bye to every head, this relay's included — and then
+// calling Close. Close used to cancel at once, and the pump dropped whatever
+// it held unflushed: always the tail, the build's own error and "the build did
+// not finish". A console build died on a failed precondition and its
+// transcript ended at "building repo-blueprint.yaml", saying nothing.
+//
+// So once the server has closed, Close first waits for the pump to finish on
+// its own — it does, on the bye, after flushing — for at most the grace, and
+// only then cancels. With the server still open there is no bye coming and
+// nothing to wait for.
 func (s *RelaySession) Close() {
 	if s == nil {
 		return
+	}
+	if s.srv != nil && s.srv.Closed() {
+		select {
+		case <-s.done:
+		case <-time.After(s.grace):
+		}
 	}
 	s.cancel()
 	<-s.done
@@ -138,19 +160,30 @@ func DialToRelay(ctx context.Context, srv *Server, inputs *agent.InputQueue, cfg
 	go func() {
 		defer close(done)
 		defer head.Detach()
-		errc := make(chan error, 2)
-		go func() { errc <- pumpUp(pctx, head, cfg, flush, wire) }()
-		go func() { errc <- pumpDown(pctx, inputs, cfg, poll, wire) }()
+		up := make(chan error, 1)
+		down := make(chan error, 1)
+		go func() { up <- pumpUp(pctx, head, cfg, flush, wire) }()
+		go func() { down <- pumpDown(pctx, inputs, cfg, poll, wire) }()
 		select {
 		case <-pctx.Done():
 			cfg.logf("orun agent serve: relay pumps stopping (context canceled)\n")
-		case err := <-errc:
+			// Not done until the up pump is: cut off, it still sends what it
+			// had batched (bounded), and `done` is what the process waits on
+			// before it exits.
+			<-up
+		case err := <-up:
 			// Never silent: even a clean/canceled exit is announced, because a
 			// dark relay with no logs is the failure mode we keep hitting.
 			cfg.logf("orun agent serve: relay pump exited: %v\n", err)
+		case err := <-down:
+			cfg.logf("orun agent serve: relay pump exited: %v\n", err)
 		}
 	}()
-	return &RelaySession{cancel: cancel, done: done}, nil
+	grace := cfg.CloseGrace
+	if grace <= 0 {
+		grace = 10 * time.Second
+	}
+	return &RelaySession{cancel: cancel, done: done, grace: grace, srv: srv}, nil
 }
 
 // ServeToRelay bridges a live session's attach Server to the cloud relay until
@@ -213,6 +246,14 @@ func pumpUp(ctx context.Context, head *HeadConn, cfg RelayConfig, flush time.Dur
 	for {
 		select {
 		case <-ctx.Done():
+			// Cut off — by a parent that is going away, or a Close whose grace
+			// ran out. What is already batched is still the body's own account;
+			// one bounded attempt at it beats silently dropping the tail.
+			if len(batch) > 0 {
+				tail, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				postEventBatch(tail, cfg, batch)
+				cancel()
+			}
 			return ctx.Err()
 		case <-ticker.C:
 			send()
