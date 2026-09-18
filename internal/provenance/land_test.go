@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sourceplane/orun/internal/githubretry"
 )
 
 // landHarness stands up a fake GitHub and a fake git, so a landing is testable
@@ -27,6 +29,9 @@ type landHarness struct {
 	gitCalls     []string
 	mergeCode    int
 	mergeMsg     string
+	// resets drops the next N connections to a path suffix without an answer.
+	resets map[string]int
+	merges int
 	// A token cut to a repository's write tier reads Actions but not Checks.
 	checksForbidden    bool
 	workflowsForbidden bool
@@ -39,6 +44,18 @@ func (h *landHarness) pen(t *testing.T) *Pen {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
+		for suffix, n := range h.resets {
+			if n > 0 && strings.HasSuffix(r.URL.Path, suffix) {
+				h.resets[suffix] = n - 1
+				if strings.HasSuffix(r.URL.Path, "/merge") {
+					h.merges++
+				}
+				if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+					_ = conn.Close()
+				}
+				return
+			}
+		}
 		h.auths = append(h.auths, r.Method+" "+r.URL.Path+" "+r.Header.Get("Authorization"))
 		forbid := func() {
 			w.WriteHeader(http.StatusForbidden)
@@ -417,5 +434,52 @@ func TestLandAsksForTheTokenOnEveryRequest(t *testing.T) {
 	}
 	if mergeAuth == "Bearer tok-1" || mergeAuth == "" {
 		t.Fatalf("the merge, the last request, went out with %q — the token the landing started with", mergeAuth)
+	}
+}
+
+func fastRetries(t *testing.T) {
+	t.Helper()
+	prev := githubretry.Backoff
+	githubretry.Backoff = []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond}
+	t.Cleanup(func() { githubretry.Backoff = prev })
+}
+
+// A landing polls GitHub for up to an hour. One read dropped in that hour must
+// not end it: the CI it is waiting on is fine.
+func TestLandSurvivesAResetRead(t *testing.T) {
+	fastRetries(t)
+	h := &landHarness{
+		resets: map[string]int{"/actions/runs": 1, "/check-runs": 1},
+		workflowSets: [][]workflowRun{
+			{{Name: "CI", Status: "in_progress"}},
+			{{Name: "CI", Status: "completed", Conclusion: "success"}},
+		},
+	}
+	pen := h.pen(t)
+	// Fresh connections: net/http already retries a GET once when a REUSED
+	// keep-alive connection drops before answering, which would hide the
+	// reset from this test — and the reset seen live was not that case.
+	pen.HTTP = &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	res, err := pen.Land(context.Background(), req(7))
+	if err != nil {
+		t.Fatalf("a reset read ended the landing: %v", err)
+	}
+	if !res.Merged {
+		t.Fatal("should have merged once CI finished")
+	}
+}
+
+// A merge that was reset may have happened. Sending it again answers "not
+// mergeable" at best; the landing reports it instead.
+func TestLandDoesNotRepeatAResetMerge(t *testing.T) {
+	fastRetries(t)
+	h := &landHarness{resets: map[string]int{"/merge": 5}}
+	pen := h.pen(t)
+	pen.HTTP = &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	if _, err := pen.Land(context.Background(), req(7)); err == nil {
+		t.Fatal("a merge whose connection was reset must surface")
+	}
+	if h.merges != 1 {
+		t.Fatalf("the merge was sent %d times", h.merges)
 	}
 }
