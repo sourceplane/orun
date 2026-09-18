@@ -26,6 +26,10 @@ type Client struct {
 	// anonymously: every call here either creates something or reads a private
 	// repository, and an anonymous 404 is indistinguishable from "absent".
 	Token string
+	// TokenFn, when set, supplies the credential for EACH request, and Token is
+	// the fallback. A build's convergence watch can outlive a minted token by
+	// an hour; asking per request is what keeps it authenticated.
+	TokenFn func() string
 	// APIBase overrides https://api.github.com (tests).
 	APIBase string
 	HTTP    *http.Client
@@ -44,7 +48,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, out a
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set("Authorization", "Bearer "+c.token())
 	req.Header.Set("Accept", "application/vnd.github+json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -99,7 +103,7 @@ type RepoResult struct {
 // own identity, so creating in a personal account works only for that account's
 // own token. Naming the owner explicitly keeps that failure legible.
 func (c *Client) EnsureRepo(ctx context.Context, owner, name string, private bool, inOrg bool) (*RepoResult, error) {
-	if c.Token == "" {
+	if c.token() == "" {
 		return nil, fmt.Errorf("forge: a GitHub credential is required (GITHUB_TOKEN / GH_TOKEN)")
 	}
 	if owner == "" || name == "" {
@@ -221,4 +225,14 @@ func (c *Client) FailedJobs(ctx context.Context, owner, repo string, id int64) (
 	}
 	sort.Strings(failed)
 	return failed, nil
+}
+
+// token is the credential for one request: TokenFn's answer, else Token.
+func (c *Client) token() string {
+	if c.TokenFn != nil {
+		if t := c.TokenFn(); t != "" {
+			return t
+		}
+	}
+	return c.Token
 }

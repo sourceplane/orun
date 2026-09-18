@@ -3,6 +3,7 @@ package forge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -143,5 +144,33 @@ func TestFailedJobsNamesOnlyTheFailures(t *testing.T) {
 		if strings.HasPrefix(f, "matrix") || strings.HasPrefix(f, "codeql") {
 			t.Errorf("skipped/neutral must not count as failures: %v", failed)
 		}
+	}
+}
+
+// A convergence watch can outlive a minted token by an hour, so a client with
+// a TokenFn asks for the credential on every request.
+func TestClientAsksForTheTokenOnEveryRequest(t *testing.T) {
+	var auths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auths = append(auths, r.Header.Get("Authorization"))
+		_ = json.NewEncoder(w).Encode(map[string]any{"full_name": "acme/product", "clone_url": "https://github.com/acme/product.git"})
+	}))
+	defer srv.Close()
+	n := 0
+	c := &Client{Token: "fallback", APIBase: srv.URL, TokenFn: func() string { n++; return fmt.Sprintf("tok-%d", n) }}
+	for i := 0; i < 2; i++ {
+		if _, err := c.EnsureRepo(context.Background(), "acme", "product", true, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(auths) != 2 || auths[0] == auths[1] {
+		t.Fatalf("each request should carry the token asked for then, got %v", auths)
+	}
+	empty := &Client{Token: "fallback", APIBase: srv.URL, TokenFn: func() string { return "" }}
+	if _, err := empty.EnsureRepo(context.Background(), "acme", "product", true, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := auths[len(auths)-1]; got != "Bearer fallback" {
+		t.Fatalf("an empty TokenFn answer falls back to Token, got %q", got)
 	}
 }

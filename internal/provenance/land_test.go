@@ -27,6 +27,11 @@ type landHarness struct {
 	gitCalls     []string
 	mergeCode    int
 	mergeMsg     string
+	// A token cut to a repository's write tier reads Actions but not Checks.
+	checksForbidden    bool
+	workflowsForbidden bool
+	// auths is the credential each request carried, with its path.
+	auths []string
 }
 
 func (h *landHarness) pen(t *testing.T) *Pen {
@@ -34,7 +39,16 @@ func (h *landHarness) pen(t *testing.T) *Pen {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
+		h.auths = append(h.auths, r.Method+" "+r.URL.Path+" "+r.Header.Get("Authorization"))
+		forbid := func() {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]any{"message": "Resource not accessible by integration"})
+		}
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/actions/runs") && h.workflowsForbidden:
+			forbid()
+		case strings.HasSuffix(r.URL.Path, "/check-runs") && h.checksForbidden:
+			forbid()
 		case strings.HasSuffix(r.URL.Path, "/actions/runs"):
 			var runs []workflowRun
 			if len(h.workflowSets) > 0 {
@@ -313,5 +327,95 @@ func TestLandPassesARepoWithNoCIOnceTheGraceHasPassed(t *testing.T) {
 	}
 	if time.Since(started) < r.CIGrace {
 		t.Error("concluded \"no CI\" before the grace had passed")
+	}
+}
+
+// A GitHub App token cut to a repository's write tier — what a platform
+// sandbox mints — reads Actions but not Checks. The check-runs listing refuses
+// it, and a landing that treated that as fatal could never land a product whose
+// CI is GitHub Actions, which is fully described by its workflow runs.
+func TestLandWithoutChecksReadWaitsOnTheWorkflowRuns(t *testing.T) {
+	h := &landHarness{
+		checksForbidden: true,
+		workflowSets: [][]workflowRun{
+			{{Name: "CI", Status: "in_progress"}},
+			{{Name: "CI", Status: "in_progress"}},
+			{{Name: "CI", Status: "completed", Conclusion: "success"}},
+		},
+	}
+	res, err := h.pen(t).Land(context.Background(), req(7))
+	if err != nil {
+		t.Fatalf("a token that reads Actions can land on its workflow runs: %v", err)
+	}
+	if !res.Merged {
+		t.Fatal("should merge once the workflow run completes")
+	}
+	if h.wpolls < 3 {
+		t.Errorf("merged before the workflow run finished (polled %d)", h.wpolls)
+	}
+}
+
+func TestLandWithoutChecksReadStillRefusesAFailedWorkflow(t *testing.T) {
+	h := &landHarness{
+		checksForbidden: true,
+		workflowSets:    [][]workflowRun{{{Name: "CI", Status: "completed", Conclusion: "failure"}}},
+	}
+	_, err := h.pen(t).Land(context.Background(), req(7))
+	if err == nil || !strings.Contains(err.Error(), "workflow CI (failure)") {
+		t.Fatalf("want a refusal naming the failed workflow, got %v", err)
+	}
+	if h.merged {
+		t.Error("must not merge over a failed workflow run")
+	}
+}
+
+// Neither readable: there is nothing to wait on honestly, and merging blind is
+// the one thing a verified landing must never do.
+func TestLandThatCanReadNeitherRefuses(t *testing.T) {
+	h := &landHarness{checksForbidden: true, workflowsForbidden: true}
+	_, err := h.pen(t).Land(context.Background(), req(7))
+	if err == nil {
+		t.Fatal("a landing that can read neither checks nor workflow runs must not merge")
+	}
+	if h.merged {
+		t.Error("merged blind")
+	}
+}
+
+// A minted credential lasts an hour and the check wait can last as long, so
+// every request asks for the token again rather than reusing the first.
+func TestLandAsksForTheTokenOnEveryRequest(t *testing.T) {
+	h := &landHarness{workflowSets: [][]workflowRun{
+		{{Name: "CI", Status: "in_progress"}},
+		{{Name: "CI", Status: "completed", Conclusion: "success"}},
+	}}
+	pen := h.pen(t)
+	var mu sync.Mutex
+	issued := 0
+	pen.Token = func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		issued++
+		return fmt.Sprintf("tok-%d", issued)
+	}
+	if _, err := pen.Land(context.Background(), req(7)); err != nil {
+		t.Fatalf("land: %v", err)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	seen := map[string]bool{}
+	var mergeAuth string
+	for _, a := range h.auths {
+		parts := strings.SplitN(a, " ", 3)
+		seen[parts[2]] = true
+		if strings.HasSuffix(parts[1], "/merge") {
+			mergeAuth = parts[2]
+		}
+	}
+	if len(seen) < 3 {
+		t.Fatalf("every request should ask for the token; saw %d distinct across %d requests", len(seen), len(h.auths))
+	}
+	if mergeAuth == "Bearer tok-1" || mergeAuth == "" {
+		t.Fatalf("the merge, the last request, went out with %q — the token the landing started with", mergeAuth)
 	}
 }

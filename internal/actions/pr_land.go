@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sourceplane/orun/internal/cliauth"
 	"github.com/sourceplane/orun/internal/provenance"
 )
 
@@ -50,7 +49,13 @@ func init() {
 }
 
 func runPRLand(ctx context.Context, in Input) (Result, error) {
-	return landWith(ctx, &provenance.Pen{Workdir: in.Dir, Token: cliauth.GitHubTokenFromEnv}, in)
+	return landWith(ctx, landPen(ctx, in.Dir), in)
+}
+
+// landPen is the pen a landing writes with: this build's GitHub credential,
+// asked for per request.
+func landPen(ctx context.Context, dir string) *provenance.Pen {
+	return &provenance.Pen{Workdir: dir, Token: func() string { return githubToken(ctx) }}
 }
 
 // landWith is the landing against a given pen — the seam a test points at a
