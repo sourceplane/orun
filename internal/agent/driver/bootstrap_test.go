@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -323,5 +324,59 @@ func TestBootstrapRefusesToLaunchWithoutItsEnvironment(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), envBaselineID) {
 		t.Fatalf("the refusal does not name what is missing: %v", err)
+	}
+}
+
+// os/exec hands a child the LAST value of a duplicated key. The driver read
+// the FIRST to build the child's arguments — so a later override (serve
+// pointing a grounded build at its clone) changed the environment the child
+// ran with, and not the `--out` it was told to place into.
+func TestLookupReadsTheValueTheChildWillSee(t *testing.T) {
+	env := []string{"ORUN_BASELINE_OUT=/home/daytona/product", "X=1", "ORUN_BASELINE_OUT=/home/daytona/work/newne"}
+	if got := lookup(env, envBaselineOut); got != "/home/daytona/work/newne" {
+		t.Fatalf("lookup = %q, want the last value", got)
+	}
+	if got := lookup(env, "ABSENT"); got != "" {
+		t.Fatalf("lookup of an absent key = %q", got)
+	}
+}
+
+// End to end through Launch: the child is told to place into the value it
+// will also see in its environment.
+func TestBootstrapPlacesIntoTheOutItsEnvironmentEndsWith(t *testing.T) {
+	stub := filepath.Join(t.TempDir(), "orun")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\necho \"args: $*\"\necho \"env: $ORUN_BASELINE_OUT\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan Event, 64)
+	d := &Bootstrap{Command: stub, Env: []string{
+		"PATH=" + os.Getenv("PATH"),
+		envBaselineID + "=cirrus@baseline-v10",
+		envBaselineOut + "=/home/daytona/product",
+		envBaselineOut + "=/home/daytona/work/newne",
+	}}
+	p, err := d.Launch(context.Background(), Brief{ID: "b1"}, IO{
+		Events: events, Steer: make(chan Message), Approve: make(chan Verdict), Interrupt: make(chan struct{}),
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	var lines []string
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for e := range events {
+			lines = append(lines, e.Text)
+		}
+	}()
+	_ = p.Wait()
+	close(events)
+	<-done
+	all := strings.Join(lines, "\n")
+	if !strings.Contains(all, "--out /home/daytona/work/newne") {
+		t.Fatalf("the child was not told to place into its clone:\n%s", all)
+	}
+	if !strings.Contains(all, "env: /home/daytona/work/newne") {
+		t.Fatalf("the child's environment disagrees with its arguments:\n%s", all)
 	}
 }
