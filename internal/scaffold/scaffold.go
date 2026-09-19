@@ -240,12 +240,27 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	// Every phase the blueprint declares but this run is not placing is
 	// reported once, so a feed shows the whole shape rather than only the part
 	// that moved.
+	//
+	// WHY it is not placed is part of the line. A resumed build leaves the
+	// phases an earlier run placed, and reporting those as "not needed for
+	// this build" — the words for a phase whose condition excludes it — told
+	// the operator of a resumed console build that its repository's first two
+	// phases were unnecessary ("The repo is born is not needed for this
+	// build").
 	for _, ph := range plan.phases {
-		if !containsPhase(phases, ph.Name) {
-			decl := plan.declOf(ph.Name)
-			em.emit(ctx, Event{Phase: ph.Name, State: EventSkipped,
-				Narration: renderNarration("", phaseTitle(decl, ph.Name), EventSkipped, nil)})
+		if containsPhase(phases, ph.Name) {
+			continue
 		}
+		decl := plan.declOf(ph.Name)
+		narration := renderNarration("", phaseTitle(decl, ph.Name), EventSkipped, nil)
+		if excluded, _ := plan.skipped(ph.Name, values.Fields); !excluded {
+			if opts.Resume {
+				narration = fmt.Sprintf("%s is already in place from an earlier run.", ph.Name)
+			} else {
+				narration = fmt.Sprintf("%s is not part of this run.", ph.Name)
+			}
+		}
+		em.emit(ctx, Event{Phase: ph.Name, State: EventSkipped, Narration: narration})
 	}
 
 	var hooksRun []string
