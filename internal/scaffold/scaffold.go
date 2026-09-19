@@ -295,6 +295,22 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			em.emit(ctx, Event{Phase: phase.Name, State: EventStarted,
 				Narration: narrate(EventStarted, startMeta),
 				Meta:      startMeta})
+			// SAY EACH STEP AS IT HAPPENS. An action with an operator line
+			// (Spec.Doing) is announced as it starts, and a hook's authored
+			// line is emitted the moment that hook completes — "The first
+			// commit is merged into main" while the phase is still converging,
+			// not after it.
+			hr.onStart = func(h Hook) {
+				if spec, ok := actions.Lookup(h.Uses); ok && spec.Doing != "" {
+					em.emit(ctx, Event{Phase: phase.Name, Step: h.ID, State: EventRunning, Narration: spec.Doing})
+				}
+			}
+			hr.onDone = func(h Hook) {
+				scope := narrationScope(phase.Name, title, hr.inputs, startMeta, hr.outputs)
+				if line := hookNarration(phase.Name, h, scope); line != "" {
+					em.emit(ctx, Event{Phase: phase.Name, Step: h.ID, State: EventDone, Narration: line})
+				}
+			}
 			// A waiting event names what it waits on, in the detail and — as
 			// `.meta.waitingOn` — in the line, so the headline says it too.
 			waitingFor := func(step, reason string) Event {
@@ -353,9 +369,6 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 					Detail:    herr.Error()})
 				return nil, fmt.Errorf("phase %q: %w", phase.Name, herr)
 			}
-			emitHookNarrations(ctx, em, phase.Name,
-				narrationScope(phase.Name, title, hr.inputs, startMeta, hr.outputs),
-				phase.Hooks.Pre, phase.Hooks.Post)
 			// await runs OUTSIDE the retry policy. Retrying a wait would turn
 			// "still running" into an error after N attempts, when the honest
 			// answer is that it is still running.
@@ -377,9 +390,6 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			if i+1 < len(phases) {
 				meta["next"] = phases[i+1].Name
 			}
-			emitHookNarrations(ctx, em, phase.Name,
-				narrationScope(phase.Name, title, hr.inputs, meta, hr.outputs),
-				phase.Hooks.Await)
 			em.emit(ctx, Event{Phase: phase.Name, State: EventDone,
 				Narration: narrate(EventDone, meta),
 				Meta:      meta})
@@ -390,6 +400,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		// there renders empty rather than silently carrying the last phase.
 		hr.phase = Phase{}
 		hr.resetOutputs()
+		hr.onStart, hr.onDone = nil, nil
 		ran, herr := hr.run(ctx, bp.Hooks.PostInstantiate)
 		if herr != nil {
 			return nil, herr

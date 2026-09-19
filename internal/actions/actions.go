@@ -67,7 +67,13 @@ type Param struct {
 type Spec struct {
 	ID      string
 	Summary string
-	Params  []Param
+	// Doing is what an operator reads while this action runs — one short
+	// line, in their words rather than the implementer's. Set only on actions
+	// that take long enough to be watched (a landing waits on CI, a watch on
+	// a convergence run); a quick one says nothing, so a build's feed is not
+	// a list of bookkeeping.
+	Doing  string
+	Params []Param
 	// Outputs names the keys Result.Outputs may carry. Declared so a blueprint
 	// referencing an output can be checked before anything runs.
 	Outputs []string

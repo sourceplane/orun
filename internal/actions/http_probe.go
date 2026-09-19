@@ -24,6 +24,7 @@ func init() {
 	register(Spec{
 		ID:      "orun.http/probe@v1",
 		Summary: "GET each URL and require the expected status",
+		Doing:   "Checking that the deployed addresses answer.",
 		Params: []Param{
 			{
 				Name:        "urls",

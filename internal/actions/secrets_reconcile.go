@@ -35,6 +35,7 @@ func init() {
 	register(Spec{
 		ID:      "orun.integrations/reconcile@v1",
 		Summary: "Create the declared brokered secrets that do not exist yet, minted from the workspace's connections",
+		Doing:   "Minting this phase's secrets from your connections.",
 		Params: append(orgParams(),
 			Param{Name: "provider", Type: ParamString, Required: true,
 				Description: "the connected provider the secrets are minted from"},

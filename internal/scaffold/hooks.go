@@ -29,6 +29,12 @@ type hookRunner struct {
 	// `{{ .hooks.<id>.outputs.<key> }}` in a later hook's `with:` block. Scoped
 	// to one phase: see resetOutputs.
 	outputs map[string]map[string]string
+	// onStart is told as each action hook begins, and onDone as any hook
+	// completes. A phase's hooks are its long part — a landing waits on CI, a
+	// watch on a convergence run — and a build that reported nothing until
+	// all of them had finished left its page on one line for an hour.
+	onStart func(h Hook)
+	onDone  func(h Hook)
 	// inputs are the blueprint's collected input values, SECRET-FREE — a
 	// secret field reads as the literal "<secret>". A hook that needs a
 	// credential gets it from the platform at resolve time (the brokered
@@ -51,6 +57,9 @@ func (hr *hookRunner) run(ctx context.Context, hooks []Hook) ([]string, error) {
 		default:
 			if err := hr.runArgv(h); err != nil {
 				return ran, err
+			}
+			if hr.onDone != nil {
+				hr.onDone(h)
 			}
 		}
 		ran = append(ran, h.ID)
@@ -80,6 +89,9 @@ func (hr *hookRunner) runAction(ctx context.Context, h Hook) error {
 	if hr.actions == nil {
 		return fmt.Errorf("hook %q: no action runner configured", h.ID)
 	}
+	if hr.onStart != nil {
+		hr.onStart(h)
+	}
 	out, err := hr.actions.Run(ctx, h.Uses, ActionInput{Dir: hr.outDir, BaseDir: hr.baseDir, Params: params})
 	if err != nil {
 		return fmt.Errorf("hook %q (%s): %w", h.ID, h.Uses, err)
@@ -88,6 +100,9 @@ func (hr *hookRunner) runAction(ctx context.Context, h Hook) error {
 		hr.resetOutputs()
 	}
 	hr.outputs[h.ID] = out
+	if hr.onDone != nil {
+		hr.onDone(h)
+	}
 	return nil
 }
 

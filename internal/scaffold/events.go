@@ -208,27 +208,23 @@ func phaseMeta(decl *Phase, files map[string]PlacedFile) map[string]string {
 	return meta
 }
 
-// emitHookNarrations emits one event per hook that authored a line, rendered
-// against the same scope a phase's lines see — including this phase's hook
-// outputs, which is the thing a hook's own caption most wants to name ("PR
-// {{ .hooks.land.outputs.number }} merged").
-func emitHookNarrations(ctx context.Context, em *emitter, phase string, scope map[string]any, groups ...[]Hook) {
-	for _, group := range groups {
-		for _, h := range group {
-			if strings.TrimSpace(h.Narrate) == "" {
-				continue
-			}
-			line := h.Narrate
-			if strings.Contains(line, "{{") {
-				out, err := Render("narrate."+phase+"."+h.ID, line, scope)
-				if err != nil {
-					continue
-				}
-				line = string(out)
-			}
-			em.emit(ctx, Event{Phase: phase, Step: h.ID, State: EventDone, Narration: line})
-		}
+// hookNarration is a hook's authored line rendered against the phase's scope
+// — including this phase's hook outputs, which is the thing a hook's own
+// caption most wants to name ("PR {{ .hooks.land.outputs.number }} merged") —
+// or "" when it authored none or the line cannot render.
+func hookNarration(phase string, h Hook, scope map[string]any) string {
+	line := strings.TrimSpace(h.Narrate)
+	if line == "" {
+		return ""
 	}
+	if strings.Contains(line, "{{") {
+		out, err := Render("narrate."+phase+"."+h.ID, line, scope)
+		if err != nil {
+			return ""
+		}
+		line = string(out)
+	}
+	return line
 }
 
 // withWaitingOn is meta plus what the phase is waiting on (`waitingOn`), which

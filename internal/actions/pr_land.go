@@ -22,6 +22,7 @@ func init() {
 	register(Spec{
 		ID:      "orun.pr/land@v1",
 		Summary: "Open the task's PR through the provenance pen and merge it once checks settle",
+		Doing:   "Opening the pull request, and merging it once its CI passes.",
 		Params: []Param{
 			{Name: "task", Type: ParamString, Required: true,
 				Description: "the task key this landing closes — a PR opens FOR a task"},
