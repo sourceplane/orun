@@ -15,6 +15,7 @@ func init() {
 	register(Spec{
 		ID:      "orun.repo/ensure@v1",
 		Summary: "Find or create the product repository",
+		Doing:   "Finding the product repository.",
 		Params: []Param{
 			{Name: "owner", Type: ParamString, Required: true,
 				Description: "GitHub owner (organization or user)"},
@@ -31,6 +32,7 @@ func init() {
 	register(Spec{
 		ID:      "orun.run/watch@v1",
 		Summary: "Watch a convergence run to green, resuming it through transient failures",
+		Doing:   "Watching the convergence run on main — this is where it deploys.",
 		Params: []Param{
 			{Name: "repo", Type: ParamString, Required: true,
 				Description: "owner/name of the repository whose run is watched"},
