@@ -149,6 +149,8 @@ func newPrLandCommand() *cobra.Command {
 		base        string
 		wait        bool
 		timeoutSecs int
+
+		rerunBudget int
 		method      string
 	)
 	cmd := &cobra.Command{
@@ -172,7 +174,7 @@ for. A check that is merely queued is not a passing check.`,
 			}
 			pen := &provenance.Pen{Workdir: ".", Token: cliauth.GitHubTokenFromEnv}
 			out, err := pen.Land(cmd.Context(), provenance.LandRequest{
-				Number: number, Base: base, CheckTimeout: timeout, MergeMethod: method,
+				Number: number, Base: base, CheckTimeout: timeout, MergeMethod: method, RerunBudget: rerunBudget,
 			})
 			if err != nil {
 				return fmt.Errorf("orun pr land: %w", err)
@@ -187,7 +189,8 @@ for. A check that is merely queued is not a passing check.`,
 	cmd.Flags().IntVar(&number, "number", 0, "the pull request to land")
 	cmd.Flags().StringVar(&base, "base", "main", "base branch, and the branch to return to")
 	cmd.Flags().BoolVar(&wait, "wait", true, "wait for checks before merging")
-	cmd.Flags().IntVar(&timeoutSecs, "check-timeout", 1800, "seconds to wait for checks to settle")
+	cmd.Flags().IntVar(&timeoutSecs, "check-timeout", 1800, "seconds to wait for checks to settle; each re-run gets this again")
+	cmd.Flags().IntVar(&rerunBudget, "rerun-budget", 2, "re-run the PR's failed CI jobs this many times before refusing; 0 never re-runs")
 	cmd.Flags().StringVar(&method, "merge-method", "squash", "squash | merge | rebase")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON")
 	return cmd

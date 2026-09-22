@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // tokenFunc adapts a function to the TokenSource interface.
@@ -192,5 +194,146 @@ func TestCoordClientContractVersionRequired(t *testing.T) {
 	c := &CoordClient{BaseURL: srv.URL}
 	if _, err := c.Claim(context.Background(), "r1", "jclaimed", ClaimRequest{RunnerID: "runner-1"}); err != nil {
 		t.Fatalf("client must send Orun-Contract-Version: %v", err)
+	}
+}
+
+// ── A verb that failed in transit is asked again ─────────────────────────────
+
+func fastCoordRetries(t *testing.T) {
+	t.Helper()
+	prev := coordRetryWait
+	coordRetryWait = func(int, string) time.Duration { return time.Millisecond }
+	t.Cleanup(func() { coordRetryWait = prev })
+}
+
+// The lane in the field: one reset connection on the claim, before a step had
+// run. The claim is asked again and the lane never notices.
+func TestCoordClientRetriesAClaimWhoseConnectionWasReset(t *testing.T) {
+	fastCoordRetries(t)
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&calls, 1) <= 2 {
+			if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+				_ = conn.Close()
+			}
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"claimed":true,"leaseEpoch":3,"leaseExpiresAt":"2026-06-19T00:01:00Z"}`))
+	}))
+	defer srv.Close()
+	c := &CoordClient{HTTP: srv.Client(), BaseURL: srv.URL}
+	out, err := c.Claim(context.Background(), "run1", "j1", ClaimRequest{RunnerID: "r1"})
+	if err != nil {
+		t.Fatalf("a reset connection must not fail the claim: %v", err)
+	}
+	if out.Kind != OutcomeClaimed || out.LeaseEpoch != 3 {
+		t.Fatalf("claim outcome: %+v", out)
+	}
+	if got := atomic.LoadInt32(&calls); got != 3 {
+		t.Fatalf("the claim was asked %d times, want 3", got)
+	}
+}
+
+// 503 and 429 are the server not answering this time; a Retry-After hint is
+// honoured. The body of a transient answer is drained, never decoded.
+func TestCoordClientRetriesTransientStatusesAndHonoursRetryAfter(t *testing.T) {
+	var hints []string
+	prev := coordRetryWait
+	coordRetryWait = func(_ int, hint string) time.Duration {
+		hints = append(hints, hint)
+		return time.Millisecond
+	}
+	t.Cleanup(func() { coordRetryWait = prev })
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch atomic.AddInt32(&calls, 1) {
+		case 1:
+			w.Header().Set("Retry-After", "2")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":"slow down"}`))
+		case 2:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		default:
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}
+	}))
+	defer srv.Close()
+	c := &CoordClient{HTTP: srv.Client(), BaseURL: srv.URL}
+	lost, err := c.Heartbeat(context.Background(), "run1", "j1", "r1", 3)
+	if err != nil || lost {
+		t.Fatalf("heartbeat after two transient answers: lost=%v err=%v", lost, err)
+	}
+	if len(hints) != 2 || hints[0] != "2" || hints[1] != "" {
+		t.Fatalf("Retry-After hints seen by the wait: %q", hints)
+	}
+}
+
+// A 4xx is an answer. Asking again would not change it, and a 409 on a
+// complete MEANS something (the lease was lost) that a retry must not blur.
+func TestCoordClientDoesNotRetryAnAnswer(t *testing.T) {
+	fastCoordRetries(t)
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusConflict)
+	}))
+	defer srv.Close()
+	c := &CoordClient{HTTP: srv.Client(), BaseURL: srv.URL}
+	lost, err := c.Complete(context.Background(), "run1", "j1", CompleteRequest{RunnerID: "r1", LeaseEpoch: 3, Outcome: "succeeded"})
+	if err != nil || !lost {
+		t.Fatalf("a 409 is a lost lease, not an error: lost=%v err=%v", lost, err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("a 4xx was asked %d times, want 1", got)
+	}
+}
+
+// The budget is a bound: a server that never answers fails after it, with the
+// transport's own error, and a transient status on the last attempt comes
+// back as the status it was.
+func TestCoordClientGivesUpAfterTheBudget(t *testing.T) {
+	fastCoordRetries(t)
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer srv.Close()
+	c := &CoordClient{HTTP: srv.Client(), BaseURL: srv.URL, RetryAttempts: 3}
+	_, err := c.Claim(context.Background(), "run1", "j1", ClaimRequest{RunnerID: "r1"})
+	if err == nil || !strings.Contains(err.Error(), "502") {
+		t.Fatalf("want the last status reported, got %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 3 {
+		t.Fatalf("asked %d times, want the budget of 3", got)
+	}
+}
+
+// The caller giving up is not the network: a cancelled context ends the
+// retries at once.
+func TestCoordClientStopsRetryingWhenTheContextEnds(t *testing.T) {
+	prev := coordRetryWait
+	coordRetryWait = func(int, string) time.Duration { return time.Hour }
+	t.Cleanup(func() { coordRetryWait = prev })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+	c := &CoordClient{HTTP: srv.Client(), BaseURL: srv.URL}
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.Claim(ctx, "run1", "j1", ClaimRequest{RunnerID: "r1"})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a cancelled wait must surface as an error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the retry outlived its context")
 	}
 }

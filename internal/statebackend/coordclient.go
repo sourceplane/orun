@@ -7,7 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"math/rand"
 	"net/http"
+	"strconv"
+	"time"
 )
 
 // ErrClaimTargetNotFound is returned by Claim when the coordination endpoint
@@ -44,22 +48,131 @@ type CoordClient struct {
 	// over Token). This is how the CI golden path authenticates: an OIDC token
 	// exchanged for a short-lived workflow token.
 	TokenSource TokenSource
+	// RetryAttempts bounds how many times a verb is asked in all when it fails
+	// in transit or the server answers 429 / 5xx. Zero means the default.
+	RetryAttempts int
 }
 
+// A VERB THAT FAILED IN TRANSIT IS ASKED AGAIN.
+//
+// A product's CI lane claims its job over the network, and one reset
+// connection on that claim ended the lane:
+//
+//	✕ claiming job integrations-worker.dev.verify-deploy: Post "…/jobs/…:claim":
+//	  read tcp 10.1.0.194:44618->104.21.44.152:443: read: connection reset by peer
+//
+// before a single step had run — a failure with nothing wrong in the product,
+// which then failed the phase's landing and stopped an unattended build.
+//
+// Every coordination verb is safe to ask twice, because the server makes each
+// one idempotent by construction: a re-claim by the holder of a live lease
+// answers the same lease; a heartbeat renews what it renews; a complete for a
+// job already in that terminal state is a no-op; the frontier and the log are
+// reads. So a transport failure — reset, timeout, EOF, anything below HTTP —
+// and a 429 or 5xx are retried with exponential backoff and jitter, honouring
+// a Retry-After hint, up to coordRetryAttempts in all. A 4xx is an answer,
+// never retried; the caller's own context ending is the caller giving up.
+const (
+	coordRetryAttempts = 5
+	coordRetryBase     = 1 * time.Second
+	coordRetryMax      = 15 * time.Second
+)
+
+// coordRetryWait is the wait before retry `attempt` (1-based), given a
+// Retry-After hint in seconds when the server sent one. A variable so tests
+// do not sleep.
+var coordRetryWait = func(attempt int, retryAfter string) time.Duration {
+	if secs, err := strconv.Atoi(retryAfter); err == nil && secs > 0 {
+		d := time.Duration(secs)*time.Second + time.Duration(rand.Float64()*float64(coordRetryBase))
+		if d > coordRetryMax {
+			d = coordRetryMax
+		}
+		return d
+	}
+	exp := float64(coordRetryBase) * math.Pow(2, float64(attempt-1))
+	if exp > float64(coordRetryMax) {
+		exp = float64(coordRetryMax)
+	}
+	return time.Duration(exp + rand.Float64()*float64(coordRetryBase))
+}
+
+// transientStatus is a status worth asking again: the server or a hop in
+// front of it could not answer this time.
+func transientStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
+func (c *CoordClient) attempts() int {
+	if c.RetryAttempts > 0 {
+		return c.RetryAttempts
+	}
+	return coordRetryAttempts
+}
+
+// do sends the verb, asking again on a transport failure or a transient
+// status (see above). The response returned is unread; on the last attempt a
+// transient status comes back as the response it was, so the caller reports
+// it the way it reports any other unexpected status.
 func (c *CoordClient) do(ctx context.Context, method, path string, body any) (*http.Response, error) {
-	var r io.Reader
+	var payload []byte
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return nil, err
 		}
-		r = bytes.NewReader(b)
+		payload = b
+	}
+	attempts := c.attempts()
+	for attempt := 1; ; attempt++ {
+		resp, err := c.once(ctx, method, path, payload)
+		last := attempt >= attempts
+		if err != nil {
+			if last || ctx.Err() != nil {
+				return nil, err
+			}
+			if werr := waitRetry(ctx, coordRetryWait(attempt, "")); werr != nil {
+				return nil, err
+			}
+			continue
+		}
+		if !transientStatus(resp.StatusCode) || last {
+			return resp, nil
+		}
+		hint := resp.Header.Get("Retry-After")
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+		if werr := waitRetry(ctx, coordRetryWait(attempt, hint)); werr != nil {
+			return nil, fmt.Errorf("%s %s: status %d, and the retry was cut short: %w", method, path, resp.StatusCode, werr)
+		}
+	}
+}
+
+func waitRetry(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
+}
+
+// once sends the verb exactly once. The body is rebuilt per call, so a retry
+// never sends a reader another attempt already drained.
+func (c *CoordClient) once(ctx context.Context, method, path string, payload []byte) (*http.Response, error) {
+	var r io.Reader
+	if payload != nil {
+		r = bytes.NewReader(payload)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, r)
 	if err != nil {
 		return nil, err
 	}
-	if body != nil {
+	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Orun-Contract-Version", "2")

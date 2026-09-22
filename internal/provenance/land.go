@@ -61,6 +61,13 @@ type LandRequest struct {
 	CIGrace time.Duration
 	// MergeMethod is squash | merge | rebase. Default squash.
 	MergeMethod string
+	// RerunBudget is how many times the head's failed CI jobs are re-run
+	// before the landing refuses. A lane that died on something transient —
+	// a runner lost, a connection reset on its claim — heals in place; a real
+	// failure fails every re-run and surfaces after the budget, which is what
+	// the budget is for. Zero never re-runs. Each re-run gets a fresh
+	// CheckTimeout.
+	RerunBudget int
 }
 
 // LandResult is what the landing did.
@@ -71,6 +78,8 @@ type LandResult struct {
 	// ChecksSeen is how many check runs were observed. Zero is a real and
 	// expected answer on a repository whose CI has not landed yet.
 	ChecksSeen int
+	// Reruns is how many times the head's failed jobs were re-run.
+	Reruns int
 	// MergeSHA is the resulting commit on the base branch.
 	MergeSHA string
 	// BranchDeleted: the merged head branch is gone from the remote.
@@ -122,8 +131,9 @@ func (p *Pen) Land(ctx context.Context, req LandRequest) (*LandResult, error) {
 	out := &LandResult{SHA: head}
 
 	if req.CheckTimeout > 0 {
-		seen, err := p.waitForChecks(ctx, owner, repo, head, token, req)
+		seen, reruns, err := p.waitForChecks(ctx, owner, repo, head, token, req)
 		out.ChecksSeen = seen
+		out.Reruns = reruns
 		if err != nil {
 			return out, err
 		}
@@ -164,8 +174,19 @@ func (p *Pen) Land(ctx context.Context, req LandRequest) (*LandResult, error) {
 }
 
 // waitForChecks polls until every check run on the head commit has a
-// conclusion, and reports how many were seen.
-func (p *Pen) waitForChecks(ctx context.Context, owner, repo, sha, token string, req LandRequest) (int, error) {
+// conclusion, and reports how many were seen and how many times the head's
+// failed jobs were re-run.
+//
+// A FAILED LANE IS RE-RUN BEFORE THE LANDING IS REFUSED, while the budget
+// lasts. The convergence watch after a merge has always resumed failed lanes
+// (`orun.run/watch@v1`, resumeBudget); the landing before it refused on the
+// first red check, so a lane that died on its claim — a connection reset
+// before a step had run — failed the phase and stopped an unattended build
+// with nothing wrong in the product. Now the failed workflow runs on the head
+// get `rerun-failed-jobs`, the wait starts over with a fresh timeout, and
+// only a failure that outlasts the budget refuses the landing. The product's
+// own CI passes `--retry` on a re-run attempt, so the lane re-opens its job.
+func (p *Pen) waitForChecks(ctx context.Context, owner, repo, sha, token string, req LandRequest) (int, int, error) {
 	interval := req.PollInterval
 	if interval <= 0 {
 		interval = 15 * time.Second
@@ -179,6 +200,22 @@ func (p *Pen) waitForChecks(ctx context.Context, owner, repo, sha, token string,
 	if grace > req.CheckTimeout {
 		grace = req.CheckTimeout
 	}
+	wait := func(seen int) (int, int, error) {
+		select {
+		case <-ctx.Done():
+			return seen, 0, ctx.Err()
+		case <-time.After(interval):
+			return 0, 0, nil
+		}
+	}
+	reruns := 0
+	// After a re-run is issued, GitHub answers with the previous attempt for a
+	// moment: the workflow run still reads completed and failed, and the check
+	// runs are still the old attempt's. Until a workflow run reports an
+	// attempt past this floor, the head is pending, not failed — or the
+	// re-run just issued would be read as its own failure and spend the budget
+	// on the same attempt.
+	attemptFloor := 0
 	for {
 		runs, err := p.checkRuns(ctx, owner, repo, sha, token)
 		// Workflow runs are best effort: a token that cannot read Actions
@@ -190,19 +227,35 @@ func (p *Pen) waitForChecks(ctx context.Context, owner, repo, sha, token string,
 		// whose CI is GitHub Actions is fully described by its workflow runs.
 		// Only when NEITHER can be read is there nothing to wait on honestly.
 		if err != nil && werr != nil {
-			return 0, err
+			return 0, reruns, err
 		}
 		// Nothing registered: a wait until the grace has passed, a pass after.
 		if len(runs) == 0 && len(workflows) == 0 {
 			if time.Since(start) >= grace {
-				return 0, nil
+				return 0, reruns, nil
 			}
-			select {
-			case <-ctx.Done():
-				return 0, ctx.Err()
-			case <-time.After(interval):
+			if seen, r, werr := wait(0); werr != nil {
+				return seen, r, werr
 			}
 			continue
+		}
+		if attemptFloor > 0 {
+			advanced := false
+			for _, w := range workflows {
+				if w.RunAttempt > attemptFloor {
+					advanced = true
+				}
+			}
+			if !advanced {
+				if time.Now().After(deadline) {
+					return len(runs), reruns, fmt.Errorf("provenance: checks still running after %s: the re-run of %s has not started", req.CheckTimeout, shortSHA(sha))
+				}
+				if seen, r, werr := wait(len(runs)); werr != nil {
+					return seen, r, werr
+				}
+				continue
+			}
+			attemptFloor = 0
 		}
 		for _, w := range workflows {
 			runs = append(runs, checkRun{Name: "workflow " + w.Name, Status: w.Status, Conclusion: w.Conclusion})
@@ -221,21 +274,66 @@ func (p *Pen) waitForChecks(ctx context.Context, owner, repo, sha, token string,
 		}
 		if len(failed) > 0 {
 			sort.Strings(failed)
-			return len(runs), fmt.Errorf("provenance: checks failed on %s: %s", shortSHA(sha), strings.Join(failed, ", "))
+			if reruns < req.RerunBudget && werr == nil {
+				issued, floor := p.rerunFailedRuns(ctx, owner, repo, token, workflows)
+				if issued > 0 {
+					reruns++
+					attemptFloor = floor
+					deadline = time.Now().Add(req.CheckTimeout)
+					if seen, r, werr := wait(len(runs)); werr != nil {
+						return seen, r, werr
+					}
+					continue
+				}
+			}
+			after := ""
+			if reruns > 0 {
+				after = fmt.Sprintf(" after %d re-run(s)", reruns)
+			}
+			return len(runs), reruns, fmt.Errorf("provenance: checks failed on %s%s: %s", shortSHA(sha), after, strings.Join(failed, ", "))
 		}
 		if len(pending) == 0 {
-			return len(runs), nil
+			return len(runs), reruns, nil
 		}
 		if time.Now().After(deadline) {
 			sort.Strings(pending)
-			return len(runs), fmt.Errorf("provenance: checks still running after %s: %s", req.CheckTimeout, strings.Join(pending, ", "))
+			return len(runs), reruns, fmt.Errorf("provenance: checks still running after %s: %s", req.CheckTimeout, strings.Join(pending, ", "))
 		}
-		select {
-		case <-ctx.Done():
-			return len(runs), ctx.Err()
-		case <-time.After(interval):
+		if seen, r, werr := wait(len(runs)); werr != nil {
+			return seen, r, werr
 		}
 	}
+}
+
+// rerunFailedRuns asks GitHub to re-run the failed jobs of every completed,
+// failed workflow run on the head, and reports how many re-runs were issued
+// and the highest attempt those runs were on — the floor the next read has
+// to pass. Best effort per run: GitHub refuses a re-run for a token without
+// `actions: write` or a run past its retention, and a re-run that could not
+// be issued leaves the failure to be reported as it was.
+func (p *Pen) rerunFailedRuns(ctx context.Context, owner, repo, token string, workflows []workflowRun) (int, int) {
+	issued, floor := 0, 0
+	for _, w := range workflows {
+		if w.Status != "completed" || w.ID == 0 {
+			continue
+		}
+		switch w.Conclusion {
+		case "success", "neutral", "skipped":
+			continue
+		}
+		path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/rerun-failed-jobs", owner, repo, w.ID)
+		if err := p.apiJSON(ctx, http.MethodPost, path, token, []byte("{}"), nil); err != nil {
+			continue
+		}
+		issued++
+		if w.RunAttempt > floor {
+			floor = w.RunAttempt
+		}
+	}
+	if issued > 0 && floor == 0 {
+		floor = 1
+	}
+	return issued, floor
 }
 
 func (p *Pen) checkRuns(ctx context.Context, owner, repo, sha, token string) ([]checkRun, error) {
@@ -251,9 +349,12 @@ func (p *Pen) checkRuns(ctx context.Context, owner, repo, sha, token string) ([]
 
 // workflowRun is the subset of a GitHub Actions workflow run this cares about.
 type workflowRun struct {
+	ID         int64  `json:"id"`
 	Name       string `json:"name"`
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
+	// RunAttempt counts re-runs; the first run is attempt 1.
+	RunAttempt int `json:"run_attempt"`
 }
 
 func (p *Pen) workflowRuns(ctx context.Context, owner, repo, sha, token string) ([]workflowRun, error) {

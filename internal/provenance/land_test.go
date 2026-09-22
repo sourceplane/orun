@@ -35,6 +35,10 @@ type landHarness struct {
 	// A token cut to a repository's write tier reads Actions but not Checks.
 	checksForbidden    bool
 	workflowsForbidden bool
+	// reruns are the workflow runs whose failed jobs were asked to re-run;
+	// rerunCode, when set, is GitHub's refusal.
+	reruns    []int64
+	rerunCode int
 	// auths is the credential each request carried, with its path.
 	auths []string
 }
@@ -62,6 +66,16 @@ func (h *landHarness) pen(t *testing.T) *Pen {
 			_ = json.NewEncoder(w).Encode(map[string]any{"message": "Resource not accessible by integration"})
 		}
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/rerun-failed-jobs"):
+			if h.rerunCode != 0 {
+				w.WriteHeader(h.rerunCode)
+				_ = json.NewEncoder(w).Encode(map[string]any{"message": "Resource not accessible by integration"})
+				return
+			}
+			var id int64
+			_, _ = fmt.Sscanf(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/repos/acme/product/actions/runs/"), "/rerun-failed-jobs"), "%d", &id)
+			h.reruns = append(h.reruns, id)
+			w.WriteHeader(http.StatusCreated)
 		case strings.HasSuffix(r.URL.Path, "/actions/runs") && h.workflowsForbidden:
 			forbid()
 		case strings.HasSuffix(r.URL.Path, "/check-runs") && h.checksForbidden:
@@ -481,5 +495,102 @@ func TestLandDoesNotRepeatAResetMerge(t *testing.T) {
 	}
 	if h.merges != 1 {
 		t.Fatalf("the merge was sent %d times", h.merges)
+	}
+}
+
+// ── A failed lane is re-run before the landing is refused ───────────────────
+
+// The lane in the field died on its claim — a reset connection before a step
+// had run — and the landing refused the phase. With a budget, the failed
+// jobs are re-run; GitHub answers with the old attempt for a poll or two,
+// which must not be read as the re-run's own failure; then the re-run
+// passes, and the landing merges.
+func TestLandRerunsAFailedLaneAndMergesWhenItPasses(t *testing.T) {
+	h := &landHarness{
+		checkSets: [][]checkRun{
+			{{Name: "plan", Status: "completed", Conclusion: "success"}, {Name: "integrations-worker · dev · Verify deploy", Status: "completed", Conclusion: "failure"}},
+			{{Name: "plan", Status: "completed", Conclusion: "success"}, {Name: "integrations-worker · dev · Verify deploy", Status: "completed", Conclusion: "failure"}},
+			{{Name: "plan", Status: "completed", Conclusion: "success"}, {Name: "integrations-worker · dev · Verify deploy", Status: "queued"}},
+			{{Name: "plan", Status: "completed", Conclusion: "success"}, {Name: "integrations-worker · dev · Verify deploy", Status: "completed", Conclusion: "success"}},
+		},
+		workflowSets: [][]workflowRun{
+			{{ID: 9, Name: "CI", Status: "completed", Conclusion: "failure", RunAttempt: 1}},
+			{{ID: 9, Name: "CI", Status: "completed", Conclusion: "failure", RunAttempt: 1}},
+			{{ID: 9, Name: "CI", Status: "in_progress", RunAttempt: 2}},
+			{{ID: 9, Name: "CI", Status: "completed", Conclusion: "success", RunAttempt: 2}},
+		},
+	}
+	r := req(7)
+	r.RerunBudget = 2
+	res, err := h.pen(t).Land(context.Background(), r)
+	if err != nil {
+		t.Fatalf("a lane that passes on its re-run must land: %v", err)
+	}
+	if !res.Merged || res.Reruns != 1 {
+		t.Fatalf("merged=%v reruns=%d, want merged after exactly one re-run", res.Merged, res.Reruns)
+	}
+	if len(h.reruns) != 1 || h.reruns[0] != 9 {
+		t.Fatalf("re-run issued for runs %v, want [9] once — the stale attempt must not spend the budget", h.reruns)
+	}
+}
+
+// A real failure fails every re-run and surfaces after the budget, named,
+// with the re-runs counted — "flake" is not a root cause.
+func TestLandRefusesAfterTheRerunBudgetAndSaysHowManyTimes(t *testing.T) {
+	h := &landHarness{
+		checkSets: [][]checkRun{{{Name: "plan", Status: "completed", Conclusion: "success"}}},
+		workflowSets: [][]workflowRun{
+			{{ID: 9, Name: "CI", Status: "completed", Conclusion: "failure", RunAttempt: 1}},
+			{{ID: 9, Name: "CI", Status: "completed", Conclusion: "failure", RunAttempt: 1}},
+			{{ID: 9, Name: "CI", Status: "completed", Conclusion: "failure", RunAttempt: 2}},
+		},
+	}
+	r := req(7)
+	r.RerunBudget = 1
+	res, err := h.pen(t).Land(context.Background(), r)
+	if err == nil || !strings.Contains(err.Error(), "after 1 re-run(s)") || !strings.Contains(err.Error(), "workflow CI (failure)") {
+		t.Fatalf("want a refusal counting the re-run and naming the workflow, got %v", err)
+	}
+	if h.merged {
+		t.Error("must not merge over a failure that outlasted the budget")
+	}
+	if res == nil || res.Reruns != 1 || len(h.reruns) != 1 {
+		t.Fatalf("reruns=%v issued=%v, want exactly the budget", res, h.reruns)
+	}
+}
+
+// No budget, no re-run: the landing refuses on the first failure as it
+// always did.
+func TestLandWithNoRerunBudgetRefusesAtOnce(t *testing.T) {
+	h := &landHarness{
+		checkSets:    [][]checkRun{{{Name: "plan", Status: "completed", Conclusion: "success"}}},
+		workflowSets: [][]workflowRun{{{ID: 9, Name: "CI", Status: "completed", Conclusion: "failure", RunAttempt: 1}}},
+	}
+	_, err := h.pen(t).Land(context.Background(), req(7))
+	if err == nil || strings.Contains(err.Error(), "re-run") {
+		t.Fatalf("want the plain refusal, got %v", err)
+	}
+	if len(h.reruns) != 0 {
+		t.Fatalf("a zero budget issued %v", h.reruns)
+	}
+}
+
+// A re-run GitHub refuses — a token without actions: write — leaves the
+// failure to be reported as it was; losing the diagnosis is the expensive
+// part.
+func TestLandStillNamesTheFailureWhenTheRerunIsRefused(t *testing.T) {
+	h := &landHarness{
+		checkSets:    [][]checkRun{{{Name: "plan", Status: "completed", Conclusion: "success"}}},
+		workflowSets: [][]workflowRun{{{ID: 9, Name: "CI", Status: "completed", Conclusion: "failure", RunAttempt: 1}}},
+		rerunCode:    403,
+	}
+	r := req(7)
+	r.RerunBudget = 2
+	res, err := h.pen(t).Land(context.Background(), r)
+	if err == nil || !strings.Contains(err.Error(), "workflow CI (failure)") || strings.Contains(err.Error(), "after") {
+		t.Fatalf("want the failure named with no re-run counted, got %v", err)
+	}
+	if res == nil || res.Reruns != 0 {
+		t.Fatalf("a refused re-run counted: %+v", res)
 	}
 }
