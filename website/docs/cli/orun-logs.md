@@ -89,6 +89,7 @@ on the renderer); pass `--raw` to print every line.
 | `--remote-state` | Fetch logs from orun-backend instead of local state |
 | `--backend-url` | orun-backend URL for remote state (or set `ORUN_BACKEND_URL`) |
 | `--follow` | Live-tail a job's log (requires `--remote-state` and `--job`); polls until the job completes |
+| `--all` | Stream logs across all executions (best-effort) |
 
 ## Remote logs
 

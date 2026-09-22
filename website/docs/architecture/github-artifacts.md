@@ -97,4 +97,3 @@ See `docs/examples/github-artifacts-workflow.yaml` for a complete workflow templ
 ## See also
 
 - [orun github](../cli/orun-github.md)
-- [v2.6 integration guide](../downstream/v2.6-integration.md)

@@ -204,7 +204,8 @@ orun run --changed --explain
 | `--artifact` | Artifact backend for uploading job shard from CI (`github`) |
 | `--remote-state` | Use orun-backend for distributed run coordination (enables remote state) |
 | `--backend-url` | orun-backend URL for remote state (or set `ORUN_BACKEND_URL`) |
-| `--org` | Org scope for remote state, overriding the linked org (or set `ORUN_ORG`). Disambiguates auto-link when you belong to several orgs |
+| `--workspace` | Workspace scope for remote state, overriding the linked workspace (or set `ORUN_WORKSPACE`). Disambiguates auto-link when you belong to several workspaces |
+| `--org` | Alias of `--workspace` (legacy spelling; or set `ORUN_ORG`) |
 | `--project` | Project scope for remote state, overriding the linked project (or set `ORUN_PROJECT`) |
 | `--local` | Force local filesystem state for this run, overriding remote-state config/flags (the escape hatch when the backend is down) |
 
@@ -228,10 +229,7 @@ These flags generate a fresh plan scoped to changed components before running. T
 | `--uncommitted` | Scope to uncommitted changes |
 | `--untracked` | Scope to untracked files |
 | `--explain` | Print how `--changed` resolved its base and head refs |
-
-:::note Deprecated flag
-`--job-id` is a deprecated alias for `--job`. Use `--job` in new scripts.
-:::
+| `--intent-impact` | How global intent changes affect components: `all`, `watch` (default), or `none` |
 
 ## Environment selection and the fail-closed guard
 
@@ -372,7 +370,7 @@ so the scope is cached in `~/.orun/config.yaml` before your first run. Even if i
 isn't, `orun run --remote-state` **self-heals**: a logged-in run against an
 unlinked repo links it on the fly and proceeds, rather than dead-ending with "repo
 not linked". When you belong to several orgs and the shell is non-interactive,
-disambiguate with `--org` / `--project` (or `ORUN_ORG` / `ORUN_PROJECT`).
+disambiguate with `--workspace` / `--project` (or `ORUN_WORKSPACE` / `ORUN_PROJECT`; `--org` / `ORUN_ORG` are the legacy spellings).
 
 For headless terminals:
 

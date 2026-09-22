@@ -148,7 +148,8 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | `--env`, `-e` | Restrict compilation to specific environments (comma-separated) |
 | `--all-envs` | Compile all environments explicitly (mutually exclusive with `--env`) |
 | `--component` | Restrict compilation to one or more components (repeatable) |
-| `--view`, `-v` | Render a view such as `dag`, `dependencies`, or `component=<name>` |
+| `--view`, `-v` | Render a view such as `dag`, `dag:long`, `dependencies`, or `component=<name>` |
+| `--long` | Show detailed output (step commands, IDs) |
 | `--changed` | Enable change-aware filtering |
 | `--base` | Base git ref for change detection |
 | `--head` | Head git ref for change detection |
@@ -156,6 +157,7 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | `--uncommitted` | Scope to uncommitted changes |
 | `--untracked` | Scope to untracked files |
 | `--explain` | Print how `--changed` resolved its base and head refs |
+| `--intent-impact` | How global intent changes affect components: `all`, `watch` (default), or `none` |
 | `--no-catalog-refresh` | Skip the pre-plan catalog refresh; plan without catalog context |
 | `--push-catalog` | After planning, sync the resolved catalog snapshot to the configured backend and advance the head (like `catalog refresh --push`). Requires a configured backend; conflicts with `--no-catalog-refresh` |
 | `--catalog-strict` | Fail the plan on catalog resolution errors |

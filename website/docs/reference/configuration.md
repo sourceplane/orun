@@ -1,13 +1,15 @@
 ---
 title: Configuration
+description: Where orun reads configuration from — intent.yaml, component manifests, composition sources, the per-user ~/.orun/config.yaml, and the credential store.
 ---
 
-`orun` configuration is split across three user-facing surfaces:
+`orun` configuration is split across five user-facing surfaces:
 
 1. `intent.yaml`
 2. discovered `component.yaml` manifests
 3. composition sources declared by `intent.compositions`
-4. local CLI config in `~/.orun/config.yaml` for backend defaults and repo links
+4. local CLI config in `~/.orun/config.yaml` for backend defaults, the selected workspace, and repo links
+5. the login session in the OS credential store, with `~/.orun/credentials.json` as the fallback
 
 ## Intent file
 
@@ -162,9 +164,56 @@ environments:
 
 See [environment promotion](../concepts/environment-promotion.md) for detailed behavior.
 
+## User config: `~/.orun/config.yaml`
+
+`~/.orun/config.yaml` is the non-secret, per-user CLI config (`cliauth.Config` in `internal/cliauth/types.go`; read and written by `internal/cliauth/storage.go`, mode `0600`). It never holds tokens.
+
+```yaml
+cloud:
+  url: https://orun-backend.example.com   # Orunbase, or a self-hosted backend URL
+  catalog:
+    autopush: false                        # off by default; publishing the catalog is team-visible
+
+workspace:                                 # written by `orun workspace use`
+  id: ws_01hxyz
+  slug: acme
+  setAt: "2026-09-01T10:00:00Z"
+
+repos:                                     # written by `orun cloud link`
+  - backendUrl: https://orun-backend.example.com
+    gitRemote: git@github.com:sourceplane/orun.git
+    repoFullName: sourceplane/orun
+    orgId: "org_123"
+    orgSlug: acme
+    projectId: "proj_456"
+    projectSlug: platform
+    linkedAt: "2026-09-01T10:05:00Z"
+```
+
+| Key | Meaning |
+| --- | --- |
+| `cloud.url` | The backend URL: Orunbase or a self-hosted backend. When unset, the CLI uses its built-in default (`remotestate.DefaultCloudURL`), which points at the hosted Orunbase API |
+| `cloud.catalog.autopush` | Push the catalog snapshot automatically after a successful `orun plan`; equivalent to the intent-level `autopushCatalog` |
+| `backend.url` | **Deprecated** alias of `cloud.url`, honoured for one release. `orun` prints a one-line warning when only the alias is set and prefers `cloud.url` when both are |
+| `backendBootstrap` | Non-secret metadata written by `orun backend init` for a self-hosted backend: `managedBy` (always `orun-backend-init`), `accountId`, `workerName`, `d1DatabaseName`, `d1DatabaseUUID`, `r2BucketName`, the catalog queue and DLQ names and IDs, `catalogCron`, `backendCommit`, `initAt`. API tokens and secrets are never stored here |
+| `workspace` | The working workspace chosen with `orun workspace use`: `id` (the `ws_…` Workspace ID when known, else the `org_…` ID), `slug`, and `setAt` (RFC 3339). It is a **default, not an override** — `--workspace`, `ORUN_WORKSPACE`, a repo's `intent.yaml`, and a repo link all win over it |
+| `repos[]` | One `RepoLink` per linked repository: `backendUrl`, `gitRemote`, `repoFullName`, the org/project spine (`orgId`, `orgSlug`, `projectId`, `projectSlug`), the legacy single-tenant fields (`namespaceId`, `namespaceKind`, `repoId`), and `linkedAt` |
+
+`orun auth login` also writes `cloud.url` from the session's backend URL, keeping the deprecated `backend.url` in sync only when it was already set.
+
+## Credential store
+
+The login session (access token, refresh token, their expiries, the user, and the workspaces the user belongs to) is a secret and lives outside `config.yaml`:
+
+- On macOS, the default store is the OS keychain — service `io.sourceplane.orun`, account `cli-session` — when a usability probe succeeds.
+- Otherwise the session is written to `~/.orun/credentials.json` with mode `0600`.
+- `ORUN_CREDENTIAL_STORE=file` forces the file; `ORUN_CREDENTIAL_STORE=keychain` forces the keychain (macOS) and skips the probe. Test binaries never reach the developer's keychain.
+
+The session is refreshed in place when the access token nears expiry, under a lock so concurrent commands do not race the refresh. `orun auth logout` clears it. Headless automation uses `ORUN_TOKEN` or `ORUN_TOKEN_FILE` instead of a stored session — see [environment variables](./environment-variables.md#cloud-and-authentication).
+
 ## Remote state configuration
 
-Add an `execution.state` block to `intent.yaml` to enable remote state coordination via orun-backend:
+Add an `execution.state` block to `intent.yaml` to enable remote state coordination through the Orunbase backend (or a self-hosted one):
 
 ```yaml
 execution:
@@ -176,31 +225,12 @@ execution:
 | Field | Values | Meaning |
 | --- | --- | --- |
 | `mode` | `local` (default) or `remote` | Where execution state is stored |
-| `backendUrl` | URI | URL of the orun-backend instance (required when `mode: remote`) |
+| `backendUrl` | URI | URL of the backend (Orunbase or self-hosted); when omitted the CLI falls back to `ORUN_BACKEND_URL`, then `~/.orun/config.yaml`, then the built-in default |
 | `autopushCatalog` | bool (default `false`) | When `true`, a successful `orun plan` best-effort publishes the resolved catalog and advances the head — but only on the **clean default branch**, debounced so an unchanged catalog is a no-op, and never failing the plan (silent unless `ORUN_VERBOSE`). Equivalent to the user-level `cloud.catalog.autopush`; either being set enables it. For explicit, fail-loud publishing use `orun plan --push-catalog` or `orun catalog refresh --push`. |
 
 The `backendUrl` can also be supplied via `--backend-url` or `ORUN_BACKEND_URL`; those take priority over the intent file.
 
-When neither the flag, environment variable, nor intent file sets a backend URL, `orun` falls back to `~/.orun/config.yaml`. The preferred form is the `cloud` block:
-
-```yaml
-cloud:
-  url: https://api.orun.cloud        # Orun Cloud, or a self-hosted backend URL
-  catalog:
-    autopush: false                  # off by default; publishing the catalog is team-visible
-
-repos:
-  - backendUrl: https://api.orun.cloud
-    repoFullName: sourceplane/orun
-    orgId: "org_123"
-    orgSlug: acme
-    projectId: "proj_456"
-    projectSlug: platform
-```
-
-The legacy `backend.url` key is still honored as a **deprecated alias** for `cloud.url` for one release; `orun` prints a one-line warning and prefers `cloud.url` when both are set.
-
-`orun cloud link` writes the `repos` entries used for local session-authenticated remote-state runs.
+When neither the flag, environment variable, nor intent file sets a backend URL, `orun` falls back to the `cloud.url` key in [`~/.orun/config.yaml`](#user-config-orunconfigyaml), and finally to the built-in default. `orun cloud link` writes the `repos` entries used for local session-authenticated remote-state runs.
 
 ### Workspace/project scope
 
@@ -218,3 +248,10 @@ Declare the workspace in `intent.yaml` under `execution.state`:
 The `ws_…` / slug / `org_…` value is passed opaquely; the platform resolves it server-side.
 
 When `mode: remote` is set, all three commands that read execution state (`run`, `status`, `logs`) automatically use the backend without requiring `--remote-state` on the command line.
+
+## Related
+
+- [Environment variables](./environment-variables.md) — the shell-level overrides for everything above.
+- [Intent model](../concepts/intent-model.md) — the full `intent.yaml` reference.
+- [Workspaces and tenancy](../concepts/workspaces-and-tenancy.md) — how the workspace scope is resolved.
+- [`orun login`](../cli/orun-login.md), [`orun auth`](../cli/orun-auth.md), [`orun cloud`](../cli/orun-cloud.md), [`orun workspace`](../cli/orun-workspace.md) — the commands that write the user config and credential store.

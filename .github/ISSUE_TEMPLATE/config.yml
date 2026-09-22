@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question
+    url: https://github.com/sourceplane/orun/discussions
+    about: Questions and ideas go to GitHub Discussions.
+  - name: Report a security vulnerability
+    url: https://github.com/sourceplane/orun/security/advisories/new
+    about: Never file security problems as public issues. Use the private advisory form.
+  - name: Orunbase (hosted service) problems
+    url: https://github.com/sourceplane/orun-cloud/issues
+    about: Console, API, billing, and workspace problems belong to the orun-cloud repository.

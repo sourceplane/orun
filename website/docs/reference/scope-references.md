@@ -4,7 +4,7 @@ title: Scope references
 
 `secret://`, `config://`, and `flag://` references share one grammar — the
 **scope-reference grammar** — parsed identically by the orun CLI (Go) and the
-Orun Cloud platform (TypeScript), asserted against shared test vectors so the
+Orunbase platform (TypeScript), asserted against shared test vectors so the
 two planes can never drift.
 
 ```

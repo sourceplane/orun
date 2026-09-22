@@ -1,23 +1,23 @@
 /**
  * orun documentation sidebar
  *
- * IA shaped around the operator journey:
+ * Shaped around the operator journey:
  *
- *   1. overview   → what orun is, how it works, the resource model,
- *                   design principles, glossary (load-bearing)
- *   2. start      → install, quick-start
- *   3. concepts   → the model (intent, compositions, plans, triggers, catalog)
- *   4. cockpit    → the operator surface (overview, architecture)
- *   5. execute    → runners, execution model
- *   6. cli        → command reference
- *   7. workflows  → real end-to-end examples
- *   8. compositions → authoring guide
- *   9. architecture → internals (compiler, runtime, artifacts)
- *  10. reference   → schemas, env vars, configuration
- *  11. ai-context  → for coding agents working with orun repos
- *  12. build       → contributing, extending, deploying docs
+ *   1. overview      → what orun is, how it works, the resource model,
+ *                      design principles, glossary
+ *   2. start         → install, quick start
+ *   3. concepts      → the model: intent, compositions, plans, execution,
+ *                      catalog, state, secrets, tenancy, baselines, tasks, agents
+ *   4. cockpit       → the operator surface
+ *   5. execute       → runners, terraform state
+ *   6. guides        → end-to-end walkthroughs
+ *   7. cli           → command reference, one page per command
+ *   8. compositions  → authoring guide
+ *   9. architecture  → internals
+ *  10. reference     → schemas, configuration, environment variables
+ *  11. ai-context    → for coding agents working with orun repos
+ *  12. build         → contributing, extending, deploying docs
  *  13. release-notes
- *  14. downstream  → migration / integration notes
  */
 const sidebars = {
   docsSidebar: [
@@ -41,6 +41,7 @@ const sidebars = {
       items: [
         'start/installation',
         'start/quick-start',
+        'examples/bootstrap-a-product-from-a-baseline',
       ],
     },
     {
@@ -65,6 +66,10 @@ const sidebars = {
         'concepts/change-watches',
         'concepts/context-discovery',
         'concepts/intent-presets',
+        'concepts/workspaces-and-tenancy',
+        'concepts/baselines',
+        'concepts/task-plane',
+        'concepts/agent-runtime',
       ],
     },
     {
@@ -85,48 +90,89 @@ const sidebars = {
     },
     {
       type: 'category',
-      label: 'CLI',
-      items: [
-        'cli/orun',
-        'cli/orun-plan',
-        'cli/orun-run',
-        'cli/orun-workflow',
-        'cli/orun-status',
-        'cli/orun-logs',
-        'cli/orun-get',
-        'cli/orun-describe',
-        'cli/orun-gc',
-        'cli/orun-github',
-        'cli/orun-tui',
-        'cli/orun-validate',
-        'cli/orun-debug',
-        'cli/orun-compositions',
-        'cli/orun-component',
-        'cli/orun-catalog',
-        'cli/orun-backend',
-        'cli/orun-auth',
-        'cli/orun-cloud',
-        'cli/orun-workspace',
-        'cli/orun-secrets',
-        'cli/orun-integrations',
-        'cli/orun-policy',
-        'cli/orun-task',
-        'cli/orun-pr',
-        'cli/orun-mcp',
-      ],
-    },
-    {
-      // Renamed from "Workflows" (orun-workflows-v2 WX7): these are end-to-end
-      // guides; "workflow" now names the workflow-actions execution vocabulary.
-      type: 'category',
       label: 'Guides',
       items: [
+        'examples/bootstrap-a-product-from-a-baseline',
         'examples/review-pull-request',
         'examples/run-github-actions',
         'examples/trigger-bindings-ci',
         'examples/remote-state-matrix',
         'examples/run-with-docker',
         'examples/use-with-kiox',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'CLI',
+      items: [
+        'cli/orun',
+        {
+          type: 'category',
+          label: 'Compile and inspect',
+          items: [
+            'cli/orun-plan',
+            'cli/orun-validate',
+            'cli/orun-debug',
+            'cli/orun-intent',
+            'cli/orun-component',
+            'cli/orun-compositions',
+            'cli/orun-describe',
+            'cli/orun-get',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Run and operate',
+          items: [
+            'cli/orun-run',
+            'cli/orun-workflow',
+            'cli/orun-approve',
+            'cli/orun-status',
+            'cli/orun-logs',
+            'cli/orun-tui',
+            'cli/orun-tui-next',
+            'cli/orun-github',
+            'cli/orun-gc',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Catalog and objects',
+          items: ['cli/orun-catalog', 'cli/orun-objects'],
+        },
+        {
+          type: 'category',
+          label: 'Scaffolding and baselines',
+          items: ['cli/orun-new', 'cli/orun-baseline'],
+        },
+        {
+          type: 'category',
+          label: 'Composition packaging',
+          items: ['cli/orun-pack', 'cli/orun-publish', 'cli/orun-fetch', 'cli/orun-login'],
+        },
+        {
+          type: 'category',
+          label: 'Cloud client',
+          items: [
+            'cli/orun-auth',
+            'cli/orun-workspace',
+            'cli/orun-cloud',
+            'cli/orun-secrets',
+            'cli/orun-integrations',
+            'cli/orun-policy',
+            'cli/orun-backend',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Tasks and provenance',
+          items: ['cli/orun-task', 'cli/orun-pr', 'cli/orun-githooks', 'cli/orun-spec'],
+        },
+        {
+          type: 'category',
+          label: 'Agents',
+          items: ['cli/orun-agent', 'cli/orun-mcp', 'cli/orun-skills'],
+        },
       ],
     },
     {
@@ -176,13 +222,31 @@ const sidebars = {
     {
       type: 'category',
       label: 'Release notes',
-      items: ['release-notes/v2.54.0', 'release-notes/v2.52.0', 'release-notes/v2.35.0', 'release-notes/v2.34.0', 'release-notes/v2.32.0', 'release-notes/v2.26.0',
-        'release-notes/v2.25.0', 'release-notes/v2.24.0', 'release-notes/v2.22.0', 'release-notes/v2.20.0', 'release-notes/v2.19.0', 'release-notes/v2.18.0', 'release-notes/v2.17.0', 'release-notes/v2.16.0', 'release-notes/v2.15.0', 'release-notes/v2.14.0', 'release-notes/v2.13.0', 'release-notes/v2.10.0', 'release-notes/v2.9.0', 'release-notes/v2.8.0', 'release-notes/v2.7.0', 'release-notes/v2.6.0'],
-    },
-    {
-      type: 'category',
-      label: 'Downstream',
-      items: ['downstream/v2.6-integration'],
+      items: [
+        'release-notes/v2.58.0',
+        'release-notes/v2.54.0',
+        'release-notes/v2.52.0',
+        'release-notes/v2.35.0',
+        'release-notes/v2.34.0',
+        'release-notes/v2.32.0',
+        'release-notes/v2.26.0',
+        'release-notes/v2.25.0',
+        'release-notes/v2.24.0',
+        'release-notes/v2.22.0',
+        'release-notes/v2.20.0',
+        'release-notes/v2.19.0',
+        'release-notes/v2.18.0',
+        'release-notes/v2.17.0',
+        'release-notes/v2.16.0',
+        'release-notes/v2.15.0',
+        'release-notes/v2.14.0',
+        'release-notes/v2.13.0',
+        'release-notes/v2.10.0',
+        'release-notes/v2.9.0',
+        'release-notes/v2.8.0',
+        'release-notes/v2.7.0',
+        'release-notes/v2.6.0',
+      ],
     },
   ],
 };

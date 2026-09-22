@@ -16,10 +16,15 @@ one.
    DECLARE                COMPILE                EXECUTE              RECORD
 intent.yaml ─┐
 component.yaml ├──▶  orun plan  ──▶  plan.json  ──▶  orun run  ──▶  .orun/objectmodel/
-compositions ─┘     (6 stages)     (immutable DAG)   (runner)      (catalog · runs · logs)
+compositions ─┘     (6 stages)     (immutable DAG)   (runner)      (the object graph:
+                                                                     catalog · runs · logs ·
+                                                                     contracts · sessions)
                                                                         │
-                                                   orun status · logs · tui · catalog
-                                                        (the cockpit reads the record)
+                                          orun status · logs · tui · catalog · objects
+                                                  (every surface reads the record)
+                                                                        │
+                                                   Orunbase (optional): shared state,
+                                                   the task plane, sandboxed agents
 ```
 
 ## 1. Declare — say what should exist
@@ -158,8 +163,16 @@ top, under `.orun/objectmodel/`.
 - **Plan revisions** — each compiled plan, pinned to the catalog it came from.
 - **Executions** — every run, job, step, and log line, sealed when terminal.
 
+- **Contracts, agent types, and sessions** — a task's sealed contract
+  (`refs/tasks/<KEY>`), each `agents/*.md` sealed as an agent type, and every
+  agent session's event log, sealed when it ends.
+
 Identical content is stored once; refs like `catalogs/current` and
-`executions/latest` move cheaply. Nothing is ever rewritten.
+`executions/latest` move cheaply. Nothing is ever rewritten. The whole store
+is the **object graph**, and `orun objects` inspects it the way you would a
+git repository: `log` lists executions, `cat` prints an object, `ls-tree`
+walks a tree, `rev-parse` resolves a ref, `fsck` verifies integrity, and
+`push`/`pull` move a ref's closure between stores.
 
 Every read surface is a projection of this record. `orun status` and
 `orun logs` read it; the `orun tui` cockpit watches it live; `orun catalog`
@@ -167,6 +180,24 @@ queries it ("who owns this?", "what depends on it?", "where is it deployed?");
 `orun catalog affected` asks it what a change touches. One record, many lenses
 — and all of them render through the same view-model and glyphs, so success
 looks the same in a CI log and in the control room.
+
+## Around the loop — Orunbase and the task plane
+
+Everything above runs from a single binary against a local `.orun/`. Connect
+a workspace on **Orunbase**, the hosted control plane, and the same record
+becomes shared: `orun catalog push` advances a workspace-wide catalog head,
+`orun run --remote-state` records runs there, and secrets, integrations, and
+policy resolve from the workspace.
+
+Two planes sit on top of that shared record. The **task plane** binds work to
+a contract: `orun task create` takes a key from the platform's allocator,
+`tasks/<KEY>.TaskContract.yaml` says what the work may touch and when it is
+done, and the task's verdict — `draft → ready → in_progress → in_review →
+done → released` — is derived from the branch, PR, merge, and gates the
+platform observes, never typed. The **agent runtime** lets a coding agent do
+that work from a frozen brief, with `orun mcp serve` as its hands and a
+sealed session as its proof. Neither plane changes the loop; both read and
+write the same objects it does.
 
 ## The loop, end to end
 
@@ -193,5 +224,8 @@ declared sources and recorded facts.
   [Plan DAG](../concepts/plan-dag.md) — the three core concepts, in reading
   order.
 - [State model](../concepts/state-model.md) — the object store in detail.
+- [The task plane](../concepts/task-plane.md) and
+  [the agent runtime](../concepts/agent-runtime.md) — the planes around the
+  loop.
 - [Quick start](../start/quick-start.md) — do all of the above against a real
   example in ten minutes.

@@ -1,0 +1,55 @@
+name: Bug report
+description: Something in the CLI, the compiler, a runner, the catalog, or the docs is wrong.
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please search existing issues first.
+        Security problems must go through the [private advisory form](https://github.com/sourceplane/orun/security/advisories/new), never a public issue.
+  - type: input
+    id: version
+    attributes:
+      label: orun version
+      description: Output of `orun version`.
+      placeholder: v2.58.15
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Operating system and architecture, and the runner if relevant.
+      placeholder: macOS 15 arm64, GitHub Actions ubuntu-latest
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands, and the smallest intent, component, composition, or plan that reproduces the problem.
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Complete command output. Set `NO_COLOR=1` to strip colour codes. Remove anything sensitive.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
+        - label: I reproduced this on the latest release.
+          required: false

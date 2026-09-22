@@ -1,6 +1,6 @@
 # Docs last updated for version
 
-v2.17.0
+v2.58.15
 
 ## How to use this file
 
@@ -8,34 +8,29 @@ When updating docs next time, run:
 
 ```bash
 # Get all changes since docs were last updated
-git log v2.17.0..HEAD --oneline
+git log v2.58.15..HEAD --oneline
 ```
 
-Then update this file to the new version after the docs PR is merged.
+Then update this file to the new version after the docs PR is merged. Prefer
+writing a release-notes page under docs/release-notes/ for every minor
+release, so this file is a pointer rather than a changelog.
 
-## What was covered in this update
+## What was covered in this update (2026-09-22)
 
-- Orun Cloud client (v2.17.0 epic, OC0–OC6): the remote state backend graduated
-  to the Orun Platform client
-  - Wired the existing (previously orphaned) CLI references into the sidebar:
-    cli/orun-auth.md (CLI session login/status/token) and cli/orun-cloud.md
-    (repo ↔ org/project link + scope)
-  - Updated: cli/orun-catalog.md — new `push` subcommand (sync the snapshot +
-    advance the catalog head) and `refresh --push`; see-also to cloud/auth
-  - Updated: cli/orun-run.md — `--local` escape hatch (force local state when the
-    backend is down)
-  - Updated: cli/orun-logs.md — `--follow` live tail (fromSeq cursor)
-- Cockpit Catalog surface (covered in the release notes): Catalog replaces the
-  Components surface; two-line header with source context + animated brand mark;
-  stabilized live step-log view
-- Release notes: release-notes/v2.17.0.md; sidebars.js updated; docusaurus
-  navbar "Releases" link bumped to v2.17.0
-- README.md: install/version references bumped v2.16.0 → v2.17.0
-
-## Deferred / not yet documented
-
-- Work plane (orun-work, W0–W4) is internal-only (system of record, PR-webhook
-  ingestion, delivery-decision core, content-addressed sealing). No user-facing
-  CLI surface yet, so no CLI reference page — mentioned in the release notes only.
-- objgolden cross-language golden vectors (developer/contributor tooling).
-</content>
+- Full refresh of the site against the v2.58.15 CLI: every top-level command
+  now has a reference page (16 were missing), the command map in cli/orun.md
+  is complete, and stale flags were corrected across the existing pages.
+- New guide: examples/bootstrap-a-product-from-a-baseline (create a
+  workspace, connect Cloudflare, build cirrus on the platform or locally).
+- New concept pages: baselines, task-plane, agent-runtime,
+  workspaces-and-tenancy.
+- Installation page rewritten around install.sh and correct archive names;
+  quick start refreshed.
+- Release notes: v2.58.0 (covers v2.55 through v2.58.15).
+- Removed: downstream/v2.6-integration (obsolete), cli/orun-state (orphaned
+  tombstone for a command removed in v2.15).
+- "Orun Cloud" renamed to Orunbase throughout; docs.orun.dev links now point
+  at docs.orunbase.com.
+- Repository: CNCF-style community files added (CONTRIBUTING, CODE_OF_CONDUCT,
+  SECURITY, GOVERNANCE, MAINTAINERS, SUPPORT, ROADMAP, ADOPTERS, CHANGELOG,
+  issue and PR templates); README rewritten.

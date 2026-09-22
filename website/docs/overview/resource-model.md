@@ -1,6 +1,6 @@
 ---
 title: The resource model
-description: Every behavior in orun is declared in a typed apiVersion/kind document or derived into one. This page is the map — authored kinds, compiled artifacts, and recorded entities.
+description: Every behavior in orun is declared in a typed apiVersion/kind document or derived into one. This page is the map — authored kinds, compiled artifacts, recorded entities, and the platform objects they run under.
 ---
 
 orun does not have configuration files in the loose sense — it has
@@ -27,8 +27,9 @@ read by tools that don't understand its internals.
 
 ## Three classes of resource
 
-The resources fall into three classes, and the class tells you who writes it
-and whether it can change:
+The documents fall into three classes, and the class tells you who writes it
+and whether it can change (a fourth class, the platform objects a document
+runs under, is [below](#platform-objects--the-tenancy)):
 
 | Class | Who writes it | Mutability | Analogy |
 |---|---|---|---|
@@ -116,6 +117,25 @@ already maintain as a declarative ownership source: when a component authors
 no owner, the resolver derives one from the last matching rule and records the
 provenance (`ownership.source: CODEOWNERS`).
 
+### The newer authored kinds
+
+The same envelope carries everything orun has learned to declare since the
+delivery core. Each is validated at load against a closed schema; unknown
+fields are refused rather than ignored.
+
+| Kind | `apiVersion` | Lives in | Declares |
+|---|---|---|---|
+| `Blueprint` | `orun.dev/v1` | A blueprint file passed to `orun new --blueprint`; a baseline's build document | Sources, modules placed by `template`, `copy`, or `consume`, `dependsOn` edges, inputs, phases with hooks and gates |
+| `Workflow` | `orun.dev/v1` | A workflow file; `orun workflow validate\|run\|view` | DAG steps with `run:` argv, `action:` + `with:`, or a nested `workflow:`, joined by `needs:`, with inputs, outputs, `poll:`/`until:`, and approval gates |
+| `TaskContract` | `orun.io/v1` | `tasks/<KEY>.TaskContract.yaml`, or a key-less template beside a flow | `goal`, `affects` (the component ceiling), `doneWhen`, `gates`, `designRefs`, `deps`, `secrets`, `envs`; sealed by sha256 over canonical JSON wherever it travels |
+| `SecretPolicy` | `orun.io/v1` | `policies/*.SecretPolicy.yaml` in the repository or a Stack | Portable Layer-2 secret-access rules; `orun policy` lints, tests, and pushes them |
+| `agent-type` | `orun.io/v1` | `agents/<name>.md` — frontmatter plus a persona body | `harness`, `model`, `runtime`, `tools` (`allow`/`ask`/`deny`), `mayAffect`, `secrets.use`, `owner`, `extends` |
+| Repo declaration | — | Inside `intent.yaml` | The repository describing itself — display name, description, tags, docs, links — projected into the catalog's `Repo` entity |
+
+→ [`orun new`](../cli/orun-new.md) · [`orun workflow`](../cli/orun-workflow.md) ·
+[The task plane](../concepts/task-plane.md) · [Secrets](../concepts/secrets.md) ·
+[The agent runtime](../concepts/agent-runtime.md)
+
 ## Compiled resources — the decisions
 
 ### Plan
@@ -136,6 +156,15 @@ way a package lockfile pins dependencies. Floating tags fail the lock in CI —
 determinism requires that "which contract" is never a runtime question.
 
 → [Stacks](../concepts/stacks.md)
+
+### Provenance lock
+
+`.orun/provenance.lock` (`orun.dev/v1`, kind `ScaffoldProvenance`) is what
+`orun new` writes into a scaffolded tree: the blueprint digest, each source
+digest, a secret-free hash of the inputs, and the mode and target of every
+module. It is the base `orun new upgrade` three-way merges against, so a
+product built from a [baseline](../concepts/baselines.md) is upgradable rather
+than a fork.
 
 ## Recorded resources — the facts
 
@@ -162,8 +191,24 @@ kind-specific `spec`, typed `relations`, `contracts`, `integrations`, `docs`,
 | `API`, `Resource` | Derived from contracts and composition `effects` |
 | `Environment` | Derived from the intent's environment matrix |
 | `Composition` | Derived from the composition lock |
+| `Repo` | The repository's own declaration in `intent.yaml`; one per snapshot, carrying the overview doc the console renders |
 
 → [Service catalog](../concepts/service-catalog.md)
+
+### Agent and task records
+
+The agent runtime and the task plane add node kinds to the same graph,
+addressed the same way:
+
+| Object | Ref | Sealed from |
+|---|---|---|
+| `AgentTypeSnapshot` | `refs/agents/types/<name>/latest` | An `agents/<name>.md` file — the capability envelope canonicalized, the persona as a body blob, the base literacy pinned via `extends` |
+| Base literacy | `refs/agents/literacy/<version>` | The document `orun agent context` prints, when sealed with `--seal` |
+| `AgentSessionSnapshot` | `refs/agents/sessions/<as_id>` | A session's append-only event log, chained and sealed on terminal state; `orun agent replay` reads it |
+| Task node | `refs/tasks/<KEY>` | The task's key and its sealed contract, recorded by `orun task create` and moved by `orun task attach` |
+
+→ [The agent runtime](../concepts/agent-runtime.md) ·
+[The task plane](../concepts/task-plane.md)
 
 ### Plan revisions and executions
 
@@ -171,6 +216,27 @@ Each compiled plan is sealed as a **PlanRevision** pinned to the catalog it
 came from; each run is an **Execution** — jobs, steps, attempts, logs — live
 while running, sealed immutable when terminal. The catalog's live plane
 (deployments, health) is derived on read from these records.
+
+## Platform objects — the tenancy
+
+A fourth class lives on Orunbase rather than in a file. These are not
+`apiVersion`/`kind` documents; they are identities the platform issues and
+every cloud command runs under, named by a prefixed id.
+
+| Object | Id | What it scopes |
+|---|---|---|
+| Workspace | `ws_…` (slug accepted; legacy `org_…`) | Members, integration connections, secrets, the task plane, agent sessions |
+| Project | `prj_…` | One repository, linked by `orun auth login` or `orun cloud link` |
+| Environment | `env_…` | A runtime context inside a project; the rung secrets are scoped to |
+| Repository link | `repl_…` | A repository the platform may act on, created through the GitHub App; what a platform baseline build and a grounded session need |
+| Integration connection | `int_…` | A connected provider that brokered secrets are minted against |
+| Epic, milestone, task | `epc_…` (or `EP-n`, slug), `mls_…`, `tsk_…` (or the key) | The task plane's containers and units |
+| Agent session | `as_…` | One run of the agent runtime, local or sandboxed |
+| Baseline registry row | The baseline id (`cirrus`, `lumen`) | What can be built, by whom, at which tag; described by a blueprint card fetched at that tag |
+| Skill revision | `sha256:…` of the canonical body | A hosted playbook; workspace revisions shadow the Sourceplane defaults by name |
+
+→ [Workspaces and tenancy](../concepts/workspaces-and-tenancy.md) ·
+[Baselines](../concepts/baselines.md)
 
 ## How resources version
 

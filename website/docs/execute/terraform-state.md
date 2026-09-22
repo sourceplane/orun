@@ -3,7 +3,7 @@ title: Terraform state on the platform
 ---
 
 Remote runs export a complete `TF_HTTP_*` environment to every step of a
-component job, pointing Terraform's `http` state backend at Orun Cloud's
+component job, pointing Terraform's `http` state backend at Orunbase's
 native Terraform state store. Compositions need **no** `-backend-config`
 plumbing, no `aws-actions/configure-aws-credentials` step, and no tenant AWS
 account (S3 bucket + OIDC roles) for state:

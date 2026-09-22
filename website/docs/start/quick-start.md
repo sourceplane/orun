@@ -1,116 +1,134 @@
 ---
 title: Quick start
+description: Compile the example platform intent into a deterministic plan, preview it, run it, and read the result in the cockpit — then connect a workspace.
 ---
 
-This walkthrough uses the repository's example intent, discovered components, and packaged composition sources to compile a plan and execute it.
+This walkthrough uses the repository's `examples/` directory: a complete
+platform intent with discovered components and packaged compositions. It
+takes about ten minutes and never touches a cloud account.
 
-## 1. Build the CLI
+## 1. Get the CLI
+
+Either [install a release](./installation.md) and use `orun`, or build from
+the repository and use `./orun`. The commands below assume the repository
+checkout, because the example intent lives there:
 
 ```bash
+git clone https://github.com/sourceplane/orun.git
+cd orun
 make build
 ```
 
-The commands below assume you are running them from the repository root and using the freshly built `./orun` binary.
-
-## 2. Inspect the shipped compositions
+## 2. See what the compositions export
 
 ```bash
 ./orun compositions --intent examples/intent.yaml
 ```
 
-The example package exports Terraform, Helm, Cloudflare, Turbo, and workspace compositions from `examples/compositions`.
+The example package exports Terraform, Helm, Cloudflare, Turbo, and
+workspace compositions from `examples/compositions`. A composition is how a
+*type* of component is validated and built; see
+[compositions](../concepts/compositions.md).
 
-## 3. Lock the resolved composition sources
+## 3. Lock the composition sources
 
 ```bash
 ./orun compositions lock --intent examples/intent.yaml
 ```
 
-This writes `examples/.orun/compositions.lock.yaml` so future plans can reuse the same resolved source digests.
+This writes `examples/.orun/compositions.lock.yaml` with the resolved source
+digests, so every later plan resolves the same golden paths.
 
-## 4. Validate the example intent and discovery tree
+## 4. Validate the intent and the discovered components
 
 ```bash
 ./orun validate --intent examples/intent.yaml
 ```
 
-This loads `examples/intent.yaml`, scans the discovery roots declared there, and validates each component against its matching composition schema.
+`validate` loads `examples/intent.yaml`, scans the discovery roots it
+declares, and checks each `component.yaml` against its composition's schema.
+A non-compliant component fails here, with a structured error, not at deploy
+time.
 
-## 5. Inspect the merged component model
+## 5. Inspect one merged component
 
 ```bash
 ./orun component network-foundation --intent examples/intent.yaml --long
 ```
 
-Use this view when you want to verify labels, overrides, subscriptions, inputs, and dependency edges before you render the final plan.
+This is the component after normalisation: labels, subscriptions, parameter
+overrides, and dependency edges, before any job exists.
 
-## 6. Compile a deterministic plan
+## 6. Compile a plan
 
 ```bash
 ./orun plan --intent examples/intent.yaml --view dag
 ```
 
-The plan is saved to `.orun/plans/` and linked as `latest`. It is the execution boundary: a fully expanded DAG with explicit jobs, steps, and dependencies.
+The plan is the execution boundary: a fully expanded DAG of jobs, steps, and
+dependencies, with every default and policy merge made explicit. It is written to
+`.orun/plans/` and sealed into the content-addressed object model under
+`.orun/objectmodel/`, where `orun status` and the TUI read it as the latest
+plan. Identical inputs produce a byte-identical plan; see
+[the plan DAG](../concepts/plan-dag.md).
 
-## 7. Preview execution
+## 7. Preview and run
+
+Compile a narrower plan for one component in one environment, then dry-run it
+with the GitHub Actions-compatible runner:
 
 ```bash
-./orun plan --intent examples/intent.yaml --component network-foundation --env development --output /tmp/orun-example-terraform-plan.json
-./orun run --plan /tmp/orun-example-terraform-plan.json --workdir examples --gha --dry-run
+./orun plan --intent examples/intent.yaml --component network-foundation --env development \
+  --output /tmp/orun-example-plan.json
+./orun run --plan /tmp/orun-example-plan.json --workdir examples --gha --dry-run
 ```
 
-`--dry-run` prints the execution order, working directories, runner choice, and resolved steps without mutating state.
+Drop `--dry-run` to execute. `--gha` selects the runner that understands
+`use:` steps; `--runner docker` runs every step in a fresh container. See
+[runners](../execute/runners.md).
 
-## 8. Execute the plan
-
-```bash
-./orun run --plan /tmp/orun-example-terraform-plan.json --workdir examples --gha
-```
-
-That command runs a dependency-free GitHub Actions-compatible job from the embedded example repo. Swap `--gha` for `--runner docker` when you want containerized execution against a plan that does not contain `use:` steps.
-
-## 9. Inspect the result
+## 8. Read the result
 
 ```bash
 ./orun status
 ./orun get jobs
-./orun logs
+./orun logs --failed
+./orun tui
 ```
 
-`status` shows a compact execution summary. `get jobs` shows the grouped job tree with status icons. `logs` streams the raw step output.
+`status`, `get`, `logs`, and the TUI render the same state through the same
+cockpit view-model. Bare `./orun` on a terminal opens the TUI.
 
-Prefer an interactive view? Just run the binary with no arguments:
+## 9. Converge only what a commit changed
 
 ```bash
-./orun
+./orun catalog refresh --intent examples/intent.yaml
+./orun catalog affected --base main --json
+./orun run --changed --base main --dry-run
 ```
 
-A bare `orun` opens the [Cockpit TUI](../cli/orun-tui.md) (the same as `orun tui`),
-where you can browse components, generate plans, launch dry-runs or real runs, and
-watch logs stream live. In non-interactive shells — or with `ORUN_NO_TUI=1` — `orun`
-prints help instead.
+The catalog is the content-addressed record of every component. `affected`
+reports the directly changed, dependent, and selected sets that `--changed`
+uses to compile the minimal plan. See
+[change detection](../concepts/change-detection.md).
 
-## 10. Run from a component subdirectory
+## 10. Connect a workspace
+
+Everything so far is local; state lives in `.orun/`. To share state, run
+builds on the platform, or bootstrap a product from a baseline, sign in:
 
 ```bash
-cd examples/infra/infra-1/
-../../../orun run --plan /tmp/orun-example-terraform-plan.json --workdir ../.. --gha
+orun auth login
+orun workspace create "Acme Cloud" --slug acme
+orun workspace use acme
+orun baseline list
 ```
 
-`orun` walks up the directory tree, finds `intent.yaml`, and detects that you are in the `network-foundation` component (via `component.yaml`). `run` automatically filters to `network-foundation` — equivalent to passing `--component=network-foundation`. Plans are always global; only execution is scoped. Use `--all` to run all jobs.
+Continue with
+[Create a workspace and build it from a baseline](../examples/bootstrap-a-product-from-a-baseline.md).
 
-## What happened
+## Where to go next
 
-1. `compositions lock` resolved the declared composition sources and wrote a reproducible lock file beside the intent.
-2. `validate` loaded the intent, discovered component manifests, and enforced schema constraints.
-3. `component` showed the merged component view that feeds the compiler.
-4. `plan` expanded environment and component subscriptions into concrete jobs and dependency edges, then stored the result in `.orun/plans/`.
-5. `run --dry-run` previewed the immutable plan artifact.
-6. `run` executed it; progress was recorded in the object model under `.orun/objectmodel/`.
-
-## Next steps
-
-1. Read [context-aware discovery](../concepts/context-discovery.md) to learn how `orun` auto-discovers the intent file and scopes to your current component.
-2. Read [execution model](../concepts/execution-model.md) to understand dry-run, concurrency, retries, phases, and execution records.
-3. Explore [GitHub Actions](../examples/run-github-actions.md) and [Docker](../examples/run-with-docker.md) runtime examples.
-4. Use `orun get`, `orun status`, and `orun logs` to inspect and debug ongoing or past runs.
+- [What is orun?](../overview/what-is-orun.md) and [how orun works](../overview/how-orun-works.md)
+- [The intent model](../concepts/intent-model.md), then [writing compositions](../compositions/writing-compositions.md)
+- [The CLI reference](../cli/orun.md)
