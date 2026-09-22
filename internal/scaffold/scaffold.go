@@ -57,6 +57,13 @@ type Options struct {
 	Only   string
 	Until  string
 	Resume bool
+	// Redo names phases a Resume places AGAIN, whatever the tree says about
+	// them. The tree cannot tell a phase that landed from one that landed and
+	// then failed to converge — its files are all there either way — so the
+	// caller that knows (the operator pressing Retry on a stopped build) says
+	// so, and the derivation doctrine stays: nothing stored decides this.
+	// Composes with Resume only.
+	Redo []string
 }
 
 // Result summarizes a completed scaffold.
@@ -364,9 +371,10 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 				return nil, parked
 			}
 			if herr != nil {
-				em.emit(ctx, Event{Phase: phase.Name, State: EventFailed,
+				meta, step := failureMeta(startMeta, herr)
+				em.emit(ctx, Event{Phase: phase.Name, Step: step, State: EventFailed,
 					Narration: narrate(EventFailed, startMeta),
-					Detail:    herr.Error()})
+					Detail:    herr.Error(), Meta: meta})
 				return nil, fmt.Errorf("phase %q: %w", phase.Name, herr)
 			}
 			// await runs OUTSIDE the retry policy. Retrying a wait would turn
@@ -380,9 +388,10 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 				return nil, parked
 			}
 			if aerr != nil {
-				em.emit(ctx, Event{Phase: phase.Name, State: EventFailed,
+				meta, step := failureMeta(startMeta, aerr)
+				em.emit(ctx, Event{Phase: phase.Name, Step: step, State: EventFailed,
 					Narration: narrate(EventFailed, startMeta),
-					Detail:    aerr.Error()})
+					Detail:    aerr.Error(), Meta: meta})
 				return nil, fmt.Errorf("phase %q: %w", phase.Name, aerr)
 			}
 			meta := phaseMeta(decl, plan.byPhase[phase.Name])

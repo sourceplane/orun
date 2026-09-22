@@ -178,6 +178,7 @@ func newBaselineNewCommand() *cobra.Command {
 		valuesFile  string
 		runHooks    bool
 		resume      bool
+		redo        []string
 		phase       string
 		until       string
 		progress    string
@@ -297,6 +298,7 @@ since moved past RESOLVES to what it publishes now, and says so.`,
 			scaffoldValuesFile = valuesFile
 			scaffoldRunHooks = runHooks
 			scaffoldResume = resume
+			scaffoldRedo = redo
 			scaffoldPhase = phase
 			scaffoldUntil = until
 			scaffoldProgress = progress
@@ -317,6 +319,7 @@ since moved past RESOLVES to what it publishes now, and says so.`,
 	cmd.Flags().StringVar(&valuesFile, "values", "", "Path to a YAML values file feeding blueprint inputs")
 	cmd.Flags().BoolVar(&runHooks, "run-hooks", false, "Execute the phases' hooks — the difference between placing files and bootstrapping a product")
 	cmd.Flags().BoolVar(&resume, "resume", false, "Place every phase not already derived as done")
+	cmd.Flags().StringArrayVar(&redo, "redo", nil, "With --resume, place this phase again even though its files are in place (repeatable)")
 	cmd.Flags().StringVar(&phase, "phase", "", "Place only this phase")
 	cmd.Flags().StringVar(&until, "until", "", "Place every phase through this one")
 	cmd.Flags().StringVar(&progress, "progress", "auto", "Progress rendering: auto | plain | verbose | json")

@@ -2,6 +2,7 @@ package scaffold
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -94,7 +95,7 @@ func (hr *hookRunner) runAction(ctx context.Context, h Hook) error {
 	}
 	out, err := hr.actions.Run(ctx, h.Uses, ActionInput{Dir: hr.outDir, BaseDir: hr.baseDir, Params: params})
 	if err != nil {
-		return fmt.Errorf("hook %q (%s): %w", h.ID, h.Uses, err)
+		return &HookError{ID: h.ID, Uses: h.Uses, Outputs: out, Err: err}
 	}
 	if hr.outputs == nil {
 		hr.resetOutputs()
@@ -262,4 +263,50 @@ func (hr *hookRunner) renderArgv(h Hook) ([]string, error) {
 		argv[i] = string(rendered)
 	}
 	return argv, nil
+}
+
+// HookError is a hook's failure WITH what the hook established before it
+// failed. The outputs are kept rather than thrown away: a convergence watch
+// that fails still knows the run it watched and the lanes that failed, and
+// those are the diagnosis — losing them to the error path is what costs
+// someone an afternoon. Reads exactly as the wrapped error used to, and
+// unwraps to the action's own error, so `actions.IsPending` and every caller
+// matching on it are unchanged.
+type HookError struct {
+	ID      string
+	Uses    string
+	Outputs map[string]string
+	Err     error
+}
+
+func (e *HookError) Error() string { return fmt.Sprintf("hook %q (%s): %v", e.ID, e.Uses, e.Err) }
+func (e *HookError) Unwrap() error { return e.Err }
+
+// failureMeta is a failed event's meta: the phase's own facts, plus what the
+// failing hook established before it failed — which hook, what it used, and
+// the outputs it had (a convergence's run id and URL, the lanes that failed)
+// — so a reader gets the diagnosis as fields and not only as one prose line.
+// The step is the failing hook's id, or "" when the failure was not a hook's.
+func failureMeta(base map[string]string, err error) (map[string]string, string) {
+	meta := make(map[string]string, len(base)+8)
+	for k, v := range base {
+		meta[k] = v
+	}
+	var he *HookError
+	if !errors.As(err, &he) {
+		return meta, ""
+	}
+	meta["hook"] = he.ID
+	if he.Uses != "" {
+		meta["uses"] = he.Uses
+	}
+	for from, to := range map[string]string{
+		"runId": "runId", "url": "runUrl", "conclusion": "conclusion", "resumes": "resumes",
+		"failedLanes": "failedLanes", "failedCount": "failedCount",
+	} {
+		if v := strings.TrimSpace(he.Outputs[from]); v != "" {
+			meta[to] = v
+		}
+	}
+	return meta, he.ID
 }

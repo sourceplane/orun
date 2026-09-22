@@ -129,10 +129,15 @@ func TestFailedJobsNamesOnlyTheFailures(t *testing.T) {
 	c := client(t, func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"jobs": []map[string]any{
 			{"name": "test", "conclusion": "success"},
-			{"name": "lint", "conclusion": "failure"},
+			{"name": "lint", "conclusion": "failure", "html_url": "https://github.com/acme/product/actions/runs/1/job/11",
+				"steps": []map[string]any{
+					{"name": "Set up job", "conclusion": "success", "number": 1},
+					{"name": "Run eslint", "conclusion": "failure", "number": 4},
+					{"name": "Post checkout", "conclusion": "skipped", "number": 9},
+				}},
 			{"name": "matrix", "conclusion": "skipped"},
 			{"name": "codeql", "conclusion": "neutral"},
-			{"name": "deploy", "conclusion": "timed_out"},
+			{"name": "deploy", "conclusion": "timed_out", "html_url": "https://github.com/acme/product/actions/runs/1/job/12"},
 		}})
 	})
 	failed, err := c.FailedJobs(context.Background(), "acme", "product", 1)
@@ -144,9 +149,21 @@ func TestFailedJobsNamesOnlyTheFailures(t *testing.T) {
 	}
 	// skipped and neutral are the normal shape of a conditional CI.
 	for _, f := range failed {
-		if strings.HasPrefix(f, "matrix") || strings.HasPrefix(f, "codeql") {
+		if strings.HasPrefix(f.Name, "matrix") || strings.HasPrefix(f.Name, "codeql") {
 			t.Errorf("skipped/neutral must not count as failures: %v", failed)
 		}
+	}
+	// The diagnosis points at the line, not only at the lane: the job's page
+	// and the FIRST failed step within it, in GitHub's own anchor grammar.
+	if got := failed[1]; got.Name != "lint" || got.Step != "Run eslint" || got.StepNumber != 4 ||
+		got.StepURL != "https://github.com/acme/product/actions/runs/1/job/11#step:4:1" {
+		t.Errorf("lint should carry its failing step, got %+v", got)
+	}
+	if got := failed[0]; got.Name != "deploy" || got.Step != "" || got.StepURL != "" {
+		t.Errorf("a job with no step detail carries none, got %+v", got)
+	}
+	if names := FailedJobNames(failed); strings.Join(names, ", ") != "deploy (timed_out), lint (failure)" {
+		t.Errorf("the diagnosis line still reads as it did: %v", names)
 	}
 }
 

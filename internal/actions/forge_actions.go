@@ -2,6 +2,7 @@ package actions
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -49,7 +50,7 @@ func init() {
 			{Name: "resumeBudget", Type: ParamInt, Default: 3,
 				Description: "how many times a failed run may be re-opened before it is called a regression"},
 		},
-		Outputs: []string{"runId", "conclusion", "url", "resumes"},
+		Outputs: []string{"runId", "conclusion", "url", "resumes", "failedLanes", "failedCount"},
 	}, runRunWatch)
 }
 
@@ -87,7 +88,22 @@ type watcher interface {
 	RunForCommit(ctx context.Context, owner, repo, branch, sha string) (*forge.Run, error)
 	GetRun(ctx context.Context, owner, repo string, id int64) (*forge.Run, error)
 	RerunFailed(ctx context.Context, owner, repo string, id int64) error
-	FailedJobs(ctx context.Context, owner, repo string, id int64) ([]string, error)
+	FailedJobs(ctx context.Context, owner, repo string, id int64) ([]forge.FailedJob, error)
+}
+
+// lanes records the failed jobs on the outputs AS DATA — `failedLanes`, a
+// JSON array of forge.FailedJob, and `failedCount` — beside the prose the
+// error carries. The outputs travel with the failure (scaffold keeps a failed
+// hook's outputs), so the event that reports it can name the lanes, the run
+// and the failing step as fields a console can link, not only as one line.
+func lanes(out map[string]string, failed []forge.FailedJob) {
+	out["failedCount"] = fmt.Sprint(len(failed))
+	if len(failed) == 0 {
+		return
+	}
+	if b, err := json.Marshal(failed); err == nil {
+		out["failedLanes"] = string(b)
+	}
 }
 
 func runRunWatch(ctx context.Context, in Input) (Result, error) {
@@ -192,9 +208,10 @@ func watchOn(ctx context.Context, c watcher, in Input, sleep func(time.Duration)
 			default:
 				if resumes >= budget {
 					failed, _ := c.FailedJobs(ctx, owner, repo, current.ID)
+					lanes(out, failed)
 					msg := fmt.Sprintf("convergence %s after %d resume(s) (run %d)", current.Conclusion, resumes, current.ID)
 					if len(failed) > 0 {
-						msg += ": " + strings.Join(failed, ", ")
+						msg += ": " + strings.Join(forge.FailedJobNames(failed), ", ")
 					}
 					return Result{Outputs: out}, fmt.Errorf("%s", msg)
 				}
@@ -204,9 +221,10 @@ func watchOn(ctx context.Context, c watcher, in Input, sleep func(time.Duration)
 					// the failed-lane list because the retry could not be
 					// issued is what costs someone an afternoon.
 					failed, _ := c.FailedJobs(ctx, owner, repo, current.ID)
+					lanes(out, failed)
 					msg := fmt.Sprintf("convergence %s (run %d) and the resume could not be issued: %v", current.Conclusion, current.ID, rerr)
 					if len(failed) > 0 {
-						msg += "; failed lanes: " + strings.Join(failed, ", ")
+						msg += "; failed lanes: " + strings.Join(forge.FailedJobNames(failed), ", ")
 					}
 					return Result{Outputs: out}, fmt.Errorf("%s", msg)
 				}

@@ -210,28 +210,83 @@ func (c *Client) RerunFailed(ctx context.Context, owner, repo string, id int64) 
 	return err
 }
 
+// FailedJob is one job of a run that did not pass: its name (a lane, in the
+// product's own CI — `api-edge · prod · Verify deploy`), GitHub's conclusion,
+// the job's page, and the first step within it that failed — the link a
+// person follows to the log line, and what a console can name as the
+// component, the environment and the step.
+type FailedJob struct {
+	Name       string `json:"name"`
+	Conclusion string `json:"conclusion"`
+	URL        string `json:"url,omitempty"`
+	Step       string `json:"step,omitempty"`
+	StepNumber int    `json:"stepNumber,omitempty"`
+	StepURL    string `json:"stepUrl,omitempty"`
+}
+
+// String is the job as the diagnosis line has always read it.
+func (j FailedJob) String() string { return fmt.Sprintf("%s (%s)", j.Name, j.Conclusion) }
+
+// FailedJobNames renders jobs the way the diagnosis line reads them.
+func FailedJobNames(jobs []FailedJob) []string {
+	out := make([]string, 0, len(jobs))
+	for _, j := range jobs {
+		out = append(out, j.String())
+	}
+	return out
+}
+
+// passed is a conclusion that is not a failure: success, or the normal shape
+// of a conditional CI, or a step that has not concluded.
+func passed(conclusion string) bool {
+	switch conclusion {
+	case "", "success", "neutral", "skipped":
+		return true
+	}
+	return false
+}
+
 // FailedJobs names the jobs that did not pass, for a diagnosis a person can act
-// on. "The convergence failed" is not one.
-func (c *Client) FailedJobs(ctx context.Context, owner, repo string, id int64) ([]string, error) {
+// on. "The convergence failed" is not one. Each carries the first failed step,
+// so the diagnosis points at the line and not only at the lane.
+func (c *Client) FailedJobs(ctx context.Context, owner, repo string, id int64) ([]FailedJob, error) {
 	var payload struct {
 		Jobs []struct {
 			Name       string `json:"name"`
 			Conclusion string `json:"conclusion"`
+			HTMLURL    string `json:"html_url"`
+			Steps      []struct {
+				Name       string `json:"name"`
+				Conclusion string `json:"conclusion"`
+				Number     int    `json:"number"`
+			} `json:"steps"`
 		} `json:"jobs"`
 	}
 	path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/jobs?per_page=100", owner, repo, id)
 	if _, err := c.do(ctx, http.MethodGet, path, nil, &payload); err != nil {
 		return nil, err
 	}
-	var failed []string
+	var failed []FailedJob
 	for _, j := range payload.Jobs {
-		switch j.Conclusion {
-		case "", "success", "neutral", "skipped":
-		default:
-			failed = append(failed, fmt.Sprintf("%s (%s)", j.Name, j.Conclusion))
+		if passed(j.Conclusion) {
+			continue
 		}
+		fj := FailedJob{Name: j.Name, Conclusion: j.Conclusion, URL: j.HTMLURL}
+		for _, s := range j.Steps {
+			if passed(s.Conclusion) {
+				continue
+			}
+			fj.Step, fj.StepNumber = s.Name, s.Number
+			if j.HTMLURL != "" && s.Number > 0 {
+				// GitHub's own anchor grammar for a step's log: the job page,
+				// the step number, the first line.
+				fj.StepURL = fmt.Sprintf("%s#step:%d:1", j.HTMLURL, s.Number)
+			}
+			break
+		}
+		failed = append(failed, fj)
 	}
-	sort.Strings(failed)
+	sort.Slice(failed, func(a, b int) bool { return failed[a].Name < failed[b].Name })
 	return failed, nil
 }
 

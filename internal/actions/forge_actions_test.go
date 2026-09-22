@@ -23,7 +23,7 @@ type fakeWatcher struct {
 	calls       int
 	reruns      int
 	rerunErr    error
-	failed      []string
+	failed      []forge.FailedJob
 }
 
 func (f *fakeWatcher) LatestRun(context.Context, string, string, string) (*forge.Run, error) {
@@ -55,7 +55,7 @@ func (f *fakeWatcher) RerunFailed(context.Context, string, string, int64) error 
 	return f.rerunErr
 }
 
-func (f *fakeWatcher) FailedJobs(context.Context, string, string, int64) ([]string, error) {
+func (f *fakeWatcher) FailedJobs(context.Context, string, string, int64) ([]forge.FailedJob, error) {
 	return f.failed, nil
 }
 
@@ -116,7 +116,7 @@ func TestWatchGivesUpAfterTheBudgetAndNamesTheLanes(t *testing.T) {
 	f := &fakeWatcher{
 		latest: &forge.Run{ID: 7},
 		states: []forge.Run{{Status: "completed", Conclusion: "failure"}},
-		failed: []string{"test (failure)", "lint (failure)"},
+		failed: []forge.FailedJob{{Name: "test", Conclusion: "failure"}, {Name: "lint", Conclusion: "failure"}},
 	}
 	in := watchInput(t, map[string]any{
 		"repo": "acme/product", "waitSeconds": 600, "pollSeconds": 1, "resumeBudget": 2,
@@ -139,7 +139,7 @@ func TestWatchStillReportsTheLanesWhenTheResumeCannotBeIssued(t *testing.T) {
 		latest:   &forge.Run{ID: 7},
 		states:   []forge.Run{{Status: "completed", Conclusion: "failure"}},
 		rerunErr: fmt.Errorf("403 no actions: write"),
-		failed:   []string{"deploy (failure)"},
+		failed:   []forge.FailedJob{{Name: "deploy", Conclusion: "failure", URL: "https://github.com/acme/product/actions/runs/7/job/9", Step: "Run set -euo pipefail", StepNumber: 6, StepURL: "https://github.com/acme/product/actions/runs/7/job/9#step:6:1"}},
 	}
 	in := watchInput(t, map[string]any{"repo": "acme/product", "waitSeconds": 600, "pollSeconds": 1})
 	_, err := watchOn(context.Background(), f, in, func(time.Duration) {})

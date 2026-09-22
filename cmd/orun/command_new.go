@@ -30,6 +30,7 @@ var (
 	scaffoldPhase      string
 	scaffoldUntil      string
 	scaffoldResume     bool
+	scaffoldRedo       []string
 	scaffoldProgress   string
 
 	upgradeBlueprint string
@@ -81,6 +82,7 @@ func registerNewCommand(root *cobra.Command) {
 	scaffoldNewCmd.Flags().StringVar(&scaffoldPhase, "phase", "", "Place only this phase")
 	scaffoldNewCmd.Flags().StringVar(&scaffoldUntil, "until", "", "Place every phase through this one")
 	scaffoldNewCmd.Flags().BoolVar(&scaffoldResume, "resume", false, "Place every phase not already derived as done")
+	scaffoldNewCmd.Flags().StringArrayVar(&scaffoldRedo, "redo", nil, "With --resume, place this phase again even though its files are in place (repeatable)")
 	scaffoldNewCmd.Flags().StringVar(&scaffoldProgress, "progress", "auto", "Progress rendering: auto | plain | verbose | json")
 	_ = scaffoldNewCmd.MarkFlagRequired("blueprint")
 
@@ -165,6 +167,7 @@ func runScaffoldNew(ctx context.Context) error {
 		Only:          scaffoldPhase,
 		Until:         scaffoldUntil,
 		Resume:        scaffoldResume,
+		Redo:          scaffoldRedo,
 		Events:        events,
 	}
 
