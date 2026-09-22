@@ -92,7 +92,8 @@ parameter is a parse error before the build starts.
 Phase state is **derived**, not recorded: a fresh container can look at the
 tree and the platform and answer which phases are done. That is what makes
 `--resume` safe, and what lets the console retry a stopped build from the
-setup it kept.
+setup it kept. The one thing the tree cannot tell is a phase that landed and
+then failed to deploy, so a retry names it: `--redo <phase>` places it again.
 
 ## Where a build runs
 
