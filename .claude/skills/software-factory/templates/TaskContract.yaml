@@ -1,0 +1,18 @@
+# A task contract template. Unbound to a key on purpose: `orun task create
+# --contract` seals and attaches it to the key the allocator issues; then
+# rename it to tasks/<KEY>.TaskContract.yaml and `orun task attach <KEY>`.
+#
+# `affects` is the ceiling on what the diff may touch (`orun task check --base
+# main` compares). `gates: []` DECLARES that merge alone finishes the task; list
+# check names here when a PR check must pass first.
+apiVersion: orun.io/v1
+kind: TaskContract
+spec:
+  goal: <one sentence: what is true when this task is done>
+  affects:
+    - <path>
+    - <path>
+  doneWhen:
+    - <observable fact>
+    - <observable fact>
+  gates: []
