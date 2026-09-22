@@ -305,8 +305,8 @@ is released on every failure path.
 
 ### Flags that do nothing on the platform
 
-`--out`, `--run-hooks`, `--resume`, `--phase`, `--until`, `--progress`, and
-`--keep-checkout` describe a local build. They are accepted with
+`--out`, `--run-hooks`, `--resume`, `--redo`, `--phase`, `--until`,
+`--progress`, and `--keep-checkout` describe a local build. They are accepted with
 `--via-platform` and silently ignored. The platform always runs with hooks and
 resume enabled.
 
@@ -351,7 +351,10 @@ orun baseline new cirrus --local --out ./acme-cloud --run-hooks --resume \
 
 `--values` takes a YAML file of inputs; `--set key=value` overrides it per
 key. `--resume` places every phase not already derived as done, which is how
-you continue after a stop. `--phase <name>` places one phase, and
+you continue after a stop. `--redo <name>` (repeatable, with `--resume`)
+places the named phase again even though its files are in place — what you
+want after a phase's pull request merged and its deploy failed, since the
+tree cannot tell that from done. `--phase <name>` places one phase, and
 `--until <name>` places every phase through that one:
 
 ```bash
@@ -456,6 +459,7 @@ are not published this way. Their catalogue is a file in the open-source
 | `repository … has more than one link` | Pass `--repo-link repl_…`. |
 | `parent_grant_insufficient` during phase `03-infrastructure` | The Cloudflare token behind the connection lacks **D1 Write**. Reconnect with a token that has it. |
 | A local `--run-hooks` build stops part way | Fix the cause it printed and re-run the same command with `--resume`. Phases already placed are skipped. |
+| A phase's pull request merged and its convergence failed | Its files are all in place, so `--resume` alone skips it. Add `--redo <phase>` to place it again; the failed event's `meta.failedLanes` names the jobs that failed. |
 
 ## Related
 
