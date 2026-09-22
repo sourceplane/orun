@@ -10,6 +10,12 @@ happening — `orun status`, `orun status --watch`, `orun get runs`, `orun logs`
 It is the operator-facing half of orun: planning happens in [the compiler](/architecture/compiler-pipeline);
 operation happens in the cockpit.
 
+Two generations of the full-screen cockpit ship in the binary today. **Cockpit v1**
+(`orun tui`, `internal/tui`) is the default. **Cockpit v2** (`orun tui-next`,
+`internal/tui2`) is a preview that rebuilds the same surfaces on a frame-stable kernel;
+see [Cockpit v2](#cockpit-v2--orun-tui-next-preview) below. Both read the same state
+and the same design tokens.
+
 <div className="cockpitFrame">
   <div className="cf-chrome">
     <span className="cf-dots"><span/><span/><span/></span>
@@ -121,14 +127,15 @@ Log Explorer pane.
 ### `orun tui` — the full cockpit
 
 ```bash
-orun tui      # explicit
+orun tui      # explicit (cockpit v1, the default)
 orun          # bare invocation opens the cockpit on an interactive terminal
+orun tui-next # cockpit v2 (preview); also: orun tui --next, or ORUN_TUI=next
 ```
 
-A three-pane Bubble Tea shell: sidebar (surfaces), main pane (active view),
-inspector (field list for the selection). The two top-level surfaces are
-`Catalog` (the home surface) and `Activity`; `Plan Studio`, `Logs`, and
-`History` are reached from within them. See
+Cockpit v1 is a three-pane Bubble Tea shell: sidebar (surfaces), main pane
+(active view), inspector (field list for the selection). The two top-level
+surfaces are `Catalog` (the home surface) and `Activity`; `Plan Studio`,
+`Logs`, and `History` are reached from within them. See
 [cockpit architecture](/cockpit/architecture) for the full mode and drilldown
 machine.
 
@@ -139,6 +146,41 @@ terminal, and falls back to printing help in non-interactive shells or when
 runner as `orun run`, persists state and per-step logs to `.orun/`, and streams
 those logs into the Activity and Logs surfaces live. See the
 [TUI reference](/cli/orun-tui) for the run and live-log workflow.
+
+## Cockpit v2 — `orun tui-next` (preview)
+
+Cockpit v2 is the terminal head of Orunbase: the same entities the hosted console
+renders, at terminal density. It lives in `internal/tui2` and is opt-in while it
+soaks — `orun tui-next`, `orun tui --next`, or `ORUN_TUI=next` all open it, and
+`orun agent --next` opens it straight on the Agents surface. The v1 cockpit stays
+the default until the remaining cloud lanes land and a release has soaked.
+
+| Surface | What it shows |
+|---|---|
+| **Home** | Stat tiles (components, live sessions, last run), a needs-attention list, latest activity, current scope |
+| **Agents** | Live local agent sessions, agent types, the launch flow, and the conversation head over the attach protocol |
+| **Activity** | Runs feed → run → jobs → steps → logs, stream-driven from step-level runner events; the log explorer is the leaf |
+| **Catalog** | Entity explorer by kind, entity detail with relations, and the component work surface — Plan Studio becomes the **Compose** flow under a component |
+| **Events** | Local execution and agent session events |
+
+What is different from v1, by construction:
+
+- **Frame stability.** Every region renders into a box of exactly the size it is
+  given (`tui2/frame`); regions are memoized by state revision and size, and one
+  animation scheduler ticks only while something is genuinely live. An idle cockpit
+  renders nothing.
+- **Streams over polls.** Step progress arrives through the runner's
+  `OnStepStart` / `AfterStepTerminal` hooks and catalog refresh through fs-watch
+  on `.orun` refs, instead of the disk polling v1 relies on.
+- **Northwind Mono.** The design system (`tui2/design`) is the terminal projection
+  of the console's Northwind system, built on the same tokens in
+  `internal/cockpit/style` — so v1, v2, and the CLI still share one palette and
+  one glyph alphabet.
+- **Claude Code grammar.** One header line, one status line, `esc` always
+  dismisses, and a command palette is the escape hatch for everything.
+
+`ORUN_TUI_PROFILE=/path/to/file.ndjson` writes per-frame timings for either
+cockpit generation; `make tui-bench` reports the v2 render budgets.
 
 ## The Catalog surface — knowledge and work in one screen
 
@@ -237,10 +279,12 @@ the same shape over the wire — `bridge.FromBackend` normalises them into the s
   rewrites or hand-edits existing state — even `orun run --resume` writes new state
   rather than mutating the old.
 
-## Next
+## Related
 
-- **[Status reference](/cli/orun-status)** — every flag, output format, and exit code.
-- **[Logs reference](/cli/orun-logs)** — filtering and grouping.
-- **[TUI reference](/cli/orun-tui)** — key bindings, modes, drilldown.
-- **[Cockpit architecture](/cockpit/architecture)** — internal structure, view-model
-  flow, preferences, sizing.
+- [Status reference](../cli/orun-status.md) — every flag, output format, and exit code.
+- [Logs reference](../cli/orun-logs.md) — filtering and grouping.
+- [TUI reference](../cli/orun-tui.md) — cockpit v1 key bindings, modes, drilldown.
+- [`orun tui-next`](../cli/orun-tui-next.md) — the cockpit v2 preview.
+- [`orun agent`](../cli/orun-agent.md) — the Agents surface and the agent runtime.
+- [Cockpit architecture](./architecture.md) — internal structure of both generations,
+  view-model flow, preferences, sizing.

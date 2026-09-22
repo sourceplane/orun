@@ -15,7 +15,7 @@ orun task create   [--adopt KEY | --derive web#123 | --prefix TSK] [--title …]
 orun task attach   <key>            # seal tasks/<KEY>.TaskContract.yaml and upload it
 orun task list     [--epic REF] [--milestone mls_…] [--assignee me|agents|REF]
 orun task show     <key|tsk_id>     # the task, where it belongs, its derived verdict
-orun task check    <key> [--base REF]   # offline: validity, completeness, affects vs diff
+orun task check    <key> [--base REF] [--head REF]   # offline: validity, completeness, affects vs diff
 
 orun task epic create      --name … [--slug …] [--description …] [--target-date …] [--owner me]
 orun task epic show        <epc_id|EP-n|slug>
@@ -86,7 +86,7 @@ recorded as refs/tasks/BASE-3 in the local object store
 ```
 
 A branch named `orun/BASE-3-<slug>` then binds its pushes, PRs and checks
-to the task — see [`orun pr`](./orun-mcp.md) for the pen that opens it.
+to the task — see [`orun pr`](./orun-pr.md) for the pen that opens it.
 
 ## `list` and `show`
 
@@ -102,7 +102,8 @@ exists, and the contract's dependencies with their states.
 canonical JSON), uploads it, and the server refuses a mismatch. `check
 <key>` runs entirely offline: strict validity, completeness in the same
 terms the cloud derives readiness from, and with `--base` the components
-the diff touched against the contract's `affects` ceiling. Advisory by
+the diff touched against the contract's `affects` ceiling (`--head` names
+the head ref for that diff; default: the working tree). Advisory by
 construction — the workspace decides at enforcement, and effective access
 is always resolved policy ∩ contract.
 

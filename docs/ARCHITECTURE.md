@@ -1,5 +1,42 @@
 # orun Architecture Guide
 
+## Since this document was written
+
+This guide describes the compiler core — intent, compositions, expansion, job
+binding, and the plan — and its algorithms are still accurate. `orun` has
+grown several subsystems around that core that this document does not cover.
+Read them on the documentation site (sources under
+[website/docs](../website/docs)):
+
+- **Catalog and change detection** — the resolved component catalog and the
+  single change-detection engine behind `--changed`:
+  [service catalog](../website/docs/concepts/service-catalog.md),
+  [change detection](../website/docs/concepts/change-detection.md).
+- **Object model** — the content-addressed store every plan, run, and catalog
+  is sealed into: [state model](../website/docs/concepts/state-model.md),
+  [`orun objects`](../website/docs/cli/orun-objects.md).
+- **Workflows** — the `workflow:` step form, `kind: Workflow` files, and
+  approval gates: [workflow actions](../website/docs/concepts/workflow-actions.md),
+  [workflow schema](../website/docs/reference/workflow-schema.md).
+- **Secrets** — `secret://` references, policies, redaction, and
+  `secretOutputs`: [secrets](../website/docs/concepts/secrets.md),
+  [scope references](../website/docs/reference/scope-references.md).
+- **Agent runtime** — briefs, drivers, sessions, and the MCP surface:
+  [agent runtime](../website/docs/concepts/agent-runtime.md),
+  [`orun agent`](../website/docs/cli/orun-agent.md).
+- **Scaffolding and baselines** — `orun new`, blueprints, and baseline
+  bootstrap: [baselines](../website/docs/concepts/baselines.md),
+  [`orun new`](../website/docs/cli/orun-new.md).
+- **Cockpit** — the terminal UI over the same state:
+  [cockpit overview](../website/docs/cockpit/overview.md).
+
+The full package map is in [internals](../website/docs/architecture/internals.md).
+Two vocabulary notes for readers of older copies: component configuration is
+declared as `parameters:` (with `parameterDefaults:` on groups and
+environments), not `inputs:`/`defaults:`; and the job templates a component
+type binds to ship inside a **composition** package, which earlier text called
+the "job registry".
+
 ## Design Philosophy
 
 **orun** is built around three core principles:
@@ -39,7 +76,7 @@
 │              Expansion Phase (Env × Component)               │
 │  - For each environment:                                     │
 │    - Select applicable components                           │
-│    - Merge inputs (precedence order)                        │
+│    - Merge parameters (precedence order)                    │
 │    - Resolve policies (constraints)                         │
 │    - Resolve dependencies (same-env/cross-env)             │
 └────────────────────────┬────────────────────────────────────┘
@@ -56,7 +93,7 @@
            ┌─────────────┴──────────────┐
            ▼                            ▼
     ┌───────────────┐           ┌────────────────┐
-    │  Job Registry │           │  Job Planner   │
+    │  Composition  │           │  Job Planner   │
     │  (jobs.yaml)  │           │  (binds types) │
     └───────────────┘           └────────────────┘
            │                            │
@@ -139,9 +176,9 @@ components:          # Optional inline execution-agnostic specs
 
 **Key principle**: Intent and component manifests contain ZERO execution details.
 
-### 2. Job Registry
+### 2. Composition
 
-**File**: `jobs.yaml`  
+**File**: `jobs.yaml` inside a composition package (declared under `intent.compositions`)  
 **Purpose**: Define HOW each component type executes
 
 ```yaml
@@ -172,7 +209,7 @@ type ComponentInstance struct {
     Domain        string                    // "platform"
     
     // Fully merged configuration
-    Inputs        map[string]interface{}    // All defaults + overrides
+    Parameters    map[string]interface{}    // All parameterDefaults + component parameters
     Policies      map[string]interface{}    // Group + env policies
     
     // Resolved dependencies
@@ -182,10 +219,10 @@ type ComponentInstance struct {
 
 **Merge precedence** (lowest → highest):
 1. Type defaults (from schema)
-2. Job defaults (from jobs.yaml)
-3. Group defaults (from intent groups)
-4. Environment defaults (from environments)
-5. Component inputs (from intent components)
+2. Job defaults (from the composition's jobs.yaml)
+3. Group `parameterDefaults` (from intent groups)
+4. Environment `parameterDefaults` (from environments)
+5. Component `parameters` (from component manifests)
 
 **Key rule**: Policies are never merged, only validated/enforced.
 
@@ -266,15 +303,15 @@ for compName, comp := range allComponents {
 }
 ```
 
-### Phase 2.2: Input Merging
+### Phase 2.2: Parameter Merging
 
 For each component instance, merge configs in order:
 
 ```
 merged := empty
-merged.update(groupDefaults[domain])        // 1. Group defaults
-merged.update(envDefaults[env])             // 2. Env defaults
-merged.update(comp.inputs)                  // 3. Component inputs
+merged.update(groupParameterDefaults[domain])  // 1. Group parameterDefaults
+merged.update(envParameterDefaults[env])       // 2. Env parameterDefaults
+merged.update(comp.parameters)                 // 3. Component parameters
 // Highest priority wins (right overwrites left)
 ```
 
@@ -316,7 +353,7 @@ component.dependsOn:
 For each component instance, find job definition:
 
 ```go
-jobDef := jobRegistry.jobs[compInst.type]
+jobDef := composition.jobs[compInst.type]
 // Example: type="helm" → jobs.helm
 ```
 
@@ -341,7 +378,7 @@ Render each step template with merged config:
 context := {
     "Component": compInst.ComponentName,
     "Environment": compInst.Environment,
-    ...all merged inputs...
+    ...all merged parameters...
 }
 
 for step in jobDef.steps:
@@ -417,9 +454,9 @@ environments:
 
 Merge order for production:
 ```
-1. Group defaults: { region: us-west-2, replicas: 3 }
-2. Env defaults: { replicas: 10 } overwrites step 1
-3. Component inputs: { replicas: 5 } overwrites step 2
+1. Group parameterDefaults: { region: us-west-2, replicas: 3 }
+2. Env parameterDefaults: { replicas: 10 } overwrites step 1
+3. Component parameters: { replicas: 5 } overwrites step 2
 
 Final: { region: us-west-2, replicas: 5 }
 ```
@@ -444,7 +481,7 @@ policies for web-app@production:
   isolation: strict      (from group)
   approval: required     (from env)
   
-Note: Cannot be overridden by component.inputs
+Note: Cannot be overridden by component.parameters
 ```
 
 ## Templating System
@@ -606,7 +643,7 @@ Enables detailed logging of each phase:
 ./orun plan --debug
 
 📋 Loading intent...
-📚 Loading job registry...
+📚 Loading compositions...
 🔍 Normalizing intent...
 📦 Expanding (env × component)...
   expansion: web-app@production

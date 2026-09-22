@@ -4,7 +4,7 @@ const require = createRequire(import.meta.url);
 
 const config = {
   title: 'orun',
-  tagline: 'The planner–cockpit for platform engineering. Plan once, run anywhere, operate from one cockpit.',
+  tagline: 'The intent compiler for platform engineering. Write your platform as intent, compile it into one deterministic state, converge the deviation on every commit.',
   url: 'https://orun-docs.pages.dev',
   baseUrl: '/',
   organizationName: 'sourceplane',
@@ -43,7 +43,7 @@ const config = {
     },
     metadata: [
       { name: 'theme-color', content: '#7c3aed' },
-      { name: 'description', content: 'orun is the planner–cockpit for platform engineering. Compile declarative intent into a deterministic execution DAG, then operate it through a unified CLI + TUI cockpit.' },
+      { name: 'description', content: 'orun is an open-source intent compiler for platform engineering: it compiles declarative platform, component, and golden-path intent into a deterministic plan, converges it on every commit, and operates it from one cockpit. Orunbase is its hosted control plane.' },
     ],
     navbar: {
       title: 'orun',
@@ -53,8 +53,9 @@ const config = {
         { to: '/principles', label: 'Principles', position: 'left' },
         { to: '/cockpit/overview', label: 'Cockpit', position: 'left' },
         { to: '/cli/orun', label: 'CLI', position: 'left' },
-        { href: 'https://docs.orun.dev', label: 'Orun Cloud', position: 'left' },
-        { to: '/release-notes/v2.19.0', label: 'Releases', position: 'right' },
+        { to: '/examples/bootstrap-a-product-from-a-baseline', label: 'Baselines', position: 'left' },
+        { href: 'https://docs.orunbase.com', label: 'Orunbase', position: 'left' },
+        { to: '/release-notes/v2.58.0', label: 'Releases', position: 'right' },
         {
           href: 'https://github.com/sourceplane/orun',
           label: 'GitHub',
@@ -92,7 +93,8 @@ const config = {
             { label: 'Runners', to: '/execute/runners' },
             { label: 'CLI', to: '/cli/orun' },
             { label: 'Reference', to: '/reference/configuration' },
-            { label: 'Orun Cloud docs', href: 'https://docs.orun.dev' },
+            { label: 'Baselines guide', to: '/examples/bootstrap-a-product-from-a-baseline' },
+            { label: 'Orunbase docs', href: 'https://docs.orunbase.com' },
           ],
         },
         {
@@ -100,6 +102,7 @@ const config = {
           items: [
             { label: 'Architecture', to: '/architecture/internals' },
             { label: 'Contributing', to: '/contributing/' },
+            { label: 'Security policy', href: 'https://github.com/sourceplane/orun/blob/main/SECURITY.md' },
             { label: 'Extending orun', to: '/contributing/extending-orun' },
             { label: 'GitHub', href: 'https://github.com/sourceplane/orun' },
           ],

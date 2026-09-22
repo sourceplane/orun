@@ -14,7 +14,7 @@ the built-in `connection_info`:
   renamed onto the grammar, pushed, and the machine-readable manifest in the
   body. Mounted whenever the server runs inside a repository checkout — it
   needs git, not a credential.
-- **The platform plane** (33 tools) — the Orun Cloud public API: catalog,
+- **The platform plane** (33 tools) — the Orunbase public API: catalog,
   runs and logs, audit, events, access, usage, billing, config, secret
   metadata, webhooks, skills, and the task plane (tasks, epics,
   milestones, contracts, derived verdicts). 24 reads plus 9 policy-gated
@@ -91,7 +91,7 @@ orun mcp serve [--workspace <ref>] [--backend-url <url>] [--read-only]
 | Flag | Effect |
 | --- | --- |
 | `--workspace <ref>` | Target workspace (org id or slug; defaults to the linked repo's). Becomes the platform tools' default `workspace`. |
-| `--backend-url <url>` | Backend URL (Orun Cloud or self-hosted). |
+| `--backend-url <url>` | Backend URL (Orunbase or self-hosted). |
 | `--read-only` | Drop the 9 platform write tools from the roster (25 tools instead of 34). Filtered from `tools/list` *and* blocked at execution. |
 
 `--read-only` deliberately does **not** touch `pr_open`. The flag scopes what
@@ -119,14 +119,14 @@ With a GitHub credential ambient (`GITHUB_TOKEN` / `GH_TOKEN` / `gh auth`)
 the PR opens through the API; without one the pen still prepares everything
 and returns the compare URL plus the body to use — honest either way. The
 same rules are checkable locally with `orun pr check`, and
-Orun Cloud's `orun/compliance` check verifies them on the PR itself.
+Orunbase's `orun/compliance` check verifies them on the PR itself.
 
 Outside a repository checkout the tool is not mounted at all, and
 `connection_info` reports the reason rather than the server guessing at git.
 
 ## The platform plane (33 tools)
 
-Every platform tool calls the Orun Cloud public API with **your own
+Every platform tool calls the Orunbase public API with **your own
 credential** — RBAC, rate limits, audit, and metering apply exactly as they
 would to you. Results are one summary line plus compact JSON, byte-capped at
 64 KiB with cursor/`fromSeq` continuation.
@@ -222,7 +222,7 @@ can reason about (`forbidden: … (requestId: …)`), never protocol faults.
 ## One contract, two implementations
 
 The platform tools are the same 33 served by the hosted remote MCP server
-(Streamable HTTP, part of Orun Cloud) — **identical names, schemas, and
+(Streamable HTTP, part of Orunbase) — **identical names, schemas, and
 semantics**, so prompts and docs are portable between the local and remote
 surfaces. The contract is a machine-readable tool manifest exported from the
 hosted plane, vendored into this repo, and enforced by a parity test: any

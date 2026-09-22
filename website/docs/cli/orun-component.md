@@ -45,5 +45,6 @@ orun component \
 | `--uncommitted` | Scope to uncommitted changes |
 | `--untracked` | Scope to untracked files |
 | `--explain` | Print how `--changed` resolved its base and head refs |
+| `--intent-impact` | How global intent changes affect components: `all`, `watch` (default), or `none` |
 
 Use `component` before `plan` when you want to understand how inputs, labels, and overrides were merged. `--config-dir` remains available as a global legacy fallback when the intent does not declare packaged sources.

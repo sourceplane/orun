@@ -1,5 +1,6 @@
 ---
 title: orun integrations
+description: Connect a provider to a workspace, check its status, and author integration-bound secrets and scope templates — value-less by design, served from the workspace's own integration registry.
 ---
 
 `orun integrations` is the console-parity CLI for integration connections —
@@ -20,6 +21,7 @@ namespace.
 
 ```bash
 orun integrations list [workspace]
+orun integrations <provider> connect [--workspace <ws>]   # token read from STDIN
 orun integrations <provider> status
 orun integrations <provider> secret create <KEY> --connection <int_…> --template <id> [--mode brokered|rotated]
 orun integrations <provider> templates list
@@ -31,6 +33,31 @@ orun integrations sync
 Persistent flags: `--backend-url`, `--workspace <ws-id|slug>` (`--org` is the
 legacy alias). Rung flags on secret-touching verbs: `--env <slug>`,
 `--project`, `--shared`. `--json` on every leaf (metadata only).
+
+## Connecting a provider
+
+```bash
+orun integrations cloudflare connect --workspace acme < cloudflare-token.txt
+```
+
+`connect` reads the provider token from **standard input only**, never from
+an argument, so it cannot land in shell history or a process listing. The
+platform activates the connection and, for providers that support it, mints
+its own scoped service token from the pasted one. Connecting through the
+console with OAuth is the alternative and needs no token at all.
+
+For Cloudflare, the pasted token's permission groups must include everything
+the workspace's templates will mint from it; a baseline such as `cirrus`
+needs **D1 Write** as well as the Workers permissions, or its `d1-edit` mint
+is refused with `parent_grant_insufficient`. The full list is in the
+[Orunbase integration catalog](https://docs.orunbase.com/platform/integrations/catalog#cloudflare).
+
+```text
+$ orun integrations list
+PROVIDER    CONNECTION                            ACCOUNT                 STATUS  SHARING              CONNECTED
+cloudflare  int_bf097f5a95064bf8bdfbc399ff2a8944  Acme Cloudflare         active  workspace            5d
+github      int_72e1a36e68a147ab907eb1e4712ae2cb  acme                    active  account (inherited)  3d
+```
 
 Command grammar is validated **before** auth or network — a typo never
 round-trips, and every unknown provider, resource, or verb gets a

@@ -4,24 +4,29 @@ This document explains the core runtime flow and how to extend `orun` in a CNCF-
 
 ## Runtime Flow (Compiler Pipeline)
 
-`orun` follows a deterministic compile pipeline:
+`orun plan` runs a six-stage compiler (the same six stages named in the README and in
+[the compiler pipeline page](../website/docs/architecture/compiler-pipeline.md)):
 
-1. **Load**: parse intent and composition assets.
-2. **Normalize**: canonicalize component/environment fields and dependency defaults.
-3. **Validate**: validate each component against its composition schema.
-4. **Expand**: materialize environment × component instances.
-5. **Plan**: bind component instances to job definitions and resolve job dependencies.
-6. **DAG checks**: detect cycles and topologically order jobs.
-7. **Render**: materialize immutable plan output (`json`/`yaml`).
+| Phase | Name | What it does |
+|---|---|---|
+| 0 | **Load & Validate** | Parse intent, component manifests, and composition assets; validate against the JSON schemas; fail fast |
+| 1 | **Normalize** | Resolve wildcards, default missing fields, canonicalize component/environment fields and dependency defaults |
+| 2 | **Expand** | Materialize the environment × component matrix and merge parameters and policies |
+| 3 | **Bind** | Match each component type to its composition job template and render step templates |
+| 4 | **Resolve** | Convert component dependencies into job dependencies, detect cycles, and topologically order the DAG |
+| 5 | **Materialize** | Emit the immutable plan (`json`/`yaml`) with every reference concrete |
 
 The pipeline is intentionally split into focused packages under [internal](../internal):
 
-- [internal/loader](../internal/loader/loader.go): loading and schema compilation.
-- [internal/normalize](../internal/normalize/intent.go): intent canonicalization.
-- [internal/expand](../internal/expand/expander.go): environment expansion + merge logic.
-- [internal/planner](../internal/planner/planner.go): job binding and dependency edges.
-- [internal/planner/graph.go](../internal/planner/graph.go): cycle detection and topological sort.
-- [internal/render](../internal/render/plan.go): deterministic output rendering.
+- [internal/loader](../internal/loader/loader.go) and [internal/schema](../internal/schema/validator.go): load & validate.
+- [internal/normalize](../internal/normalize/intent.go): normalize.
+- [internal/expand](../internal/expand/expander.go): expand — environment expansion + merge logic.
+- [internal/planner](../internal/planner/planner.go): bind — job binding and dependency edges.
+- [internal/planner/graph.go](../internal/planner/graph.go): resolve — cycle detection and topological sort.
+- [internal/render](../internal/render/plan.go): materialize — deterministic output rendering.
+
+The full package map, including the subsystems added since this document was
+written, is in [internals](../website/docs/architecture/internals.md).
 
 ## Step Phases and Ordering
 

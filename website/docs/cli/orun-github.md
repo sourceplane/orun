@@ -141,7 +141,7 @@ orun github logs --failed
 | `--latest` | `false` | Latest run |
 | `--job` | | Job ID to fetch logs for |
 
-> **`--job` matching:** Currently a substring match against the GitHub artifact name (e.g. `--job job_896da6b` or `--job api-edge-worker`), not a structured component/env/job lookup. Use `orun github runs --details` to discover available shard names. See improvements doc.
+> **`--job` matching:** Currently a substring match against the GitHub artifact name (e.g. `--job job_896da6b` or `--job api-edge-worker`), not a structured component/env/job lookup. Use `orun github runs --details` to discover available shard names.
 
 ## Artifact naming
 

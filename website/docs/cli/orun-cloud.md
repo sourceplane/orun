@@ -1,23 +1,24 @@
 ---
 title: orun cloud
+description: Link the current repository to an Orunbase workspace and project, check that it is allow-listed, open its console page, and create workspaces from the older spelling.
 ---
 
-`orun cloud` manages the link between the current repository and an Orun Cloud
+`orun cloud` manages the link between the current repository and an Orunbase
 workspace/project (the tenancy spine). A workspace can be named by its Workspace
 ID (`ws_…`, short and immutable), its slug, or a legacy `org_…` id — all are
 accepted wherever `--workspace`/`--org` is. The link is resolved once and cached in
 `~/.orun/config.yaml`; every `--remote-state` call then runs under that scope.
 
-This page covers the CLI surface. The Orun Cloud **platform** — workspaces,
+This page covers the CLI surface. The Orunbase **platform** — workspaces,
 access control, the API, webhooks, billing, and self-hosting — is documented at
-[docs.orun.dev](https://docs.orun.dev).
+[docs.orunbase.com](https://docs.orunbase.com).
 
 :::note Headless / container linking
 `orun cloud link` and `orun cloud check` honor **`ORUN_TOKEN`** before looking
 for a stored CLI session, so headless environments — containers, CI drivers,
 scaffold phase steps — can self-link without `orun auth login`. The
 not-logged-in error says so:
-`not logged in to Orun Cloud; run 'orun auth login' (or set ORUN_TOKEN for headless runs)`.
+`not logged in to Orunbase; run 'orun auth login' (or set ORUN_TOKEN for headless runs)`.
 :::
 
 :::tip Most teams don't run `orun cloud link` directly
@@ -36,7 +37,19 @@ orun cloud unlink                                 # drop the local link (the ser
 orun cloud status                                 # show the linked org/project, remote, and backend URL
 orun cloud check                                  # is this repo allow-listed for the resolved org?
 orun cloud open                                   # open the project's console page in the browser
+orun cloud workspace create <name> [--slug s]     # create a workspace (same as `orun workspace create`)
 ```
+
+:::warning Two kinds of repository link
+`orun cloud link` creates the **CLI link**: it allow-lists this repository
+for remote state under a workspace and project, and caches the choice in
+`~/.orun/config.yaml`. It is not the **repository link** (`repl_…`) that a
+platform baseline build or a grounded agent session needs. That one is
+created in the console after the GitHub App is installed, by the baseline
+flow's Repository step or from the repository's **Git** tab, and the CLI can
+list it but never create it. See
+[workspaces and tenancy](../concepts/workspaces-and-tenancy.md).
+:::
 
 ## Check allow-listing (`orun cloud check`)
 
@@ -119,3 +132,9 @@ proceed:
 - **Repo not linked and can't auto-link** (e.g. no git remote, or an ambiguous
   org in a non-interactive shell) → run `orun auth login` (which links), or
   `orun cloud link --workspace <ws_…|slug>` (alias `--org <slug>`).
+
+## Related
+
+- [`orun workspace`](./orun-workspace.md) — choose the working workspace
+- [`orun auth`](./orun-auth.md) — sign in, which also links this repository
+- [Workspaces and tenancy](../concepts/workspaces-and-tenancy.md)

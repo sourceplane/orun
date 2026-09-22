@@ -1,7 +1,7 @@
 ---
 title: orun
 slug: /
-description: orun is the planner–cockpit for platform engineering. Compile declarative intent into a deterministic execution DAG, then operate it through a single cockpit shared by the CLI and the TUI.
+description: orun is the open-source intent compiler for platform engineering. Compile declarative intent into a deterministic plan, converge it on every commit, operate it from one cockpit, and build whole products from baselines on Orunbase.
 ---
 
 <div className="heroFrame">
@@ -12,13 +12,13 @@ description: orun is the planner–cockpit for platform engineering. Compile dec
     then runs it through the backend you choose — local shell, Docker, or GitHub Actions.
     The CLI and the TUI render the same plan, the same state, the same glyphs. Drift between
     surfaces is a compile error, not a visual regression. And when your plans need a home,
-    <a href="https://docs.orun.dev">Orun Cloud</a> gives them managed remote state, live runs,
-    and a workspace console.
+    <a href="https://docs.orunbase.com">Orunbase</a> gives them managed remote state, live runs,
+    a workspace console, and a registry of baselines to build whole products from.
   </p>
   <div className="heroActions">
     <a className="button button--primary button--lg" href="/start/quick-start">Quick start →</a>
     <a className="button button--secondary button--lg" href="/principles">The principles</a>
-    <a className="button button--secondary button--lg" href="https://docs.orun.dev">Orun Cloud docs</a>
+    <a className="button button--secondary button--lg" href="/examples/bootstrap-a-product-from-a-baseline">Build from a baseline</a>
   </div>
 
 <div className="cockpitFrame">
@@ -92,6 +92,18 @@ description: orun is the planner–cockpit for platform engineering. Compile dec
     </p>
     <p><a href="/concepts/service-catalog">Service catalog →</a></p>
   </article>
+  <article className="pillarCard">
+    <span className="glyph">◆</span>
+    <strong>agents</strong>
+    <h3>A runtime for agents, with provenance</h3>
+    <p>
+      <code>orun agent</code> runs sessions in real checkouts, <code>orun mcp</code> serves
+      one tool surface over the pen and the platform, and <code>orun pr</code> makes every
+      pull request carry its task's lineage. Baseline builds author themselves into the
+      task plane, one milestone per phase.
+    </p>
+    <p><a href="/concepts/agent-runtime">Agent runtime →</a> · <a href="/concepts/task-plane">Task plane →</a></p>
+  </article>
 </div>
 
 ## What orun is
@@ -159,13 +171,15 @@ The boundary on the left is **planning**. The boundary on the right is **operati
 `plan.json` and `.orun/` are the only contracts between them — both versioned, both
 deterministic, both reviewable.
 
-## Orun Cloud — the managed backend
+## Orunbase — the managed control plane
 
 `orun` is local-first: state lives in your repo's `.orun/`, and no server is required.
-**[Orun Cloud](https://docs.orun.dev)** is what you add when a team shares that state —
-point `execution.state.backendUrl` at it and every plan, run, and state transition is
-stored, ordered, and streamed. It is also a complete open-source SaaS control plane,
-built and converged by orun itself.
+**[Orunbase](https://docs.orunbase.com)** is what you add when a team shares that state —
+sign in with `orun auth login`, choose a workspace with `orun workspace use`, and every
+plan, run, and state transition is stored, ordered, and streamed. It is also where
+**baselines** live: complete products such as `cirrus` and `lumen` that the platform
+rebuilds under your name in about an hour. Orunbase is itself a complete open-source SaaS
+control plane, built and converged by orun.
 
 <div className="signalGrid">
   <article className="signalCard">
@@ -183,8 +197,8 @@ built and converged by orun itself.
     <h3>A console for convergence</h3>
     <p>
       Jobs coordinate through the backend across runners — dependency-ordered, observable
-      in real time, resumable on retry. The <a href="https://app.orun.dev">workspace
-      console</a> renders runs, history, and the catalog of record.
+      in real time, resumable on retry. The <a href="https://app.orunbase.com">workspace
+      console</a> renders runs, history, agents, and the catalog of record.
     </p>
   </article>
   <article className="signalCard">
@@ -193,18 +207,18 @@ built and converged by orun itself.
     <p>
       Workspaces, projects, deny-by-default RBAC, teams, API keys, an immutable audit
       log, metering, billing, and signed webhooks — the
-      <a href="https://docs.orun.dev">Orun Cloud docs</a> cover the whole platform,
-      product by product.
+      <a href="https://docs.orunbase.com">Orunbase docs</a> cover the whole platform,
+      product by product. <a href="/concepts/workspaces-and-tenancy">Tenancy from the CLI →</a>
     </p>
   </article>
   <article className="signalCard">
-    <strong>open baseline</strong>
-    <h3>Fork the whole platform</h3>
+    <strong>baselines</strong>
+    <h3>Build a whole product</h3>
     <p>
-      Orun Cloud is <a href="https://github.com/sourceplane/orun-cloud">open source</a> and
-      written as portable component intent, converged by orun on every commit — the thesis,
-      made concrete. <a href="https://docs.orun.dev/self-hosting/deploy-your-own">Run your
-      own</a> from a clean clone.
+      A baseline is a production-shaped product the platform rebuilds under your name:
+      your GitHub org, your cloud account, your domain. <code>orun baseline new cirrus
+      --via-platform</code> builds a Cloudflare-only SaaS in about an hour.
+      <a href="/examples/bootstrap-a-product-from-a-baseline">The guide →</a>
     </p>
   </article>
 </div>
@@ -246,7 +260,7 @@ built and converged by orun itself.
     <h3>Architecture & contributing</h3>
     <p>
       <a href="/architecture/compiler-pipeline">Architecture</a> explains every stage of
-      the planner and cockpit bridge. <a href="/build/contributing">Build</a> covers
+      the planner and cockpit bridge. <a href="/contributing/">Build</a> covers
       packaging your own compositions, runners, or surfaces.
     </p>
   </article>

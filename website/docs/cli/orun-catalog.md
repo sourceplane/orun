@@ -20,10 +20,11 @@ orun catalog <sub> --help
 | Subcommand | Purpose |
 | --- | --- |
 | `refresh` | Resolve the current workspace and persist a catalog snapshot |
-| `push` | Sync the resolved snapshot to Orun Cloud and advance the catalog head |
+| `push` | Sync the resolved snapshot to Orunbase and advance the catalog head |
 | `affected` | Compute the components affected by a change (the change-detection engine) |
 | `list` | List the components in the selected catalog |
-| `describe` | Show the full resolved manifest for one component |
+| `describe` | Show the full resolved manifest for one component or entity |
+| `docs` | Print a resolved doc (default: `overview`) carried in the catalog closure |
 | `tree` | Render the catalog relationship graphs |
 | `history` | Enumerate a component's execution history |
 | `diff` | Compare two catalog snapshots |
@@ -62,13 +63,13 @@ Exit codes: `0` created or reused · `1` validation error (or any warning under
 
 | Flag | Purpose |
 | --- | --- |
-| `--push` | After refreshing, push the snapshot to Orun Cloud and advance the head |
+| `--push` | After refreshing, push the snapshot to Orunbase and advance the head |
 | `--environment <name>` | With `--push`: target a named environment head (default: the project-wide head) |
-| `--backend-url <url>` | With `--push`: backend URL (Orun Cloud or self-hosted) |
+| `--backend-url <url>` | With `--push`: backend URL (Orunbase or self-hosted) |
 
 ## `orun catalog push`
 
-Syncs the locally resolved `catalogs/current` snapshot to Orun Cloud and advances
+Syncs the locally resolved `catalogs/current` snapshot to Orunbase and advances
 the catalog head, recording the source git commit — which lights up the
 org-global catalog browser within seconds. It runs in two ordered steps: the
 object closure is uploaded as a **content set-difference** (only the blobs the
@@ -90,7 +91,7 @@ orun catalog refresh --push                # refresh then push in one step
 
 | Flag | Purpose |
 | --- | --- |
-| `--backend-url <url>` | Backend URL (Orun Cloud or self-hosted) |
+| `--backend-url <url>` | Backend URL (Orunbase or self-hosted) |
 | `--org <slug>` / `--project <slug>` | Override the cached link scope |
 | `--environment <name>` | Target a named environment head (default: the project-wide head) |
 
@@ -150,7 +151,8 @@ component was (or wasn't) selected.
 ```bash
 orun catalog list                 # components in the current catalog
 orun catalog list --kind System   # derived entities of another kind
-orun catalog describe <name>      # the full v1 envelope for one entity
+orun catalog describe <name>      # the full v1 envelope for one component or entity
+orun catalog docs <entity> [doc]  # a resolved doc from the catalog closure (default: overview)
 orun catalog tree                 # the catalog relationship graphs
 orun catalog history <name>       # a component's execution history
 orun catalog diff <a> <b>         # compare two catalog snapshots
