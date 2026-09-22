@@ -76,7 +76,7 @@ func registerNewCommand(root *cobra.Command) {
 	scaffoldNewCmd.Flags().StringVar(&scaffoldValuesFile, "values", "", "Path to a YAML values file feeding blueprint inputs")
 	scaffoldNewCmd.Flags().StringVar(&scaffoldOut, "out", ".", "Output directory (created if absent)")
 	scaffoldNewCmd.Flags().StringArrayVar(&scaffoldSet, "set", nil, "Set an input as key=value (repeatable; overrides --values)")
-	scaffoldNewCmd.Flags().BoolVar(&scaffoldRunHooks, "run-hooks", false, "Execute declared postInstantiate hooks (outside the sandbox)")
+	scaffoldNewCmd.Flags().BoolVar(&scaffoldRunHooks, "run-hooks", false, "Execute declared hooks — the phases' own, and the run-level preInstantiate and postInstantiate lists (outside the sandbox)")
 	scaffoldNewCmd.Flags().BoolVar(&scaffoldStatus, "status", false, "Derive and print each phase's state without writing anything")
 	scaffoldNewCmd.Flags().BoolVar(&scaffoldJSON, "json", false, "With --status, emit JSON")
 	scaffoldNewCmd.Flags().StringVar(&scaffoldPhase, "phase", "", "Place only this phase")

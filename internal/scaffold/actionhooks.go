@@ -64,9 +64,13 @@ func newHookLocator(data []byte) *hookLocator {
 		}
 	}
 	if hooks := mapValue(root, "hooks"); hooks != nil {
-		if post := mapValue(hooks, "postInstantiate"); post != nil && post.Kind == yaml.SequenceNode {
-			for hi, hook := range post.Content {
-				loc.nodes[fmt.Sprintf("hooks.postInstantiate[%d]", hi)] = hook
+		for _, slot := range []string{"preInstantiate", "postInstantiate"} {
+			list := mapValue(hooks, slot)
+			if list == nil || list.Kind != yaml.SequenceNode {
+				continue
+			}
+			for hi, hook := range list.Content {
+				loc.nodes[fmt.Sprintf("hooks.%s[%d]", slot, hi)] = hook
 			}
 		}
 	}
@@ -180,11 +184,13 @@ func validateActionHooks(bp *Blueprint, loc *hookLocator) error {
 			}
 		}
 	}
-	for hi, h := range bp.Hooks.PostInstantiate {
-		path := fmt.Sprintf("hooks.postInstantiate[%d]", hi)
-		label := fmt.Sprintf("hooks.postInstantiate[%d] (%s)", hi, h.ID)
-		if err := check(path, label, h); err != nil {
-			return err
+	for slot, list := range map[string][]Hook{"preInstantiate": bp.Hooks.PreInstantiate, "postInstantiate": bp.Hooks.PostInstantiate} {
+		for hi, h := range list {
+			path := fmt.Sprintf("hooks.%s[%d]", slot, hi)
+			label := fmt.Sprintf("hooks.%s[%d] (%s)", slot, hi, h.ID)
+			if err := check(path, label, h); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

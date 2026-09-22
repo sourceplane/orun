@@ -240,9 +240,10 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		}
 	}
 
-	// Hooks (opt-in, outside the sandbox — design §12). Per-phase hooks run in
-	// phase order, each phase placed between its pre and post hooks, then the
-	// global postInstantiate hooks.
+	// Hooks (opt-in, outside the sandbox — design §12). The run-level
+	// preInstantiate hooks first, then per-phase hooks in phase order, each
+	// phase placed between its pre and post hooks, then the run-level
+	// postInstantiate hooks.
 	em := newEmitter(opts.Events, runIDOf(opts))
 	// Every phase the blueprint declares but this run is not placing is
 	// reported once, so a feed shows the whole shape rather than only the part
@@ -282,6 +283,18 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			actions: runner,
 			inputs:  values.nonSecretFields(),
 		}
+		// preInstantiate belongs to no phase, like postInstantiate: it is what
+		// a build sets up for the WHOLE run before its first phase places —
+		// the epic, and every milestone and task the phases will land under —
+		// so a reader sees the shape of the work while phase one is still on
+		// its way. It runs on a resume too; what it does is idempotent by
+		// identity, so a resumed build finds what the first run made.
+		hr.phase = Phase{}
+		preRan, preErr := hr.run(ctx, bp.Hooks.PreInstantiate)
+		if preErr != nil {
+			return nil, preErr
+		}
+		hooksRun = append(hooksRun, preRan...)
 		for i, phase := range phases {
 			decl := plan.declOf(phase.Name)
 			title := phaseTitle(decl, phase.Name)

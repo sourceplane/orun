@@ -94,7 +94,11 @@ phases:                       # optional barriers with hooks
     modules: [worker]
 
 hooks:
-  postInstantiate:
+  preInstantiate:             # before the first phase places
+    - id: epic
+      uses: orun.task/ensure@v1
+      with: { kind: epic, slug: platform-baseline, name: "Platform baseline" }
+  postInstantiate:            # after the last phase
     - id: install
       run: [pnpm, install, --lockfile-only]
 ```
@@ -129,11 +133,16 @@ exactly one phase, and no edge pointing forward across a phase boundary. A
 phase can state preconditions and can wait rather than fail. With no
 `phases`, everything places in one implicit phase.
 
-**Hooks** are argv, not shell. They run after placement, outside the render
-sandbox, and only with `--run-hooks`. A hook is either `run` (a command) or
-`uses` (a typed action from orun's closed registry, such as opening a task,
-minting a brokered secret, or landing a pull request). A bad parameter is a
-parse error before anything is placed.
+**Hooks** are argv, not shell. They run outside the render sandbox, and only
+with `--run-hooks`. A hook is either `run` (a command) or `uses` (a typed
+action from orun's closed registry, such as opening a task, minting a brokered
+secret, or landing a pull request). A bad parameter is a parse error before
+anything is placed. A phase's hooks sit in its `pre`, `post` and `await`
+slots; two run-level lists belong to no phase: `hooks.preInstantiate` runs
+before the first phase places (where a bootstrap opens the epic and every
+milestone and task its phases will land under, so the shape of the work is
+visible before any of it starts) and `hooks.postInstantiate` runs after the
+last. Both are run on a resume too, so what they do must be idempotent.
 
 ## The output gate
 

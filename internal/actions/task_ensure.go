@@ -45,6 +45,10 @@ func init() {
 				Description: "epic name, milestone name, or task title"},
 			Param{Name: "slug", Type: ParamString,
 				Description: "epic only: the stable slug it is found by"},
+			Param{Name: "description", Type: ParamString,
+				Description: "epic only: what the epic is for, carried when it is created"},
+			Param{Name: "owner", Type: ParamString,
+				Description: "epic only: the owner when it is created — `me` for the caller, or a subject ref (usr_… / sp_…)"},
 			Param{Name: "epic", Type: ParamString,
 				Description: "milestone and task: the epic (slug, EP-n or epc_…)"},
 			Param{Name: "milestone", Type: ParamString,
@@ -108,11 +112,18 @@ func ensureOn(ctx context.Context, client taskPlane, org string, in Input) (Resu
 
 // ensureEpic finds or creates an epic by slug. A taken slug is an answer, not
 // an error — the plane already returns the existing epic, which is exactly the
-// idempotent caller's intent.
+// idempotent caller's intent. The description and the owner travel with the
+// create only: an epic that exists keeps what it has, because a resume is not
+// a reason to rewrite a record a person may have edited since.
 func ensureEpic(ctx context.Context, c taskPlane, org string, in Input) (Result, error) {
 	slug := StringParam(in, "slug")
 	name := StringParam(in, "name")
-	epic, err := c.CreateEpic(ctx, org, remotestate.EpicCreateRequest{Name: name, Slug: slug})
+	epic, err := c.CreateEpic(ctx, org, remotestate.EpicCreateRequest{
+		Name:        name,
+		Slug:        slug,
+		Description: StringParam(in, "description"),
+		Owner:       StringParam(in, "owner"),
+	})
 	if existing := remotestate.ExistingEpicOf(err); existing != nil {
 		return Result{Outputs: map[string]string{
 			"id": existing.ID, "key": existing.Key, "existed": "true",

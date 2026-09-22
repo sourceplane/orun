@@ -157,8 +157,13 @@ phases:
       - id: verify-contracts
         workflow: workflows/verify-contracts.yaml
 
-# the global list — runs last, after the whole scaffold
+# the run-level lists — preInstantiate before the first phase, postInstantiate
+# after the whole scaffold
 hooks:
+  preInstantiate:
+    - id: epic
+      uses: orun.task/ensure@v1
+      with: { kind: epic, slug: "{{ .serviceName }}", name: "{{ .serviceName }}" }
   postInstantiate:
     - id: open-pr
       workflow: workflows/open-pr.yaml

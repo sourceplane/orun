@@ -137,6 +137,9 @@ phases:
       - id: phase2
         run: ["touch", "` + filepath.Join(dir, "phase2.done") + `"]
 hooks:
+  preInstantiate:
+    - id: first
+      run: ["touch", "` + filepath.Join(dir, "first.done") + `"]
   postInstantiate:
     - id: final
       run: ["touch", "` + filepath.Join(dir, "final.done") + `"]
@@ -152,11 +155,11 @@ hooks:
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	wantHooks := []string{"phase1", "phase2", "final"}
+	wantHooks := []string{"first", "phase1", "phase2", "final"}
 	if strings.Join(res.HooksRun, ",") != strings.Join(wantHooks, ",") {
 		t.Fatalf("hooks ran %v, want %v", res.HooksRun, wantHooks)
 	}
-	for _, f := range []string{"phase1.done", "phase2.done", "final.done"} {
+	for _, f := range []string{"first.done", "phase1.done", "phase2.done", "final.done"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("hook marker %s not created: %v", f, err)
 		}

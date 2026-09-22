@@ -38,6 +38,11 @@ phases:
           with:
             repo: acme/product
 hooks:
+  preInstantiate:
+    - id: head
+      uses: orun.task/rollup@v1
+      with:
+        epic: infra-baselining
   postInstantiate:
     - id: tail
       uses: orun.run/watch@v1
@@ -45,14 +50,17 @@ hooks:
         repo: acme/product
 `
 
-// seeing records, for each action it runs, what the build had already said.
+// seeing records, for each action it runs, what the build had already said,
+// and the order the actions were asked in.
 type seeing struct {
 	sink     *CollectingSink
 	saidThen map[string][]Event
+	order    []string
 }
 
 func (s *seeing) Run(_ context.Context, id string, _ ActionInput) (map[string]string, error) {
 	s.saidThen[id] = snapshotOf(s.sink)
+	s.order = append(s.order, id)
 	if id == "orun.pr/land@v1" {
 		return map[string]string{"number": "3"}, nil
 	}
@@ -123,11 +131,23 @@ func TestEachLineOnceAndGlobalHooksUnderNoPhase(t *testing.T) {
 		if e.Narration == "PR 3 is merged." {
 			merged++
 		}
-		if e.Step == "tail" {
-			t.Fatalf("a postInstantiate hook was reported under phase %q", e.Phase)
+		if e.Step == "tail" || e.Step == "head" {
+			t.Fatalf("a run-level hook was reported under phase %q", e.Phase)
 		}
 	}
 	if merged != 1 {
 		t.Fatalf("the landing's line was said %d times", merged)
+	}
+}
+
+// The run-level preInstantiate list runs before the first phase's own hooks:
+// the shape of the work exists before any of it starts.
+func TestPreInstantiateRunsBeforeTheFirstPhase(t *testing.T) {
+	r, _ := runSteps(t)
+	if len(r.order) == 0 || r.order[0] != "orun.task/rollup@v1" {
+		t.Fatalf("the preInstantiate hook did not run first: %v", r.order)
+	}
+	if last := r.order[len(r.order)-1]; last != "orun.run/watch@v1" {
+		t.Fatalf("the postInstantiate hook did not run last: %v", r.order)
 	}
 }
