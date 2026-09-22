@@ -297,6 +297,15 @@ func TestBootstrapArgsNeedTheControlPlanesEnvironment(t *testing.T) {
 		t.Fatalf("values file ignored: %v", args)
 	}
 
+	// A retry of a stopped build names the phases to place again — the tree
+	// cannot tell a landed phase from one that landed and failed to converge.
+	env[envBaselineRedo] = " 04-workers, 05-edge ,"
+	args, _ = bootstrapArgs(get)
+	if joined := strings.Join(args, " "); !strings.Contains(joined, "--redo 04-workers --redo 05-edge") || !strings.Contains(joined, "--resume") {
+		t.Fatalf("redo phases not carried beside --resume: %v", args)
+	}
+	env[envBaselineRedo] = ""
+
 	// Half-configured is not configured: a driver that guessed the out dir
 	// would place somebody's product wherever it happened to be running.
 	for _, missing := range []string{envBaselineID, envBaselineOut} {

@@ -178,6 +178,22 @@ func (p *runPlan) selectPhases(opts Options) ([]PhasePlan, bool, error) {
 			set++
 		}
 	}
+	// A redo names phases a resume places again. It is a refinement of
+	// resume, not a fourth selector: on its own there is nothing to refine.
+	redo := map[string]bool{}
+	for _, name := range opts.Redo {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if !opts.Resume {
+			return nil, false, gateErr("scaffold: --redo names a phase for --resume to place again; use it with --resume")
+		}
+		if !containsPhaseName(p.phases, name) {
+			return nil, false, notFoundErr("scaffold: no phase named %q to redo (this blueprint declares: %s)", name, strings.Join(p.phaseNames(), ", "))
+		}
+		redo[name] = true
+	}
 	if set == 0 {
 		return nil, false, nil
 	}
@@ -216,6 +232,17 @@ func (p *runPlan) selectPhases(opts Options) ([]PhasePlan, bool, error) {
 				return nil, false, err
 			}
 			if skip {
+				continue
+			}
+			// A REDO IS PLACED WHATEVER THE TREE SAYS. The tree answers "are
+			// the files there", and after a phase landed and then failed to
+			// converge they are — merged, even. The operator retrying that
+			// build knows something the tree cannot: the phase is not done.
+			// Its files re-place as a no-op and its hooks run again, which is
+			// what "do the phase again" means for a phase whose work is a
+			// landing and a deployment.
+			if redo[ph.Name] {
+				out = append(out, ph)
 				continue
 			}
 			st := derivePhaseOf(opts.OutDir, ph.Name, p.byPhase[ph.Name], p.declOf(ph.Name))
@@ -310,4 +337,13 @@ func mergeModuleRecords(prev, current []ProvModule) []ProvModule {
 		out = append(out, byName[name])
 	}
 	return out
+}
+
+func containsPhaseName(phases []PhasePlan, name string) bool {
+	for _, ph := range phases {
+		if ph.Name == name {
+			return true
+		}
+	}
+	return false
 }

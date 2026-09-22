@@ -75,6 +75,10 @@ const (
 	envBaselineID   = "ORUN_BASELINE_ID"     // `cirrus` or `cirrus@baseline-v6`
 	envBaselineOut  = "ORUN_BASELINE_OUT"    // where to place the product
 	envBaselineVals = "ORUN_BASELINE_VALUES" // path to a --values JSON file
+	// Phases to place again under --resume, comma-separated: what a retry
+	// of a stopped build names, since the tree cannot tell a landed phase
+	// from one that landed and failed to converge.
+	envBaselineRedo = "ORUN_BASELINE_REDO"
 )
 
 // bootstrapArgs builds the command from the environment.
@@ -97,6 +101,11 @@ func bootstrapArgs(get func(string) string) ([]string, error) {
 		"--run-hooks", "--resume", "--progress", "json"}
 	if vals := strings.TrimSpace(get(envBaselineVals)); vals != "" {
 		args = append(args, "--values", vals)
+	}
+	for _, name := range strings.Split(get(envBaselineRedo), ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			args = append(args, "--redo", name)
+		}
 	}
 	return args, nil
 }
