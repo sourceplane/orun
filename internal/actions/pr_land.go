@@ -41,11 +41,13 @@ func init() {
 			{Name: "wait", Type: ParamBool, Default: true,
 				Description: "wait for checks before merging; false when a later convergence is the real gate"},
 			{Name: "checkTimeoutSeconds", Type: ParamInt, Default: 1800,
-				Description: "how long to wait for checks to settle"},
+				Description: "how long to wait for checks to settle; each re-run gets this again"},
+			{Name: "rerunBudget", Type: ParamInt, Default: 2,
+				Description: "re-run the PR's failed CI jobs this many times before refusing the landing — a lane that died on something transient heals in place, a real failure fails every re-run; 0 never re-runs"},
 			{Name: "mergeMethod", Type: ParamString, Default: "squash",
 				Description: "squash | merge | rebase"},
 		},
-		Outputs: []string{"branch", "number", "url", "merged", "mergeSha", "landed"},
+		Outputs: []string{"branch", "number", "url", "merged", "mergeSha", "landed", "reruns"},
 	}, runPRLand)
 }
 
@@ -106,6 +108,7 @@ func landWith(ctx context.Context, pen *provenance.Pen, in Input) (Result, error
 		"merged":   "false",
 		"mergeSha": "",
 		"landed":   "true",
+		"reruns":   "0",
 	}
 	// No credential: the pen prepared everything and printed the compare URL.
 	// That is honest for a human at a terminal and useless to an unattended
@@ -130,7 +133,11 @@ func landWith(ctx context.Context, pen *provenance.Pen, in Input) (Result, error
 		Base:         StringParam(in, "base"),
 		CheckTimeout: timeout,
 		MergeMethod:  StringParam(in, "mergeMethod"),
+		RerunBudget:  IntParam(in, "rerunBudget"),
 	})
+	if landed != nil {
+		out["reruns"] = fmt.Sprint(landed.Reruns)
+	}
 	if landed != nil && landed.Merged {
 		out["merged"] = "true"
 		out["mergeSha"] = landed.MergeSHA

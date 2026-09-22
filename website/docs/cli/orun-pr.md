@@ -106,6 +106,16 @@ Three behaviours are load-bearing:
   name; without the delete, the second push would be refused as
   non-fast-forward after a squash merge and a task could land exactly once.
 
+- **A failed lane is re-run before the landing is refused.** A lane that
+  died on something transient — a runner lost, a connection reset on its
+  claim before a step had run — is asked again: the failed jobs of the
+  head's workflow runs get `rerun-failed-jobs`, the wait starts over with a
+  fresh timeout, and only a failure that outlasts `--rerun-budget` (default
+  2) refuses the landing, counted in the refusal (`checks failed on abc1234
+  after 2 re-run(s): …`). A real failure fails every re-run; the budget is
+  what makes it surface. The product's own CI passes `--retry` on a re-run
+  attempt, so the lane re-opens its job.
+
 A refused merge carries GitHub's own reason through (`#N was not merged:
 …`) rather than a bare `422`, so an operator can act on it.
 
@@ -114,9 +124,10 @@ A refused merge carries GitHub's own reason through (`#N was not merged:
 | `--number` | The pull request to land (required) |
 | `--base` | Base branch, and the branch to return to (default `main`) |
 | `--wait` | Wait for checks before merging (default `true`; `--wait=false` merges immediately) |
-| `--check-timeout` | Seconds to wait for checks to settle (default `1800`) |
+| `--check-timeout` | Seconds to wait for checks to settle (default `1800`); each re-run gets this again |
+| `--rerun-budget` | Re-run the PR's failed CI jobs this many times before refusing (default `2`; `0` never re-runs) |
 | `--merge-method` | `squash` (default), `merge`, or `rebase` |
-| `--json` | Emit JSON: `Merged`, `SHA`, `ChecksSeen`, `MergeSHA`, `BranchDeleted` |
+| `--json` | Emit JSON: `Merged`, `SHA`, `ChecksSeen`, `Reruns`, `MergeSHA`, `BranchDeleted` |
 
 ```bash
 # Open, then land, from a flow that knows its PR number

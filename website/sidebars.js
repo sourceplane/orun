@@ -223,6 +223,7 @@ const sidebars = {
       type: 'category',
       label: 'Release notes',
       items: [
+        'release-notes/v2.61.0',
         'release-notes/v2.60.0',
         'release-notes/v2.59.0',
         'release-notes/v2.58.0',
