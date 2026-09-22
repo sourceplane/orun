@@ -195,12 +195,12 @@ covers prerequisites, every flag, what the platform enforces, verification,
 upgrades, and registering your own baseline. The model is explained in
 [Baselines](https://orun-docs.pages.dev/concepts/baselines).
 
-**[SOFTWAREFACTORY.md](SOFTWAREFACTORY.md)** takes it further: from an idea to
-a live product and then your own features on top, with the epic, tasks, and
-design documents visible in the workspace and every change landed through a
-task-carrying pull request. The
-[`software-factory` skill](.claude/skills/software-factory/SKILL.md) runs that
-whole flow for a coding agent.
+Or let an agent do all of it. **[SOFTWAREFACTORY.md](SOFTWAREFACTORY.md)**
+explains how to hand a product idea to Claude Code (or any agent that reads a
+`SKILL.md`) with the [`software-factory` skill](skills/software-factory/SKILL.md)
+and get back a live product, an epic with milestones and tasks in the
+workspace, its design documents, and every feature landed as a task-carrying
+pull request.
 
 ## The command tree
 
@@ -303,7 +303,7 @@ The documentation site is <https://orun-docs.pages.dev>; its source is
 - [What is orun?](https://orun-docs.pages.dev/overview/what-is-orun)
 - [Installation](https://orun-docs.pages.dev/start/installation) and [quick start](https://orun-docs.pages.dev/start/quick-start)
 - [Create a workspace and build it from a baseline](https://orun-docs.pages.dev/examples/bootstrap-a-product-from-a-baseline)
-- [The software factory](SOFTWAREFACTORY.md): idea → workspace → baseline → your product, with the work visible in Orunbase
+- [Software factory](SOFTWAREFACTORY.md): hand an agent a product idea and get a live product, built on a baseline with the work visible in Orunbase
 - [Concepts](https://orun-docs.pages.dev/concepts/intent-model): intent, compositions, plans, execution, catalog, state, secrets, tenancy, baselines, tasks, agents
 - [CLI reference](https://orun-docs.pages.dev/cli/orun)
 - [Release notes](https://orun-docs.pages.dev/release-notes/v2.58.0)

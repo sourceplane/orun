@@ -70,7 +70,7 @@ Stop and tell the user if any row fails. Everything downstream depends on it.
 
 Write `specs/epics/<reponame>-<slug>/` **in a scratch directory** now; it
 moves into the product repository after the bootstrap. Start from the
-templates beside this file (`templates/`) and follow them exactly:
+templates beside this file (`templates/` beside this file) and follow them exactly:
 
 - `README.md`: bold one-paragraph thesis; the **Status** table (`Draft`,
   the cluster code and milestone range, the owning components, "Builds on:
