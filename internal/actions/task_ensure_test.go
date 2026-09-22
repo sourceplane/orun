@@ -31,6 +31,7 @@ type fakePlane struct {
 	// existingSlug makes CreateEpic answer the way the real plane does when a
 	// slug is taken: with the existing epic, not a conflict.
 	existingSlug string
+	lastEpic     remotestate.EpicCreateRequest
 	lastTask     remotestate.TaskCreateRequest
 	// attached records every contract attach, keyed by task key, so a test can
 	// assert that a landing's task was born able to fold.
@@ -43,6 +44,7 @@ func (f *fakePlane) CreateEpic(_ context.Context, _ string, req remotestate.Epic
 		return nil, existingEpicErr(&remotestate.PublicEpic{ID: "epc_existing", Slug: req.Slug, Key: "EP-1"})
 	}
 	f.createdEp++
+	f.lastEpic = req
 	return &remotestate.PublicEpic{ID: "epc_new", Slug: req.Slug, Key: "EP-9", Name: req.Name}, nil
 }
 
@@ -106,6 +108,23 @@ func TestEnsureEpicCreatesWhenAbsent(t *testing.T) {
 
 // A taken slug is an answer, not an error: that is what makes re-running a
 // phase safe.
+// An epic is born with what it is for and whose it is. Both travel on the
+// create only — see ensureEpic.
+func TestEnsureEpicCarriesItsDescriptionAndOwner(t *testing.T) {
+	f := &fakePlane{}
+	_, err := ensure(t, f, map[string]any{
+		"kind": "epic", "name": "Infra baselining — Acme", "slug": "infra-baselining",
+		"description": "Everything the cirrus baseline builds for Acme, one phase per milestone.",
+		"owner":       "me",
+	})
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if f.lastEpic.Description == "" || f.lastEpic.Owner != "me" {
+		t.Fatalf("the epic was created without its description or owner: %+v", f.lastEpic)
+	}
+}
+
 func TestEnsureEpicAdoptsAnExistingSlug(t *testing.T) {
 	f := &fakePlane{existingSlug: "infra-baselining"}
 	res, err := ensure(t, f, map[string]any{"kind": "epic", "name": "Infra baselining", "slug": "infra-baselining"})

@@ -85,7 +85,11 @@ phases:
 
 # (5) HOOKS — declared, ecosystem-specific, run outside the sandbox (opt-in).
 hooks:
-  postInstantiate:
+  preInstantiate:             # before the first phase: the shape of the work
+    - id: epic
+      uses: orun.task/ensure@v1
+      with: { kind: epic, slug: platform-baseline, name: "Platform baseline" }
+  postInstantiate:            # after the last phase
     - id: install
       run: [pnpm, install, --lockfile-only]
 ```
@@ -143,8 +147,9 @@ their own hooks. The DAG remains the ordering authority — phases only add coar
 barriers (all of phase N placed before phase N+1) and a hook attachment point.
 Rules (validated fail-closed): every module in exactly one phase, and **no
 dependency edge may point forward across a phase boundary**. With no `phases`,
-everything places in one implicit phase (default behavior). Per-phase hooks run
-in phase order, then the global `postInstantiate` hooks.
+everything places in one implicit phase (default behavior). The run-level
+`preInstantiate` hooks run first, then per-phase hooks in phase order, then the
+run-level `postInstantiate` hooks.
 
 ### Hooks
 

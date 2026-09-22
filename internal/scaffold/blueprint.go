@@ -177,8 +177,20 @@ type Module struct {
 	Wiring []string `yaml:"wiring,omitempty" json:"wiring,omitempty"`
 }
 
-// Hooks declares ecosystem post-steps (design §12).
+// Hooks declares the run-level hook lists (design §12), the two that belong
+// to no phase:
+//
+//	preInstantiate   before the first phase places — what a build sets up
+//	                 for the whole run, such as the epic and every milestone
+//	                 and task its phases will land under
+//	postInstantiate  after the last phase — the ecosystem post-steps
+//
+// Both run only with --run-hooks, and preInstantiate runs on a resume too:
+// what it does is idempotent by identity, like everything a bootstrap does,
+// so a resumed build finds what the first run made rather than making it
+// twice.
 type Hooks struct {
+	PreInstantiate  []Hook `yaml:"preInstantiate,omitempty" json:"preInstantiate,omitempty"`
 	PostInstantiate []Hook `yaml:"postInstantiate,omitempty" json:"postInstantiate,omitempty"`
 }
 
@@ -473,8 +485,13 @@ func (bp *Blueprint) validate() error {
 }
 
 // validateHooks enforces the run|workflow mutual-exclusion invariant across every
-// declared hook — the global postInstantiate list and each phase's hooks.
+// declared hook — the run-level lists and each phase's hooks.
 func (bp *Blueprint) validateHooks() error {
+	for i, h := range bp.Hooks.PreInstantiate {
+		if err := h.validate(); err != nil {
+			return fmt.Errorf("hooks.preInstantiate[%d]: %w", i, err)
+		}
+	}
 	for i, h := range bp.Hooks.PostInstantiate {
 		if err := h.validate(); err != nil {
 			return fmt.Errorf("hooks.postInstantiate[%d]: %w", i, err)
