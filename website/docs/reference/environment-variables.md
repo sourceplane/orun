@@ -73,6 +73,7 @@ The bootstrap driver (`internal/agent/driver/bootstrap.go`) reads its inputs fro
 | `ORUN_BASELINE_ID` | `internal/agent/driver/bootstrap.go` | The baseline to instantiate, for example `cirrus` or `cirrus@baseline-v6` |
 | `ORUN_BASELINE_OUT` | `internal/agent/driver/bootstrap.go` | Where to place the product; `orun agent serve` sets it to the session's working directory |
 | `ORUN_BASELINE_VALUES` | `internal/agent/driver/bootstrap.go` | Path to a `--values` JSON file |
+| `ORUN_BASELINE_REDO` | `internal/agent/driver/bootstrap.go` | Phases to place again under `--resume`, comma-separated; each becomes a `--redo`. A retry of a stopped build names the phase that failed |
 
 ## Debugging
 

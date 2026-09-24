@@ -104,6 +104,7 @@ nobody should repeat.
 | `--values <file>` | A YAML file of inputs. |
 | `--run-hooks` | Run each phase's declared hooks after its files are placed. Without it the command places files and stops; with it, it bootstraps a product: repositories, installs, secrets, Terraform, pull requests, deploys. |
 | `--resume` | Place every phase not already derived as done. |
+| `--redo <phase>` | With `--resume`, place this phase again even though its files are in place: its hooks run again. Repeatable. For retrying a phase that landed and then failed to converge. |
 | `--phase <name>` | Place only this phase. |
 | `--until <name>` | Place every phase through this one. |
 | `--progress auto\|plain\|verbose\|json` | Progress rendering. `json` emits one event per line. |
@@ -154,8 +155,8 @@ verbatim: the admin-role requirement, the paid-tier gate, readiness, the
 repository grounding, required inputs, the admission fee, and the
 one-build-per-repository lease.
 
-`--out`, `--run-hooks`, `--resume`, `--phase`, `--until`, `--progress`, and
-`--keep-checkout` are accepted with `--via-platform` and ignored; the platform
+`--out`, `--run-hooks`, `--resume`, `--redo`, `--phase`, `--until`, `--progress`,
+and `--keep-checkout` are accepted with `--via-platform` and ignored; the platform
 always runs with hooks and resume on.
 
 ## `register`
