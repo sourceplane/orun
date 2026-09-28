@@ -28,7 +28,7 @@ type componentEntry struct {
 	key     string
 	name    string
 	watches []string
-	inputs  []string // spec.inputs globs (repository-root-relative)
+	inputs  []string // spec.change.inputs globs (repository-root-relative)
 }
 
 // catalogIndex is the engine's precomputed, lookup-friendly view of one catalog:
@@ -45,7 +45,7 @@ type catalogIndex struct {
 	components []componentEntry
 	nameToKey  map[string]string
 
-	// inputRules are the components that declare spec.inputs globs, in
+	// inputRules are the components that declare spec.change.inputs globs, in
 	// component-key order so selection and explain output are deterministic.
 	inputRules []componentEntry
 
@@ -195,7 +195,7 @@ func (idx *catalogIndex) classify(path string) classification {
 	return classification{kind: classIgnore}
 }
 
-// inputMatches returns the components whose spec.inputs globs match path, each
+// inputMatches returns the components whose spec.change.inputs globs match path, each
 // with the first matching pattern, in component-key order. Independent of path
 // ownership: a file can be owned by one component and an input of others.
 func (idx *catalogIndex) inputMatches(path string) []inputMatch {
@@ -295,11 +295,16 @@ func componentWatches(c objcatalog.CatalogComponentView) []string {
 	return out
 }
 
-// componentInputs extracts the component's spec.inputs globs from the verbatim
-// manifest spec. Patterns were validated when the catalog was resolved; an
-// invalid one (an older or hand-edited snapshot) is skipped rather than trusted.
+// componentInputs extracts the component's input globs from the verbatim
+// manifest spec (spec.change.inputs). Patterns were validated when the catalog
+// was resolved; an invalid one (an older or hand-edited snapshot) is skipped
+// rather than trusted.
 func componentInputs(c objcatalog.CatalogComponentView) []string {
-	raw, ok := c.Spec["inputs"].([]any)
+	change, ok := c.Spec["change"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := change["inputs"].([]any)
 	if !ok {
 		return nil
 	}

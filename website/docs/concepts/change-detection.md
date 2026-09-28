@@ -114,14 +114,16 @@ transitively.
 
 A component owns only its own directory, so a file at the repository root —
 `pnpm-lock.yaml`, `turbo.json`, `tooling/eslint/**` — selects nothing unless a
-component declares it as an input glob.
+component declares it in `change.inputs`.
 
-### Input globs (`spec.inputs`)
+### Input globs (`spec.change.inputs`)
 
-`spec.inputs` lists glob patterns for files a component depends on but does not
-own. A changed file matching any of them selects the component, **in addition
-to** normal path ownership, and selection then propagates over input edges
-exactly as for an owned file.
+`spec.change.inputs` lists glob patterns for files a component depends on but
+does not own. It sits next to [`spec.change.watches`](./change-watches.md):
+watches react to intent sections, inputs react to repository files. A changed
+file matching any input glob selects the component, **in addition to** normal
+path ownership, and selection then propagates over input edges exactly as for
+an owned file.
 
 ```yaml
 apiVersion: orun.io/v1alpha1
@@ -130,10 +132,11 @@ metadata:
   name: web
 spec:
   type: turbo-app
-  inputs:
-    - pnpm-lock.yaml        # the workspace lockfile
-    - turbo.json            # the task pipeline
-    - tooling/eslint/**     # shared lint config, any depth
+  change:
+    inputs:
+      - pnpm-lock.yaml        # the workspace lockfile
+      - turbo.json            # the task pipeline
+      - tooling/eslint/**     # shared lint config, any depth
 ```
 
 ```text
@@ -150,19 +153,17 @@ Rules:
   `{a,b}` alternation.
 - Absolute paths, `.` or `..` segments, backslashes, empty segments, and
   malformed globs are rejected when the catalog is resolved
-  (`component.spec.inputs.invalid`) and when the intent is normalized, so a
-  typo fails closed instead of silently selecting nothing.
-- Inline `components:` entries in `intent.yaml` accept the same `inputs:` list.
-- A component without `inputs` behaves exactly as before.
-- Older manifests that used `spec.inputs` as a **mapping** (the plan engine's
-  former name for `parameters`) still load: the mapping declares no globs and
-  is reported as an uninterpreted field. Only the list form declares globs.
+  (`component.spec.change.inputs.invalid`) and when the intent is normalized,
+  so a typo fails closed instead of silently selecting nothing.
+- Inline `components:` entries in `intent.yaml` accept the same
+  `change.inputs:` list.
+- A component without `change.inputs` behaves exactly as before.
 
 `orun catalog affected --explain` records which pattern matched:
 
 ```text
 explain:
-  - ns/repo/web: input glob pnpm-lock.yaml matched: pnpm-lock.yaml
+  - ns/repo/web: change.inputs glob pnpm-lock.yaml matched: pnpm-lock.yaml
 ```
 
 ## Intent-aware change scoping

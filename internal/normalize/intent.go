@@ -88,9 +88,9 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 			}
 		}
 
-		// Validate input globs (spec.inputs)
-		if err := inputglob.ValidateAll(comp.Inputs); err != nil {
-			return nil, fmt.Errorf("component %s: invalid spec.%w", comp.Name, err)
+		// Validate change input globs
+		if err := inputglob.ValidateAll(comp.Change.Inputs); err != nil {
+			return nil, fmt.Errorf("component %s: invalid change.%w", comp.Name, err)
 		}
 
 		// Validate subscription env

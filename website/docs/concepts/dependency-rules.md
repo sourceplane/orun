@@ -243,7 +243,7 @@ redeploy is not required for a peer-only change.
 
 Input edges connect components. For files that belong to no component — a
 root lockfile, `turbo.json`, a shared `tooling/` tree — declare them on the
-component with [`spec.inputs`](./change-detection.md#input-globs-specinputs)
+component with [`spec.change.inputs`](./change-detection.md#input-globs-specchangeinputs)
 globs; a match is a direct change that then rides input edges the same way.
 
 `orun catalog affected --explain` records the provenance of every rescope:

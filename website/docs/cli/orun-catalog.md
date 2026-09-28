@@ -126,7 +126,7 @@ and therefore planned and deployed — when only the package's directory changed
 See [Dependency rules → Input edges](../concepts/dependency-rules.md#input-edges-build-input-rescope).
 
 `directlyChanged` also includes components whose
-[`spec.inputs`](../concepts/change-detection.md#input-globs-specinputs) globs
+[`spec.change.inputs`](../concepts/change-detection.md#input-globs-specchangeinputs) globs
 match a changed file — how a root file such as `pnpm-lock.yaml` or
 `turbo.json`, owned by no component, selects the components that build from it.
 

@@ -1,9 +1,9 @@
 package main
 
-// changed_inputs_test.go locks spec.inputs (OR2) end to end: component.yaml →
+// changed_inputs_test.go locks spec.change.inputs (OR2) end to end: component.yaml →
 // resolved catalog → the --changed engine. Root files owned by no component
 // (the lockfile, turbo.json, a tooling tree) select the components that list
-// them in spec.inputs, and the selection rides dependsOn input:true edges.
+// them in spec.change.inputs, and the selection rides dependsOn input:true edges.
 
 import "testing"
 
@@ -22,9 +22,10 @@ metadata:
   name: web
 spec:
   type: app
-  inputs:
-    - pnpm-lock.yaml
-    - turbo.json
+  change:
+    inputs:
+      - pnpm-lock.yaml
+      - turbo.json
 `,
 		"packages/lint/component.yaml": `apiVersion: orun.io/v1alpha1
 kind: Component
@@ -32,8 +33,9 @@ metadata:
   name: lint
 spec:
   type: library
-  inputs:
-    - tooling/eslint/**
+  change:
+    inputs:
+      - tooling/eslint/**
 `,
 		"apps/console/component.yaml": `apiVersion: orun.io/v1alpha1
 kind: Component

@@ -79,14 +79,18 @@ func validate(authored []AuthoredManifest, manifests []*catalogmodel.ComponentMa
 			})
 		}
 
-		// spec.inputs globs — error in both modes: a malformed or escaping
-		// pattern would silently select nothing (or the wrong files).
-		for j, p := range am.Component.Spec.Inputs {
+		// spec.change.inputs globs — error in both modes: a malformed or
+		// escaping pattern would silently select nothing (or the wrong files).
+		var changeInputs []string
+		if am.Component.Spec.Change != nil {
+			changeInputs = am.Component.Spec.Change.Inputs
+		}
+		for j, p := range changeInputs {
 			if err := inputglob.Validate(p); err != nil {
 				add(ValidationIssue{
 					File:     file,
-					Pointer:  fmt.Sprintf("/spec/inputs/%d", j),
-					Code:     "component.spec.inputs.invalid",
+					Pointer:  fmt.Sprintf("/spec/change/inputs/%d", j),
+					Code:     "component.spec.change.inputs.invalid",
 					Message:  err.Error(),
 					Severity: SeverityError,
 				})

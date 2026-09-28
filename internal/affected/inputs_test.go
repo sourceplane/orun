@@ -10,18 +10,18 @@ import (
 // inputsCatalog models a turborepo-style workspace (OR2): root files
 // (pnpm-lock.yaml, turbo.json, tooling/eslint/**) are owned by no component.
 //
-//	web     (apps/web)      inputs: pnpm-lock.yaml, turbo.json
-//	lint    (packages/lint) inputs: tooling/eslint/**
+//	web     (apps/web)      change.inputs: pnpm-lock.yaml, turbo.json
+//	lint    (packages/lint) change.inputs: tooling/eslint/**
 //	console (apps/console)  dependsOn lint input:true
 //	api     (apps/api)      no inputs, no input edges
 func inputsCatalog() *objcatalog.CatalogView {
 	return &objcatalog.CatalogView{
 		Components: []objcatalog.CatalogComponentView{
 			{ComponentKey: "ns/repo/web", Name: "web", Spec: map[string]any{
-				"inputs": []any{"pnpm-lock.yaml", "turbo.json"},
+				"change": map[string]any{"inputs": []any{"pnpm-lock.yaml", "turbo.json"}},
 			}},
 			{ComponentKey: "ns/repo/lint", Name: "lint", Spec: map[string]any{
-				"inputs": []any{"tooling/eslint/**"},
+				"change": map[string]any{"inputs": []any{"tooling/eslint/**"}},
 			}},
 			{ComponentKey: "ns/repo/console", Name: "console"},
 			{ComponentKey: "ns/repo/api", Name: "api"},
@@ -50,7 +50,7 @@ func TestDetect_InputGlob_RootFileSelectsComponent(t *testing.T) {
 	eq(t, r.Selection, []string{"ns/repo/web"}, "Selection")
 	var found bool
 	for _, e := range r.Explain {
-		if e.Component == "ns/repo/web" && strings.Contains(e.Reason, "input glob pnpm-lock.yaml matched: pnpm-lock.yaml") {
+		if e.Component == "ns/repo/web" && strings.Contains(e.Reason, "change.inputs glob pnpm-lock.yaml matched: pnpm-lock.yaml") {
 			found = true
 		}
 	}
@@ -106,7 +106,7 @@ func TestDetect_InputGlob_NoInputsIsUnchanged(t *testing.T) {
 
 func TestDetect_InputGlob_InvalidStoredPatternIgnored(t *testing.T) {
 	c := inputsCatalog()
-	c.Components[0].Spec = map[string]any{"inputs": []any{"../pnpm-lock.yaml", "/turbo.json", 7}}
+	c.Components[0].Spec = map[string]any{"change": map[string]any{"inputs": []any{"../pnpm-lock.yaml", "/turbo.json", 7}}}
 	r := detect(t, c, IntentImpactWatch, fakeSource{files: []string{"pnpm-lock.yaml", "turbo.json"}})
 	eq(t, r.DirectlyChanged, nil, "DirectlyChanged")
 }

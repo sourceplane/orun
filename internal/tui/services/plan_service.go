@@ -381,7 +381,7 @@ func changedComponentsFromFiles(
 			out[comp.Name] = true
 			continue
 		}
-		if anyChangedMatchesInputs(changedFiles, comp.Inputs) {
+		if anyChangedMatchesInputs(changedFiles, comp.Change.Inputs) {
 			out[comp.Name] = true
 			continue
 		}
@@ -423,7 +423,7 @@ func joinRel(dir, path string) string {
 }
 
 // anyChangedMatchesInputs reports whether any changed file matches one of the
-// component's spec.inputs globs (repository-root-relative).
+// component's change.inputs globs (repository-root-relative).
 func anyChangedMatchesInputs(changed map[string]struct{}, inputs []string) bool {
 	if len(inputs) == 0 {
 		return false

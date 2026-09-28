@@ -8,7 +8,7 @@ import (
 
 func TestChangedComponentsFromFiles_InputGlobs(t *testing.T) {
 	normalized := &model.NormalizedIntent{Components: map[string]model.Component{
-		"web": {Name: "web", SourcePath: "apps/web", Inputs: []string{"pnpm-lock.yaml", "tooling/**"}},
+		"web": {Name: "web", SourcePath: "apps/web", Change: model.ComponentChange{Inputs: []string{"pnpm-lock.yaml", "tooling/**"}}},
 		"api": {Name: "api", SourcePath: "apps/api"},
 	}}
 	changed := map[string]struct{}{"tooling/eslint/deep/rule.js": {}}

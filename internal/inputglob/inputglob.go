@@ -1,4 +1,4 @@
-// Package inputglob validates and matches a component's `spec.inputs` globs:
+// Package inputglob validates and matches a component's `spec.change.inputs` globs:
 // repository-root-relative, doublestar-style patterns (`**` crosses directory
 // boundaries) that let a component claim files outside its own directory for
 // change detection — a root lockfile, turbo.json, or a shared tooling tree.

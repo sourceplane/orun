@@ -46,6 +46,12 @@
         "change": {
           "additionalProperties": false,
           "properties": {
+            "inputs": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
             "watches": {
               "items": {
                 "type": "string"
@@ -163,21 +169,6 @@
         "extensions": {
           "additionalProperties": {},
           "type": "object"
-        },
-        "inputs": {
-          "oneOf": [
-            {
-              "description": "Repository-root-relative glob patterns (doublestar, ** crosses directories) whose changes select this component under --changed.",
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "description": "Legacy spec.inputs parameters block; accepted and ignored.",
-              "type": "object"
-            }
-          ]
         },
         "integrations": {
           "additionalProperties": {},
