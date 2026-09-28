@@ -58,6 +58,29 @@ spec:
 
 If a component has no `change.watches` (or an empty list), global intent changes do **not** mark it as changed. Only direct file changes (component source files or `component.yaml` itself) trigger change detection for that component.
 
+## Watching repository files: `change.inputs`
+
+Watches react to **intent sections**. To react to **repository files** a
+component does not own — a root lockfile, `turbo.json`, a shared tooling tree —
+list them as globs in `change.inputs`, alongside `watches`:
+
+```yaml
+spec:
+  change:
+    watches:
+      - environments
+    inputs:
+      - pnpm-lock.yaml
+      - turbo.json
+      - tooling/eslint/**
+```
+
+A changed file matching any input glob marks the component changed (and its
+`dependsOn` `input: true` dependents with it), independent of
+`--intent-impact`. Patterns are repository-root-relative, support `**`, and are
+validated when the catalog resolves. See
+[change detection → Input globs](./change-detection.md#input-globs-specchangeinputs).
+
 ## What is NOT affected by watches
 
 These change detection rules remain unchanged regardless of watches:
@@ -155,7 +178,7 @@ The full pipeline:
 
 ```
 changed files
-  → file-to-component detection
+  → file-to-component detection (path ownership + change.inputs globs)
   → intent semantic diff (identifies changed sections)
   → component watches matched against changed sections
   → final changed component set

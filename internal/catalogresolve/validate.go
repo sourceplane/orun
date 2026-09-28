@@ -1,9 +1,11 @@
 package catalogresolve
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
+	"github.com/sourceplane/orun/internal/inputglob"
 )
 
 // validate is stage 9 of the resolver. It applies the rule table from
@@ -75,6 +77,24 @@ func validate(authored []AuthoredManifest, manifests []*catalogmodel.ComponentMa
 				Message:  "spec.lifecycle should be set",
 				Severity: SeverityWarning,
 			})
+		}
+
+		// spec.change.inputs globs — error in both modes: a malformed or
+		// escaping pattern would silently select nothing (or the wrong files).
+		var changeInputs []string
+		if am.Component.Spec.Change != nil {
+			changeInputs = am.Component.Spec.Change.Inputs
+		}
+		for j, p := range changeInputs {
+			if err := inputglob.Validate(p); err != nil {
+				add(ValidationIssue{
+					File:     file,
+					Pointer:  fmt.Sprintf("/spec/change/inputs/%d", j),
+					Code:     "component.spec.change.inputs.invalid",
+					Message:  err.Error(),
+					Severity: SeverityError,
+				})
+			}
 		}
 
 		// Unrecognized authored keys — warn default, error strict. The

@@ -118,11 +118,21 @@ type ComponentYAMLDocs struct {
 	ADRs     []string  `json:"adrs,omitempty"`
 }
 
-// ComponentYAMLChange declares which intent change signals affect this
-// component — the change-detection "watch" inputs (the catalog-canonical home,
-// orun-catalog-state). Optional; omitted when no signals are watched.
+// ComponentYAMLChange declares which change signals affect this component —
+// the intent sections it watches and the repository files it takes as inputs
+// (the catalog-canonical home, orun-catalog-state). Optional; omitted when no
+// signals are declared.
 type ComponentYAMLChange struct {
 	Watches []string `json:"watches,omitempty"`
+	// Inputs are repository-root-relative glob patterns (doublestar-style,
+	// `**` crosses directories) naming files outside the component's own
+	// directory that select it under --changed — a root lockfile, turbo.json,
+	// a shared tooling tree. Path ownership is unchanged; a matching file is
+	// an additional direct change, propagated over dependsOn input:true edges
+	// like an owned file. Absolute paths, `.`/`..` segments and malformed
+	// globs are rejected (rule component.spec.change.inputs.invalid).
+	// Mirrors internal/model.ComponentChange.Inputs.
+	Inputs []string `json:"inputs,omitempty"`
 }
 
 // ComponentYAMLDependency is one entry in the authored `dependsOn` list. Only

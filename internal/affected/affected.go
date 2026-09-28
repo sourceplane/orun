@@ -5,7 +5,8 @@
 //
 // A Detector runs one surface-agnostic pipeline over a catalog read view
 // (internal/objcatalog): a ChangeSource yields the changed file set (and any
-// intent.yaml change), the ownership map classifies those files to components,
+// intent.yaml change), the ownership map classifies those files to components
+// (plus any component whose spec.change.inputs globs match a changed file),
 // the intent diff + intent-impact policy fold in intent-driven components, and
 // the catalog dependency graph is walked for the forward (Dependencies) and
 // reverse (Dependents) closures. The Result carries all three sets plus the
@@ -136,6 +137,17 @@ func (d *Detector) Detect(ctx context.Context, src ChangeSource) (Result, error)
 		case classGlobal:
 			// handled by the intent stage below
 		case classIgnore:
+		}
+
+		// 1b. Input globs (spec.change.inputs): a component may claim files it does
+		// not own — a root lockfile, turbo.json, a shared tooling tree. A
+		// match is a direct change on top of path ownership, so it rides the
+		// input-edge rescope (2b) and the closures below like an owned file.
+		for _, m := range idx.inputMatches(normPath(f)) {
+			if !directly[m.componentKey] {
+				directly[m.componentKey] = true
+				explain = append(explain, ExplainEntry{Component: m.componentKey, Reason: "change.inputs glob " + m.pattern + " matched: " + f})
+			}
 		}
 	}
 

@@ -128,6 +128,11 @@ component (transitively). A worker that bundles a shared package is rescoped —
 and therefore planned and deployed — when only the package's directory changed.
 See [Dependency rules → Input edges](../concepts/dependency-rules.md#input-edges-build-input-rescope).
 
+`directlyChanged` also includes components whose
+[`spec.change.inputs`](../concepts/change-detection.md#input-globs-specchangeinputs) globs
+match a changed file — how a root file such as `pnpm-lock.yaml` or
+`turbo.json`, owned by no component, selects the components that build from it.
+
 On classification ambiguity the engine **over-reports, never under** — a false
 positive is safe, a missed change is not. A `component.yaml` edit is treated as
 structural: it lowers `confidence` and sets `needsFullResolve`.

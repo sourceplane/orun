@@ -155,9 +155,16 @@ type EnvironmentSelectors struct {
 // ValidWatchSections lists valid values for ComponentChange.Watches.
 var ValidWatchSections = []string{"automation", "compositions", "discovery", "env", "environments", "execution", "groups"}
 
-// ComponentChange declares which intent change signals affect a component.
+// ComponentChange declares which change signals affect a component.
 type ComponentChange struct {
 	Watches []string `yaml:"watches,omitempty" json:"watches,omitempty"`
+	// Inputs are repository-root-relative glob patterns (doublestar `**`
+	// supported) naming files outside the component's own directory that
+	// still select it under --changed: a root lockfile, turbo.json, a shared
+	// tooling tree. Selection then propagates over dependsOn input:true edges
+	// exactly as for an owned file. Validated by internal/inputglob. Mirrors
+	// internal/catalogmodel.ComponentYAMLChange.Inputs.
+	Inputs []string `yaml:"inputs,omitempty" json:"inputs,omitempty"`
 }
 
 // Component is execution-agnostic declaration

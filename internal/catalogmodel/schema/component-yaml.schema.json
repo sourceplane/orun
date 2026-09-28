@@ -46,6 +46,12 @@
         "change": {
           "additionalProperties": false,
           "properties": {
+            "inputs": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
             "watches": {
               "items": {
                 "type": "string"

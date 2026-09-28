@@ -11,6 +11,7 @@ import (
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/expand"
 	"github.com/sourceplane/orun/internal/git"
+	"github.com/sourceplane/orun/internal/inputglob"
 	"github.com/sourceplane/orun/internal/loader"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/normalize"
@@ -380,6 +381,10 @@ func changedComponentsFromFiles(
 			out[comp.Name] = true
 			continue
 		}
+		if anyChangedMatchesInputs(changedFiles, comp.Change.Inputs) {
+			out[comp.Name] = true
+			continue
+		}
 		for _, envInstances := range instances {
 			for _, inst := range envInstances {
 				if inst.ComponentName != comp.Name || inst.Path == "" || inst.Path == "./" {
@@ -415,6 +420,20 @@ func joinRel(dir, path string) string {
 		return dir
 	}
 	return dir + "/" + path
+}
+
+// anyChangedMatchesInputs reports whether any changed file matches one of the
+// component's change.inputs globs (repository-root-relative).
+func anyChangedMatchesInputs(changed map[string]struct{}, inputs []string) bool {
+	if len(inputs) == 0 {
+		return false
+	}
+	for f := range changed {
+		if _, ok := inputglob.MatchAny(inputs, f); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func isPathInChanged(changed map[string]struct{}, target string) bool {

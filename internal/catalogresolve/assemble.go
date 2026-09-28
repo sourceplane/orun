@@ -76,9 +76,16 @@ func authoredToManifest(am AuthoredManifest, namespace, repo string) *catalogmod
 	// Change-detection watches — carry the authored signals into the resolved
 	// manifest (the catalog-canonical home the affected engine reads). Pointer +
 	// omitempty so a watch-less component leaves the manifest hash unchanged.
-	if c.Spec.Change != nil && len(c.Spec.Change.Watches) > 0 {
-		cm.Spec.Change = &catalogmodel.ComponentChange{
-			Watches: append([]string(nil), c.Spec.Change.Watches...),
+	// Input globs (change.inputs) ride along verbatim (validated at stage 9)
+	// so the engine can select this component on files it does not own; each
+	// slice stays nil when absent so existing manifest hashes are unchanged.
+	if ch := c.Spec.Change; ch != nil && (len(ch.Watches) > 0 || len(ch.Inputs) > 0) {
+		cm.Spec.Change = &catalogmodel.ComponentChange{}
+		if len(ch.Watches) > 0 {
+			cm.Spec.Change.Watches = append([]string(nil), ch.Watches...)
+		}
+		if len(ch.Inputs) > 0 {
+			cm.Spec.Change.Inputs = append([]string(nil), ch.Inputs...)
 		}
 	}
 

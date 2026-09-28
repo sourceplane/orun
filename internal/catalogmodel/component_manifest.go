@@ -105,11 +105,17 @@ type ComponentSpec struct {
 	Change       *ComponentChange                `json:"change,omitempty"`
 }
 
-// ComponentChange carries the resolved change-detection "watch" sections (the
-// intent signals this component reacts to). Optional/pointer so a component
-// without watches leaves the manifest hash unchanged.
+// ComponentChange carries the resolved change-detection signals: the "watch"
+// sections (intent signals this component reacts to) and the input globs
+// (files it does not own that still select it). Optional/pointer so a
+// component with neither leaves the manifest hash unchanged.
 type ComponentChange struct {
 	Watches []string `json:"watches,omitempty"`
+	// Inputs are the authored change.inputs globs (repository-root-relative)
+	// the change engine matches changed files against, in addition to path
+	// ownership. omitempty so a component without inputs leaves the manifest
+	// hash unchanged.
+	Inputs []string `json:"inputs,omitempty"`
 }
 
 // CompositionRef points at the stack-tectonic composition that backs this

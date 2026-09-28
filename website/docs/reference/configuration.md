@@ -110,6 +110,21 @@ Valid values: `environments`, `groups`, `env`, `automation`, `compositions`, `di
 
 Without `change.watches`, global intent changes do not affect the component. See [change watches](../concepts/change-watches.md) for full details.
 
+### Change inputs
+
+Declare files **outside the component's own directory** that should mark this component as changed during `--changed` planning — a root lockfile, `turbo.json`, a shared tooling tree:
+
+```yaml
+spec:
+  change:
+    inputs:
+      - pnpm-lock.yaml
+      - turbo.json
+      - tooling/eslint/**
+```
+
+Patterns are relative to the repository root and use doublestar syntax (`*` within a segment, `**` across directories, `?`, `[...]`, `{a,b}`). Absolute paths, `.` or `..` segments, backslashes, and malformed globs are rejected. Path ownership is unchanged; a matching file is an additional direct change that propagates over `dependsOn` `input: true` edges. See [change detection → Input globs](../concepts/change-detection.md#input-globs-specchangeinputs).
+
 ## Composition sources
 
 Declare composition sources in the intent and plan directly against that intent:

@@ -65,6 +65,7 @@ func (e *inlineSubEnv) UnmarshalYAML(node *yaml.Node) error {
 
 type inlineChange struct {
 	Watches []string `yaml:"watches"`
+	Inputs  []string `yaml:"inputs"`
 }
 
 // inlineManifests converts the intent's inline components into AuthoredManifests,
@@ -136,8 +137,14 @@ func inlineToAuthored(ic inlineComponent) AuthoredManifest {
 		}
 		c.Spec.Subscribe = sub
 	}
-	if ic.Change != nil && len(ic.Change.Watches) > 0 {
-		c.Spec.Change = &catalogmodel.ComponentYAMLChange{Watches: append([]string(nil), ic.Change.Watches...)}
+	if ic.Change != nil && (len(ic.Change.Watches) > 0 || len(ic.Change.Inputs) > 0) {
+		c.Spec.Change = &catalogmodel.ComponentYAMLChange{}
+		if len(ic.Change.Watches) > 0 {
+			c.Spec.Change.Watches = append([]string(nil), ic.Change.Watches...)
+		}
+		if len(ic.Change.Inputs) > 0 {
+			c.Spec.Change.Inputs = append([]string(nil), ic.Change.Inputs...)
+		}
 	}
 
 	// Synthetic SourceFile so the component dir resolves; empty when no path.

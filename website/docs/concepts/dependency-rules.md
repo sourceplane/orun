@@ -298,6 +298,11 @@ Plain runtime peers — service bindings, API calls — should **not** be marked
 `input`: they appear in the blast radius (`orun catalog affected`) but a peer
 redeploy is not required for a peer-only change.
 
+Input edges connect components. For files that belong to no component — a
+root lockfile, `turbo.json`, a shared `tooling/` tree — declare them on the
+component with [`spec.change.inputs`](./change-detection.md#input-globs-specchangeinputs)
+globs; a match is a direct change that then rides input edges the same way.
+
 `orun catalog affected --explain` records the provenance of every rescope:
 
 ```text
