@@ -6,6 +6,32 @@ title: Change detection
 
 Change detection is computed by a single engine over the **object-model catalog** — the same engine behind [`orun catalog affected`](../cli/orun-catalog.md) and the cockpit's changed/affected overlay. It classifies a change using the catalog's ownership map and dependency graph, and **over-reports rather than under-reports** on ambiguity, so a missed change never silently drops out of a plan. To inspect the engine's classification directly (the directly-changed, dependents, affected, and selection sets, with a confidence signal), use `orun catalog affected --json`.
 
+## The catalog always matches the working tree
+
+`--changed` reads the persisted catalog snapshot at `catalogs/current` to learn
+the components, their paths, and their `dependsOn` edges. Before it selects
+anything, `plan`, `run`, and `component --changed` check that snapshot against
+the working tree and rebuild it when it is stale, the same way
+`orun catalog refresh` does. So a `component.yaml` (or `component.yml`) that
+was added, moved, or edited since the last refresh counts, including after a
+branch switch, in a fresh `git worktree`, in a gitignored directory, or in a
+workspace without git.
+
+The check is cheap. The snapshot is keyed on the git source and on a digest of
+`intent.yaml` plus every component manifest discovery finds. When nothing
+changed, the existing snapshot is reused without resolving. When the rebuilt
+snapshot has a different component graph from the old one, one line on stderr
+says so:
+
+```
+orun: catalog was stale (1 component added); refreshed from the working tree
+```
+
+`orun plan --changed --no-catalog-refresh` skips the rebuild and uses the
+snapshot as it is. If that snapshot was not built from the current working
+tree, orun prints a warning that names `orun catalog refresh`, and it stops
+with an error if there is no snapshot yet.
+
 ## Commands that support change detection
 
 - `orun plan`

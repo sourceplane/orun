@@ -35,6 +35,15 @@ detection and the cockpit see current component data. Use `--no-catalog-refresh`
 to skip that step, or `--catalog-strict` to fail the plan when the catalog cannot
 be resolved.
 
+With `--changed`, the catalog snapshot that drives the selection is checked
+against the component manifests in the working tree first. A stale snapshot is
+rebuilt from the working tree, and a one-line notice
+(`orun: catalog was stale (…); refreshed from the working tree`) is printed on
+stderr when the component graph changed. With `--no-catalog-refresh`, the
+snapshot is used as it is, and a stale one gets a warning that names
+`orun catalog refresh`. See
+[Change detection](../concepts/change-detection.md#the-catalog-always-matches-the-working-tree).
+
 ### Publishing the catalog after a plan
 
 A successful plan can also publish the resolved catalog to the configured backend:
@@ -158,7 +167,7 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | `--untracked` | Scope to untracked files |
 | `--explain` | Print how `--changed` resolved its base and head refs |
 | `--intent-impact` | How global intent changes affect components: `all`, `watch` (default), or `none` |
-| `--no-catalog-refresh` | Skip the pre-plan catalog refresh; plan without catalog context |
+| `--no-catalog-refresh` | Skip the pre-plan catalog refresh; plan without catalog context. With `--changed`, use the existing snapshot as it is and warn if it is stale |
 | `--push-catalog` | After planning, sync the resolved catalog snapshot to the configured backend and advance the head (like `catalog refresh --push`). Requires a configured backend; conflicts with `--no-catalog-refresh` |
 | `--catalog-strict` | Fail the plan on catalog resolution errors |
 | `--trigger` | Named trigger binding for environment activation |
