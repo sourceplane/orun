@@ -31,11 +31,22 @@ type Actor struct {
 // Skill is one skill revision's metadata (SkillSummary on the wire).
 type Skill struct {
 	Name        string                 `json:"name"`
-	Rev         string                 `json:"rev"`    // sha256:<hex> of the canonical body
+	Rev         string                 `json:"rev"`    // sha256:<hex> — of the canonical body, or of the bundle manifest when files ride along
 	Source      string                 `json:"source"` // default | org
 	Frontmatter map[string]interface{} `json:"frontmatter"`
-	PublishedBy *Actor                 `json:"publishedBy,omitempty"`
-	PublishedAt string                 `json:"publishedAt,omitempty"`
+	// Files lists the bundle's paths (saas-agent-skills SK2): `references/*`
+	// an agent loads on demand and `templates/*` it copies. Empty for a
+	// body-only skill; absent from an older platform, which reads the same.
+	Files       []string `json:"files,omitempty"`
+	PublishedBy *Actor   `json:"publishedBy,omitempty"`
+	PublishedAt string   `json:"publishedAt,omitempty"`
+}
+
+// SkillFile is one file of a bundle: a path relative to the skill directory
+// and its UTF-8 body.
+type SkillFile struct {
+	Path string `json:"path"`
+	Body string `json:"body"`
 }
 
 // SkillsList mirrors SkillsListResponse.
@@ -43,10 +54,12 @@ type SkillsList struct {
 	Skills []Skill `json:"skills"`
 }
 
-// SkillView is one skill with its body (SkillView on the wire).
+// SkillView is one skill with its body and its bundle files inline
+// (SkillView on the wire) — one read materializes one revision whole.
 type SkillView struct {
 	Skill
-	Body string `json:"body"`
+	Body  string      `json:"body"`
+	Files []SkillFile `json:"files,omitempty"`
 }
 
 func skillsPathFor(org, suffix string) string {
