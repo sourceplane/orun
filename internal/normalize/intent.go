@@ -119,6 +119,16 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 				return nil, fmt.Errorf("component %s: dependsOn[%d].include %q is invalid (expected %q or %q)",
 					comp.Name, i, dep.Include, model.IncludeIfSelected, model.IncludeAlways)
 			}
+			if !model.IsValidDependencyMode(dep.Mode) {
+				return nil, fmt.Errorf("component %s: dependsOn[%d].mode %q is invalid (expected one of enforced|advisory|disabled)",
+					comp.Name, i, dep.Mode)
+			}
+			for j, rule := range dep.ModeRules {
+				if rule.Mode == "" || !model.IsValidDependencyMode(rule.Mode) {
+					return nil, fmt.Errorf("component %s: dependsOn[%d].modeRules[%d].mode %q is invalid (expected one of enforced|advisory|disabled)",
+						comp.Name, i, j, rule.Mode)
+				}
+			}
 		}
 
 		normalized.Components[comp.Name] = comp

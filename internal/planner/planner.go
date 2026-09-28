@@ -669,11 +669,15 @@ func (jp *JobPlanner) resolveDependencies(jobInstances map[string]*model.JobInst
 					continue
 				}
 
-				// Branch by the dependent job's resolved DependencyMode.
-				// Falls back to enforced for legacy paths that did not
-				// populate the field.
+				// Branch by the edge's own mode when the dependsOn item
+				// set one (mode / modeRules), otherwise by the dependent
+				// job's resolved lane-level DependencyMode. Falls back to
+				// enforced for legacy paths that did not populate either.
 				for _, myJob := range myJobs {
-					mode := jobInstances[myJob].DependencyMode
+					mode := dep.Mode
+					if mode == "" {
+						mode = jobInstances[myJob].DependencyMode
+					}
 					if mode == "" {
 						mode = model.DependencyModeEnforced
 					}

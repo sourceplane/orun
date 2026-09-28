@@ -71,3 +71,47 @@ func TestNormalize_RejectsInvalidInclude(t *testing.T) {
 		t.Errorf("expected error mentioning include, got %v", err)
 	}
 }
+
+func TestNormalize_AcceptsValidEdgeMode(t *testing.T) {
+	intent := &model.Intent{
+		Metadata:     model.Metadata{Name: "t"},
+		Environments: map[string]model.Environment{"dev": {}},
+		Components: []model.Component{
+			{Name: "api", Type: "terraform", DependsOn: []model.Dependency{
+				{Component: "db", Mode: model.DependencyModeAdvisory, ModeRules: []model.DependencyRule{
+					{Mode: model.DependencyModeEnforced, When: model.DependencyRuleWhen{TriggerRef: "push"}},
+				}},
+			}},
+			{Name: "db", Type: "terraform"},
+		},
+	}
+	out, err := NormalizeIntent(intent)
+	if err != nil {
+		t.Fatalf("NormalizeIntent: %v", err)
+	}
+	if got := out.Components["api"].DependsOn[0].Mode; got != model.DependencyModeAdvisory {
+		t.Errorf("expected mode preserved, got %q", got)
+	}
+}
+
+func TestNormalize_RejectsInvalidEdgeMode(t *testing.T) {
+	for name, dep := range map[string]model.Dependency{
+		"mode":      {Component: "db", Mode: "sometimes"},
+		"rule mode": {Component: "db", ModeRules: []model.DependencyRule{{Mode: "fast", When: model.DependencyRuleWhen{TriggerRef: "push"}}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			intent := &model.Intent{
+				Metadata:     model.Metadata{Name: "t"},
+				Environments: map[string]model.Environment{"dev": {}},
+				Components: []model.Component{
+					{Name: "api", Type: "terraform", DependsOn: []model.Dependency{dep}},
+					{Name: "db", Type: "terraform"},
+				},
+			}
+			_, err := NormalizeIntent(intent)
+			if err == nil || !strings.Contains(err.Error(), "enforced|advisory|disabled") {
+				t.Fatalf("expected invalid edge mode error, got %v", err)
+			}
+		})
+	}
+}

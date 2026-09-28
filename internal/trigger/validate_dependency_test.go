@@ -111,3 +111,59 @@ func TestValidateDependencyRules_RuleMissingMode(t *testing.T) {
 		t.Fatalf("expected missing-mode error, got %v", errs)
 	}
 }
+
+func edgeModeIntent(dep model.Dependency) *model.Intent {
+	return &model.Intent{
+		Automation: model.AutomationConfig{
+			TriggerBindings: map[string]model.TriggerBinding{
+				"github-push-main": {On: model.TriggerMatch{Provider: "github", Event: "push"}},
+			},
+		},
+		Components: []model.Component{{Name: "api", Type: "terraform", DependsOn: []model.Dependency{dep}}},
+	}
+}
+
+func TestValidateDependencyRules_EdgeModeValid(t *testing.T) {
+	intent := edgeModeIntent(model.Dependency{
+		Component: "db-migrate",
+		Mode:      model.DependencyModeAdvisory,
+		ModeRules: []model.DependencyRule{
+			{Mode: model.DependencyModeEnforced, When: model.DependencyRuleWhen{TriggerRef: "github-push-main"}},
+		},
+	})
+	if errs := ValidateDependencyRules(intent); len(errs) > 0 {
+		t.Fatalf("expected no errors, got %v", errs)
+	}
+}
+
+func TestValidateDependencyRules_EdgeModeInvalid(t *testing.T) {
+	errs := ValidateDependencyRules(edgeModeIntent(model.Dependency{Component: "db-migrate", Mode: "sometimes"}))
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), `dependsOn[0] (db-migrate): mode "sometimes" is not one of enforced|advisory|disabled`) {
+		t.Fatalf("expected invalid edge mode error, got %v", errs)
+	}
+}
+
+func TestValidateDependencyRules_EdgeModeRuleErrors(t *testing.T) {
+	errs := ValidateDependencyRules(edgeModeIntent(model.Dependency{
+		Component: "db-migrate",
+		ModeRules: []model.DependencyRule{
+			{Mode: "", When: model.DependencyRuleWhen{TriggerRef: "github-push-main"}},
+			{Mode: "fast", When: model.DependencyRuleWhen{TriggerRef: "nope"}},
+			{Mode: model.DependencyModeEnforced},
+		},
+	}))
+	want := []string{
+		"modeRules[0].mode is required",
+		`modeRules[1].mode "fast" is not one of`,
+		`modeRules[1].when.triggerRef "nope" does not exist`,
+		"modeRules[2].when.triggerRef is required",
+	}
+	if len(errs) != len(want) {
+		t.Fatalf("expected %d errors, got %v", len(want), errs)
+	}
+	for i, w := range want {
+		if !strings.Contains(errs[i].Error(), w) {
+			t.Errorf("errs[%d] = %v, want substring %q", i, errs[i], w)
+		}
+	}
+}

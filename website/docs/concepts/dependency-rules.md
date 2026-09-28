@@ -64,14 +64,65 @@ spec:
 
 `dependencyMode` is the fallback when no rule matches; `dependencyRules` is an ordered first-match-wins list.
 
+### Per-edge override (`dependsOn[].mode`)
+
+`dependencyMode` and `dependencyRules` set the mode for **every** `dependsOn`
+edge of a component in a lane. When one lane needs a mix — a worker's
+production deploy must wait on its migration and its infrastructure, but not
+on peer workers it only calls at run time — set `mode` on the individual
+`dependsOn` item:
+
+```yaml
+metadata:
+  name: api-worker
+spec:
+  dependsOn:
+    - component: db-migrate
+      mode: enforced        # always wait for the migration
+    - component: platform-terraform
+      mode: enforced
+    - component: billing-worker
+      mode: advisory        # recorded, never blocks the deploy
+  subscribe:
+    environments:
+      - name: production
+        dependencyMode: enforced   # the lane default for any other edge
+```
+
+`mode` accepts the same values as `dependencyMode` (`enforced`, `advisory`,
+`disabled`) and overrides the lane-level mode **for that edge only**; an edge
+without `mode` follows the lane exactly as before. It works in both
+directions: an `advisory` edge inside an `enforced` lane runs in parallel, and
+an `enforced` edge inside an `advisory` lane (for example a PR preview) still
+blocks.
+
+An edge can also switch mode by trigger with `modeRules`, which mirrors
+`dependencyRules` (ordered, first match wins, `when.triggerRef` must exist in
+`automation.triggerBindings`). When no rule matches, the edge's `mode` applies,
+and when that is unset too, the lane-level mode:
+
+```yaml
+  dependsOn:
+    - component: db-migrate
+      mode: advisory                # PR previews do not wait on migrations
+      modeRules:
+        - mode: enforced
+          when:
+            triggerRef: github-push-main
+```
+
 ## Precedence
 
-When the planner computes an instance's effective dependency mode it walks this chain and stops at the first match:
+When the planner computes the effective mode of a `dependsOn` edge it walks this chain and stops at the first match:
 
-1. `subscription.dependencyRules[]` whose `when.triggerRef` matched the active trigger
-2. `subscription.dependencyMode`
-3. `environment.dependencyMode`
-4. built-in default `enforced`
+1. `dependsOn[].modeRules[]` whose `when.triggerRef` matched the active trigger
+2. `dependsOn[].mode`
+3. `subscription.dependencyRules[]` whose `when.triggerRef` matched the active trigger
+4. `subscription.dependencyMode`
+5. `environment.dependencyMode`
+6. built-in default `enforced`
+
+Steps 3–6 are the instance's lane-level mode; steps 1–2 apply to one edge only.
 
 The selected source is recorded on every job for auditability:
 
@@ -84,6 +135,10 @@ The selected source is recorded on every job for auditability:
 ```
 
 `dependencySource` can be `"default"`, `"environment"`, `"subscription"`, or `"subscription-rule"`.
+These fields describe the lane-level mode; an edge whose own `mode` overrides
+it is still visible in the job's edge lists — an advisory edge lands in
+`advisoryDependsOn`, an enforced one in `dependsOn`, a disabled one in
+neither.
 
 ## Plan output
 
@@ -129,6 +184,8 @@ Validated at plan time (not run time):
 | `dependencyMode` must be `enforced`, `advisory`, or `disabled` | Catch typos before they suppress edges |
 | `dependencyRules[].mode` is required and must be valid | First-match-wins must not produce empty modes |
 | `dependencyRules[].when.triggerRef` must exist in `automation.triggerBindings` | Avoid silent fall-through |
+| `dependsOn[].mode` must be `enforced`, `advisory`, or `disabled` when set | Same as `dependencyMode` |
+| `dependsOn[].modeRules[].mode` is required and valid; `when.triggerRef` must exist | Same as `dependencyRules` |
 
 Run `orun validate` to surface these errors.
 
@@ -138,7 +195,7 @@ Run `orun validate` to surface these errors.
 |---------|-----------|
 | Which environments are active for a trigger | `environments[].activation.triggerRefs` |
 | Which profile runs inside an active environment | `subscribe.environments[].profile` + [`profileRules`](./profile-rules.md) |
-| Which `dependsOn` edges block execution | `dependencyMode` / `dependencyRules` (this page) |
+| Which `dependsOn` edges block execution | `dependencyMode` / `dependencyRules`, per edge `dependsOn[].mode` / `modeRules` (this page) |
 
 Keeping these axes independent keeps the compiled plan DAG the single source of truth.
 
