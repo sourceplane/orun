@@ -41,6 +41,11 @@ func unknownFields(raw any) []string {
 	if spec, ok := root["spec"].(map[string]any); ok {
 		out = appendUnknown(out, spec, knownKeys(reflect.TypeOf(catalogmodel.ComponentYAMLSpec{})), "/spec")
 		out = append(out, unknownSubscribeFields(spec)...)
+		// A legacy spec.inputs mapping (the plan engine's old name for
+		// parameters) decodes to no globs; keep flagging it as uninterpreted.
+		if _, legacy := spec["inputs"].(map[string]any); legacy {
+			out = append(out, "/spec/inputs")
+		}
 	}
 
 	sort.Strings(out)

@@ -82,6 +82,13 @@ func authoredToManifest(am AuthoredManifest, namespace, repo string) *catalogmod
 		}
 	}
 
+	// Change-detection input globs — carried verbatim (validated at stage 9)
+	// so the affected engine can select this component on files it does not
+	// own. Nil when absent so the manifest hash is unchanged.
+	if len(c.Spec.Inputs) > 0 {
+		cm.Spec.Inputs = append([]string(nil), c.Spec.Inputs...)
+	}
+
 	// Environments — copy authored profile and mark active=true (Phase 2
 	// has no environment-active gating yet; the writer can override).
 	// Both the `environments` map form and the legacy `subscribe`

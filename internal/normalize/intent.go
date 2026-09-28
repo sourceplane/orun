@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/inputglob"
 	"github.com/sourceplane/orun/internal/model"
 )
 
@@ -85,6 +86,11 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 			if !isValidWatchSection(w) {
 				return nil, fmt.Errorf("component %s: invalid change.watches value %q (valid: %s)", comp.Name, w, strings.Join(model.ValidWatchSections, ", "))
 			}
+		}
+
+		// Validate input globs (spec.inputs)
+		if err := inputglob.ValidateAll(comp.Inputs); err != nil {
+			return nil, fmt.Errorf("component %s: invalid spec.%w", comp.Name, err)
 		}
 
 		// Validate subscription env

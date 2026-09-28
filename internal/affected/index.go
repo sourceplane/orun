@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/inputglob"
 	"github.com/sourceplane/orun/internal/objcatalog"
 )
 
@@ -27,6 +28,7 @@ type componentEntry struct {
 	key     string
 	name    string
 	watches []string
+	inputs  []string // spec.inputs globs (repository-root-relative)
 }
 
 // catalogIndex is the engine's precomputed, lookup-friendly view of one catalog:
@@ -42,6 +44,10 @@ type catalogIndex struct {
 
 	components []componentEntry
 	nameToKey  map[string]string
+
+	// inputRules are the components that declare spec.inputs globs, in
+	// component-key order so selection and explain output are deterministic.
+	inputRules []componentEntry
 
 	// dependency adjacency: deps[from] = its forward deps; dependents[to] = the
 	// components that depend on it. depsAlways is the forward adjacency
@@ -97,16 +103,23 @@ func (d *Detector) index() *catalogIndex {
 	})
 
 	for _, c := range d.catalog.Components {
-		idx.components = append(idx.components, componentEntry{
+		entry := componentEntry{
 			key:     c.ComponentKey,
 			name:    c.Name,
 			watches: componentWatches(c),
-		})
+			inputs:  componentInputs(c),
+		}
+		idx.components = append(idx.components, entry)
+		if len(entry.inputs) > 0 {
+			idx.inputRules = append(idx.inputRules, entry)
+		}
 		if c.Name != "" {
 			idx.nameToKey[c.Name] = c.ComponentKey
 		}
 		idx.allComps = append(idx.allComps, c.ComponentKey)
 	}
+
+	sort.Slice(idx.inputRules, func(i, j int) bool { return idx.inputRules[i].key < idx.inputRules[j].key })
 
 	// Dependency adjacency comes from the single typed relation graph
 	// (relations.json, SC2/CV-1): component→component `dependsOn` edges, carrying
@@ -180,6 +193,24 @@ func (idx *catalogIndex) classify(path string) classification {
 		return classification{kind: classComponent, componentKey: key}
 	}
 	return classification{kind: classIgnore}
+}
+
+// inputMatches returns the components whose spec.inputs globs match path, each
+// with the first matching pattern, in component-key order. Independent of path
+// ownership: a file can be owned by one component and an input of others.
+func (idx *catalogIndex) inputMatches(path string) []inputMatch {
+	var out []inputMatch
+	for _, r := range idx.inputRules {
+		if p, ok := inputglob.MatchAny(r.inputs, path); ok {
+			out = append(out, inputMatch{componentKey: r.key, pattern: p})
+		}
+	}
+	return out
+}
+
+type inputMatch struct {
+	componentKey string
+	pattern      string
 }
 
 // ownerOf returns the component key owning path by longest-matching dir prefix,
@@ -258,6 +289,23 @@ func componentWatches(c objcatalog.CatalogComponentView) []string {
 	out := make([]string, 0, len(raw))
 	for _, w := range raw {
 		if s, ok := w.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// componentInputs extracts the component's spec.inputs globs from the verbatim
+// manifest spec. Patterns were validated when the catalog was resolved; an
+// invalid one (an older or hand-edited snapshot) is skipped rather than trusted.
+func componentInputs(c objcatalog.CatalogComponentView) []string {
+	raw, ok := c.Spec["inputs"].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok && inputglob.Validate(s) == nil {
 			out = append(out, s)
 		}
 	}

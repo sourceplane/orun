@@ -3,6 +3,8 @@ package catalogmodel
 import (
 	"bytes"
 	"encoding/json"
+
+	"github.com/sourceplane/orun/internal/inputglob"
 )
 
 //go:generate go run ./schema/gen schema/component-yaml.schema.json
@@ -87,6 +89,17 @@ type ComponentYAMLSpec struct {
 	Labels       map[string]string                   `json:"labels,omitempty"`
 	Env          map[string]string                   `json:"env,omitempty"`
 	Change       *ComponentYAMLChange                `json:"change,omitempty"`
+	// Inputs are repository-root-relative glob patterns (doublestar-style,
+	// `**` crosses directories) naming files outside the component's own
+	// directory that select it under --changed — a root lockfile, turbo.json,
+	// a shared tooling tree. Path ownership is unchanged; a matching file is
+	// an additional direct change, propagated over dependsOn input:true edges
+	// like an owned file. Absolute paths, `.`/`..` segments and malformed
+	// globs are rejected (rule component.spec.inputs.invalid). Mirrors
+	// internal/model.Component.Inputs. A legacy `spec.inputs` mapping (the
+	// plan engine's old name for parameters) decodes to an empty list and is
+	// reported as an uninterpreted field.
+	Inputs inputglob.Patterns `json:"inputs,omitempty"`
 	// Integrations / Links / Docs / Extensions are the catalog-hub authoring
 	// blocks (orun-service-catalog SC6). `integrations` is a map of typed join
 	// keys (datadog/pagerduty/…); `extensions` carries namespaced x-<vendor>

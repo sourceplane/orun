@@ -103,6 +103,11 @@ type ComponentSpec struct {
 	Environments map[string]ComponentEnvironment `json:"environments"`
 	Dependencies ComponentDependencies           `json:"dependencies"`
 	Change       *ComponentChange                `json:"change,omitempty"`
+	// Inputs are the authored spec.inputs globs (repository-root-relative)
+	// the change engine matches changed files against, in addition to path
+	// ownership. omitempty so a component without inputs leaves the manifest
+	// hash unchanged.
+	Inputs []string `json:"inputs,omitempty"`
 }
 
 // ComponentChange carries the resolved change-detection "watch" sections (the

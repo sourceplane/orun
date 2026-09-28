@@ -22,6 +22,7 @@ type inlineComponent struct {
 	DependsOn  []inlineDependency `yaml:"dependsOn"`
 	Subscribe  *inlineSubscribe   `yaml:"subscribe"`
 	Change     *inlineChange      `yaml:"change"`
+	Inputs     []string           `yaml:"inputs"`
 	Parameters map[string]any     `yaml:"parameters"`
 	Labels     map[string]string  `yaml:"labels"`
 }
@@ -138,6 +139,9 @@ func inlineToAuthored(ic inlineComponent) AuthoredManifest {
 	}
 	if ic.Change != nil && len(ic.Change.Watches) > 0 {
 		c.Spec.Change = &catalogmodel.ComponentYAMLChange{Watches: append([]string(nil), ic.Change.Watches...)}
+	}
+	if len(ic.Inputs) > 0 {
+		c.Spec.Inputs = append([]string(nil), ic.Inputs...)
 	}
 
 	// Synthetic SourceFile so the component dir resolves; empty when no path.
