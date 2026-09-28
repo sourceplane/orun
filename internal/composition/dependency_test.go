@@ -92,3 +92,72 @@ func TestResolveDependencyMode_DisabledMode(t *testing.T) {
 		t.Fatalf("want disabled, got %+v", got)
 	}
 }
+
+func TestResolveEdgeDependencyMode_NoOverride(t *testing.T) {
+	got, err := ResolveEdgeDependencyMode(model.Dependency{Component: "db"}, []string{"github-push-main"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != (ResolvedEdgeDependencyMode{}) {
+		t.Fatalf("want empty (follow lane), got %+v", got)
+	}
+}
+
+func TestResolveEdgeDependencyMode_EdgeMode(t *testing.T) {
+	got, err := ResolveEdgeDependencyMode(model.Dependency{Component: "db", Mode: model.DependencyModeAdvisory}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Mode != model.DependencyModeAdvisory || got.Source != "edge" || got.RuleTriggerRef != "" {
+		t.Fatalf("want edge/advisory, got %+v", got)
+	}
+}
+
+func TestResolveEdgeDependencyMode_RuleFirstMatchWins(t *testing.T) {
+	dep := model.Dependency{
+		Component: "db",
+		Mode:      model.DependencyModeAdvisory,
+		ModeRules: []model.DependencyRule{
+			{Mode: model.DependencyModeEnforced, When: model.DependencyRuleWhen{TriggerRef: "github-push-main"}},
+			{Mode: model.DependencyModeDisabled, When: model.DependencyRuleWhen{TriggerRef: "github-push-main"}},
+		},
+	}
+	got, err := ResolveEdgeDependencyMode(dep, []string{"github-push-main"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Mode != model.DependencyModeEnforced || got.Source != "edge-rule" || got.RuleTriggerRef != "github-push-main" {
+		t.Fatalf("want edge-rule/enforced@github-push-main, got %+v", got)
+	}
+
+	// No matching trigger: falls back to the edge's own mode.
+	got, err = ResolveEdgeDependencyMode(dep, []string{"github-pull-request"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Mode != model.DependencyModeAdvisory || got.Source != "edge" {
+		t.Fatalf("want edge/advisory fallback, got %+v", got)
+	}
+
+	// No matching trigger and no edge mode: follow the lane.
+	dep.Mode = ""
+	got, err = ResolveEdgeDependencyMode(dep, []string{"github-pull-request"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Mode != "" {
+		t.Fatalf("want lane fallback (empty), got %+v", got)
+	}
+}
+
+func TestResolveEdgeDependencyMode_InvalidMode(t *testing.T) {
+	if _, err := ResolveEdgeDependencyMode(model.Dependency{Component: "db", Mode: "sometimes"}, nil); err == nil {
+		t.Fatal("expected error for invalid edge mode")
+	}
+	dep := model.Dependency{Component: "db", ModeRules: []model.DependencyRule{
+		{Mode: "", When: model.DependencyRuleWhen{TriggerRef: "x"}},
+	}}
+	if _, err := ResolveEdgeDependencyMode(dep, []string{"x"}); err == nil {
+		t.Fatal("expected error for empty rule mode")
+	}
+}

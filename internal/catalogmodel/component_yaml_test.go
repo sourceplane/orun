@@ -104,3 +104,24 @@ func TestComponentYAML_OpenSchema(t *testing.T) {
 		t.Error("expected every authored struct to report OpenSchema() == true")
 	}
 }
+
+// TestComponentYAMLDependency_EdgeMode confirms the catalog parser accepts the
+// plan engine's per-edge dependency mode shape (mode + modeRules).
+func TestComponentYAMLDependency_EdgeMode(t *testing.T) {
+	const in = `{
+	  "component": "db-migrate",
+	  "mode": "advisory",
+	  "modeRules": [{"mode": "enforced", "when": {"triggerRef": "github-push-main"}}]
+	}`
+	var d catalogmodel.ComponentYAMLDependency
+	if err := json.Unmarshal([]byte(in), &d); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if d.Component != "db-migrate" || d.Mode != "advisory" {
+		t.Errorf("component/mode = %q/%q", d.Component, d.Mode)
+	}
+	if len(d.ModeRules) != 1 || d.ModeRules[0].Mode != "enforced" ||
+		d.ModeRules[0].When.TriggerRef != "github-push-main" {
+		t.Errorf("modeRules = %+v", d.ModeRules)
+	}
+}
