@@ -1,0 +1,141 @@
+{
+  "$comment": "Standards conformance (saas-agent-skills SK5, design §7): `orun pr check --standards <mode>` (Go) and the cloud orun/compliance evaluator (TS) replay these cases and must emit exactly these findings, in this order, with these texts. A sibling of provenance-conformance.json, which stays the byte-identical v1 twin: that file proves the five rules under the default mode; this one proves the mode and the four rules that need facts the webhook cannot see (skillStatus, contract, affectsOutside, epic). Facts a caller cannot resolve are left out and the rule says nothing. ASCII-only inputs. Change only in lockstep with BOTH engines.",
+  "version": 1,
+  "cases": [
+    {
+      "name": "off says nothing, however wrong the pen",
+      "mode": "off",
+      "input": { "branch": "feature/whatever", "commitMessages": ["oops"], "contract": { "present": false } },
+      "findings": []
+    },
+    {
+      "name": "warn is today's engine plus advice: a clean pen with no facts is silent",
+      "mode": "warn",
+      "input": { "branch": "orun/SK-5-setup", "commitMessages": ["SK4: setup\n\nOrun-Task: SK-5\n"], "manifest": { "version": 1, "task": "SK-5" } },
+      "findings": []
+    },
+    {
+      "name": "warn: a missing manifest stays a warning",
+      "mode": "warn",
+      "input": { "branch": "orun/SK-5-setup", "manifest": null },
+      "findings": [
+        { "level": "warn", "rule": "manifest", "text": "no manifest block — `orun pr open` writes it; the compliance check will flag its absence" }
+      ]
+    },
+    {
+      "name": "enforce: a missing manifest is an error that names the skill to read",
+      "mode": "enforce",
+      "input": { "branch": "orun/SK-5-setup", "manifest": null },
+      "findings": [
+        { "level": "error", "rule": "manifest", "text": "no manifest block — `orun pr open` writes it; the compliance check will flag its absence (enforced; see the `orunbase` skill, §2 Non-negotiables)" }
+      ]
+    },
+    {
+      "name": "enforce: a manifest with no pins is an error even when the session recorded none",
+      "mode": "enforce",
+      "input": { "branch": "orun/SK-5-setup", "manifest": { "version": 1, "task": "SK-5" } },
+      "findings": [
+        { "level": "error", "rule": "skill-pins", "text": "the manifest names no skill revisions — pull the skills before you start, and open the PR with `orun pr open` (see the `orunbase` skill, §2 Non-negotiables)" }
+      ]
+    },
+    {
+      "name": "enforce: the v1 skill-pins warning (pins recorded, manifest empty) becomes an error, once",
+      "mode": "enforce",
+      "input": { "branch": "orun/SK-5-setup", "manifest": { "version": 1, "task": "SK-5" }, "hasSkillPins": true },
+      "findings": [
+        { "level": "error", "rule": "skill-pins", "text": "the session recorded skill pins but the manifest names none (enforced; see the `orunbase` skill, §2 Non-negotiables)" }
+      ]
+    },
+    {
+      "name": "v1 errors are errors under every mode, verbatim",
+      "mode": "warn",
+      "input": { "branch": "main", "taskKey": "SK-5", "commitMessages": ["no trailer here"], "manifest": { "version": 1, "task": "SK-5", "skills": [{ "name": "orunbase", "rev": "sha256:aa" }] } },
+      "findings": [
+        { "level": "error", "rule": "branch-grammar", "text": "branch \"main\" does not match orun/<task-key>-<slug>" },
+        { "level": "error", "rule": "task-trailer", "text": "commit \"no trailer here\" lacks the Orun-Task trailer (orun githooks install adds it)" }
+      ]
+    },
+    {
+      "name": "skill-current: stale warns under enforce, unknown fails; names sorted",
+      "mode": "enforce",
+      "input": {
+        "branch": "orun/SK-5-setup",
+        "manifest": { "version": 1, "task": "SK-5", "skills": [{ "name": "task-branch-pr", "rev": "sha256:bb" }, { "name": "orunbase", "rev": "sha256:aa" }, { "name": "mcp-tools", "rev": "sha256:cc" }] },
+        "skillStatus": { "task-branch-pr": "unknown", "orunbase": "stale", "mcp-tools": "current" }
+      },
+      "findings": [
+        { "level": "warn", "rule": "skill-current", "text": "skill orunbase is pinned to a superseded revision — `orun skills pull` and re-read it" },
+        { "level": "error", "rule": "skill-current", "text": "skill task-branch-pr is pinned to a revision the registry never published (see the `orunbase` skill, §2 Non-negotiables)" }
+      ]
+    },
+    {
+      "name": "skill-current: under warn, unknown is a warning too",
+      "mode": "warn",
+      "input": {
+        "branch": "orun/SK-5-setup",
+        "manifest": { "version": 1, "task": "SK-5", "skills": [{ "name": "orunbase", "rev": "sha256:zz" }] },
+        "skillStatus": { "orunbase": "unknown" }
+      },
+      "findings": [
+        { "level": "warn", "rule": "skill-current", "text": "skill orunbase is pinned to a revision the registry never published (see the `orunbase` skill, §2 Non-negotiables)" }
+      ]
+    },
+    {
+      "name": "task-contract: missing fails under enforce, warns under warn; the key comes from the branch",
+      "mode": "enforce",
+      "input": { "branch": "orun/SK-5-setup", "manifest": { "version": 1, "task": "SK-5", "skills": [{ "name": "orunbase", "rev": "sha256:aa" }] }, "contract": { "present": false } },
+      "findings": [
+        { "level": "error", "rule": "task-contract", "text": "tasks/SK-5.TaskContract.yaml is missing — write it and `orun task attach SK-5` (see the `orunbase` skill, §2 Non-negotiables)" }
+      ]
+    },
+    {
+      "name": "task-contract: present but not attached",
+      "mode": "warn",
+      "input": { "branch": "orun/SK-5-setup", "manifest": { "version": 1, "task": "SK-5", "skills": [{ "name": "orunbase", "rev": "sha256:aa" }] }, "contract": { "present": true, "attached": false } },
+      "findings": [
+        { "level": "warn", "rule": "task-contract", "text": "tasks/SK-5.TaskContract.yaml is not attached to SK-5 — `orun task attach SK-5` (see the `orunbase` skill, §2 Non-negotiables)" }
+      ]
+    },
+    {
+      "name": "affects-ceiling: names up to five components, then an ellipsis",
+      "mode": "enforce",
+      "input": {
+        "branch": "orun/SK-5-setup",
+        "manifest": { "version": 1, "task": "SK-5", "skills": [{ "name": "orunbase", "rev": "sha256:aa" }] },
+        "contract": { "present": true, "attached": true },
+        "affectsOutside": ["a", "b", "c", "d", "e", "f"]
+      },
+      "findings": [
+        { "level": "error", "rule": "affects-ceiling", "text": "6 component(s) outside the contract's affects: a, b, c, d, e, ... — widen the contract or narrow the change (see the `orunbase` skill, §2 Non-negotiables)" }
+      ]
+    },
+    {
+      "name": "epic-status: a warning under enforce too, with the path when known",
+      "mode": "enforce",
+      "input": {
+        "branch": "orun/SK-5-setup",
+        "manifest": { "version": 1, "task": "SK-5", "skills": [{ "name": "orunbase", "rev": "sha256:aa" }] },
+        "epic": { "closesMilestone": true, "touchesStatus": false, "statusPath": "specs/epics/saas-agent-skills/IMPLEMENTATION-STATUS.md" }
+      },
+      "findings": [
+        { "level": "warn", "rule": "epic-status", "text": "this PR closes a milestone but does not update specs/epics/saas-agent-skills/IMPLEMENTATION-STATUS.md" }
+      ]
+    },
+    {
+      "name": "a fully compliant PR under enforce is silent",
+      "mode": "enforce",
+      "input": {
+        "branch": "orun/SK-5-setup",
+        "taskKey": "SK-5",
+        "commitMessages": ["SK4: setup\n\nOrun-Task: SK-5\n"],
+        "manifest": { "version": 1, "task": "SK-5", "epic": "saas-agent-skills", "skills": [{ "name": "orunbase", "rev": "sha256:aa" }] },
+        "hasSkillPins": true,
+        "skillStatus": { "orunbase": "current" },
+        "contract": { "present": true, "attached": true },
+        "affectsOutside": [],
+        "epic": { "closesMilestone": true, "touchesStatus": true }
+      },
+      "findings": []
+    }
+  ]
+}
