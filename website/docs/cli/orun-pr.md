@@ -78,7 +78,56 @@ on shared fixtures. Exit 1 on errors.
 | Flag | Meaning |
 | --- | --- |
 | `--base` | Base branch to diff against (default `main`) |
+| `--standards` | Standards mode: `off`, `warn` (default) or `enforce` — see below |
 | `--json` | Emit the findings as JSON |
+
+### `--standards`: from advice to a gate
+
+The rules above are what the skill registry's `orunbase` skill tells an
+agent to do. A repository can turn them from advice into a merge gate with
+one mode, resolved in this order: `--standards`, `ORUN_STANDARDS`,
+`execution.standards` in `intent.yaml`, then `warn`.
+
+```yaml
+# intent.yaml — the committed, reviewable place to enforce for every lane
+execution:
+  standards: enforce
+```
+
+| Rule | `warn` | `enforce` |
+| --- | --- | --- |
+| `branch-grammar`, `task-trailer`, `one-task-one-pr` | error | error |
+| `manifest` present | warn | **error** |
+| `skill-pins` — the manifest names the skill revisions the session ran under | warn | **error** |
+| `skill-current` — each pin is the registry's latest | warn | **error** on a revision the registry never published; warn on a superseded one |
+| `task-contract` — `tasks/<KEY>.TaskContract.yaml` exists and is attached | warn | **error** |
+| `affects-ceiling` — the diff stays inside the contract's `affects` | warn | **error** |
+| `epic-status` — a PR closing a milestone updates the epic's status file | warn | warn |
+
+`warn` never fails what passes today; `off` runs nothing. Every finding
+names the skill section to read, so a refusal is also the instruction.
+
+The new rules judge **facts** this process can see, and say nothing about a
+fact it cannot: the contract from `tasks/`, attachment from the local object
+store (a hit is asserted, a miss is not), the affects ceiling from the same
+change engine `task check --base` uses (that engine names components, so a
+contract whose `affects` are path globs is not judged, with a note), the pins from
+`.orun/agent-mcp/skills.json` against the registry (a login is needed for
+that one; without it the rule is skipped with a note on stderr). Inside a
+GitHub Actions `pull_request` job the manifest is read from the event's PR
+body (`GITHUB_EVENT_PATH`), so a CI step can enforce the block the PR
+already carries; locally, before `pr open`, there is no manifest and the
+rule says so. The `epic-status` fact needs the task plane's milestone view
+and is left to the cloud's check today.
+
+```yaml
+# .github/workflows/ci.yml — the whole change a repository makes to enforce
+- run: orun pr check --standards enforce --base "origin/${{ github.base_ref }}"
+```
+
+The cloud's `orun/compliance` check speaks the same modes: a repository
+link in `advisory` mode is `warn`, in `required` mode `enforce`. Both
+engines replay `standards-conformance.json`.
 
 ## `land`
 
