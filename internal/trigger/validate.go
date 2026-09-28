@@ -150,8 +150,9 @@ func ValidateProfileRules(intent *model.Intent) []error {
 	return errs
 }
 
-// ValidateDependencyRules checks that dependencyMode values are valid and
-// that dependencyRules in subscriptions reference existing trigger bindings.
+// ValidateDependencyRules checks that dependencyMode values are valid, that
+// dependencyRules in subscriptions reference existing trigger bindings, and
+// that per-edge dependsOn mode / modeRules are valid the same way.
 func ValidateDependencyRules(intent *model.Intent) []error {
 	var errs []error
 
@@ -170,6 +171,38 @@ func ValidateDependencyRules(intent *model.Intent) []error {
 	}
 
 	for _, comp := range intent.Components {
+		for d, dep := range comp.DependsOn {
+			if dep.Mode != "" && !model.IsValidDependencyMode(dep.Mode) {
+				errs = append(errs, fmt.Errorf(
+					"component %q dependsOn[%d] (%s): mode %q is not one of enforced|advisory|disabled",
+					comp.Name, d, dep.Component, dep.Mode,
+				))
+			}
+			for i, rule := range dep.ModeRules {
+				if rule.Mode == "" {
+					errs = append(errs, fmt.Errorf(
+						"component %q dependsOn[%d] (%s): modeRules[%d].mode is required",
+						comp.Name, d, dep.Component, i,
+					))
+				} else if !model.IsValidDependencyMode(rule.Mode) {
+					errs = append(errs, fmt.Errorf(
+						"component %q dependsOn[%d] (%s): modeRules[%d].mode %q is not one of enforced|advisory|disabled",
+						comp.Name, d, dep.Component, i, rule.Mode,
+					))
+				}
+				if rule.When.TriggerRef == "" {
+					errs = append(errs, fmt.Errorf(
+						"component %q dependsOn[%d] (%s): modeRules[%d].when.triggerRef is required",
+						comp.Name, d, dep.Component, i,
+					))
+				} else if _, exists := bindingNames[rule.When.TriggerRef]; !exists {
+					errs = append(errs, fmt.Errorf(
+						"component %q dependsOn[%d] (%s): modeRules[%d].when.triggerRef %q does not exist in automation.triggerBindings",
+						comp.Name, d, dep.Component, i, rule.When.TriggerRef,
+					))
+				}
+			}
+		}
 		for _, sub := range comp.Subscribe.Environments {
 			if sub.DependencyMode != "" && !model.IsValidDependencyMode(sub.DependencyMode) {
 				errs = append(errs, fmt.Errorf(

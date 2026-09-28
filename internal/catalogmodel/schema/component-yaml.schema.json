@@ -80,6 +80,37 @@
               "input": {
                 "type": "boolean"
               },
+              "mode": {
+                "type": "string"
+              },
+              "modeRules": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": {
+                      "type": "string"
+                    },
+                    "when": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "triggerRef": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "triggerRef"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "mode",
+                    "when"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "optional": {
                 "type": "boolean"
               },

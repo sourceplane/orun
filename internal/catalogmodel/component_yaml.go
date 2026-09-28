@@ -153,6 +153,14 @@ type ComponentYAMLDependency struct {
 	// the shared-package rescope gap where `--changed` only matched files
 	// under a component's own directory. Transitive over other input edges.
 	Input bool `json:"input,omitempty"`
+	// Mode optionally overrides the dependent's lane-level dependencyMode for
+	// this edge only (enforced | advisory | disabled). Interpreted by the plan
+	// engine; accepted here so both parsers of component.yaml take the same
+	// authored shape. Mirrors internal/model.Dependency.Mode.
+	Mode string `json:"mode,omitempty"`
+	// ModeRules conditionally override Mode when a trigger fires (first match
+	// wins). Mirrors internal/model.Dependency.ModeRules.
+	ModeRules []ComponentYAMLDependencyRule `json:"modeRules,omitempty"`
 }
 
 // ComponentYAMLEnvironment is one entry in the authored `environments` map.

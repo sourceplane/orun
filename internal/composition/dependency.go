@@ -91,3 +91,62 @@ func ResolveDependencyMode(
 		Source: "default",
 	}, nil
 }
+
+// ResolvedEdgeDependencyMode is the outcome of per-edge dependency-mode
+// resolution for a single dependsOn item. A zero value (empty Mode) means
+// the edge sets no override and follows the lane-level mode.
+type ResolvedEdgeDependencyMode struct {
+	// Mode is one of model.DependencyMode{Enforced,Advisory,Disabled}, or
+	// empty when the edge does not override the lane.
+	Mode string
+	// Source is "edge-rule" or "edge" when Mode is set; empty otherwise.
+	Source string
+	// RuleTriggerRef is set only when Source == "edge-rule".
+	RuleTriggerRef string
+}
+
+// ResolveEdgeDependencyMode evaluates a dependsOn item's own mode override:
+//
+//  1. dep.ModeRules whose when.triggerRef matched (first match wins)
+//  2. dep.Mode
+//  3. no override (empty result): the lane-level mode from
+//     ResolveDependencyMode applies to this edge unchanged.
+//
+// Invalid modes are rejected so misconfiguration surfaces at plan time.
+func ResolveEdgeDependencyMode(dep model.Dependency, matchedTriggers []string) (ResolvedEdgeDependencyMode, error) {
+	for i, rule := range dep.ModeRules {
+		if rule.Mode == "" || !model.IsValidDependencyMode(rule.Mode) {
+			return ResolvedEdgeDependencyMode{}, fmt.Errorf(
+				"dependsOn %q: modeRules[%d].mode %q is invalid (want one of enforced|advisory|disabled)",
+				dep.Component, i, rule.Mode,
+			)
+		}
+	}
+	if !model.IsValidDependencyMode(dep.Mode) {
+		return ResolvedEdgeDependencyMode{}, fmt.Errorf(
+			"dependsOn %q: mode %q is invalid (want one of enforced|advisory|disabled)",
+			dep.Component, dep.Mode,
+		)
+	}
+
+	if len(dep.ModeRules) > 0 && len(matchedTriggers) > 0 {
+		triggerSet := make(map[string]struct{}, len(matchedTriggers))
+		for _, t := range matchedTriggers {
+			triggerSet[t] = struct{}{}
+		}
+		for _, rule := range dep.ModeRules {
+			if _, ok := triggerSet[rule.When.TriggerRef]; ok {
+				return ResolvedEdgeDependencyMode{
+					Mode:           rule.Mode,
+					Source:         "edge-rule",
+					RuleTriggerRef: rule.When.TriggerRef,
+				}, nil
+			}
+		}
+	}
+
+	if dep.Mode != "" {
+		return ResolvedEdgeDependencyMode{Mode: dep.Mode, Source: "edge"}, nil
+	}
+	return ResolvedEdgeDependencyMode{}, nil
+}

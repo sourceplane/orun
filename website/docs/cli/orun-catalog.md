@@ -35,7 +35,10 @@ orun catalog <sub> --help
 A catalog is also written transparently as a side effect of using orun: `orun
 plan` and a universal pre-run refresh hook keep `catalogs/current` fresh, so the
 read subcommands and the cockpit usually have an up-to-date catalog without an
-explicit `refresh`.
+explicit `refresh`. `plan`, `run`, and `component --changed` also rebuild the
+snapshot from the working tree whenever the component manifests changed since
+it was built, and print a one-line notice when that changed the component graph
+(see [Change detection](../concepts/change-detection.md#the-catalog-always-matches-the-working-tree)).
 
 ## `orun catalog refresh`
 

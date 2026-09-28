@@ -1,11 +1,13 @@
 package objplan
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
 	"path/filepath"
 
+	"github.com/sourceplane/orun/internal/catalogresolve"
 	"github.com/sourceplane/orun/internal/codeowners"
 )
 
@@ -19,11 +21,15 @@ var codeownersLocations = []string{
 }
 
 // WorkspaceInputsDigest hashes the extra-source resolver inputs — the
-// CODEOWNERS file the owner resolver reads and the composition lock the
-// composition resolver reads — into a short hex digest. The resolve memo folds
-// it into its key so a change to either file (which feeds the resolved catalog
-// but may be untracked, like a gitignored lock) can never serve a stale
-// memoized catalog. Returns "" when none of the files exist.
+// CODEOWNERS file the owner resolver reads, the composition lock the
+// composition resolver reads, and the authored component-manifest set
+// (catalogresolve.ManifestSetDigest: intent.yaml plus every discovered
+// component.yaml/.yml) — into a short hex digest. The resolve memo folds it
+// into its key so a change to any of them (which feed the resolved catalog but
+// may be invisible to the git-derived source id: an untracked lock, a
+// gitignored or component.yml manifest, any edit in a workspace without git)
+// can never serve a stale memoized catalog. Returns "" when none of the inputs
+// exist.
 //
 // Note the by-commit provenance property (the epic's defining property) holds
 // fully only when these files are committed; the lockfile convention is to
@@ -45,6 +51,21 @@ func WorkspaceInputsDigest(root string) string {
 		h.Write([]byte(p))
 		h.Write([]byte{0})
 		h.Write(b)
+		h.Write([]byte{0})
+	}
+	// The component-manifest set (OR3): without it the memo, keyed on the
+	// source id, would keep serving a catalog built from an older manifest set
+	// whenever the source id cannot see the change. A discovery error is folded
+	// in as-is so the memo misses and the resolve reports it.
+	manifests, merr := catalogresolve.ManifestSetDigest(context.Background(), root)
+	if merr != nil {
+		manifests = "error:" + merr.Error()
+	}
+	if manifests != "" {
+		any = true
+		h.Write([]byte("manifests"))
+		h.Write([]byte{0})
+		h.Write([]byte(manifests))
 		h.Write([]byte{0})
 	}
 	if !any {
