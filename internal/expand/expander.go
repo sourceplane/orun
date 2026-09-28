@@ -124,7 +124,10 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 			instance.Policies = e.resolvePolicies(comp, envName)
 
 			// Resolve dependencies
-			deps := e.resolveDependencies(comp, envName)
+			deps, err := e.resolveDependencies(comp, envName)
+			if err != nil {
+				return nil, err
+			}
 			instance.DependsOn = deps
 
 			instances = append(instances, instance)
@@ -467,7 +470,7 @@ func (e *Expander) resolvePolicies(comp model.Component, envName string) map[str
 }
 
 // resolveDependencies transforms component dependencies into resolved form
-func (e *Expander) resolveDependencies(comp model.Component, envName string) []model.ResolvedDependency {
+func (e *Expander) resolveDependencies(comp model.Component, envName string) ([]model.ResolvedDependency, error) {
 	resolved := make([]model.ResolvedDependency, 0)
 
 	for _, dep := range comp.DependsOn {
@@ -477,17 +480,25 @@ func (e *Expander) resolveDependencies(comp model.Component, envName string) []m
 			targetEnv = envName
 		}
 
+		edgeMode, err := compositionpkg.ResolveEdgeDependencyMode(dep, e.matchedTriggers)
+		if err != nil {
+			return nil, fmt.Errorf("component %s environment %s: %w", comp.Name, envName, err)
+		}
+
 		resolved = append(resolved, model.ResolvedDependency{
-			ComponentName: dep.Component,
-			Environment:   targetEnv,
-			Scope:         dep.Scope,
-			Condition:     dep.Condition,
-			Include:       dep.Include,
-			Reason:        dep.Reason,
+			ComponentName:      dep.Component,
+			Environment:        targetEnv,
+			Scope:              dep.Scope,
+			Condition:          dep.Condition,
+			Include:            dep.Include,
+			Reason:             dep.Reason,
+			Mode:               edgeMode.Mode,
+			ModeSource:         edgeMode.Source,
+			ModeRuleTriggerRef: edgeMode.RuleTriggerRef,
 		})
 	}
 
-	return resolved
+	return resolved, nil
 }
 
 // GetComponentInstance retrieves a specific component instance

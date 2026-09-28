@@ -323,6 +323,15 @@ type Dependency struct {
 	// plan engine's ordering semantics. Declared here so both parsers of
 	// component.yaml accept the same authored shape.
 	Input bool `yaml:"input,omitempty" json:"input,omitempty"`
+	// Mode optionally overrides the lane's resolved dependencyMode for this
+	// edge only (enforced | advisory | disabled). When unset, the edge
+	// follows the dependent's lane-level mode (subscription rules >
+	// subscription dependencyMode > environment dependencyMode > enforced).
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	// ModeRules conditionally override Mode for this edge based on the
+	// matched triggerRef. First match wins; if nothing matches, Mode (or,
+	// when unset, the lane-level mode) applies.
+	ModeRules []DependencyRule `yaml:"modeRules,omitempty" json:"modeRules,omitempty"`
 }
 
 // Dependency include modes.
@@ -407,4 +416,14 @@ type ResolvedDependency struct {
 	Include string
 	// Reason mirrors Dependency.Reason for audit trails in plan output.
 	Reason string
+	// Mode is the edge-level dependency mode resolved from
+	// Dependency.ModeRules / Dependency.Mode. Empty means the edge follows
+	// the dependent instance's lane-level DependencyMode.
+	Mode string
+	// ModeSource records which edge layer set Mode: "edge" or "edge-rule".
+	// Empty when Mode is empty.
+	ModeSource string
+	// ModeRuleTriggerRef records the matched triggerRef when ModeSource is
+	// "edge-rule".
+	ModeRuleTriggerRef string
 }
