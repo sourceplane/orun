@@ -553,8 +553,9 @@ func TestCompositionResolver_ReadsEffectsFromManifest(t *testing.T) {
 }
 
 // TestWorkspaceInputsDigest asserts the digest tracks the extra-source resolver
-// inputs: present files digest, a content change moves the digest, and absent
-// files (or an empty root) yield "".
+// inputs: present files digest, a content change moves the digest (CODEOWNERS,
+// the composition lock, component manifests), and absent files (or an empty
+// root) yield "".
 func TestWorkspaceInputsDigest(t *testing.T) {
 	t.Parallel()
 	if WorkspaceInputsDigest("") != "" {
@@ -592,6 +593,25 @@ func TestWorkspaceInputsDigest(t *testing.T) {
 	}
 	if WorkspaceInputsDigest(dir) != d3 {
 		t.Error("digest not deterministic")
+	}
+	// The component-manifest set is an input too (OR3): a manifest the source
+	// id may not see (component.yml, gitignored, no git) must still miss the
+	// memo.
+	if err := os.MkdirAll(filepath.Join(dir, "svc", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "svc", "nested", "component.yml"), []byte("metadata:\n  name: nested\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d4 := WorkspaceInputsDigest(dir)
+	if d4 == d3 {
+		t.Error("adding a component manifest should change the digest")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "svc", "nested", "component.yml"), []byte("metadata:\n  name: nested2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if WorkspaceInputsDigest(dir) == d4 {
+		t.Error("editing a component manifest should change the digest")
 	}
 }
 
