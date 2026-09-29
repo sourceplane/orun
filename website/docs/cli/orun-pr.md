@@ -103,6 +103,7 @@ execution:
 | `task-contract` — `<tasks>/<KEY>.TaskContract.yaml` exists and is attached (`<tasks>` is `work.tasks` in intent.yaml, default `tasks`) | warn | **error** |
 | `affects-ceiling` — the diff stays inside the contract's `affects` | warn | **error** |
 | `epic-status` — a PR closing a milestone updates the epic's status file | warn | warn |
+| `work-manifest` — the declared work tree is well-formed ([`orun work check`](./orun-work.md)) | warn | **error** |
 
 `warn` never fails what passes today; `off` runs nothing. Every finding
 names the skill section to read, so a refusal is also the instruction.

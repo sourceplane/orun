@@ -166,7 +166,7 @@ const sidebars = {
         {
           type: 'category',
           label: 'Tasks and provenance',
-          items: ['cli/orun-task', 'cli/orun-pr', 'cli/orun-githooks', 'cli/orun-spec'],
+          items: ['cli/orun-task', 'cli/orun-pr', 'cli/orun-githooks', 'cli/orun-spec', 'cli/orun-work'],
         },
         {
           type: 'category',
@@ -223,6 +223,7 @@ const sidebars = {
       type: 'category',
       label: 'Release notes',
       items: [
+        'release-notes/v2.65.0',
         'release-notes/v2.64.0',
         'release-notes/v2.63.0',
         'release-notes/v2.62.0',

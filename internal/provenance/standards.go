@@ -64,6 +64,10 @@ const (
 	RuleTaskContract   = "task-contract"
 	RuleAffectsCeiling = "affects-ceiling"
 	RuleEpicStatus     = "epic-status"
+	// RuleWorkManifest judges the declared work tree (saas-work-gitops
+	// design §2, §5): epic.yaml well-formed, every listed key with a
+	// contract, every reserved-prefix contract listed once.
+	RuleWorkManifest = "work-manifest"
 )
 
 // SkillPinStatus is how a pinned skill revision stands against the registry.
@@ -93,6 +97,11 @@ type EpicFact struct {
 	StatusPath      string `json:"statusPath,omitempty"`
 }
 
+// WorkFact is what the caller knows about the declared work tree.
+type WorkFact struct {
+	Problems []string `json:"problems"`
+}
+
 // StandardsInput is CheckInput plus the facts the new rules judge. A nil
 // fact is "unknown", and its rule is silent.
 type StandardsInput struct {
@@ -107,6 +116,11 @@ type StandardsInput struct {
 	AffectsOutside []string
 	// Epic: whether this PR closes a milestone and updates the epic's status.
 	Epic *EpicFact
+	// Work: the declared tree's problems, each a sentence naming the file
+	// (workfile.Tree.Problems). nil = the repository declares no work
+	// section, or the caller did not read the tree; an empty, non-nil slice
+	// = read and clean.
+	Work *WorkFact
 }
 
 const readTheSkill = "see the `orunbase` skill, §2 Non-negotiables"
@@ -210,6 +224,14 @@ func CheckStandards(in StandardsInput, mode Mode) []Finding {
 		out = append(out, Finding{Level: levelFor(), Rule: RuleAffectsCeiling,
 			Text: fmt.Sprintf("%d component(s) outside the contract's affects: %s%s — widen the contract or narrow the change (%s)",
 				len(in.AffectsOutside), strings.Join(shown, ", "), more, readTheSkill)})
+	}
+
+	// work-manifest: one finding per problem, in the tree's order — a PR
+	// fixes the whole list at once.
+	if in.Work != nil {
+		for _, p := range in.Work.Problems {
+			out = append(out, Finding{Level: levelFor(), Rule: RuleWorkManifest, Text: p + " (" + readTheSkill + ")"})
+		}
 	}
 
 	// epic-status: always a warning (design §7) — the status file is the

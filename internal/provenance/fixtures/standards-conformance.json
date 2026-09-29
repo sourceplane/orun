@@ -130,6 +130,23 @@
       ]
     },
     {
+      "name": "work-manifest: one finding per tree problem, error under enforce",
+      "mode": "enforce",
+      "input": { "branch": "orun/WG-5-epic-yaml", "manifest": { "version": 1, "task": "WG-5", "skills": [{ "name": "orunbase", "rev": "sha256:aa" }] }, "work": { "problems": ["work/epics/saas-work-gitops/epic.yaml: WG-6 is listed under \"WG3\" but work/tasks/WG-6.TaskContract.yaml does not exist", "work/tasks/WG-12.TaskContract.yaml: WG-12 carries the prefix WG reserves but no milestone in work/epics/saas-work-gitops/epic.yaml lists it"] } },
+      "findings": [
+        { "level": "error", "rule": "work-manifest", "text": "work/epics/saas-work-gitops/epic.yaml: WG-6 is listed under \"WG3\" but work/tasks/WG-6.TaskContract.yaml does not exist (see the `orunbase` skill, §2 Non-negotiables)" },
+        { "level": "error", "rule": "work-manifest", "text": "work/tasks/WG-12.TaskContract.yaml: WG-12 carries the prefix WG reserves but no milestone in work/epics/saas-work-gitops/epic.yaml lists it (see the `orunbase` skill, §2 Non-negotiables)" }
+      ]
+    },
+    {
+      "name": "work-manifest: a warning under warn; a clean tree is silent",
+      "mode": "warn",
+      "input": { "branch": "orun/WG-5-epic-yaml", "manifest": { "version": 1, "task": "WG-5", "skills": [{ "name": "orunbase", "rev": "sha256:aa" }] }, "work": { "problems": ["work/epics/x/epic.yaml: spec.title is required"] } },
+      "findings": [
+        { "level": "warn", "rule": "work-manifest", "text": "work/epics/x/epic.yaml: spec.title is required (see the `orunbase` skill, §2 Non-negotiables)" }
+      ]
+    },
+    {
       "name": "a fully compliant PR under enforce is silent",
       "mode": "enforce",
       "input": {
