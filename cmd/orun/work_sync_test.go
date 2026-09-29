@@ -51,14 +51,14 @@ func (p *fakePlatform) handler() http.HandlerFunc {
 		case r.Method == "POST" && path == "/epics":
 			p.record(r)
 			p.epic = map[string]any{"id": "epc_1", "slug": body["slug"], "name": body["name"], "description": body["description"], "state": "Planning", "stateCategory": "backlog", "owner": "usr_1"}
-			p.stamp(r)
+			p.stamp(r, body)
 			envelope(p.t, w, 201, map[string]any{"epic": p.epic})
 		case r.Method == "PATCH" && path == "/epics/saas-work-gitops":
 			p.record(r)
 			if len(body) == 0 {
 				p.stampsOnly++
 			}
-			p.stamp(r)
+			p.stamp(r, body)
 			for k, v := range body {
 				if k == "state" {
 					p.epic["stateCategory"] = v
@@ -106,10 +106,17 @@ func (p *fakePlatform) handler() http.HandlerFunc {
 
 // stamp does what the platform does under the sync header: the epic carries
 // the pointer at the commit the header names.
-func (p *fakePlatform) stamp(r *http.Request) {
+func (p *fakePlatform) stamp(r *http.Request, body map[string]any) {
 	if h := r.Header.Get("X-Orun-Work-Sync"); h != "" {
 		repo, sha, _ := strings.Cut(h, "@")
-		p.epic["managedBy"] = map[string]any{"repo": repo, "path": "work/epics/saas-work-gitops/epic.yaml", "sha": sha, "keyPrefix": "WG", "syncedAt": "2026-01-01T00:00:00Z"}
+		prefix := ""
+		if prev, ok := p.epic["managedBy"].(map[string]any); ok {
+			prefix, _ = prev["keyPrefix"].(string)
+		}
+		if k, ok := body["keyPrefix"].(string); ok && k != "" {
+			prefix = k
+		}
+		p.epic["managedBy"] = map[string]any{"repo": repo, "path": "work/epics/saas-work-gitops/epic.yaml", "sha": sha, "keyPrefix": prefix, "syncedAt": "2026-01-01T00:00:00Z"}
 	}
 }
 
@@ -287,6 +294,10 @@ func TestWorkSyncStampsAnUnchangedEpicOncePerCommit(t *testing.T) {
 	if p.stampsOnly != 0 {
 		t.Fatalf("a run that created and updated the epic has nothing left to stamp; got %d empty PATCHes", p.stampsOnly)
 	}
+	// the declaration's prefix rode the create; the pointer reserves it
+	if mb, _ := p.epic["managedBy"].(map[string]any); mb["keyPrefix"] != "WG" {
+		t.Fatalf("the create did not reserve the declared prefix: %v", p.epic["managedBy"])
+	}
 
 	// a commit that touches nothing the sync declares
 	if err := os.WriteFile(filepath.Join(dir, "NOTES.md"), []byte("unrelated\n"), 0o644); err != nil {
@@ -325,5 +336,25 @@ func TestWorkSyncStampsAnUnchangedEpicOncePerCommit(t *testing.T) {
 	}
 	if p.stampsOnly != 1 || !strings.Contains(out, "0 write(s)") {
 		t.Fatalf("third run:\n%s", out)
+	}
+}
+
+// An epic adopted from the console carries no pointer; the first sync's
+// update reserves the declared prefix even when no other field changed.
+func TestWorkSyncReservesThePrefixOnAnAdoptedEpic(t *testing.T) {
+	writeSyncRepo(t)
+	p := &fakePlatform{t: t, tasks: map[string]map[string]any{}, docs: map[string]string{}}
+	p.epic = map[string]any{"id": "epc_1", "slug": "saas-work-gitops", "name": "Work as code", "description": "", "state": "Started", "stateCategory": "started", "owner": "usr_1"}
+	srv := httptest.NewServer(p.handler())
+	defer srv.Close()
+	out, err := runTaskCmd(t, newWorkSyncCommand(), srv.URL, "--repo", "sourceplane/t")
+	if err != nil {
+		t.Fatalf("sync: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "keyPrefix WG") {
+		t.Fatalf("the prefix was not sent:\n%s", out)
+	}
+	if mb, _ := p.epic["managedBy"].(map[string]any); mb["keyPrefix"] != "WG" {
+		t.Fatalf("the pointer does not reserve WG: %v", p.epic["managedBy"])
 	}
 }
