@@ -75,6 +75,9 @@ type EpicCreateRequest struct {
 	TargetDate  string `json:"targetDate,omitempty"`
 	// Owner is a subject ref (usr_… / sp_…) or "me".
 	Owner string `json:"owner,omitempty"`
+	// KeyPrefix is the task-key prefix the declaration reserves (the work
+	// sync's; the platform stamps it on the managed pointer).
+	KeyPrefix string `json:"keyPrefix,omitempty"`
 }
 
 // MilestoneCreateRequest mirrors CreateMilestoneRequest. Position is the
@@ -301,6 +304,7 @@ func (c *Client) CreateMilestoneWithKey(ctx context.Context, org, epicRef string
 // declaration names and leaves the rest to the platform.
 type EpicUpdateRequest struct {
 	Name        string `json:"name,omitempty"`
+	KeyPrefix   string `json:"keyPrefix,omitempty"`
 	State       string `json:"state,omitempty"`
 	TargetDate  string `json:"targetDate,omitempty"`
 	Description string `json:"description,omitempty"`

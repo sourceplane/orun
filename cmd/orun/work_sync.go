@@ -177,7 +177,7 @@ func (s *workSyncer) syncEpic(root string, tree *workfile.Tree, e *workfile.Epic
 		s.say("create", "epic "+e.Slug, e.Title)
 		if !s.dryRun {
 			created, err := s.client.CreateEpicWithKey(s.ctx, s.org, remotestate.EpicCreateRequest{
-				Name: e.Title, Slug: e.Slug, Description: e.Summary, TargetDate: e.TargetDate, Owner: e.Owner,
+				Name: e.Title, Slug: e.Slug, Description: e.Summary, TargetDate: e.TargetDate, Owner: e.Owner, KeyPrefix: e.Key,
 			}, s.idem(e.Path, "epic"))
 			if err != nil {
 				return fmt.Errorf("create epic: %w", err)
@@ -222,6 +222,11 @@ func (s *workSyncer) syncEpic(root string, tree *workfile.Tree, e *workfile.Epic
 		default:
 			upd.State, changes = e.State, append(changes, "state → "+e.State)
 		}
+	}
+	// The prefix the declaration reserves rides every write that stamps —
+	// an epic adopted from the console has none until its first sync.
+	if remote.ID != "" && (remote.ManagedBy == nil || remote.ManagedBy.KeyPrefix != e.Key) {
+		upd.KeyPrefix, changes = e.Key, append(changes, "keyPrefix "+e.Key)
 	}
 	if len(changes) > 0 {
 		s.say("update", "epic "+e.Slug, strings.Join(changes, ", "))
