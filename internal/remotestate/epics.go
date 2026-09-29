@@ -279,3 +279,77 @@ func (c *Client) CreateMilestoneWithKey(ctx context.Context, org, epicRef string
 	}
 	return &resp.Milestone, nil
 }
+
+// ── The work sync's writes (orun-cloud saas-work-gitops WG3, design §6) ──
+
+// EpicUpdateRequest mirrors UpdateEpicRequest: a native epic's declared
+// fields. Empty strings are omitted (not cleared) — the sync sets what the
+// declaration names and leaves the rest to the platform.
+type EpicUpdateRequest struct {
+	Name        string `json:"name,omitempty"`
+	State       string `json:"state,omitempty"`
+	TargetDate  string `json:"targetDate,omitempty"`
+	Description string `json:"description,omitempty"`
+	Owner       string `json:"owner,omitempty"`
+}
+
+// UpdateEpicWithKey PATCHes a native epic under an Idempotency-Key.
+func (c *Client) UpdateEpicWithKey(ctx context.Context, org, ref string, req EpicUpdateRequest, idemKey string) (*PublicEpic, error) {
+	page, err := c.platformDo(ctx, http.MethodPatch, epicsPathFor(org, "/"+urlSegment(ref)), req, idemKey)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Epic PublicEpic `json:"epic"`
+	}
+	if err := json.Unmarshal(page.Data, &resp); err != nil {
+		return nil, fmt.Errorf("decoding epic: %w", err)
+	}
+	return &resp.Epic, nil
+}
+
+// MilestoneUpdateRequest mirrors UpdateMilestoneRequest. After re-positions
+// the phase after a sibling; AfterFirst puts it first (`after: null` on the
+// wire); neither leaves the position alone.
+type MilestoneUpdateRequest struct {
+	Name         string   `json:"name,omitempty"`
+	TargetDate   string   `json:"targetDate,omitempty"`
+	ExitCriteria []string `json:"exitCriteria,omitempty"`
+	After        string   `json:"-"`
+	AfterFirst   bool     `json:"-"`
+}
+
+func (r MilestoneUpdateRequest) MarshalJSON() ([]byte, error) {
+	m := map[string]any{}
+	if r.Name != "" {
+		m["name"] = r.Name
+	}
+	if r.TargetDate != "" {
+		m["targetDate"] = r.TargetDate
+	}
+	if r.ExitCriteria != nil {
+		m["exitCriteria"] = r.ExitCriteria
+	}
+	if r.AfterFirst {
+		m["after"] = nil
+	} else if r.After != "" {
+		m["after"] = r.After
+	}
+	return json.Marshal(m)
+}
+
+// UpdateMilestoneWithKey PATCHes a native epic's phase under an
+// Idempotency-Key.
+func (c *Client) UpdateMilestoneWithKey(ctx context.Context, org, id string, req MilestoneUpdateRequest, idemKey string) (*PublicMilestone, error) {
+	page, err := c.platformDo(ctx, http.MethodPatch, orgPath(org, "/tasks/milestones/"+urlSegment(id)), req, idemKey)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Milestone PublicMilestone `json:"milestone"`
+	}
+	if err := json.Unmarshal(page.Data, &resp); err != nil {
+		return nil, fmt.Errorf("decoding milestone: %w", err)
+	}
+	return &resp.Milestone, nil
+}

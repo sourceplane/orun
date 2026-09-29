@@ -616,6 +616,9 @@ func (c *Client) platformDoOnce(ctx context.Context, method, path string, payloa
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set(clientSurfaceHeader, clientSurfaceMCP)
+	for k, v := range c.extraHeaders {
+		req.Header.Set(k, v)
+	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

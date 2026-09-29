@@ -215,6 +215,11 @@ type Client struct {
 	httpClient *http.Client
 	// logClient uses a longer timeout for log uploads.
 	logClient *http.Client
+	// extraHeaders ride on every platform request — the work sync's
+	// `X-Orun-Work-Sync: <repo>@<sha>` (saas-work-gitops design §7), which the
+	// platform stamps as the epic's managedBy pointer and honours as the
+	// one writer a managed field accepts.
+	extraHeaders map[string]string
 }
 
 // NewClient creates a Client for baseURL using the given TokenSource and CLI
@@ -904,6 +909,9 @@ func (c *Client) doJSONOnce(ctx context.Context, httpClient *http.Client, method
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	req.Header.Set("User-Agent", c.userAgent)
+	for k, v := range c.extraHeaders {
+		req.Header.Set(k, v)
+	}
 	req.Header.Set(contractVersionHeader, ContractVersion)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -1097,3 +1105,14 @@ func urlSegment(s string) string {
 	s = strings.ReplaceAll(s, "?", "%3F")
 	return s
 }
+
+// SetHeader adds a header to every platform request this client makes.
+func (c *Client) SetHeader(name, value string) {
+	if c.extraHeaders == nil {
+		c.extraHeaders = map[string]string{}
+	}
+	c.extraHeaders[name] = value
+}
+
+// WorkSyncHeader names the header the work sync identifies itself with.
+const WorkSyncHeader = "X-Orun-Work-Sync"
