@@ -1,0 +1,99 @@
+1
+00:00:01,000 --> 00:00:05,020
+The best engineering teams don't ship faster because they type faster.
+
+2
+00:00:05,800 --> 00:00:07,080
+They ship on a platform.
+
+3
+00:00:07,460 --> 00:00:10,440
+Years of discipline, that most teams never get to build.
+
+4
+00:00:11,190 --> 00:00:13,490
+orun turns that discipline into intent.
+
+5
+00:00:13,810 --> 00:00:14,510
+What exists.
+
+6
+00:00:14,690 --> 00:00:15,530
+Where it ships.
+
+7
+00:00:15,750 --> 00:00:17,190
+And the rules it lives by.
+
+8
+00:00:17,810 --> 00:00:20,910
+One open-source binary compiles it into a single plan.
+
+9
+00:00:21,330 --> 00:00:23,250
+Same inputs, same plan.
+
+10
+00:00:23,330 --> 00:00:24,130
+Every time.
+
+11
+00:00:24,900 --> 00:00:27,000
+Policy runs at compile time.
+
+12
+00:00:27,220 --> 00:00:30,380
+So when an agent breaks a rule, it fails in the plan.
+
+13
+00:00:30,600 --> 00:00:31,560
+Not in production.
+
+14
+00:00:32,510 --> 00:00:33,710
+Want the whole platform?
+
+15
+00:00:33,930 --> 00:00:34,670
+Pick a baseline.
+
+16
+00:00:35,110 --> 00:00:35,830
+Connect your cloud.
+
+17
+00:00:36,720 --> 00:00:37,820
+About an hour later:
+
+18
+00:00:38,080 --> 00:00:41,680
+forty-four components, twelve bounded contexts, three environments.
+
+19
+00:00:42,120 --> 00:00:43,380
+Live, in your repo.
+
+20
+00:00:44,400 --> 00:00:46,100
+Then every commit converges.
+
+21
+00:00:46,300 --> 00:00:47,480
+Forty-one jobs.
+
+22
+00:00:47,280 --> 00:00:48,160
+All green.
+
+23
+00:00:49,500 --> 00:00:50,120
+orun.
+
+24
+00:00:50,260 --> 00:00:51,700
+Platform discipline, compiled.
+
+25
+00:00:51,980 --> 00:00:52,720
+Open source.
