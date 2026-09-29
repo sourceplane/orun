@@ -2,9 +2,8 @@
 // (orun-cloud saas-work-gitops, design §1–§3): one directory per epic under
 // `work.epics`, each with an epic.yaml — the declaration — and the task
 // contracts under `work.tasks`. It parses the declaration strictly and
-// judges the tree by the rules the `work-manifest` standards rule reports,
-// so `orun work check` and `orun pr check --standards` refuse a malformed
-// tree before it merges and `orun work sync` never meets one on main.
+// judges the tree, so `orun work check` refuses a malformed tree before it
+// merges and `orun work sync` never meets one on main.
 package workfile
 
 import (
@@ -26,8 +25,8 @@ const (
 	// EpicFile is the declaration's filename inside an epic directory.
 	EpicFile = "epic.yaml"
 	// DefaultStatusFile is the epic's status file when the declaration
-	// names none — the file the epic-status rule expects a milestone-closing
-	// PR to touch.
+	// names none — the file `orun work check --base` expects a
+	// milestone-closing PR to touch.
 	DefaultStatusFile = "IMPLEMENTATION-STATUS.md"
 
 	wantAPIVersion = "orun.io/v1"

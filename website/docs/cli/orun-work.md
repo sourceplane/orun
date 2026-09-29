@@ -1,6 +1,6 @@
 ---
 title: orun work
-description: The declared work tree — epic.yaml per epic, task contracts beside it — validated before a pull request merges, so the work-manifest rule refuses a malformed declaration in CI rather than on main.
+description: The declared work tree — epic.yaml per epic, task contracts beside it — validated before a pull request merges, so a malformed declaration is refused in CI rather than on main.
 ---
 
 `orun work` is the CLI face of **work as code** (orun-cloud epic
@@ -51,8 +51,8 @@ the task it creates.
 ## `check`
 
 Reads every `epic.yaml` and every contract and prints each problem as one
-sentence naming the file — the same sentences the `work-manifest` rule
-reports under `orun pr check --standards`. Exit 1 on any problem.
+sentence naming the file, prefixed `error work-manifest`. Exit 1 on any
+problem.
 
 | Rule | Problem it names |
 |---|---|
@@ -67,7 +67,7 @@ With `--base <ref>` the check also resolves, for the current branch's task
 (the key in `orun/<KEY>-<slug>`): the milestone that lists it, whether
 this branch closes that milestone (its other tasks read `done` on the
 platform, or it has none), and whether the diff touches the epic's status
-file — the `epic-status` rule's facts.
+file.
 
 ```text
 $ orun work check --base main
@@ -82,13 +82,8 @@ clean
 A repository with no `work:` section prints that and exits 0; nothing here
 applies to it.
 
-## In `orun pr check`
-
-When the repository declares a `work:` section, `orun pr check --standards`
-reads the tree too: every problem becomes a `work-manifest` finding (an
-error under `enforce`, a warning under `warn`), and the branch's task gets
-the `epic-status` fact. No new CI step: the `standards` job that already
-runs `pr check` covers it.
+To refuse a malformed tree before it merges, run `orun work check` as a
+step of the pull-request CI job.
 
 ## Exit codes
 
