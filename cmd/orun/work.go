@@ -39,6 +39,7 @@ runs the same reading as the work-manifest rule.`,
 		RunE: func(cmd *cobra.Command, args []string) error { return cmd.Help() },
 	}
 	cmd.AddCommand(newWorkCheckCommand())
+	cmd.AddCommand(newWorkSyncCommand())
 	root.AddCommand(cmd)
 }
 
