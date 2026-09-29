@@ -30,6 +30,7 @@ type standardsConformance struct {
 			Contract       *ContractFact             `json:"contract"`
 			AffectsOutside []string                  `json:"affectsOutside"`
 			Epic           *EpicFact                 `json:"epic"`
+			Work           *WorkFact                 `json:"work"`
 		} `json:"input"`
 		Findings []Finding `json:"findings"`
 	} `json:"cases"`
@@ -60,6 +61,7 @@ func TestStandardsConformance(t *testing.T) {
 				Contract:       tc.Input.Contract,
 				AffectsOutside: tc.Input.AffectsOutside,
 				Epic:           tc.Input.Epic,
+				Work:           tc.Input.Work,
 			}, tc.Mode)
 			if len(got) != len(tc.Findings) {
 				t.Fatalf("findings = %+v, want %+v", got, tc.Findings)

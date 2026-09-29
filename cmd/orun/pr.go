@@ -229,8 +229,10 @@ func newPrCheckCommand() *cobra.Command {
 		Short: "Local preflight of the provenance rules (exit 1 on errors)",
 		Long: `Run the same rules the cloud's orun/compliance check verifies (IS7 pins
 the two engines byte-identical on shared fixtures): the branch grammar,
-the Orun-Task trailer on every commit ahead of the base, one task per PR.
-Fix the lineage before the PR exists — prevention over detection.`,
+the Orun-Task trailer on every commit ahead of the base, one task per PR —
+and, under --standards, the task contract, the skill pins and the declared
+work tree (work-manifest, epic-status). Fix the lineage before the PR
+exists — prevention over detection.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			mode, err := resolveStandardsMode(standards)
@@ -341,8 +343,8 @@ func manifestFromCIEvent() *provenance.Manifest {
 // what this process can see: the contract document and the local object
 // store (task-contract), the change engine against the base
 // (affects-ceiling), and the registry for the session's pins
-// (skill-current). The epic fact needs the task plane's milestone view and
-// stays nil here. Every step is best-effort: a fact that cannot be
+// (skill-current), and the declared work tree for work-manifest and the
+// epic fact (workFacts). Every step is best-effort: a fact that cannot be
 // resolved is left nil and its rule is silent, with a note on stderr.
 func resolveStandardsFacts(ctx context.Context, in *provenance.StandardsInput, base string, pins []provenance.SkillPin, errOut io.Writer) {
 	key := in.TaskKey
@@ -391,6 +393,9 @@ func resolveStandardsFacts(ctx context.Context, in *provenance.StandardsInput, b
 		}
 		in.Contract = fact
 	}
+	// work-manifest and epic-status: the declared tree (saas-work-gitops
+	// WG2), when the repository has one.
+	workFacts(ctx, in, key, base, errOut)
 	if len(pins) > 0 {
 		client, err := cloudClient(ctx, "", "")
 		if err != nil {
