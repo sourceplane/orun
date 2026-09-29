@@ -97,6 +97,14 @@
       ]
     },
     {
+      "name": "task-contract: the finding prints the path the repository declares (intent.yaml work.tasks)",
+      "mode": "enforce",
+      "input": { "branch": "orun/WG-3-work-tree", "manifest": { "version": 1, "task": "WG-3", "skills": [{ "name": "orunbase", "rev": "sha256:aa" }] }, "contract": { "present": false, "path": "work/tasks/WG-3.TaskContract.yaml" } },
+      "findings": [
+        { "level": "error", "rule": "task-contract", "text": "work/tasks/WG-3.TaskContract.yaml is missing — write it and `orun task attach WG-3` (see the `orunbase` skill, §2 Non-negotiables)" }
+      ]
+    },
+    {
       "name": "affects-ceiling: names up to five components, then an ellipsis",
       "mode": "enforce",
       "input": {

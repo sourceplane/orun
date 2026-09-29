@@ -32,6 +32,9 @@ func LoadIntent(path string) (*model.Intent, error) {
 	if err := yaml.Unmarshal(data, &intent); err != nil {
 		return nil, fmt.Errorf("failed to parse intent YAML: %w", err)
 	}
+	if err := intent.ValidateWork(); err != nil {
+		return nil, err
+	}
 
 	// The workflow-engine pin died with the external engine boundary. Intent
 	// parsing is otherwise lenient, so probe for the removed block explicitly —

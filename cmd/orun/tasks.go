@@ -3,7 +3,7 @@ package main
 // orun task (orun-tasks O2) — the CLI face of the task plane, split exactly
 // along the epic's boundary: identity comes from the cloud (create/attach/
 // show/list — the allocator is the single writer of keys, TK-I), while the
-// contract is authored in the repo (tasks/<KEY>.TaskContract.yaml) and
+// contract is authored in the repo (<tasks>/<KEY>.TaskContract.yaml) and
 // checked OFFLINE (check — the design §3.3 loop). The check verb is
 // advisory by construction: plan-side evaluation guides, the workspace
 // decides at enforcement (E1/E2), and effective access is always
@@ -34,7 +34,7 @@ func registerTaskCommand(root *cobra.Command) {
 		Short: "Tasks: cloud-issued identity, repo-authored contracts, offline checks",
 		Long: `A task binds work to an enforceable contract. The cloud allocator issues
 every key (adopt > derive > mint — never invented client-side); the
-contract lives in the repository as tasks/<KEY>.TaskContract.yaml and is
+contract lives in the repository as <tasks>/<KEY>.TaskContract.yaml and is
 sealed by content hash wherever it travels. 'check' runs entirely offline.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -304,7 +304,7 @@ tracker's).`,
 	return cmd
 }
 
-// taskDocRoot is where tasks/ documents are looked up: the repo root the
+// taskDocRoot is where task documents are looked up: the repo root the
 // intent file anchors (the same resolution the policy commands use).
 func taskDocRoot() string {
 	_, repoRoot := policyIntentContext()
@@ -312,6 +312,22 @@ func taskDocRoot() string {
 		return "."
 	}
 	return repoRoot
+}
+
+// taskDocDir is the tasks directory intent.yaml declares (`work.tasks`,
+// saas-work-gitops design §1), repo-relative; taskfile.Dir when the
+// repository declares none. Every lookup of a contract document goes
+// through this pair, so the declared layout is honoured everywhere at once.
+func taskDocDir() string {
+	return loadIntentForCloudConfig().WorkLayout().Tasks
+}
+
+// taskDocPath is the on-disk path of a key's document; taskDocRel the
+// repo-relative spelling a message prints.
+func taskDocPath(key string) string { return taskfile.PathForIn(taskDocRoot(), taskDocDir(), key) }
+func taskDocRel(key string) string  { return taskfile.RelPathIn(taskDocDir(), key) }
+func findTaskDoc(key string) (*taskfile.Document, error) {
+	return taskfile.FindForKeyIn(taskDocRoot(), taskDocDir(), key)
 }
 
 func newTaskCreateCommand() *cobra.Command {
@@ -341,7 +357,7 @@ takes it up (--assignee me).
 
 The contract: --contract <file> attaches an explicit TaskContract document
 (a template, unbound to any key — what a bootstrap keeps beside its
-flows). Without it, tasks/<KEY>.TaskContract.yaml is attached if one
+flows). Without it, <tasks>/<KEY>.TaskContract.yaml is attached if one
 exists for the issued key. Either way the task is recorded in the local
 object store (refs/tasks/<KEY>).
 
@@ -412,7 +428,7 @@ contract parks at in_review after its merge.`,
 			case doc != nil:
 				fmt.Fprintf(out, "contract %s attached from %s%s\n", shortRevision(hash), doc.Path, gatesNote(doc))
 			default:
-				fmt.Fprintf(out, "no contract document (%s) — created without narrowing\n", taskfile.PathFor(taskDocRoot(), task.Key))
+				fmt.Fprintf(out, "no contract document (%s) — created without narrowing\n", taskDocPath(task.Key))
 			}
 			if sealNote != "" {
 				fmt.Fprintln(out, sealNote)
@@ -431,7 +447,7 @@ contract parks at in_review after its merge.`,
 	cmd.Flags().StringVar(&epic, "epic", "", "club the task under this epic (epc_… id, EP-n key, or slug)")
 	cmd.Flags().StringVar(&milestone, "milestone", "", "place the task in this milestone/phase (mls_… id; implies its epic)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "who takes it up: a subject ref (usr_… / sp_…) or 'me'")
-	cmd.Flags().StringVar(&contractPath, "contract", "", "attach this TaskContract document (a template; metadata.name optional) instead of tasks/<KEY>.TaskContract.yaml")
+	cmd.Flags().StringVar(&contractPath, "contract", "", "attach this TaskContract document (a template; metadata.name optional) instead of <tasks>/<KEY>.TaskContract.yaml")
 	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
@@ -476,7 +492,7 @@ func newTaskAttachCommand() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "attach <key>",
-		Short: "Seal tasks/<KEY>.TaskContract.yaml and upload it to the task",
+		Short: "Seal <tasks>/<KEY>.TaskContract.yaml and upload it to the task",
 		Long: `Attach (or revise) a task's contract from the repository document. The
 contract is sealed locally (sha256 over canonical JSON), the server
 recomputes the hash and refuses a mismatch, and the local object store's
@@ -484,12 +500,12 @@ task node moves to the new revision.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key := args[0]
-			doc, err := taskfile.FindForKey(taskDocRoot(), key)
+			doc, err := findTaskDoc(key)
 			if err != nil {
 				return fmt.Errorf("orun task attach: %w", err)
 			}
 			if doc == nil {
-				return fmt.Errorf("orun task attach: no document at %s", taskfile.PathFor(taskDocRoot(), key))
+				return fmt.Errorf("orun task attach: no document at %s", taskDocPath(key))
 			}
 			hash, wire, err := contract.ContractID(doc.Contract)
 			if err != nil {
@@ -637,7 +653,7 @@ func newTaskCheckCommand() *cobra.Command {
 		Use:   "check <key>",
 		Short: "Check the repo's contract document offline: validity, completeness, affects vs diff",
 		Long: `Check a task's contract without the network — the authoring loop of
-design §3.3. Validates tasks/<KEY>.TaskContract.yaml strictly, reports
+design §3.3. Validates <tasks>/<KEY>.TaskContract.yaml strictly, reports
 completeness in the same terms the cloud derives readiness from, and with
 --base compares the components the diff actually touched against the
 contract's affects ceiling (the same change engine 'plan --changed' uses).
@@ -672,13 +688,12 @@ const taskCheckAdvisory = "advisory: offline check — the workspace decides at 
 
 func runTaskCheck(cmd *cobra.Command, key, baseRef, headRef string, asJSON bool) error {
 	out := cmd.OutOrStdout()
-	root := taskDocRoot()
-	doc, err := taskfile.FindForKey(root, key)
+	doc, err := findTaskDoc(key)
 	if err != nil {
 		return fmt.Errorf("orun task check: %w", err)
 	}
 	if doc == nil {
-		fmt.Fprintf(out, "no contract document at %s\n", taskfile.PathFor(root, key))
+		fmt.Fprintf(out, "no contract document at %s\n", taskDocPath(key))
 		fmt.Fprintln(out, "no contract ⇒ no narrowing (the task, if it exists, constrains nothing)")
 		return nil
 	}
@@ -775,7 +790,7 @@ func detectChangedComponents(ctx context.Context, baseRef, headRef string) ([]st
 // attachDocumentIfPresent attaches the repo's contract document for a key,
 // when one exists. (nil, "", nil) = no document, which is a legal state.
 func attachDocumentIfPresent(ctx context.Context, client *remotestate.Client, org, key string) (*taskfile.Document, string, error) {
-	doc, err := taskfile.FindForKey(taskDocRoot(), key)
+	doc, err := findTaskDoc(key)
 	if err != nil || doc == nil {
 		return nil, "", err
 	}

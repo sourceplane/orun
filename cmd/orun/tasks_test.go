@@ -502,3 +502,43 @@ func TestTaskCheckWithoutDocument(t *testing.T) {
 		t.Fatalf("absence report:\n%s", out)
 	}
 }
+
+// saas-work-gitops WG-1: with `work.tasks` declared in intent.yaml, the
+// contract lookup reads the declared directory — and nothing else changes.
+func TestTaskCreateReadsDeclaredTasksDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "work", "tasks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "work", "tasks", "ENG-1.TaskContract.yaml"), []byte(testTaskDoc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "intent.yaml"), []byte("apiVersion: orun.io/v1\nkind: Intent\nmetadata:\n  name: t\nwork:\n  tasks: work/tasks\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	initTempGit(t, dir)
+	attached := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/organizations/org_x/tasks":
+			envelope(t, w, 201, map[string]any{"task": map[string]any{"id": "tsk_3KF9TQ2P", "key": "ENG-1"}})
+		case r.Method == http.MethodPut && r.URL.Path == "/v1/organizations/org_x/tasks/ENG-1/contract":
+			attached = true
+			envelope(t, w, 200, map[string]any{"contractHash": "sha256:abcdef0123", "syncedAt": "2026-01-01T00:00:00Z"})
+		default:
+			t.Errorf("unexpected call %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	out, err := runTaskCmd(t, newTaskCreateCommand(), srv.URL, "--adopt", "ENG-1")
+	if err != nil {
+		t.Fatalf("task create: %v\n%s", err, out)
+	}
+	if !attached || strings.Contains(out, "no contract document") {
+		t.Fatalf("declared tasks dir not read:\n%s", out)
+	}
+	if got := taskDocRel("ENG-1"); got != "work/tasks/ENG-1.TaskContract.yaml" {
+		t.Fatalf("taskDocRel = %q", got)
+	}
+}

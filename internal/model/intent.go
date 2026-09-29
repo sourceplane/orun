@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -20,7 +21,11 @@ type Intent struct {
 	Environments map[string]Environment `yaml:"environments" json:"environments"`
 	Components   []Component            `yaml:"components" json:"components"`
 	Execution    IntentExecution        `yaml:"execution,omitempty" json:"execution,omitempty"`
-	Env          map[string]string      `yaml:"env,omitempty" json:"env,omitempty"`
+	// Work names where the repository declares its work: the epics tree and
+	// the task contracts (orun-cloud saas-work-gitops WG-1). Absent means
+	// today's layout; see IntentWork.
+	Work *IntentWork       `yaml:"work,omitempty" json:"work,omitempty"`
+	Env  map[string]string `yaml:"env,omitempty" json:"env,omitempty"`
 	// SecretEnv maps env var names to secret:// references (never values —
 	// the planner rejects literals; specs/orun-secrets/data-model.md §2.1).
 	SecretEnv map[string]string `yaml:"secretEnv,omitempty" json:"secretEnv,omitempty"`
@@ -439,4 +444,97 @@ type ResolvedDependency struct {
 	// ModeRuleTriggerRef records the matched triggerRef when ModeSource is
 	// "edge-rule".
 	ModeRuleTriggerRef string
+}
+
+// IntentWork is the `work:` section of intent.yaml (orun-cloud
+// saas-work-gitops, design §1): where the epics live (one directory per
+// epic, named by its slug, holding epic.yaml, the design docs and the status
+// file), where the task contracts live (`<KEY>.TaskContract.yaml`), and
+// whether `orun work sync` reconciles the tree into the platform on the
+// default branch. Every field is optional; Layout applies the defaults.
+type IntentWork struct {
+	// Epics is the epics directory, repo-relative. Default "specs/epics".
+	Epics string `yaml:"epics,omitempty" json:"epics,omitempty"`
+	// Tasks is the task-contracts directory, repo-relative. Default "tasks".
+	Tasks string `yaml:"tasks,omitempty" json:"tasks,omitempty"`
+	// Sync is "off" (default) or "on-merge".
+	Sync string `yaml:"sync,omitempty" json:"sync,omitempty"`
+}
+
+// The defaults a repository with no `work:` section has always had.
+const (
+	DefaultWorkEpicsDir = "specs/epics"
+	DefaultWorkTasksDir = "tasks"
+	WorkSyncOff         = "off"
+	WorkSyncOnMerge     = "on-merge"
+)
+
+// WorkLayout is the resolved `work:` section: every field set, slashes
+// forward, no leading "./" or trailing "/".
+type WorkLayout struct {
+	Epics string
+	Tasks string
+	Sync  string
+}
+
+// DefaultWorkLayout is the layout of a repository that declares nothing.
+func DefaultWorkLayout() WorkLayout {
+	return WorkLayout{Epics: DefaultWorkEpicsDir, Tasks: DefaultWorkTasksDir, Sync: WorkSyncOff}
+}
+
+// Declared reports whether the repository has a `work:` section at all —
+// the rules that only make sense for a declared tree (work-manifest) are
+// silent otherwise.
+func (w WorkLayout) Declared() bool { return w != DefaultWorkLayout() }
+
+// WorkLayout resolves the section with its defaults. A nil intent is the
+// default layout, so callers need no nil check.
+func (i *Intent) WorkLayout() WorkLayout {
+	l := DefaultWorkLayout()
+	if i == nil || i.Work == nil {
+		return l
+	}
+	if s := cleanWorkDir(i.Work.Epics); s != "" {
+		l.Epics = s
+	}
+	if s := cleanWorkDir(i.Work.Tasks); s != "" {
+		l.Tasks = s
+	}
+	if s := strings.ToLower(strings.TrimSpace(i.Work.Sync)); s != "" {
+		l.Sync = s
+	}
+	return l
+}
+
+// ValidateWork refuses a `work:` section that names an absolute path, an
+// escape from the repository, or an unknown sync mode. Called by the
+// loader; a repository with no section always validates.
+func (i *Intent) ValidateWork() error {
+	if i == nil || i.Work == nil {
+		return nil
+	}
+	for _, f := range []struct{ name, value string }{{"epics", i.Work.Epics}, {"tasks", i.Work.Tasks}} {
+		v := cleanWorkDir(f.value)
+		if f.value != "" && v == "" || strings.HasPrefix(v, "/") || v == ".." || strings.HasPrefix(v, "../") {
+			return fmt.Errorf("intent.yaml work.%s: %q must be a repo-relative directory", f.name, f.value)
+		}
+	}
+	switch s := strings.ToLower(strings.TrimSpace(i.Work.Sync)); s {
+	case "", WorkSyncOff, WorkSyncOnMerge:
+		return nil
+	default:
+		return fmt.Errorf("intent.yaml work.sync: %q is not one of off, on-merge", i.Work.Sync)
+	}
+}
+
+// cleanWorkDir normalizes a declared directory: forward slashes, no "./",
+// no trailing slash. "" for an empty or dot-only value.
+func cleanWorkDir(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\\", "/"))
+	s = strings.TrimPrefix(s, "./")
+	s = strings.TrimSuffix(s, "/")
+	if s == "." {
+		return ""
+	}
+	return s
 }

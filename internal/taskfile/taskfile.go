@@ -26,7 +26,9 @@ import (
 const (
 	wantAPIVersion = "orun.io/v1"
 	wantKind       = "TaskContract"
-	// Dir is the repo-root directory contract documents live in.
+	// Dir is the repo-root directory contract documents live in when the
+	// repository declares none (intent.yaml `work.tasks`, saas-work-gitops
+	// design §1 — PathForIn takes the declared one).
 	Dir = "tasks"
 	// Suffix is the document filename suffix, mirroring the
 	// `<name>.SecretPolicy.yaml` convention.
@@ -43,6 +45,8 @@ type Document struct {
 	// Key is metadata.name — the task the contract narrows.
 	Key  string
 	Path string
+	// Title is metadata.title, "" when the document names none.
+	Title string
 	// Contract is the authored contract, in the exact shape ContractID
 	// seals. Never nil on a successful parse.
 	Contract *contract.Contract
@@ -56,6 +60,10 @@ type rawDoc struct {
 	Kind       string `yaml:"kind"`
 	Metadata   struct {
 		Name string `yaml:"name"`
+		// Title is the task's display title (saas-work-gitops, design §2):
+		// what `orun work sync` names a task it creates from the tree.
+		// Optional; the first sentence of spec.goal otherwise.
+		Title string `yaml:"title"`
 	} `yaml:"metadata"`
 	Spec struct {
 		Goal       string    `yaml:"goal"`
@@ -85,7 +93,7 @@ func Parse(path string, body []byte) (*Document, error) {
 	if base := filepath.Base(path); base != key+Suffix {
 		return nil, fmt.Errorf("taskfile %s: file for task %q must be named %s", path, key, key+Suffix)
 	}
-	return &Document{Key: key, Path: path, Contract: raw.contract()}, nil
+	return &Document{Key: key, Path: path, Title: strings.TrimSpace(raw.Metadata.Title), Contract: raw.contract()}, nil
 }
 
 // ParseTemplate decodes a contract document that is not yet bound to a key
@@ -103,7 +111,7 @@ func ParseTemplate(path string, body []byte) (*Document, error) {
 	if key != "" && !keyRe.MatchString(key) {
 		return nil, fmt.Errorf("taskfile %s: metadata.name %q is not a task key (ABC-123) — omit it on a template", path, key)
 	}
-	return &Document{Key: key, Path: path, Contract: raw.contract()}, nil
+	return &Document{Key: key, Path: path, Title: strings.TrimSpace(raw.Metadata.Title), Contract: raw.contract()}, nil
 }
 
 // LoadTemplate reads and parses an unbound contract document at path.
@@ -159,9 +167,28 @@ func Load(path string) (*Document, error) {
 	return Parse(path, body)
 }
 
-// PathFor is where a task's document lives under a repo root.
+// PathFor is where a task's document lives under a repo root with the
+// default layout; PathForIn takes the directory intent.yaml declares.
 func PathFor(root, key string) string {
-	return filepath.Join(root, Dir, key+Suffix)
+	return PathForIn(root, Dir, key)
+}
+
+// PathForIn is where a task's document lives under a repo root when the
+// repository declares its tasks directory (`work.tasks` in intent.yaml).
+func PathForIn(root, dir, key string) string {
+	if dir == "" {
+		dir = Dir
+	}
+	return filepath.Join(root, filepath.FromSlash(dir), key+Suffix)
+}
+
+// RelPathIn is the repo-relative, forward-slash path of a task's document
+// under a declared directory — the spelling a finding prints.
+func RelPathIn(dir, key string) string {
+	if dir == "" {
+		dir = Dir
+	}
+	return dir + "/" + key + Suffix
 }
 
 // FindForKey loads the document for a key if one exists; (nil, nil) when
@@ -170,10 +197,15 @@ func PathFor(root, key string) string {
 // BEFORE it becomes a path segment: create feeds this the key the cloud
 // returned, and a hostile backend must not get to steer filesystem lookups.
 func FindForKey(root, key string) (*Document, error) {
+	return FindForKeyIn(root, Dir, key)
+}
+
+// FindForKeyIn is FindForKey under a declared tasks directory.
+func FindForKeyIn(root, dir, key string) (*Document, error) {
 	if !keyRe.MatchString(key) {
 		return nil, fmt.Errorf("taskfile: %q is not a task key", key)
 	}
-	path := PathFor(root, key)
+	path := PathForIn(root, dir, key)
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

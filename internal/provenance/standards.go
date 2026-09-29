@@ -80,6 +80,10 @@ const (
 type ContractFact struct {
 	Present  bool  `json:"present"`
 	Attached *bool `json:"attached,omitempty"`
+	// Path is the repo-relative file the caller looked for, as intent.yaml
+	// `work.tasks` resolves it (saas-work-gitops design §1). "" prints the
+	// default layout, so callers that predate the section keep their text.
+	Path string `json:"path,omitempty"`
 }
 
 // EpicFact is what the caller knows about the milestone this PR closes.
@@ -179,13 +183,17 @@ func CheckStandards(in StandardsInput, mode Mode) []Finding {
 		if key == "" {
 			key = "<KEY>"
 		}
+		path := in.Contract.Path
+		if path == "" {
+			path = "tasks/" + key + ".TaskContract.yaml"
+		}
 		switch {
 		case !in.Contract.Present:
 			out = append(out, Finding{Level: levelFor(), Rule: RuleTaskContract,
-				Text: fmt.Sprintf("tasks/%s.TaskContract.yaml is missing — write it and `orun task attach %s` (%s)", key, key, readTheSkill)})
+				Text: fmt.Sprintf("%s is missing — write it and `orun task attach %s` (%s)", path, key, readTheSkill)})
 		case in.Contract.Attached != nil && !*in.Contract.Attached:
 			out = append(out, Finding{Level: levelFor(), Rule: RuleTaskContract,
-				Text: fmt.Sprintf("tasks/%s.TaskContract.yaml is not attached to %s — `orun task attach %s` (%s)", key, key, key, readTheSkill)})
+				Text: fmt.Sprintf("%s is not attached to %s — `orun task attach %s` (%s)", path, key, key, readTheSkill)})
 		}
 	}
 
