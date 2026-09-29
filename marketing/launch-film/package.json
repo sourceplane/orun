@@ -1,0 +1,20 @@
+{
+  "name": "orun-launch-film",
+  "private": true,
+  "type": "module",
+  "description": "The orun launch film: HyperFrames (HTML + GSAP) composition, word-locked to a Kokoro voiceover.",
+  "scripts": {
+    "build": "node build.mjs",
+    "lint": "hyperframes lint project && hyperframes validate project",
+    "snapshot": "hyperframes snapshot project -o snapshots --frames 12 --describe false",
+    "render": "mkdir -p renders && hyperframes render project -o renders/video-silent.mp4 -q delivery -f 30"
+  },
+  "devDependencies": {
+    "@fontsource/inter": "5.3.0",
+    "@fontsource/jetbrains-mono": "5.3.0",
+    "ffmpeg-static": "5.3.0",
+    "ffprobe-static": "3.1.0",
+    "gsap": "3.15.0",
+    "hyperframes": "0.8.92"
+  }
+}

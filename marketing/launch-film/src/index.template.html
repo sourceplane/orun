@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>orun — Above the line</title>
+<script src="vendor/gsap.min.js"></script>
+<script src="data.js"></script>
+<style>
+@font-face { font-family: "Inter"; font-weight: 400; src: url(fonts/inter-latin-400-normal.woff2) format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 500; src: url(fonts/inter-latin-500-normal.woff2) format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 600; src: url(fonts/inter-latin-600-normal.woff2) format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 700; src: url(fonts/inter-latin-700-normal.woff2) format("woff2"); }
+@font-face { font-family: "JBM"; font-weight: 400; src: url(fonts/jetbrains-mono-latin-400-normal.woff2) format("woff2"); }
+@font-face { font-family: "JBM"; font-weight: 500; src: url(fonts/jetbrains-mono-latin-500-normal.woff2) format("woff2"); }
+@font-face { font-family: "JBM"; font-weight: 700; src: url(fonts/jetbrains-mono-latin-700-normal.woff2) format("woff2"); }
+
+/* Orunbase tokens, verbatim from orunbase.com :root */
+:root {
+  --bg: #08090a; --bg-raised: #0d0e10; --bg-card: #101113; --bg-inset: #0b0c0d;
+  --line: #1e2024; --line-strong: #2a2c31;
+  --tx: #f7f8f8; --tx-2: #b1b5bd; --tx-3: #9aa0a9; --tx-4: #7c818a;
+  --ac: #d9b45c; --ac-deep: #B8862F; --ok: #4cc38a; --bad: #e5675a;
+}
+html, body { margin: 0; background: var(--bg); }
+#root { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: var(--bg);
+  font-family: "Inter", sans-serif; color: var(--tx); -webkit-font-smoothing: antialiased; }
+.abs { position: absolute; }
+.scene { position: absolute; inset: 0; opacity: 0; visibility: hidden; }
+.mono { font-family: "JBM", monospace; }
+.h { font-weight: 700; letter-spacing: -0.04em; line-height: 1.02; white-space: nowrap; }
+.w { display: inline-block; opacity: 0; }
+.kicker { font-family: "JBM", monospace; font-size: 20px; letter-spacing: 0.22em; color: var(--tx-3); text-transform: uppercase; }
+.card { background: var(--bg-raised); border: 1px solid var(--line-strong); border-radius: 14px; overflow: hidden;
+  box-shadow: 0 40px 80px -30px rgba(0,0,0,.9); }
+.card .bar { height: 50px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 9px; padding: 0 20px;
+  font-family: "JBM", monospace; font-size: 18px; color: var(--tx-4); }
+.dot { width: 11px; height: 11px; border-radius: 50%; background: var(--line-strong); }
+.code { font-family: "JBM", monospace; white-space: pre; color: var(--tx-2); }
+.code .k { color: var(--tx); }
+.code .c { color: var(--tx-4); }
+.code .row { position: relative; padding-left: 26px; }
+.hl { position: absolute; left: 0; right: 0; background: rgba(217,180,92,0.10); border-left: 3px solid var(--ac); opacity: 0; }
+.amber { color: var(--ac); }
+.ok { color: var(--ok); }
+.bad { color: var(--bad); }
+.tx3 { color: var(--tx-3); }
+.tx4 { color: var(--tx-4); }
+.pill { display: inline-flex; align-items: center; gap: 10px; border: 1px solid var(--line-strong); border-radius: 999px;
+  padding: 8px 16px; font-family: "JBM", monospace; font-size: 20px; color: var(--tx-2); background: var(--bg-card); }
+
+/* The line — the signature. Outer node carries y, inner carries scaleX. */
+#lineWrap { position: absolute; left: 0; top: 0; width: 1920px; height: 2px; z-index: 50; }
+#lineBar { position: absolute; left: 160px; top: 0; width: 1600px; height: 2px; transform-origin: 50% 50%; }
+#lineCore { position: absolute; inset: 0; background: var(--ac); }
+#lineGlow { position: absolute; left: 0; right: 0; top: -22px; height: 46px;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(217,180,92,.34), rgba(217,180,92,0) 70%); }
+#flash { position: absolute; top: -1px; height: 4px; background: var(--bad); opacity: 0;
+  box-shadow: 0 0 24px 6px rgba(229,103,90,.55); }
+
+#grade { position: absolute; inset: 0; z-index: 90; pointer-events: none; }
+#vignette { position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 45%, rgba(0,0,0,0) 55%, rgba(0,0,0,.55) 100%); }
+#grain { position: absolute; inset: 0; opacity: .055; }
+
+/* 01 */
+#s1 .h { font-size: 104px; }
+/* 02 */
+.chip { position: absolute; width: 372px; height: 96px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--bg-raised);
+  display: flex; align-items: center; padding: 0 26px; box-sizing: border-box; font-family: "JBM", monospace; font-size: 26px; color: var(--tx-2); opacity: 0; }
+.chip i { width: 9px; height: 9px; border-radius: 2px; background: var(--tx-4); margin-right: 18px; }
+/* 03/04 */
+.label { white-space: nowrap; font-size: 56px; font-weight: 600; letter-spacing: -0.03em; opacity: 0; display: flex; align-items: center; gap: 22px; }
+.label b { display: inline-block; width: 6px; height: 46px; background: var(--ac); border-radius: 2px; }
+/* 07 */
+.node { position: absolute; height: 34px; line-height: 32px; box-sizing: border-box; padding: 0 12px; border-radius: 8px;
+  border: 1px solid var(--line-strong); background: var(--bg-card); font-family: "JBM", monospace; font-size: 16px; color: var(--tx-2); white-space: nowrap; }
+.node.worker { color: var(--tx); border-color: #3a3c42; }
+.stat .n { font-size: 112px; font-weight: 700; letter-spacing: -0.05em; line-height: 1; font-variant-numeric: tabular-nums; }
+.stat .l { font-size: 30px; font-weight: 500; color: var(--tx-2); margin-top: 6px; }
+/* 08 */
+.cell { position: absolute; width: 98px; height: 44px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg-inset);
+  font-family: "JBM", monospace; font-size: 22px; color: var(--tx-4); display: flex; align-items: center; justify-content: center; }
+.cell .y { position: absolute; opacity: 0; color: var(--tx-2); }
+.colh { position: absolute; font-family: "JBM", monospace; font-size: 15px; color: var(--tx-3); transform-origin: 0 100%; transform: rotate(-32deg); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-width="1920" data-height="1080" data-duration="__TOTAL__" data-fps="30">
+
+  <!-- 01 · hook -->
+  <div class="scene" id="s1">
+    <div class="abs h" style="left:160px; top:250px;">
+      <span class="w" data-s="01-hook" data-w="The">The</span> <span class="w" data-s="01-hook" data-w="best">best</span> <span class="w" data-s="01-hook" data-w="engineering">engineering</span> <span class="w" data-s="01-hook" data-w="teams">teams</span>
+    </div>
+    <div class="abs h" style="left:160px; top:372px;">
+      <span class="w" data-s="01-hook" data-w="don't">don’t</span> <span class="w" data-s="01-hook" data-w="ship">ship</span> <span class="w" data-s="01-hook" data-w="faster">faster.</span>
+    </div>
+    <div class="abs mono" id="s1myth" style="left:160px; top:640px; font-size:40px; color:var(--tx-3);"><span id="s1mythT"></span><span id="s1strike" class="abs" style="left:-6px; right:-6px; top:50%; height:3px; background:var(--tx-3); transform:scaleX(0); transform-origin:0 50%;"></span></div>
+  </div>
+
+  <!-- 02 · platform -->
+  <div class="scene" id="s2">
+    <div class="abs h" style="left:160px; top:150px; font-size:96px;">
+      <span class="w" data-s="02-platform" data-w="They">They</span> <span class="w" data-s="02-platform" data-w="ship">ship</span> <span class="w" data-s="02-platform" data-w="on">on</span> <span class="w" data-s="02-platform" data-w="a">a</span> <span class="w amber" data-s="02-platform" data-w="platform">platform.</span>
+    </div>
+    <div id="chips"></div>
+    <div class="abs mono tx3" id="s2cap" style="left:160px; top:888px; font-size:26px; opacity:0;">years of discipline — most teams never get to build it</div>
+  </div>
+
+  <!-- 03 · intent  +  04 · compile (share the card) -->
+  <div class="scene" id="s3">
+    <div class="abs" id="wordmark" style="left:160px; top:84px; display:flex; align-items:baseline; gap:26px; opacity:0;">
+      <span class="h" style="font-size:72px;">orun</span><span class="mono tx3" style="font-size:22px;">the intent compiler · v2.69.0</span>
+    </div>
+    <div class="abs card" id="yamlCard" style="left:160px; top:210px; width:860px; height:680px; opacity:0; clip-path: inset(0 0 var(--cutB, 0px) 0);">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>&nbsp;infra/infra-1/component.yaml</div>
+      <div class="code" id="yaml" style="font-size:23px; line-height:33px; padding:18px 0;"></div>
+    </div>
+    <div class="abs card" id="planCard" style="left:160px; top:210px; width:860px; height:680px; clip-path: inset(var(--cutT, 680px) 0 0 0);">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>&nbsp;~/platform · orun plan</div>
+      <div class="code" id="plan" style="font-size:21px; line-height:34px; padding:22px 26px;"></div>
+    </div>
+    <div class="abs" id="labels" style="left:1110px; top:250px;">
+      <div class="label" id="lab1" style="position:absolute; top:0;"><b></b>What exists.</div>
+      <div class="label" id="lab2" style="position:absolute; top:110px;"><b></b>Where it ships.</div>
+      <div class="label" id="lab3" style="position:absolute; top:220px;"><b></b>The rules it lives by.</div>
+      <div class="card" id="intentCard" style="position:absolute; top:330px; width:650px; height:250px; opacity:0;">
+        <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>&nbsp;intent.yaml</div>
+        <div class="code" style="font-size:23px; line-height:33px; padding:16px 0;"><div class="row"><span class="k">environments:</span></div><div class="row">  <span class="k">production:</span></div><div class="row">    <span class="k">policies:</span></div><div class="row"><span class="hl" id="hlRule" style="top:0; bottom:0;"></span>      <span class="k">requireApproval:</span> <span class="amber">"true"</span></div></div>
+      </div>
+    </div>
+    <div class="abs" id="binary" style="left:1110px; top:300px; opacity:0;">
+      <div class="h" style="font-size:72px;">One open‑source<br>binary.</div>
+      <div class="mono tx3" style="font-size:22px; margin-top:28px;">linux · darwin · amd64 · arm64 · MIT</div>
+    </div>
+    <div class="abs card" id="run2" style="left:1110px; top:210px; width:650px; height:300px; opacity:0;"></div>
+    <div class="abs card" id="run3" style="left:1110px; top:560px; width:650px; height:300px; opacity:0;"></div>
+  </div>
+
+  <!-- 05 · policy -->
+  <div class="scene" id="s5">
+    <div class="abs h" style="left:160px; top:100px; font-size:80px;">
+      <span class="w" data-s="05-policy" data-w="Policy">Policy</span> <span class="w" data-s="05-policy" data-w="runs">runs</span> <span class="w" data-s="05-policy" data-w="at">at</span> <span class="w amber" data-s="05-policy" data-w="compile">compile</span> <span class="w amber" data-s="05-policy" data-w="time">time.</span>
+    </div>
+    <div class="abs card" id="agentCard" style="left:560px; top:250px; width:800px; height:246px; opacity:0;">
+      <div class="bar"><span style="color:var(--tx-2)">agent</span>&nbsp;·&nbsp;edit infra/infra-1/component.yaml</div>
+      <div class="code" style="font-size:23px; line-height:36px; padding:14px 0;"><div class="row">  <span class="k">parameters:</span></div><div class="row">    <span class="k">stackName:</span> network-foundation</div><div class="row">    <span class="k">terraformDir:</span> .</div><div class="row" id="badRow"><span class="hl" id="hlBad" style="top:0; bottom:0; background:rgba(229,103,90,.12); border-left-color:var(--bad);"></span><span class="tx3">+</span>   <span class="k">autoApprove:</span> true</div></div>
+    </div>
+    <div class="abs card" id="errCard" style="left:360px; top:620px; width:1200px; height:214px; opacity:0;">
+      <div class="code" style="font-size:22px; line-height:36px; padding:20px 28px; white-space:pre-wrap;"><span class="tx4">$ orun plan</span>
+<span id="errT"></span></div>
+    </div>
+    <div class="abs" id="prodPill" style="left:360px; top:872px; opacity:0;"><span class="pill"><span style="width:9px;height:9px;border-radius:50%;background:var(--tx-4)"></span>production · no plan, nothing ran</span></div>
+  </div>
+
+  <!-- 06 · baseline -->
+  <div class="scene" id="s6">
+    <div class="abs h" style="left:160px; top:130px; font-size:88px;">
+      <span class="w" data-s="06-baseline" data-w="Want">Want</span> <span class="w" data-s="06-baseline" data-w="the">the</span> <span class="w" data-s="06-baseline" data-w="whole">whole</span> <span class="w" data-s="06-baseline" data-w="platform">platform?</span>
+    </div>
+    <div id="bcards"></div>
+    <div class="abs" id="prov" style="left:160px; top:720px; width:1080px;"></div>
+  </div>
+
+  <!-- 07 · live (hero) -->
+  <div class="scene" id="s7">
+    <div class="abs mono" id="s7cmd" style="left:160px; top:52px; font-size:24px; color:var(--tx-3);"><span id="s7cmdT"></span></div>
+    <div class="abs" id="graph" style="left:0; top:0; width:1920px; height:1080px; clip-path: inset(var(--gtop, 1080px) 0 0 0);">
+      <svg id="edges" class="abs" width="1920" height="1080" style="left:0; top:0;"></svg>
+      <div id="nodes"></div>
+    </div>
+    <div class="abs" id="stats" style="left:1400px; top:180px;">
+      <div class="stat" id="st1" style="opacity:0;"><div class="n"><span id="n44">0</span></div><div class="l">components</div></div>
+      <div class="stat" id="st2" style="opacity:0; margin-top:44px;"><div class="n"><span id="n12">0</span></div><div class="l">bounded contexts</div></div>
+      <div class="stat" id="st3" style="opacity:0; margin-top:44px;"><div class="n">3</div><div class="l">environments <span class="mono tx4" style="font-size:22px;">dev · stage · prod</span></div></div>
+    </div>
+    <div class="abs" id="liveRow" style="left:1400px; top:900px; opacity:0; font-size:32px; font-weight:600; letter-spacing:-0.02em; display:flex; align-items:center; gap:14px;">
+      <span style="width:14px;height:14px;border-radius:50%;background:var(--ok);box-shadow:0 0 18px rgba(76,195,138,.7)"></span>Live — in your repo.
+    </div>
+    <div class="abs mono tx4" id="measured" style="left:1400px; top:960px; font-size:18px; opacity:0;">measured end to end: ~73 min, headless</div>
+  </div>
+
+  <!-- 08 · converge -->
+  <div class="scene" id="s8">
+    <div class="abs pill" id="commit" style="left:760px; top:190px; font-size:26px; opacity:0; padding:12px 24px;">
+      <span class="tx4">commit</span> <span class="k" style="color:var(--tx)">7835981</span> <span class="tx4">→</span> main
+    </div>
+    <div class="abs card" id="runCard" style="left:160px; top:380px; width:1600px; height:600px; opacity:0;">
+      <div class="code" style="font-size:22px; line-height:36px; padding:26px 34px;"><span class="k" style="font-weight:700">▲ orun</span>  <span class="tx3">lumen</span>
+<span class="tx4">  Plan: sha256:8f16e29a… · Source: ci · refs/heads/main · 7835981</span>
+  <span class="tx3">Status:</span>   <span id="stat8"><span id="okN">0</span> succeeded · ✗ 0 failed</span>    <span id="bar8" class="tx4"></span></div>
+      <div id="grid" class="abs" style="left:0; top:0;"></div>
+    </div>
+  </div>
+
+  <!-- 09 · end -->
+  <div class="scene" id="s9">
+    <svg id="mark" class="abs" width="288" height="288" viewBox="0 0 48 48" style="left:816px; top:150px; overflow:visible;">
+      <defs>
+        <clipPath id="clipTop"><rect x="-10" y="-30" width="68" height="61.58"/></clipPath>
+        <clipPath id="clipBot"><rect x="-10" y="39.23" width="68" height="30"/></clipPath>
+      </defs>
+      <g clip-path="url(#clipTop)"><g id="sunTop"><path d="M5.06 31.58 A20.4 20.4 0 1 1 42.94 31.58 Z" fill="#f7f8f8"/></g></g>
+      <g clip-path="url(#clipBot)"><g id="sunBot"><path d="M10.43 39.23 A20.4 20.4 0 0 0 37.57 39.23 Z" fill="#B8862F"/></g></g>
+    </svg>
+    <div class="abs h" id="endWord" style="left:0; width:1920px; text-align:center; top:470px; font-size:150px; opacity:0;">orun</div>
+    <div class="abs h" style="left:0; width:1920px; text-align:center; top:660px; font-size:60px; font-weight:600; letter-spacing:-0.03em;">
+      <span class="w" data-s="09-end" data-w="platform">Platform</span> <span class="w" data-s="09-end" data-w="discipline">discipline,</span> <span class="w amber" data-s="09-end" data-w="compiled">compiled.</span>
+    </div>
+    <div class="abs mono" id="endLinks" style="left:0; width:1920px; text-align:center; top:790px; font-size:28px; color:var(--tx-2); opacity:0;">
+      open source · github.com/sourceplane/orun&nbsp;&nbsp;·&nbsp;&nbsp;hosted · orunbase.com
+    </div>
+    <div class="abs mono tx4" id="endCmd" style="left:0; width:1920px; text-align:center; top:858px; font-size:21px; opacity:0;">
+      curl -fsSL https://raw.githubusercontent.com/sourceplane/orun/main/install.sh | sh
+    </div>
+  </div>
+
+  <div id="lineWrap"><div id="lineBar"><div id="lineGlow"></div><div id="lineCore"></div></div><div id="flash"></div></div>
+
+  <div id="grade">
+    <svg id="grain" width="1920" height="1080"><filter id="gf"><feTurbulence id="turb" type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="0" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="1920" height="1080" filter="url(#gf)"/></svg>
+    <div id="vignette"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var T = /*__TIMELINE__*/null;
+  var L = window.LUMEN;
+  window.__timelines = window.__timelines || {};
+  var tl = gsap.timeline({ paused: true });
+  var $ = function (s) { return document.querySelector(s); };
+  var $$ = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
+
+  // ---- word clock: every cue resolves against the measured transcript ----
+  function norm(s) { return s.toLowerCase().replace(/[^a-z0-9]/g, ""); }
+  function S(id, dt) { return T.scenes[id].start + (dt || 0); }
+  function V(id) { return T.scenes[id].start + T.scenes[id].lead; }
+  function W(id, word, n) {
+    var ws = T.meta[id].words, k = 0, want = norm(word);
+    for (var i = 0; i < ws.length; i++) {
+      if (norm(ws[i].w) === want) { if (k === (n || 0)) return V(id) + ws[i].start; k++; }
+    }
+    throw new Error("cue word '" + word + "' not in " + id);
+  }
+  function E(id) { var s = T.scenes[id]; return s.start + s.dur; }
+
+  // ---- helpers ----
+  function type(el, text, at, dur) {
+    var p = { i: 0 };
+    tl.to(p, { i: text.length, duration: dur, ease: "none", snap: { i: 1 },
+      onUpdate: function () { el.textContent = text.slice(0, Math.round(p.i)); } }, at);
+  }
+  function count(el, to, at, dur) {
+    var p = { v: 0 };
+    tl.to(p, { v: to, duration: dur, ease: "power2.out", snap: { v: 1 },
+      onUpdate: function () { el.textContent = String(Math.round(p.v)); } }, at);
+  }
+  function words(scene) {
+    $$('.w[data-s="' + scene + '"]').forEach(function (el) {
+      var n = el.getAttribute("data-n") || 0;
+      tl.fromTo(el, { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.34, ease: "power3.out", immediateRender: false },
+        W(scene, el.getAttribute("data-w"), +n) - 0.03);
+    });
+  }
+  function sceneIn(sel, id) { tl.to(sel, { autoAlpha: 1, duration: 0.01 }, S(id)); }
+  function sceneOut(sel, at, d) { tl.to(sel, { autoAlpha: 0, duration: d || 0.3, ease: "power1.in" }, at); }
+  var line = $("#lineWrap"), bar = $("#lineBar"), glow = $("#lineGlow");
+  gsap.set(line, { y: 600 }); gsap.set(bar, { scaleX: 0 });
+  function lineTo(y, at, d, ease) { tl.to(line, { y: y, duration: d, ease: ease || "power3.inOut" }, at); }
+
+  // =========== 01 · hook ===========
+  sceneIn("#s1", "01-hook");
+  tl.to(bar, { scaleX: 1, duration: 0.85, ease: "power3.inOut" }, 0.12);                       // silence: the line draws alone
+  tl.fromTo(glow, { opacity: 0.2 }, { opacity: 1, duration: 0.5, ease: "power2.out", immediateRender: false }, 0.8);
+  words("01-hook");                                                                             // "The best engineering teams / don't ship faster"
+  var myth = "because they type faster";
+  tl.to("#s1myth", { opacity: 1, duration: 0.01 }, W("01-hook", "because") - 0.05);
+  type($("#s1mythT"), myth, W("01-hook", "because") - 0.02, W("01-hook", "faster", 1) + 0.3 - W("01-hook", "because")); // typed as spoken
+  tl.to("#s1strike", { scaleX: 1, duration: 0.3, ease: "power2.inOut" }, W("01-hook", "faster", 1) + 0.42);           // struck at the end of "faster."
+  tl.to("#s1mythT", { color: "#5f636a", duration: 0.3 }, W("01-hook", "faster", 1) + 0.5);
+  sceneOut("#s1", S("02-platform") - 0.05, 0.25);
+
+  // =========== 02 · platform ===========
+  sceneIn("#s2", "02-platform");
+  lineTo(330, S("02-platform") - 0.1, 0.65);
+  words("02-platform");                                                                          // "They ship on a platform."
+  var CHIPS = ["environments", "policy as code", "golden paths", "dependency order", "approvals", "change detection",
+               "service catalog", "audit trail", "brokered secrets", "migrations", "preview lanes", "RBAC"];
+  var chipsEl = $("#chips");
+  CHIPS.forEach(function (c, i) {
+    var d = document.createElement("div"); d.className = "chip";
+    d.style.left = (160 + (i % 4) * 404) + "px"; d.style.top = (400 + Math.floor(i / 4) * 124) + "px";
+    d.innerHTML = "<i></i>" + c; chipsEl.appendChild(d);
+    tl.fromTo(d, { opacity: 0, y: -18 }, { opacity: 1, y: 0, duration: 0.32, ease: "power3.out", immediateRender: false },
+      W("02-platform", "years") - 0.04 + i * 0.045);                                             // "Years of discipline"
+  });
+  tl.to(".chip", { opacity: 0.16, duration: 0.45, ease: "power2.inOut" }, W("02-platform", "never"));   // "never"
+  tl.to("#s2cap", { opacity: 1, duration: 0.35 }, W("02-platform", "never") + 0.05);
+  sceneOut("#s2", S("03-intent") - 0.02, 0.3);
+
+  // =========== 03 · intent ===========
+  sceneIn("#s3", "03-intent");
+  lineTo(890, S("03-intent") - 0.05, 0.7);                                      // the intent rests on the line
+  tl.fromTo("#wordmark", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out", immediateRender: false }, W("03-intent", "o") - 0.02); // "Oh-run"
+  var YAML = [
+    ['<span class="k">apiVersion:</span> sourceplane.io/v1', 0],
+    ['<span class="k">kind:</span> Component', 1],
+    ['<span class="k">metadata:</span>', 1],
+    ['  <span class="k">name:</span> network-foundation', 1],
+    ['<span class="k">spec:</span>', 0],
+    ['  <span class="k">type:</span> terraform', 1],
+    ['  <span class="k">subscribe:</span>', 2],
+    ['    <span class="k">environments:</span>', 2],
+    ['      - <span class="k">name:</span> development', 2],
+    ['        <span class="k">profile:</span> pull-request', 2],
+    ['      - <span class="k">name:</span> staging', 2],
+    ['        <span class="k">profile:</span> verify', 2],
+    ['      - <span class="k">name:</span> production', 2],
+    ['        <span class="k">profile:</span> release', 2],
+    ['  <span class="k">parameters:</span>', 0],
+    ['    <span class="k">stackName:</span> network-foundation', 0],
+    ['    <span class="k">terraformDir:</span> .', 0],
+    ['    <span class="k">terraformVersion:</span> 1.9.8', 0]
+  ];
+  var yEl = $("#yaml"), h1 = 0, h1n = 0, h2 = 0, h2n = 0;
+  YAML.forEach(function (r, i) {
+    if (r[1] === 1) { if (!h1n) h1 = i; h1n++; } if (r[1] === 2) { if (!h2n) h2 = i; h2n++; }
+    var d = document.createElement("div"); d.className = "row"; d.innerHTML = r[0]; yEl.appendChild(d);
+  });
+  function hl(first, n, id) { var h = document.createElement("span"); h.className = "hl"; h.id = id;
+    h.style.top = (18 + first * 33) + "px"; h.style.height = (n * 33) + "px"; yEl.appendChild(h); return h; }
+  yEl.style.position = "relative";
+  hl(h1, h1n, "hlExists"); hl(h2, h2n, "hlShips");
+  tl.fromTo("#yamlCard", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out", immediateRender: false }, W("03-intent", "intent") - 0.1); // "intent"
+  tl.to("#lab1", { opacity: 1, duration: 0.3 }, W("03-intent", "what"));                        // "What exists"
+  tl.to("#hlExists", { opacity: 1, duration: 0.25 }, W("03-intent", "exists"));
+  tl.to("#lab1", { opacity: 0.35, duration: 0.3 }, W("03-intent", "where"));
+  tl.to("#hlExists", { opacity: 0, duration: 0.3 }, W("03-intent", "where"));
+  tl.to("#lab2", { opacity: 1, duration: 0.3 }, W("03-intent", "where"));                       // "Where it ships"
+  tl.to("#hlShips", { opacity: 1, duration: 0.25 }, W("03-intent", "ships"));
+  tl.to("#lab2", { opacity: 0.35, duration: 0.3 }, W("03-intent", "and"));
+  tl.to("#hlShips", { opacity: 0, duration: 0.3 }, W("03-intent", "and"));
+  tl.to("#lab3", { opacity: 1, duration: 0.3 }, W("03-intent", "rules") - 0.05);                // "the rules it lives by"
+  tl.fromTo("#intentCard", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out", immediateRender: false }, W("03-intent", "rules"));
+  tl.to("#hlRule", { opacity: 1, duration: 0.25 }, W("03-intent", "lives"));
+
+  // =========== 04 · compile — the line sweeps up through the intent ===========
+  tl.to(["#labels", "#wordmark"], { opacity: 0, duration: 0.35 }, S("04-compile"));
+  tl.fromTo("#binary", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.45, ease: "power3.out", immediateRender: false }, W("04-compile", "one") - 0.02); // "One open-source binary"
+  var PLAN = '<span class="tx4">$ orun plan</span>\n' +
+    '<span class="tx3">object-model:</span> <span id="d1a">source=sha256:eb2c30c…</span> <span id="d1b">catalog=sha256:edacb30…</span>\n\n' +
+    '<span class="ok">✓</span> <span class="k">Plan revision created</span>\n\n' +
+    '  <span class="tx3">Jobs:</span>     <span id="d1c" class="k">38</span>\n\n' +
+    '  <span class="tx4">│</span> 15 components × 5 envs → 38 jobs\n' +
+    '  <span class="tx4">│</span> components: admin-console-pages-git, api-edge-worker, …\n\n' +
+    '  <span class="tx4">→</span> orun run <span class="tx3">&lt;plan&gt;</span>';
+  $("#plan").innerHTML = PLAN;
+  var SWEEP_AT = W("04-compile", "compiles") - 0.08, SWEEP = 1.15;                              // "compiles"
+  gsap.set("#yamlCard", { "--cutB": "0px" }); gsap.set("#planCard", { "--cutT": "680px" });
+  // card spans 210..890 and the line sweeps exactly 890 -> 210, so the clip edge IS the line
+  lineTo(210, SWEEP_AT, SWEEP, "power2.inOut");
+  tl.to("#yamlCard", { "--cutB": "680px", duration: SWEEP, ease: "power2.inOut" }, SWEEP_AT);
+  tl.to("#planCard", { "--cutT": "0px", duration: SWEEP, ease: "power2.inOut" }, SWEEP_AT);
+  tl.to(glow, { opacity: 0.55, duration: 0.4 }, SWEEP_AT + SWEEP);
+  lineTo(960, SWEEP_AT + SWEEP + 0.25, 0.8);
+  function runCard(el, n) {
+    el.innerHTML = '<div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>&nbsp;run ' + n + ' · same inputs</div>' +
+      '<div class="code" style="font-size:22px; line-height:40px; padding:22px 28px;"><span class="tx4">$ orun plan</span>\n' +
+      '<span class="tx3">source </span>  <span class="dg">sha256:eb2c30c…</span>\n<span class="tx3">catalog</span>  <span class="dg">sha256:edacb30…</span>\n' +
+      '<span class="ok">✓</span> <span class="dg k">38</span> jobs · 15 components × 5 envs</div>';
+  }
+  runCard($("#run2"), 2); runCard($("#run3"), 3);
+  tl.to("#binary", { opacity: 0, duration: 0.3 }, W("04-compile", "same") - 0.35);
+  tl.fromTo("#run2", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out", immediateRender: false }, W("04-compile", "same") - 0.02);   // "Same inputs"
+  tl.fromTo("#run3", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out", immediateRender: false }, W("04-compile", "same", 1) - 0.02); // "same plan"
+  tl.to(["#d1a", "#d1b", "#d1c", ".dg"], { color: "#d9b45c", duration: 0.2, stagger: 0.03 }, W("04-compile", "every"));     // "Every time"
+  sceneOut("#s3", S("05-policy") - 0.02, 0.3);
+
+  // =========== 05 · policy — the rule fails at the line ===========
+  sceneIn("#s5", "05-policy");
+  lineTo(560, S("05-policy") - 0.05, 0.7);
+  words("05-policy");                                                                            // "Policy runs at compile time."
+  tl.fromTo("#agentCard", { opacity: 0, y: -40 }, { opacity: 1, y: 0, duration: 0.45, ease: "power3.out", immediateRender: false }, W("05-policy", "agent") - 0.15); // "an agent"
+  var HIT = W("05-policy", "rule") - 0.02;                                                        // impact on "rule"
+  tl.to("#agentCard", { y: 60, duration: HIT - W("05-policy", "breaks"), ease: "power2.in" }, W("05-policy", "breaks"));  // "breaks"
+  tl.set("#flash", { left: 560, width: 800 }, 0);
+  tl.fromTo("#flash", { opacity: 0 }, { opacity: 1, duration: 0.05, immediateRender: false }, HIT);
+  tl.to("#flash", { opacity: 0, duration: 0.8, ease: "power2.out" }, HIT + 0.12);
+  tl.to("#agentCard", { y: -24, duration: 0.5, ease: "back.out(2.2)" }, HIT);
+  tl.to("#agentCard", { borderColor: "#e5675a", duration: 0.2 }, HIT);
+  tl.to("#hlBad", { opacity: 1, duration: 0.2 }, HIT);
+  var ERR = "✕ component validation failed: component network-foundation failed validation against type terraform: jsonschema: '/inputs' does not validate with profiles://terraform/schema.json#/properties/inputs/additionalProperties: additionalProperties 'autoApprove' not allowed";
+  tl.to("#errCard", { opacity: 1, duration: 0.25 }, W("05-policy", "fails") - 0.2);
+  var errEl = $("#errT"); errEl.className = "bad";
+  type(errEl, ERR, W("05-policy", "fails") - 0.05, 0.55);                                         // "fails in the plan"
+  tl.fromTo("#prodPill", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.35, ease: "power3.out", immediateRender: false }, W("05-policy", "not") - 0.02); // "Not in production"
+  sceneOut("#s5", S("06-baseline") - 0.02, 0.3);
+
+  // =========== 06 · baseline ===========
+  sceneIn("#s6", "06-baseline");
+  lineTo(300, S("06-baseline") - 0.05, 0.6);
+  words("06-baseline");                                                                          // "Want the whole platform?"
+  var BL = [
+    ["LUMEN", "Multi-tenant SaaS on Cloudflare and Supabase", ["44 components", "~75 min", "baseline-v29"]],
+    ["CIRRUS", "The same platform, on Cloudflare alone", ["43 components", "~60 min", "baseline-v12"]],
+    ["MULTI-TENANT SAAS", "The same platform, under the Sourceplane brand", ["44 components", "~75 min", "baseline-v3"]]
+  ];
+  var bEl = $("#bcards");
+  BL.forEach(function (b, i) {
+    var d = document.createElement("div"); d.className = "abs card"; d.id = "bc" + i;
+    d.style.cssText = "left:" + (160 + i * 544) + "px; top:360px; width:512px; height:300px; opacity:0; padding:34px 34px; box-sizing:border-box;";
+    d.innerHTML = '<div class="kicker" style="font-size:17px;">' + b[0] + '</div><div style="font-size:32px; font-weight:600; letter-spacing:-0.02em; line-height:1.18; margin-top:18px; height:118px;">' + b[1] +
+      '</div><div style="display:flex; gap:10px; margin-top:26px;">' + b[2].map(function (c) { return '<span class="pill" style="font-size:16px; padding:6px 12px;">' + c + '</span>'; }).join("") + '</div>';
+    bEl.appendChild(d);
+    tl.fromTo(d, { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.36, ease: "power3.out", immediateRender: false }, W("06-baseline", "pick") - 0.06 + i * 0.07); // "Pick a baseline"
+  });
+  tl.to("#bc0", { borderColor: "#d9b45c", boxShadow: "0 0 0 1px #d9b45c, 0 30px 80px -30px rgba(217,180,92,.35)", duration: 0.25 }, W("06-baseline", "baseline") + 0.12);
+  tl.to(["#bc1", "#bc2"], { opacity: 0.35, duration: 0.3 }, W("06-baseline", "baseline") + 0.12);
+  var PROV = [["cloudflare", "short-lived scoped tokens"], ["supabase", "management API per run"]];
+  PROV.forEach(function (p, i) {
+    var d = document.createElement("div"); d.className = "abs";
+    d.style.cssText = "left:0; top:" + (i * 76) + "px; width:1080px; height:62px; border:1px solid var(--line-strong); border-radius:10px; background:var(--bg-card); display:flex; align-items:center; padding:0 24px; box-sizing:border-box; gap:18px; opacity:0; font-family:JBM,monospace; font-size:24px;";
+    d.innerHTML = '<span style="width:11px;height:11px;border-radius:50%;background:var(--ok)"></span><span style="width:250px">' + p[0] + '</span><span class="tx3" style="flex:1; font-size:20px;">' + p[1] + '</span><span class="pill" style="font-size:16px; padding:4px 12px;">connected</span>';
+    $("#prov").appendChild(d);
+    tl.fromTo(d, { opacity: 0, x: -20 }, { opacity: 1, x: 0, duration: 0.3, ease: "power3.out", immediateRender: false }, W("06-baseline", "connect") - 0.04 + i * 0.16); // "Connect your cloud"
+  });
+  sceneOut("#s6", E("06-baseline") - 0.35, 0.3);                                                // clear the frame: silence before the hero
+  lineTo(1000, E("06-baseline") - 0.2, 0.5);
+
+  // =========== 07 · live — the line sweeps up, the real system exists below it ===========
+  sceneIn("#s7", "07-live");
+  type($("#s7cmdT"), "$ orun baseline new lumen --via-platform", S("07-live") + 0.02, 0.5);
+  // layout the real catalog: level = longest dependsOn chain; foundation at the bottom
+  var deps = L.deps, lvl = {};
+  function level(c) { if (lvl[c] != null) return lvl[c]; var m = -1; deps[c].forEach(function (d) { m = Math.max(m, level(d)); }); return (lvl[c] = m + 1); }
+  var names = Object.keys(deps).sort(); names.forEach(level);
+  var byL = {}; names.forEach(function (c) { (byL[lvl[c]] = byL[lvl[c]] || []).push(c); });
+  var rows = []; Object.keys(byL).map(Number).sort(function (a, b) { return a - b; }).forEach(function (k) {
+    var r = byL[k]; for (var i = 0; i < r.length; i += 6) rows.push(r.slice(i, i + 6)); });
+  var GX0 = 120, GX1 = 1320, YB = 880, YT = 150, pitch = (YB - YT) / (rows.length - 1), pos = {};
+  var nodesEl = $("#nodes"), NS = "http://www.w3.org/2000/svg";
+  rows.forEach(function (r, ri) {
+    var ws = r.map(function (c) { return c.length * 9.6 + 26; }), tot = ws.reduce(function (a, b) { return a + b; }, 0) + (r.length - 1) * 16;
+    var x = GX0 + (GX1 - GX0 - tot) / 2, y = YB - ri * pitch;
+    r.forEach(function (c, i) {
+      var d = document.createElement("div"); d.className = "node" + (/worker|api-edge|web-console/.test(c) ? " worker" : "");
+      d.textContent = c; d.style.left = x + "px"; d.style.top = (y - 17) + "px"; d.style.width = ws[i] + "px"; nodesEl.appendChild(d);
+      pos[c] = { x: x + ws[i] / 2, y: y }; x += ws[i] + 16;
+    });
+  });
+  var svg = $("#edges");
+  names.forEach(function (c) { deps[c].forEach(function (d) {
+    var l = document.createElementNS(NS, "line"); l.setAttribute("x1", pos[d].x); l.setAttribute("y1", pos[d].y - 17);
+    l.setAttribute("x2", pos[c].x); l.setAttribute("y2", pos[c].y + 17); l.setAttribute("stroke", "#3a3d44"); l.setAttribute("stroke-width", "1.3");
+    svg.appendChild(l); }); });
+  L.tests.forEach(function (c, i) {                                                               // 17 test lanes as a strip under the foundation
+    var d = document.createElement("div"); d.className = "abs"; d.style.cssText = "left:" + (GX0 + 70 + i * 22) + "px; top:950px; width:12px; height:12px; border-radius:3px; background:#2a2c31;";
+    nodesEl.appendChild(d); });
+  var tl7 = document.createElement("div"); tl7.className = "abs mono tx4"; tl7.style.cssText = "left:" + GX0 + "px; top:945px; font-size:15px;"; tl7.textContent = "tests"; nodesEl.appendChild(tl7);
+  var UP_AT = W("07-live", "later") - 0.1, UP = 1.5;                                               // "later" — the hero sweep
+  gsap.set("#graph", { "--gtop": "1000px" });
+  lineTo(118, UP_AT, UP, "power2.inOut");
+  tl.to("#graph", { "--gtop": "118px", duration: UP, ease: "power2.inOut" }, UP_AT);
+  tl.fromTo("#st1", { opacity: 0, x: 24 }, { opacity: 1, x: 0, duration: 0.35, ease: "power3.out", immediateRender: false }, W("07-live", "44") - 0.04);
+  count($("#n44"), 44, W("07-live", "44"), 0.55);                                                 // "forty-four components"
+  tl.fromTo("#st2", { opacity: 0, x: 24 }, { opacity: 1, x: 0, duration: 0.35, ease: "power3.out", immediateRender: false }, W("07-live", "12") - 0.04);
+  count($("#n12"), 12, W("07-live", "12"), 0.4);                                                  // "twelve bounded contexts"
+  tl.fromTo("#st3", { opacity: 0, x: 24 }, { opacity: 1, x: 0, duration: 0.35, ease: "power3.out", immediateRender: false }, W("07-live", "3") - 0.04);  // "three environments"
+  tl.fromTo("#liveRow", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.35, ease: "power3.out", immediateRender: false }, W("07-live", "live") - 0.03); // "Live, in your repo"
+  tl.to("#measured", { opacity: 1, duration: 0.4 }, W("07-live", "repo"));
+  sceneOut("#s7", S("08-converge") - 0.02, 0.3);
+
+  // =========== 08 · converge — 41 real jobs in real dependency order ===========
+  sceneIn("#s8", "08-converge");
+  lineTo(330, S("08-converge") - 0.05, 0.6);
+  tl.fromTo("#commit", { opacity: 0, y: -30 }, { opacity: 1, y: 0, duration: 0.3, ease: "power3.out", immediateRender: false }, W("08-converge", "commit") - 0.06); // "commit"
+  tl.to("#commit", { y: 150, opacity: 0, duration: 0.32, ease: "power2.in" }, W("08-converge", "converges") - 0.1);             // "converges" — into the line
+  tl.to(glow, { opacity: 1, scaleY: 1.8, duration: 0.12 }, W("08-converge", "converges") + 0.2);
+  tl.to(glow, { opacity: 0.6, scaleY: 1, duration: 0.6 }, W("08-converge", "converges") + 0.35);
+  tl.fromTo("#runCard", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.35, ease: "power3.out", immediateRender: false }, W("08-converge", "converges") - 0.2);
+  // job levels from the run's real deps: worker deps within an env, and prod after stage
+  var wdeps = {}; L.runWorkers.forEach(function (w) { wdeps[w] = (deps[w] || []).filter(function (d) { return L.runWorkers.indexOf(d) >= 0; }); });
+  var jl = {};
+  function jlev(w, env) { var k = w + "." + env; if (jl[k] != null) return jl[k]; var m = -1;
+    wdeps[w].forEach(function (d) { m = Math.max(m, jlev(d, env)); }); if (env === "prod") m = Math.max(m, jlev(w, "stage"));
+    return (jl[k] = m + 1); }
+  var ENVS = ["dev", "stage", "prod"], cells = [], maxL = 0;
+  var gridEl = $("#grid"), GX = 190, GY = 250;
+  L.runWorkers.forEach(function (w, ci) {
+    var h = document.createElement("div"); h.className = "colh"; h.style.left = (GX + ci * 104 + 30) + "px"; h.style.top = (GY - 30) + "px";
+    h.textContent = w.replace("-worker", ""); gridEl.appendChild(h);
+    ENVS.forEach(function (e, ri) {
+      var c = document.createElement("div"); c.className = "cell"; c.style.left = (GX + ci * 104) + "px"; c.style.top = (GY + ri * 54) + "px";
+      c.innerHTML = '<span class="o">○</span><span class="y">✓</span>'; gridEl.appendChild(c);
+      var lv = jlev(w, e); maxL = Math.max(maxL, lv); cells.push({ el: c, lv: lv });
+    });
+  });
+  ENVS.concat(["tests"]).forEach(function (e, ri) {
+    var l = document.createElement("div"); l.className = "abs mono tx4"; l.style.cssText = "left:40px; top:" + (GY + ri * 54 + 10) + "px; font-size:19px;";
+    l.textContent = e; gridEl.appendChild(l); });
+  L.runTests.forEach(function (t, i) {
+    var c = document.createElement("div"); c.className = "cell"; c.style.left = (GX + i * 520) + "px"; c.style.top = (GY + 3 * 54) + "px"; c.style.width = "510px";
+    c.style.justifyContent = "flex-start"; c.style.paddingLeft = "16px"; c.style.boxSizing = "border-box"; c.style.fontSize = "17px";
+    c.innerHTML = '<span class="o">○</span><span class="y" style="left:16px;">✓</span>&nbsp;&nbsp;&nbsp;' + t + ' · verify'; gridEl.appendChild(c);
+    cells.push({ el: c, lv: 0 });
+  });
+  var F0 = W("08-converge", "converges") + 0.15, F1 = W("08-converge", "41") + 0.3, step = (F1 - F0) / maxL;
+  cells.forEach(function (c, i) { c.t = F0 + c.lv * step + (i % 7) * 0.012; });
+  cells.forEach(function (c) {
+    tl.to(c.el.querySelector(".o"), { opacity: 0, duration: 0.08 }, c.t);
+    tl.to(c.el.querySelector(".y"), { opacity: 1, duration: 0.1 }, c.t);
+    tl.to(c.el, { borderColor: "#2a2c31", backgroundColor: "#101113", duration: 0.15 }, c.t);
+  });
+  var clk = { t: 0 }, okEl = $("#okN"), barEl = $("#bar8"), last = -1, tStart = F0 - 0.05, tEnd = F1 + 0.3;
+  tl.fromTo(clk, { t: tStart }, { t: tEnd, duration: tEnd - tStart, ease: "none", immediateRender: false, onUpdate: function () {
+    var n = 0; for (var i = 0; i < cells.length; i++) if (cells[i].t <= clk.t) n++;
+    if (n !== last) { last = n; okEl.textContent = "✓ " + n; var f = Math.round(n / 41 * 24); barEl.textContent = "▓".repeat(f) + "░".repeat(24 - f) + " " + Math.round(n / 41 * 100) + "%"; }
+  } }, tStart);
+  gsap.set(okEl, { textContent: "✓ 0" }); barEl.textContent = "░".repeat(24) + " 0%";
+  var G = W("08-converge", "green");                                                              // "All green"
+  tl.to(["#stat8", "#bar8"], { color: "#4cc38a", duration: 0.25 }, G - 0.05);
+  tl.to(".cell .y", { color: "#4cc38a", duration: 0.2, stagger: 0.006 }, G - 0.12);
+  sceneOut("#s8", S("09-end") - 0.02, 0.35);
+
+  // =========== 09 · end — the sun rises over the line ===========
+  sceneIn("#s9", "09-end");
+  var mark = $("#mark"), gapY = 150 + 35.4 * 6;                                                  // centre of the mark's horizon gap
+  lineTo(gapY, S("09-end") - 0.05, 0.7);
+  tl.to(bar, { scaleX: 0.16, duration: 0.8, ease: "power3.inOut" }, S("09-end"));
+  gsap.set("#sunTop", { y: 34 }); gsap.set("#sunBot", { y: -12 });
+  tl.to("#sunTop", { y: 0, duration: 1.25, ease: "power3.out" }, W("09-end", "o") - 0.1);        // "Oh-run" — sunrise
+  tl.to("#sunBot", { y: 0, duration: 1.1, ease: "power3.out" }, W("09-end", "o") + 0.05);
+  tl.to(bar, { scaleX: 0, duration: 0.6, ease: "power2.in" }, W("09-end", "o") + 0.55);           // the line becomes the gap in the mark
+  tl.fromTo("#endWord", { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.45, ease: "power3.out", immediateRender: false }, W("09-end", "run") - 0.02);
+  words("09-end");                                                                               // "Platform discipline, compiled."
+  tl.fromTo("#endLinks", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out", immediateRender: false }, W("09-end", "open") - 0.03); // "Open source"
+  tl.to("#endCmd", { opacity: 1, duration: 0.5 }, W("09-end", "source") + 0.35);
+
+  // =========== grade: playhead-seeded grain at 12 Hz ===========
+  var turb = $("#turb"), gclk = { t: 0 }, lastSeed = -1;
+  tl.to(gclk, { t: T.total, duration: T.total, ease: "none", onUpdate: function () {
+    var seed = Math.floor(gclk.t * 12) % 24; if (seed !== lastSeed) { lastSeed = seed; turb.setAttribute("seed", String(seed)); } } }, 0);
+
+  window.__timelines["main"] = tl;
+})();
+</script>
+</body>
+</html>
