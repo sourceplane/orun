@@ -11,6 +11,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -68,8 +70,13 @@ func (s *workSyncer) say(verb, what, detail string) {
 	}
 }
 
+// idem builds the Idempotency-Key for one write: repo, path and commit in
+// the clear (what a reader greps for), then a short digest of WHAT — the
+// milestone name, the change list — because those carry dashes, arrows and
+// spaces, and the edge accepts only printable ASCII in the header.
 func (s *workSyncer) idem(path, what string) string {
-	return "work:" + s.repo + ":" + path + ":" + s.sha + ":" + what
+	sum := sha256.Sum256([]byte(what))
+	return "work:" + s.repo + ":" + path + ":" + s.sha + ":" + hex.EncodeToString(sum[:8])
 }
 
 func newWorkSyncCommand() *cobra.Command {

@@ -151,7 +151,7 @@ func TestWorkSyncCreatesThenIsIdempotent(t *testing.T) {
 		}
 	}
 	// create carries no state, so the declared `started` is the one PATCH
-	if n := strings.Count(joined, "PATCH"); n != 1 || !strings.Contains(joined, "epic:state") {
+	if n := strings.Count(joined, "PATCH"); n != 1 || !strings.Contains(joined, "PATCH /v1/organizations/org_x/tasks/epics/saas-work-gitops ") {
 		t.Errorf("a fresh epic needs exactly the state PATCH:\n%s", joined)
 	}
 	if !strings.Contains(out, "state → started") {
@@ -234,4 +234,24 @@ func headSha(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return sha
+}
+
+// The edge accepts only printable ASCII in Idempotency-Key; milestone names
+// and change lists carry dashes, arrows and spaces, so the WHAT is digested.
+func TestWorkSyncIdempotencyKeysAreASCII(t *testing.T) {
+	s := &workSyncer{repo: "sourceplane/t", sha: "abc123"}
+	for _, what := range []string{"epic:state → started", "milestone:WG0 — the spec", "contract:sha256:ff"} {
+		k := s.idem("work/epics/e/epic.yaml", what)
+		if !strings.HasPrefix(k, "work:sourceplane/t:work/epics/e/epic.yaml:abc123:") {
+			t.Fatalf("prefix lost: %s", k)
+		}
+		for _, r := range k {
+			if r < 0x20 || r > 0x7e {
+				t.Fatalf("non-ASCII in key %q", k)
+			}
+		}
+	}
+	if s.idem("p", "a") == s.idem("p", "b") {
+		t.Fatal("different whats must not collide")
+	}
 }
