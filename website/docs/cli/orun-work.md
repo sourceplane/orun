@@ -115,6 +115,10 @@ Every write carries `Idempotency-Key: work:<repo>:<path>:<sha>[:<what>]`,
 so re-running the same commit is a no-op at the edge, and the header
 `X-Orun-Work-Sync: <repo>@<sha>`, which the platform stamps as the epic's
 `managedBy` pointer and honours as the one writer a managed field accepts.
+Every run moves that pointer: a commit that changes nothing the sync
+writes still stamps the epic once (`stamp  epic <slug> — managedBy`, an
+empty update under the header), and the same commit run twice stamps
+nothing.
 A run stops at the first failed write and says how many it applied; the
 next push resumes from the tree.
 

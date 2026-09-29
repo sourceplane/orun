@@ -231,6 +231,19 @@ func (s *workSyncer) syncEpic(root string, tree *workfile.Tree, e *workfile.Epic
 				return fmt.Errorf("update epic: %w", err)
 			}
 		}
+	} else if remote.ID != "" && !pointsAt(remote.ManagedBy, s.repo, s.sha) {
+		// Design §6: the pointer names the commit the tree was last read at,
+		// and every run moves it — a run that changes no declared field still
+		// tells the platform which commit it agrees with. An empty PATCH under
+		// the sync header is that stamp and nothing else (the platform writes
+		// no field for it).
+		s.say("stamp", "epic "+e.Slug, "managedBy — "+s.repo+"@"+shortSHA(s.sha))
+		s.writes++
+		if !s.dryRun {
+			if _, err := s.client.UpdateEpicWithKey(s.ctx, s.org, e.Slug, remotestate.EpicUpdateRequest{}, s.idem(e.Path, "epic:stamp")); err != nil {
+				return fmt.Errorf("stamp epic: %w", err)
+			}
+		}
 	}
 
 	// 4. Milestones: match by name, create in order, re-order, never delete.
@@ -451,4 +464,17 @@ func firstSentence(s string) string {
 		s = s[:117] + "..."
 	}
 	return s
+}
+
+// pointsAt reports whether a managed pointer already names this repository
+// at this commit — the case in which a run has nothing to stamp.
+func pointsAt(m *remotestate.EpicManagedBy, repo, sha string) bool {
+	return m != nil && m.Repo == repo && m.SHA == sha
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
 }
