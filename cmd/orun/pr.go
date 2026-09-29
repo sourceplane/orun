@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 
 	"github.com/sourceplane/orun/internal/cliauth"
 	"github.com/sourceplane/orun/internal/provenance"
-	"github.com/sourceplane/orun/internal/taskobj"
 )
 
 // orun pr — the provenance pen: the branch names the task, the body
@@ -220,25 +218,18 @@ func readBodyFile(cmd *cobra.Command, path string) (string, error) {
 
 func newPrCheckCommand() *cobra.Command {
 	var (
-		base      string
-		asJSON    bool
-		standards string
+		base   string
+		asJSON bool
 	)
 	cmd := &cobra.Command{
 		Use:   "check [task-key]",
 		Short: "Local preflight of the provenance rules (exit 1 on errors)",
 		Long: `Run the same rules the cloud's orun/compliance check verifies (IS7 pins
 the two engines byte-identical on shared fixtures): the branch grammar,
-the Orun-Task trailer on every commit ahead of the base, one task per PR —
-and, under --standards, the task contract, the skill pins and the declared
-work tree (work-manifest, epic-status). Fix the lineage before the PR
-exists — prevention over detection.`,
+the Orun-Task trailer on every commit ahead of the base, one task per PR.
+Fix the lineage before the PR exists — prevention over detection.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			mode, err := resolveStandardsMode(standards)
-			if err != nil {
-				return fmt.Errorf("orun pr check: %w", err)
-			}
 			branch, err := gitOut(cmd.Context(), "rev-parse", "--abbrev-ref", "HEAD")
 			if err != nil {
 				return fmt.Errorf("orun pr check: %w", err)
@@ -247,25 +238,18 @@ exists — prevention over detection.`,
 			if err != nil {
 				return fmt.Errorf("orun pr check: %w", err)
 			}
-			pins := loadSessionSkillPins()
-			in := provenance.StandardsInput{CheckInput: provenance.CheckInput{Branch: branch, CommitMessages: messages,
-				HasSkillPins: len(pins) > 0, Manifest: manifestFromCIEvent()}}
+			in := provenance.CheckInput{Branch: branch, CommitMessages: messages,
+				HasSkillPins: len(loadSessionSkillPins()) > 0}
 			if len(args) == 1 {
 				in.TaskKey = args[0]
 			}
-			// The facts the standards rules judge — resolved where this
-			// process can, left nil where it cannot (the rule then says
-			// nothing; design §7). Under `off` none of it runs.
-			if mode != provenance.ModeOff {
-				resolveStandardsFacts(cmd.Context(), &in, base, pins, cmd.ErrOrStderr())
-			}
-			findings := provenance.CheckStandards(in, mode)
+			findings := provenance.Verify(in)
 			if asJSON {
-				if err := encodeJSON(cmd, map[string]any{"branch": branch, "standards": mode, "findings": findings}); err != nil {
+				if err := encodeJSON(cmd, map[string]any{"branch": branch, "findings": findings}); err != nil {
 					return err
 				}
 			} else if len(findings) == 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "clean: %s carries its lineage (%d commit(s) checked, standards %s)\n", branch, len(messages), mode)
+				fmt.Fprintf(cmd.OutOrStdout(), "clean: %s carries its lineage (%d commit(s) checked)\n", branch, len(messages))
 			} else {
 				for _, f := range findings {
 					fmt.Fprintf(cmd.OutOrStdout(), "%-5s %-16s %s\n", f.Level, f.Rule, f.Text)
@@ -278,155 +262,8 @@ exists — prevention over detection.`,
 		},
 	}
 	cmd.Flags().StringVar(&base, "base", "main", "base branch to diff against")
-	cmd.Flags().StringVar(&standards, "standards", "", "standards mode: off | warn | enforce (default: ORUN_STANDARDS, then intent.yaml execution.standards, then warn)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON")
 	return cmd
-}
-
-// resolveStandardsMode picks the mode: the flag, then ORUN_STANDARDS, then
-// intent.yaml execution.standards, then the default (warn). Each source
-// must parse; an unknown word is an error, never silently "warn".
-func resolveStandardsMode(flag string) (provenance.Mode, error) {
-	for _, src := range []struct{ name, value string }{
-		{"--standards", flag},
-		{"ORUN_STANDARDS", os.Getenv("ORUN_STANDARDS")},
-	} {
-		m, err := provenance.ParseMode(src.value)
-		if err != nil {
-			return "", fmt.Errorf("%s: %w", src.name, err)
-		}
-		if m != "" {
-			return m, nil
-		}
-	}
-	if intent := loadIntentForCloudConfig(); intent != nil {
-		m, err := provenance.ParseMode(intent.Execution.Standards)
-		if err != nil {
-			return "", fmt.Errorf("intent.yaml execution.standards: %w", err)
-		}
-		if m != "" {
-			return m, nil
-		}
-	}
-	return provenance.DefaultMode, nil
-}
-
-// manifestFromCIEvent reads the PR body's manifest block when this process
-// runs inside a GitHub Actions pull_request job (GITHUB_EVENT_PATH names
-// the event payload). Locally, before the PR exists, there is no body and
-// the manifest is nil — which the rules report as it is.
-func manifestFromCIEvent() *provenance.Manifest {
-	path := os.Getenv("GITHUB_EVENT_PATH")
-	if path == "" {
-		return nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var ev struct {
-		PullRequest struct {
-			Body string `json:"body"`
-		} `json:"pull_request"`
-	}
-	if json.Unmarshal(raw, &ev) != nil || ev.PullRequest.Body == "" {
-		return nil
-	}
-	m, err := provenance.ParseManifest(ev.PullRequest.Body)
-	if err != nil {
-		return nil
-	}
-	return m
-}
-
-// resolveStandardsFacts fills the facts the standards rules judge, from
-// what this process can see: the contract document and the local object
-// store (task-contract), the change engine against the base
-// (affects-ceiling), and the registry for the session's pins
-// (skill-current), and the declared work tree for work-manifest and the
-// epic fact (workFacts). Every step is best-effort: a fact that cannot be
-// resolved is left nil and its rule is silent, with a note on stderr.
-func resolveStandardsFacts(ctx context.Context, in *provenance.StandardsInput, base string, pins []provenance.SkillPin, errOut io.Writer) {
-	key := in.TaskKey
-	if key == "" {
-		key = provenance.TaskKeyOfBranch(in.Branch)
-	}
-	if key == "" && in.Manifest != nil {
-		key = in.Manifest.Task
-	}
-	if key != "" {
-		fact := &provenance.ContractFact{Path: taskDocRel(key)}
-		if doc, err := findTaskDoc(key); err == nil && doc != nil {
-			fact.Present = true
-			// Attached: the local object store sealed it (orun task create /
-			// attach from this clone). Absent there proves nothing — another
-			// clone may have attached it — so only a hit is asserted.
-			if store, refs, _, err := openObjectModel(); err == nil {
-				if _, c, err := taskobj.ReadTask(ctx, store, refs, key); err == nil && c != nil {
-					attached := true
-					fact.Attached = &attached
-				}
-			}
-			// affects-ceiling: the directly changed components against the
-			// contract's affects — the `task check --base` engine. The engine
-			// names COMPONENTS; a contract that lists path globs instead (the
-			// software-factory template's shape) cannot be compared here, and
-			// a rule that would flag every PR is no rule: skip it and say so.
-			if affectsArePaths(doc.Contract.Affects) {
-				fmt.Fprintln(errOut, "orun pr check: affects-ceiling not judged — the contract lists path globs and the change engine names components")
-			} else if changed, err := detectChangedComponents(ctx, base, ""); err == nil {
-				allowed := map[string]bool{}
-				for _, a := range doc.Contract.Affects {
-					allowed[a] = true
-				}
-				outside := []string{}
-				for _, c := range changed {
-					if !allowed[c] {
-						outside = append(outside, c)
-					}
-				}
-				sort.Strings(outside)
-				in.AffectsOutside = outside
-			} else {
-				fmt.Fprintf(errOut, "orun pr check: affects not compared (%v)\n", err)
-			}
-		}
-		in.Contract = fact
-	}
-	// work-manifest and epic-status: the declared tree (saas-work-gitops
-	// WG2), when the repository has one.
-	workFacts(ctx, in, key, base, errOut)
-	if len(pins) > 0 {
-		client, err := cloudClient(ctx, "", "")
-		if err != nil {
-			fmt.Fprintf(errOut, "orun pr check: skill pins not checked against the registry (%v)\n", err)
-			return
-		}
-		org := client.Scope().OrgID
-		list, err := client.ListSkills(ctx, org)
-		if err != nil {
-			fmt.Fprintf(errOut, "orun pr check: skill pins not checked against the registry (%v)\n", err)
-			return
-		}
-		latest := make(map[string]string, len(list.Skills))
-		for _, s := range list.Skills {
-			latest[s.Name] = s.Rev
-		}
-		status := make(map[string]provenance.SkillPinStatus, len(pins))
-		for _, p := range pins {
-			switch {
-			case latest[p.Name] == p.Rev:
-				status[p.Name] = provenance.SkillCurrent
-			default:
-				if _, err := client.GetSkill(ctx, org, p.Name, p.Rev); err == nil {
-					status[p.Name] = provenance.SkillStale
-				} else {
-					status[p.Name] = provenance.SkillUnknown
-				}
-			}
-		}
-		in.SkillStatus = status
-	}
 }
 
 // githooksMarker identifies our hook so install never clobbers a foreign one.
@@ -500,15 +337,4 @@ func commitsAhead(ctx context.Context, base string) ([]string, error) {
 		}
 	}
 	return out, nil
-}
-
-// affectsArePaths reports whether a contract's affects are path globs (any
-// entry carries a glob character) rather than component refs.
-func affectsArePaths(affects []string) bool {
-	for _, a := range affects {
-		if strings.ContainsAny(a, "*?[") {
-			return true
-		}
-	}
-	return false
 }

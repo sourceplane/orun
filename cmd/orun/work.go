@@ -3,11 +3,9 @@ package main
 // orun work (orun-cloud saas-work-gitops WG2, design §2 and §5): the
 // repository's declared work tree — epic.yaml per epic under `work.epics`,
 // contracts under `work.tasks` — judged before a merge. `check` reports
-// every problem the `work-manifest` standards rule would, plus the facts a
-// PR at hand needs (which milestone its task closes, whether the diff
-// touches the epic's status file). `pr check --standards` runs the same
-// reading when the repository declares a `work:` section, so the standards
-// job needs no new step. `sync` (WG3) reconciles the tree into the platform.
+// every problem in the tree, plus the facts a PR at hand needs (which
+// milestone its task closes, whether the diff touches the epic's status
+// file). `sync` (WG3) reconciles the tree into the platform.
 
 import (
 	"context"
@@ -34,8 +32,8 @@ func registerWorkCommand(root *cobra.Command) {
 
 'check' reads the tree and reports every problem — a malformed epic.yaml,
 a listed task with no contract, a contract in a reserved prefix that no
-milestone lists — before a pull request merges. 'pr check --standards'
-runs the same reading as the work-manifest rule.`,
+milestone lists — before a pull request merges. 'sync' reconciles the
+tree into the platform.`,
 		RunE: func(cmd *cobra.Command, args []string) error { return cmd.Help() },
 	}
 	cmd.AddCommand(newWorkCheckCommand())
@@ -52,8 +50,7 @@ func newWorkCheckCommand() *cobra.Command {
 		Use:   "check",
 		Short: "Validate the declared work tree (exit 1 on any problem)",
 		Long: `Read every epic.yaml under work.epics and every contract under
-work.tasks, and print each problem as the work-manifest rule reports it:
-one sentence naming the file. With --base, also resolve the facts for the
+work.tasks, and print each problem as one sentence naming the file. With --base, also resolve the facts for the
 current branch's task — the milestone that lists it, whether this PR would
 close that milestone, and whether the diff touches the epic's status file.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -70,7 +67,7 @@ close that milestone, and whether the diff touches the epic's status file.`,
 			if err != nil {
 				return fmt.Errorf("orun work check: %w", err)
 			}
-			var epic *provenance.EpicFact
+			var epic *epicFact
 			var placedIn string
 			if base != "" {
 				branch, err := gitOut(cmd.Context(), "rev-parse", "--abbrev-ref", "HEAD")
@@ -113,38 +110,24 @@ close that milestone, and whether the diff touches the epic's status file.`,
 	return cmd
 }
 
-// workFacts fills the work-manifest and epic-status facts for `pr check`
-// when the repository declares a work section. Best-effort like the other
-// facts: a tree that cannot be read leaves both nil, with a note.
-func workFacts(ctx context.Context, in *provenance.StandardsInput, key, base string, errOut io.Writer) {
-	layout := loadIntentForCloudConfig().WorkLayout()
-	if !layout.Declared() {
-		return
-	}
-	tree, err := workfile.Load(taskDocRoot(), layout)
-	if err != nil {
-		fmt.Fprintf(errOut, "orun pr check: work tree not read (%v)\n", err)
-		return
-	}
-	in.Work = &provenance.WorkFact{Problems: tree.Problems}
-	if key == "" {
-		return
-	}
-	if pl, ok := tree.Placement[key]; ok {
-		in.Epic = resolveEpicFact(ctx, tree, pl, key, base, errOut)
-	}
+// epicFact is what `orun work check --base` reports about the milestone
+// that lists the branch's task.
+type epicFact struct {
+	ClosesMilestone bool   `json:"closesMilestone"`
+	TouchesStatus   bool   `json:"touchesStatus"`
+	StatusPath      string `json:"statusPath,omitempty"`
 }
 
 // resolveEpicFact answers "does this PR close the milestone that lists key,
 // and does the diff touch the epic's status file". Closing needs the other
 // tasks' rungs from the platform; when the platform cannot be asked and
-// the milestone lists more than this task, the fact is nil (the rule says
-// nothing) rather than guessed.
-func resolveEpicFact(ctx context.Context, tree *workfile.Tree, pl workfile.Placement, key, base string, errOut io.Writer) *provenance.EpicFact {
-	fact := &provenance.EpicFact{StatusPath: pl.Epic.StatusPath()}
+// the milestone lists more than this task, the fact is nil (nothing is
+// said) rather than guessed.
+func resolveEpicFact(ctx context.Context, tree *workfile.Tree, pl workfile.Placement, key, base string, errOut io.Writer) *epicFact {
+	fact := &epicFact{StatusPath: pl.Epic.StatusPath()}
 	changed, err := changedFilesSince(ctx, base)
 	if err != nil {
-		fmt.Fprintf(errOut, "orun pr check: diff not read (%v)\n", err)
+		fmt.Fprintf(errOut, "orun work check: diff not read (%v)\n", err)
 		return nil
 	}
 	for _, f := range changed {
@@ -164,7 +147,7 @@ func resolveEpicFact(ctx context.Context, tree *workfile.Tree, pl workfile.Place
 	}
 	client, err := cloudClient(ctx, "", "")
 	if err != nil {
-		fmt.Fprintf(errOut, "orun pr check: epic-status not judged — the platform could not be asked for the milestone's other tasks (%v)\n", err)
+		fmt.Fprintf(errOut, "orun work check: epic-status not judged — the platform could not be asked for the milestone's other tasks (%v)\n", err)
 		return nil
 	}
 	org := client.Scope().OrgID
@@ -172,7 +155,7 @@ func resolveEpicFact(ctx context.Context, tree *workfile.Tree, pl workfile.Place
 	for _, k := range others {
 		v, err := client.GetTaskVerdict(ctx, org, k)
 		if err != nil {
-			fmt.Fprintf(errOut, "orun pr check: epic-status not judged — %s: %v\n", k, err)
+			fmt.Fprintf(errOut, "orun work check: epic-status not judged — %s: %v\n", k, err)
 			return nil
 		}
 		if v.Verdict.Rung != "done" {

@@ -37,12 +37,6 @@ type Intent struct {
 // orun binary's digest and a declared pin is a load-time error.
 type IntentExecution struct {
 	State IntentExecutionState `yaml:"state,omitempty" json:"state,omitempty"`
-	// Standards is the repository's standards mode for `orun pr check`
-	// (orun-cloud saas-agent-skills SK5, design §7): off, warn or enforce.
-	// The committed, reviewable place to turn the practices the skill
-	// registry ships into a merge gate for every lane at once; the flag and
-	// ORUN_STANDARDS override it per invocation. Unset reads as warn.
-	Standards string `yaml:"standards,omitempty" json:"standards,omitempty"`
 }
 
 // IntentExecutionState configures where execution state is stored.

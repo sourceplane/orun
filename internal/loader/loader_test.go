@@ -294,4 +294,27 @@ components: []
 	if _, err := LoadIntent(okPath); err != nil {
 		t.Fatalf("intent without a pin must load: %v", err)
 	}
+
+	// execution.standards (the removed `orun pr check --standards` mode)
+	// is ignored: an intent that still declares it loads unchanged.
+	stdPath := filepath.Join(dir, "standards.yaml")
+	writeTestFile(t, stdPath, `apiVersion: sourceplane.io/v1
+kind: Intent
+metadata:
+  name: plain
+execution:
+  standards: enforce
+  state:
+    mode: local
+groups: {}
+environments: {}
+components: []
+`)
+	got, err := LoadIntent(stdPath)
+	if err != nil {
+		t.Fatalf("an intent that still declares execution.standards must load: %v", err)
+	}
+	if got.Execution.State.Mode != "local" {
+		t.Fatalf("execution.state lost next to execution.standards: %+v", got.Execution)
+	}
 }
