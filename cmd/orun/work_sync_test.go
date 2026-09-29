@@ -24,6 +24,8 @@ type fakePlatform struct {
 	tasks      map[string]map[string]any
 	docs       map[string]string
 	writes     []string // "METHOD path idem header"
+	// stampsOnly counts the empty PATCHes: the sync's stamp, no field.
+	stampsOnly int
 }
 
 func (p *fakePlatform) record(r *http.Request) {
@@ -49,9 +51,14 @@ func (p *fakePlatform) handler() http.HandlerFunc {
 		case r.Method == "POST" && path == "/epics":
 			p.record(r)
 			p.epic = map[string]any{"id": "epc_1", "slug": body["slug"], "name": body["name"], "description": body["description"], "state": "Planning", "stateCategory": "backlog", "owner": "usr_1"}
+			p.stamp(r)
 			envelope(p.t, w, 201, map[string]any{"epic": p.epic})
 		case r.Method == "PATCH" && path == "/epics/saas-work-gitops":
 			p.record(r)
+			if len(body) == 0 {
+				p.stampsOnly++
+			}
+			p.stamp(r)
 			for k, v := range body {
 				if k == "state" {
 					p.epic["stateCategory"] = v
@@ -94,6 +101,15 @@ func (p *fakePlatform) handler() http.HandlerFunc {
 			p.t.Errorf("unexpected call %s %s", r.Method, r.URL.Path)
 			envelope(p.t, w, 500, nil)
 		}
+	}
+}
+
+// stamp does what the platform does under the sync header: the epic carries
+// the pointer at the commit the header names.
+func (p *fakePlatform) stamp(r *http.Request) {
+	if h := r.Header.Get("X-Orun-Work-Sync"); h != "" {
+		repo, sha, _ := strings.Cut(h, "@")
+		p.epic["managedBy"] = map[string]any{"repo": repo, "path": "work/epics/saas-work-gitops/epic.yaml", "sha": sha, "keyPrefix": "WG", "syncedAt": "2026-01-01T00:00:00Z"}
 	}
 }
 
@@ -253,5 +269,61 @@ func TestWorkSyncIdempotencyKeysAreASCII(t *testing.T) {
 	}
 	if s.idem("p", "a") == s.idem("p", "b") {
 		t.Fatal("different whats must not collide")
+	}
+}
+
+// Design §6: every run moves the pointer. A commit that changes nothing the
+// sync writes still stamps the epic — once, with an empty PATCH — and the
+// same commit run twice stamps nothing.
+func TestWorkSyncStampsAnUnchangedEpicOncePerCommit(t *testing.T) {
+	dir := writeSyncRepo(t)
+	p := &fakePlatform{t: t, tasks: map[string]map[string]any{}, docs: map[string]string{}}
+	srv := httptest.NewServer(p.handler())
+	defer srv.Close()
+
+	if out, err := runTaskCmd(t, newWorkSyncCommand(), srv.URL, "--repo", "sourceplane/t"); err != nil {
+		t.Fatalf("first sync: %v\n%s", err, out)
+	}
+	if p.stampsOnly != 0 {
+		t.Fatalf("a run that created and updated the epic has nothing left to stamp; got %d empty PATCHes", p.stampsOnly)
+	}
+
+	// a commit that touches nothing the sync declares
+	if err := os.WriteFile(filepath.Join(dir, "NOTES.md"), []byte("unrelated\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "unrelated")
+	before := len(p.writes)
+	out, err := runTaskCmd(t, newWorkSyncCommand(), srv.URL, "--repo", "sourceplane/t")
+	if err != nil {
+		t.Fatalf("second sync: %v\n%s", err, out)
+	}
+	var nonDoc []string
+	for _, w := range p.writes[before:] {
+		if !strings.Contains(w, "/docs/") {
+			nonDoc = append(nonDoc, w)
+		}
+	}
+	if len(nonDoc) != 1 || !strings.Contains(nonDoc[0], "PATCH /v1/organizations/org_x/tasks/epics/saas-work-gitops work:sourceplane/t:work/epics/saas-work-gitops/epic.yaml:"+headSha(t)) {
+		t.Fatalf("expected exactly the stamp PATCH, got %v", nonDoc)
+	}
+	if p.stampsOnly != 1 || !strings.Contains(out, "stamp          epic saas-work-gitops — managedBy") || !strings.Contains(out, "1 write(s)") {
+		t.Fatalf("stamp not reported as the one write:\n%s", out)
+	}
+
+	// the same commit again: the pointer already names it
+	before = len(p.writes)
+	out, err = runTaskCmd(t, newWorkSyncCommand(), srv.URL, "--repo", "sourceplane/t")
+	if err != nil {
+		t.Fatalf("third sync: %v\n%s", err, out)
+	}
+	for _, w := range p.writes[before:] {
+		if !strings.Contains(w, "/docs/") {
+			t.Errorf("third run wrote: %s", w)
+		}
+	}
+	if p.stampsOnly != 1 || !strings.Contains(out, "0 write(s)") {
+		t.Fatalf("third run:\n%s", out)
 	}
 }

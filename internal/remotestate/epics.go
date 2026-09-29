@@ -39,6 +39,20 @@ type PublicEpic struct {
 	// Health is the ASSERTED health (TV3): somebody's word, or "".
 	Health     string `json:"health"`
 	HealthNote string `json:"healthNote"`
+	// ManagedBy is the work-sync pointer (saas-work-gitops design §6): the
+	// repository, file and commit git last declared this epic from. Nil on
+	// an epic no sync has stamped.
+	ManagedBy *EpicManagedBy `json:"managedBy,omitempty"`
+}
+
+// EpicManagedBy is the pointer a managed epic carries: which tree owns it
+// and the commit the last sync read.
+type EpicManagedBy struct {
+	Repo      string `json:"repo"`
+	Path      string `json:"path"`
+	SHA       string `json:"sha"`
+	KeyPrefix string `json:"keyPrefix"`
+	SyncedAt  string `json:"syncedAt"`
 }
 
 // PublicMilestone mirrors PublicMilestone: a phase of its epic.
