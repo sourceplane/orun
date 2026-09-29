@@ -158,3 +158,35 @@ func TestParseTemplateIsUnbound(t *testing.T) {
 		t.Fatal("ParseTemplate accepted a non-key name")
 	}
 }
+
+// saas-work-gitops WG-1: the declared tasks directory (intent.yaml
+// `work.tasks`) is honoured by every lookup, and the finding-facing
+// spelling is repo-relative with forward slashes.
+func TestFindForKeyInDeclaredDir(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "work", "tasks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	titled := strings.Replace(fullDoc, "name: ENG-42", "name: ENG-42\n  title: Ship the composer", 1)
+	if err := os.WriteFile(PathForIn(root, "work/tasks", "ENG-42"), []byte(titled), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := FindForKeyIn(root, "work/tasks", "ENG-42")
+	if err != nil || doc == nil || doc.Key != "ENG-42" || doc.Title != "Ship the composer" {
+		t.Fatalf("find in declared dir: %v %+v", err, doc)
+	}
+	// The default lookup does not see it: the layout is the repository's word.
+	if doc, err := FindForKey(root, "ENG-42"); err != nil || doc != nil {
+		t.Fatalf("default dir must not find a declared-dir doc: %v %+v", err, doc)
+	}
+	if got := RelPathIn("work/tasks", "ENG-42"); got != "work/tasks/ENG-42.TaskContract.yaml" {
+		t.Fatalf("RelPathIn = %q", got)
+	}
+	if got := RelPathIn("", "ENG-42"); got != "tasks/ENG-42.TaskContract.yaml" {
+		t.Fatalf("RelPathIn default = %q", got)
+	}
+	if _, err := FindForKeyIn(root, "work/tasks", "../x"); err == nil {
+		t.Fatal("traversal-shaped key accepted")
+	}
+}

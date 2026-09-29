@@ -12,7 +12,7 @@ what the platform observed (branches, PRs, merges, gates), never typed.
 orun task create   [--adopt KEY | --derive web#123 | --prefix TSK] [--title …] \
                    [--epic REF] [--milestone mls_…] [--brief …] [--assignee me] \
                    [--contract FILE]
-orun task attach   <key>            # seal tasks/<KEY>.TaskContract.yaml and upload it
+orun task attach   <key>            # seal <tasks>/<KEY>.TaskContract.yaml and upload it
 orun task list     [--epic REF] [--milestone mls_…] [--assignee me|agents|REF]
 orun task show     <key|tsk_id>     # the task, where it belongs, its derived verdict
 orun task check    <key> [--base REF] [--head REF]   # offline: validity, completeness, affects vs diff
@@ -54,7 +54,7 @@ contracted:
   a bootstrap keeps beside its flows because the key does not exist until
   the allocator answers. It is read and validated *before* the create, so a
   malformed document costs no key.
-- Without `--contract`, `tasks/<KEY>.TaskContract.yaml` is attached when
+- Without `--contract`, `<tasks>/<KEY>.TaskContract.yaml` is attached when
   one exists for the issued key (the repo-authored convention; see
   `attach`).
 
@@ -98,7 +98,10 @@ exists, and the contract's dependencies with their states.
 
 ## `attach` and `check`
 
-`attach <key>` seals `tasks/<KEY>.TaskContract.yaml` locally (sha256 over
+`<tasks>` is the directory intent.yaml declares under `work.tasks`, `tasks`
+when it declares none — see [configuration](../reference/configuration.md#intent-file).
+
+`attach <key>` seals `<tasks>/<KEY>.TaskContract.yaml` locally (sha256 over
 canonical JSON), uploads it, and the server refuses a mismatch. `check
 <key>` runs entirely offline: strict validity, completeness in the same
 terms the cloud derives readiness from, and with `--base` the components

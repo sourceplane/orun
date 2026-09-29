@@ -16,7 +16,6 @@ import (
 
 	"github.com/sourceplane/orun/internal/cliauth"
 	"github.com/sourceplane/orun/internal/provenance"
-	"github.com/sourceplane/orun/internal/taskfile"
 	"github.com/sourceplane/orun/internal/taskobj"
 )
 
@@ -354,9 +353,8 @@ func resolveStandardsFacts(ctx context.Context, in *provenance.StandardsInput, b
 		key = in.Manifest.Task
 	}
 	if key != "" {
-		fact := &provenance.ContractFact{}
-		root := taskDocRoot()
-		if doc, err := taskfile.FindForKey(root, key); err == nil && doc != nil {
+		fact := &provenance.ContractFact{Path: taskDocRel(key)}
+		if doc, err := findTaskDoc(key); err == nil && doc != nil {
 			fact.Present = true
 			// Attached: the local object store sealed it (orun task create /
 			// attach from this clone). Absent there proves nothing — another

@@ -100,7 +100,7 @@ execution:
 | `manifest` present | warn | **error** |
 | `skill-pins` — the manifest names the skill revisions the session ran under | warn | **error** |
 | `skill-current` — each pin is the registry's latest | warn | **error** on a revision the registry never published; warn on a superseded one |
-| `task-contract` — `tasks/<KEY>.TaskContract.yaml` exists and is attached | warn | **error** |
+| `task-contract` — `<tasks>/<KEY>.TaskContract.yaml` exists and is attached (`<tasks>` is `work.tasks` in intent.yaml, default `tasks`) | warn | **error** |
 | `affects-ceiling` — the diff stays inside the contract's `affects` | warn | **error** |
 | `epic-status` — a PR closing a milestone updates the epic's status file | warn | warn |
 
@@ -108,7 +108,7 @@ execution:
 names the skill section to read, so a refusal is also the instruction.
 
 The new rules judge **facts** this process can see, and say nothing about a
-fact it cannot: the contract from `tasks/`, attachment from the local object
+fact it cannot: the contract from the declared tasks directory, attachment from the local object
 store (a hit is asserted, a miss is not), the affects ceiling from the same
 change engine `task check --base` uses (that engine names components, so a
 contract whose `affects` are path globs is not judged, with a note), the pins from
