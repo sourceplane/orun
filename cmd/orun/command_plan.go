@@ -41,6 +41,9 @@ var planCmd = &cobra.Command{
 		// Never fails the plan; a no-op unless enabled + on the clean default
 		// branch + the catalog changed since the last publish.
 		maybeAutoPushCatalog(cmd.Context())
+		// Same shape for the declared work tree (intent work.sync: on-merge):
+		// the merge's plan is the sync; no separate job.
+		maybeAutoSyncWork(cmd.Context())
 		return nil
 	},
 }

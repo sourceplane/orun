@@ -55,7 +55,10 @@ Every `orun task` verb and `orun pr check` read the contract from the
 declared `tasks` directory, and a `task-contract` finding prints that path.
 Absent, the section means the layout every repository has had; a directory
 must be repo-relative and `sync` one of the two words, or the intent file
-refuses to load.
+refuses to load. `sync: on-merge` makes a successful `orun plan` on the
+clean default branch reconcile the tree into Orunbase after the plan — the
+same mechanism as `execution.state.autopushCatalog`, so a repository needs
+no separate job; see [`orun work`](../cli/orun-work.md).
 
 It also declares where compositions come from:
 

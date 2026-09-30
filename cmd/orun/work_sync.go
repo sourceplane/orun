@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -110,48 +111,39 @@ Runs only when intent.yaml says 'sync: on-merge' (or with --force);
 				return fmt.Errorf("orun work sync: intent.yaml work.sync is %q — set it to on-merge, or pass --dry-run to see the plan", layout.Sync)
 			}
 			root := taskDocRoot()
-			tree, err := workfile.Load(root, layout)
-			if err != nil {
-				return fmt.Errorf("orun work sync: %w", err)
-			}
-			if len(tree.Problems) > 0 {
-				for _, p := range tree.Problems {
+			// The tree is judged before any network: a broken declaration is
+			// refused whether or not a workspace resolves.
+			tree, err := loadWorkTree(root, layout)
+			var problems *workTreeProblems
+			if errors.As(err, &problems) {
+				for _, p := range problems.Problems {
 					fmt.Fprintf(cmd.ErrOrStderr(), "error work-manifest   %s\n", p)
 				}
-				return exitErr(1, "orun work sync: the tree has %d problem(s) — `orun work check` names them; nothing was written", len(tree.Problems))
+				return exitErr(1, "orun work sync: the tree has %d problem(s) — `orun work check` names them; nothing was written", len(problems.Problems))
 			}
-			sha, err := gitOutIn(root, "rev-parse", "HEAD")
 			if err != nil {
-				return fmt.Errorf("orun work sync: %s has no commits yet", root)
-			}
-			identity := repoName
-			if identity == "" {
-				identity = specRepoIdentity(root)
+				return fmt.Errorf("orun work sync: %w", err)
 			}
 			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
-			client.SetHeader(remotestate.WorkSyncHeader, identity+"@"+sha)
-			s := &workSyncer{ctx: cmd.Context(), client: client, org: client.Scope().OrgID, repo: identity, sha: sha, dryRun: dryRun, out: cmd.OutOrStdout()}
+			out := cmd.OutOrStdout()
 			if asJSON {
-				s.out = io.Discard
+				out = io.Discard
 			}
-			for _, e := range tree.Epics {
-				if err := s.syncEpic(root, tree, e); err != nil {
-					if asJSON {
-						_ = encodeJSON(cmd, map[string]any{"repo": identity, "sha": sha, "dryRun": dryRun, "actions": s.actions, "error": err.Error()})
-					}
-					return exitErr(1, "orun work sync: %s: %v — %d write(s) applied before it; re-running resumes from the tree", e.Slug, err, s.writes)
+			s, err := runWorkSyncTree(cmd.Context(), root, tree, client, repoName, dryRun, out)
+			if err != nil && s == nil {
+				return fmt.Errorf("orun work sync: %w", err)
+			}
+			if err != nil {
+				if asJSON {
+					_ = encodeJSON(cmd, map[string]any{"repo": s.repo, "sha": s.sha, "dryRun": dryRun, "actions": s.actions, "error": err.Error()})
 				}
+				return exitErr(1, "orun work sync: %v", err)
 			}
 			if asJSON {
-				return encodeJSON(cmd, map[string]any{"repo": identity, "sha": sha, "dryRun": dryRun, "actions": s.actions, "writes": s.writes, "warnings": s.warns})
-			}
-			if dryRun {
-				fmt.Fprintf(s.out, "dry run: %d write(s) would be made, %d warning(s)\n", s.writes, s.warns)
-			} else {
-				fmt.Fprintf(s.out, "synced %d epic(s) at %s: %d write(s), %d warning(s)\n", len(tree.Epics), shortRevision(sha), s.writes, s.warns)
+				return encodeJSON(cmd, map[string]any{"repo": s.repo, "sha": s.sha, "dryRun": dryRun, "actions": s.actions, "writes": s.writes, "warnings": s.warns})
 			}
 			return nil
 		},
@@ -161,6 +153,54 @@ Runs only when intent.yaml says 'sync: on-merge' (or with --force);
 	cmd.Flags().StringVar(&repoName, "repo", "", "repository identity for the docs and the managedBy pointer (default: from the origin remote)")
 	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
+}
+
+// workTreeProblems is the error a sync answers when the tree fails the
+// work-manifest rules: nothing was written, and each line names a file.
+type workTreeProblems struct{ Problems []string }
+
+func (e *workTreeProblems) Error() string {
+	return fmt.Sprintf("the tree has %d problem(s)", len(e.Problems))
+}
+
+// runWorkSyncTree is one sync of a loaded tree at root — what `orun work
+// sync` and the plan-time auto-sync share. It sets the sync header for HEAD, reconciles every epic in order, and prints the
+// summary line to out. The syncer is returned even on a failed write, so a
+// caller can report what was applied before it; the error says so too.
+// loadWorkTree loads and judges the declared tree: a parse failure is the
+// error, a rule violation is a *workTreeProblems.
+func loadWorkTree(root string, layout model.WorkLayout) (*workfile.Tree, error) {
+	tree, err := workfile.Load(root, layout)
+	if err != nil {
+		return nil, err
+	}
+	if len(tree.Problems) > 0 {
+		return nil, &workTreeProblems{Problems: tree.Problems}
+	}
+	return tree, nil
+}
+
+func runWorkSyncTree(ctx context.Context, root string, tree *workfile.Tree, client *remotestate.Client, identity string, dryRun bool, out io.Writer) (*workSyncer, error) {
+	sha, err := gitOutIn(root, "rev-parse", "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("%s has no commits yet", root)
+	}
+	if identity == "" {
+		identity = specRepoIdentity(root)
+	}
+	client.SetHeader(remotestate.WorkSyncHeader, identity+"@"+sha)
+	s := &workSyncer{ctx: ctx, client: client, org: client.Scope().OrgID, repo: identity, sha: sha, dryRun: dryRun, out: out}
+	for _, e := range tree.Epics {
+		if err := s.syncEpic(root, tree, e); err != nil {
+			return s, fmt.Errorf("%s: %v — %d write(s) applied before it; the next sync resumes from the tree", e.Slug, err, s.writes)
+		}
+	}
+	if dryRun {
+		fmt.Fprintf(s.out, "dry run: %d write(s) would be made, %d warning(s)\n", s.writes, s.warns)
+	} else {
+		fmt.Fprintf(s.out, "synced %d epic(s) at %s: %d write(s), %d warning(s)\n", len(tree.Epics), shortRevision(sha), s.writes, s.warns)
+	}
+	return s, nil
 }
 
 // syncEpic reconciles one declaration, in the order design §6 lists.
