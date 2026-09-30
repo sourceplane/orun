@@ -11,10 +11,12 @@ The plan is the artifact produced by `orun plan` and consumed by `orun run`. The
 | --- | --- |
 | `apiVersion` | `orun.io/v1` |
 | `kind` | Always `Plan` |
-| `metadata` | Name, description, namespace, generation timestamp, checksum |
+| `metadata` | Name, description, namespace, checksum, selection, trigger, and revision |
 | `execution` | `concurrency`, `failFast`, and `stateFile` |
 | `spec.jobBindings` | Optional metadata about bound jobs |
 | `jobs` | The concrete execution DAG |
+
+Plans are deterministic: the same inputs produce byte-identical `plan.json`. `jobs[]` is in topological order, with ties broken by job id, so a plan diff in a pull request only shows real changes. Plans carry no generation timestamp. `metadata.generatedAt` is still accepted when reading plans written by older versions, but it is volatile and is left out of `metadata.checksum` and `metadata.revision.planHash`.
 
 ## Job fields
 
@@ -99,7 +101,6 @@ Secrets appear in the plan as references only; no value field exists, structural
   "kind": "Plan",
   "metadata": {
     "name": "demo",
-    "generatedAt": "2026-01-01T00:00:00Z",
     "checksum": "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   },
   "execution": {

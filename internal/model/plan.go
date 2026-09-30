@@ -15,6 +15,9 @@ type PlanMetadata struct {
 	Name        string            `json:"name" yaml:"name"`
 	Description string            `json:"description,omitempty" yaml:"description,omitempty"`
 	Namespace   string            `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	// GeneratedAt is volatile and not stamped by the renderer (plans are
+	// byte-identical for identical inputs). It is kept for reading older
+	// plans and is excluded from checksum and planHash.
 	GeneratedAt string            `json:"generatedAt,omitempty" yaml:"generatedAt,omitempty"`
 	Checksum    string            `json:"checksum,omitempty" yaml:"checksum,omitempty"`
 	Scope       *PlanScope        `json:"scope,omitempty" yaml:"scope,omitempty"`
