@@ -302,6 +302,8 @@ type PlanJobInput struct {
 	JobID     string   `json:"jobId"`
 	Component string   `json:"component,omitempty"`
 	Deps      []string `json:"deps"`
+	Index     int      `json:"index"`
+	RunsOn    string   `json:"runsOn,omitempty"`
 }
 
 // CreateRunRequest is the body for POST …/state/runs (contract §2.1). The plan

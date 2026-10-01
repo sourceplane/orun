@@ -78,6 +78,8 @@ func (r *RemoteStateBackend) InitRun(ctx context.Context, plan *model.Plan, opts
 			JobID:     j.JobID,
 			Component: j.Component,
 			Deps:      j.Deps,
+			Index:     j.Index,
+			RunsOn:    j.RunsOn,
 		})
 	}
 

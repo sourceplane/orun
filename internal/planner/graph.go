@@ -2,6 +2,7 @@ package planner
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/sourceplane/orun/internal/model"
 )
@@ -79,12 +80,19 @@ func (g *JobGraph) TopologicalSort() ([]string, error) {
 		}
 	}
 
-	// Kahn's algorithm: process nodes with no dependencies first
+	// Kahn's algorithm: process nodes with no dependencies first. The seed
+	// queue and every dependents list are sorted so the order is a function of
+	// the graph alone, not of map iteration: a job's position (PlanJob.Index)
+	// must be the same every time the same intent is planned.
 	queue := make([]string, 0)
 	for jobID, degree := range inDegree {
 		if degree == 0 {
 			queue = append(queue, jobID)
 		}
+	}
+	sort.Strings(queue)
+	for jobID := range dependents {
+		sort.Strings(dependents[jobID])
 	}
 
 	sorted := make([]string, 0, len(g.jobs))

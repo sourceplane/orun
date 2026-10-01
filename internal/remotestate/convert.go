@@ -22,6 +22,12 @@ type BackendPlanJob struct {
 	Component string            `json:"component"`
 	Deps      []string          `json:"deps"`
 	Steps     []BackendPlanStep `json:"steps"`
+	// Index, RunsOn and Labels let the platform map a GitHub lane back to its
+	// plan job (the lane's runner label carries the index) and know what the
+	// lane asked to run on.
+	Index  int               `json:"index"`
+	RunsOn string            `json:"runsOn,omitempty"`
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // BackendPlanStep is a step entry in BackendPlanJob.
@@ -51,6 +57,9 @@ func ConvertPlan(plan *model.Plan) *BackendPlan {
 			Component: job.Component,
 			Deps:      deps,
 			Steps:     make([]BackendPlanStep, 0, len(job.Steps)),
+			Index:     job.Index,
+			RunsOn:    job.RunsOn,
+			Labels:    job.Labels,
 		}
 		for _, step := range job.Steps {
 			sid := backendStepID(step)

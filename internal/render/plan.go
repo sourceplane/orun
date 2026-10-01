@@ -123,6 +123,7 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 			}
 		}
 
+		planJob.Index = len(plan.Jobs)
 		plan.Jobs = append(plan.Jobs, planJob)
 	}
 
