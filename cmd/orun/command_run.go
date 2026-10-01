@@ -75,6 +75,7 @@ var runCmd = &cobra.Command{
 
 func registerRunCommand(root *cobra.Command) {
 	root.AddCommand(runCmd)
+	registerRunInitCommand(runCmd)
 
 	runCmd.Flags().StringVarP(&runPlanRef, "plan", "p", "", "Plan reference: file path, name, or checksum prefix (deprecated: use positional argument)")
 
@@ -437,16 +438,26 @@ func printRunSummary(plan *model.Plan, execID string, runErr error) {
 // uploadJobShardsAfterRun loads the execution state and uploads job shards
 // for all terminal jobs. The upload is best-effort — errors warn but do not
 // change the job conclusion.
-// setupRemoteStateHooks initialises the backend, performs InitRun, and wires
-// hooks for per-job claim, heartbeat, log upload, and terminal update. On
-// success it stores the log pipeline (which buffers/spills log uploads, design
-// §7 row 5) through outPipe so the caller can drain + report it after the run.
-func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, backendURL string, intent *model.Intent, outPipe **logpipe.Pipeline) error {
-	ctx := context.Background()
+// remoteRunSession is what initRemoteRun establishes: the authenticated,
+// scoped backend and the run it created or joined. setupRemoteStateHooks
+// wires the per-job hooks on top; `orun run init` stops here.
+type remoteRunSession struct {
+	backend  statebackend.Backend
+	client   *remotestate.Client
+	tokenSrc remotestate.TokenSource
+	scope    remotestate.Scope
+	runnerID string
+	handle   *statebackend.RunHandle
+}
 
+// initRemoteRun resolves the repo link, scope and credentials, builds the
+// coordination backend, and performs InitRun for execID. It claims nothing.
+// InitRun is idempotent on the server, so the plan job can create the run
+// before any lane exists and every lane's `orun run --job` joins it.
+func initRemoteRun(ctx context.Context, plan *model.Plan, execID, backendURL string, intent *model.Intent, dryRun bool) (*remoteRunSession, error) {
 	repo, err := resolveRepoContext(backendURL)
 	if err != nil && os.Getenv("GITHUB_ACTIONS") != "true" {
-		return err
+		return nil, err
 	}
 	namespaceID := ""
 	if repo != nil {
@@ -467,7 +478,7 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	// fail fast in non-interactive use rather than exchanging an empty claim.
 	if !termIsInteractive() {
 		if err := enforceRequireOrg(requireOrg, scope.OrgID); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -486,9 +497,9 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		// command first (design §7 row 2) — a fresh clone goes `auth login` →
 		// `cloud link` → run; you cannot link without a session.
 		if isNoLoginErr(err) {
-			return errNotLoggedIn()
+			return nil, errNotLoggedIn()
 		}
-		return fmt.Errorf("remote state auth: %w", err)
+		return nil, fmt.Errorf("remote state auth: %w", err)
 	}
 
 	// With a usable session but no resolved scope, self-heal by linking this
@@ -505,12 +516,12 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		_, link, created, linkErr := autoLinkRepo(ctx, backendURL, runOrg, runProject)
 		if linkErr != nil {
 			if isNoGitRemoteErr(linkErr) {
-				return errRepoNotLinked(backendURL)
+				return nil, errRepoNotLinked(backendURL)
 			}
-			return linkErr
+			return nil, linkErr
 		}
 		if link == nil {
-			return errRepoNotLinked(backendURL)
+			return nil, errRepoNotLinked(backendURL)
 		}
 		scope = resolveScope(runOrg, runProject, intentOrg, intentProject, link.OrgID, link.ProjectID)
 		if strings.TrimSpace(namespaceID) == "" {
@@ -530,7 +541,7 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	// so state paths target the org/project the workflow token authorizes.
 	if oidcSrc, ok := tokenSrc.(*remotestate.OIDCTokenSource); ok {
 		if _, terr := oidcSrc.Token(ctx); terr != nil {
-			return fmt.Errorf("remote state auth (oidc exchange): %w", terr)
+			return nil, fmt.Errorf("remote state auth (oidc exchange): %w", terr)
 		}
 		exOrg, exProject := oidcSrc.ResolvedScope()
 		if scope.OrgID == "" {
@@ -552,7 +563,7 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		cs := configsurface.NewClient(backendURL, version, tokenSrc)
 		id, rerr := cs.ResolveProjectID(ctx, scope.OrgID, p)
 		if rerr != nil {
-			return fmt.Errorf("resolve project %q: %w", p, rerr)
+			return nil, fmt.Errorf("resolve project %q: %w", p, rerr)
 		}
 		scope.ProjectID = id
 	}
@@ -590,7 +601,7 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		GitCommit:   gitCommit,
 		GitRef:      gitRef,
 		GitDirty:    gitDirty,
-		DryRun:      r.DryRun,
+		DryRun:      dryRun,
 	})
 	if err != nil {
 		var apiErr *remotestate.APIError
@@ -605,24 +616,46 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 				// upgrade to the actionable "add your repo" message only if the
 				// repo is genuinely absent; otherwise keep the generic not-linked
 				// message (specs/oidc-ci-tenancy §4.2).
-				return disambiguateRepoDenial(ctx, backendURL, repo, scope.OrgID, errRepoNotLinked(backendURL))
+				return nil, disambiguateRepoDenial(ctx, backendURL, repo, scope.OrgID, errRepoNotLinked(backendURL))
 			}
 			if apiErr.IsAuth() {
-				return errNotLoggedIn()
+				return nil, errNotLoggedIn()
 			}
 			// A 5xx at run start means the backend is up but failing — same escape
 			// hatch as an unreachable backend (design §7 row 4).
 			if apiErr.Status >= 500 {
-				return errBackendUnreachable(backendURL, err)
+				return nil, errBackendUnreachable(backendURL, err)
 			}
-			return fmt.Errorf("initializing remote run: %w", err)
+			return nil, fmt.Errorf("initializing remote run: %w", err)
 		}
 		// Not an API error → a transport failure (DNS, refused, timeout) after the
 		// client's retries: the backend is unreachable at run start. Fail fast with
 		// the --local escape hatch; never silently fall back to local state (a team
 		// expecting shared state must notice).
-		return errBackendUnreachable(backendURL, err)
+		return nil, errBackendUnreachable(backendURL, err)
 	}
+	return &remoteRunSession{
+		backend:  backend,
+		client:   client,
+		tokenSrc: tokenSrc,
+		scope:    scope,
+		runnerID: runnerID,
+		handle:   handle,
+	}, nil
+}
+
+// setupRemoteStateHooks initialises the backend, performs InitRun, and wires
+// hooks for per-job claim, heartbeat, log upload, and terminal update. On
+// success it stores the log pipeline (which buffers/spills log uploads, design
+// §7 row 5) through outPipe so the caller can drain + report it after the run.
+func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, backendURL string, intent *model.Intent, outPipe **logpipe.Pipeline) error {
+	ctx := context.Background()
+
+	sess, err := initRemoteRun(ctx, plan, execID, backendURL, intent, r.DryRun)
+	if err != nil {
+		return err
+	}
+	backend, client, tokenSrc, scope, runnerID, handle := sess.backend, sess.client, sess.tokenSrc, sess.scope, sess.runnerID, sess.handle
 	// Use the run ID returned by the backend (idempotent join may return existing ID).
 	r.ExecID = handle.RunID
 
