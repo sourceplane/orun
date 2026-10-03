@@ -108,6 +108,8 @@ func init() {
 				Description: "how often to re-read the connections while waiting"},
 			Param{Name: "githubOwner", Type: ParamString,
 				Description: "the GitHub org or user the product repository belongs to; github then counts only through a connection to that account"},
+			Param{Name: "connections", Type: ParamStringList,
+				Description: "specific connections that must be active, each by id, display name or account login"},
 		),
 		Outputs: []string{"connected", "missing"},
 	}, runDoctorCheck)
@@ -199,6 +201,14 @@ func doctorOn(ctx context.Context, c connections, org string, in Input, sleep fu
 					}
 				}
 				missing = append(missing, label)
+			}
+		}
+		// MCX-D7: named connections — with several connections per provider,
+		// "cloudflare is connected" can hold while the account a baseline
+		// builds against is not.
+		for _, ref := range StringListParam(in, "connections") {
+			if ref = strings.TrimSpace(ref); ref != "" && len(matchConnectionRef(live, "", ref)) == 0 {
+				missing = append(missing, fmt.Sprintf("connection %s", ref))
 			}
 		}
 		sort.Strings(missing)

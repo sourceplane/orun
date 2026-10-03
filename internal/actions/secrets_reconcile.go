@@ -45,6 +45,8 @@ func init() {
 				Description: "the broker scope template each key is minted under"},
 			Param{Name: "project", Type: ParamString,
 				Description: "project scope; empty uses the workspace scope"},
+			Param{Name: "connection", Type: ParamString,
+				Description: "which connection to mint from when the provider has several: its id, display name or account login; empty uses the first active one"},
 		),
 		Outputs: []string{"created", "kept", "connection"},
 	}, runIntegrationsReconcile)
@@ -69,10 +71,29 @@ func reconcileOn(ctx context.Context, c secretsPlane, org string, in Input) (Res
 		return Result{}, fmt.Errorf("reading connections for %s: %w", org, err)
 	}
 	var connectionID string
-	for _, conn := range conns {
-		if strings.EqualFold(conn.Provider, provider) && strings.EqualFold(conn.Status, "active") {
-			connectionID = conn.ID
-			break
+	if ref := strings.TrimSpace(StringParam(in, "connection")); ref != "" {
+		// MCX-D7: a pinned connection. A name two connections share is
+		// refused rather than guessed; a name nothing matches yet is a wait,
+		// like a provider not connected yet.
+		matched := matchConnectionRef(conns, provider, ref)
+		if len(matched) > 1 {
+			return Result{}, fmt.Errorf("connection %q matches %d %s connections in workspace %s; pin one by id: %s",
+				ref, len(matched), provider, org, connectionCandidates(conns, provider))
+		}
+		if len(matched) == 0 {
+			return Result{Outputs: map[string]string{"created": "", "kept": "", "connection": ""},
+				Pending: &Pending{Reason: fmt.Sprintf("no active %s connection %q in workspace %s (active: %s)",
+					provider, ref, org, connectionCandidates(conns, provider))}}, nil
+		}
+		connectionID = matched[0].ID
+	} else {
+		// Unpinned: the first active connection of the provider, exactly as
+		// before references existed.
+		for _, conn := range conns {
+			if strings.EqualFold(conn.Provider, provider) && strings.EqualFold(conn.Status, "active") {
+				connectionID = conn.ID
+				break
+			}
 		}
 	}
 	if connectionID == "" {
