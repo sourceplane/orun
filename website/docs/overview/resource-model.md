@@ -16,14 +16,29 @@ apiVersion: <group>/<version>   # which schema governs this document
 kind: <Kind>                    # what sort of thing it is
 metadata:                       # identity — name, labels
   name: …
-spec:                           # the declaration itself
-  …
+spec:                           # the declaration itself (Intent keeps its
+  …                             # sections at the top level instead)
 ```
 
 If you have used Kubernetes, this is deliberate and familiar. The envelope is
 what makes the system schema-driven: every document can be validated before it
-is used (`orun validate`), evolved behind a version (`v1alpha1` → `v1`), and
-read by tools that don't understand its internals.
+is used (`orun validate` checks the intent and its rules; `orun plan` checks
+components against their composition's schema), evolved behind a version
+(`v1alpha1` → `v1`), and read by tools that don't understand its internals.
+
+### API groups
+
+Three API groups are in use, and the group tells you which part of orun owns
+the schema:
+
+| Group | Kinds | Owned by |
+|---|---|---|
+| `sourceplane.io` | `Intent`, `Component` (`v1`); `Composition`, `ComponentSchema`, `JobTemplate`, `ExecutionProfile`, `IntentPreset` (`v1alpha1`) | The intent language: what you declare about your platform and its golden paths |
+| `orun.io` | `Stack`, `Plan`, `TaskContract`, `SecretPolicy`, agent types, catalog and object-model kinds (`v1`) | orun's packaging, compiled, recorded, and work documents |
+| `orun.dev` | `Blueprint`, `Workflow`, `ScaffoldProvenance` (`v1`) | Scaffolding and workflows |
+
+The groups record where each schema came from. They do not change how a
+document is used.
 
 ## Three classes of resource
 
@@ -46,20 +61,22 @@ never rewrites an authored file, and you never edit a recorded object.
 
 ### Intent
 
-One per repository. The control document: environments, policies, trigger
-bindings, discovery roots, composition sources.
+One per repository. The control document for the platform's structure and
+standards: environments, groups, trigger bindings, promotion order, discovery
+roots, composition sources, and inherited presets. Its sections sit at the top
+level, not under `spec`.
 
 ```yaml
 apiVersion: sourceplane.io/v1
 kind: Intent
 metadata:
   name: shop-platform
-spec:
-  discovery: { roots: [apps/, infra/] }
-  environments: { … }
-  groups: { … }
-  automation: { triggerBindings: { … } }
-  compositions: { sources: [ … ] }
+compositions: { sources: [ … ] }
+extends: [ … ]
+discovery: { roots: [apps/, infra/] }
+groups: { … }
+environments: { … }
+automation: { triggerBindings: { … } }
 ```
 
 → [Intent model](../concepts/intent-model.md)
@@ -151,9 +168,12 @@ records, and replayed against any runner.
 
 ### Composition lock
 
-`compositions.lock.yaml` pins every composition source to a digest, the same
-way a package lockfile pins dependencies. Floating tags fail the lock in CI —
-determinism requires that "which contract" is never a runtime question.
+`.orun/compositions.lock.yaml` (`sourceplane.io/v1alpha1`, kind `CompositionLock`) records
+the digest every composition source resolved to. `orun plan` and
+`orun compositions lock` write it; orun does not read it back. The binding pin
+is a `digest:` on the source in `intent.yaml`, which `orun plan` verifies, and
+the plan itself records each resolved digest under `spec.compositionSources`,
+so "which contract" is answered by the plan, never at run time.
 
 → [Stacks](../concepts/stacks.md)
 

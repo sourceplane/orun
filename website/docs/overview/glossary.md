@@ -16,9 +16,10 @@ discipline as code. Terms link to the page that explains them in depth.
 | **Composition** | A versioned execution contract for one component type: input schema, job templates, execution profiles, and declared effects. → [Compositions](../concepts/compositions.md) |
 | **Stack** | The packaging format for composition sources — a manifest plus split-kind documents, distributable as a directory, archive, or OCI artifact. → [Stacks](../concepts/stacks.md) |
 | **Intent preset** | Reusable intent scaffolding shipped inside a Stack; a repository opts in via `extends`. → [Intent presets](../concepts/intent-presets.md) |
-| **Group (domain)** | A policy domain: components sharing defaults and non-negotiable constraints, declared in the intent. → [Intent model](../concepts/intent-model.md) |
+| **Group (domain)** | Defaults shared by every component in a domain, keyed by the domain name and declared in the intent. → [Intent model](../concepts/intent-model.md) |
 | **Environment** | A named runtime context (dev, staging, production) with its own activation rules, defaults, and policies. → [Intent model](../concepts/intent-model.md) |
-| **Policy** | A constraint declared at group or environment level and enforced at compile time. Cannot be overridden by component inputs. → [Design principles](/principles) |
+| **Policy** | A `policies` map declared on a group, an environment, or an execution profile. Carried onto every component instance but not yet enforced by the planner or runner. → [Standards](../concepts/standards.md#declared-not-yet-enforced) |
+| **Standard** | A declaration the platform reads and checks: a schema, a profile, a rule, an ordering, a pin, a contract. Each is enforced, recorded, or declared only. → [Standards](../concepts/standards.md) |
 | **Profile** | A context overlay on a composition (`pull-request`, `verify`, `deploy`): which jobs, steps, and capabilities run in that context. → [Profile rules](../concepts/profile-rules.md) |
 | **Trigger binding** | A rule mapping an external event (PR, push, tag) to planning context: which environments activate, what scope compiles. → [Trigger bindings](../concepts/trigger-bindings.md) |
 | **Dependency rule** | Per-trigger policy for whether `dependsOn` edges are enforced, advisory, or disabled. → [Dependency rules](../concepts/dependency-rules.md) |
@@ -69,7 +70,7 @@ discipline as code. Terms link to the page that explains them in depth.
 |---|---|
 | **Planner / compiler** | The six-stage pipeline — load, normalize, expand, bind, resolve, materialize — that turns declarations into a plan. → [How orun works](how-orun-works.md) |
 | **Component instance** | One cell of the environment × component matrix, with fully merged inputs and resolved policies. → [Plan DAG](../concepts/plan-dag.md) |
-| **Job instance** | An executable DAG node (`component@environment.job`) with rendered steps and job-level dependency edges. → [Plan DAG](../concepts/plan-dag.md) |
+| **Job instance** | An executable DAG node (`component.environment.job`) with rendered steps and job-level dependency edges. → [Plan DAG](../concepts/plan-dag.md) |
 | **Plan (plan DAG)** | The immutable compiled artifact (`plan.json`): every job, step, edge, and merged input made explicit. The artifact of record. → [Plan DAG](../concepts/plan-dag.md) |
 | **Composition lock** | `compositions.lock.yaml` — every composition source pinned to a digest, so "which contract" is never a runtime question. → [Stacks](../concepts/stacks.md) |
 | **Scope** | Which components/environments a plan covers: `full`, `changed`, or explicit `--component`/`--env`/`--all-envs` selection. → [Change detection](../concepts/change-detection.md) |

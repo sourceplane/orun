@@ -11,6 +11,7 @@ recent are:
 
 | Version | Date | Highlights |
 |---|---|---|
+| [v2.73.1](https://orun-docs.pages.dev/release-notes/v2.73.1) | 2026-10-05 | The Declare pillar: a standards page that labels every declared rule enforced, recorded, or declared only; intent and composition pages rewritten (PD2) |
 | [v2.73.0](https://orun-docs.pages.dev/release-notes/v2.73.0) | 2026-10-05 | Platform discipline as code: the docs, README, and `orun --help` reorganised around declare, package and evolve, ground agents, and verify, plan, execute (PD1) |
 | [v2.72.1](https://orun-docs.pages.dev/release-notes/v2.72.1) | 2026-10-05 | `orun plan` is byte-identical for identical inputs; profile step overrides no longer leak across profiles; plans drop `generatedAt` |
 | [v2.71.0](https://orun-docs.pages.dev/release-notes/v2.71.0) | 2026-10-01 | the plan names its runners (`index` in the plan, the matrix and the upload); `orun run init` |

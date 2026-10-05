@@ -1,6 +1,9 @@
 ---
 title: Trigger bindings
+description: Which CI events may touch which environments is a platform standard. Trigger bindings declare it in intent, so the decision lives in one reviewed file instead of in CI conditionals across repositories.
 ---
+
+Which events may touch which environments is a platform standard: pull requests may validate, merges to main may verify staging, only a release tag may touch production. Trigger bindings write that standard down in `intent.yaml`, so it is one reviewed declaration instead of `if:` expressions scattered across CI files. The plan records which binding activated each environment.
 
 Trigger bindings map CI provider events to environment activation. They let you declare which environments should be planned for each type of event — pull requests activate development, pushes to main activate staging, release tags activate production.
 

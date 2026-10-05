@@ -88,8 +88,9 @@ From that, four properties follow:
   declared, it does not exist.
 - **Portable.** Golden paths travel as versioned Stacks, platform rules as
   intent presets inherited with `extends:`, and a whole product as a
-  **baseline** that `orun new upgrade` can three-way merge forward. A lockfile
-  pins every digest, so a standard changes only when you change the pin.
+  **baseline** that `orun new upgrade` can three-way merge forward. A source
+  is pinned by version or by a `digest:` that `orun plan` verifies, and every
+  plan records the digest each standard resolved to.
 - **Shared with agents.** `orun mcp serve` gives a coding agent the catalog,
   runs, skills, and task plane derived from the same intent. Agent types carry
   a deny-by-default tool policy, and a task contract declares what a change
@@ -106,7 +107,7 @@ From that, four properties follow:
 | Pillar | Capability | Commands |
 |---|---|---|
 | Declare | Platform and component intent, golden paths as typed contracts, the effective intent explained field by field | `intent`, `component`, `compositions`, `work` |
-| Package & evolve | Golden paths as versioned, lockable OCI Stacks; a scaffold engine and a baseline registry: a component, or a whole live product, from a `kind: Blueprint`, upgradable later | `new`, `baseline`, `pack`, `publish`, `fetch`, `login` |
+| Package & evolve | Golden paths as versioned, pinnable OCI Stacks; a scaffold engine and a baseline registry: a component, or a whole live product, from a `kind: Blueprint`, upgradable later | `new`, `baseline`, `pack`, `publish`, `fetch`, `login` |
 | Ground agents | One MCP server, hosted skills, an agent runtime with sealed briefs, a task plane, and a provenance pen: every pull request carries its lineage | `mcp`, `skills`, `agent`, `task`, `spec`, `pr`, `githooks` |
 | Verify → plan → execute | A checker and a planner that compile intent into an immutable, diffable DAG; a backend-swappable runtime; a cockpit; a derived catalog and object graph | `validate`, `debug`, `plan`, `run`, `workflow`, `approve`, `status`, `logs`, `describe`, `get`, `tui`, `catalog`, `objects`, `gc` |
 | Across all four | A cloud client for workspaces, secrets, integrations, and policy | `auth`, `workspace`, `cloud`, `secrets`, `integrations`, `policy`, `backend` |
@@ -226,7 +227,7 @@ command.
 ## How it works
 
 `orun plan` runs a six-stage compiler over your platform intent, the
-discovered component intents, and the locked golden paths:
+discovered component intents, and the resolved golden paths:
 
 | Stage | Name | What it does |
 |---|---|---|

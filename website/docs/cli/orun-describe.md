@@ -43,7 +43,7 @@ orun describe plan a1b2c3
 Describe a job from the latest plan:
 
 ```bash
-orun describe job api-edge-worker@production.verify-deploy-cloudflare-worker-turbo
+orun describe job api-edge-worker.production.verify-deploy-cloudflare-worker-turbo
 ```
 
 Describe a component:
@@ -82,7 +82,7 @@ orun describe execution my-plan-20240601-a1b2c3
 ```bash
 orun describe run/latest
 orun describe plan/release-candidate
-orun describe job/api-edge-worker@production.verify-deploy-cloudflare-worker-turbo
+orun describe job/api-edge-worker.production.verify-deploy-cloudflare-worker-turbo
 orun describe component/network-foundation
 ```
 

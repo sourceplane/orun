@@ -1,6 +1,9 @@
 ---
 title: Composition contract
+description: The field reference for the four documents that make up a golden path - Composition, ComponentSchema, JobTemplate, and ExecutionProfile - and the Stack that packages them.
 ---
+
+This is the field reference for the documents that make up a golden path. For why the path is split this way and what orun enforces about it, read [compositions](../concepts/compositions.md) first.
 
 A composition source exports self-describing documents. The primary contract is a `Composition` document grouped under a Stack package. Compositions support both inline authoring (single file) and split-kind authoring (multiple files).
 
@@ -201,7 +204,7 @@ spec:
           run: terraform plan -no-color -lock=false
 ```
 
-Profiles can also declare `policies` for enforcement:
+Profiles can also declare `policies`. They are parsed and carried onto each component instance, but orun does not enforce them yet; see [standards](../concepts/standards.md#declared-not-yet-enforced).
 
 ```yaml
 spec:

@@ -1,6 +1,9 @@
 ---
 title: Secrets
+description: "Secrets in orun are references, never values, and that standard is enforced at plan time: a literal in a secret slot fails the plan. This page covers secretEnv, optionalSecretEnv, and secretOutputs."
 ---
+
+"Secrets are references, never values" is a standard orun enforces rather than recommends: a literal value in a secret slot fails `orun plan`, so the rule cannot be broken by a paste.
 
 `orun` moves secrets by **reference, never by value**. Manifests declare
 [`secret://` references](../reference/scope-references.md); values are resolved

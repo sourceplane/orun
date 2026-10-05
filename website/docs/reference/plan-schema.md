@@ -22,7 +22,7 @@ Plans are deterministic: the same inputs produce byte-identical `plan.json`. `jo
 
 | Field | Meaning |
 | --- | --- |
-| `id` | Job ID in the form `<component>@<environment>.<job>` |
+| `id` | Job ID in the form `<component>.<environment>.<job>` |
 | `name`, `component`, `environment` | Required identity of the job |
 | `composition`, `jobRegistry`, `job` | Which composition and job template the job was bound from |
 | `runsOn`, `path` | Runner image and working directory |

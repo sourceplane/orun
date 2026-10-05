@@ -1,6 +1,9 @@
 ---
 title: Runtime environment
+description: Environment variables follow one declared precedence ladder, resolved at plan time, with a reserved ORUN_ prefix, so platform-wide values cannot be silently shadowed by a step.
 ---
+
+Environment variables follow one declared precedence ladder, resolved at plan time and visible in the plan, and the `ORUN_` prefix is reserved for orun itself. A platform-wide value therefore cannot be silently shadowed by a step, and `orun validate` rejects a user variable that claims the reserved prefix.
 
 orun resolves environment variables at plan time and injects them into every job and step at runtime. This page explains how `env` declarations are merged, what ORUN-prefixed variables are injected automatically, and the full precedence order.
 

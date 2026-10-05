@@ -52,7 +52,8 @@ description: orun is platform discipline as code. Declare your platform's struct
     <h3>Standards that travel like code</h3>
     <p>
       Golden paths ship as versioned OCI Stacks. Platform rules ship as intent presets
-      that repositories inherit with <code>extends:</code>. A lockfile pins every digest.
+      that repositories inherit with <code>extends:</code>. A repository pins each standard
+      by version or digest, and every plan records the exact digest it used.
       A baseline packages a whole product's
       structure and standards, so it can be rebuilt for a new owner and upgraded instead of
       forked.

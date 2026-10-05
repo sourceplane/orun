@@ -57,8 +57,10 @@ packages standards the way software packages libraries:
 - Platform rules are published as **intent presets** and inherited with `extends:`; the
   repository's own intent always wins, and `orun intent explain` shows where each field
   came from.
-- `orun compositions lock` pins every resolved source by digest, so a standard changes in
-  a repository only when someone changes the pin, in a reviewed commit.
+- A repository pins each source in `intent.yaml`, by a version tag in its reference or,
+  strictly, by a `digest:` that `orun plan` verifies and refuses to plan past if the
+  source resolves to anything else. A standard changes when someone changes that pin, in a
+  reviewed commit, and every plan records the digest each source resolved to.
 - A **baseline** packages a whole product's structure and standards. `orun new upgrade`
   three-way merges a newer release into a product built from it, so improvements flow
   forward instead of each copy aging on its own.
@@ -90,7 +92,7 @@ based on what inputs, at what revision.
 
 - Every implicit default becomes explicit.
 - Every dependency edge is named.
-- Every composition source is pinned by digest in `compositions.lock.yaml`.
+- Every composition source is recorded with the digest it resolved to (`spec.compositionSources`).
 
 This means:
 
@@ -103,7 +105,7 @@ If a behaviour is not visible in the plan, it is a bug.
 ## 6. Determinism over cleverness
 
 Identical inputs produce **byte-for-byte identical** plans. The compiler is a pure
-function of the intent, the components, the locked composition digests, and the trigger
+function of the intent, the components, the resolved composition digests, and the trigger
 context.
 
 Concretely:

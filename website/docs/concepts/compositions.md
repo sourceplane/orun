@@ -1,81 +1,29 @@
 ---
 title: Compositions
+description: A composition is a golden path written as code - the schema a component must satisfy, the jobs it runs, and the execution profiles allowed in each lane - so "how we deploy Terraform here" is enforced, not a wiki page.
 ---
 
-Compositions are the execution contract between desired state and runtime behavior. A component type such as `helm` or `terraform` resolves to a self-describing `Composition` document exported by a declared composition source.
+A composition is a **golden path written as code**. It is how a platform team turns "this
+is how we build and ship Terraform here" from a wiki page into a contract the platform
+checks: the parameters a component of this type must provide, the jobs it runs, and the
+profiles it may run under in each lane. Every component that declares `type: terraform`
+gets exactly that path, and changing the path is one reviewed change in one place.
 
-## Declaring composition sources
+Compositions are the *how* to [intent](./intent-model.md)'s *what*. A `component.yaml`
+names a type; the composition for that type decides everything about how it executes.
 
-The primary workflow is to declare sources in `intent.yaml`:
+## The four parts of a golden path
 
-```yaml
-compositions:
-  sources:
-    - name: example-platform
-      kind: dir
-      path: ./compositions
-```
+A composition is split into four kinds of document, so each concern can change on its own:
 
-Supported source kinds are `dir`, `archive`, and `oci`.
-
-## Package shape — Stack format
-
-The recommended package format uses a `stack.yaml` manifest and a `compositions/` subdirectory tree. Each composition type lives in its own subdirectory using split-kind authoring:
-
-```text
-my-platform/
-├── stack.yaml
-└── compositions/
-    ├── terraform/
-    │   ├── composition.yaml
-    │   ├── schema.yaml
-    │   ├── jobs/
-    │   │   └── terraform-validate.yaml
-    │   └── profiles/
-    │       ├── terraform-pull-request.yaml
-    │       ├── terraform-verify.yaml
-    │       └── terraform-release.yaml
-    └── helm-chart/
-        ├── composition.yaml
-        ├── schema.yaml
-        ├── jobs/
-        │   └── helm-chart-render.yaml
-        └── profiles/
-            ├── helm-chart-lint-only.yaml
-            └── helm-chart-verify.yaml
-```
-
-`stack.yaml` declares package metadata and an optional OCI registry target. When `spec.compositions` is omitted, the packager automatically discovers composition files by walking the directory tree — no explicit path listing is needed.
-
-```yaml
-apiVersion: orun.io/v1
-kind: Stack
-metadata:
-  name: my-platform-stack
-  version: 1.0.0
-  description: Platform compositions for my-platform
-  owner: my-org
-registry:
-  host: ghcr.io
-  namespace: my-org
-  repository: my-platform-stack
-  visibility: public
-```
-
-See [Stacks](stacks.md) for the full Stack concept guide including packaging and remote distribution.
-
-## Document kinds
-
-Compositions use a multi-kind authoring model where each concern has its own document type:
-
-| Kind | Purpose | Changes when |
+| Kind | The standard it holds | Changes when |
 |------|---------|-------------|
-| `Composition` | Type binding, defaults, references | You introduce or rename a component type |
-| `ComponentSchema` | Input validation contract | Component contract changes |
-| `JobTemplate` | Steps, capabilities, runner defaults | Runtime implementation changes |
-| `ExecutionProfile` | Behavior overlay per trigger/env | PR/release/env behavior changes |
+| `ComponentSchema` | What a component of this type must look like: its required parameters and their shapes | The contract with application teams changes |
+| `JobTemplate` | The steps that build, check, and ship it, each tagged with a capability | The implementation changes |
+| `ExecutionProfile` | Which capabilities run in a lane, with which step overrides | Pull-request, verify, or release behaviour changes |
+| `Composition` | The type name and how the other three fit together: default job, default profile, the profile catalogue | You introduce or rename a type |
 
-The `Composition` document is the public facade that references the other kinds by name:
+The `Composition` document is the facade that references the others by name:
 
 ```yaml
 apiVersion: sourceplane.io/v1alpha1
@@ -105,63 +53,78 @@ spec:
         name: terraform-release
 ```
 
-## Capability-based step selection
+The full field reference is the [composition contract](../compositions/composition-contract.md).
 
-`JobTemplate` steps are tagged with a `capability` field. Profiles select which steps to run using `includeCapabilities` rather than brittle step ID lists:
+## How a golden path is enforced
+
+- **The schema is checked at plan time.** `orun plan` validates every component's merged
+  parameters against its type's `ComponentSchema`. A component missing a required
+  parameter, or carrying one of the wrong shape, fails the plan before anything runs.
+- **Only declared profiles can run.** A subscription that names a profile the composition
+  does not define fails the plan. Application teams choose among the lanes the platform
+  team offers; they cannot invent new ones.
+- **Profiles select capabilities, not step IDs.** A `JobTemplate` tags each step with a
+  `capability`, and a profile lists the capabilities it runs:
+
+  ```yaml
+  # JobTemplate step
+  - id: plan
+    name: plan
+    capability: terraform.plan
+    run: terraform plan -no-color
+
+  # ExecutionProfile
+  spec:
+    jobs:
+      validate:
+        includeCapabilities:
+          - terraform.setup
+          - terraform.plan
+  ```
+
+  Renaming or adding a step does not silently change which steps a lane runs.
+- **Overrides stay inside the profile.** A profile can patch a step's `run`, `with`, or
+  `env` without copying it:
+
+  ```yaml
+  spec:
+    jobs:
+      validate:
+        stepOverrides:
+          plan:
+            run: terraform -chdir={{.parameters.terraformDir}} plan -no-color -lock=false
+  ```
+
+- **The plan shows the result.** Every rendered step lands in `plan.json`, so a change to a
+  golden path is visible as a plan diff in every repository that adopts it.
+
+A profile can also declare a `policies` block (`requireCleanGitTree`,
+`requirePinnedTerraformVersion`, `requireApproval`). orun records it but does not enforce it
+yet; see [standards](./standards.md#declared-not-yet-enforced).
+
+## Where compositions come from
+
+A repository declares its composition sources in `intent.yaml`:
 
 ```yaml
-# JobTemplate step
-- id: plan
-  name: plan
-  capability: terraform.plan
-  run: terraform plan -no-color
-
-# ExecutionProfile selects it
-spec:
-  jobs:
-    validate:
-      includeCapabilities:
-        - terraform.setup
-        - terraform.plan
+compositions:
+  sources:
+    - name: platform
+      kind: oci
+      ref: ghcr.io/acme/platform-stack:v1.4.0
+    - name: local
+      kind: dir
+      path: ./compositions
 ```
 
-This makes profiles resilient to step ID renames and additions.
-
-## Profile step overrides
-
-Profiles can patch specific step fields without duplicating the entire step definition:
-
-```yaml
-spec:
-  jobs:
-    validate:
-      stepOverrides:
-        init:
-          run: terraform init -backend=false
-        plan:
-          run: terraform plan -no-color -lock=false
-```
-
-## Profile policies
-
-Release profiles can enforce rules before execution:
-
-```yaml
-spec:
-  policies:
-    requireCleanGitTree: true
-    requirePinnedTerraformVersion: true
-    requireApproval: true
-```
-
-## Inline authoring
-
-For simpler compositions, everything can live in a single file with inline schemas and jobs. This is still supported but split-kind is recommended for compositions with multiple profiles or reusable jobs.
+Source kinds are `dir`, `archive`, and `oci`. Compositions are packaged and published as a
+**Stack**, which is how a golden path travels between repositories and gets versioned; see
+[Stacks](./stacks.md). A source can carry a `digest:` that `orun plan` verifies, so a
+repository changes golden paths only when it changes the pin.
 
 ## Versioning, lifecycle, and effects
 
-A composition is a **golden path**, and golden paths evolve. Three spec fields
-(v2.16.0) make that evolution first-class:
+Golden paths evolve. Three fields on the `Composition` make that evolution explicit:
 
 ```yaml
 spec:
@@ -176,33 +139,31 @@ spec:
       satisfies: [has-deploy-pipeline]
 ```
 
-- **`version` + `lifecycle`** let platform teams publish, stage, and retire
-  golden paths deliberately. Pinning a `deprecated` composition version
-  surfaces a warning at resolve time.
-- **`effects`** declare the path's consequences once, centrally: every
-  component that adopts the type gets its integrations, provided Resources,
-  and exposed APIs linked into the [service catalog](service-catalog.md)
-  without authoring them per component.
+- **`version` and `lifecycle`** are recorded on the composition's catalog entity, so
+  "which services are still on a deprecated golden path?" is a catalog query, not an audit.
+  orun does not print a warning for a deprecated composition.
+- **`effects`** declare a path's consequences once: every component that adopts the type
+  gets its integrations, provided Resources, and exposed APIs linked into the
+  [service catalog](./service-catalog.md) without authoring them per component.
 
-Compositions are themselves catalog entities (`kind: Composition`), related to
-the components that ride them — so "which services are on the old golden
-path?" is a catalog query, not an audit.
+## Authoring
 
-## Why compositions scale well
+Split-kind authoring, one file per document under `compositions/<type>/`, is recommended
+for any composition with more than one profile. Simple compositions can still keep
+everything in a single file with an inline schema and jobs.
 
-- They keep execution logic centralized instead of duplicating shell scripts across repositories.
-- They let platform teams publish stricter schemas without changing every intent file.
-- They make plan generation deterministic because source resolution is explicit and lockable.
-- They support multiple runtime backends because the compile step is separate from execution.
-- Split-kind authoring lets each concern evolve independently with clear ownership boundaries.
+- [Writing compositions](../compositions/writing-compositions.md) walks through encoding a
+  golden path and publishing it.
+- [Composition examples](../compositions/composition-examples.md) tours the example Stack
+  in this repository, which defines eleven types.
 
 ## Inspecting compositions from the CLI
 
 ```bash
-orun compositions --intent examples/intent.yaml
-orun compositions terraform --intent examples/intent.yaml
-orun pack --root examples/compositions
-orun publish --root examples/compositions
+orun compositions --intent examples/intent.yaml            # every resolved type
+orun compositions terraform --intent examples/intent.yaml  # one type, with its profiles
+orun component network-foundation --intent examples/intent.yaml --long
 ```
 
-Read [Stacks](stacks.md) to understand the packaging and distribution model, or [composition contract](../compositions/composition-contract.md) when you are ready to author your own type.
+Next: [Stacks](./stacks.md), to package and version a golden path, or the
+[composition contract](../compositions/composition-contract.md) to author one.
