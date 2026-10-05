@@ -403,3 +403,10 @@ func TestApplyHandoffNeverOverridesAnExplicitFlag(t *testing.T) {
 		t.Errorf("--set rides through untouched, got %v", sets)
 	}
 }
+
+func TestBaselineNewFromNamesOnlyTheTwoDoors(t *testing.T) {
+	err := runBaselineNew(t, "--from", "bst_7K2M9QAZ", "--by", "platform", "--local", "--out", t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "--by") {
+		t.Fatalf("the platform door is the kickoff's own word, not a caller's: %v", err)
+	}
+}

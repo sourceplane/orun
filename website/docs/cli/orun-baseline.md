@@ -142,8 +142,10 @@ building repo-blueprint.yaml
 
 The workspace is named because the bootstrap is read under it and an empty
 directory has nothing else to name it from. Before anything is fetched the
-platform is told the CLI took the bootstrap, so the workspace's **Overview**
-reads *continued from the orun CLI*; a bootstrap another door already took
+platform is told which door took the bootstrap — `--by cli` (the default),
+or `--by agent` when a coding agent runs the command from the Review page's
+prompt — so the workspace's **Overview** reads *continued from the orun CLI*
+or *continued in a coding agent*; a bootstrap another door already took
 keeps that door's word, and the command says so. The platform refuses an id
 that never reached Review (`409 not_resolved`, naming the step or the missing
 provider) and answers `404` for one that is not this workspace's — the id

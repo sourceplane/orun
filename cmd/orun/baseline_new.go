@@ -170,6 +170,7 @@ func newBaselineNewCommand() *cobra.Command {
 		workspace   string
 		backendURL  string
 		from        string
+		by          string
 		local       bool
 		viaPlatform bool
 		repo        string
@@ -216,7 +217,8 @@ since moved past RESOLVES to what it publishes now, and says so.
 --from bst_… continues a bootstrap the console's Review step resolved. The
 record carries the baseline at its tag, the repository, the inputs and the
 connections, so nothing is typed twice: the id fills what the flags would, an
-explicit flag still wins, and --set adds. The platform is told the CLI took it.`,
+explicit flag still wins, and --set adds. The platform is told which door took it
+(--by cli, the default, or --by agent for a coding agent running this).`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
@@ -244,6 +246,9 @@ explicit flag still wins, and --set adds. The platform is told the CLI took it.`
 				handoff *remotestate.BootstrapHandoff
 			)
 			if h := strings.TrimSpace(from); h != "" {
+				if by != "cli" && by != "agent" {
+					return exitErr(2, "orun baseline new: --by names the door this build comes through: cli (default) or agent")
+				}
 				var err error
 				client, err = cloudClient(ctx, backendURL, workspace)
 				if err != nil {
@@ -323,10 +328,10 @@ explicit flag still wins, and --set adds. The platform is told the CLI took it.`
 			// server; a refusal here is a note, not a stop — the build is the
 			// operator's to run either way.
 			if handoff != nil {
-				if by, err := client.ContinueBootstrap(ctx, client.Scope().OrgID, handoff.ID, "cli"); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not record that the CLI took bootstrap %s: %v\n", handoff.ID, err)
-				} else if by != "cli" {
-					fmt.Fprintf(cmd.ErrOrStderr(), "note: bootstrap %s was already continued by %s\n", handoff.ID, continuedByWord(by))
+				if door, err := client.ContinueBootstrap(ctx, client.Scope().OrgID, handoff.ID, by); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not record that %s took bootstrap %s: %v\n", continuedByWord(by), handoff.ID, err)
+				} else if door != by {
+					fmt.Fprintf(cmd.ErrOrStderr(), "note: bootstrap %s was already continued by %s\n", handoff.ID, continuedByWord(door))
 				}
 			}
 
@@ -372,6 +377,7 @@ explicit flag still wins, and --set adds. The platform is told the CLI took it.`
 		},
 	}
 	cmd.Flags().StringVar(&from, "from", "", "bst_… id of a bootstrap the console resolved; fills the baseline, repository and inputs")
+	cmd.Flags().StringVar(&by, "by", "cli", "With --from: the door this build comes through, cli or agent — what the workspace's Overview reads")
 	cmd.Flags().BoolVar(&local, "local", false, "Build here, from a checkout of the baseline at the registry's tag")
 	cmd.Flags().BoolVar(&viaPlatform, "via-platform", false, "Ask the platform to build into a linked repository, and return a session to watch")
 	cmd.Flags().StringVar(&repo, "repo", "", "owner/name to build into (--via-platform); defaults to this checkout's origin")
