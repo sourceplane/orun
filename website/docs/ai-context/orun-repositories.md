@@ -1,13 +1,45 @@
 ---
-title: AI context for Orun repositories
-description: How a coding agent should reason about a repository that uses the Orun component model — what to read, which layer to change, the rules to keep, and the runtime surfaces (MCP, base literacy, agent types, task contracts, skills) it now has.
+title: Agents in orun repositories
+description: How coding agents are grounded in a platform's standards in an orun repository - what they read (the intent, the catalog, base literacy, skills), what keeps them from deviating (tool policy, task contracts, the provenance pen), and the rules they follow.
 ---
 
-This page explains how AI agents should reason about repositories that use the Orun component model. It is written for application, platform, and infrastructure repos that consume Orun concepts, not for agents editing the Orun CLI source code itself.
+A coding agent amplifies whatever a repository makes easy. If the platform's standards are
+implicit, an agent learns them by imitating the nearest example, and drift scales at
+machine speed. In an orun repository the standards are explicit (declared as intent,
+schemas, profiles, rules, and contracts), so an agent can be **grounded** in them: it reads
+the same declarations the planner reads, and what it may do is itself declared.
+
+This page is for agents working in, and people setting agents up for, repositories that
+use orun. It is not about editing the orun CLI's own source.
+
+## How an agent learns the standards
+
+| Source | What it tells the agent | How it gets it |
+|---|---|---|
+| `intent.yaml`, `component.yaml` | The platform's structure: components, environments, triggers, ordering | Read the files; `orun component --long`, `orun intent explain` |
+| Compositions | The golden path for each type: required parameters, jobs, lanes | `orun compositions`, the Stack's files |
+| The catalog | What exists, who owns it, what depends on what, what a change affects | `orun mcp serve` (catalog tools), `orun catalog affected` |
+| Base literacy | How orun works and the invariants every agent keeps | `orun agent context`, pinned into every brief by hash |
+| Skills | The organisation's playbooks | `orun skills pull`, or `skills_list` and `skill_get` on the MCP |
+| The task contract | What this piece of work may touch and when it is done | `tasks/<KEY>.TaskContract.yaml` |
+
+## What keeps an agent inside them
+
+| Guardrail | Declared in | Enforced by |
+|---|---|---|
+| The golden path's schema, profiles, and rules | Compositions and intent | `orun plan`; an agent's change that breaks one fails like anyone's |
+| The tools an agent may call | `tools.allow`, `tools.ask`, `tools.deny` in `agents/<name>.md` | The agent runtime: denied tools are absent, `ask` tools wait for a human |
+| The components a change may touch | `affects` in the task contract | `orun task check <key>` |
+| One task, one branch, one PR, with lineage | Repository convention | `orun pr check` locally, the `orun/compliance` check on the PR |
+| Status is derived, never asserted | The platform | There is no status-write tool; branches, PRs, merges, and gates move the task |
+
+An agent type's `mayAffect` records the components it is meant to work on and is shown in
+the cockpit, but the runtime does not check it; the task contract's `affects` is the
+enforced limit. See [standards](../concepts/standards.md#within-what-blast-radius-may-a-change-go).
 
 ## The model
 
-An Orun repository is a desired-state component repository:
+An orun repository is a desired-state component repository:
 
 ```text
 intent.yaml + discovered component.yaml files + composition sources
@@ -16,7 +48,10 @@ intent.yaml + discovered component.yaml files + composition sources
         -> explicit runtime execution
 ```
 
-The main job of an AI agent is to preserve that separation. Components declare what they are. Compositions define the reusable validation and execution contract for each component type. The plan makes the resulting jobs, steps, profiles, paths, and dependencies reviewable before anything runs.
+The main job of an agent is to preserve that separation. Components declare what they are.
+Compositions define the reusable validation and execution contract for each component type.
+The plan makes the resulting jobs, steps, profiles, paths, and dependencies reviewable
+before anything runs.
 
 ## What to read first
 
@@ -25,7 +60,7 @@ The main job of an AI agent is to preserve that separation. Components declare w
 | `intent.yaml` | Repo-level planning boundary: discovery, environments, groups, composition sources, triggers, defaults, policies, and the workspace the repo declares. |
 | `component.yaml` | Local ownership boundary for a component near its app, chart, package, or infrastructure code. |
 | `stack.yaml` and `compositions/` | Versioned composition contracts: schemas, jobs, profiles, capabilities. |
-| `.orun/compositions.lock.yaml` | Resolved composition source digests for reproducible planning. |
+| `plan.json` `spec.compositionSources` | The digest each composition source resolved to. A source's `digest:` in `intent.yaml` is the enforced pin. |
 | `tasks/<KEY>.TaskContract.yaml` | What a task may touch (`affects`), when it is done (`doneWhen`), and which gates a merge must pass. Your ceiling, if you are working a task. |
 | `agents/*.md` | The agent types this repo defines: a capability envelope (harness, model, tool policy, `mayAffect`, owner) plus a persona. |
 | `policies/*.SecretPolicy.yaml` | Portable secret-access rules. Secrets are `secret://` references; you never see values. |
@@ -49,9 +84,9 @@ If a command cannot run because local tools, credentials, or the Orun binary are
 
 ## The runtime surfaces you have
 
-Since the agent runtime landed, a coding agent working in an Orun repository has more than files to reason from.
+A coding agent working in an orun repository has more than files to reason from.
 
-**`orun mcp serve` is your tool surface.** One local MCP server composes two planes: the **pen** (`pr_open`, mounted when the server runs inside a checkout) and the **platform** (33 tools over the Orunbase API — catalog search, runs and logs, audit, access, secret metadata, skills, and the task plane — mounted when cloud auth resolves). Register it once (`claude mcp add orun -- orun mcp serve`) or let `orun agent run` write the config for you. `orun mcp tools` prints the roster; `orun mcp doctor` says why a plane did not mount. When the runtime launches you, the agent type's `tools` policy has already filtered that roster: denied tools are absent, `ask` tools raise an approval a human answers.
+**`orun mcp serve` is your tool surface.** One local MCP server composes two planes: the **pen** (`pr_open`, mounted when the server runs inside a checkout) and the **platform** (tools over the Orunbase API — catalog search, runs and logs, audit, access, secret metadata, skills, and the task plane — mounted when cloud auth resolves). Register it once (`claude mcp add orun -- orun mcp serve`) or let `orun agent run` write the config for you. `orun mcp tools` prints the roster; `orun mcp doctor` says why a plane did not mount. When the runtime launches you, the agent type's `tools` policy has already filtered that roster: denied tools are absent, `ask` tools raise an approval a human answers.
 
 **`orun agent context` prints the base literacy.** It is the versioned document every agent type `extends` — what orun is, the catalog and affected engine, the shape of a brief, and the invariants below. It is pinned into your brief by content hash, so what you read from that command is exactly what the operator's orun version guarantees. Read it before reading any persona.
 
@@ -87,14 +122,14 @@ Since the agent runtime landed, a coding agent working in an Orun repository has
 - Prefer typed component inputs plus schema support over ad-hoc variables.
 - Always validate and inspect the DAG after meaningful changes.
 - Do not try to assert progress. There is no status-write tool; push the branch, open the PR, let the gates run.
-- Stay inside the blast radius: the contract's `affects` and the agent type's `mayAffect` are ceilings. If the work truly needs more, say so and stop; never widen scope silently.
+- Stay inside the blast radius: the contract's `affects` is the ceiling `orun task check` enforces, and the agent type's `mayAffect` says what you are meant to work on. If the work truly needs more, say so and stop; never widen scope silently.
 - One task, one branch, one PR, with the `Orun-Task` trailer on every commit.
 - Secrets are references, never content. Never write a secret value into code, a commit, a comment, or a transcript.
 - When unsure whether something is affected, in scope, or safe, over-report. Orun's own engines do.
 
 ## Reusable context pack
 
-This repository includes a copyable AI context pack under `context-for-ai/` with a deeper playbook:
+The orun repository includes a copyable context pack under [`context-for-ai/`](https://github.com/sourceplane/orun/tree/main/context-for-ai) with a deeper playbook. This page is the canonical narrative; the pack is the same guidance in a form you can drop into another repository:
 
 - `context-for-ai/README.md`
 - `context-for-ai/00-orun-repo-philosophy.md`
@@ -103,8 +138,9 @@ This repository includes a copyable AI context pack under `context-for-ai/` with
 - `context-for-ai/03-compositions-and-execution-contracts.md`
 - `context-for-ai/04-development-and-testing-workflow.md`
 - `context-for-ai/05-ai-agent-operating-rules.md`
+- `context-for-ai/06-standards-presets-and-agent-guardrails.md`
 
-Use that pack when onboarding an AI agent to a repo implemented with Orun component concepts.
+Use that pack when onboarding an agent to a repository that uses orun.
 
 ## Related
 

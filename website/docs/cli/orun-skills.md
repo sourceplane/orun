@@ -3,7 +3,9 @@ title: orun skills
 description: The hosted skill registry from the command line — list every playbook's latest revision, pull them as native skill files (with their bundled references and templates) into the directory your coding-agent client discovers, and check the local copies against the registry.
 ---
 
-`orun skills` is the human and CI face of the **skill registry**: hosted,
+Skills are your organisation's playbooks, versioned and shared with every agent the same
+way standards are shared with every repository. `orun skills` is the human and CI face of
+the **skill registry**: hosted,
 content-addressed agent playbooks — the Sourceplane defaults, shadowed by
 anything your workspace publishes. Agents consume the same registry through
 `skills_list` and `skill_get` on the platform MCP, and

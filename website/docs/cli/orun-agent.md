@@ -3,7 +3,9 @@ title: orun agent
 description: The agent runtime — seal agent types from agents/*.md, delegate a task to a coding agent behind a driver, attach to and steer a live session, replay a sealed one, and serve a session inside a platform sandbox.
 ---
 
-`orun agent` is the command-line face of the agent runtime. An **agent type**
+`orun agent` runs coding agents inside your standards: each session starts from a sealed
+brief built from the repository's declarations, and its tools are filtered by the policy its
+agent type declares. It is the command-line face of the agent runtime. An **agent type**
 is a markdown file under `agents/` — YAML capability frontmatter over a
 persona body — sealed into the content-addressed object store as an
 `AgentTypeSnapshot`. A **session** is one run of one type: a frozen brief

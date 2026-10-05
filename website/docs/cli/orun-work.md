@@ -3,8 +3,7 @@ title: orun work
 description: The declared work tree — epic.yaml per epic, task contracts beside it — validated before a pull request merges, so a malformed declaration is refused in CI rather than on main.
 ---
 
-`orun work` is the CLI face of **work as code** (orun-cloud epic
-`saas-work-gitops`): a repository declares in `intent.yaml` where its
+`orun work` is the CLI face of **work as code**: a repository declares in `intent.yaml` where its
 epics and task contracts live, each epic carries an `epic.yaml`, and the
 tools read the tree instead of asking anyone to mint anything by hand.
 

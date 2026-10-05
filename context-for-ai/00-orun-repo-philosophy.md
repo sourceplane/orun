@@ -8,7 +8,7 @@ The repo is not organized around "whatever script happens to run in CI". It is o
 
 | Concept | Meaning | AI implication |
 | --- | --- | --- |
-| `intent.yaml` | Repository-level platform intent: discovery roots, environments, composition sources, groups, defaults, policies, triggers, and optional inline components. | Start here. It defines the planning boundary. |
+| `intent.yaml` | Repository-level platform intent: discovery roots, environments, composition sources, inherited presets (`extends:`), groups, defaults, triggers, and optional inline components. | Start here. It defines the planning boundary. |
 | `component.yaml` | Local declaration for one component owned near its code, chart, package, or infrastructure. | Treat this as an ownership boundary, not just metadata. |
 | `component.type` | Stable logical contract name, such as `terraform`, `helm-chart`, or `cloudflare-worker`. | Type decides which composition validates and executes the component. |
 | Composition source | Versioned package of component contracts loaded from a directory, archive, or OCI ref. | Do not invent execution logic if a composition type should own it. |
@@ -24,8 +24,8 @@ Orun deliberately separates three layers:
 | Layer | Owns | Should not own |
 | --- | --- | --- |
 | Intent layer | environments, discovery, groups, trigger activation, composition sources, repo-wide defaults | long shell scripts, tool-specific execution logic |
-| Component layer | component name, type, domain, path, subscriptions, typed inputs, labels, dependencies | copied job templates, per-environment imperative branching |
-| Composition layer | schema, job templates, profiles, capabilities, step ordering, runtime contract | app-specific desired state that belongs in component inputs |
+| Component layer | component name, type, domain, path, subscriptions, typed parameters, labels, dependencies | copied job templates, per-environment imperative branching |
+| Composition layer | schema, job templates, profiles, capabilities, step ordering, runtime contract | app-specific desired state that belongs in component parameters |
 
 This mirrors common CNCF API patterns: authors declare resources, platform teams publish controllers/contracts, and the compiler materializes the reconciled graph before execution.
 
@@ -61,7 +61,7 @@ Avoid:
 
 Compositions answer questions like:
 
-- What inputs are required for a `terraform` component?
+- What parameters are required for a `terraform` component?
 - Which steps make up the `verify` or `release` profile?
 - Which capabilities are included for pull request validation?
 - Which runner-compatible `run` or `use` steps are emitted?
@@ -75,11 +75,11 @@ The plan answers:
 
 ## Policies and defaults
 
-Defaults are convenience. Policies are constraints.
+Defaults are convenience. Standards are constraints.
 
-Use defaults to reduce repetition in component inputs. Use policies to express guardrails that should not be bypassed by component authors.
+Use `parameterDefaults` to reduce repetition in component parameters. Express guardrails where orun enforces them: the composition's schema (checked by `orun plan`), the profiles a composition offers, profile and dependency rules, secret references, and source `digest:` pins. A `policies` map on a group, environment, or profile is recorded but not yet enforced; treat it as stated intent, not a guardrail.
 
-As implemented by Orun's planner, component instance inputs are assembled from environment defaults, group defaults, and component inputs, with component inputs winning. Path has a specific precedence: component `path`, then group default `path`, then environment default `path`, then `./`.
+As implemented by orun's planner, component instance parameters are assembled from environment `parameterDefaults`, group `parameterDefaults`, and component `parameters`, with component parameters winning. Path has a specific precedence: component `path`, then group default `path`, then environment default `path`, then `./`.
 
 Runtime `env` has its own merge chain: root intent `env`, environment `env`, component root `env`, then subscription `env`.
 
@@ -89,8 +89,8 @@ Runtime `env` has its own merge chain: root intent `env`, environment `env`, com
 - Do not duplicate composition logic inside components.
 - Do not bypass `intent.yaml` when changing repo-level behavior.
 - Do not create environment behavior that cannot be seen in `orun plan`.
-- Do not hardcode values that belong in defaults, environment config, component inputs, or profiles.
-- Prefer adding typed inputs and composition support over one-off shell.
+- Do not hardcode values that belong in defaults, environment config, component parameters, or profiles.
+- Prefer adding typed parameters and composition support over one-off shell.
 - Always validate and inspect the DAG after changes.
 - Explain changes in Orun terms: intent, component, composition, profile, dependency, plan.
 

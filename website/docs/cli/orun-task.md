@@ -1,8 +1,10 @@
 ---
 title: orun task
+description: The task plane from the command line - create tasks, attach their contracts, list and show them, and check offline that a branch stays inside its contract's affects.
 ---
 
-`orun task` is the CLI face of the task plane: identity comes from the
+`orun task` binds work, by a person or an agent, to a declared contract and checks it. It
+is the CLI face of the task plane: identity comes from the
 cloud allocator (the single writer of keys), the contract is authored in the
 repository and sealed by content hash wherever it travels, and the verdict —
 `draft → ready → in_progress → in_review → done → released` — is derived from

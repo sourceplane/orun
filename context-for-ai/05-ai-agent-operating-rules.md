@@ -21,9 +21,9 @@ Before editing, identify:
 | Which components exist | `component.yaml` files or inline `intent.components` |
 | Which environments exist | `intent.environments` |
 | Which components run in an environment | `subscribe.environments` or environment selectors |
-| Shared defaults | `intent.environments.*.defaults` or `intent.groups.*.defaults` |
-| Guardrails | `intent.groups.*.policies`, `intent.environments.*.policies`, or profile policies |
-| Required component inputs | `ComponentSchema` in the composition package |
+| Shared defaults | `intent.environments.*.parameterDefaults` or `intent.groups.*.parameterDefaults` |
+| Guardrails | The `ComponentSchema`, the profiles a composition offers, profile and dependency rules, a source `digest:` pin (group, environment, and profile `policies` are recorded, not enforced) |
+| Required component parameters | `ComponentSchema` in the composition package |
 | Execution steps | `JobTemplate` in the composition package |
 | PR vs release behavior | `ExecutionProfile` |
 | Ordering | `dependsOn` |

@@ -6,12 +6,18 @@ description: The typed entity model derived from your declared sources — compo
 The catalog is orun's answer to "what exists, who owns it, how is it
 connected, and where is it running?" — derived entirely from the sources you
 already declare. It is not a database you curate: it is a **projection** of
-`component.yaml` files, the intent, `CODEOWNERS`, the composition lock, and
-recorded execution history. If the sources change, the catalog changes; if
+`component.yaml` files, the intent, `CODEOWNERS`, the resolved composition
+sources, and recorded execution history. If the sources change, the catalog changes; if
 something is in the catalog, a source put it there.
 
+That makes the catalog the platform's standards, observed, and it is what coding agents
+read to understand a repository: the catalog tools on [`orun mcp`](../cli/orun-mcp.md) and
+`orun catalog affected` answer "what is this, who owns it, and what does my change touch?"
+from the same declarations the planner uses. See
+[agents in orun repositories](../ai-context/orun-repositories.md).
+
 ```text
-component.yaml · intent.yaml · CODEOWNERS · compositions.lock.yaml
+component.yaml · intent.yaml · CODEOWNERS · composition sources
                           │  resolve
                           ▼
         ┌──────────────────────────────────────┐

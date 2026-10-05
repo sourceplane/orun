@@ -20,8 +20,8 @@ Answer these questions:
 1. Choose the correct existing `type`.
 2. Place the component under a directory included by `intent.discovery.roots`.
 3. Add `component.yaml` with `apiVersion`, `kind`, `metadata.name`, and `spec`.
-4. Set `domain`, `path`, `subscribe.environments`, `inputs`, labels, and dependencies.
-5. Validate against the composition schema.
+4. Set `domain`, `path`, `subscribe.environments`, `parameters`, labels, and dependencies.
+5. Run `orun plan`, which checks the parameters against the composition schema (`orun validate` does not load compositions).
 6. Inspect the component view and DAG.
 7. Update docs and AI context if the repo keeps a component inventory.
 
@@ -38,7 +38,7 @@ orun plan --intent intent.yaml --view dag
 
 1. Read the component schema for its type.
 2. Change only component-owned desired state in `component.yaml`.
-3. If you need a new input, update the composition schema instead of smuggling it through shell.
+3. If you need a new parameter, update the composition schema instead of smuggling it through shell.
 4. If ordering changes, add or update `dependsOn`.
 5. Validate and inspect the plan.
 
@@ -49,10 +49,10 @@ Prefer these locations:
 | Need | Put it here |
 | --- | --- |
 | Environment activates on a CI event | `intent.automation.triggerBindings` plus `environments.<name>.activation.triggerRefs` |
-| Shared default for all components in an environment | `environments.<name>.defaults` |
+| Shared default for all components in an environment | `environments.<name>.parameterDefaults` |
 | Shared env var for all jobs in an environment | `environments.<name>.env` |
-| Shared constraint for an environment | `environments.<name>.policies` |
-| Component-specific behavior in one environment | `component.subscribe.environments[].profile`, `env`, or inputs |
+| Shared constraint for an environment | A composition profile or profile rule, or a dependency rule (`environments.<name>.policies` is recorded, not enforced) |
+| Component-specific behavior in one environment | `component.subscribe.environments[].profile`, `env`, or parameters |
 | Reusable behavior difference such as PR vs release | `ExecutionProfile` |
 
 ### Add or modify a composition type

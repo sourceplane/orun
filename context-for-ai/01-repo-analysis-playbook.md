@@ -60,7 +60,7 @@ Identify:
 - Composition sources, source kinds, and lock digests.
 - Environments and trigger activation rules.
 - Groups, domains, defaults, and policies.
-- Components, their paths, types, domains, subscriptions, labels, inputs, and dependencies.
+- Components, their paths, types, domains, subscriptions, labels, parameters, and dependencies.
 - Component types and the compositions they bind to.
 - Profiles used by each component/environment subscription.
 - Trigger bindings and CI workflows that call Orun.
@@ -78,7 +78,7 @@ Use this shape when summarizing a target repo:
 
 Use this shape:
 
-| Type | Source | Default job | Default profile | Profiles | Key inputs | Used by |
+| Type | Source | Default job | Default profile | Profiles | Key parameters | Used by |
 | --- | --- | --- | --- | --- | --- | --- |
 | `terraform` | `platform` | `validate` | `verify` | `pull-request`, `verify`, `release` | `stackName`, `terraformDir`, `terraformVersion` | infra components |
 

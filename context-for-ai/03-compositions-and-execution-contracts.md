@@ -59,7 +59,7 @@ compositions/
 | Kind | Owns | AI guidance |
 | --- | --- | --- |
 | `Composition` | Public type facade, default job, default profile, references to schema/jobs/profiles. | Update when adding or renaming a type, job, or profile. |
-| `ComponentSchema` | JSON Schema for component inputs. | Update when component input contract changes. |
+| `ComponentSchema` | JSON Schema for component parameters, checked by `orun plan`. | Update when the component parameter contract changes. |
 | `JobTemplate` | Steps, capabilities, labels, runner defaults, timeouts, retries. | Update when execution behavior changes for all users of the type. |
 | `ExecutionProfile` | Which jobs/steps/capabilities run in a context. | Update when PR, verify, release, or deploy behavior should differ. |
 
@@ -133,7 +133,7 @@ Change a composition when:
 - A new profile is needed for a planning context.
 - Reusable behavior is being copied across multiple components.
 
-Do not change a composition for a single component's desired state. Use component inputs for that.
+Do not change a composition for a single component's desired state. Use component parameters for that.
 
 ## Validation checklist for composition changes
 
