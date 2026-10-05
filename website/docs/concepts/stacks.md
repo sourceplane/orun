@@ -1,10 +1,17 @@
 ---
 title: Stacks
+description: A Stack is how a platform's standards travel - golden paths and platform rules packaged as one versioned OCI artifact that any repository pulls by reference, so upgrading a standard is a version bump, not a migration project.
 ---
 
-A **Stack** is the standard packaging format for distributing composition types in orun. It replaces the legacy `orun.yaml` / `CompositionPackage` format and is the recommended way to author, version, and share platform compositions.
+A **Stack** is how your standards travel. It packages golden paths (compositions) and,
+optionally, platform rules ([intent presets](./intent-presets.md)) as one versioned OCI
+artifact. Every repository pulls it by reference, like any other dependency, so upgrading a
+golden path across an organisation is a version bump that each repository reviews as a plan
+diff, not a migration project.
 
 ## What is a Stack?
+
+A Stack replaces the legacy `orun.yaml` / `CompositionPackage` format.
 
 A Stack is a directory rooted at a `stack.yaml` manifest (apiVersion: `orun.io/v1`, kind: `Stack`). It bundles one or more composition types — each using split-kind authoring — together with metadata and an optional OCI registry target.
 
@@ -140,7 +147,7 @@ compositions:
       digest: sha256:abc123...
 ```
 
-Or generate a lock file with `orun compositions lock` — it records resolved digests automatically.
+`orun plan` verifies a declared `digest:` and fails if the source resolves to anything else. Every plan also records the digest each source resolved to, so a moved tag shows up in the plan diff. See [versioning and locking](./versioning-and-locking.md).
 
 ## Using a local Stack
 
@@ -194,7 +201,7 @@ apiVersion: orun.io/v1
 kind: Stack
 metadata:
   name: sumo-ops-orun-platform-stack
-  version: 0.9.2
+  version: 0.10.0
   description: Packaged compositions for the Sumo Ops Platform Orun repository.
   owner: sourceplane
 registry:
@@ -206,41 +213,9 @@ registry:
 
 Running `orun pack --root examples/compositions` discovers and archives all eleven composition types automatically.
 
-## Intent Presets
+## Intent presets
 
-Stacks can publish reusable intent scaffolding alongside compositions. This lets platform teams ship "golden repo baselines" — standard environments, triggers, defaults, and policies — that consuming repos opt into via `extends:`.
-
-### Declaring Presets in stack.yaml
-
-```yaml
-apiVersion: orun.io/v1
-kind: Stack
-metadata:
-  name: aws-platform-stack
-  version: 1.0.0
-spec:
-  compositions:
-    - path: compositions/terraform/composition.yaml
-  intentPresets:
-    - name: standard
-      path: presets/standard.yaml
-    - name: github-actions
-      path: presets/github-actions.yaml
-```
-
-Preset files use `kind: IntentPreset` and live anywhere within the Stack directory. They are included in the OCI artifact when the Stack is published.
-
-### Directory Structure
-
-```text
-my-platform/
-├── stack.yaml
-├── compositions/
-│   └── ...
-└── presets/
-    ├── standard.yaml       ← IntentPreset
-    └── github-actions.yaml ← IntentPreset
-```
-
-See [Intent Presets](./intent-presets.md) for the full preset specification and merge rules.
-
+A Stack can also publish platform rules (environments, trigger bindings, defaults,
+discovery roots) as intent presets, listed under `spec.intentPresets` in `stack.yaml`.
+Repositories inherit them with `extends:`. See [intent presets](./intent-presets.md) for
+the preset format and merge rules.

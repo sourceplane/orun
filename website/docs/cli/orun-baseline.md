@@ -4,9 +4,10 @@ description: The baseline registry from the command line — list what can be bu
 ---
 
 `orun baseline` is the command-line face of the **baseline registry**: the
-catalogue of complete product repositories the platform can rebuild under
-your name. Every subcommand runs against one workspace, resolved the same
-way as every other cloud command (see [`orun workspace`](./orun-workspace.md)).
+catalogue of baselines, each a whole product's structure and standards packaged so the
+platform can rebuild it under your name and you can upgrade it later. Every subcommand
+runs against one workspace, resolved the same way as every other cloud command (see
+[`orun workspace`](./orun-workspace.md)).
 
 ```bash
 orun baseline list [--public] [--json]

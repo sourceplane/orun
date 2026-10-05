@@ -3,6 +3,11 @@ title: Create a workspace and build it from a baseline
 description: From a fresh install to a live product — sign in, create an Orunbase workspace, connect Cloudflare, verify the cirrus baseline is buildable, and build it on the platform or on your own machine.
 ---
 
+A baseline is a whole product's structure and standards, packaged so it can be rebuilt
+for a new owner and upgraded later instead of forked (see [baselines](../concepts/baselines.md)).
+This guide is that idea end to end: it takes a baseline from the registry and builds a live
+product from it under your name.
+
 This guide walks through the complete path from an empty machine to a running
 multi-tenant SaaS product, using the **cirrus** baseline as the worked example.
 Every command and every line of output below was run against the current

@@ -63,6 +63,7 @@ const sidebars = {
         'compositions/writing-compositions',
         'compositions/composition-examples',
         'concepts/intent-presets',
+        'concepts/versioning-and-locking',
         'concepts/baselines',
         'examples/bootstrap-a-product-from-a-baseline',
         'examples/use-with-kiox',
@@ -225,6 +226,7 @@ const sidebars = {
       type: 'category',
       label: 'Release notes',
       items: [
+        'release-notes/v2.73.2',
         'release-notes/v2.73.1',
         'release-notes/v2.73.0',
         'release-notes/v2.72.1',
