@@ -7,7 +7,7 @@
 // from now.
 //
 // References:
-//   - specs/orun-component-catalog/identity-and-keys.md §2 (SourceSnapshot
+//   - specs/archive/orun-component-catalog/identity-and-keys.md §2 (SourceSnapshot
 //     key construction), §7 (dirtyHash inputs), §8 (catalogInputHash).
-//   - specs/orun-component-catalog/data-model.md §1 (SourceSnapshot shape).
+//   - specs/archive/orun-component-catalog/data-model.md §1 (SourceSnapshot shape).
 package sourcectx

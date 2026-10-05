@@ -2,7 +2,7 @@
   "$id": "https://orun.io/schemas/component-yaml.schema.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": true,
-  "description": "Authored component.yaml shape per specs/orun-component-catalog/data-model.md §6.",
+  "description": "Authored component.yaml shape per specs/archive/orun-component-catalog/data-model.md §6.",
   "properties": {
     "apiVersion": {
       "type": "string"

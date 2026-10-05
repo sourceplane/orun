@@ -5,7 +5,7 @@
 // binding matched a provider event) or a "system" trigger (an ad-hoc invocation
 // such as a manual `orun plan`).
 //
-// This package owns no persistence. See specs/orun-state-redesign/data-model.md
+// This package owns no persistence. See specs/archive/orun-state-redesign/data-model.md
 // §2 for the on-disk JSON schema and design.md §5.1 for the position of
 // triggerctx in the broader architecture.
 package triggerctx

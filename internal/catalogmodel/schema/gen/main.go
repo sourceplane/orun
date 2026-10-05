@@ -22,7 +22,7 @@ import (
 const (
 	schemaID          = "https://orun.io/schemas/component-yaml.schema.json"
 	schemaTitle       = "ComponentYAML"
-	schemaDescription = "Authored component.yaml shape per specs/orun-component-catalog/data-model.md §6."
+	schemaDescription = "Authored component.yaml shape per specs/archive/orun-component-catalog/data-model.md §6."
 )
 
 func main() {
