@@ -686,14 +686,7 @@ func generatePlan() error {
 			outputPath := os.Getenv("GITHUB_OUTPUT")
 			var outputLines []string
 
-			// Build matrix JSON from plan jobs
-			var matrixEntries []string
-			for _, job := range plan.Jobs {
-				entry := fmt.Sprintf(`{"id":%q,"uid":%q,"component":%q,"env":%q,"composition":%q,"profile":%q}`,
-					job.ID, job.UID, job.Component, job.Environment, job.Composition, job.Profile)
-				matrixEntries = append(matrixEntries, entry)
-			}
-			matrixJSON := fmt.Sprintf("{\"include\":[%s]}", strings.Join(matrixEntries, ","))
+			matrixJSON := githubMatrixJSON(plan)
 			outputLines = append(outputLines, fmt.Sprintf("matrix<<EOF\n%s\nEOF", matrixJSON))
 			outputLines = append(outputLines, fmt.Sprintf("plan_id=%s", planID))
 			outputLines = append(outputLines, fmt.Sprintf("exec_id=%s", execID))

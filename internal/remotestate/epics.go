@@ -184,6 +184,27 @@ func ExistingEpicOf(err error) *PublicEpic {
 	return d.Existing
 }
 
+// AuthoredElsewhereOf reads the refusal a workspace answers when it creates
+// new work in another channel (412 precondition_failed, reason
+// `authored_elsewhere`, orun-cloud saas-work-ownership WO-D8): the channel
+// it names (`tracker`, `platform`) and true; "", false for any other error.
+func AuthoredElsewhereOf(err error) (string, bool) {
+	apiErr, ok := err.(*APIError)
+	if !ok || apiErr.Status != http.StatusPreconditionFailed || len(apiErr.Details) == 0 {
+		return "", false
+	}
+	var d struct {
+		Reason string `json:"reason"`
+		Owner  struct {
+			Kind string `json:"kind"`
+		} `json:"owner"`
+	}
+	if json.Unmarshal(apiErr.Details, &d) != nil || d.Reason != "authored_elsewhere" {
+		return "", false
+	}
+	return d.Owner.Kind, true
+}
+
 // ListEpics fetches the org's epics.
 func (c *Client) ListEpics(ctx context.Context, org string) (*EpicsList, error) {
 	var resp EpicsList

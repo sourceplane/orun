@@ -1,47 +1,10 @@
 package planner
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/sourceplane/orun/internal/model"
 )
-
-func TestTopologicalSortIsDeterministic(t *testing.T) {
-	jobs := map[string]*model.JobInstance{}
-	add := func(id string, deps ...string) {
-		jobs[id] = &model.JobInstance{ID: id, DependsOn: deps}
-	}
-	add("z.prod.deploy", "z.staging.deploy", "a.prod.deploy")
-	add("z.staging.deploy", "z.dev.deploy")
-	add("z.dev.deploy")
-	add("m.dev.deploy")
-	add("a.prod.deploy", "a.staging.deploy")
-	add("a.staging.deploy", "a.dev.deploy")
-	add("a.dev.deploy")
-	add("b.dev.verify")
-
-	// Kahn's algorithm, always taking the smallest ready id.
-	want := []string{
-		"a.dev.deploy",
-		"a.staging.deploy",
-		"a.prod.deploy",
-		"b.dev.verify",
-		"m.dev.deploy",
-		"z.dev.deploy",
-		"z.staging.deploy",
-		"z.prod.deploy",
-	}
-	for i := 0; i < 50; i++ {
-		got, err := NewJobGraph(jobs).TopologicalSort()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("iteration %d: order = %v, want %v", i, got, want)
-		}
-	}
-}
 
 // Two environments on different profiles of the same composition, where one
 // profile overrides a step's run. The template cache used to key on

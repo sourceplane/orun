@@ -153,6 +153,11 @@ type PlanJob struct {
 	JobRegistry              string                 `json:"jobRegistry,omitempty" yaml:"jobRegistry,omitempty"` // Name of the JobRegistry used
 	Job                      string                 `json:"job,omitempty" yaml:"job,omitempty"`                 // Specific job from registry
 	RunsOn                   string                 `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`
+	// Index is the job's position in Jobs: a stable, dense 0-based number for
+	// one plan. CI composes a per-job runner label from it
+	// (ghr-orun-job:<run>-<index>), so a runner launched for a lane can take
+	// only that lane; the platform maps the label back through the plan.
+	Index int `json:"index" yaml:"index"`
 	Path                     string                 `json:"path,omitempty" yaml:"path,omitempty"` // Working directory for job execution
 	Steps                    []PlanStep             `json:"steps" yaml:"steps"`
 	DependsOn                []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`

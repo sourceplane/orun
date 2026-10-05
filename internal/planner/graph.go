@@ -60,59 +60,52 @@ func (g *JobGraph) hasCycleDFS(node string, visited, recStack map[string]bool) b
 }
 
 // TopologicalSort performs topological sorting of jobs using Kahn's algorithm
-// Returns sorted job IDs in execution order.
-//
-// The order is deterministic: among the jobs whose dependencies are all
-// satisfied, the lexicographically smallest id is emitted first. Plan
-// checksums and revision keys hash the rendered job order, so it must not
-// depend on map iteration order.
+// Returns sorted job IDs in execution order
 func (g *JobGraph) TopologicalSort() ([]string, error) {
-	jobIDs := make([]string, 0, len(g.jobs))
-	for jobID := range g.jobs {
-		jobIDs = append(jobIDs, jobID)
-	}
-	sort.Strings(jobIDs)
-
 	// Build reverse dependency graph (dependents: who depends on me)
 	dependents := make(map[string][]string)
-	inDegree := make(map[string]int, len(jobIDs))
+	inDegree := make(map[string]int)
 
 	// Initialize all jobs
-	for _, jobID := range jobIDs {
+	for jobID := range g.jobs {
 		inDegree[jobID] = 0
+		dependents[jobID] = make([]string, 0)
 	}
 
 	// Build graph by counting incoming edges
-	for _, jobID := range jobIDs {
-		for _, dep := range g.jobs[jobID].DependsOn {
+	for jobID, job := range g.jobs {
+		for _, dep := range job.DependsOn {
 			dependents[dep] = append(dependents[dep], jobID)
 			inDegree[jobID]++
 		}
 	}
 
-	// Kahn's algorithm: process nodes with no dependencies first. ready is
-	// kept sorted so the next job is always the smallest ready id.
-	ready := make([]string, 0)
-	for _, jobID := range jobIDs {
-		if inDegree[jobID] == 0 {
-			ready = append(ready, jobID)
+	// Kahn's algorithm: process nodes with no dependencies first. The seed
+	// queue and every dependents list are sorted so the order is a function of
+	// the graph alone, not of map iteration: a job's position (PlanJob.Index)
+	// must be the same every time the same intent is planned.
+	queue := make([]string, 0)
+	for jobID, degree := range inDegree {
+		if degree == 0 {
+			queue = append(queue, jobID)
 		}
+	}
+	sort.Strings(queue)
+	for jobID := range dependents {
+		sort.Strings(dependents[jobID])
 	}
 
 	sorted := make([]string, 0, len(g.jobs))
-	for len(ready) > 0 {
-		current := ready[0]
-		ready = ready[1:]
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
 		sorted = append(sorted, current)
 
 		// Process all dependents
 		for _, dependent := range dependents[current] {
 			inDegree[dependent]--
 			if inDegree[dependent] == 0 {
-				i := sort.SearchStrings(ready, dependent)
-				ready = append(ready, "")
-				copy(ready[i+1:], ready[i:])
-				ready[i] = dependent
+				queue = append(queue, dependent)
 			}
 		}
 	}

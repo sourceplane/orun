@@ -122,7 +122,23 @@ writes still stamps the epic once (`stamp  epic <slug> — managedBy`, an
 empty update under the header), and the same commit run twice stamps
 nothing.
 A run stops at the first failed write and says how many it applied; the
-next push resumes from the tree.
+next push resumes from the tree. One refusal is not a failure: when the
+workspace's Work setting creates new work in another channel (its tracker,
+or the console), the platform refuses a new epic with `412
+authored_elsewhere`, and the sync prints `warn  epic <slug> — not created
+— this workspace creates new work in its tracker (Settings → Work);
+skipped` and goes on to the next epic. Epics that already exist keep
+syncing whatever the setting says.
+
+**The merge's own sync rides `orun plan`.** With `sync: on-merge` in
+`intent.yaml`, a successful `orun plan` on the clean default branch
+reconciles the tree the same way it publishes the catalog
+(`execution.state.autopushCatalog`): no separate job, in any repository
+that runs orun. It is debounced by commit, bounded to ten minutes, and
+never changes the plan's exit code; a refused write is printed as
+`⚠ work sync: …` and the next plan on main resumes from the tree. The
+standalone `orun work sync` remains for a run from a laptop or a re-run
+by hand.
 
 `sync` runs only when `intent.yaml` says `sync: on-merge` (or with
 `--force`). `--dry-run` prints the plan and writes nothing, whatever intent

@@ -11,6 +11,8 @@ recent are:
 
 | Version | Date | Highlights |
 |---|---|---|
+| [v2.72.1](https://orun-docs.pages.dev/release-notes/v2.72.1) | 2026-10-05 | `orun plan` is byte-identical for identical inputs; profile step overrides no longer leak across profiles; plans drop `generatedAt` |
+| [v2.71.0](https://orun-docs.pages.dev/release-notes/v2.71.0) | 2026-10-01 | the plan names its runners (`index` in the plan, the matrix and the upload); `orun run init` |
 | [v2.58](https://orun-docs.pages.dev/release-notes/v2.58.0) | 2026-09-16 to 2026-09-19 | `orun baseline new --via-platform`, `orun baseline register` and `publish`, the bootstrap driver, and the build-hardening patches through v2.58.15 |
 | [v2.57.0](https://orun-docs.pages.dev/release-notes/v2.58.0#v2570) | 2026-09-15 | `orun baseline new --local` |
 | [v2.56.0](https://orun-docs.pages.dev/release-notes/v2.58.0#v2560) | 2026-09-15 | `orun baseline` (the registry from the command line), typed hook actions, phase preconditions and waits, derived phase state |

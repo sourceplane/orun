@@ -42,3 +42,20 @@ func TestExistingEpicOf(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthoredElsewhereOf(t *testing.T) {
+	refusal := &APIError{Status: http.StatusPreconditionFailed, Code: "precondition_failed", Details: json.RawMessage(`{"reason":"authored_elsewhere","owner":{"kind":"tracker"}}`)}
+	if kind, ok := AuthoredElsewhereOf(refusal); !ok || kind != "tracker" {
+		t.Fatalf("got %q %v", kind, ok)
+	}
+	for _, err := range []error{
+		&APIError{Status: http.StatusPreconditionFailed, Details: json.RawMessage(`{"reason":"managed","owner":{"kind":"git"}}`)},
+		&APIError{Status: http.StatusConflict, Details: json.RawMessage(`{"reason":"authored_elsewhere"}`)},
+		&APIError{Status: http.StatusPreconditionFailed},
+		nil,
+	} {
+		if _, ok := AuthoredElsewhereOf(err); ok {
+			t.Errorf("%v read as authored_elsewhere", err)
+		}
+	}
+}
