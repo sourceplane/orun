@@ -22,7 +22,7 @@ Before editing, identify:
 | Which environments exist | `intent.environments` |
 | Which components run in an environment | `subscribe.environments` or environment selectors |
 | Shared defaults | `intent.environments.*.parameterDefaults` or `intent.groups.*.parameterDefaults` |
-| Guardrails | The `ComponentSchema`, the profiles a composition offers, profile and dependency rules, a source `digest:` pin (group, environment, and profile `policies` are recorded, not enforced) |
+| Guardrails | The `ComponentSchema`, the profiles a composition offers, profile and dependency rules, a source `digest:` pin, and group, environment, and profile `policies` |
 | Required component parameters | `ComponentSchema` in the composition package |
 | Execution steps | `JobTemplate` in the composition package |
 | PR vs release behavior | `ExecutionProfile` |

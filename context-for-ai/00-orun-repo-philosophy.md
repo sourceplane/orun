@@ -77,7 +77,7 @@ The plan answers:
 
 Defaults are convenience. Standards are constraints.
 
-Use `parameterDefaults` to reduce repetition in component parameters. Express guardrails where orun enforces them: the composition's schema (checked by `orun plan`), the profiles a composition offers, profile and dependency rules, secret references, and source `digest:` pins. A `policies` map on a group, environment, or profile is recorded but not yet enforced; treat it as stated intent, not a guardrail.
+Use `parameterDefaults` to reduce repetition in component parameters. Express guardrails where orun enforces them: the composition's schema (checked by `orun plan`), the profiles a composition offers, profile and dependency rules, secret references, source `digest:` pins, and `policies` on a group, environment, or profile (checked by `orun validate`, `orun plan`, and `orun run`).
 
 As implemented by orun's planner, component instance parameters are assembled from environment `parameterDefaults`, group `parameterDefaults`, and component `parameters`, with component parameters winning. Path has a specific precedence: component `path`, then group default `path`, then environment default `path`, then `./`.
 

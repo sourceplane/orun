@@ -126,7 +126,37 @@ properties:
                 additionalProperties: true
             policies:
               type: object
-              additionalProperties: true
+              description: Typed platform policies, enforced by orun (see website/docs/concepts/standards.md). Unknown keys fail validate and plan.
+              properties:
+                pinnedParameters:
+                  type: object
+                  description: Parameter values a component may not override, keyed by composition type or "*" like parameterDefaults.
+                  additionalProperties:
+                    type: object
+                    additionalProperties: true
+                requireProfile:
+                  description: Execution profile name(s) or glob patterns every component instance must resolve to.
+                  oneOf:
+                    - type: string
+                      minLength: 1
+                    - type: array
+                      minItems: 1
+                      items:
+                        type: string
+                        minLength: 1
+                requirePinnedTerraformVersion:
+                  description: The terraformVersion parameter must be an exact version.
+                  type: [boolean, string]
+                  enum: [true, false, "true", "false"]
+                requireCleanGitTree:
+                  description: orun run refuses to execute these jobs from a working tree with uncommitted or untracked changes.
+                  type: [boolean, string]
+                  enum: [true, false, "true", "false"]
+                requireApproval:
+                  description: orun run pauses each job on an approval gate (orun approve) before any step runs.
+                  type: [boolean, string]
+                  enum: [true, false, "true", "false"]
+              additionalProperties: false
       groups:
         type: object
         additionalProperties:
@@ -134,7 +164,37 @@ properties:
           properties:
             policies:
               type: object
-              additionalProperties: true
+              description: Typed platform policies, enforced by orun (see website/docs/concepts/standards.md). Unknown keys fail validate and plan.
+              properties:
+                pinnedParameters:
+                  type: object
+                  description: Parameter values a component may not override, keyed by composition type or "*" like parameterDefaults.
+                  additionalProperties:
+                    type: object
+                    additionalProperties: true
+                requireProfile:
+                  description: Execution profile name(s) or glob patterns every component instance must resolve to.
+                  oneOf:
+                    - type: string
+                      minLength: 1
+                    - type: array
+                      minItems: 1
+                      items:
+                        type: string
+                        minLength: 1
+                requirePinnedTerraformVersion:
+                  description: The terraformVersion parameter must be an exact version.
+                  type: [boolean, string]
+                  enum: [true, false, "true", "false"]
+                requireCleanGitTree:
+                  description: orun run refuses to execute these jobs from a working tree with uncommitted or untracked changes.
+                  type: [boolean, string]
+                  enum: [true, false, "true", "false"]
+                requireApproval:
+                  description: orun run pauses each job on an approval gate (orun approve) before any step runs.
+                  type: [boolean, string]
+                  enum: [true, false, "true", "false"]
+              additionalProperties: false
             parameterDefaults:
               type: object
               additionalProperties:

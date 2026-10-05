@@ -253,6 +253,24 @@ orun run --all-envs             # all environments, explicitly
 orun run --dry-run              # preview all environments (read-only)
 ```
 
+## Runtime policies
+
+Two [policies](../concepts/intent-model.md#policies) can only be checked when a job
+runs. The plan records them on each job under `policies`, and `orun run` enforces them
+(a `--dry-run` does neither):
+
+- **`requireCleanGitTree`**: before any job starts, the workspace must be a git work tree
+  with no uncommitted or untracked changes. orun's own `.orun/` directory is ignored. A
+  dirty tree fails the run and lists the changed paths.
+- **`requireApproval`**: the job pauses before its first step, and before its secrets
+  resolve, until [`orun approve`](./orun-approve.md#policy-approvals)
+  `<jobID> policy.requireApproval` decides. A rejection, or no decision within 24 hours,
+  fails the job.
+
+In CI, where nobody can answer an interactive gate, keep `requireApproval` on the lanes a
+person promotes by hand (production on a release tag, say), not on lanes that run on every
+merge.
+
 ## Backend resolution
 
 `run` chooses its backend in this order:

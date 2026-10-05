@@ -121,6 +121,7 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 					OptionalSecretRefs:       optionalSecretRefs,
 					SecretBindings:           bindings,
 					Materialize:              materialize,
+					Policies:                 compInst.Policies,
 					DependsOn:                make([]string, 0),
 				}
 

@@ -398,7 +398,7 @@ type ComponentInstance struct {
 	// guard as SecretEnv; a key may not appear in both maps.
 	OptionalSecretEnv     map[string]string
 	StepOverrides         []Step
-	Policies              map[string]interface{}
+	Policies              *PlanPolicies // effective, already-enforced policy set; nil when none applies
 	DependsOn             []ResolvedDependency
 	Enabled               bool
 	ProfileRef            string

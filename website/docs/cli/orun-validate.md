@@ -1,9 +1,9 @@
 ---
 title: orun validate
-description: The verify step - check the intent, its discovered component manifests, the reserved ORUN_ prefix, and every profile and dependency rule, without compiling a plan.
+description: The verify step - check the intent, its discovered component manifests, the reserved ORUN_ prefix, every profile and dependency rule, and every policy, without compiling a plan.
 ---
 
-`orun validate` is the verify step: it checks the intent file, the component manifests it discovers, the reserved `ORUN_` environment prefix, and the profile and dependency rules, without loading compositions or generating a plan. Checking each component's parameters against its composition's schema happens in [`orun plan`](./orun-plan.md); run both in CI. See [standards](../concepts/standards.md) for what each command enforces.
+`orun validate` is the verify step: it checks the intent file, the component manifests it discovers, the reserved `ORUN_` environment prefix, the profile and dependency rules, and the intent's [policies](../concepts/intent-model.md#policies), without generating a plan. It resolves the composition sources to merge presets and to check execution-profile policies; if they cannot be resolved it warns and still checks the intent-level policies. Checking each component's parameters against its composition's schema happens in [`orun plan`](./orun-plan.md); run both in CI. See [standards](../concepts/standards.md) for what each command enforces.
 
 :::note Always global
 `validate` always operates on the full intent regardless of your current directory. CWD-based component scoping does not apply — you need to know the whole graph is valid, not just your component. The `--all` flag has no effect on this command.
@@ -21,6 +21,7 @@ When `--intent` is not specified, `orun` auto-discovers `intent.yaml` by walking
 
 - pre-commit validation
 - fast CI checks before full plan rendering
+- catching a policy violation (a component overriding a pinned parameter, a lane on the wrong profile) before review
 - debugging schema failures independently from execution planning
 
 ## Examples

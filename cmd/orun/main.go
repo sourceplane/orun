@@ -49,22 +49,9 @@ func generatePlan() error {
 	}
 
 	// Resolve and merge intent presets from composition sources
-	if len(intent.Extends) > 0 {
-		if debugMode {
-			fmt.Printf("□ Resolving %d intent presets...\n", len(intent.Extends))
-		}
-		if err := preset.ValidateExtendsRefs(intent); err != nil {
-			return err
-		}
-		resolvedPresets, err := preset.LoadPresetsForIntent(intent, compositionRegistry.SourceRoots)
-		if err != nil {
-			return fmt.Errorf("failed to load intent presets: %w", err)
-		}
-		mergeResult, err := preset.MergePresets(intent, resolvedPresets)
-		if err != nil {
-			return fmt.Errorf("failed to merge intent presets: %w", err)
-		}
-		intent = mergeResult.Intent
+	intent, err = mergeIntentPresets(intent, compositionRegistry)
+	if err != nil {
+		return err
 	}
 
 	// Build CompositionInfo map for the planner with default jobs
@@ -761,8 +748,26 @@ func validateFiles() error {
 
 	fmt.Println("✓ Intent is valid")
 
+	// Compositions are needed to merge presets and to check profile policies.
+	// When they cannot be resolved (e.g. an unreachable remote source), the
+	// intent-level checks still run and the gap is reported.
+	compositionRegistry, regErr := loader.LoadCompositionsForIntent(intent, intentFile, configDir)
+	if regErr != nil {
+		compositionRegistry = nil
+		// An intent with no composition sources has nothing more to check;
+		// only a declared source that fails to resolve is worth a warning.
+		if len(intent.Compositions.Sources) > 0 || configDir != "" {
+			fmt.Fprintf(os.Stderr, "⚠ compositions not resolved (%v); presets and profile policies are not checked\n", regErr)
+		}
+	} else {
+		intent, err = mergeIntentPresets(intent, compositionRegistry)
+		if err != nil {
+			return err
+		}
+	}
+
 	fmt.Println("□ Normalizing intent...")
-	_, err = normalize.NormalizeIntent(intent)
+	normalized, err := normalize.NormalizeIntent(intent)
 	if err != nil {
 		return fmt.Errorf("normalization failed: %w", err)
 	}
@@ -774,8 +779,50 @@ func validateFiles() error {
 		return trigger.FormatErrors(errs)
 	}
 
+	fmt.Println("□ Checking policies...")
+	if err := checkIntentPolicies(normalized, compositionRegistry); err != nil {
+		return err
+	}
+
 	fmt.Println("✓ All validation passed")
 	return nil
+}
+
+// checkIntentPolicies expands every environment × component and enforces the
+// group, environment, and execution-profile policies (pinned parameters,
+// requireProfile, requirePinnedTerraformVersion). A nil registry skips the
+// profile-dependent checks. Violations come back as *intentpolicy.Error.
+func checkIntentPolicies(normalized *model.NormalizedIntent, registry *loader.CompositionRegistry) error {
+	expander := expand.NewExpander(normalized)
+	if registry != nil {
+		expander = expander.WithRegistry(registry)
+	}
+	_, err := expander.Expand()
+	return err
+}
+
+// mergeIntentPresets resolves the intent's `extends` presets from the
+// composition sources and merges them in. An intent without presets is
+// returned unchanged.
+func mergeIntentPresets(intent *model.Intent, registry *loader.CompositionRegistry) (*model.Intent, error) {
+	if len(intent.Extends) == 0 {
+		return intent, nil
+	}
+	if debugMode {
+		fmt.Printf("□ Resolving %d intent presets...\n", len(intent.Extends))
+	}
+	if err := preset.ValidateExtendsRefs(intent); err != nil {
+		return nil, err
+	}
+	resolvedPresets, err := preset.LoadPresetsForIntent(intent, registry.SourceRoots)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load intent presets: %w", err)
+	}
+	mergeResult, err := preset.MergePresets(intent, resolvedPresets)
+	if err != nil {
+		return nil, fmt.Errorf("failed to merge intent presets: %w", err)
+	}
+	return mergeResult.Intent, nil
 }
 
 func debugIntent() error {

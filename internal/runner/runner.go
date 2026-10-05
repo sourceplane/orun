@@ -187,6 +187,10 @@ type Runner struct {
 	// counts the seeded ones as "cached". nil disables cross-run resume.
 	ResumeJobs map[string]*execmodel.JobState
 
+	// GitTreeStatus lists the uncommitted/untracked paths of a workspace for
+	// the requireCleanGitTree policy (nil result = clean). Nil uses git.
+	GitTreeStatus func(dir string) ([]string, error)
+
 	printMu sync.Mutex
 	stateMu sync.Mutex
 
@@ -457,6 +461,14 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		}
 	}
 
+	// Runtime policies recorded on the plan: requireCleanGitTree is checked
+	// once, before any job starts.
+	if !r.DryRun {
+		if err := r.checkCleanTreePolicy(orderedJobs, workspaceDir); err != nil {
+			return err
+		}
+	}
+
 	r.groupMultiEnv = singleEnvironment(orderedJobs) == ""
 	r.initComponentCounts(orderedJobs)
 	r.live = ui.NewLiveRegion(r.Stdout, ui.IsInteractiveWriter(r.Stdout), r.Color)
@@ -598,6 +610,24 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 	jobFailed := false
 	jobStartedAt := time.Now()
 	jobReport := newJobReport(job, r.DryRun)
+
+	// Policy requireApproval: pause on an approval gate before any step runs
+	// (and before secrets resolve, so an unapproved job never sees them).
+	if job.Policies != nil && job.Policies.RequireApproval && !r.DryRun {
+		if approvalErr := r.awaitPolicyApproval(baseExecContext, job); approvalErr != nil {
+			r.updateState(persistState, execState, func() {
+				jobState.Status = "failed"
+				jobState.LastError = approvalErr.Error()
+				jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+			})
+			fmt.Fprintf(r.Stderr, "  %s %s: %v\n", ui.Red(r.Color, "✗"), job.ID, approvalErr)
+			summary.addFailed()
+			if r.Hooks != nil && r.Hooks.AfterJobTerminal != nil {
+				r.Hooks.AfterJobTerminal(job.ID, false, jobState.LastError)
+			}
+			return true
+		}
+	}
 
 	// Resolve secret references before any step runs (fail-closed). Values are
 	// registered with the redactor FIRST, live only in this job's memory, and

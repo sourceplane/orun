@@ -53,6 +53,20 @@ orun approve deploy-api promote --reject --by "rahul (change freeze)"
 The command confirms with `approved deploy-api / promote` (or `rejected …`).
 A job/step pair with nothing pending is an error, not a silent no-op.
 
+## Policy approvals
+
+A job compiled under a `requireApproval` [policy](../concepts/intent-model.md#policies)
+(declared on its environment, its group, or its execution profile) pauses the same way,
+before its first step and before its secrets resolve. The gate's step id is
+`policy.requireApproval`:
+
+```bash
+orun approve network-foundation.production.validate policy.requireApproval
+```
+
+A rejection fails the job. With no decision within 24 hours, the job fails and the
+timeout is sealed as the verdict. Dry runs (`orun run --dry-run`) do not pause.
+
 ## What is recorded
 
 Each gate is a directory `.orun/approvals/<execId>/<jobID>/<stepID>/`. The
@@ -72,5 +86,6 @@ so a run always shows who or what resolved the gate.
 ## Related
 
 - [Workflow actions](../concepts/workflow-actions.md) — declaring `approval:` on a step
+- [Policies](../concepts/intent-model.md#policies) — `requireApproval` on an environment, group, or profile
 - [`orun workflow`](./orun-workflow.md)
 - [`orun run`](./orun-run.md), [`orun status`](./orun-status.md)

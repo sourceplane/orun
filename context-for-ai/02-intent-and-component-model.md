@@ -16,7 +16,7 @@ Common fields:
 | `compositions.resolution` | Source precedence and explicit type-to-source bindings. |
 | `discovery.roots` | Directories to scan recursively for `component.yaml` files. |
 | `automation.triggerBindings` | CI/event triggers that activate environments and plan scopes. |
-| `groups` | `parameterDefaults` per domain, keyed by domain name (and a `policies` map that is recorded, not enforced). |
+| `groups` | `parameterDefaults` per domain, keyed by domain name, and an enforced `policies` map. |
 | `environments` | `parameterDefaults`, selectors, env vars, trigger activation, promotion order, dependency mode (and a recorded `policies` map). |
 | `components` | Optional inline components. Many repos prefer discovered components. |
 | `execution` | Runtime state configuration, such as local or remote state. |
@@ -148,9 +148,19 @@ The `ORUN_` prefix is reserved for runtime-injected variables. Do not define use
 
 ## Policies
 
-Groups, environments, and execution profiles can declare a `policies` map. orun collects it onto each component instance, but the planner and runner do not enforce it yet. Treat a declared policy as the platform team's stated intent anyway: if a change seems to conflict with one, stop and explain the conflict rather than working around it.
+Groups and environments can declare a `policies` map, and execution profiles a `policies` block. The vocabulary is closed and enforced:
 
-The guardrails orun does enforce are the composition's schema, the profiles a composition offers, profile and dependency rules, secret references, source digest pins, and task-contract `affects`. See the docs page on standards (`website/docs/concepts/standards.md`).
+| Policy | Requires | Enforced by |
+| --- | --- | --- |
+| `pinnedParameters` (keyed by type or `"*"`) | A component or subscription may not set a different value; the pinned value is applied | `orun validate`, `orun plan` |
+| `requireProfile` (names or globs) | The component's resolved profile matches | `orun validate`, `orun plan` |
+| `requirePinnedTerraformVersion` | `terraformVersion` is exact (`1.9.8`), not a range | `orun validate`, `orun plan` |
+| `requireCleanGitTree` | No uncommitted or untracked changes when the job runs | `orun run` |
+| `requireApproval` | `orun approve <jobID> policy.requireApproval` before the job's first step | `orun run` |
+
+An unknown key fails validation. Never work around a policy violation by editing the policy from a component change: if a change conflicts with one, stop and explain the conflict. Each plan job records its effective policies under `policies`.
+
+The other guardrails orun enforces are the composition's schema, the profiles a composition offers, profile and dependency rules, secret references, source digest pins, and task-contract `affects`. See the docs page on standards (`website/docs/concepts/standards.md`).
 
 ## Dependencies
 

@@ -95,9 +95,8 @@ automation:                # which CI events activate which environments
 | `automation.triggerBindings` | Which CI events activate which environments, and how much of the repository each plans | [Trigger bindings](./trigger-bindings.md) |
 | `components` | Optional inline components, for teams that want some declarations central | |
 
-Groups and environments also accept a `policies` map. It is carried onto every component
-instance, but the planner and runner do not act on it yet; see
-[standards](./standards.md#declared-not-yet-enforced).
+Groups and environments also accept a `policies` map: rules a component cannot opt out
+of. `orun validate` and `orun plan` enforce them; see [policies](#policies).
 
 ## `component.yaml`
 
@@ -146,12 +145,73 @@ At plan time, each component's parameters are merged from lowest to highest prec
 
 1. The environment's `parameterDefaults["*"]`, then `parameterDefaults[<type>]`.
 2. The component's group's `parameterDefaults["*"]`, then `parameterDefaults[<type>]`.
-3. The component's own `parameters`.
+3. The component's own `parameters`, then its subscription's `parameters` for that
+   environment.
+4. Any value pinned by a group or environment policy (`pinnedParameters`). A component or
+   subscription that sets a different value fails; see [policies](#policies).
 
 The merged result is then checked against the composition's schema. `path` has its own
 order: the component's `path`, then the group default, then the environment default, then
 `./`. Environment variables follow a separate ladder, described in
 [runtime environment](./runtime-environment.md).
+
+## Policies
+
+A `policies` map on a group or an environment declares rules every component in it must
+follow. Presets can contribute them too, and a preset's policy keys win over the
+repository's (see [intent presets](./intent-presets.md)). The vocabulary is closed: an
+unknown key or a value of the wrong type fails `orun validate` and `orun plan`, so a typo
+cannot quietly switch a guardrail off.
+
+```yaml
+groups:
+  platform-foundation:
+    policies:
+      pinnedParameters:            # keyed like parameterDefaults: a type, or "*"
+        terraform:
+          terraformVersion: 1.9.8
+environments:
+  production:
+    policies:
+      requireProfile: [release, "deploy*"]   # names or glob patterns
+      requirePinnedTerraformVersion: true
+      requireCleanGitTree: true
+      requireApproval: true
+```
+
+| Policy | What it requires | Checked by |
+|---|---|---|
+| `pinnedParameters` | The parameter has this value. A component or subscription that sets a different value fails; otherwise the pinned value is applied. Two layers pinning different values for one parameter also fail | `orun validate`, `orun plan` |
+| `requireProfile` | The component's resolved execution profile (the name a subscription's `profile:` uses) matches one of the names | `orun validate`, `orun plan` |
+| `requirePinnedTerraformVersion` | `terraformVersion` is an exact version such as `1.9.8`, not a range, wildcard, or `latest`. It applies to every component that sets `terraformVersion`; when an execution profile declares it, the parameter must also be set | `orun validate`, `orun plan` |
+| `requireCleanGitTree` | The job runs only from a working tree with no uncommitted or untracked changes (orun's own `.orun/` is ignored) | `orun run` |
+| `requireApproval` | The job pauses before its first step until [`orun approve`](../cli/orun-approve.md) `<jobID> policy.requireApproval` decides; no decision within 24 hours fails it | `orun run` |
+
+Execution profiles can declare the last three in their own `policies` block (see
+[compositions](./compositions.md)). The layers combine: a boolean required by any layer
+(group, environment, or profile) is required, and no layer can relax it.
+`requireApproval: false` simply declares nothing.
+
+Every plan job records the policies it was compiled under, and which layer declared each:
+
+```json
+"policies": {
+  "requireCleanGitTree": true,
+  "requireApproval": true,
+  "sources": {
+    "requireApproval": ["environment:production", "profile:terraform.release"],
+    "requireCleanGitTree": ["profile:terraform.release"]
+  }
+}
+```
+
+A violation fails with one line per broken rule, naming the component, the environment,
+the policy, and the layer that declared it:
+
+```text
+policy check failed (1 violation):
+  - component network-foundation (env production): pinnedParameters.terraformVersion [group:platform-foundation]: component sets terraformVersion = "1.10.0", but the policy pins it to "1.9.8"
+```
 
 ## What reads intent
 

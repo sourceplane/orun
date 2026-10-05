@@ -94,7 +94,7 @@ spec:
 
 ## Profile policies
 
-The release profile declares profile policies. orun records them but does not enforce them yet; see [standards](../concepts/standards.md#declared-not-yet-enforced).
+The release profile declares profile policies. `orun plan` rejects a component on this profile whose `terraformVersion` is not an exact version, and `orun run` refuses a dirty working tree and pauses each job for `orun approve`; see [policies](../concepts/intent-model.md#policies).
 
 ```yaml
 # profiles/terraform-release.yaml

@@ -13,19 +13,22 @@ agent.
 | A subscription names a profile the composition offers | `ExecutionProfile`, `subscribe.environments[].profile` | `orun plan` |
 | Profile and dependency rules are well formed | `profileRules`, dependency rules | `orun validate` |
 | No dependency cycles | `dependsOn` | `orun plan` |
+| A component does not override a policy-pinned parameter | `pinnedParameters` in group/environment `policies` | `orun validate`, `orun plan` |
+| A component runs the profile its environment or group requires | `requireProfile` in `policies` | `orun validate`, `orun plan` |
+| `terraformVersion` is an exact version | `requirePinnedTerraformVersion` in intent or profile `policies` | `orun validate`, `orun plan` |
+| Only known policy keys are declared | any `policies` map | `orun validate`, `orun plan` |
+| A job runs from a clean git tree / after approval | `requireCleanGitTree` / `requireApproval` in intent or profile `policies` | `orun run` |
 | Secret slots hold `secret://` references, never values | `secretEnv`, `optionalSecretEnv` | `orun plan` |
 | User `env` does not use the reserved `ORUN_` prefix | any `env` block | `orun validate`, `orun plan` |
 | A pinned source resolves to its digest | `digest:` on a source in `intent.yaml` | `orun plan` |
 | A task branch stays inside its contract | `affects` in `tasks/<KEY>.TaskContract.yaml` | `orun task check <KEY>` |
 
-Recorded but **not enforced**: group, environment, and execution-profile `policies`;
-cross-plan promotion gates; `condition` on a component `dependsOn`; a composition's
+Recorded but **not enforced**: cross-plan promotion gates; `condition` on a component `dependsOn`; a composition's
 `lifecycle`; an agent type's `mayAffect`. Respect them as stated intent, but do not tell a
 user they are guardrails.
 
-Run `orun validate` and `orun plan` after every meaningful change. `orun validate` does not
-load compositions or apply presets, so only `orun plan` checks schemas and the effective
-intent.
+Run `orun validate` and `orun plan` after every meaningful change. `orun validate` applies
+presets and checks policies, but only `orun plan` checks parameters against schemas.
 
 ## Inherited standards: presets and Stacks
 

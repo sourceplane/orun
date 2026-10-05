@@ -95,8 +95,10 @@ From that, four properties follow:
   runs, skills, and task plane derived from the same intent. Agent types carry
   a deny-by-default tool policy, and a task contract declares what a change
   may touch.
-- **Verified before it runs.** `orun validate` checks the intent and its
-  rules, `orun plan` checks every component against its composition's schema,
+- **Verified before it runs.** `orun validate` checks the intent, its
+  rules, and its policies (a pinned parameter a component cannot override, a
+  required profile, an exact terraform version), `orun plan` checks every
+  component against its composition's schema,
   and the plan is deterministic: identical inputs produce byte-identical
   plans, so a plan diff in a pull request is a faithful preview of behaviour.
   The repository is the desired state; `--changed` compiles only what a commit
@@ -233,7 +235,7 @@ discovered component intents, and the resolved golden paths:
 |---|---|---|
 | 0 | Load and validate | Parse YAML, validate against JSON schemas, fail fast |
 | 1 | Normalize | Resolve wildcards, default missing fields, canonicalize dependencies |
-| 2 | Expand | Environment × component matrix, policy merge |
+| 2 | Expand | Environment × component matrix, policy enforcement |
 | 3 | Bind | Match component type to golden path, render step templates |
 | 4 | Resolve | Convert component dependencies to job dependencies, detect cycles |
 | 5 | Materialize | Emit `plan.json` with every reference concrete |

@@ -204,7 +204,7 @@ spec:
           run: terraform plan -no-color -lock=false
 ```
 
-Profiles can also declare `policies`. They are parsed and carried onto each component instance, but orun does not enforce them yet; see [standards](../concepts/standards.md#declared-not-yet-enforced).
+Profiles can also declare `policies`. They apply to every component that resolves to the profile and are recorded on each plan job: `requirePinnedTerraformVersion` is checked by `orun validate` and `orun plan`, `requireCleanGitTree` and `requireApproval` by `orun run`. See [policies](../concepts/intent-model.md#policies).
 
 ```yaml
 spec:

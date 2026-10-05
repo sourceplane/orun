@@ -98,9 +98,19 @@ The full field reference is the [composition contract](../compositions/compositi
 - **The plan shows the result.** Every rendered step lands in `plan.json`, so a change to a
   golden path is visible as a plan diff in every repository that adopts it.
 
-A profile can also declare a `policies` block (`requireCleanGitTree`,
-`requirePinnedTerraformVersion`, `requireApproval`). orun records it but does not enforce it
-yet; see [standards](./standards.md#declared-not-yet-enforced).
+A profile can also declare a `policies` block. Every component that resolves to the
+profile is held to it, and each plan job records it:
+
+```yaml
+spec:
+  policies:
+    requirePinnedTerraformVersion: true   # orun validate / orun plan: terraformVersion must be exact
+    requireCleanGitTree: true             # orun run: refuse a dirty working tree
+    requireApproval: true                 # orun run: pause until `orun approve`
+```
+
+The same keys are accepted on intent groups and environments, and the layers add up; see
+[policies](./intent-model.md#policies).
 
 ## Where compositions come from
 
