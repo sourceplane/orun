@@ -18,6 +18,9 @@ type Expander struct {
 	groups          map[string]model.Group
 	registry        *compositionpkg.Registry
 	matchedTriggers []string
+	// recordPoliciesOnly resolves and records policies without failing on a
+	// violation, for read-only views of the intent (see WithoutPolicyEnforcement).
+	recordPoliciesOnly bool
 }
 
 // NewExpander creates a new expander
@@ -40,12 +43,21 @@ func (e *Expander) WithMatchedTriggers(triggers []string) *Expander {
 	return e
 }
 
+// WithoutPolicyEnforcement makes Expand record each instance's effective
+// policies (and apply pinned parameters) but never fail on a violation or a
+// malformed policy. Read-only commands that inspect the intent use it, so a
+// policy violation surfaces in validate/plan, not in `orun component`.
+func (e *Expander) WithoutPolicyEnforcement() *Expander {
+	e.recordPoliciesOnly = true
+	return e
+}
+
 // Expand produces ComponentInstances for each environment × component pair
 func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 	result := make(map[string][]*model.ComponentInstance)
 
 	groupPolicies, envPolicies, err := e.parsePolicies()
-	if err != nil {
+	if err != nil && !e.recordPoliciesOnly {
 		return nil, err
 	}
 	var violations []intentpolicy.Violation
@@ -147,7 +159,7 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 		result[envName] = instances
 	}
 
-	if err := intentpolicy.NewError(violations); err != nil {
+	if err := intentpolicy.NewError(violations); err != nil && !e.recordPoliciesOnly {
 		return nil, err
 	}
 	return result, nil
@@ -474,10 +486,9 @@ func (e *Expander) parsePolicies() (map[string]intentpolicy.Layer, map[string]in
 		violations = append(violations, v...)
 		envs[name] = intentpolicy.Layer{Source: source, Set: set}
 	}
-	if err := intentpolicy.NewError(violations); err != nil {
-		return nil, nil, err
-	}
-	return groups, envs, nil
+	// The layers are returned even with violations (a malformed key is
+	// skipped), so record-only callers still see the well-formed policies.
+	return groups, envs, intentpolicy.NewError(violations)
 }
 
 // enforcePolicies applies the component's group policies, then its

@@ -154,3 +154,30 @@ func TestExpandRequireProfile(t *testing.T) {
 		t.Fatalf("non-matching profile must fail: %v", v)
 	}
 }
+
+// Read-only views (`orun component`, `orun get/describe components`) go
+// through the analyzer: a policy violation must not break them; it fails
+// validate and plan instead.
+func TestAnalyzerRecordsPoliciesWithoutFailing(t *testing.T) {
+	intent := policyIntent(map[string]interface{}{
+		"requireAproval":   true, // unknown key
+		"requireApproval":  true,
+		"pinnedParameters": map[string]interface{}{"terraform": map[string]interface{}{"terraformVersion": "1.9.8"}},
+	}, nil, map[string]interface{}{"terraformVersion": "1.10.0"}) // overrides the pin
+
+	normalized, err := normalize.NormalizeIntent(intent)
+	if err != nil {
+		t.Fatalf("NormalizeIntent: %v", err)
+	}
+	if _, err := NewExpander(normalized).Expand(); err == nil {
+		t.Fatalf("enforcing expansion must fail on these violations")
+	}
+	components, err := NewComponentAnalyzer(normalized).ListAll()
+	if err != nil {
+		t.Fatalf("the analyzer must not fail on a policy violation: %v", err)
+	}
+	inst := components[0].Instances[0]
+	if inst.Policies == nil || !inst.Policies.RequireApproval || inst.Parameters["terraformVersion"] != "1.9.8" {
+		t.Fatalf("well-formed policies are still recorded and pins applied: %+v %v", inst.Policies, inst.Parameters)
+	}
+}

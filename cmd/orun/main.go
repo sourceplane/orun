@@ -754,7 +754,11 @@ func validateFiles() error {
 	compositionRegistry, regErr := loader.LoadCompositionsForIntent(intent, intentFile, configDir)
 	if regErr != nil {
 		compositionRegistry = nil
-		fmt.Fprintf(os.Stderr, "⚠ compositions not resolved (%v); presets and profile policies are not checked\n", regErr)
+		// An intent with no composition sources has nothing more to check;
+		// only a declared source that fails to resolve is worth a warning.
+		if len(intent.Compositions.Sources) > 0 || configDir != "" {
+			fmt.Fprintf(os.Stderr, "⚠ compositions not resolved (%v); presets and profile policies are not checked\n", regErr)
+		}
 	} else {
 		intent, err = mergeIntentPresets(intent, compositionRegistry)
 		if err != nil {
