@@ -47,8 +47,35 @@ intent.
   intent, rules          schemas, plan.json    shell · docker · gha   catalog · cockpit
 ```
 
+## See it work
+
+<p align="center">
+  <img src="assets/orun-demo.svg" alt="A terminal recording of orun on an example platform: a component on a golden path, a broken contract refused by orun plan, the derived catalog and a change's blast radius, the MCP tools an agent gets, and a new product built from a baseline and checked for an upgrade." width="100%">
+</p>
+
+A two-minute recording of the example platform in [`examples/`](examples/),
+every command real and unedited:
+
+1. **Declare.** A component says what it is and which golden path it follows;
+   `orun compositions` lists the golden paths the platform team owns.
+2. **Standards are enforced.** Delete a required parameter and `orun plan`
+   refuses it against the composition's schema; put it back and the plan
+   compiles: 15 components across 5 environments, 38 jobs.
+3. **The catalog.** Owners come from `CODEOWNERS`, edges from `dependsOn`.
+   Change one Terraform component and `orun catalog affected` shows what it
+   touches (the blast radius) and what re-runs (the selection).
+4. **Agents.** `orun mcp tools` lists what a coding agent can ask the platform.
+5. **Baselines.** `orun new` builds a new product repository from a small
+   baseline (intent, a golden path, a first service), gated by `validate` and a
+   full plan. When the baseline ships v1.1.0, `orun new upgrade` reports exactly
+   which files the new release would update.
+
+To re-record it: `scripts/demo/setup.sh /tmp/orun-demo`, then
+`scripts/demo/record.py` (see the script's header).
+
 ## Table of contents
 
+- [See it work](#see-it-work)
 - [Why orun](#why-orun)
 - [What you get](#what-you-get)
 - [Installation](#installation)
