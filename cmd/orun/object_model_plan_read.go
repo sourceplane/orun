@@ -63,11 +63,32 @@ func objResolveRevisionRef(store *objectstore.LocalStore, refs *refstore.LocalRe
 	if err != nil {
 		return "", false
 	}
+	// The by-hash key carries a "sha256-" prefix (it is the plan hash), so a
+	// bare hex prefix is compared with that prefix stripped as well.
+	want := trimHashAlgo(sanitizeRevSeg(ref))
 	for _, name := range names {
 		short := strings.TrimPrefix(name, revByHashPrefix)
-		if strings.HasPrefix(short, sanitizeRevSeg(ref)) {
+		if strings.HasPrefix(short, sanitizeRevSeg(ref)) || (want != "" && strings.HasPrefix(trimHashAlgo(short), want)) {
 			if r, rerr := refs.Read(ctx, name); rerr == nil {
 				return objectstore.ObjectID(r.Target), true
+			}
+		}
+	}
+	// The plan id `orun plan` prints (and `orun status` shows) is the short
+	// form of the plan's own metadata.checksum, which is a different digest
+	// from the by-hash key. Match it against each revision's plan so the
+	// printed `→ orun run <id>` hint resolves.
+	if want != "" {
+		for _, name := range names {
+			r, rerr := refs.Read(ctx, name)
+			if rerr != nil {
+				continue
+			}
+			revID := objectstore.ObjectID(r.Target)
+			if plan, ok := objPlanFromRevision(store, revID); ok {
+				if strings.HasPrefix(trimHashAlgo(plan.Metadata.Checksum), want) {
+					return revID, true
+				}
 			}
 		}
 	}
@@ -353,4 +374,14 @@ func sanitizeRevSeg(s string) string {
 		return "x"
 	}
 	return out
+}
+
+// trimHashAlgo strips a leading "sha256-" or "sha256:" from a digest string.
+func trimHashAlgo(s string) string {
+	for _, p := range []string{"sha256-", "sha256:"} {
+		if strings.HasPrefix(s, p) {
+			return s[len(p):]
+		}
+	}
+	return s
 }

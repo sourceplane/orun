@@ -48,5 +48,7 @@ func finishObjectModelRun(r *runner.Runner, s *objrun.Session, runErr error) {
 		warnObjectModel("seal execution: %v", err)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "object-runner: revision=%s execution=%s sealed (live)\n", shortID(s.RevisionID()), shortID(id))
+	if debugMode || os.Getenv("ORUN_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "object-runner: revision=%s execution=%s sealed (live)\n", shortID(s.RevisionID()), shortID(id))
+	}
 }

@@ -526,16 +526,6 @@ func generatePlan() error {
 	if headRev == "" {
 		headRev = "no-head"
 	}
-	fmt.Println()
-	fmt.Println(ui.Green(color, "✓") + " Plan revision created")
-	fmt.Println()
-	fmt.Printf("  Revision: %s\n", revKey)
-	fmt.Printf("  Trigger:  %s / %s / %s\n", trig.TriggerName, triggerScope, headRev)
-	fmt.Printf("  Jobs:     %d\n", len(plan.Jobs))
-	if outputFile != "" {
-		fmt.Printf("  Output:   %s\n", outputFile)
-	}
-
 	// Modern compact summary — derive component count from filtered instances
 	compSet := make(map[string]struct{})
 	for _, envInsts := range instances {
@@ -552,16 +542,31 @@ func generatePlan() error {
 	numComponents := len(compNames)
 	numEnvs := len(instances)
 	numJobs := len(plan.Jobs)
+	lastPlanCounts = planCounts{components: numComponents, envs: numEnvs, jobs: numJobs, id: planID}
 
-	fmt.Printf("\n  %s %d components %s %d envs %s %s\n",
-		ui.Dim(color, "│"),
-		numComponents,
-		ui.Dim(color, "×"),
-		numEnvs,
-		ui.Dim(color, "→"),
-		ui.Bold(color, fmt.Sprintf("%d jobs", numJobs)),
-	)
-	if numComponents > 0 {
+	// The headline: the plan id and what it compiles to.
+	//
+	//	✓ Plan 1017ce094baa  ·  2 components × 2 envs → 4 jobs
+	fmt.Println()
+	fmt.Printf("%s %s %s  %s  %d components %s %d envs %s %s\n",
+		ui.Green(color, "✓"), ui.Bold(color, "Plan"), ui.Bold(color, planID), ui.Dim(color, "·"),
+		numComponents, ui.Dim(color, "×"), numEnvs, ui.Dim(color, "→"),
+		ui.Bold(color, fmt.Sprintf("%d jobs", numJobs)))
+
+	// On a terminal, a small plan is shown lane by lane: what runs where, with
+	// which profile and steps, and what waits on what. Large plans keep the
+	// compact summary; --view dag is the full graph.
+	lanes := viewPlan == "" && numJobs > 0 && numJobs <= maxLaneJobs && ui.IsInteractiveWriter(os.Stdout)
+	if lanes {
+		fmt.Println()
+		renderPlanLanes(os.Stdout, plan, color)
+	}
+
+	field := func(label, value string) {
+		fmt.Printf("  %s  %s\n", ui.Dim(color, fmt.Sprintf("%-10s", label)), value)
+	}
+	fmt.Println()
+	if !lanes && numComponents > 0 {
 		const maxShow = 4
 		displayed := compNames
 		if len(displayed) > maxShow {
@@ -571,28 +576,28 @@ func generatePlan() error {
 		if len(compNames) > maxShow {
 			label += fmt.Sprintf(" (+%d more)", len(compNames)-maxShow)
 		}
-		fmt.Printf("  %s components: %s\n", ui.Dim(color, "│"), label)
+		field("components", label)
 	}
+	field("revision", revKey)
+	triggerLine := trig.TriggerName + " · " + triggerScope
+	if trig.Source.HeadRevision != "" {
+		triggerLine += " · " + headRev
+	}
+	field("trigger", triggerLine)
 	if changedOnly {
-		fmt.Printf("  %s mode: %s\n", ui.Dim(color, "│"), ui.Cyan(color, "changed-only"))
+		field("mode", ui.Cyan(color, "changed-only"))
 	}
 	if planName != "" {
-		fmt.Printf("  %s name: %s\n", ui.Dim(color, "│"), planName)
+		field("name", planName)
 	}
-	fmt.Printf("  %s plan: %s\n", ui.Dim(color, "│"), ui.Dim(color, planID))
 	if outputFile != "" {
-		fmt.Printf("  %s file: %s\n", ui.Dim(color, "│"), outputFile)
+		field("output", outputFile)
 	}
 	fmt.Println()
 
 	// Actionable hint
-	if numJobs > 0 {
-		if planID != "" {
-			fmt.Printf("  %s orun run %s\n", ui.Dim(color, "→"), planID)
-		}
-		if planName != "" {
-			fmt.Printf("  %s orun run %s\n", ui.Dim(color, "→"), planName)
-		}
+	if numJobs > 0 && planID != "" {
+		fmt.Printf("  %s orun run %s\n\n", ui.Dim(color, "→"), planID)
 	}
 
 	// Handle --view flag
