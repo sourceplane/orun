@@ -1,123 +1,165 @@
 ---
 title: Design principles
-description: The five principles that shape every choice in orun — from compiler stages to the cockpit palette.
+description: The principles behind platform discipline as code, from why standards must be declarations to why the plan is the audit artifact and why agents read the same intent as everyone else.
 ---
 
-orun was designed by working backwards from one question: *what would platform engineering
-look like if planning, observation, and execution all spoke the same language?*
+orun was designed by working backwards from one question: *what would it take for a
+platform's standards to be followed every time, by every team and every agent, without
+someone having to remember them?*
 
-These principles are the answer. They are load-bearing — every concept, every command,
-every pixel of the cockpit traces back to one of them.
+The answer is that a standard has to be something the platform can **read**: written in a
+declarative language, versioned like code, shared with every tool that acts on the
+repository, and checked before anything runs. These principles are how orun gets there.
+Every concept and command traces back to one of them.
 
-## 1. Intent and execution are different layers
+## 1. A standard is a declaration, not a document
 
-The most common platform-engineering anti-pattern is collapsing **what should happen**
-into **how it happens**. Helm values get tangled with kubectl invocations, Terraform vars
-get tangled with CI workflows, environment policy gets tangled with shell scripts.
+If a rule lives in a wiki, a review checklist, or a copied CI file, it is a
+recommendation. It drifts the first time someone is in a hurry, and nothing notices.
+
+In orun, the platform's structure and standards are typed documents in the repository:
+
+- **Structure**: which components exist, where they are discovered, which environments
+  they ship to, and what depends on what (`intent.yaml`, `component.yaml`).
+- **Standards**: how each kind of component is built and what it must look like
+  (compositions: schemas, job templates, profiles), which profile runs in which lane
+  (profile rules), what waits for what (dependency rules, promotion), and how secrets are
+  referenced.
+
+A rule that is not declared does not exist as far as orun is concerned. That is the point:
+the declaration is the standard.
+
+## 2. Intent and execution are different layers
+
+The most common platform anti-pattern is collapsing **what should happen** into **how it
+happens**. Helm values get tangled with kubectl invocations, Terraform variables with CI
+workflows, environment rules with shell scripts.
 
 orun draws a hard line:
 
 | Layer | Lives in | Owned by |
 |---|---|---|
-| **Intent** — desired state, policy, environment matrix | `intent.yaml`, `component.yaml` | Platform & app teams |
-| **Contract** — typed execution recipes per component type | `Composition` packages | Platform team |
-| **Plan** — fully-resolved DAG of jobs and steps | `plan.json` | Generated, never edited |
-| **Execution** — running the plan against a backend | Runner adapter | Runtime |
+| **Intent**: desired state, environment matrix, rules | `intent.yaml`, `component.yaml` | Platform and app teams |
+| **Contract**: typed execution recipes per component type | Composition packages | Platform team |
+| **Plan**: the fully resolved DAG of jobs and steps | `plan.json` | Generated, never edited |
+| **Execution**: running the plan against a backend | Runner adapter | Runtime |
 
-Each layer has a stable schema. Each layer can be reviewed independently. A platform team
-can evolve compositions without touching app intent; an app team can change inputs without
-re-reading runner code.
+Each layer has a stable schema and can be reviewed on its own. A platform team can evolve
+a golden path without touching application intent; an application team can change its
+parameters without reading runner code.
 
-## 2. The plan is the audit artifact
+## 3. Standards travel as versioned code
 
-`plan.json` is not a debugging aid. It is the **artifact of record** — what was decided,
+A standard that cannot move between repositories gets copied, and a copy is a fork. orun
+packages standards the way software packages libraries:
+
+- Golden paths are published as versioned OCI **Stacks** and pulled by reference.
+- Platform rules are published as **intent presets** and inherited with `extends:`; the
+  repository's own intent always wins, and `orun intent explain` shows where each field
+  came from.
+- `orun compositions lock` pins every resolved source by digest, so a standard changes in
+  a repository only when someone changes the pin, in a reviewed commit.
+- A **baseline** packages a whole product's structure and standards. `orun new upgrade`
+  three-way merges a newer release into a product built from it, so improvements flow
+  forward instead of each copy aging on its own.
+
+Upgrading a standard is a version bump whose consequence you can read as a plan diff.
+
+## 4. Agents read the same intent
+
+Coding agents amplify whatever a repository makes easy. If the standards are implicit,
+an agent learns them by imitating the nearest example, which is how drift scales.
+
+In orun, an agent is grounded in the same declarations everyone else uses:
+
+- `orun mcp serve` exposes the catalog, runs, skills, and task plane derived from the
+  repository's intent, so an agent can ask "what is this component and what depends on
+  it?" instead of guessing.
+- Every agent type extends a versioned base literacy, and its tools are allowed, gated,
+  or denied by a policy written in the agent type itself.
+- A `TaskContract` declares the paths a change may affect and the gates it must pass.
+  `orun task check` and `orun pr check` hold a change to it, and status is derived from
+  evidence, never asserted.
+
+The agent is a client of the platform's truth, not a second source of it.
+
+## 5. The plan is the audit artifact
+
+`plan.json` is not a debugging aid. It is the **artifact of record**: what was decided,
 based on what inputs, at what revision.
 
 - Every implicit default becomes explicit.
-- Every policy merge is visible.
 - Every dependency edge is named.
 - Every composition source is pinned by digest in `compositions.lock.yaml`.
 
 This means:
 
 - You **diff plans** in pull requests instead of guessing what a YAML change will do.
-- You **archive plans** as deployment records — every run came from a plan you can replay.
+- You **archive plans** as deployment records; every run came from a plan you can replay.
 - You can **execute the same plan on a different runner** without recompiling.
 
-If a behavior isn't visible in the plan, it's a bug.
+If a behaviour is not visible in the plan, it is a bug.
 
-## 3. Determinism over cleverness
+## 6. Determinism over cleverness
 
 Identical inputs produce **byte-for-byte identical** plans. The compiler is a pure
-function of `(intent, components, locked composition digests, trigger context)`.
+function of the intent, the components, the locked composition digests, and the trigger
+context.
 
 Concretely:
 
-- Maps are serialized in sorted key order.
-- Job IDs are derived from `component@environment.short` — no random suffixes.
-- Step ordering is stable across compiler runs.
-- Floating tags in composition sources fail the lock; only digests are accepted in CI.
+- Maps are serialised in sorted key order.
+- Job IDs are derived from the component, environment, and job name
+  (`component.environment.job`), with no random suffixes.
+- Job and step order are stable across compiler runs.
+- The plan carries no wall-clock timestamp.
 
-Cleverness — auto-inferred dependencies, magic environment selection, implicit retries —
-is rejected when it threatens determinism. Where heuristics are unavoidable, they live
-behind an explicit flag.
+Cleverness such as auto-inferred dependencies, magic environment selection, or implicit
+retries is rejected when it threatens determinism. Where a heuristic is unavoidable, it
+lives behind an explicit flag.
 
-## 4. Policy at compile time
+## 7. Check before you run
 
-Group policies and domain constraints are **enforced when the plan is built**, not when
-it runs. A non-compliant intent fails fast with a structured error, not a half-deployed
-environment.
+Whatever can be checked before execution is checked before execution, so a violation
+fails in review, not halfway through a deploy:
 
-This puts the right pressure in the right place:
+- `orun validate` checks the intent and its profile and dependency rules.
+- `orun plan` checks every component's parameters against its composition's schema,
+  rejects a literal value in a secret slot, and refuses a dependency cycle.
+- Profile and dependency rules let behaviour *adapt to the trigger* without escaping the
+  compile step: a pull request can run plan-only with parallel jobs and a release can run
+  apply with enforced ordering, both from the same intent.
 
-- **Authors** see policy violations during `orun validate`.
-- **Reviewers** see policy in the plan diff, not in runtime logs.
-- **Operators** never have to roll back a non-compliant deploy that slipped past a
-  permissive runner.
+Not every declared rule is enforced yet. Group and environment `policies`, and the
+`policies` block on execution profiles, are carried through to each component instance
+but are not yet checked by the planner or the runner; cross-plan promotion gates are
+recorded in the plan as evidence to check, not enforced. The concept pages say which is
+which.
 
-Profile rules and dependency rules ([profile-rules](/concepts/profile-rules),
-[dependency-rules](/concepts/dependency-rules)) let policy *adapt to the trigger* without
-escaping the compile-time boundary — a PR can run plan-only with parallel jobs, a release
-can run apply with enforced ordering, both from the same intent.
+## 8. One vocabulary across every surface
 
-## 5. One design language across every surface
-
-The cockpit — the violet wedge `▲`, the status glyphs `✓ ✗ ◐ ○ ↷`, the tree connectors,
-the progress bar — is **not styling**. It is a shared vocabulary that lets you move from
-`orun status` in a CI log, to `orun status --watch` on your terminal, to `orun tui` in a
-control room without re-learning what success looks like.
-
-The implementation enforces it:
-
-```text
-internal/cockpit/style   ← single source of truth (Go constants, zero deps)
-       │
-       ├──▶ internal/ui          (ANSI escapes for the CLI)
-       └──▶ internal/tui/theme   (lipgloss.AdaptiveColor for the TUI)
-```
-
-This documentation site uses the same tokens. The violet (`#7c3aed` / `#a78bfa`), the
-glyphs, the brand wedge — all the same constants. Reskinning the entire ecosystem is one
-file.
+The status glyphs `✓ ✗ ◐ ○ ↷`, the tree connectors, and the progress bar are a shared
+vocabulary, so you can move from `orun status` in a CI log to `orun tui` in a terminal
+without relearning what success looks like. The tokens live in one package,
+`internal/cockpit/style`, and this documentation site uses the same palette.
 
 ---
 
 ## What follows from these principles
 
-A few things you'll notice as you go deeper:
+A few things you will notice as you go deeper:
 
-- **No "smart" defaults.** Every input that affects the plan is declarable; defaults
-  exist, but they're documented and visible in the rendered plan.
-- **No runtime mutation of the DAG.** Triggers shape the DAG at compile time; the
-  executor consumes it as-is.
-- **No surface-specific output formats.** The same view-model produces the CLI frame,
-  the TUI panes, and (Phase 4) the JSON surface.
+- **No unwritten rules.** Every input that affects the plan is declarable; defaults exist,
+  but they are documented and visible in the rendered plan.
+- **No silent upgrades.** A standard changes in a repository when its pin changes.
+- **No runtime mutation of the DAG.** Triggers shape the DAG at compile time; the executor
+  consumes it as is.
 - **No undocumented state.** `.orun/` is the only place runtime state lives, and its
   schema is part of the public contract.
 
-When you're authoring a new composition, a new runner, or a new surface, hold the change
-up to these five principles. If it fights them, it probably belongs somewhere else.
+When you author a new composition, preset, runner, or agent type, hold the change up to
+these principles. If it fights them, it probably belongs somewhere else.
 
-Next: read [intent model](/concepts/intent-model), then [compositions](/concepts/compositions),
-then [plan DAG](/concepts/plan-dag) in that order — they map directly onto principles 1, 1,
-and 2.
+Next: read the [intent model](/concepts/intent-model), then
+[compositions](/concepts/compositions), [Stacks](/concepts/stacks), and the
+[plan DAG](/concepts/plan-dag).

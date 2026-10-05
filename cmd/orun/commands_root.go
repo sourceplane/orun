@@ -74,8 +74,10 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   cliName,
-	Short: "Plan and run changes from intent",
-	Long: "orun turns intent into deterministic plans and runs them with clear, resumable execution feedback.\n\n" +
+	Short: "Platform discipline as code",
+	Long: "orun is platform discipline as code. Declare your platform's structure and standards as intent, " +
+		"package them as baselines that evolve like code, ground your coding agents in them, " +
+		"and let the runner verify the intent, compile a deterministic plan, and execute it.\n\n" +
 		"Run `orun` with no arguments in an interactive terminal to open the Cockpit TUI; " +
 		"set ORUN_NO_TUI=1 (or run in a non-interactive shell) to print help instead.",
 	Version:       version,

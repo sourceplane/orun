@@ -1,23 +1,22 @@
 /**
  * orun documentation sidebar
  *
- * Shaped around the operator journey:
+ * Shaped around the four pillars of platform discipline as code:
  *
- *   1. overview      → what orun is, how it works, the resource model,
- *                      design principles, glossary
- *   2. start         → install, quick start
- *   3. concepts      → the model: intent, compositions, plans, execution,
- *                      catalog, state, secrets, tenancy, baselines, tasks, agents
- *   4. cockpit       → the operator surface
- *   5. execute       → runners, terraform state
- *   6. guides        → end-to-end walkthroughs
- *   7. cli           → command reference, one page per command
- *   8. compositions  → authoring guide
- *   9. architecture  → internals
- *  10. reference     → schemas, configuration, environment variables
- *  11. ai-context    → for coding agents working with orun repos
- *  12. build         → contributing, extending, deploying docs
- *  13. release-notes
+ *   overview  → what orun is, the principles, how it works, the resource model
+ *   start     → install, quick start
+ *   1 declare → structure and standards as intent: the intent model,
+ *               compositions, and the rules that adapt them to events
+ *   2 package → standards that travel like code: Stacks, presets,
+ *               authoring golden paths, baselines
+ *   3 agents  → grounding coding agents in the same intent
+ *   4 run     → verify, plan, execute, and the record they leave
+ *   platform  → tenancy and workspace discovery, which support all four
+ *   cli       → command reference, grouped by pillar
+ *   then architecture, reference, build, and release notes
+ *
+ * Pages are grouped here only; their file paths, and so their URLs, are
+ * stable.
  */
 const sidebars = {
   docsSidebar: [
@@ -28,9 +27,9 @@ const sidebars = {
       collapsed: false,
       items: [
         'overview/what-is-orun',
+        'principles',
         'overview/how-orun-works',
         'overview/resource-model',
-        'principles',
         'overview/glossary',
       ],
     },
@@ -38,67 +37,84 @@ const sidebars = {
       type: 'category',
       label: 'Start',
       collapsed: false,
-      items: [
-        'start/installation',
-        'start/quick-start',
-        'examples/bootstrap-a-product-from-a-baseline',
-      ],
+      items: ['start/installation', 'start/quick-start'],
     },
     {
       type: 'category',
-      label: 'Concepts',
+      label: '1 · Declare',
       items: [
         'concepts/intent-model',
         'concepts/compositions',
-        'concepts/stacks',
-        'concepts/plan-dag',
-        'concepts/execution-model',
-        'concepts/workflow-actions',
+        'compositions/composition-contract',
         'concepts/trigger-bindings',
         'concepts/profile-rules',
         'concepts/dependency-rules',
         'concepts/environment-promotion',
-        'concepts/runtime-environment',
-        'concepts/service-catalog',
-        'concepts/state-model',
         'concepts/secrets',
+        'concepts/runtime-environment',
+      ],
+    },
+    {
+      type: 'category',
+      label: '2 · Package & evolve',
+      items: [
+        'concepts/stacks',
+        'compositions/writing-compositions',
+        'compositions/composition-examples',
+        'concepts/intent-presets',
+        'concepts/baselines',
+        'examples/bootstrap-a-product-from-a-baseline',
+        'examples/use-with-kiox',
+      ],
+    },
+    {
+      type: 'category',
+      label: '3 · Ground agents',
+      items: [
+        'ai-context/orun-repositories',
+        'concepts/agent-runtime',
+        'concepts/task-plane',
+      ],
+    },
+    {
+      type: 'category',
+      label: '4 · Verify → plan → execute',
+      items: [
+        'concepts/plan-dag',
         'concepts/change-detection',
         'concepts/change-watches',
-        'concepts/context-discovery',
-        'concepts/intent-presets',
-        'concepts/workspaces-and-tenancy',
-        'concepts/baselines',
-        'concepts/task-plane',
-        'concepts/agent-runtime',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Cockpit',
-      items: [
-        'cockpit/overview',
-        'cockpit/architecture',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Execute',
-      items: [
+        'concepts/execution-model',
+        'concepts/workflow-actions',
         'execute/runners',
         'execute/terraform-state',
+        {
+          type: 'category',
+          label: 'The record',
+          items: [
+            'concepts/state-model',
+            'concepts/service-catalog',
+            'cockpit/overview',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Guides',
+          items: [
+            'examples/review-pull-request',
+            'examples/trigger-bindings-ci',
+            'examples/run-github-actions',
+            'examples/remote-state-matrix',
+            'examples/run-with-docker',
+          ],
+        },
       ],
     },
     {
       type: 'category',
-      label: 'Guides',
+      label: 'Platform and operations',
       items: [
-        'examples/bootstrap-a-product-from-a-baseline',
-        'examples/review-pull-request',
-        'examples/run-github-actions',
-        'examples/trigger-bindings-ci',
-        'examples/remote-state-matrix',
-        'examples/run-with-docker',
-        'examples/use-with-kiox',
+        'concepts/workspaces-and-tenancy',
+        'concepts/context-discovery',
       ],
     },
     {
@@ -108,47 +124,55 @@ const sidebars = {
         'cli/orun',
         {
           type: 'category',
-          label: 'Compile and inspect',
+          label: '1 · Declare',
+          items: ['cli/orun-intent', 'cli/orun-component', 'cli/orun-compositions', 'cli/orun-work'],
+        },
+        {
+          type: 'category',
+          label: '2 · Package & evolve',
           items: [
-            'cli/orun-plan',
-            'cli/orun-validate',
-            'cli/orun-debug',
-            'cli/orun-intent',
-            'cli/orun-component',
-            'cli/orun-compositions',
-            'cli/orun-describe',
-            'cli/orun-get',
+            'cli/orun-new',
+            'cli/orun-baseline',
+            'cli/orun-pack',
+            'cli/orun-publish',
+            'cli/orun-fetch',
+            'cli/orun-login',
           ],
         },
         {
           type: 'category',
-          label: 'Run and operate',
+          label: '3 · Ground agents',
           items: [
+            'cli/orun-mcp',
+            'cli/orun-skills',
+            'cli/orun-agent',
+            'cli/orun-task',
+            'cli/orun-spec',
+            'cli/orun-pr',
+            'cli/orun-githooks',
+          ],
+        },
+        {
+          type: 'category',
+          label: '4 · Verify → plan → execute',
+          items: [
+            'cli/orun-validate',
+            'cli/orun-debug',
+            'cli/orun-plan',
             'cli/orun-run',
             'cli/orun-workflow',
             'cli/orun-approve',
             'cli/orun-status',
             'cli/orun-logs',
+            'cli/orun-describe',
+            'cli/orun-get',
             'cli/orun-tui',
             'cli/orun-tui-next',
             'cli/orun-github',
+            'cli/orun-catalog',
+            'cli/orun-objects',
             'cli/orun-gc',
           ],
-        },
-        {
-          type: 'category',
-          label: 'Catalog and objects',
-          items: ['cli/orun-catalog', 'cli/orun-objects'],
-        },
-        {
-          type: 'category',
-          label: 'Scaffolding and baselines',
-          items: ['cli/orun-new', 'cli/orun-baseline'],
-        },
-        {
-          type: 'category',
-          label: 'Composition packaging',
-          items: ['cli/orun-pack', 'cli/orun-publish', 'cli/orun-fetch', 'cli/orun-login'],
         },
         {
           type: 'category',
@@ -163,25 +187,6 @@ const sidebars = {
             'cli/orun-backend',
           ],
         },
-        {
-          type: 'category',
-          label: 'Tasks and provenance',
-          items: ['cli/orun-task', 'cli/orun-pr', 'cli/orun-githooks', 'cli/orun-spec', 'cli/orun-work'],
-        },
-        {
-          type: 'category',
-          label: 'Agents',
-          items: ['cli/orun-agent', 'cli/orun-mcp', 'cli/orun-skills'],
-        },
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Authoring compositions',
-      items: [
-        'compositions/composition-contract',
-        'compositions/writing-compositions',
-        'compositions/composition-examples',
       ],
     },
     {
@@ -192,6 +197,7 @@ const sidebars = {
         'architecture/compiler-pipeline',
         'architecture/execution-runtime',
         'architecture/github-artifacts',
+        'cockpit/architecture',
       ],
     },
     {
@@ -207,11 +213,6 @@ const sidebars = {
     },
     {
       type: 'category',
-      label: 'AI context',
-      items: ['ai-context/orun-repositories'],
-    },
-    {
-      type: 'category',
       label: 'Build',
       items: [
         'contributing/contributing',
@@ -223,6 +224,7 @@ const sidebars = {
       type: 'category',
       label: 'Release notes',
       items: [
+        'release-notes/v2.73.0',
         'release-notes/v2.72.1',
         'release-notes/v2.72.0',
         'release-notes/v2.71.0',
