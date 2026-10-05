@@ -146,7 +146,12 @@ platform is told which door took the bootstrap — `--by cli` (the default),
 or `--by agent` when a coding agent runs the command from the Review page's
 prompt — so the workspace's **Overview** reads *continued from the orun CLI*
 or *continued in a coding agent*; a bootstrap another door already took
-keeps that door's word, and the command says so. The platform refuses an id
+keeps that door's word, and the command says so. One build per repository
+holds from any door: when a cloud session or another runner already holds
+the repository, the command stops before anything is fetched and names who
+holds it and since when. The run reports its phase landings to the platform
+under the bootstrap id, so the record carries the build whichever door ran
+it, and the run's end gives the repository back. The platform refuses an id
 that never reached Review (`409 not_resolved`, naming the step or the missing
 provider) and answers `404` for one that is not this workspace's — the id
 alone is not a credential. No token is in the record; the hooks resolve the

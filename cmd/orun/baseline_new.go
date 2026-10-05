@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -328,11 +330,26 @@ explicit flag still wins, and --set adds. The platform is told which door took i
 			// server; a refusal here is a note, not a stop — the build is the
 			// operator's to run either way.
 			if handoff != nil {
-				if door, err := client.ContinueBootstrap(ctx, client.Scope().OrgID, handoff.ID, by); err != nil {
+				door, err := client.ContinueBootstrap(ctx, client.Scope().OrgID, handoff.ID, by)
+				var apiErr *remotestate.APIError
+				switch {
+				case errors.As(err, &apiErr) && apiErr.Status == http.StatusConflict:
+					// THE LEASE. One build per repository, from any door: the
+					// platform names who holds it, and this stops before a
+					// single file is fetched. Verbatim — it says who and when.
+					return exitErr(1, "orun baseline new: %v", err)
+				case err != nil:
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not record that %s took bootstrap %s: %v\n", continuedByWord(by), handoff.ID, err)
-				} else if door != by {
+				case door != by:
 					fmt.Fprintf(cmd.ErrOrStderr(), "note: bootstrap %s was already continued by %s\n", handoff.ID, continuedByWord(door))
 				}
+				// The run reports under the bootstrap id (BH5): the platform
+				// keeps one stream per bootstrap whichever door builds it, and
+				// the run-level end it carries gives the repository back.
+				scaffoldPlatformSink = scaffold.NewPlatformSink(
+					buildEventPoster{client: client}, client.Scope().OrgID, handoff.ID,
+					func(format string, args ...any) { fmt.Fprintf(cmd.ErrOrStderr(), format+"\n", args...) },
+				)
 			}
 
 			work, err := os.MkdirTemp("", "orun-baseline-")
