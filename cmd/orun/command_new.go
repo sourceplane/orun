@@ -213,49 +213,34 @@ func runScaffoldNew(ctx context.Context) error {
 		return err // *scaffold.ExitError carries the exit code
 	}
 
-	fmt.Printf("✓ scaffolded %d file(s) into %s\n", len(res.Files), scaffoldOut)
-	phased := len(res.Phases) > 1 || (len(res.Phases) == 1 && res.Phases[0].Name != "")
-	for _, phase := range res.Phases {
-		if phased {
-			label := phase.Name
-			if phase.Hooks.Len() > 0 {
-				all := phase.Hooks.All()
-				hookIDs := make([]string, len(all))
-				for i, h := range all {
-					hookIDs[i] = h.ID
-				}
-				label = fmt.Sprintf("%s (hooks: %s)", phase.Name, strings.Join(hookIDs, ", "))
+	intent := findScaffoldedIntent(scaffoldOut)
+	if mode == progressVerbose || mode == progressJSON {
+		printScaffoldDetail(res)
+		// Repo-scale gate (design §10): if the scaffolded tree is an orun
+		// workspace (has an intent), additionally run validate and a full plan
+		// compile before declaring success. Component-scale scaffolds skip this;
+		// their gate is the both-parsers + resolve check inside scaffold.Run.
+		if intent != "" {
+			if err := repoScaleGate(intent); err != nil {
+				return exitErr(1, "repo-scale gate failed: %v", err)
 			}
-			fmt.Printf("  ▸ phase: %s\n", label)
+			fmt.Printf("  repo gate: validate and plan passed\n")
 		}
-		for _, batch := range phase.Batches {
-			indent := "  "
-			if phased {
-				indent = "    "
-			}
-			fmt.Printf("%s· batch: %s\n", indent, strings.Join(batch, ", "))
-		}
+		return nil
 	}
-	for _, f := range res.Files {
-		fmt.Printf("    %s\n", f)
-	}
-	if len(res.Consumed) > 0 {
-		fmt.Printf("  consumed (pinned deps, no bytes):\n")
-		for _, c := range res.Consumed {
-			fmt.Printf("    %s (source %s, from %s)\n", c.Module, c.Source, c.From)
-		}
-	}
-	fmt.Printf("  provenance: %s (inputs %s)\n", filepath.Join(scaffoldOut, scaffold.ProvenanceRelPath), res.Provenance.InputsHash)
 
-	// Repo-scale gate (design §10): if the scaffolded tree is an orun workspace
-	// (has an intent), additionally run validate + plan --dry-run before
-	// declaring success. Component-scale scaffolds skip this — their gate is
-	// the both-parsers + resolve check already run inside scaffold.Run.
-	if intent := findScaffoldedIntent(scaffoldOut); intent != "" {
-		if err := repoScaleGate(intent); err != nil {
-			return exitErr(1, "repo-scale gate failed: %v", err)
-		}
-		fmt.Printf("  repo gate: validate + plan --dry-run passed\n")
+	// The default report: what was placed, that it verifies, where the
+	// provenance is, and what to do next. The gate's own output is held back
+	// and shown only if it fails.
+	var gateErr error
+	var gateOut string
+	if intent != "" {
+		gateOut, gateErr = captureOutput(func() error { return repoScaleGate(intent) })
+	}
+	printScaffoldSummary(bp.Metadata.Name, res, intent != "", gateErr)
+	if gateErr != nil {
+		fmt.Print(gateOut)
+		return exitErr(1, "repo-scale gate failed: %v", gateErr)
 	}
 	return nil
 }

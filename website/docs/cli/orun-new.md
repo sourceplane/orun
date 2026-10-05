@@ -31,7 +31,7 @@ orun new upgrade --out <dir> [--blueprint <newer>] [--apply]
 | `--until <name>` | Place every phase through this one. |
 | `--resume` | Place every phase not already derived as done. |
 | `--status` | Derive and print each phase's state without writing anything. `--json` for machines. |
-| `--progress auto\|plain\|verbose\|json` | Progress rendering. Default `auto`. |
+| `--progress auto\|plain\|verbose\|json` | Progress rendering. Default `auto`, which ends with a summary: files placed, the repository gate's result (components, environments, and jobs the scaffolded intent plans to), and where the provenance lock is. `verbose` also lists every phase, batch, and file. |
 
 Missing inputs are prompted for on an interactive terminal. On
 non-interactive input a missing required input fails fast.

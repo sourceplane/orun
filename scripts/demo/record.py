@@ -2,101 +2,102 @@
 """Record the README demo as an asciicast v2 file.
 
 Drives a real bash in a pseudo-terminal: every command is typed, run, and
-captured with its real output and colours. Only the pauses are scripted.
+captured with its real output and colours. Nothing is edited. Two things are
+presentation only: the typing rhythm and pauses, and the playback speed of a
+command marked `slow` (the local run finishes in about a second, too fast to
+watch, so its frames are played back at a fraction of real speed).
 
-    scripts/demo/setup.sh /tmp/orun-demo
-    scripts/demo/record.py --workspace /tmp/orun-demo --orun ./orun --out demo.cast
-    npx svg-term-cli --in demo.cast --out assets/orun-demo.svg --window --no-cursor --width 120 --height 34
-
-The commands below are the whole script; edit SCENES to change the demo.
+    scripts/demo/setup.sh /tmp/orun-demo/code
+    go build -o /tmp/orun ./cmd/orun
+    scripts/demo/record.py --workspace /tmp/orun-demo/code --orun /tmp/orun --out demo.cast
+    npx svg-term-cli --in demo.cast --out assets/orun-demo.svg --window --no-cursor \\
+        --width 96 --height 30 --padding 18 --term iterm2 --profile scripts/demo/orun.itermcolors
 """
 import argparse
+import fcntl
 import json
 import os
 import pty
 import random
+import re
 import select
 import shutil
-import subprocess
+import struct
 import sys
 import tempfile
+import termios
 import time
 
-COLS, ROWS = 120, 34
-PROMPT_MARK = "▲"  # ▲, the orun wedge, ends the prompt
+COLS, ROWS = 96, 30
+PROMPT_MARK = "❯"  # ❯
 
-# Each scene is a list of (command, seconds to linger on the output afterwards).
-# Lines starting with "#" are typed as narration and run as bash comments.
+# Terminal capability queries some libraries send at start-up. A real
+# terminal answers them; so does this one, and they are kept out of the cast.
+QUERIES = {
+    b"\x1b]11;?\x1b\\": b"\x1b]11;rgb:1414/1212/1e1e\x1b\\",
+    b"\x1b]11;?\x07": b"\x1b]11;rgb:1414/1212/1e1e\x07",
+    b"\x1b]10;?\x1b\\": b"\x1b]10;rgb:e4e4/e1e1/f0f0\x1b\\",
+    b"\x1b[6n": b"\x1b[1;1R",
+}
+
+
+def plan_id(output):
+    m = re.findall(r"orun run ([0-9a-f]{12})", output)
+    return m[-1] if m else "latest"
+
+
+# (command, seconds to linger afterwards, options). A command may be a function
+# of the previous command's output.
 SCENES = [
-    [
-        ("# This is an orun-disciplined platform repo: structure and standards as code.", 0.6),
-        ("# 1 · DECLARE — a component says what it is and which golden path it follows", 0.4),
-        ("sed -n '1,25p' apps/identity-worker/component.yaml", 3.5),
-        ("orun compositions    # the golden paths, owned by the platform team", 3.5),
-    ],
-    [
-        ("clear", 0.2),
-        ("# 2 · STANDARDS ARE ENFORCED — break the contract and the plan refuses it", 0.4),
-        ("sed -i '/deployCommand/d' apps/identity-worker/component.yaml", 0.4),
-        ("orun plan", 4.0),
-        ("git checkout -q apps/identity-worker/component.yaml   # put it back", 0.4),
-        ("orun validate && orun plan", 4.0),
-    ],
-    [
-        ("clear", 0.2),
-        ("# 3 · THE CATALOG — derived from intent and CODEOWNERS, never curated", 0.4),
-        ("orun catalog list", 3.5),
-        ("orun catalog tree", 3.0),
-        ("echo '# tune the VPC' >> infra/infra-1/main.tf   # change one component", 0.4),
-        ("orun catalog affected --base main    # what it touches, and what re-runs", 4.5),
-    ],
-    [
-        ("clear", 0.2),
-        ("# 4 · AGENTS read the same model, through one MCP server", 0.4),
-        ("orun mcp tools | cut -c1-112 | head -12", 4.0),
-    ],
-    [
-        ("clear", 0.2),
-        ("# 5 · BASELINES — package the standards, rebuild them as a new product", 0.4),
-        ("cd ..", 0.2),
-        ("orun new --blueprint acme-baseline/blueprint.yaml --out acme-shop --set serviceName=checkout-api", 4.5),
-        ("# the platform team ships acme-baseline v1.1.0 (golden path moves to setup-node v5)", 0.4),
-        ("git -C acme-baseline checkout -q v1.1.0", 0.3),
-        ("orun new upgrade --out acme-shop --blueprint acme-baseline/blueprint.yaml", 5.0),
-    ],
+    ("orun new --blueprint saas-baseline/blueprint.yaml --out acme-shop --set name=acme-shop", 3.2, {}),
+    ("cd acme-shop", 0.3, {}),
+    ("ls", 1.4, {}),
+    ("orun plan", 4.2, {}),
+    (lambda prev: f"orun run {plan_id(prev)}", 4.5, {"slow": 3.0}),
 ]
 
 
 class Recorder:
     def __init__(self, cwd, path_dir, home):
         self.events = []
-        self.start = None
-        self.clock = 0.0  # virtual time: real output time plus scripted pauses
+        self.clock = 0.0  # playback time: output time plus scripted pauses
+        self.speed = 1.0
         env = {
             "PATH": f"{path_dir}:/usr/local/bin:/usr/bin:/bin",
             "HOME": home,
             "TERM": "xterm-256color",
+            "COLORTERM": "truecolor",
             "LANG": "C.UTF-8",
             "COLUMNS": str(COLS),
             "LINES": str(ROWS),
             "ORUN_NO_TUI": "1",
             "GIT_PAGER": "cat",
-            "PS1": "\\[\\e[38;5;141m\\]" + PROMPT_MARK + "\\[\\e[0m\\] \\[\\e[2m\\]\\W\\[\\e[0m\\] $ ",
+            "GIT_AUTHOR_NAME": "Acme", "GIT_AUTHOR_EMAIL": "eng@acme.dev",
+            "GIT_COMMITTER_NAME": "Acme", "GIT_COMMITTER_EMAIL": "eng@acme.dev",
+            "PS1": "\\[\\e[2m\\]\\W\\[\\e[0m\\] \\[\\e[38;5;141m\\]" + PROMPT_MARK + "\\[\\e[0m\\] ",
         }
         pid, fd = pty.fork()
         if pid == 0:
             os.chdir(cwd)
             os.execve("/bin/bash", ["bash", "--noprofile", "--norc", "-i"], env)
         self.pid, self.fd = pid, fd
-        import fcntl, struct, termios
         fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
         self.last_real = time.monotonic()
-        self.read_until_prompt(record=False)
+        self.read_until_prompt()
+
+    def _read(self):
+        data = os.read(self.fd, 65536)
+        for q, answer in QUERIES.items():
+            if q in data:
+                os.write(self.fd, answer)
+                data = data.replace(q, b"")
+        return data.decode("utf-8", "replace")
 
     def _emit(self, data):
+        if not data:
+            return
         now = time.monotonic()
-        # Real elapsed time, with long silences capped so slow commands stay watchable.
-        self.clock += min(now - self.last_real, 1.2)
+        self.clock += min(now - self.last_real, 1.0) * self.speed
         self.last_real = now
         self.events.append([round(self.clock, 3), "o", data])
 
@@ -110,10 +111,10 @@ class Recorder:
         while time.monotonic() < deadline:
             r, _, _ = select.select([self.fd], [], [], 0.1)
             if not r:
-                if buf.rstrip().endswith("$") and PROMPT_MARK in buf[-200:]:
-                    return
+                if buf.rstrip().endswith(PROMPT_MARK) or buf.rstrip().endswith(PROMPT_MARK + "\x1b[0m"):
+                    return buf
                 continue
-            chunk = os.read(self.fd, 65536).decode("utf-8", "replace")
+            chunk = self._read()
             buf += chunk
             if record:
                 self._emit(chunk)
@@ -121,18 +122,25 @@ class Recorder:
                 self.last_real = time.monotonic()
         raise TimeoutError("prompt did not return; last output: " + repr(buf[-400:]))
 
-    def type_command(self, text, rng):
-        for ch in text:
+    def run(self, text, rng, slow=None):
+        self.pause(0.5)
+        for i, ch in enumerate(text):
             os.write(self.fd, ch.encode())
-            # Echo comes back through the pty; read it so it is timestamped as typed.
             time.sleep(0.004)
             r, _, _ = select.select([self.fd], [], [], 0.2)
             if r:
-                self._emit(os.read(self.fd, 4096).decode("utf-8", "replace"))
-            self.pause(rng.uniform(0.025, 0.06) if not text.startswith("#") else rng.uniform(0.018, 0.04))
-        self.pause(0.35)
+                self._emit(self._read())
+            gap = rng.uniform(0.03, 0.075)
+            if ch == " " and rng.random() < 0.25:
+                gap += rng.uniform(0.05, 0.15)
+            self.pause(gap)
+        self.pause(0.45)
+        if slow:
+            self.speed = slow
         os.write(self.fd, b"\r")
-        self.read_until_prompt()
+        out = self.read_until_prompt()
+        self.speed = 1.0
+        return out
 
 
 def main():
@@ -144,15 +152,20 @@ def main():
 
     bindir = tempfile.mkdtemp(prefix="orun-demo-bin-")
     shutil.copy(os.path.abspath(args.orun), os.path.join(bindir, "orun"))
+    # `ls` with colours, as most shells alias it.
+    with open(os.path.join(bindir, "ls"), "w") as f:
+        f.write('#!/bin/sh\nexec /bin/ls --color=auto "$@"\n')
+    os.chmod(os.path.join(bindir, "ls"), 0o755)
     home = tempfile.mkdtemp(prefix="orun-demo-home-")
-    rec = Recorder(os.path.join(args.workspace, "platform"), bindir, home)
-    rng = random.Random(7)
-    rec.pause(0.5)
-    for scene in SCENES:
-        for cmd, linger in scene:
-            rec.type_command(cmd, rng)
-            rec.pause(linger)
-    rec.pause(1.5)
+    rec = Recorder(args.workspace, bindir, home)
+    rng = random.Random(11)
+    prev = ""
+    for cmd, linger, opts in SCENES:
+        text = cmd(prev) if callable(cmd) else cmd
+        prev = rec.run(text, rng, slow=opts.get("slow"))
+        rec.pause(linger)
+    # A no-op event holds the last frame for the final linger.
+    rec.events.append([round(rec.clock, 3), "o", "\x1b[0m"])
     os.write(rec.fd, b"exit\r")
 
     header = {"version": 2, "width": COLS, "height": ROWS, "timestamp": 0,

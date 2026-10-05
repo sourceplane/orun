@@ -78,3 +78,24 @@ func TestObjResolvePlanOffWhenAbsent(t *testing.T) {
 		t.Fatalf("should not list with no object model")
 	}
 }
+
+// The id `orun plan` prints is the short form of metadata.checksum, while
+// revisions are indexed under the plan hash with a "sha256-" prefix. Both, and
+// a bare hex prefix of the indexed hash, must resolve.
+func TestObjResolvePlanByPrintedIDAndBareHashPrefix(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	plan := &model.Plan{Jobs: []model.PlanJob{{ID: "api.staging.ship"}}}
+	plan.Metadata.Name = "acme-shop"
+	plan.Metadata.Checksum = "sha256-da6acc29f1de0123456789abcdef"
+	seedObjectRevision(t, "sha256-9dd54859315dcec3e3e6", plan)
+
+	for _, ref := range []string{"da6acc29f1de", "9dd54859", "sha256-9dd5"} {
+		if got, ok := objResolvePlan(ref); !ok || got.Metadata.Name != "acme-shop" {
+			t.Errorf("objResolvePlan(%q) = %v, ok=%v", ref, got, ok)
+		}
+	}
+	if _, ok := objResolvePlan("ffff0000"); ok {
+		t.Errorf("an unrelated id resolved")
+	}
+}

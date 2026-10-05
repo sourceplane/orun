@@ -88,8 +88,12 @@ func writeObjectModelPlan(orunDir string, plan *model.Plan, planBytes []byte, pl
 		warnObjectModel("%v", err)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "object-model: source=%s catalog=%s revision=%s reused=%v trigger=%s\n",
-		shortID(res.SourceID), shortID(res.CatalogID), shortID(res.RevisionID), res.RevisionReused, shortID(res.TriggerID))
+	// The object ids are diagnostics, not part of the plan summary: print them
+	// only when asked (--debug or ORUN_DEBUG).
+	if debugMode || os.Getenv("ORUN_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "object-model: source=%s catalog=%s revision=%s reused=%v trigger=%s\n",
+			shortID(res.SourceID), shortID(res.CatalogID), shortID(res.RevisionID), res.RevisionReused, shortID(res.TriggerID))
+	}
 }
 
 // objectModelTrigger maps a triggerctx.TriggerOccurrence to the node form.

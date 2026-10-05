@@ -417,21 +417,14 @@ func runPlan() error {
 // printRevisionRunSummary; the data now comes from the plan's stamped revision
 // key and the run's execution id rather than the retired executionstate mirror.
 func printRunSummary(plan *model.Plan, execID string, runErr error) {
+	// The runner has already printed the outcome, the counts, and the
+	// status/logs commands for this execution id; add only the plan revision
+	// the run executed, aligned with those lines.
+	_ = execID
+	_ = runErr
 	color := ui.ColorEnabledForWriter(os.Stdout)
-	status := "completed"
-	icon := ui.Green(color, "✓")
-	if runErr != nil {
-		status = "failed"
-		icon = ui.Red(color, "✗")
-	}
-	fmt.Println()
-	fmt.Println(icon + " Execution " + status)
-	fmt.Println()
 	if plan != nil && plan.Metadata.Revision != nil && plan.Metadata.Revision.Key != "" {
-		fmt.Printf("  Revision:  %s\n", plan.Metadata.Revision.Key)
-	}
-	if execID != "" {
-		fmt.Printf("  Execution: %s\n", execID)
+		fmt.Printf("  %s  %s\n\n", ui.Dim(color, "plan  "), plan.Metadata.Revision.Key)
 	}
 }
 
