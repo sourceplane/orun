@@ -115,7 +115,7 @@ The runner (`internal/runner/runner.go`) exports these into every step's environ
 | `ORUN_RUNNER` | Resolved runner name for the current step |
 | `ORUN_EXEC_ID` | Execution ID of the current run |
 | `ORUN_PLAN_ID` | Plan checksum short-hash |
-| `ORUN_JOB_ID` | Job ID of the currently running job (e.g. `api@dev.deploy`) |
+| `ORUN_JOB_ID` | Job ID of the currently running job (e.g. `api.dev.deploy`) |
 | `ORUN_JOB_UID` | Content-addressed UID of the current job — stable across runs while the job's inputs are unchanged |
 | `ORUN_JOB_RUN_ID` | Stable per-job identifier: `{execID}/{jobUID}` |
 | `ORUN_ENVIRONMENT` | Environment name for the current job (e.g. `dev`, `production`) |

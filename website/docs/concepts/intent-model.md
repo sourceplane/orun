@@ -1,228 +1,169 @@
 ---
 title: Intent model
+description: Where a platform's structure and standards live as code. intent.yaml holds the platform's rules, component.yaml declares each unit next to its code, and everything downstream (plans, agents, the catalog) reads from them.
 ---
 
-`orun` treats intent as the desired-state layer. It captures the platform policy, environment defaults, component subscriptions, and discovery roots that define **what** should happen, not **how** steps should execute.
+Intent is where your platform's **structure and standards live as code**. A platform team
+declares the rules once, in `intent.yaml`: which environments exist, which components ship
+to them, which events activate what, and in what order environments promote. Each team
+declares what it owns in a `component.yaml` next to its code: what the component is, which
+golden path it follows, and what it depends on. Everything downstream reads this one
+source: the planner compiles it, the catalog is derived from it, and coding agents query it
+instead of guessing.
 
-## Inputs that make up intent
+Intent says **what** should happen. It never says **how** a step executes; that belongs to
+[compositions](./compositions.md).
 
-The planning boundary is built from five inputs:
+## Who declares what
 
-1. `intent.yaml`
-2. Discovered `component.yaml` manifests
-3. Composition sources declared under `intent.compositions`
-4. Intent presets inherited via `extends:`
-5. Optional CLI scoping such as `--env` or change-detection flags
+| Document | Declares | Owned by |
+|---|---|---|
+| `intent.yaml` | Composition sources, presets, discovery roots, groups, environments, trigger bindings, platform-wide `env` | The platform team, one per repository |
+| `component.yaml` | One unit's name, type, domain, environment subscriptions, typed parameters, dependencies, `env` | The team that owns the code |
+| Compositions | How a type is built: its schema, job templates, and execution profiles | The platform team, published as a [Stack](./stacks.md) |
 
-The output of those inputs is a compiled `plan.json`.
+The split is the point. An application team can change its parameters without reading
+runner code, and a platform team can change a golden path without touching any
+`component.yaml`.
 
-## Structure of the intent file
+## `intent.yaml`
+
+All sections sit at the top level of the document:
 
 ```yaml
 apiVersion: sourceplane.io/v1
 kind: Intent
-
 metadata:
-  name: microservices-deployment
+  name: shop-platform
 
-env:
-  OWNER: sourceplane
-  ORGANIZATION: sourceplane
-
-compositions:
+compositions:              # where the golden paths come from
   sources:
-    - name: example-platform
-      kind: dir
-      path: ./compositions
+    - name: platform
+      kind: oci
+      ref: ghcr.io/acme/platform-stack:v1.4.0   # the pin
 
-discovery:
-  roots:
-    - apps/
-    - infra/
-    - deploy/
-    - charts/
-    - packages/
-    - website/
+extends:                   # platform rules inherited from that Stack's presets
+  - source: platform
+    preset: github-actions
 
-groups:
-  platform:
-    policies:
-      isolation: strict
+discovery:                 # where component.yaml files are found
+  roots: [apps/, infra/]
+
+env:                       # platform-wide environment variables
+  OWNER: sourceplane
+
+groups:                    # defaults per domain
+  platform-foundation:
     parameterDefaults:
       "*":
         namespacePrefix: platform-
 
-environments:
-  production:
-    selectors:
-      domains: [platform]
-    parameterDefaults:
-      "*":
-        replicas: 3
-    env:
-      AWS_REGION: us-west-2
-    policies:
-      requireApproval: "true"
-```
-
-### `env`
-
-Root-level `env` declares global environment variables shared across all environments and all components. These are the lowest-precedence user-declared env vars and are useful for platform-wide identity such as organization name, repository owner, or shared runtime settings.
-
-Environment-level `env` (under `environments.<name>.env`) provides per-environment overrides. See [runtime environment](./runtime-environment.md) for the full merge model.
-
-### `extends`
-
-The `extends` field lets a repo inherit reusable intent scaffolding (environments, triggers, defaults, policies) from Stack-provided presets:
-
-```yaml
-extends:
-  - source: aws-platform
-    preset: github-actions
-```
-
-Each entry references a composition source by name and a preset published by that source's Stack. The repo must declare the composition source under `compositions.sources` first.
-
-Presets are merged into the intent before planning — the repo's own values always take precedence. See [Intent Presets](./intent-presets.md) for details on merge rules and authoring.
-
-### `discovery`
-
-Discovery roots are scanned recursively for `component.yaml` files relative to the location of the intent file.
-
-`intent.yaml` also serves as the workspace root marker for [context-aware discovery](./context-discovery.md). When you run `orun` from any subdirectory in your repo, it walks up the directory tree to find `intent.yaml` and uses its location to resolve all relative paths.
-
-### `groups`
-
-Groups define platform-owned defaults and policy domains. They are the right place for non-negotiable constraints and common defaults that should apply across many components.
-
-### `environments`
-
-Environments define selectors, defaults, and policies for a target environment such as `development`, `staging`, or `production`.
-
-Environments can optionally declare `activation.triggerRefs` to specify which trigger bindings activate them for CI-driven planning:
-
-```yaml
-environments:
-  development:
-    activation:
-      triggerRefs:
-        - github-pull-request
-    parameterDefaults:
-      "*":
-        namespacePrefix: dev-
-```
-
-See [trigger bindings](./trigger-bindings.md) for full details.
-
-Environments can also declare `promotion.dependsOn` to express deployment pipeline ordering:
-
-```yaml
-environments:
+environments:              # where components ship, and under which rules
   staging:
     activation:
-      triggerRefs:
-        - github-push-main
-    promotion:
-      dependsOn:
-        - environment: preview
+      triggerRefs: [github-push-main]
     parameterDefaults:
       "*":
         lane: verify
-
   production:
+    selectors:
+      domains: [platform-foundation, commerce]
     activation:
-      triggerRefs:
-        - github-tag-release
+      triggerRefs: [github-tag-release]
     promotion:
       dependsOn:
         - environment: staging
-    parameterDefaults:
-      "*":
-        lane: release
-```
 
-This compiles into DAG edges when both environments are active, or gates when they are in separate plans. See [environment promotion](./environment-promotion.md) for full details.
-
-### `automation`
-
-The `automation` section declares trigger bindings that map CI provider events to environment activation:
-
-```yaml
-automation:
+automation:                # which CI events activate which environments
   triggerBindings:
-    github-pull-request:
-      on:
-        provider: github
-        event: pull_request
-        actions: [opened, synchronize]
-        baseBranches: [main]
-      plan:
-        scope: changed
-        base: pull_request.base.sha
-        head: pull_request.head.sha
+    github-push-main:
+      on: { provider: github, event: push, branches: [main] }
+      plan: { scope: changed, base: before, head: after }
+    github-tag-release:
+      on: { provider: github, event: push, tags: ["v*"] }
+      plan: { scope: full }
 ```
 
-Trigger bindings are opt-in. Existing intent files without `automation` continue to work unchanged.
+| Section | What it declares | Read more |
+|---|---|---|
+| `compositions.sources` | The golden paths this repository uses: a directory, an archive, or an OCI Stack, pinned by its reference | [Stacks](./stacks.md) |
+| `extends` | Presets inherited from a Stack. The repository's own values always win; `orun intent explain` shows where each field came from | [Intent presets](./intent-presets.md) |
+| `discovery.roots` | Directories scanned recursively for `component.yaml`, relative to the intent file. The intent file also marks the workspace root | [Context discovery](./context-discovery.md) |
+| `env` | Platform-wide environment variables, the lowest-precedence user-declared layer | [Runtime environment](./runtime-environment.md) |
+| `groups` | Defaults shared by every component in a domain. A group is keyed by domain name: a component with `domain: platform-foundation` takes the `platform-foundation` group's defaults | [Merge model](#merge-model) |
+| `environments` | Each target environment: which components it selects (by name or domain), its parameter defaults, `env`, activation, promotion order, and default dependency mode | [Environment promotion](./environment-promotion.md), [dependency rules](./dependency-rules.md) |
+| `automation.triggerBindings` | Which CI events activate which environments, and how much of the repository each plans | [Trigger bindings](./trigger-bindings.md) |
+| `components` | Optional inline components, for teams that want some declarations central | |
 
-### `components`
+Groups and environments also accept a `policies` map. It is carried onto every component
+instance, but the planner and runner do not act on it yet; see
+[standards](./standards.md#declared-not-yet-enforced).
 
-Intent can also declare inline components. In practice, many teams combine inline components with discovered component manifests when they want both central declarations and repo-local ownership.
+## `component.yaml`
 
-## Discovered component manifests
-
-Component manifests carry type-specific inputs, environment variable declarations, and dependency edges:
+A component manifest sits next to the code it describes. Its fields live under `spec`:
 
 ```yaml
 apiVersion: sourceplane.io/v1
 kind: Component
-
 metadata:
   name: network-foundation
-
 spec:
-  type: terraform
-  domain: platform-foundation
-  env:
-    REPO: network-foundation
-    SERVICE: platform-infra
+  type: terraform                  # the golden path: a composition type
+  domain: platform-foundation      # which group's defaults apply
   subscribe:
     environments:
       - name: development
+        profile: pull-request      # how it may run in this environment
       - name: staging
+        profile: verify
       - name: production
-        env:
-          TF_VAR_replicas: "3"
-  parameters:
+        profile: release
+  parameters:                      # checked against the type's schema at plan time
     stackName: network-foundation
     terraformDir: .
     terraformVersion: 1.9.8
+  dependsOn:
+    - component: dns-zones
+  env:
+    SERVICE: platform-infra
 ```
 
-Root-level `env` on a component applies to all subscribed environments. Subscription-level `env` overrides component root env for that specific environment. See [runtime environment](./runtime-environment.md) for the full merge model.
-
-Subscriptions can also declare `profileRules` for conditional profile selection based on triggers. See [profile rules](./profile-rules.md) for details.
-
-Components can declare `change.watches` to opt into global intent change signals. Without watches, changing `environments` or `groups` in intent.yaml does not mark the component as changed during `--changed` planning. See [change watches](./change-watches.md) for details.
+- **`type`** binds the component to a composition. `orun plan` checks `parameters` against
+  that composition's schema and fails if they do not match.
+- **`subscribe.environments`** lists where the component ships, as names or as objects
+  with a `profile`, `profileRules`, or `env`. See [profile rules](./profile-rules.md).
+- **`dependsOn`** declares ordering between components. See
+  [dependency rules](./dependency-rules.md).
+- **`change`** declares which intent sections and which outside files count as a change to
+  this component under `--changed`. See [change detection](./change-detection.md).
+- **`secretEnv`** maps variables to `secret://` references, never to values. See
+  [secrets](./secrets.md).
 
 ## Merge model
 
-At compile time, `orun` merges configuration in a stable order from lowest to highest precedence:
+At plan time, each component's parameters are merged from lowest to highest precedence:
 
-1. Environment defaults
-2. Group defaults for the component domain
-3. Component inputs
+1. The environment's `parameterDefaults["*"]`, then `parameterDefaults[<type>]`.
+2. The component's group's `parameterDefaults["*"]`, then `parameterDefaults[<type>]`.
+3. The component's own `parameters`.
 
-`path` has its own override order: component `path`, group default `path`, environment default `path`, then `./`.
+The merged result is then checked against the composition's schema. `path` has its own
+order: the component's `path`, then the group default, then the environment default, then
+`./`. Environment variables follow a separate ladder, described in
+[runtime environment](./runtime-environment.md).
 
-Policies are not treated as ordinary defaults. They are enforced as platform constraints.
+## What reads intent
 
-## Why this split matters
+- **The planner.** `orun validate` checks the intent and its rules; `orun plan` compiles
+  it, with the components and compositions, into a deterministic `plan.json`. See the
+  [plan DAG](./plan-dag.md).
+- **The catalog.** Components, systems, domains, environments, and compositions are
+  derived from intent, never curated by hand. See the [service catalog](./service-catalog.md).
+- **Agents.** `orun mcp serve` answers an agent's questions about the repository from the
+  same intent. See [agents in orun repositories](../ai-context/orun-repositories.md).
+- **People.** `orun intent explain` and `orun intent render` show the effective intent
+  after presets; `orun component <name>` shows one component's merged view.
 
-- App teams can declare intent without owning runner details.
-- Platform teams can evolve packaged schemas and job definitions independently.
-- Reviewers can diff desired state separately from execution steps.
-- The compiled plan remains deterministic because all implicit defaults are resolved before runtime.
-
-The legacy `--config-dir` flag still works during migration, but packaged composition sources are the recommended model.
-
-Read [compositions](./compositions.md) next to see how component types bind to executable jobs.
+Next: [standards](./standards.md), the rules you can declare and which ones orun enforces,
+then [compositions](./compositions.md).

@@ -248,6 +248,6 @@ See [Stacks](../concepts/stacks.md) for the full packaging and distribution guid
 - Tag steps with `capability` fields so profiles can select behavior semantically.
 - Prefer `includeCapabilities` over `stepsEnabled` — step IDs are implementation details.
 - Use `stepOverrides` in profiles to alter behavior (e.g., `--dry-run`) without duplicating steps.
-- Add `policies` to release profiles for enforcement rules like `requireApproval`.
+- Profiles accept a `policies` block (`requireApproval` and others), but orun does not enforce it yet; for an approval that blocks, use a workflow approval gate. See [standards](../concepts/standards.md#declared-not-yet-enforced).
 - Keep schemas strict enough to reject invalid inputs early.
 - Set `defaultJob` and `defaultProfile` explicitly.

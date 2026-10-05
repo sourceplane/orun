@@ -152,7 +152,7 @@ path ownership, and selection then propagates over input edges exactly as for
 an owned file.
 
 ```yaml
-apiVersion: orun.io/v1alpha1
+apiVersion: sourceplane.io/v1
 kind: Component
 metadata:
   name: web

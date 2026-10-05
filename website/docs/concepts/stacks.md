@@ -220,7 +220,7 @@ metadata:
   version: 1.0.0
 spec:
   compositions:
-    - path: compositions/terraform/compositions.yaml
+    - path: compositions/terraform/composition.yaml
   intentPresets:
     - name: standard
       path: presets/standard.yaml

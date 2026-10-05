@@ -167,18 +167,18 @@ export ORUN_EXEC_ID="local-$(date +%s)-${PLAN_ID}"
 export ORUN_BACKEND_URL=https://orun-api.sourceplane.ai
 export ORUN_REMOTE_STATE=true
 
-# Launch two processes for foundation@dev.smoke (duplicate claim — namespace auto-resolved on first call)
-orun run "${PLAN_ID}" --job foundation@dev.smoke --remote-state --backend-url "${ORUN_BACKEND_URL}" &
-orun run "${PLAN_ID}" --job foundation@dev.smoke --remote-state --backend-url "${ORUN_BACKEND_URL}" &
+# Launch two processes for foundation.dev.smoke (duplicate claim — namespace auto-resolved on first call)
+orun run "${PLAN_ID}" --job foundation.dev.smoke --remote-state --backend-url "${ORUN_BACKEND_URL}" &
+orun run "${PLAN_ID}" --job foundation.dev.smoke --remote-state --backend-url "${ORUN_BACKEND_URL}" &
 
-# Launch api@dev.smoke — waits for foundation@dev.smoke via /runnable
-orun run "${PLAN_ID}" --job api@dev.smoke --remote-state --backend-url "${ORUN_BACKEND_URL}" &
+# Launch api.dev.smoke — waits for foundation.dev.smoke via /runnable
+orun run "${PLAN_ID}" --job api.dev.smoke --remote-state --backend-url "${ORUN_BACKEND_URL}" &
 wait
 
 # Verify
 orun status --remote-state --backend-url "${ORUN_BACKEND_URL}" --exec-id "${ORUN_EXEC_ID}" --json
 orun logs   --remote-state --backend-url "${ORUN_BACKEND_URL}" --exec-id "${ORUN_EXEC_ID}" \
-  --job foundation@dev.smoke
+  --job foundation.dev.smoke
 ```
 
 ## GitHub Actions conformance workflow
@@ -285,7 +285,7 @@ From any machine with access to the backend:
 ```bash
 orun status --remote-state --backend-url https://… --exec-id gha-12345678-1-a1b2c3 --json
 orun logs   --remote-state --backend-url https://… --exec-id gha-12345678-1-a1b2c3 \
-  --job foundation@dev.smoke
+  --job foundation.dev.smoke
 ```
 
 ## Troubleshooting

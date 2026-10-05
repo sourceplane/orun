@@ -17,7 +17,8 @@ around:
    composition packages: typed, schema-checked documents instead of wiki pages and CI
    conditionals.
 2. **Package and evolve.** Standards travel like code. Golden paths ship as versioned
-   **Stacks**, platform rules ship as **intent presets**, a lockfile pins every digest, and
+   **Stacks**, platform rules ship as **intent presets**, every plan records the exact
+   digest of each standard it used, and
    a **baseline** packages a whole product so it can be rebuilt and upgraded rather than
    copied and forked.
 3. **Ground agents.** A coding agent reads the same intent, catalog, and contracts your
@@ -95,8 +96,9 @@ verdict is read off the record, not off an assertion.
   defaults, discovery roots) that repositories inherit with `extends:`.
   `orun intent explain` shows where every effective field came from. See
   [intent presets](../concepts/intent-presets.md).
-- **Locks.** `orun compositions lock` pins every resolved source by digest in
-  `compositions.lock.yaml`, so a standard changes only when you change the pin.
+- **Pins and records.** A source in `intent.yaml` is pinned by the version tag in its
+  reference or, strictly, by a `digest:` that `orun plan` verifies. Every plan records the
+  digest each source resolved to.
 - **Blueprints and baselines.** `orun new` places a `kind: Blueprint` phase by phase and
   records a provenance lock so `orun new upgrade` can three-way merge a newer release.
   `orun baseline` rebuilds a registered baseline, a whole product's structure and
@@ -125,7 +127,7 @@ for this pillar.
 - **Verify.** `orun validate` checks the intent and its profile and dependency rules
   without compiling a plan.
 - **Plan.** `orun plan` runs a six-stage compiler (load, normalize, expand, bind,
-  resolve, materialize) over your intent, discovered components, and locked compositions.
+  resolve, materialize) over your intent, discovered components, and resolved compositions.
   Identical inputs produce byte-identical plans. `orun intent render` and
   `orun intent explain` show the effective intent the plan was compiled from.
 - **Execute.** `orun run` executes the plan on your shell, in Docker, or on GitHub Actions
@@ -168,7 +170,7 @@ values up without printing them back; `orun policy` lints and tests portable
                          your repositories
      intent.yaml · component.yaml · agents/*.md · tasks/*.TaskContract.yaml
                                   ▲
-        Stacks · presets ─────────┤ extends: · compositions.lock.yaml
+        Stacks · presets ─────────┤ extends: · pinned source refs  
         baselines (OCI, registry) │
                                   │
         events ───────────────────┤ PR · merge · tag · manual · a delegated task

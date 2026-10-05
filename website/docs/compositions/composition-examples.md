@@ -1,6 +1,9 @@
 ---
 title: Composition examples
+description: "A tour of the example Stack shipped in this repository: eleven golden paths for Terraform, Helm, Cloudflare, and turbo, each with its schema, jobs, and lane profiles."
 ---
+
+The example Stack in this repository is a working set of golden paths: eleven component types, each with a schema that every component of that type must satisfy and profiles for each lane. It is the quickest way to see a platform's standards written as code.
 
 The repository ships one packaged example-platform Stack using the split-kind authoring model. It covers the quick start, GitHub Actions-compatible execution, and multi-root repository discovery.
 
@@ -91,7 +94,7 @@ spec:
 
 ## Profile policies
 
-The release profile demonstrates enforcement policies:
+The release profile declares profile policies. orun records them but does not enforce them yet; see [standards](../concepts/standards.md#declared-not-yet-enforced).
 
 ```yaml
 # profiles/terraform-release.yaml

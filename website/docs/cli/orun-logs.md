@@ -29,19 +29,19 @@ orun logs run/my-plan-20240601-a1b2c3
 Filter to one job:
 
 ```bash
-orun logs job/api-edge-worker@production.deploy
+orun logs job/api-edge-worker.production.deploy
 ```
 
 Combine exec and job filters:
 
 ```bash
-orun logs --exec-id my-plan-20240601-a1b2c3 --job api-edge-worker@production.deploy
+orun logs --exec-id my-plan-20240601-a1b2c3 --job api-edge-worker.production.deploy
 ```
 
 Filter to a specific step:
 
 ```bash
-orun logs --job api-edge-worker@production.deploy --step deploy
+orun logs --job api-edge-worker.production.deploy --step deploy
 ```
 
 ## Slash notation
@@ -100,7 +100,7 @@ orun logs \
   --remote-state \
   --backend-url https://orun-backend.example.com \
   --exec-id gh-12345678-1-a1b2c3 \
-  --job api@dev.deploy
+  --job api.dev.deploy
 ```
 
 Omit `--job` to fetch logs for all jobs in the run.
@@ -111,7 +111,7 @@ backend from a sequence cursor and streams new lines until the job completes:
 ```bash
 orun logs \
   --remote-state \
-  --job api@dev.deploy \
+  --job api.dev.deploy \
   --follow
 ```
 

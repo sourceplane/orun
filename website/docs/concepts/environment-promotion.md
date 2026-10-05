@@ -1,8 +1,9 @@
 ---
-title: Environment Promotion
+title: Environment promotion
+description: Promotion order, such as preview then staging then production, is a standard a platform declares once in intent. orun compiles it into enforced DAG edges within a plan and recorded evidence gates across plans.
 ---
 
-# Environment Promotion
+Promotion order (preview, then staging, then production) is a standard a platform declares once, in `intent.yaml`. Within a single plan orun compiles it into DAG edges the runner enforces. Across separate plans it compiles into evidence gates that are recorded on the plan but not yet enforced; see [standards](./standards.md#in-what-order).
 
 Environment promotion dependencies define ordering and gating relationships between environments. They express the deployment pipeline flow — for example, staging must succeed before production can run.
 
@@ -67,8 +68,8 @@ The behavior depends on whether the dependency environment is active in the same
 When both environments are activated by the same trigger (or selected with `--env`), promotion dependencies compile into normal DAG edges:
 
 ```
-web-app@dev.deploy  →  web-app@staging.deploy
-api@dev.deploy      →  api@staging.deploy
+web-app.dev.deploy  →  web-app.staging.deploy
+api.dev.deploy      →  api.staging.deploy
 ```
 
 The plan output uses standard `dependsOn`:
@@ -82,7 +83,7 @@ The plan output uses standard `dependsOn`:
 
 ### Cross-plan (dependency environment not active)
 
-When environments are activated by different triggers (e.g., PR activates preview, push activates staging), the dependency environment won't be in the same plan. In this case, promotion compiles into **gates** — evidence checks that require prior success:
+When environments are activated by different triggers (e.g., PR activates preview, push activates staging), the dependency environment won't be in the same plan. In this case, promotion compiles into **gates**: a record of the prior success the job is meant to require.
 
 ```json
 {
@@ -220,8 +221,11 @@ environments:
 
 This gives you:
 - PR → preview only (validate changes)
-- Push to main → staging only (gate: preview must have passed for this commit)
-- Tag → production only (gate: staging must have passed for this commit)
+- Push to main → staging only (a recorded gate: preview should have passed for this commit)
+- Tag → production only (a recorded gate: staging should have passed for this commit)
+
+The gates are recorded, not enforced (see the note above). To make the order binding today,
+plan the environments together, for example with `--all-envs`.
 
 ## Validation
 

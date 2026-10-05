@@ -1,6 +1,9 @@
 ---
 title: Dependency rules
+description: Dependency rules declare when ordering between components is a hard rule and when it is advisory, per environment or trigger, so the plan decides what waits rather than a person at deploy time.
 ---
+
+Ordering is a standard too: the database migrates before the API deploys, but on a pull request nothing needs to wait. Dependency rules declare, per environment or per trigger, whether an edge blocks, is advisory, or is dropped, so the plan decides what waits rather than a person at deploy time.
 
 Dependency rules let you control whether `dependsOn` edges in the plan DAG are **enforced** (block execution), **advisory** (recorded but non-blocking), or **disabled** (omitted entirely), conditional on which trigger fired.
 
@@ -146,9 +149,9 @@ For a pull-request plan with advisory mode the job retains both views:
 
 ```json
 {
-  "id": "api@dev-preview.verify",
+  "id": "api.dev-preview.verify",
   "dependsOn": [],
-  "advisoryDependsOn": ["database@dev-preview.verify"],
+  "advisoryDependsOn": ["database.dev-preview.verify"],
   "dependencyMode": "advisory",
   "dependencySource": "subscription-rule",
   "dependencyRuleTriggerRef": "github-pull-request"
@@ -159,8 +162,8 @@ For the same component on push-to-main:
 
 ```json
 {
-  "id": "api@staging.verify",
-  "dependsOn": ["database@staging.verify"],
+  "id": "api.staging.verify",
+  "dependsOn": ["database.staging.verify"],
   "dependencyMode": "enforced",
   "dependencySource": "environment"
 }
@@ -170,8 +173,8 @@ For the same component on push-to-main:
 
 ```
 └─ api (api/dev-preview)
-  ├─ depends-on: shared-secrets@dev-preview.verify
-  └─ advisory:   database@dev-preview.verify
+  ├─ depends-on: shared-secrets.dev-preview.verify
+  └─ advisory:   database.dev-preview.verify
    mode: advisory (rule:github-pull-request)
 ```
 
@@ -209,7 +212,7 @@ Keeping these axes independent keeps the compiled plan DAG the single source of 
 
 Since v2.9.0, `dependsOn` separates two orthogonal questions:
 
-1. **Ordering** — should A wait for B when both are in the plan? (existing `dependencyMode` / `condition`)
+1. **Ordering** — should A wait for B when both are in the plan? (`dependencyMode` and the dependency rules above)
 2. **Inclusion** — should B be pulled into the plan when only A was selected by `--changed`? (new `include`)
 
 The new `include` field controls inclusion:

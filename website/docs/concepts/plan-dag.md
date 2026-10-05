@@ -10,7 +10,7 @@ A rendered plan includes:
 
 - metadata such as name, namespace, timestamp, and checksum
 - execution settings such as concurrency, fail-fast behavior, and state-file name
-- concrete jobs with stable IDs like `web-app@production.deploy`
+- concrete jobs with stable IDs like `web-app.production.deploy`
 - ordered steps with `run` or `use` instructions
 - fully resolved dependencies between jobs
 - promotion gates for cross-plan environment dependencies
@@ -32,9 +32,9 @@ A rendered plan includes:
   },
   "jobs": [
     {
-      "id": "web-app@production.deploy",
+      "id": "web-app.production.deploy",
       "runsOn": "ubuntu-22.04",
-      "dependsOn": ["common-services@production.deploy"],
+      "dependsOn": ["common-services.production.deploy"],
       "steps": [
         {
           "id": "deploy",
@@ -88,6 +88,6 @@ When an environment declares a [promotion dependency](./environment-promotion.md
 }
 ```
 
-Gates are evidence checks that require the component to have previously succeeded in the referenced environment for the same source revision. When both environments are in the same plan, promotion compiles into standard `dependsOn` edges instead.
+Gates record that the component should have succeeded in the referenced environment for the same source revision. They are recorded, not enforced: orun does not yet check them before running (see [environment promotion](./environment-promotion.md)). When both environments are in the same plan, promotion compiles into standard `dependsOn` edges instead.
 
 Read [execution model](./execution-model.md) next to see how plans are previewed and executed.

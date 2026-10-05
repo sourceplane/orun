@@ -89,13 +89,13 @@ orun run --verbose
 Run only one job:
 
 ```bash
-orun run --job network-foundation@development.validate-terraform
+orun run --job network-foundation.development.validate-terraform
 ```
 
 Retry a failed job (clears its saved state first):
 
 ```bash
-orun run --job network-foundation@development.validate-terraform --retry
+orun run --job network-foundation.development.validate-terraform --retry
 ```
 
 ### Resume-aware CI reruns
@@ -323,7 +323,7 @@ When the backend already has a result for a job whose inputs match a prior run,
 the run **adopts that result instead of re-executing**, and surfaces it:
 
 ```
-✓ memoized api@prod.build — cache hit, skipped execution (a1b2c3d4e5f6)
+✓ memoized api.prod.build — cache hit, skipped execution (a1b2c3d4e5f6)
 ```
 
 The digest in parentheses is the resolved result's content hash. A memoized job is
@@ -405,7 +405,7 @@ When running with remote state, each step receives:
 | Variable | Value |
 | --- | --- |
 | `ORUN_PLAN_ID` | Plan checksum short-hash |
-| `ORUN_JOB_ID` | Job ID (e.g. `api@dev.deploy`) |
+| `ORUN_JOB_ID` | Job ID (e.g. `api.dev.deploy`) |
 | `ORUN_JOB_UID` | Content-addressed job UID (stable while the job's inputs are unchanged) |
 | `ORUN_JOB_RUN_ID` | `{execID}/{jobUID}` — stable per-job identifier |
 

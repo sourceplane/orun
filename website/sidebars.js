@@ -44,6 +44,7 @@ const sidebars = {
       label: '1 · Declare',
       items: [
         'concepts/intent-model',
+        'concepts/standards',
         'concepts/compositions',
         'compositions/composition-contract',
         'concepts/trigger-bindings',
@@ -224,6 +225,7 @@ const sidebars = {
       type: 'category',
       label: 'Release notes',
       items: [
+        'release-notes/v2.73.1',
         'release-notes/v2.73.0',
         'release-notes/v2.72.1',
         'release-notes/v2.72.0',

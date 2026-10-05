@@ -2,7 +2,7 @@
 title: orun validate
 ---
 
-`orun validate` checks intent, discovered component manifests, and type-specific schema constraints without generating a plan.
+`orun validate` is the verify step: it checks the intent file, the component manifests it discovers, the reserved `ORUN_` environment prefix, and the profile and dependency rules, without loading compositions or generating a plan. Checking each component's parameters against its composition's schema happens in [`orun plan`](./orun-plan.md); run both in CI. See [standards](../concepts/standards.md) for what each command enforces.
 
 :::note Always global
 `validate` always operates on the full intent regardless of your current directory. CWD-based component scoping does not apply — you need to know the whole graph is valid, not just your component. The `--all` flag has no effect on this command.

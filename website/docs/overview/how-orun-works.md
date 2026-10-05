@@ -42,26 +42,26 @@ apiVersion: sourceplane.io/v1
 kind: Intent
 metadata:
   name: shop-platform
-spec:
-  discovery:
-    roots: [apps/, infra/]
-  environments:
-    staging:
-      activation:
-        triggerRefs: [github-push-main]
-    production:
-      activation:
-        triggerRefs: [github-tag-release]
-      promotion:
-        dependsOn: [staging]
-  automation:
-    triggerBindings:
-      github-push-main:
-        on: { provider: github, event: push, branches: [main] }
-        plan: { scope: changed }
-      github-tag-release:
-        on: { provider: github, event: push, tags: ["v*"] }
-        plan: { scope: full }
+discovery:
+  roots: [apps/, infra/]
+environments:
+  staging:
+    activation:
+      triggerRefs: [github-push-main]
+  production:
+    activation:
+      triggerRefs: [github-tag-release]
+    promotion:
+      dependsOn:
+        - environment: staging
+automation:
+  triggerBindings:
+    github-push-main:
+      on: { provider: github, event: push, branches: [main] }
+      plan: { scope: changed, base: before, head: after }
+    github-tag-release:
+      on: { provider: github, event: push, tags: ["v*"] }
+      plan: { scope: full }
 ```
 
 Each **component** declares itself next to its code: a name, a *type*, the
@@ -120,8 +120,11 @@ Three properties make the plan worth trusting:
 - **It is complete.** Every implicit default, policy merge, and dependency
   edge is explicit in the artifact. If a behavior isn't visible in the plan,
   that's a bug.
-- **It is policy-checked.** Group and environment constraints are enforced
-  here, at compile time. A violating intent never becomes a plan.
+- **It is checked.** Every component's parameters are validated against its
+  composition's schema, secret slots must hold references, dependency cycles
+  are refused, and a pinned source must match its digest. A violating intent
+  never becomes a plan. See [standards](../concepts/standards.md) for what is
+  enforced and what is only recorded.
 
 The **trigger** shapes compilation without escaping it. A push to `main`
 activates staging with `scope: changed` — orun's change-detection engine

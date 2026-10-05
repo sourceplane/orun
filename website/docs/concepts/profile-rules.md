@@ -1,6 +1,9 @@
 ---
 title: Profile rules
+description: Profile rules encode lane policy, such as plan-only on pull requests and apply on main, as a declaration on the subscription that the plan records with its provenance.
 ---
+
+Lane policy is a standard: a pull request may only plan, a merge to main may apply. Profile rules declare that policy on the component's subscription, as a choice among the profiles its golden path offers, and the plan records which rule chose the profile. `orun validate` rejects a malformed rule before anything is planned.
 
 Profile rules provide conditional execution profile selection based on which trigger fired. They allow a single component subscription to behave differently depending on the CI event — for example, running `plan-only` on pull requests but `apply` on merge to main.
 

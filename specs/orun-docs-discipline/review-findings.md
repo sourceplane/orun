@@ -75,6 +75,17 @@ change intro, positioning, and links. KEEP = minor touches.
 
 ### Package & evolve (PD3)
 
+- **The composition lock records; it does not pin.** `.orun/compositions.lock.yaml`
+  is written on every plan (`internal/composition/registry.go:338`) and by
+  `orun compositions lock`, but nothing reads it back, and `.orun/` is
+  gitignored. What pins a standard is the source in `intent.yaml`: its `ref`
+  tag, or strictly a `digest:` field, which resolution verifies and fails on
+  mismatch (`internal/composition/registry.go:626,651,672`). The resolved
+  digests are recorded in `plan.json` (`spec.compositionSources`).
+  PD1 (v2.73.0) repeated the "a lockfile pins every digest" claim on the
+  landing page, principles, what-is-orun, and README; PD2 corrects them, PD3
+  the stacks and compositions pages.
+
 10. `intent-presets.md:140`: "later presets take precedence … for
    non-conflicting fields" contradicts itself; `:146-147` uses
    `groups.defaults`/`environments.defaults` where the schema has

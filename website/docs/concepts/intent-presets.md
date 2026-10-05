@@ -1,8 +1,6 @@
 ---
-title: Intent Presets
+title: Intent presets
 ---
-
-# Intent Presets
 
 Intent Presets allow Stack packages to publish reusable intent scaffolding — environments, trigger bindings, defaults, policies, discovery roots, and env vars — that consuming repos can explicitly opt into via `extends:` in their `intent.yaml`.
 
@@ -32,8 +30,8 @@ registry:
 
 spec:
   compositions:
-    - path: compositions/terraform/compositions.yaml
-    - path: compositions/helm/compositions.yaml
+    - path: compositions/terraform/composition.yaml
+    - path: compositions/helm/composition.yaml
   intentPresets:
     - name: standard
       path: presets/standard.yaml
@@ -198,6 +196,6 @@ The rendered output shows the final merged state — what the planner actually s
 
 - The repo intent must visibly opt in via `extends:`. Stacks do not automatically inject behavior.
 - Presets cannot declare `compositions.sources` or `components`.
-- Preset policies are additive — repos cannot override them without explicit authorization.
+- Preset `policies` are merged over the repository's: on a conflicting key, the preset's value wins. Policies are not yet enforced by the planner or runner; see [standards](./standards.md#declared-not-yet-enforced).
 - The `extends[].source` must reference a declared composition source name.
 - The effective intent is always deterministic for the same inputs.
