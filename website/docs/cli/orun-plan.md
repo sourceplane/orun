@@ -89,10 +89,11 @@ Generate with an explicit output path (for backwards compatibility):
 orun plan -i examples/intent.yaml -o /tmp/orun-plan.json
 ```
 
-Label a plan in its summary (run it later by its checksum or `latest`, not by this name):
+Name a plan so you can run it later by that name (`orun run release-candidate`). The name points at the newest plan generated with it:
 
 ```bash
 orun plan -i examples/intent.yaml --name release-candidate
+orun run release-candidate
 ```
 
 Generate YAML output:
@@ -155,7 +156,7 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | `--intent`, `-i` | Intent file path (auto-discovered if not set) |
 | `--output`, `-o` | Also write the plan to this path (optional; every plan is sealed into the object model under `.orun/objectmodel/` regardless) |
 | `--format`, `-f` | Output format: `json` or `yaml` |
-| `--name` | A name shown in the plan summary. It is not a run reference: run a plan by its checksum or `latest` |
+| `--name` | Name the plan so `orun run <name>` runs it. Re-planning with the same name moves the name to the new plan |
 | `--debug` | Enable debug logging during planning |
 | `--env`, `-e` | Restrict compilation to specific environments (comma-separated) |
 | `--all-envs` | Compile all environments explicitly (mutually exclusive with `--env`) |

@@ -510,7 +510,7 @@ func generatePlan() error {
 
 	// Write the content-addressed object graph. Best-effort and isolated under
 	// .orun/objectmodel/.
-	writeObjectModelPlan(absStoreRoot, plan, planBytes, planHash, revKey, trig, catRes)
+	writeObjectModelPlan(absStoreRoot, plan, planBytes, planHash, revKey, planName, trig, catRes)
 
 	// On-success summary block (cli-surface.md §1.1). Printed before the
 	// "components × envs → jobs" detail line so existing tooling that scans for

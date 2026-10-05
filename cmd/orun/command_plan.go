@@ -70,7 +70,7 @@ func registerPlanCommand(root *cobra.Command) {
 	planCmd.Flags().StringVarP(&environment, "env", "e", "", "Filter by environment (comma-separated)")
 	planCmd.Flags().BoolVar(&allEnvs, "all-envs", false, "Plan all environments explicitly (mutually exclusive with --env)")
 	planCmd.Flags().StringArrayVar(&planComponents, "component", nil, "Filter by component (repeatable)")
-	planCmd.Flags().StringVar(&planName, "name", "", "Name shown in the plan summary (run a plan by its checksum or \"latest\")")
+	planCmd.Flags().StringVar(&planName, "name", "", "Name the plan so \"orun run <name>\" runs it")
 	planCmd.Flags().StringVarP(&viewPlan, "view", "v", "", "View plan (dag/dag:long/dependencies/component=NAME)")
 	planCmd.Flags().BoolVar(&planLong, "long", false, "Show detailed output (step commands, IDs)")
 	planCmd.Flags().BoolVar(&changedOnly, "changed", false, "Show only changed components (requires git)")
