@@ -86,8 +86,9 @@ orun baseline check cirrus && orun baseline new cirrus --via-platform --repo acm
 
 ## `new`
 
-Builds a registered baseline. Exactly one of `--local` or `--via-platform`
-must be given; both or neither exits `2`. Both paths refuse to start unless
+Builds a registered baseline, named by id or by a bootstrap's `--from bst_…`.
+Exactly one of `--local` or `--via-platform` must be given; both or neither
+exits `2`. Both paths refuse to start unless
 `check` would pass.
 
 ### `--local`
@@ -119,6 +120,42 @@ orun baseline new cirrus --local --out ./acme-cloud \
 A hook-running local build needs `git`, `gh`, Node.js 20+, `pnpm`, and
 `python3`, an admin session or `ORUN_TOKEN` for the workspace, and the
 providers the baseline requires connected to it.
+
+### `--from bst_…`
+
+Continues a bootstrap the console's **Review** step resolved. The record
+carries the baseline at its tag, the repository, the inputs and the
+connections, so nothing is typed twice: the id fills what the flags would, an
+explicit flag still wins, and `--set` adds. Works with either shape; the
+command the Review page prints is the local one:
+
+```bash
+orun baseline new --from bst_7K2M9QAZ --workspace ws_537EHJPC \
+  --local --out ./test-123 --run-hooks
+```
+
+```text
+continuing bootstrap bst_7K2M9QAZ: cirrus@baseline-v9 for acme/test-123
+fetching sourceplane/cirrus@baseline-v9
+building repo-blueprint.yaml
+```
+
+The workspace is named because the bootstrap is read under it and an empty
+directory has nothing else to name it from. Before anything is fetched the
+platform is told which door took the bootstrap — `--by cli` (the default),
+or `--by agent` when a coding agent runs the command from the Review page's
+prompt — so the workspace's **Overview** reads *continued from the orun CLI*
+or *continued in a coding agent*; a bootstrap another door already took
+keeps that door's word, and the command says so. One build per repository
+holds from any door: when a cloud session or another runner already holds
+the repository, the command stops before anything is fetched and names who
+holds it and since when. The run reports its phase landings to the platform
+under the bootstrap id, so the record carries the build whichever door ran
+it, and the run's end gives the repository back. The platform refuses an id
+that never reached Review (`409 not_resolved`, naming the step or the missing
+provider) and answers `404` for one that is not this workspace's — the id
+alone is not a credential. No token is in the record; the hooks resolve the
+chosen connections through the workspace, as a platform build does.
 
 ### `--via-platform`
 

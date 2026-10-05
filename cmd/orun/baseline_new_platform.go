@@ -93,6 +93,12 @@ func runBaselineViaPlatform(cmd *cobra.Command, address string, o platformBuildO
 	if err != nil {
 		return err
 	}
+	// A bootstrap record's inputs fill what the flags did not (--from).
+	for name, value := range scaffoldBootstrapInputs {
+		if _, given := inputs[name]; !given {
+			inputs[name] = value
+		}
+	}
 
 	// PRINTED BEFORE IT STARTS. An hour of automated commits into the wrong
 	// repository is not recoverable by pressing ctrl-c afterwards.

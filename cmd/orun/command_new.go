@@ -24,14 +24,23 @@ var (
 	scaffoldValuesFile string
 	scaffoldOut        string
 	scaffoldSet        []string
-	scaffoldRunHooks   bool
-	scaffoldStatus     bool
-	scaffoldJSON       bool
-	scaffoldPhase      string
-	scaffoldUntil      string
-	scaffoldResume     bool
-	scaffoldRedo       []string
-	scaffoldProgress   string
+	// scaffoldBootstrapInputs are the values a bootstrap record carries
+	// (`orun baseline new --from bst_…`). They fill declared inputs the flags
+	// did not; a key the build document does not declare is one of the
+	// platform's derived facts, not an operator's typo, and is left out.
+	scaffoldBootstrapInputs map[string]string
+	// scaffoldPlatformSink, when set, is the platform sink for this run — a
+	// `--from` build reports under its bootstrap id (BH5) rather than under a
+	// sandbox session the environment names.
+	scaffoldPlatformSink *scaffold.PlatformSink
+	scaffoldRunHooks     bool
+	scaffoldStatus       bool
+	scaffoldJSON         bool
+	scaffoldPhase        string
+	scaffoldUntil        string
+	scaffoldResume       bool
+	scaffoldRedo         []string
+	scaffoldProgress     string
 
 	upgradeBlueprint string
 	upgradeOut       string
@@ -106,6 +115,14 @@ func runScaffoldNew(ctx context.Context) error {
 	if err != nil {
 		return exitErr(6, "%v", err)
 	}
+	for name, value := range scaffoldBootstrapInputs {
+		if _, declared := bp.Inputs[name]; !declared {
+			continue
+		}
+		if _, given := inputs[name]; !given {
+			inputs[name] = value
+		}
+	}
 	// Recover what this product was already built with, BEFORE prompting: a
 	// resumed run in a fresh container has no values file and must not ask
 	// again for values the tree already records. A flag that disagrees with
@@ -148,7 +165,10 @@ func runScaffoldNew(ctx context.Context) error {
 	// somebody (BE-O13). `platformEventSink` is nil outside one, and a nil sink
 	// is what `events.go` already defines as "nobody is listening", so a local
 	// run is byte-for-byte what it was.
-	platform := platformEventSink()
+	platform := scaffoldPlatformSink
+	if platform == nil {
+		platform = platformEventSink()
+	}
 	var events scaffold.EventSink = &progressSink{out: os.Stdout, mode: mode}
 	if platform != nil {
 		events = fanOutSink{events, platform}
