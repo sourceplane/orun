@@ -33,7 +33,7 @@ func TestWriteObjectModelPlanWritesGraph(t *testing.T) {
 		CreatedAt:   time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC),
 	}
 	// No catalog view → degenerate (source + revision + trigger spine).
-	writeObjectModelPlan(orunDir, &model.Plan{}, []byte(`{"plan":"A"}`), "sha256-abc", "rev-x", trig, planCatalogResolution{})
+	writeObjectModelPlan(orunDir, &model.Plan{}, []byte(`{"plan":"A"}`), "sha256-abc", "rev-x", "", trig, planCatalogResolution{})
 
 	root := objectModelRoot(orunDir)
 	if n := countFiles(t, filepath.Join(root, "objects")); n == 0 {
@@ -51,7 +51,7 @@ func TestWriteObjectModelPlanWritesGraph(t *testing.T) {
 	}
 	// A second run dedups the revision (same plan) — still succeeds and adds a
 	// fresh trigger event without erroring.
-	writeObjectModelPlan(orunDir, &model.Plan{}, []byte(`{"plan":"A"}`), "sha256-abc", "rev-x", trig, planCatalogResolution{})
+	writeObjectModelPlan(orunDir, &model.Plan{}, []byte(`{"plan":"A"}`), "sha256-abc", "rev-x", "", trig, planCatalogResolution{})
 }
 
 func TestObjectModelTriggerMapping(t *testing.T) {

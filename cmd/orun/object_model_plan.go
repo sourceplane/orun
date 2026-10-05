@@ -30,8 +30,9 @@ func objectModelRoot(orunDir string) string { return filepath.Join(orunDir, "obj
 // writeObjectModelPlan writes source → (catalog) → revision → trigger to the
 // object graph for the just-compiled plan. orunDir is the absolute path to the
 // workspace's .orun directory. catRes carries the already-resolved catalog view
-// so no re-resolution happens.
-func writeObjectModelPlan(orunDir string, plan *model.Plan, planBytes []byte, planHash, revHumanKey string, trig triggerctx.TriggerOccurrence, catRes planCatalogResolution) {
+// so no re-resolution happens. A non-empty planName (`orun plan --name`) also
+// publishes the revision under revisions/by-name/<name>.
+func writeObjectModelPlan(orunDir string, plan *model.Plan, planBytes []byte, planHash, revHumanKey, planName string, trig triggerctx.TriggerOccurrence, catRes planCatalogResolution) {
 	ctx := context.Background()
 	root := objectModelRoot(orunDir)
 
@@ -74,6 +75,7 @@ func writeObjectModelPlan(orunDir string, plan *model.Plan, planBytes []byte, pl
 		RevisionScope:    nodes.RevisionScope{Mode: planScopeMode(trig)},
 		JobCount:         len(plan.Jobs),
 		LegacyChecksum:   planHash,
+		PlanName:         planName,
 		Trigger:          objectModelTrigger(trig),
 	}
 

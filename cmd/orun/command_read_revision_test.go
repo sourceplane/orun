@@ -64,7 +64,7 @@ func seedObjectModelRevision(t *testing.T, dir string) (checksum, humanKey strin
 	plan.Metadata.Name = "test-plan"
 	plan.Jobs = make([]model.PlanJob, 5)
 	planBytes := []byte(`{"apiVersion":"orun.io/v1alpha1","kind":"Plan","jobs":[]}`)
-	writeObjectModelPlan(filepath.Join(dir, ".orun"), plan, planBytes, checksum, humanKey, trig, planCatalogResolution{})
+	writeObjectModelPlan(filepath.Join(dir, ".orun"), plan, planBytes, checksum, humanKey, "", trig, planCatalogResolution{})
 	return checksum, humanKey
 }
 
