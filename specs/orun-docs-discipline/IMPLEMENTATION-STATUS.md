@@ -4,8 +4,8 @@
 |---|---|---|---|
 | PD1 — The narrative: tagline, landing page, information architecture | Done | [#710](https://github.com/sourceplane/orun/pull/710) | v2.73.0 |
 | PD2 — Pillar 1, Declare | Done | [#711](https://github.com/sourceplane/orun/pull/711) | v2.73.1 |
-| PD3 — Pillar 2, Package & evolve | Done | (this PR) | v2.73.2 |
-| PD4 — Pillar 3, Ground agents | Not started | | |
+| PD3 — Pillar 2, Package & evolve | Done | [#712](https://github.com/sourceplane/orun/pull/712) | v2.73.2 |
+| PD4 — Pillar 3, Ground agents | Done | (this PR) | v2.73.3 |
 | PD5 — Pillar 4, Verify → plan → execute | Not started | | |
 | PD6 — Reference sweep and close-out | Not started | | |
 
@@ -21,3 +21,8 @@
 - The docs site deploys by hand (`wrangler pages deploy`). Each milestone is
   validated with `npm run docs:build`; publishing the site is left to a
   maintainer with Cloudflare access.
+- PD4 left two planned items unchanged after checking them: the skill's
+  `v2.58.15 or later` is a minimum version, not a pin, so it stays; and the
+  "work plane is gone" comments in `agents/*.md` and `cmd/orun/pr.go` refer to
+  the work plane removed in v2.54, not to today's `orun work`, so they are
+  accurate.

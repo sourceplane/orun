@@ -1,7 +1,13 @@
 ---
 title: The agent runtime
-description: The orun binary is the agent runtime — agent types sealed from agents/*.md, frozen briefs, replayable sessions, a driver seam, and the MCP as the agent's hands — running the same way in a terminal and in an Orunbase sandbox.
+description: How orun runs coding agents inside your standards - agent types sealed from agents/*.md with a deny-by-default tool policy, frozen briefs built from your intent and task contracts, replayable sessions, and the MCP as the agent's hands.
 ---
+
+The agent runtime is where grounding becomes mechanism. An agent started by orun does not
+begin from a blank prompt: its brief is assembled from the versioned base literacy, the
+agent type your repository declares, the task contract, and the set of components the
+change affects, all sealed by content hash. Its tools are filtered by the policy its type
+declares, and its work is judged by the same plan, checks, and task plane as a human's.
 
 orun already compiles intent, resolves the catalog, computes what a change
 affects, and coordinates runs. The **agent runtime** lets the same binary
@@ -32,8 +38,9 @@ reviewed like code. It has two halves:
 - **Capability** — YAML frontmatter, a closed schema parsed into a typed
   envelope: `name`, `harness` (a driver id), `model`, optional `runtime`
   tuning, `autonomyDefault`, a deny-by-default `tools` policy
-  (`allow` / `ask` / `deny`), a `mayAffect` blast-radius ceiling of component
-  globs, optional `secrets.use` reference globs, a mandatory `owner`, and
+  (`allow` / `ask` / `deny`), `mayAffect` component globs naming what the
+  type is meant to work on (recorded and shown in the cockpit, not checked by
+  the runtime; a task contract's `affects` is the enforced limit), optional `secrets.use` reference globs, a mandatory `owner`, and
   `extends`.
 - **Character** — the markdown body, the persona, stored verbatim as a blob.
   It carries no policy weight and never restates orun mechanics.
@@ -151,7 +158,7 @@ planes over one connection:
 | Plane | Mounts when | Tools |
 |---|---|---|
 | **The pen** | The server runs inside a repository checkout | `pr_open` — the PR with its lineage written in |
-| **The platform** | Cloud auth resolves | 33 tools over the Orunbase API: catalog, runs and logs, audit, events, access, usage, billing, config, secret metadata, webhooks, skills, and the task plane; 24 reads plus 9 policy-gated writes |
+| **The platform** | Cloud auth resolves | Tools over the Orunbase API: catalog, runs and logs, audit, events, access, usage, billing, config, secret metadata, webhooks, skills, and the task plane; reads plus a few policy-gated writes (`orun mcp tools` prints the roster) |
 
 The agent type's `tools` policy filters that surface at write time: denied
 tools are absent from the config, and the runtime denies them again if a

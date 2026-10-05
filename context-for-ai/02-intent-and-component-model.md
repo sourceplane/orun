@@ -16,8 +16,8 @@ Common fields:
 | `compositions.resolution` | Source precedence and explicit type-to-source bindings. |
 | `discovery.roots` | Directories to scan recursively for `component.yaml` files. |
 | `automation.triggerBindings` | CI/event triggers that activate environments and plan scopes. |
-| `groups` | Domain defaults and policies. |
-| `environments` | Environment defaults, policies, selectors, env vars, and trigger activation. |
+| `groups` | `parameterDefaults` per domain, keyed by domain name (and a `policies` map that is recorded, not enforced). |
+| `environments` | `parameterDefaults`, selectors, env vars, trigger activation, promotion order, dependency mode (and a recorded `policies` map). |
 | `components` | Optional inline components. Many repos prefer discovered components. |
 | `execution` | Runtime state configuration, such as local or remote state. |
 | `repo` | Optional self-description of the repo itself (see below). |
@@ -44,7 +44,7 @@ markdown with `docs.overview: <path>`. On `orun plan` / `orun catalog push`, the
 referenced file's bytes are read at the resolved commit and carried into the
 catalog snapshot as a content-addressed blob (deduped and set-difference synced —
 an unchanged doc is never re-uploaded). The entity records a `{path, sha, digest}`
-pointer; there is no live git-provider call. Orun Cloud's Workspace Overview
+pointer; there is no live git-provider call. Orunbase's workspace overview
 renders these directly.
 
 ## Component manifests
@@ -68,7 +68,7 @@ spec:
         profile: verify
       - name: production
         profile: release
-  inputs:
+  parameters:
     stackName: network-foundation
     terraformDir: .
     terraformVersion: 1.9.8
@@ -82,10 +82,10 @@ Key fields:
 | --- | --- | --- |
 | `metadata.name` | Stable component ID used in dependencies and plan jobs. | Rename only with a repo-wide dependency update. |
 | `spec.type` | Composition contract name. | Choose an existing type unless you are also adding a composition. |
-| `spec.domain` | Group/policy domain. | Ensure the matching group exists if group defaults or policies are expected. |
+| `spec.domain` | The group whose `parameterDefaults` apply (groups are keyed by domain). | Ensure the matching group exists if group defaults are expected. |
 | `spec.path` | Job working directory. | Keep relative to the intent root unless the repo documents otherwise. |
 | `spec.subscribe.environments` | Environments where the component participates. | Prefer explicit subscriptions for component-owned behavior. |
-| `spec.inputs` | Type-specific configuration validated by the composition schema. | Add fields only if the schema allows them or update the composition. |
+| `spec.parameters` | Type-specific configuration, checked against the composition's schema by `orun plan`. | Add fields only if the schema allows them or update the composition. |
 | `spec.env` | Component-level runtime environment variables. | Use for shell env, not typed configuration. |
 | `spec.labels` | Metadata for ownership and classification. | Useful for humans and future selection features. |
 | `spec.dependsOn` | Component dependency edges. | Add when ordering or required context matters. |
@@ -114,13 +114,15 @@ subscribe:
         RELEASE_CHANNEL: stable
 ```
 
-## Defaults and inputs
+## Defaults and parameters
 
-For component instance inputs, the current planner uses this precedence from lowest to highest:
+For component instance parameters, the planner uses this precedence from lowest to highest:
 
-1. Environment defaults.
-2. Group defaults for the component domain.
-3. Component inputs.
+1. Environment `parameterDefaults` (`"*"`, then the component's type).
+2. Group `parameterDefaults` for the component's domain (`"*"`, then the type).
+3. Component `parameters`.
+
+The merged result is then checked against the composition's schema.
 
 `path` is handled specially:
 
@@ -129,11 +131,11 @@ For component instance inputs, the current planner uses this precedence from low
 3. Environment default `path`.
 4. `./`.
 
-Use defaults for shared values, but keep component-specific facts in component inputs.
+Use defaults for shared values, but keep component-specific facts in component parameters.
 
 ## Runtime env vars
 
-Runtime `env` is distinct from `inputs`.
+Runtime `env` is distinct from `parameters`.
 
 Plan-time merge order from lowest to highest:
 
@@ -146,9 +148,9 @@ The `ORUN_` prefix is reserved for runtime-injected variables. Do not define use
 
 ## Policies
 
-Policies are constraints, not ordinary defaults. Group policies and environment policies are collected for the component instance and should be treated as platform guardrails.
+Groups, environments, and execution profiles can declare a `policies` map. orun collects it onto each component instance, but the planner and runner do not enforce it yet. Treat a declared policy as the platform team's stated intent anyway: if a change seems to conflict with one, stop and explain the conflict rather than working around it.
 
-If a change seems to require bypassing a policy, stop and explain the conflict. Do not encode a workaround in a component script.
+The guardrails orun does enforce are the composition's schema, the profiles a composition offers, profile and dependency rules, secret references, source digest pins, and task-contract `affects`. See the docs page on standards (`website/docs/concepts/standards.md`).
 
 ## Dependencies
 

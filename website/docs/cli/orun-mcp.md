@@ -1,23 +1,26 @@
 ---
 title: orun mcp
+description: The orun MCP server - how a coding agent reads the same catalog, runs, skills, and task plane your platform does, and delivers its work through the provenance pen, over one local connection.
 ---
 
-`orun mcp serve` runs **the orun MCP** — the ecosystem's one local
+`orun mcp serve` is how a coding agent is **grounded in your platform**: instead of
+inferring structure and standards from the files it happens to open, the agent asks the
+same catalog, runs, skills, and task plane your platform uses, all derived from the
+repository's declared intent. It is the ecosystem's one local
 [Model Context Protocol](https://modelcontextprotocol.io) server: a minimal,
-dependency-free JSON-RPC 2.0 server over stdio that gives an agent hands on
-everything orun through a single connection.
+dependency-free JSON-RPC 2.0 server over stdio, one connection for everything.
 
-One loop composes two tool planes — **34 tools under one initialize**, plus
-the built-in `connection_info`:
+One loop composes two tool planes under one initialize, plus the built-in
+`connection_info`. `orun mcp tools` prints the exact roster your binary serves:
 
 - **The pen plane** (1 tool) — `pr_open` writes a PR's lineage: the branch
   renamed onto the grammar, pushed, and the machine-readable manifest in the
   body. Mounted whenever the server runs inside a repository checkout — it
   needs git, not a credential.
-- **The platform plane** (33 tools) — the Orunbase public API: catalog,
+- **The platform plane** — the Orunbase public API: catalog,
   runs and logs, audit, events, access, usage, billing, config, secret
   metadata, webhooks, skills, and the task plane (tasks, epics,
-  milestones, contracts, derived verdicts). 24 reads plus 9 policy-gated
+  milestones, contracts, derived verdicts), as reads plus a few policy-gated
   writes. Mounted whenever cloud auth resolves.
 
 ```bash
@@ -92,7 +95,7 @@ orun mcp serve [--workspace <ref>] [--backend-url <url>] [--read-only]
 | --- | --- |
 | `--workspace <ref>` | Target workspace (org id or slug; defaults to the linked repo's). Becomes the platform tools' default `workspace`. |
 | `--backend-url <url>` | Backend URL (Orunbase or self-hosted). |
-| `--read-only` | Drop the 9 platform write tools from the roster (25 tools instead of 34). Filtered from `tools/list` *and* blocked at execution. |
+| `--read-only` | Drop the platform write tools from the roster. Filtered from `tools/list` *and* blocked at execution. |
 
 `--read-only` deliberately does **not** touch `pr_open`. The flag scopes what
 the server may change *in the cloud*; the pen changes your checkout and your
@@ -109,6 +112,29 @@ orun mcp tools --json        # the same rows as JSON
 orun mcp tools --read-only   # the roster as `serve --read-only` advertises it
 ```
 
+## `orun mcp doctor`
+
+When an MCP client cannot see or reach the server, run:
+
+```bash
+orun mcp doctor [--workspace <ref>] [--backend-url <url>]
+```
+
+It checks, in order:
+
+1. **This binary**, and whether a different `orun` earlier on `PATH` would shadow it,
+   which is the most common failure in the field.
+2. **Auth**: whether a credential resolves and when the session expires. No secret is
+   printed.
+3. **The workspace resolution chain**: `--workspace`, then `ORUN_WORKSPACE` or
+   `ORUN_ORG`, then `intent.yaml`, then the repository link.
+4. **The backend**: one platform route and one work route, probed with the resolved
+   credential. A 404 on a platform route means the backend URL is not an Orunbase API
+   endpoint.
+
+It ends with the exact absolute-path registration line to paste into your MCP client,
+exits non-zero when any check fails, and only makes read-only `GET` requests.
+
 ## The pen plane (1 tool)
 
 | Tool | Kind | Purpose |
@@ -124,7 +150,7 @@ Orunbase's `orun/compliance` check verifies them on the PR itself.
 Outside a repository checkout the tool is not mounted at all, and
 `connection_info` reports the reason rather than the server guessing at git.
 
-## The platform plane (33 tools)
+## The platform plane
 
 Every platform tool calls the Orunbase public API with **your own
 credential** — RBAC, rate limits, audit, and metering apply exactly as they
@@ -221,7 +247,7 @@ can reason about (`forbidden: … (requestId: …)`), never protocol faults.
 
 ## One contract, two implementations
 
-The platform tools are the same 33 served by the hosted remote MCP server
+The platform tools are the same ones served by the hosted remote MCP server
 (Streamable HTTP, part of Orunbase) — **identical names, schemas, and
 semantics**, so prompts and docs are portable between the local and remote
 surfaces. The contract is a machine-readable tool manifest exported from the

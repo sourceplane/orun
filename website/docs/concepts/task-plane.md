@@ -3,6 +3,10 @@ title: The task plane
 description: Tasks, epics, and milestones whose identity comes from the platform, whose contract lives in the repository sealed by content hash, and whose status is derived from what was observed — never typed.
 ---
 
+A task contract is a standard for one piece of work: what it may touch, what done means,
+and which gates it must pass, written in the repository like any other standard and held
+to by `orun task check`, whoever does the work, person or agent.
+
 The **task plane** is where orun binds a unit of work to an enforceable
 contract. It has one unusual property that shapes everything else on this
 page: nobody, human or agent, can *write* a status. A task's rung is derived
