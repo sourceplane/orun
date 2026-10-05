@@ -1,5 +1,6 @@
 ---
 title: orun status
+description: Execution status of the latest run or a named execution, locally or through remote state.
 ---
 
 `orun status` shows the execution status of the latest run or a specific execution.

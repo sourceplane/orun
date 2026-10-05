@@ -1,5 +1,6 @@
 ---
 title: orun get
+description: kubectl-style lists of plans, runs, jobs, components, and environments from the record.
 ---
 
 `orun get` lists resources in a kubectl-style interface.

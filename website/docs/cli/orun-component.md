@@ -1,5 +1,6 @@
 ---
 title: orun component
+description: List discovered components, or show one component's merged view - its declared intent after every default that applies to it.
 ---
 
 `orun component` lists discovered components or prints the merged view for a single component.

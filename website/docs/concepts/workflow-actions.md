@@ -24,7 +24,7 @@ and **one** secret bridge:
 - a **`workflow:` plan step** — inside a composition job, beside `run:`/`use:`;
 - a **`workflow:` blueprint hook** — in a `blueprint.yaml`, after scaffolding.
 
-Since **orun-workflows-v3** there is no external engine: the workflow language
+Since **v2.35.0** there is no external engine: the workflow language
 (`apiVersion: orun.dev/v1, kind: Workflow`) is parsed, validated, and executed
 by the same binary that compiles the plan. The former torkflow engine boundary
 — the subprocess contract, the engine pin, `ORUN_TORKFLOW_ENGINE` — is deleted.
@@ -262,11 +262,10 @@ run can reference a workflow that lives in another repo entirely — see
 
 ## Upgrading from torkflow
 
-orun-workflows-v3 ships **no converter** and no compatibility layer. What to
+v2.35.0 shipped **no converter** and no compatibility layer. What to
 know when upgrading:
 
-- A `torkflow/v1` file is rejected by name with a pointer to the manual mapping
-  (`specs/orun-workflows-v3` design §12). The headline moves: the `spec:`
+- A `torkflow/v1` file is rejected by name with a pointer to the manual mapping. The headline moves: the `spec:`
   wrapper is gone, `outboundEdges`/`nextStepName`/`branchName` become `needs:`
   pull edges, `actionRef` becomes one of the three verbs, `Trigger.*` references
   become `inputs.*`, and `maxParallelSteps` becomes `maxParallel`.

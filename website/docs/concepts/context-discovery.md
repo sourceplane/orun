@@ -1,5 +1,6 @@
 ---
 title: Context-aware discovery
+description: How orun finds the intent file and the component you are working in from your current directory, so commands work from anywhere in the repository.
 ---
 
 `orun` automatically discovers the intent file and detects which component you are working in based on your current directory. This means you can run `orun` commands from anywhere in the repository without passing `--intent` or `--component`.

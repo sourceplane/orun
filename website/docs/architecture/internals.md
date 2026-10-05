@@ -49,6 +49,7 @@ The `orun` binary is one Go module. Cobra command wiring, flag definitions, and 
 | `internal/codeowners` | Parse a GitHub-style `CODEOWNERS` file so the resolver can derive ownership |
 | `internal/sourcectx` | The source-context resolver that produces a `SourceSnapshot` for the workspace at refresh time |
 | `internal/affected` | The single change-detection engine behind `plan --changed`, `run --changed`, the cockpit, and `orun catalog affected` |
+| `internal/inputglob` | Validates and matches a component's `spec.change.inputs` globs: repository-root-relative, doublestar-style patterns that let a component claim files outside its own directory |
 | `internal/git` | Git change detection and intent diffing (`ChangeDetector`, `IntentDiffResult`) |
 | `internal/ci` | Detect the CI provider and the refs it exposes (`DetectedRefs`) |
 
@@ -129,6 +130,7 @@ The `orun` binary is one Go module. Cobra command wiring, flag definitions, and 
 | --- | --- |
 | `internal/contract` | The agent runtime's task contract — goal, blast-radius ceiling, done-when list, and gates |
 | `internal/taskfile` | Reads authored `tasks/<KEY>.TaskContract.yaml` documents |
+| `internal/workfile` | Reads and judges the work tree an intent declares (one `epic.yaml` per epic, task contracts beside it) for `orun work check` and `orun work sync` |
 | `internal/taskobj` | Seals tasks into the object graph under `refs/tasks/<key>` and reads them back |
 
 ## Test fixtures and conformance

@@ -1,5 +1,6 @@
 ---
 title: Run with GitHub Actions compatibility
+description: "Run a plan whose steps use GitHub Actions (use: steps) with the GitHub Actions-compatible runner, locally or in CI."
 ---
 
 The repository example includes packaged compositions that use GitHub Actions `use:` steps for tool setup. A small dependency-free smoke path is the Terraform-backed `network-foundation` component.

@@ -1,5 +1,6 @@
 ---
 title: orun gc
+description: Reclaim disk by removing object-model objects no ref can reach, under a retention policy.
 ---
 
 `orun gc` reclaims disk by removing objects in the [object model](../concepts/state-model.md)

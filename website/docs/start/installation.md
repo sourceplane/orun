@@ -19,12 +19,12 @@ it:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ORUN_VERSION` | `latest` | A specific release tag to install, for example `v2.58.15` |
+| `ORUN_VERSION` | `latest` | A specific release tag to install, for example `v2.73.4` |
 | `ORUN_INSTALL_DIR` | `~/.local/bin` | Where to put the binary |
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sourceplane/orun/main/install.sh \
-  | ORUN_VERSION=v2.58.15 ORUN_INSTALL_DIR=/usr/local/bin sh
+  | ORUN_VERSION=v2.73.4 ORUN_INSTALL_DIR=/usr/local/bin sh
 ```
 
 If `~/.local/bin` is not on your `PATH`, the script says so at the end.
@@ -37,7 +37,7 @@ and place the `orun` binary on your `PATH`. Archive names drop the `v` from
 the tag:
 
 ```bash
-VERSION=v2.58.15
+VERSION=v2.73.4
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')      # linux or darwin
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 
@@ -57,7 +57,7 @@ go install github.com/sourceplane/orun/cmd/orun@latest
 ```
 
 The binary reports `orun version dev` when built this way; pin a tag
-(`@v2.58.15`) for a versioned build.
+(`@v2.73.4`) for a versioned build.
 
 ## From source
 
@@ -79,15 +79,15 @@ pinned per workspace and reproducible across machines and CI:
 
 ```bash
 kiox init demo
-kiox --workspace demo add ghcr.io/sourceplane/orun:v2.58.15 as orun
+kiox --workspace demo add ghcr.io/sourceplane/orun:v2.73.4 as orun
 kiox --workspace demo exec -- orun plan --intent intent.yaml
 ```
 
-The same image runs under Docker, and `oras pull ghcr.io/sourceplane/orun:v2.58.15`
+The same image runs under Docker, and `oras pull ghcr.io/sourceplane/orun:v2.73.4`
 fetches the raw provider package:
 
 ```bash
-docker run --rm -v "$PWD":/work -w /work ghcr.io/sourceplane/orun:v2.58.15 plan --intent intent.yaml
+docker run --rm -v "$PWD":/work -w /work ghcr.io/sourceplane/orun:v2.73.4 plan --intent intent.yaml
 ```
 
 ## Verify

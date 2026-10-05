@@ -11,6 +11,7 @@ recent are:
 
 | Version | Date | Highlights |
 |---|---|---|
+| [v2.73.5](https://orun-docs.pages.dev/release-notes/v2.73.5) | 2026-10-05 | Closes the platform discipline as code docs epic: descriptions on every page, stale pins and jargon removed, CLI reference matched to the binary (PD6) |
 | [v2.73.4](https://orun-docs.pages.dev/release-notes/v2.73.4) | 2026-10-05 | The Verify, plan, execute pillar: a verify step in the runner's walkthrough, selection versus blast radius in change detection, remote state rewritten for Orunbase, `orun run init` (PD5) |
 | [v2.73.3](https://orun-docs.pages.dev/release-notes/v2.73.3) | 2026-10-05 | The Ground agents pillar: how agents learn your standards and what keeps them inside them; `mayAffect` and `orun pr check` described accurately; context pack updated (PD4) |
 | [v2.73.2](https://orun-docs.pages.dev/release-notes/v2.73.2) | 2026-10-05 | The Package and evolve pillar: intent presets rewritten (precedence corrected), a new versioning and locking page, Stacks and baselines reframed (PD3) |

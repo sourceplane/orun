@@ -1,5 +1,6 @@
 ---
 title: Trigger-aware CI with GitHub Actions
+description: A complete GitHub Actions setup where trigger bindings scope each CI plan to the event - pull requests, pushes to main, and release tags.
 ---
 
 This example shows how to use trigger bindings to automatically scope CI plans based on the GitHub event type — pull requests plan development, pushes to main plan staging, release tags plan production.

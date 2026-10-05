@@ -1,5 +1,6 @@
 ---
 title: orun describe
+description: Detailed view of a run, plan, job, component, revision, or trigger from the record.
 ---
 
 `orun describe` shows detailed information about a specific run, plan, job, or component.
@@ -10,7 +11,7 @@ title: orun describe
 orun describe <resource> [name]
 ```
 
-Supported resources: `run`, `plan`, `job`, `component`, `revision`, `trigger`, `execution`.
+Supported resources: `run`, `plan`, `job`, `component`, `revision`, `trigger`. `execution` is an alias of `run`.
 
 ## Common examples
 

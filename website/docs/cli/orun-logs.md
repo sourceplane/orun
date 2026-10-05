@@ -1,5 +1,6 @@
 ---
 title: orun logs
+description: Stream or filter step logs from an execution record, locally or through remote state.
 ---
 
 `orun logs` streams raw step output from an execution record.

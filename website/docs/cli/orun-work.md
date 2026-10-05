@@ -158,7 +158,6 @@ work-sync:
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   steps:
     - uses: actions/checkout@v6
-    - uses: sourceplane/orun-action@v1.2.0
-      with: { version: v2.66.0 }
+    - uses: sourceplane/orun-action@v1
     - run: orun work sync
 ```

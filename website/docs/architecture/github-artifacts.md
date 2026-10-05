@@ -1,5 +1,6 @@
 ---
 title: GitHub Artifacts architecture
+description: How orun uploads immutable GitHub Actions artifact shards (plan evidence, job results, and logs) with no upload-artifact steps, and how orun github reads them back.
 ---
 
 Orun can produce immutable GitHub Actions artifact shards from CI execution — plan evidence, job results, and logs — without requiring `actions/upload-artifact` steps in your workflow YAML.

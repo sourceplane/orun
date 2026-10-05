@@ -1,5 +1,6 @@
 ---
 title: Terraform state on the platform
+description: The TF_HTTP_* environment remote runs export, pointing Terraform's http backend at Orunbase's state store so jobs need no S3 bucket or cloud role.
 ---
 
 Remote runs export a complete `TF_HTTP_*` environment to every step of a

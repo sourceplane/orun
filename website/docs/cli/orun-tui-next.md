@@ -4,7 +4,7 @@ description: The next-generation cockpit (preview) — Home, Agents, Activity, C
 ---
 
 `orun tui-next` launches **cockpit v2**: a ground-up rebuild of the
-terminal cockpit as the terminal head of orun cloud. It shows the same
+terminal cockpit as the terminal head of Orunbase. It shows the same
 surfaces the console shows — **Home · Agents · Activity · Catalog · Events**
 — over the same state store, driven by streams (a watch on `.orun` refs,
 step-level run events, the agent attach protocol, cloud feeds when signed

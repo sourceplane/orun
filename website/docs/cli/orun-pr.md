@@ -1,5 +1,6 @@
 ---
 title: orun pr
+description: The provenance pen - open, preflight, and land a task-carrying pull request with its lineage in the branch name, the commit trailers, and a manifest.
 ---
 
 `orun pr` is the **provenance pen**: it opens a task-carrying PR with its

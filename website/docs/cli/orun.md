@@ -100,7 +100,7 @@ Running `orun` with no arguments on an interactive terminal opens the
 | Flag | Meaning |
 | --- | --- |
 | `--intent`, `-i` | Intent file path. Auto-discovered by walking up from the current directory to the git root when not set. |
-| `--config-dir`, `-c` | Legacy fallback path or glob for folder-shaped compositions (also `ORUN_CONFIG_DIR`). Packaged composition sources declared in the intent are the recommended path. |
+| `--config-dir`, `-c` | Legacy fallback: a path or glob for folder-shaped job definitions, used when the intent declares no composition sources (also `ORUN_CONFIG_DIR`). Composition sources declared in the intent are the recommended path. |
 | `--all` | Disable current-directory component scoping and process every component. |
 | `--version`, `-v` | Print the CLI version. |
 | `--help`, `-h` | Show help for any command. |

@@ -14,8 +14,6 @@ discipline as code. Terms link to the page that explains them in depth.
 | **Component** | A deployable or operable unit declared next to its code in `component.yaml`: a type, environment subscriptions, typed inputs, dependencies, and catalog metadata. → [Intent model](../concepts/intent-model.md) |
 | **Type** | A component's contract name (e.g. `terraform`, `helm-chart`). Binds the component to the composition that validates and executes it. → [Compositions](../concepts/compositions.md) |
 | **Composition** | A versioned execution contract for one component type: input schema, job templates, execution profiles, and declared effects. → [Compositions](../concepts/compositions.md) |
-| **Stack** | The packaging format for composition sources — a manifest plus split-kind documents, distributable as a directory, archive, or OCI artifact. → [Stacks](../concepts/stacks.md) |
-| **Intent preset** | Reusable intent scaffolding shipped inside a Stack; a repository opts in via `extends`. → [Intent presets](../concepts/intent-presets.md) |
 | **Group (domain)** | Defaults shared by every component in a domain, keyed by the domain name and declared in the intent. → [Intent model](../concepts/intent-model.md) |
 | **Environment** | A named runtime context (dev, staging, production) with its own activation rules, defaults, and policies. → [Intent model](../concepts/intent-model.md) |
 | **Policy** | A `policies` map declared on a group, an environment, or an execution profile. Carried onto every component instance but not yet enforced by the planner or runner. → [Standards](../concepts/standards.md#declared-not-yet-enforced) |
@@ -31,6 +29,9 @@ discipline as code. Terms link to the page that explains them in depth.
 
 | Term | Definition |
 |---|---|
+| **Stack** | How standards travel: compositions (golden paths) and optional intent presets packaged together under a `stack.yaml`, versioned, and published as an OCI artifact that repositories reference as a composition source. → [Stacks](../concepts/stacks.md) |
+| **Intent preset** | Platform rules (environments, trigger bindings, defaults, discovery roots) shipped inside a Stack and inherited by a repository with `extends:`; presets fill in what the repository leaves out. Not a baseline. → [Intent presets](../concepts/intent-presets.md) |
+| **Source pin** | A `digest:` on a composition source in `intent.yaml`. `orun plan` verifies it and fails if the source resolves to anything else. → [Versioning and locking](../concepts/versioning-and-locking.md) |
 | **Baseline** | A whole product's structure and standards, packaged: a blueprint plus the Stacks and presets it pulls, registered in the baseline registry and rebuilt for a new owner phase by phase by `orun baseline new`, then upgraded rather than forked. Presets and Stacks are the standards layers inside it; neither is itself a baseline. → [Baselines](../concepts/baselines.md) |
 | **Baseline registry** | The catalogue of baselines — id, source repository, pinned tag, tier, visibility, required providers, manifest path. Orunbase-maintained rows live in `orun-cloud`'s `baselines.yaml`; account rows come from `orun baseline register`. → [`orun baseline`](../cli/orun-baseline.md) |
 | **Blueprint** | A `kind: Blueprint` (`orun.dev/v1`) document `orun new` places into a directory: sources, modules, dependency edges, inputs, and phases with hooks. → [`orun new`](../cli/orun-new.md) |
@@ -72,7 +73,7 @@ discipline as code. Terms link to the page that explains them in depth.
 | **Component instance** | One cell of the environment × component matrix, with fully merged inputs and resolved policies. → [Plan DAG](../concepts/plan-dag.md) |
 | **Job instance** | An executable DAG node (`component.environment.job`) with rendered steps and job-level dependency edges. → [Plan DAG](../concepts/plan-dag.md) |
 | **Plan (plan DAG)** | The immutable compiled artifact (`plan.json`): every job, step, edge, and merged input made explicit. The artifact of record. → [Plan DAG](../concepts/plan-dag.md) |
-| **Composition lock** | `compositions.lock.yaml` — every composition source pinned to a digest, so "which contract" is never a runtime question. → [Stacks](../concepts/stacks.md) |
+| **Composition lock** | `.orun/compositions.lock.yaml`: a record of the digest each composition source resolved to, written by `orun plan` and `orun compositions lock`. orun does not read it back; the enforced pin is a source `digest:`. → [Versioning and locking](../concepts/versioning-and-locking.md) |
 | **Scope** | Which components/environments a plan covers: `full`, `changed`, or explicit `--component`/`--env`/`--all-envs` selection. → [Change detection](../concepts/change-detection.md) |
 | **Change detection** | The engine classifying which components a file change affects, powering `--changed` and `orun catalog affected`. → [Change detection](../concepts/change-detection.md) |
 
