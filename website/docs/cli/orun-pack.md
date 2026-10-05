@@ -1,10 +1,10 @@
 ---
 title: orun pack
-description: Build a composition package archive locally without uploading it to a registry.
+description: Build a Stack archive locally without uploading it to a registry.
 ---
 
-`orun pack` builds the `.tgz` archive of a composition package — a directory
-carrying a `stack.yaml` or `orun.yaml` manifest — and leaves it on disk. It is
+`orun pack` builds the `.tgz` archive of a Stack (a directory carrying a
+`stack.yaml`, or the legacy `orun.yaml`) and leaves it on disk. It is
 the offline half of [`orun publish`](./orun-publish.md): the same archive
 layout, no registry involved. Use it to inspect what would ship, attach the
 archive to a release, or push it later with `orun compositions package push`.

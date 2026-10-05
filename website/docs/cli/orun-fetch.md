@@ -1,9 +1,9 @@
 ---
 title: orun fetch
-description: Download and extract a composition package from an OCI registry into a local directory.
+description: Download and extract a Stack from an OCI registry into a local directory.
 ---
 
-`orun fetch` pulls a published composition package out of an OCI registry and
+`orun fetch` pulls a published Stack out of an OCI registry and
 unpacks it on disk, so you can read, vendor, or fork a stack without cloning
 its source repository. It is the read side of [`orun publish`](./orun-publish.md).
 

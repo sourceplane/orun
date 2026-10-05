@@ -1,8 +1,12 @@
 ---
 title: Writing compositions
+description: Encode a standard as a package - write a golden path as a Stack of compositions, validate it against real components, and publish it so every repository can adopt it by reference.
 ---
 
-Author a new composition package when you want to introduce a new component type without changing the core planner.
+Writing a composition is how you **encode a standard as a package**. You take "this is how
+we build and ship this kind of thing" and write it down as a schema, job templates, and
+lane profiles; then you publish it as a [Stack](../concepts/stacks.md) that every
+repository adopts by reference. This guide walks through it end to end.
 
 ## 1. Create a Stack package root
 

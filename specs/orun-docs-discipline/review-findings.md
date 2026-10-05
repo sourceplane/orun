@@ -98,7 +98,7 @@ change intro, positioning, and links. KEEP = minor touches.
 13. `orun-pack.md:6-7` says `stack.yaml` or `orun.yaml`; the code's help says
     `orun.yaml` (`cmd/orun/command_publish.go:53`).
 14. `examples/bootstrap-a-product-from-a-baseline.md:72-77` shows "Orgs:" and
-    an `oruncloud.workers.dev` URL.
+    an `oruncloud.workers.dev` URL. (PD3 check: this output matches what `orun auth status` prints today, `cmd/orun/command_auth.go:123-134` and `internal/remotestate/defaults.go:27`; not a docs error.)
 
 ### Ground agents (PD4)
 

@@ -1,7 +1,14 @@
 ---
 title: Baselines
-description: A baseline is a complete product repository the platform can rebuild under your name — registered in a catalogue, described by a blueprint card, built phase by phase by orun.
+description: A baseline is a whole product's structure and standards packaged as code - registered in a catalogue, described by a blueprint card, built phase by phase by orun for a new owner, and upgradable instead of forked.
 ---
+
+A **baseline** is a whole product's structure and standards, packaged as code. Where a
+[Stack](./stacks.md) carries golden paths and [presets](./intent-presets.md) carry platform
+rules, a baseline carries everything a working product needs: its repository layout, its
+components and their golden paths, its CI, its environments. orun rebuilds it for a new
+owner, and because the build records its provenance, the product can take later releases
+of the baseline by three-way merge instead of becoming a fork.
 
 A **baseline** is a production-shaped product repository that can be rebuilt
 for a new owner: a new GitHub organisation, a new cloud account, a new product
@@ -58,7 +65,7 @@ tag inside it could only ever be a second, rotting copy.
 placement, declared `dependsOn` edges, and `phases` with per-phase hooks. The
 engine places modules in dependency order, phase by phase, and gates the
 output: every generated `component.yaml` must parse, and the tree must pass
-`orun validate` and `orun plan --dry-run` before the build reports success.
+`orun validate` and a full `orun plan` compile (no plan file written) before the build reports success.
 
 ## Blueprint-driven and shell-layer baselines
 

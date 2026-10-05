@@ -1,37 +1,36 @@
 ---
 title: Intent presets
+description: Intent presets let a platform team ship its platform rules - environments, trigger bindings, defaults, discovery roots - as a versioned part of a Stack that every repository inherits with extends, so the standard lives in one place and evolves by version.
 ---
 
-Intent Presets allow Stack packages to publish reusable intent scaffolding — environments, trigger bindings, defaults, policies, discovery roots, and env vars — that consuming repos can explicitly opt into via `extends:` in their `intent.yaml`.
+An intent preset is how a platform team **ships its platform rules as versioned code**.
+Environment names and their activation triggers, the trigger bindings themselves,
+parameter defaults per environment and per domain, discovery-root conventions,
+organisation-wide `env`: instead of every repository copying them into its own
+`intent.yaml` and slowly drifting, a preset publishes them once, inside a
+[Stack](./stacks.md), and each repository inherits them with one line of `extends:`.
 
-## Problem
+Updating the standard is a new Stack version. A repository adopts it by changing its source
+pin, and `orun intent explain` and the plan diff show exactly what changed.
 
-Without presets, every Orun repo must repeat the same environment names, trigger bindings, default profile mappings, group defaults, and policy scaffolding. This creates drift across an organization. A Stack preset lets a platform team publish a "golden repo baseline" so each repo only declares what is truly repo-specific.
+## The three steps
 
-## How It Works
+### 1. A Stack declares its presets
 
-### 1. Stack Declares Presets
-
-A Stack package can include intent presets alongside its compositions:
+A preset is a file inside a Stack, listed in `stack.yaml` under `spec.intentPresets`:
 
 ```yaml
 # stack.yaml
 apiVersion: orun.io/v1
 kind: Stack
-
 metadata:
   name: aws-platform-stack
   version: 1.0.0
-
 registry:
   host: ghcr.io
   namespace: sourceplane
   repository: aws-platform-stack
-
 spec:
-  compositions:
-    - path: compositions/terraform/composition.yaml
-    - path: compositions/helm/composition.yaml
   intentPresets:
     - name: standard
       path: presets/standard.yaml
@@ -39,27 +38,25 @@ spec:
       path: presets/github-actions.yaml
 ```
 
-### 2. Write the Preset
+Preset files travel with the Stack when it is packed and published.
 
-Presets use the `IntentPreset` kind and can declare any combination of env vars, discovery roots, automation trigger bindings, environments, and groups:
+### 2. The preset declares the rules
+
+A preset is a `kind: IntentPreset` document whose `spec` can carry `env`, `discovery`,
+`automation`, `environments`, and `groups`, with the same shapes as in `intent.yaml`:
 
 ```yaml
 # presets/github-actions.yaml
 apiVersion: sourceplane.io/v1alpha1
 kind: IntentPreset
-
 metadata:
   name: github-actions
-
 spec:
   env:
     ORG: sourceplane
 
   discovery:
-    roots:
-      - apps/
-      - infra/
-      - deploy/
+    roots: [apps/, infra/, deploy/]
 
   automation:
     triggerBindings:
@@ -72,7 +69,6 @@ spec:
           scope: changed
           base: pull_request.base.sha
           head: pull_request.head.sha
-
       github-push-main:
         on:
           provider: github
@@ -90,7 +86,6 @@ spec:
       parameterDefaults:
         "*":
           lane: pull-request
-
     staging:
       activation:
         triggerRefs: [github-push-main]
@@ -99,18 +94,20 @@ spec:
           lane: verify
 ```
 
-### 3. Repo Opts In
+A preset cannot declare `compositions.sources` or `components`; those belong to the
+repository.
 
-The consuming repo's `intent.yaml` uses `extends:` to inherit from presets. The repo must declare the composition source first, then reference it:
+### 3. The repository opts in
+
+The repository declares the Stack as a composition source and names the presets it
+inherits:
 
 ```yaml
 # intent.yaml
 apiVersion: sourceplane.io/v1
 kind: Intent
-
 metadata:
   name: aws-admin
-  namespace: sourceplane
 
 compositions:
   sources:
@@ -119,11 +116,10 @@ compositions:
       ref: oci://ghcr.io/sourceplane/aws-platform-stack:v1.0.0
 
 extends:
-  - source: aws-platform
+  - source: aws-platform        # must name a declared composition source
     preset: github-actions
 
 env:
-  OWNER: sourceplane
   REPO: aws-admin
 
 environments:
@@ -133,69 +129,77 @@ environments:
         awsAccountId: "123456789012"
 ```
 
-## Merge Rules
+Nothing is inherited implicitly: a Stack never injects rules into a repository that did
+not list the preset under `extends:`.
 
-Presets are applied in declaration order. Later presets take precedence over earlier ones for non-conflicting fields. The repo intent always wins over any preset.
+## How presets merge
 
-| Field | Merge Behavior |
+Presets **fill in what the repository leaves out**. orun starts from the repository's own
+intent and applies each preset in `extends:` order, adding only what is not already set.
+So the repository always wins, and among presets the **first** one to set a value wins.
+
+| Field | How a preset contributes |
 |-------|---------------|
-| `env` | Deep merge, repo wins on conflict |
-| `discovery.roots` | Union (deduplicated) |
-| `groups.defaults` | Deep merge, repo wins on conflict |
-| `environments.defaults` | Deep merge, repo wins on conflict |
-| `automation.triggerBindings` | Merge by name, repo wins on conflict |
-| `policies` | Additive — preset policies always included |
-| `compositions.sources` | Not merged (repo-owned) |
-| `components` | Not merged (repo-owned) |
+| `env` | Adds keys the repository (or an earlier preset) has not set |
+| `discovery.roots` | Union, deduplicated |
+| `automation.triggerBindings` | Adds bindings by name that are not already declared |
+| `groups` | A group the repository does not declare is added whole. For an existing group: `parameterDefaults` keys not already set are added; `path` is added if unset; `policies` are overwritten (see below) |
+| `environments` | An environment the repository does not declare is added whole. For an existing environment: `parameterDefaults` and `env` keys not already set are added; `activation.triggerRefs` is a union; `selectors` and `path` are added only if the repository has none; `policies` are overwritten. `promotion`, `dependencyMode`, and `secretEnv` come only from the repository |
+| `compositions.sources`, `components` | Never merged; repository-owned |
 
-### Merge Order
+**`policies` are the exception.** A preset's `policies` keys are written over the
+repository's and over earlier presets', so on a conflicting key the last preset wins.
+Policies are carried onto every component instance but are not yet enforced by the
+planner or runner; see [standards](./standards.md#declared-not-yet-enforced).
 
+```text
+repo intent.yaml  →  + preset 1 (fills gaps)  →  + preset 2 (fills remaining gaps)  →  effective intent
+(always wins)          wins over later presets
 ```
-Stack preset 1 → Stack preset 2 → ... → Repo intent.yaml
-(lowest priority)                        (highest priority)
-```
 
-## Inspecting Presets
+## Seeing the effective intent
 
-### Explain
-
-See what each preset contributes:
+`orun intent explain` lists every field a preset contributed and which preset it came
+from:
 
 ```bash
 orun intent explain
 ```
 
-Output shows each preset and the fields it contributes with provenance tracking.
-
-### Render
-
-Emit the fully-merged effective intent:
+`orun intent render` prints the fully merged intent, which is what the planner sees:
 
 ```bash
 orun intent render
 orun intent render --output /tmp/effective-intent.yaml
 ```
 
-The rendered output shows the final merged state — what the planner actually sees.
+Presets are applied by `orun plan` and the `orun intent` commands. `orun validate` checks
+the repository's own `intent.yaml` without applying presets, so run `orun plan` in CI to
+check the effective intent.
 
-## What Should Go in a Preset
+## What belongs in a preset
 
-**Good candidates:**
-- Standard environment names and activation triggers
-- Discovery root conventions
-- Default lanes and profiles per environment
-- Organization-wide env vars
-- Policy baselines (approval requirements, clean git tree)
+**Good candidates** are the rules every repository on the platform should share:
 
-**Avoid in presets:**
-- Component declarations (repo-specific)
-- Composition sources (repo-owned)
-- Repo-specific env vars (secrets, repo names)
+- Environment names, their activation triggers, and their trigger bindings
+- Discovery-root conventions
+- Default lanes and parameters per environment and per domain
+- Organisation-wide `env`
 
-## Constraints
+**Keep in the repository** what is genuinely its own:
 
-- The repo intent must visibly opt in via `extends:`. Stacks do not automatically inject behavior.
-- Presets cannot declare `compositions.sources` or `components`.
-- Preset `policies` are merged over the repository's: on a conflicting key, the preset's value wins. Policies are not yet enforced by the planner or runner; see [standards](./standards.md#declared-not-yet-enforced).
-- The `extends[].source` must reference a declared composition source name.
-- The effective intent is always deterministic for the same inputs.
+- Components and composition sources (presets cannot declare them)
+- Promotion order and dependency modes (presets do not merge them into an existing
+  environment)
+- Repository-specific `env` and secret references
+
+## Presets, Stacks, and baselines
+
+- A **Stack** packages golden paths (compositions) and platform rules (presets) together,
+  versioned as one OCI artifact. See [Stacks](./stacks.md).
+- A **preset** is the platform-rules half of a Stack, inherited with `extends:`.
+- A **baseline** packages a whole product built on those standards, rebuilt for a new
+  owner and upgraded rather than forked. See [baselines](./baselines.md).
+
+How a repository pins a Stack version, and how to see what a version change does, is
+covered in [versioning and locking](./versioning-and-locking.md).

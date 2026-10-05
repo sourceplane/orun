@@ -24,8 +24,9 @@ var (
 
 var publishCmd = &cobra.Command{
 	Use:   "publish [oci-ref]",
-	Short: "Package and publish a composition package to an OCI registry",
-	Long: `Publish a composition package to an OCI registry.
+	Short: "Package and publish a Stack to an OCI registry",
+	Long: `Publish a Stack (a directory containing stack.yaml) to an OCI registry, so
+every repository can adopt its golden paths and presets by reference.
 
 With zero arguments, orun infers the registry and repository from the local
 git remote (ghcr.io/<owner>/<repo>) and the version from the latest matching
@@ -49,8 +50,8 @@ Examples:
 
 var packCmd = &cobra.Command{
 	Use:   "pack",
-	Short: "Build a composition package archive (no upload)",
-	Long:  "Build a .tgz archive of a composition package directory containing orun.yaml.",
+	Short: "Build a Stack archive (no upload)",
+	Long:  "Build a .tgz archive of a Stack: a directory containing stack.yaml (or the legacy orun.yaml).",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPack()
 	},

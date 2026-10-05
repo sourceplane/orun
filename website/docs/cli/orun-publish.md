@@ -1,13 +1,13 @@
 ---
 title: orun publish
-description: Package a composition stack and push it to an OCI registry in one step.
+description: Package a Stack and push it to an OCI registry in one step, so every repository can adopt its golden paths and presets by reference.
 ---
 
-`orun publish` packages a composition package — a directory carrying a
-`stack.yaml` or `orun.yaml` manifest — and pushes it to an OCI registry as a
-single artifact, streaming straight from the directory with no intermediate
-file. A published stack can then be referenced from any `intent.yaml` as an
-`oci` composition source, or unpacked with [`orun fetch`](./orun-fetch.md).
+`orun publish` is how a standard ships: it packages a Stack (a directory carrying a
+`stack.yaml`, or the legacy `orun.yaml`) and pushes it to an OCI registry as a single
+artifact, streaming straight from the directory with no intermediate file. A published
+Stack can then be referenced from any `intent.yaml` as an `oci` composition source, or
+unpacked with [`orun fetch`](./orun-fetch.md).
 
 ```bash
 orun publish [oci-ref] [--root DIR] [--version TAG] [--dry-run] [--keep-archive]

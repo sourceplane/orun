@@ -3,6 +3,8 @@ title: orun new
 description: Scaffold a component or instantiate a whole repository from a kind:Blueprint — one engine at two scales, fail-closed, provenanced, and upgradable.
 ---
 
+Scaffolding is how a standard gets applied to new code: a blueprint encodes the shape a component or a whole repository must have, and `orun new` places it, records its provenance, and can upgrade it later.
+
 `orun new` places a `kind: Blueprint` into a directory. A blueprint with one
 module and no sources is the single-component scaffolder; the same grammar
 with a source and many modules instantiates a whole product repository. The
@@ -148,8 +150,8 @@ last. Both are run on a resume too, so what they do must be idempotent.
 
 At component scale, every generated `component.yaml` must pass both the
 plan-engine parser and the strict catalog parser. At repository scale, if the
-tree has an intent, it must also pass `orun validate` and
-`orun plan --dry-run` before the command reports success.
+tree has an intent, it must also pass `orun validate` and a full `orun plan`
+compile (no plan file is written) before the command reports success.
 
 ## Provenance and `upgrade`
 

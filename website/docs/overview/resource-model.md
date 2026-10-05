@@ -142,6 +142,8 @@ fields are refused rather than ignored.
 
 | Kind | `apiVersion` | Lives in | Declares |
 |---|---|---|---|
+| `Stack` | `orun.io/v1` | `stack.yaml` at the root of a composition package | Package metadata, an optional OCI registry target, the compositions it exports (auto-discovered when omitted), and its `intentPresets`; published with `orun publish` |
+| `IntentPreset` | `sourceplane.io/v1alpha1` | A file inside a Stack, listed under `spec.intentPresets` | Platform rules a repository inherits with `extends:`: `env`, `discovery`, `automation`, `environments`, and `groups` |
 | `Blueprint` | `orun.dev/v1` | A blueprint file passed to `orun new --blueprint`; a baseline's build document | Sources, modules placed by `template`, `copy`, or `consume`, `dependsOn` edges, inputs, phases with hooks and gates |
 | `Workflow` | `orun.dev/v1` | A workflow file; `orun workflow validate\|run\|view` | DAG steps with `run:` argv, `action:` + `with:`, or a nested `workflow:`, joined by `needs:`, with inputs, outputs, `poll:`/`until:`, and approval gates |
 | `TaskContract` | `orun.io/v1` | `tasks/<KEY>.TaskContract.yaml`, or a key-less template beside a flow | `goal`, `affects` (the component ceiling), `doneWhen`, `gates`, `designRefs`, `deps`, `secrets`, `envs`; sealed by sha256 over canonical JSON wherever it travels |
@@ -149,7 +151,8 @@ fields are refused rather than ignored.
 | `agent-type` | `orun.io/v1` | `agents/<name>.md` — frontmatter plus a persona body | `harness`, `model`, `runtime`, `tools` (`allow`/`ask`/`deny`), `mayAffect`, `secrets.use`, `owner`, `extends` |
 | Repo declaration | — | Inside `intent.yaml` | The repository describing itself — display name, description, tags, docs, links — projected into the catalog's `Repo` entity |
 
-→ [`orun new`](../cli/orun-new.md) · [`orun workflow`](../cli/orun-workflow.md) ·
+→ [Stacks](../concepts/stacks.md) · [Intent presets](../concepts/intent-presets.md) ·
+[`orun new`](../cli/orun-new.md) · [`orun workflow`](../cli/orun-workflow.md) ·
 [The task plane](../concepts/task-plane.md) · [Secrets](../concepts/secrets.md) ·
 [The agent runtime](../concepts/agent-runtime.md)
 

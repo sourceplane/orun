@@ -1,8 +1,12 @@
 ---
 title: orun compositions
+description: List and inspect the golden paths an intent resolves, and pull, record, and package the composition sources it declares.
 ---
 
-`orun compositions` lists or inspects the composition types resolved for an intent, or from a legacy `--config-dir` fallback, and carries the `pull`, `lock`, and `package` subcommands that manage declared composition sources and their packages.
+`orun compositions` shows the golden paths a repository has adopted: it lists or inspects
+the composition types resolved for an intent (or from a legacy `--config-dir` fallback),
+and carries the `pull`, `lock`, and `package` subcommands that manage declared composition
+sources and their packages.
 
 ## Usage
 
@@ -49,7 +53,7 @@ orun compositions list terraform \
 
 ## `pull` and `lock`
 
-Resolve the sources declared under `compositions.sources` in `intent.yaml` into the local cache, and record the resolved digests so plans are reproducible:
+Resolve the sources declared under `compositions.sources` in `intent.yaml` into the local cache (`pull`), and record the digest each one resolved to in `.orun/compositions.lock.yaml` (`lock`). orun does not read the lock back; to pin a source, put its `digest:` in `intent.yaml`, which `orun plan` enforces. See [versioning and locking](../concepts/versioning-and-locking.md).
 
 ```bash
 orun compositions pull --intent examples/intent.yaml
