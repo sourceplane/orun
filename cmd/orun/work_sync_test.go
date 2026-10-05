@@ -26,6 +26,9 @@ type fakePlatform struct {
 	writes     []string // "METHOD path idem header"
 	// stampsOnly counts the empty PATCHes: the sync's stamp, no field.
 	stampsOnly int
+	// authoredElsewhere refuses the epic create the way a workspace that
+	// creates new work in another channel does (412 authored_elsewhere).
+	authoredElsewhere string
 }
 
 func (p *fakePlatform) record(r *http.Request) {
@@ -48,6 +51,13 @@ func (p *fakePlatform) handler() http.HandlerFunc {
 				return
 			}
 			envelope(p.t, w, 200, map[string]any{"epic": p.epic, "milestones": p.milestones, "taskCount": len(p.tasks)})
+		case r.Method == "POST" && path == "/epics" && p.authoredElsewhere != "":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPreconditionFailed)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+				"code": "precondition_failed", "message": "This workspace creates new epics elsewhere",
+				"details": map[string]any{"reason": "authored_elsewhere", "owner": map[string]any{"kind": p.authoredElsewhere}},
+			}})
 		case r.Method == "POST" && path == "/epics":
 			p.record(r)
 			p.epic = map[string]any{"id": "epc_1", "slug": body["slug"], "name": body["name"], "description": body["description"], "state": "Planning", "stateCategory": "backlog", "owner": "usr_1"}
@@ -356,5 +366,27 @@ func TestWorkSyncReservesThePrefixOnAnAdoptedEpic(t *testing.T) {
 	}
 	if mb, _ := p.epic["managedBy"].(map[string]any); mb["keyPrefix"] != "WG" {
 		t.Fatalf("the pointer does not reserve WG: %v", p.epic["managedBy"])
+	}
+}
+
+// orun-cloud saas-work-ownership WO-D8: a workspace whose Work setting
+// creates new work in another channel refuses the epic create. The sync
+// warns and moves on — it never fails the run, and never writes under it.
+func TestWorkSyncSkipsAnEpicTheWorkspaceCreatesElsewhere(t *testing.T) {
+	writeSyncRepo(t)
+	p := &fakePlatform{t: t, tasks: map[string]map[string]any{}, docs: map[string]string{}, authoredElsewhere: "tracker"}
+	srv := httptest.NewServer(p.handler())
+	defer srv.Close()
+
+	out, err := runTaskCmd(t, newWorkSyncCommand(), srv.URL, "--repo", "sourceplane/t")
+	if err != nil {
+		t.Fatalf("a refused create must not fail the sync: %v\n%s", err, out)
+	}
+	if len(p.writes) != 0 {
+		t.Fatalf("wrote under a refused epic:\n%v", p.writes)
+	}
+	if !strings.Contains(out, "warn           epic saas-work-gitops — not created — this workspace creates new work in its tracker") ||
+		!strings.Contains(out, "0 write(s), 1 warning(s)") {
+		t.Fatalf("no warning:\n%s", out)
 	}
 }

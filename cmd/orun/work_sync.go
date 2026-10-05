@@ -71,6 +71,19 @@ func (s *workSyncer) say(verb, what, detail string) {
 	}
 }
 
+// authoringChannel names the channel a refused create points to.
+func authoringChannel(kind string) string {
+	switch kind {
+	case "tracker":
+		return "its tracker"
+	case "platform":
+		return "the console"
+	case "":
+		return "another channel"
+	}
+	return kind
+}
+
 // idem builds the Idempotency-Key for one write: repo, path and commit in
 // the clear (what a reader greps for), then a short digest of WHAT — the
 // milestone name, the change list — because those carry dashes, arrows and
@@ -219,6 +232,12 @@ func (s *workSyncer) syncEpic(root string, tree *workfile.Tree, e *workfile.Epic
 			created, err := s.client.CreateEpicWithKey(s.ctx, s.org, remotestate.EpicCreateRequest{
 				Name: e.Title, Slug: e.Slug, Description: e.Summary, TargetDate: e.TargetDate, Owner: e.Owner, KeyPrefix: e.Key,
 			}, s.idem(e.Path, "epic"))
+			if kind, refused := remotestate.AuthoredElsewhereOf(err); refused {
+				// The workspace creates new work elsewhere (its Work setting):
+				// the declaration waits, the rest of the tree still syncs.
+				s.say("warn", "epic "+e.Slug, "not created — this workspace creates new work in "+authoringChannel(kind)+" (Settings → Work); skipped")
+				return nil
+			}
 			if err != nil {
 				return fmt.Errorf("create epic: %w", err)
 			}
