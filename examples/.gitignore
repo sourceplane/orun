@@ -24,3 +24,6 @@ website/node_modules/
 
 # orun per-job staged workspaces
 .orun/runs/
+
+# products built from saas-baseline/ (see saas-baseline/README.md)
+acme-shop/

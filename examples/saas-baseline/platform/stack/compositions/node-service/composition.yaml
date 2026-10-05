@@ -1,0 +1,18 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: node-service
+spec:
+  type: node-service
+  description: Test, build, and package a Node.js service
+  schemaRef: { name: node-service-component }
+  defaultJob: ship
+  defaultProfile: verify
+  jobs:
+    - name: ship
+      templateRef: { name: node-service-ship }
+  profiles:
+    - name: verify
+      profileRef: { name: node-service-verify }
+    - name: release
+      profileRef: { name: node-service-release }
