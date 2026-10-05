@@ -8,8 +8,10 @@ graph** under `.orun/objectmodel/`. This object model is the **single**
 persistence stack — the legacy revision/catalog file store was retired in
 v2.15.0, so there is one store and one write path.
 
-This page documents the layout. It is the same layout the future R2/S3 and Orun
-Cloud drivers will use; only the storage backend changes.
+This page documents the layout. Every plan and run is sealed here, which turns "we
+followed the standard" into evidence: the plan that was compiled, the catalog it was
+compiled against, and every step that ran, all tamper-evident. Future remote object-store
+drivers (R2, S3) will use the same layout; only the storage backend changes.
 
 ## Why content addressing
 
@@ -162,9 +164,12 @@ recent releases remain readable.
 
 ## What is *not* in v1
 
-- **R2 / S3 / Cloud object-store drivers.** The local driver is the only driver
-  shipping today. The interface is frozen so remote drivers can be added without
-  changing callers.
+- **R2 / S3 / cloud object-store drivers.** The local driver is the only object-store
+  driver shipping today (`orun objects push` and `pull` sync to another directory). The
+  interface is frozen so remote drivers can be added without changing callers. This is
+  separate from **remote run coordination**: `orun run --remote-state` coordinates jobs
+  and records runs through Orunbase or a self-hosted backend, see
+  [`orun run`](../cli/orun-run.md).
 - **Packfiles.** Objects are stored loose (one zstd file per object) with a
   two-char fanout; packing with delta compression is a deferred, profiling-gated
   milestone.

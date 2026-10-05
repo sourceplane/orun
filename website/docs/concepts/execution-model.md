@@ -1,6 +1,12 @@
 ---
 title: Execution model
+description: How orun executes exactly what the plan says, through a runner you choose - so the discipline compiled into the plan does not depend on which CI system or machine runs the job.
 ---
+
+The plan is where the standards were checked; execution's job is to do exactly what the
+plan says and nothing else. orun runs a compiled plan through a swappable runner and
+records every step, so discipline does not depend on which CI system or machine runs the
+job.
 
 `orun` keeps planning and execution separate on purpose. `plan` produces an immutable DAG, and `run` consumes that DAG through an explicit execution backend.
 
@@ -35,14 +41,9 @@ If a step contains `use:`, the local executor fails fast and asks you to rerun w
 
 ## Runner resolution order
 
-`run` chooses its backend in a stable order:
-
-1. `--gha`
-2. `--runner`
-3. `ORUN_RUNNER`
-4. `GITHUB_ACTIONS=true`
-5. Auto-detection when the compiled plan contains a `use:` step
-6. Fallback to `local`
+`run` chooses its backend in a stable order: `--gha`, then `--runner`, then
+`ORUN_RUNNER`, then the GitHub Actions runner when `GITHUB_ACTIONS=true` or the plan
+contains a `use:` step, then `local`. See [runners](../execute/runners.md#selection-order).
 
 ## Concurrent job execution
 
@@ -53,26 +54,6 @@ orun run --concurrency 4
 ```
 
 Setting `--concurrency 1` forces strictly sequential execution, which is useful for debugging.
-
-### Action isolation
-
-When multiple jobs run concurrently and both use the same remote action (e.g., `actions/setup-node@v4`), each job works from its own isolated copy of that action's directory. The shared on-disk cache is never modified during execution, so jobs cannot race on the same files.
-
-Isolation is zero-cost by default: files are hardlinked from the cache into each job's temp directory. A full copy only happens when the job temp directory is on a different filesystem than the cache.
-
-Local actions (paths starting with `./`) are not isolated — they are used directly from the workspace.
-
-### Action reference caching
-
-Resolving a non-SHA action reference (e.g., `v4`) to a commit SHA requires a GitHub API call. orun avoids redundant API calls through a three-tier cache:
-
-| Tier | Scope | What it stores |
-| --- | --- | --- |
-| In-memory | Current process | `repo@ref` → SHA map, deduplicated via singleflight |
-| On-disk | Persistent across runs | SHA written to `~/.orun/actions/<repo>/refs/<ref>` |
-| API | Fallback | GitHub REST API `/repos/<owner>/<repo>/commits/<ref>` |
-
-This ensures that `--concurrency 4` with many jobs using the same action versions never triggers API rate limits, even with large platform repositories containing dozens of concurrent jobs.
 
 ### Concurrent output
 
@@ -104,8 +85,8 @@ moved to point at the sealed run. While the run is in flight it is published und
 
 That model enables:
 
-- **Resumable execution** — already-completed jobs are skipped (and carry their
-  prior step logs forward)
+- **Resumable execution** — run again with the same `--exec-id` and already-completed
+  jobs are skipped (and carry their prior step logs forward)
 - **Job-level retry** — `--job <id> --retry` re-runs only that job; on remote
   state it also re-opens the job's failed claim and waits out failed upstream
   dependencies, so a CI "rerun failed jobs" resumes cleanly — see
@@ -137,38 +118,7 @@ That gives steps a consistent way to understand whether they are running locally
 
 ## CI artifacts
 
-When running in GitHub Actions, `orun` can produce immutable shard artifacts that capture execution evidence (plan, job results, logs) without requiring `actions/upload-artifact` steps in workflow YAML.
-
-### How it works
-
-Each `orun` invocation produces one shard:
-
-- **Plan shard** — `orun plan --artifact github` writes a plan shard (manifest, plan.json, checksums) and uploads it as a GitHub Actions artifact.
-- **Job shard** — `orun run --artifact github` uploads a job shard after the runner completes, even on failure. The original exit code is preserved.
-
-Shards use the naming convention `orun.v1.<exec-id>.<role>.<suffix>.<status>` and are uploaded via an embedded `@actions/artifact` Node.js helper.
-
-### CLI inspection
-
-The `orun github` command tree provides remote inspection without downloading full artifacts:
-
-- `orun github runs` — list workflow runs with artifact shard counts
-- `orun github status` — lightweight remote status via artifact name parsing
-- `orun github pull` — full download, synthesize, and import into the local object model
-- `orun github logs` — download specific job shard logs
-
-### Partial hydration
-
-When some job shards are missing (e.g., cancelled run), hydration produces `status: "partial"` rather than failing. Missing shards are recorded as "pending" in the synthesized state:
-
-```
-EXECUTION gh-26185145757-1-a1b2c3d4  ◐ partial  13/18 shards
-```
-
-### Env-based activation
-
-Set the following environment variables in your GitHub Actions workflow to enable artifact upload without CLI flags:
-
-- `ORUN_ARTIFACT_BACKEND=github` — select the GitHub store
-- `ORUN_ARTIFACT_UPLOAD=true` — enable upload
-- `ORUN_ARTIFACT_RETENTION_DAYS=14` — override artifact retention
+On GitHub Actions, `orun plan --artifact github` and `orun run --artifact github` upload
+immutable shards of execution evidence (the plan, job results, logs) without any
+`actions/upload-artifact` steps, and `orun github` inspects or imports them. See
+[GitHub Actions artifacts](../architecture/github-artifacts.md).

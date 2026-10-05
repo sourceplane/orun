@@ -1,6 +1,9 @@
 ---
 title: orun run
+description: Execute a compiled plan - the execute step of the runner - on the local shell, in Docker, or on GitHub Actions, locally or coordinated across runners through remote state.
 ---
+
+`orun run` is the execute step: it runs exactly what a verified, compiled plan says, on the backend you choose, and records every step.
 
 `orun run` executes the jobs and steps from a compiled plan. **Execution is the default** — add `--dry-run` to preview without running.
 
@@ -15,7 +18,7 @@ orun run [component|planhash]
 The optional positional argument controls what gets run:
 
 - **component name** — generates a fresh plan scoped to that component and runs it immediately
-- **plan hash or name** — runs the matching saved plan from `.orun/plans/`
+- **plan revision** — `latest`, a revision key, or a checksum prefix: runs that compiled plan from the object model
 - _(omitted)_ — generates a fresh plan from the current intent and runs it
 
 Every execution is recorded as an immutable node in the object model under its
@@ -285,10 +288,12 @@ The positional argument is resolved in this order:
 | Argument | Resolves to |
 | --- | --- |
 | _(omitted)_ | Generates a fresh plan from `intent.yaml`, then runs it |
-| `my-plan` | `.orun/plans/my-plan.json` (saved plan by name) |
-| `a1b2c3` | Any plan whose checksum starts with `a1b2c3` (saved plan by hash prefix) |
+| `latest` or `rev-<key>` | That plan revision in the object model |
+| `a1b2c3` | The plan whose checksum starts with `a1b2c3` |
 | `./plan.json` | Explicit file path (when it exists on disk) |
-| `network-foundation` | Generates a fresh plan scoped to that component, then runs it (when not a saved plan) |
+| `network-foundation` | Generates a fresh plan scoped to that component, then runs it (when it does not resolve to a plan revision) |
+
+A name given to `orun plan --name` is not a run reference; run a plan by its checksum or `latest`.
 
 The legacy `--plan` flag accepts the same values and is still supported, but the positional form is preferred.
 
@@ -306,7 +311,21 @@ See [context-aware discovery](../concepts/context-discovery.md) for full details
 
 ## Remote state (distributed execution)
 
-`orun run --remote-state` delegates execution coordination to an [orun-backend](https://github.com/sourceplane/orun-backend) instance.  Each GitHub Actions matrix job runs `orun run --remote-state --job <id>`, and the backend enforces DAG ordering — a job polls until its dependencies complete before claiming work.
+`orun run --remote-state` delegates execution coordination to a backend: Orunbase by default, or a self-hosted one ([`orun backend`](./orun-backend.md)). Each GitHub Actions matrix job runs `orun run --remote-state --job <id>`, and the backend enforces DAG ordering: a job polls until its dependencies complete before claiming work. See [distributed execution with remote state](../examples/remote-state-matrix.md).
+
+### Creating the run before the lanes: `orun run init`
+
+```bash
+orun run init --plan <ref> --exec-id <id> --remote-state [--env <name>]
+```
+
+`orun run init` creates the remote run for a plan, or joins it if it already exists,
+without executing or claiming any job. Run it in the CI job that compiles the plan, so the
+run exists on the platform before the first matrix lane is queued; each lane then runs
+`orun run --job <id> --exec-id <same id> --remote-state` and joins it. It requires remote
+state (`--remote-state`, `ORUN_REMOTE_STATE=true`, or `execution.state` in `intent.yaml`)
+and accepts the same `--workspace`, `--project`, `--backend-url`, and `--workdir` flags as
+`orun run`.
 
 ### Native event-sourced coordination
 

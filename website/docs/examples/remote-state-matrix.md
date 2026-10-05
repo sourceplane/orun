@@ -1,8 +1,18 @@
 ---
 title: Distributed execution with remote state
+description: Run one plan across parallel GitHub Actions matrix jobs, or several machines, coordinated through remote state on Orunbase or a self-hosted backend, so the plan's ordering holds no matter how many runners execute it.
 ---
 
-Run `orun` jobs across parallel GitHub Actions matrix workers coordinated through [orun-backend](https://github.com/sourceplane/orun-backend).  The backend enforces DAG ordering — each matrix job polls until its dependencies complete, then claims work and executes.
+A plan's dependency order is part of the standard it encodes, and it has to hold even when
+the jobs run on many machines at once. With **remote state**, every runner, whether a
+GitHub Actions matrix job or a terminal on a laptop, reads and writes one shared run
+record. Each job claims its work atomically and waits until its dependencies have
+succeeded, so the DAG compiled into the plan is enforced across runners exactly as it is on
+one machine.
+
+Remote state is served by **Orunbase**, the hosted control plane, by default. You can
+self-host a backend on Cloudflare with [`orun backend init`](../cli/orun-backend.md) and
+point orun at it instead.
 
 :::tip Terraform state needs no AWS either
 Remote runs also export a `TF_HTTP_*` environment pointing Terraform's
@@ -11,59 +21,61 @@ no S3 bucket or OIDC role for Terraform state — see
 [Terraform state on the platform](../execute/terraform-state.md).
 :::
 
-## Why local remote-state?
+## Local state and remote state
 
-Default `orun run` stores execution state on the local filesystem in the object model under `.orun/objectmodel/`. This works for a single machine but cannot coordinate between independent runners.
+By default, `orun run` records execution in the object model under `.orun/objectmodel/`.
+That works on one machine but cannot coordinate independent runners. `--remote-state`
+moves coordination to the backend.
 
-**Remote state** moves that coordination to orun-backend.  Every runner — whether a GitHub Actions job or a terminal on your laptop — reads and writes the same backend run record.
-
-Running the harness locally is useful because:
-
-- You can iterate on distributed-claim and dependency-wait behavior without pushing to CI.
-- You can reproduce GitHub Actions failures from your laptop in minutes.
-- You can inspect logs and status immediately via `orun status` and `orun logs`.
-
-### How local remote-state differs from local filesystem state
-
-| | Local filesystem state | Remote state |
+| | Local state | Remote state |
 |---|---|---|
-| State location | `.orun/objectmodel/` on disk | orun-backend (Cloudflare D1 + KV) |
-| Coordination across machines | Not possible | Yes — shared backend run record |
-| Claim enforcement | Advisory file lock (`flock`) | Backend atomic claim |
-| Dependency wait | Polls local state | Polls backend `/v1/runs/{id}/runnable` |
-| Auth required | No | Yes — OIDC (GHA) or Orun CLI session (local) |
-| `orun status/logs` from another machine | No | Yes |
+| Where the run record lives | `.orun/objectmodel/` on disk | The backend (Orunbase, or your own) |
+| Coordination across machines | No | Yes: one shared run record |
+| Claiming a job | Advisory file lock (`flock`) | Atomic claim on the backend |
+| Waiting on dependencies | Polls local state | Polls the backend's runnable set |
+| Authentication | None | GitHub Actions OIDC, or your `orun auth login` session |
+| `orun status` / `orun logs` from another machine | No | Yes |
 
-## How authentication works
+## Which backend
 
-### GitHub Actions
+`orun run --remote-state` (and `orun status` / `orun logs` with `--remote-state`) resolve
+the backend in this order:
 
-When your workflow has `permissions: id-token: write`, orun requests a GitHub Actions OIDC token with audience `orun` and sends it to the backend.  The backend cryptographically verifies the token against GitHub's JWKS endpoint.  No secrets or static tokens are needed.
+1. `--backend-url`
+2. `ORUN_BACKEND_URL`
+3. `execution.state.backendUrl` in `intent.yaml`
+4. `cloud.url` in `~/.orun/config.yaml`
+5. Orunbase's production API, when nothing else names one
 
-### Local developer machine
+So on Orunbase you need no URL at all. Set one only for a self-hosted backend.
 
-Outside GitHub Actions, orun uses the credentials stored by `orun auth login` or `orun auth login --device`.  These are Orun-issued OAuth session tokens (not GitHub PATs).  The access token is refreshed automatically when it expires.
+## Authentication
 
-Outside GitHub Actions, link the repo to an org/project once with `orun cloud link` (it resolves the current Git remote against the platform and caches the org/project scope in `~/.orun/config.yaml`).  Subsequent `orun run --remote-state` invocations run under the cached scope.  An unlinked repo fails fast with `run `orun cloud link``.
+**On GitHub Actions**, give the workflow `permissions: id-token: write`. orun requests a
+GitHub Actions OIDC token with audience `orun`, and the backend verifies it against
+GitHub's signing keys. No secrets or static tokens are needed.
 
-Token resolution order (for `orun run --remote-state`):
+**On your machine**, sign in once with `orun auth login` (or `orun auth login --device` on
+a headless terminal). The session is refreshed automatically. The repository is linked to
+a workspace on first use; `orun cloud link` does it explicitly. See
+[workspaces and tenancy](../concepts/workspaces-and-tenancy.md).
 
-1. GitHub Actions OIDC (when `ACTIONS_ID_TOKEN_REQUEST_URL` is set)
-2. `ORUN_TOKEN` environment variable (short-lived machine token, explicit fallback — requires a pre-cached org/project link)
-3. Stored Orun CLI session from `orun auth login`
+The credential is resolved in this order:
 
-**GitHub PATs are not the normal local auth path.**  They are never stored by the Orun CLI.  Use `orun auth login` for interactive machines and `orun auth login --device` for headless environments.
+1. GitHub Actions OIDC, when `ACTIONS_ID_TOKEN_REQUEST_URL` is set
+2. `ORUN_TOKEN` (or `ORUN_TOKEN_FILE`), a short-lived machine token for headless use
+3. The session stored by `orun auth login`
+
+GitHub personal access tokens are never used or stored.
 
 ## Prerequisites
 
 | Item | Purpose | Required |
 |---|---|---|
-| Go 1.22+ | Build orun from source | Yes |
-| `jq` | Harness and workflow scripts | Yes |
-| `orun auth login` | Local remote-state auth | Yes |
-| `orun cloud link` | Pre-cache repo namespace (optional — auto-resolved on first run) | No |
-| orun-backend instance | Coordinate remote state | Yes |
-| `ORUN_BACKEND_URL` | URL of the backend | Yes |
+| orun | The CLI | Yes |
+| `jq` | The harness and workflow scripts | Yes |
+| `orun auth login` | Authentication for local runs | For local runs |
+| A self-hosted backend and its URL | Only if you do not use Orunbase | No |
 
 ### Install orun
 
@@ -134,7 +146,8 @@ cd examples/remote-state-matrix
 ./run-local-harness.sh
 ```
 
-Override the backend URL:
+The harness passes its own default backend URL to every command; set
+`ORUN_BACKEND_URL` to point it at Orunbase's API or at your own backend:
 
 ```bash
 ORUN_BACKEND_URL=https://my-backend.example.com ./run-local-harness.sh
@@ -164,21 +177,20 @@ orun plan --name remote-state-e2e --all
 
 PLAN_ID="$(orun get plans -o json | jq -r '.[] | select(.Name == "remote-state-e2e") | .Checksum')"
 export ORUN_EXEC_ID="local-$(date +%s)-${PLAN_ID}"
-export ORUN_BACKEND_URL=https://orun-api.sourceplane.ai
 export ORUN_REMOTE_STATE=true
+# Optional, for a self-hosted backend: export ORUN_BACKEND_URL=https://…
 
-# Launch two processes for foundation.dev.smoke (duplicate claim — namespace auto-resolved on first call)
-orun run "${PLAN_ID}" --job foundation.dev.smoke --remote-state --backend-url "${ORUN_BACKEND_URL}" &
-orun run "${PLAN_ID}" --job foundation.dev.smoke --remote-state --backend-url "${ORUN_BACKEND_URL}" &
+# Launch two processes for foundation.dev.smoke (duplicate claim; the workspace is resolved on first call)
+orun run "${PLAN_ID}" --job foundation.dev.smoke --remote-state &
+orun run "${PLAN_ID}" --job foundation.dev.smoke --remote-state &
 
-# Launch api.dev.smoke — waits for foundation.dev.smoke via /runnable
-orun run "${PLAN_ID}" --job api.dev.smoke --remote-state --backend-url "${ORUN_BACKEND_URL}" &
+# Launch api.dev.smoke: it waits until foundation.dev.smoke has succeeded
+orun run "${PLAN_ID}" --job api.dev.smoke --remote-state &
 wait
 
 # Verify
-orun status --remote-state --backend-url "${ORUN_BACKEND_URL}" --exec-id "${ORUN_EXEC_ID}" --json
-orun logs   --remote-state --backend-url "${ORUN_BACKEND_URL}" --exec-id "${ORUN_EXEC_ID}" \
-  --job foundation.dev.smoke
+orun status --remote-state --exec-id "${ORUN_EXEC_ID}" --json
+orun logs   --remote-state --exec-id "${ORUN_EXEC_ID}" --job foundation.dev.smoke
 ```
 
 ## GitHub Actions conformance workflow
@@ -189,7 +201,7 @@ See [`.github/workflows/remote-state-conformance.yml`](https://github.com/source
 
 | Setting | Location | Value |
 |---|---|---|
-| `ORUN_BACKEND_URL` | Settings → Variables → Actions | URL of your orun-backend instance |
+| `ORUN_BACKEND_URL` | Settings → Variables → Actions | Backend URL; leave unset to use Orunbase |
 | `ORUN_REMOTE_STATE_E2E` | Settings → Variables → Actions | `true` to enable on push/PR (optional) |
 
 ### Workflow permissions
@@ -374,21 +386,16 @@ orun auth login
 Check status:
 
 ```bash
-orun auth status --backend-url https://orun-api.sourceplane.ai
+orun auth status
 ```
 
-### Backend URL mismatch
+### Talking to the wrong backend
 
-```
---remote-state requires --backend-url or ORUN_BACKEND_URL
-```
-
-Resolution order:
-
-1. `--backend-url` flag
-2. `ORUN_BACKEND_URL` environment variable
-3. `execution.state.backendUrl` in `intent.yaml`
-4. `backend.url` in `~/.orun/config.yaml`
+If runs, status, or logs do not appear where you expect, check which backend orun
+resolved. The order is `--backend-url`, then `ORUN_BACKEND_URL`, then
+`execution.state.backendUrl` in `intent.yaml`, then `cloud.url` in `~/.orun/config.yaml`
+(the older `backend.url` key still works, with a deprecation warning), then Orunbase's
+production API. `orun mcp doctor` probes the backend it resolves and reports what it found.
 
 ### Revoked refresh tokens
 

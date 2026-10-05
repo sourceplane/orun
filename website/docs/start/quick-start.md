@@ -1,6 +1,6 @@
 ---
 title: Quick start
-description: Compile the example platform intent into a deterministic plan, preview it, run it, and read the result in the cockpit — then connect a workspace.
+description: Walk the example platform through the four pillars - read its declared intent, see its golden paths, give an agent the same view, then verify, plan, run, and read the record.
 ---
 
 This walkthrough uses the repository's `examples/` directory: a complete
@@ -19,63 +19,74 @@ cd orun
 make build
 ```
 
-## 2. See what the compositions export
+The steps follow the four pillars: **declare** what the platform is, see how its
+standards are **packaged**, give an **agent** the same view, then **verify, plan, and
+execute**.
 
-```bash
-./orun compositions --intent examples/intent.yaml
-```
+## 2. Declare: read the platform's intent
 
-The example package exports Terraform, Helm, Cloudflare, Turbo, and
-workspace compositions from `examples/compositions`. A composition is how a
-*type* of component is validated and built; see
-[compositions](../concepts/compositions.md).
-
-## 3. Lock the composition sources
-
-```bash
-./orun compositions lock --intent examples/intent.yaml
-```
-
-This writes `examples/.orun/compositions.lock.yaml` with the resolved source
-digests, so every later plan resolves the same golden paths.
-
-## 4. Validate the intent and the discovered components
-
-```bash
-./orun validate --intent examples/intent.yaml
-```
-
-`validate` loads `examples/intent.yaml`, scans the discovery roots it
-declares, and checks each `component.yaml` against its composition's schema.
-A non-compliant component fails here, with a structured error, not at deploy
-time.
-
-## 5. Inspect one merged component
+Open `examples/intent.yaml`. It declares the platform's structure and rules: discovery
+roots, environments and what activates them, trigger bindings, and the composition source
+the golden paths come from. Each component declares itself in a `component.yaml` next to
+its code. See one, merged with every default that applies to it:
 
 ```bash
 ./orun component network-foundation --intent examples/intent.yaml --long
 ```
 
-This is the component after normalisation: labels, subscriptions, parameter
-overrides, and dependency edges, before any job exists.
+This is the component after normalisation: labels, subscriptions, merged parameters, and
+dependency edges, before any job exists. See the [intent model](../concepts/intent-model.md).
 
-## 6. Compile a plan
+## 3. Package: see the golden paths
+
+```bash
+./orun compositions --intent examples/intent.yaml
+```
+
+The example Stack in `examples/compositions` exports Terraform, Helm, Cloudflare, Turbo,
+and workspace compositions. A composition is how a *type* of component is validated and
+built: its schema, its jobs, and the profiles allowed in each lane. In a real platform it
+is published as a versioned [Stack](../concepts/stacks.md) and pinned by reference.
+
+## 4. Ground an agent: give it the same view
+
+```bash
+./orun agent context | head -20     # the versioned base literacy every agent reads
+./orun mcp tools                    # the tools an agent gets from `orun mcp serve`
+```
+
+A coding agent working in this repository reads the same intent, catalog, and contracts
+through `orun mcp serve`. See [agents in orun repositories](../ai-context/orun-repositories.md).
+
+## 5. Verify the intent
+
+```bash
+./orun validate --intent examples/intent.yaml
+```
+
+`validate` loads `examples/intent.yaml`, scans the discovery roots it declares, and checks
+the component manifests, the reserved `ORUN_` environment prefix, and every profile and
+dependency rule. It does not load compositions, so it is fast.
+
+## 6. Plan
 
 ```bash
 ./orun plan --intent examples/intent.yaml --view dag
 ```
 
-The plan is the execution boundary: a fully expanded DAG of jobs, steps, and
-dependencies, with every default and policy merge made explicit. It is written to
-`.orun/plans/` and sealed into the content-addressed object model under
-`.orun/objectmodel/`, where `orun status` and the TUI read it as the latest
-plan. Identical inputs produce a byte-identical plan; see
-[the plan DAG](../concepts/plan-dag.md).
+Compiling the plan is the heavier check: every component's parameters are validated
+against its composition's schema, secret slots must hold references, and dependency
+cycles are refused. The result is the execution boundary: a fully expanded DAG of jobs,
+steps, and dependencies, with every default and merged parameter made explicit. It is
+sealed into the content-addressed object model under `.orun/objectmodel/`, where
+`orun status` and the TUI read it as the latest plan, and it records the digest each
+composition source resolved to. Identical inputs produce a byte-identical plan; see
+[the plan DAG](../concepts/plan-dag.md) and [standards](../concepts/standards.md).
 
-## 7. Preview and run
+## 7. Execute: preview and run
 
-Compile a narrower plan for one component in one environment, then dry-run it
-with the GitHub Actions-compatible runner:
+Compile a narrower plan for one component in one environment, then dry-run it with the
+GitHub Actions-compatible runner:
 
 ```bash
 ./orun plan --intent examples/intent.yaml --component network-foundation --env development \
@@ -83,11 +94,10 @@ with the GitHub Actions-compatible runner:
 ./orun run --plan /tmp/orun-example-plan.json --workdir examples --gha --dry-run
 ```
 
-Drop `--dry-run` to execute. `--gha` selects the runner that understands
-`use:` steps; `--runner docker` runs every step in a fresh container. See
-[runners](../execute/runners.md).
+Drop `--dry-run` to execute. `--gha` selects the runner that understands `use:` steps;
+`--runner docker` runs every step in a fresh container. See [runners](../execute/runners.md).
 
-## 8. Read the result
+## 8. Read the record
 
 ```bash
 ./orun status
@@ -96,10 +106,10 @@ Drop `--dry-run` to execute. `--gha` selects the runner that understands
 ./orun tui
 ```
 
-`status`, `get`, `logs`, and the TUI render the same state through the same
-cockpit view-model. Bare `./orun` on a terminal opens the TUI.
+`status`, `get`, `logs`, and the TUI render the same record through the same cockpit
+view-model. Bare `./orun` on a terminal opens the TUI.
 
-## 9. Converge only what a commit changed
+## 9. Re-verify only what a commit changed
 
 ```bash
 ./orun catalog refresh --intent examples/intent.yaml
@@ -107,10 +117,9 @@ cockpit view-model. Bare `./orun` on a terminal opens the TUI.
 ./orun run --changed --base main --dry-run
 ```
 
-The catalog is the content-addressed record of every component. `affected`
-reports the directly changed, dependent, and selected sets that `--changed`
-uses to compile the minimal plan. See
-[change detection](../concepts/change-detection.md).
+The catalog is the content-addressed record of every component. `affected` reports the
+directly changed, dependent, and selected sets that `--changed` uses to compile the
+minimal plan. See [change detection](../concepts/change-detection.md).
 
 ## 10. Connect a workspace
 

@@ -3,6 +3,10 @@ title: Cockpit overview
 description: The cockpit is the unified UX layer for orun. Same view-model, same glyphs, same palette — across the CLI and the TUI.
 ---
 
+The cockpit is where you inspect the record the runner leaves: every plan, run, job, and
+log, rendered the same way in a CI log and in a terminal. It is part of pillar 4, the
+runner, and it only ever shows what was planned and what happened.
+
 The **cockpit** is the unified UX layer for orun. Every surface that shows you what's
 happening — `orun status`, `orun status --watch`, `orun get runs`, `orun logs`, and
 `orun tui` — flows through the same view-model and the same design tokens.
@@ -248,22 +252,14 @@ environments elsewhere.
 
 ## State, on disk
 
-The cockpit reads from `.orun/`, written by `orun run`:
+The cockpit reads the same record `orun run` writes: the content-addressed object model
+under `.orun/objectmodel/`, where every execution, job, step, and log is an immutable
+object and refs such as `executions/latest` and `executions/live/<exec-id>` point at the
+current ones. See the [state model](/concepts/state-model) for the layout.
 
-```text
-.orun/
-├── runs/
-│   └── <run-id>/
-│       ├── metadata.json    ExecMetadata — plan ref, start time, trigger
-│       ├── state.json       ExecState — job/step status, durations, exit codes
-│       └── logs/
-│           └── <job>.log
-└── current                  symlink to the most recent run
-```
-
-This is the only place runtime state lives. Anything you can see in the cockpit, you can
-see by reading `.orun/` directly. Remote state backends (`statebackend.Backend`) expose
-the same shape over the wire — `bridge.FromBackend` normalises them into the same
+Anything you can see in the cockpit you can also read with `orun status`, `orun logs`,
+`orun describe`, or `orun objects`. Remote state backends (`statebackend.Backend`) expose
+the same shape over the wire, and `bridge.FromBackend` normalises them into the same
 `bridge.Source` interface.
 
 ## What the cockpit deliberately is not
