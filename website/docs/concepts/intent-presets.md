@@ -149,8 +149,9 @@ So the repository always wins, and among presets the **first** one to set a valu
 
 **`policies` are the exception.** A preset's `policies` keys are written over the
 repository's and over earlier presets', so on a conflicting key the last preset wins.
-Policies are carried onto every component instance but are not yet enforced by the
-planner or runner; see [standards](./standards.md#declared-not-yet-enforced).
+That is what lets a platform team ship a rule in a Stack that an adopting repository
+cannot loosen. Policies are enforced by `orun validate`, `orun plan`, and `orun run`; see
+[policies](./intent-model.md#policies).
 
 ```text
 repo intent.yaml  →  + preset 1 (fills gaps)  →  + preset 2 (fills remaining gaps)  →  effective intent

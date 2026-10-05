@@ -179,6 +179,44 @@ type PlanJob struct {
 	Materialize *PlanMaterialize       `json:"materialize,omitempty" yaml:"materialize,omitempty"`
 	Labels      map[string]string      `json:"labels,omitempty" yaml:"labels,omitempty"`
 	Parameters  map[string]interface{} `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+	// Policies are the effective policies this job was compiled under (group,
+	// environment, and execution-profile layers, already checked by the
+	// compiler). The runner reads the runtime ones (requireCleanGitTree,
+	// requireApproval); the rest are recorded so the plan stays the audit
+	// artifact. Absent when no policy applies.
+	Policies *PlanPolicies `json:"policies,omitempty" yaml:"policies,omitempty"`
+}
+
+// PlanPolicies is the effective, typed policy set for one component instance
+// in one environment (see internal/intentpolicy for parsing and enforcement).
+// Booleans are a union across layers: once any layer requires something, no
+// other layer can relax it.
+type PlanPolicies struct {
+	// PinnedParameters are parameter values a policy fixed for this instance.
+	// The compiler rejects a component or subscription that sets a different
+	// value, and applies the pinned value otherwise.
+	PinnedParameters map[string]interface{} `json:"pinnedParameters,omitempty" yaml:"pinnedParameters,omitempty"`
+	// RequireProfile lists the profile-name patterns the instance's resolved
+	// execution profile had to match (one entry per declaring layer).
+	RequireProfile []string `json:"requireProfile,omitempty" yaml:"requireProfile,omitempty"`
+	// RequirePinnedTerraformVersion: the terraformVersion parameter had to be
+	// an exact version. Checked at compile time.
+	RequirePinnedTerraformVersion bool `json:"requirePinnedTerraformVersion,omitempty" yaml:"requirePinnedTerraformVersion,omitempty"`
+	// RequireCleanGitTree: `orun run` refuses to execute the job from a
+	// working tree with uncommitted or untracked changes.
+	RequireCleanGitTree bool `json:"requireCleanGitTree,omitempty" yaml:"requireCleanGitTree,omitempty"`
+	// RequireApproval: `orun run` pauses the job on an approval gate
+	// (resolved with `orun approve`) before any step runs.
+	RequireApproval bool `json:"requireApproval,omitempty" yaml:"requireApproval,omitempty"`
+	// Sources maps each policy key in effect to the layers that declared it,
+	// e.g. "group:platform", "environment:production", "profile:terraform-release".
+	Sources map[string][]string `json:"sources,omitempty" yaml:"sources,omitempty"`
+}
+
+// IsZero reports whether no policy is in effect.
+func (p *PlanPolicies) IsZero() bool {
+	return p == nil || (len(p.PinnedParameters) == 0 && len(p.RequireProfile) == 0 &&
+		!p.RequirePinnedTerraformVersion && !p.RequireCleanGitTree && !p.RequireApproval)
 }
 
 // PlanMaterialize is the value-free materialize step in the plan: the typed

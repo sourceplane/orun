@@ -125,18 +125,20 @@ lives behind an explicit flag.
 Whatever can be checked before execution is checked before execution, so a violation
 fails in review, not halfway through a deploy:
 
-- `orun validate` checks the intent and its profile and dependency rules.
+- `orun validate` checks the intent, its profile and dependency rules, and its policies.
 - `orun plan` checks every component's parameters against its composition's schema,
-  rejects a literal value in a secret slot, and refuses a dependency cycle.
+  enforces policies (a pinned parameter cannot be overridden, a required profile must be
+  the one that runs), rejects a literal value in a secret slot, and refuses a dependency
+  cycle.
 - Profile and dependency rules let behaviour *adapt to the trigger* without escaping the
   compile step: a pull request can run plan-only with parallel jobs and a release can run
   apply with enforced ordering, both from the same intent.
 
-Not every declared rule is enforced yet. Group and environment `policies`, and the
-`policies` block on execution profiles, are carried through to each component instance
-but are not yet checked by the planner or the runner; cross-plan promotion gates are
-recorded in the plan as evidence to check, not enforced. The concept pages say which is
-which.
+What can only be known at run time is checked at run time and recorded in the plan
+beforehand: a job under `requireCleanGitTree` refuses a dirty working tree, and one under
+`requireApproval` waits for `orun approve`. Not every declared rule is enforced yet:
+cross-plan promotion gates are recorded in the plan as evidence to check, not enforced.
+The [standards](./concepts/standards.md) page says which is which.
 
 ## 8. One vocabulary across every surface
 

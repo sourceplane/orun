@@ -31,7 +31,7 @@
 - PD5 found that `orun plan --name` prints an `orun run <name>` hint that
   does not resolve (the argument is treated as a component name). The docs and
   flag help now describe current behaviour; fixing the hint is out of scope.
-- Follow-ups outside this epic's scope: enforce intent and profile `policies`;
-  make the composition lock pin or drop it; fix the `orun run <name>` hint
+- Follow-ups outside this epic's scope: enforce intent and profile `policies`
+  (done in v2.75.0: the standards page now labels them enforced); make the composition lock pin or drop it; fix the `orun run <name>` hint
   printed by `orun plan --name`; rename the remaining "Orun Cloud" strings in
   CLI flag help to Orunbase.

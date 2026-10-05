@@ -51,7 +51,7 @@ Prefer these locations:
 | Environment activates on a CI event | `intent.automation.triggerBindings` plus `environments.<name>.activation.triggerRefs` |
 | Shared default for all components in an environment | `environments.<name>.parameterDefaults` |
 | Shared env var for all jobs in an environment | `environments.<name>.env` |
-| Shared constraint for an environment | A composition profile or profile rule, or a dependency rule (`environments.<name>.policies` is recorded, not enforced) |
+| Shared constraint for an environment | `environments.<name>.policies` (pinned parameters, required profile, approval, ...), a composition profile or profile rule, or a dependency rule |
 | Component-specific behavior in one environment | `component.subscribe.environments[].profile`, `env`, or parameters |
 | Reusable behavior difference such as PR vs release | `ExecutionProfile` |
 

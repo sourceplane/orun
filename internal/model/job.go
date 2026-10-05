@@ -193,6 +193,7 @@ type JobInstance struct {
 	// "subscription-rule".
 	DependencyRuleTriggerRef string
 	Gates                    []PromotionGate
+	Policies                 *PlanPolicies // effective policy set, copied from the component instance
 	Timeout                  string
 	Retries                  int
 	Parameters               map[string]interface{}

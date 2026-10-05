@@ -103,7 +103,7 @@ A coding agent working in an orun repository has more than files to reason from.
 | Add or update a deployable/operable unit | `component.yaml` |
 | Add an environment or trigger activation | `intent.yaml` |
 | Share values across many components | Environment or group defaults |
-| Enforce constraints | `ComponentSchema`, profiles and profile rules, dependency rules, a source `digest:` (group, environment, and profile `policies` are recorded, not enforced) |
+| Enforce constraints | `ComponentSchema`, profiles and profile rules, dependency rules, a source `digest:`, and group, environment, and profile `policies` |
 | Add a typed input | `ComponentSchema` |
 | Change reusable execution steps | `JobTemplate` |
 | Change PR, verify, release, or deploy behavior | `ExecutionProfile` |

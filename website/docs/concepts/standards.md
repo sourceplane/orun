@@ -20,6 +20,8 @@ says plainly what orun does with each today.
 | **Component schema.** The parameters a type requires and the shape of each | `ComponentSchema` in the composition | **Enforced** by `orun plan`: every component's merged parameters are checked against its type's schema, and a mismatch fails the plan |
 | **Known type.** A component's `type` must resolve to a composition from a declared source | `component.yaml` `type`, `intent.yaml` `compositions.sources` | **Enforced** by `orun plan` |
 | **Reserved environment names.** User-declared `env` may not use the `ORUN_` prefix | Any `env` block | **Enforced** by `orun validate` and `orun plan` |
+| **Pinned parameters.** A parameter value a component may not override, per composition type or for every type | `pinnedParameters` in a group's or environment's `policies` | **Enforced** by `orun validate` and `orun plan`: a component or subscription that sets a different value fails; otherwise the pinned value is applied. Recorded on each plan job under `policies` |
+| **Policy vocabulary.** `policies` accepts only the keys orun enforces, so a typo cannot switch a guardrail off | `policies` on groups and environments, including those merged from presets | **Enforced** by `orun validate` and `orun plan`: an unknown key or ill-typed value fails |
 
 ## Which version of a golden path?
 
@@ -39,9 +41,13 @@ platform rules are packaged and adopted.
 | **Execution profile.** Which steps of a job run in a lane, and with which overrides | `ExecutionProfile` in the composition; `profile:` on a subscription | **Enforced** by `orun plan`: a subscription naming a profile the composition does not define fails, and only the steps the profile selects are rendered into the plan |
 | **Profile rules.** Which profile applies under which trigger | `profileRules` on a subscription | **Enforced**: `orun validate` rejects malformed rules, and `orun plan` applies them and records which rule chose the profile |
 | **Trigger bindings.** Which CI events activate which environments, and how much each plans | `automation.triggerBindings`, `environments.<name>.activation` | **Enforced** by `orun plan` when it plans for an event (`--trigger`, `--from-ci`): an environment the event does not activate is not planned |
+| **Required profile.** Every component in a group or environment must run a given profile | `requireProfile` in `policies` | **Enforced** by `orun validate` and `orun plan`: an instance whose resolved profile matches none of the names fails |
+| **Pinned terraform version.** `terraformVersion` must be an exact release, not a range or `latest` | `requirePinnedTerraformVersion` in a profile's or an intent layer's `policies` | **Enforced** by `orun validate` and `orun plan` |
+| **Clean git tree.** A job may only run from committed code | `requireCleanGitTree` in a profile's or an intent layer's `policies` | **Enforced** by `orun run`, which refuses to start when the working tree has uncommitted or untracked changes. Recorded on each plan job |
+| **Approval.** A person signs off before a job runs | `requireApproval` in a profile's or an intent layer's `policies` | **Enforced** by `orun run`, which pauses the job before any step until [`orun approve`](../cli/orun-approve.md) decides. Recorded on each plan job; the verdict is sealed under `.orun/approvals` |
 
-See [compositions](./compositions.md), [profile rules](./profile-rules.md), and
-[trigger bindings](./trigger-bindings.md).
+See [compositions](./compositions.md), [profile rules](./profile-rules.md),
+[trigger bindings](./trigger-bindings.md), and [policies](./intent-model.md#policies).
 
 ## In what order?
 
@@ -78,20 +84,14 @@ See the [task plane](./task-plane.md) and the [agent runtime](./agent-runtime.md
 
 ## Declared, not yet enforced
 
-These are parsed, merged, and carried through to each component instance, but neither the
-planner nor the runner acts on them:
+This is parsed and carried through to each component instance, but neither the planner
+nor the runner acts on it:
 
-- **Group and environment `policies`** in `intent.yaml`, including those inherited from
-  presets.
-- **Execution profile `policies`**: `requireCleanGitTree`, `requirePinnedTerraformVersion`,
-  and `requireApproval`.
 - **`condition` on a component's `dependsOn`** (`success`, `always`, `failure`). An
   enforced edge always waits for the dependency to succeed.
 
-Write them down if they document intent, but do not rely on them as guardrails. For an
-approval that actually blocks, use a workflow step with an approval gate
-([`orun approve`](../cli/orun-approve.md)); for ordering, use dependency rules and
-promotion.
+Write it down if it documents intent, but do not rely on it as a guardrail. For ordering,
+use dependency rules and promotion.
 
 ## Making standards stick
 
@@ -99,8 +99,8 @@ A standard is only as strong as the command that checks it. In CI, run on every 
 request:
 
 ```bash
-orun validate                  # the intent and its rules
-orun plan --changed            # schemas, pins, profiles, secrets, cycles
+orun validate                  # the intent, its rules, and its policies
+orun plan --changed            # schemas, pins, profiles, policies, secrets, cycles
 orun task check "$TASK_KEY"    # on a task branch: the change stays inside its contract
 orun pr check                  # the branch and commits carry the task's lineage
 ```

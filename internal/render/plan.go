@@ -108,6 +108,7 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 			Materialize:              buildPlanJobMaterialize(job),
 			Labels:                   job.Labels,
 			Parameters:               job.Parameters,
+			Policies:                 job.Policies,
 		}
 
 		if len(job.Gates) > 0 {

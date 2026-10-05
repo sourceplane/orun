@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	compositionpkg "github.com/sourceplane/orun/internal/composition"
+	"github.com/sourceplane/orun/internal/intentpolicy"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/secretref"
 )
@@ -42,6 +43,12 @@ func (e *Expander) WithMatchedTriggers(triggers []string) *Expander {
 // Expand produces ComponentInstances for each environment × component pair
 func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 	result := make(map[string][]*model.ComponentInstance)
+
+	groupPolicies, envPolicies, err := e.parsePolicies()
+	if err != nil {
+		return nil, err
+	}
+	var violations []intentpolicy.Violation
 
 	for envName, env := range e.normalized.Environments {
 		instances := make([]*model.ComponentInstance, 0)
@@ -120,8 +127,12 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 				instance.Path = "./"
 			}
 
-			// Extract and apply policies (cannot be overridden)
-			instance.Policies = e.resolvePolicies(comp, envName)
+			// Enforce group/environment/profile policies: pinned parameters are
+			// applied (a component may not override them) and compile-time
+			// policies are checked; the effective set is recorded on the plan.
+			policies, policyViolations := e.enforcePolicies(instance, comp, envName, groupPolicies, envPolicies)
+			instance.Policies = policies
+			violations = append(violations, policyViolations...)
 
 			// Resolve dependencies
 			deps, err := e.resolveDependencies(comp, envName)
@@ -136,6 +147,9 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 		result[envName] = instances
 	}
 
+	if err := intentpolicy.NewError(violations); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
@@ -442,31 +456,90 @@ func (e *Expander) mergeOptionalSecretEnv(comp model.Component, env model.Enviro
 	return merged, nil
 }
 
-// resolvePolicies extracts policies that apply to this component in this environment
-func (e *Expander) resolvePolicies(comp model.Component, envName string) map[string]interface{} {
-	policies := make(map[string]interface{})
+// parsePolicies parses every group and environment `policies` map into its
+// typed form. A malformed or unknown policy fails expansion.
+func (e *Expander) parsePolicies() (map[string]intentpolicy.Layer, map[string]intentpolicy.Layer, error) {
+	var violations []intentpolicy.Violation
+	groups := make(map[string]intentpolicy.Layer, len(e.groups))
+	for name, group := range e.groups {
+		source := intentpolicy.GroupSource(name)
+		set, v := intentpolicy.Parse(source, group.Policies)
+		violations = append(violations, v...)
+		groups[name] = intentpolicy.Layer{Source: source, Set: set}
+	}
+	envs := make(map[string]intentpolicy.Layer, len(e.normalized.Environments))
+	for name, env := range e.normalized.Environments {
+		source := intentpolicy.EnvironmentSource(name)
+		set, v := intentpolicy.Parse(source, env.Policies)
+		violations = append(violations, v...)
+		envs[name] = intentpolicy.Layer{Source: source, Set: set}
+	}
+	if err := intentpolicy.NewError(violations); err != nil {
+		return nil, nil, err
+	}
+	return groups, envs, nil
+}
 
-	// Get group policies
+// enforcePolicies applies the component's group policies, then its
+// environment's, then its execution profile's, to the instance. Pinned
+// parameter values are written into instance.Parameters.
+func (e *Expander) enforcePolicies(
+	instance *model.ComponentInstance,
+	comp model.Component,
+	envName string,
+	groupPolicies, envPolicies map[string]intentpolicy.Layer,
+) (*model.PlanPolicies, []intentpolicy.Violation) {
+	var layers []intentpolicy.Layer
 	if comp.Domain != "" {
-		if group, exists := e.groups[comp.Domain]; exists {
-			if group.Policies != nil {
-				for k, v := range group.Policies {
-					policies[k] = v
-				}
-			}
+		if layer, ok := groupPolicies[comp.Domain]; ok {
+			layers = append(layers, layer)
 		}
 	}
-
-	// Get environment policies
-	if env, exists := e.normalized.Environments[envName]; exists {
-		if env.Policies != nil {
-			for k, v := range env.Policies {
-				policies[k] = v
-			}
-		}
+	if layer, ok := envPolicies[envName]; ok {
+		layers = append(layers, layer)
 	}
 
-	return policies
+	var subParams map[string]interface{}
+	if sub := comp.Subscribe.FindSubscription(envName); sub != nil {
+		subParams = sub.Parameters
+	}
+	return intentpolicy.Enforce(layers, intentpolicy.Instance{
+		Component:              comp.Name,
+		Environment:            envName,
+		Type:                   comp.Type,
+		ProfileChecked:         e.registry != nil,
+		ProfileName:            instance.ProfileName,
+		ProfileRef:             instance.ProfileRef,
+		ProfilePolicies:        e.profilePolicies(comp, instance.ProfileName),
+		ComponentParameters:    comp.Parameters,
+		SubscriptionParameters: subParams,
+		Parameters:             instance.Parameters,
+		Interpolate: func(s string) string {
+			return e.interpolateString(s, envName, comp.Domain, comp.Name)
+		},
+	})
+}
+
+// profilePolicies returns the `policies` block of the named execution profile
+// of the component's composition, or nil.
+func (e *Expander) profilePolicies(comp model.Component, profileName string) *model.ProfilePolicies {
+	if e.registry == nil || profileName == "" {
+		return nil
+	}
+	key := comp.ResolvedComposition
+	if key == "" {
+		key = comp.Type
+	}
+	composition, ok := e.registry.ByKey[key]
+	if !ok {
+		if composition, ok = e.registry.Types[comp.Type]; !ok {
+			return nil
+		}
+	}
+	if profile, ok := composition.ExecutionProfiles[profileName]; ok {
+		return profile.Policies
+	}
+	return nil
 }
 
 // resolveDependencies transforms component dependencies into resolved form
