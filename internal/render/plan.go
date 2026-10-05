@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/sourceplane/orun/internal/model"
 	"gopkg.in/yaml.v3"
@@ -57,7 +56,8 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 			Name:        metadata.Name,
 			Description: metadata.Description,
 			Namespace:   metadata.Namespace,
-			GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+			// GeneratedAt is deliberately left unset: a wall-clock stamp
+			// would break the byte-identical-plans guarantee.
 		},
 		Execution: model.PlanExecution{
 			Concurrency: 4,
@@ -264,6 +264,7 @@ func (r *Renderer) attachChecksum(plan *model.Plan) {
 
 	clone := *plan
 	clone.Metadata.Checksum = ""
+	clone.Metadata.GeneratedAt = "" // volatile; never part of plan identity
 	payload, err := json.Marshal(clone)
 	if err != nil {
 		return

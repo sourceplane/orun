@@ -510,11 +510,15 @@ func (jp *JobPlanner) renderTemplateString(componentType, stepName, fieldName, v
 	// and leaves the spans for the runner to substitute.
 	masked, spans := flow.MaskOutputRefs(value)
 
-	cacheKey := fmt.Sprintf("%s:%s:%s", componentType, stepName, fieldName)
+	// The key includes the template source: the same composition step can
+	// carry different text per profile (stepOverrides) or per component, and
+	// a name-only key would render whichever variant was parsed first.
+	tmplName := fmt.Sprintf("%s:%s:%s", componentType, stepName, fieldName)
+	cacheKey := tmplName + "\x00" + masked
 	tmpl, exists := jp.templateCache[cacheKey]
 	if !exists {
 		var err error
-		tmpl, err = template.New(cacheKey).Parse(masked)
+		tmpl, err = template.New(tmplName).Parse(masked)
 		if err != nil {
 			return "", fmt.Errorf("invalid template in step %s %s: %w", stepName, fieldName, err)
 		}

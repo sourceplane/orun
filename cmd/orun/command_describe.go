@@ -206,7 +206,9 @@ func describePlan(ref string) error {
 	fmt.Fprintf(os.Stdout, "\n%s\n", ui.Bold(color, "Plan: "+plan.Metadata.Name))
 	fmt.Fprintln(os.Stdout, strings.Repeat("─", 60))
 	fmt.Fprintf(os.Stdout, "Plan ID:      %s\n", planID)
-	fmt.Fprintf(os.Stdout, "Generated:    %s\n", plan.Metadata.GeneratedAt)
+	if plan.Metadata.GeneratedAt != "" {
+		fmt.Fprintf(os.Stdout, "Generated:    %s\n", plan.Metadata.GeneratedAt)
+	}
 	fmt.Fprintf(os.Stdout, "Checksum:     %s\n", plan.Metadata.Checksum)
 	fmt.Fprintf(os.Stdout, "Concurrency:  %d\n", plan.Execution.Concurrency)
 	fmt.Fprintf(os.Stdout, "Fail Fast:    %v\n", plan.Execution.FailFast)

@@ -395,7 +395,8 @@ func runnerStatusToNode(s string) string {
 }
 
 // PlanHash returns the canonical "sha256:<hex>" digest of the plan's content
-// with self-referential metadata (checksum, revision) cleared, so the hash is
+// with self-referential metadata (checksum, revision) and the volatile
+// generatedAt timestamp cleared, so the hash is
 // stable across re-runs of the same intent on the same SHA. It is the dedup key
 // under revisions/by-hash/ shared by `orun plan` and the run path.
 func PlanHash(plan *model.Plan) (string, error) {
@@ -405,6 +406,7 @@ func PlanHash(plan *model.Plan) (string, error) {
 	clone := *plan
 	clone.Metadata.Checksum = ""
 	clone.Metadata.Revision = nil
+	clone.Metadata.GeneratedAt = ""
 	payload, err := json.Marshal(&clone)
 	if err != nil {
 		return "", err
