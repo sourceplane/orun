@@ -1,6 +1,13 @@
 ---
 title: Change detection
+description: How orun decides what a change must re-verify - one engine over the declared catalog that selects changed components, their build-input dependents, and always-included dependencies, and over-reports rather than letting a change skip the checks.
 ---
+
+Change detection decides what a commit must re-verify, and it does so from the same
+declared graph as everything else: component ownership from `component.yaml`, edges from
+`dependsOn`, build inputs from `change.inputs`, and intent sensitivity from
+`change.watches`. When it is unsure, it over-reports, so a change cannot quietly skip the
+standards its components are held to.
 
 `orun` can narrow inspection, planning, and execution to changed files or changed components. That is useful in pull requests, preview environments, and incremental review workflows.
 
@@ -203,7 +210,49 @@ When `intent.yaml` itself is in the changed file set, `orun` performs a **semant
 | Formatting, comments, or component reordering without content change | No components marked changed from intent |
 | Both `components` and another section | Global sections use watch matching; inline component changes are always direct |
 
-By default, a global intent section change does **not** mark any component as changed unless that component explicitly opts in with [`spec.change.watches`](./change-watches.md). Use `--intent-impact=all` for pre-v2.3 behavior where all components are marked.
+By default, a global intent section change does **not** mark any component as changed
+unless that component opts in with `spec.change.watches`:
+
+```yaml
+apiVersion: sourceplane.io/v1
+kind: Component
+metadata:
+  name: api-platform
+spec:
+  type: terraform
+  domain: platform
+  subscribe:
+    environments: [dev, staging, production]
+  change:
+    watches:
+      - environments
+      - groups
+```
+
+| Watch value | Marks the component changed when this part of `intent.yaml` changes |
+| --- | --- |
+| `environments` | `environments:` |
+| `groups` | `groups:` |
+| `env` | Root-level `env:` |
+| `automation` | `automation:` |
+| `compositions` | `compositions:` |
+| `discovery` | `discovery:` |
+| `execution` | `execution:` |
+
+With no watches (or an empty list), only direct file changes select the component: files
+under its path, its `component.yaml`, and any `change.inputs` match.
+
+`--intent-impact` overrides the watch behaviour for one command:
+
+```bash
+orun plan --changed --intent-impact=watch   # default: only matching watches
+orun plan --changed --intent-impact=all     # any global intent change marks every component
+orun plan --changed --intent-impact=none    # ignore intent changes; files only
+```
+
+`--intent-impact=all` restores the behaviour before v2.3.0, when any global intent change
+marked every component. Prefer adding watches to the components that really depend on a
+section.
 
 If the base or head intent cannot be parsed (e.g. the file is new), the engine escalates to a global intent change (over-reporting) rather than risk missing an affected component.
 
@@ -223,6 +272,36 @@ orun catalog affected --json
 ```
 
 `--explain` on `plan`/`run` covers **ref resolution** (which base/head were used); the per-component classification and its provenance live in `orun catalog affected`.
+
+## Selection and blast radius
+
+The engine computes two different sets, and it matters which one you are looking at:
+
+- **Selection** is what `--changed` plans and runs: the directly changed components, plus
+  components that declare one of them as a build input (`dependsOn` with `input: true`,
+  transitively), plus dependencies pulled in with `include: always`.
+- **Affected** is the blast radius: the directly changed components plus everything that
+  depends on them. It drives the cockpit's affected overlay and `orun catalog affected`.
+  (`orun task check` compares a task contract's `affects` with the *directly changed*
+  components: the contract limits what the work edits, not what rebuilds.)
+
+So if `web-gateway` depends on a changed `api-platform` through an ordinary `dependsOn`
+edge, `web-gateway` is in the blast radius but is not planned. Mark the edge
+`input: true` when the dependent's build embeds the dependency (a shared package, a
+generated client). `include: always` works in the other direction: it pulls a dependency
+into the plan whenever its dependent is selected (see
+[dependency rules](./dependency-rules.md#include-policy-plan-selection)).
+
+The full pipeline:
+
+```text
+changed files
+  → file-to-component ownership (paths + change.inputs globs)
+  → intent semantic diff (changed sections) → components with matching change.watches
+  → build-input dependents (dependsOn input:true, transitive)   = directly changed
+  → + include:always dependencies                                = selection (planned)
+  → + reverse dependents                                         = affected (blast radius)
+```
 
 ## Trigger-driven change detection
 

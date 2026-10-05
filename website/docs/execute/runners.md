@@ -3,6 +3,10 @@ title: Runners
 description: The plan is the boundary. Execute it on the local shell, in Docker, or on GitHub Actions without recompiling.
 ---
 
+The runner is the last checkpoint between your standards and your infrastructure, and it
+adds no decisions of its own: it executes the plan that was verified and compiled, on the
+backend you choose.
+
 orun separates compilation from execution. `orun plan` produces an immutable
 `plan.json` — a DAG of jobs and steps with every reference resolved. `orun run`
 consumes that plan through an **execution backend** (a "runner") of your choice.
@@ -81,10 +85,35 @@ selected runner without actually executing anything.
 
 ## Resumption
 
-Runs are durable. `.orun/runs/<id>/state.json` records job and step status on every
-transition, so `orun run --resume <id>` picks up where a failed or interrupted run
-left off. The cockpit shows resumed runs with the <span className="g g-brand">⚡</span>
-glyph.
+Runs are durable. Every run is recorded as an execution in the object model under
+`.orun/objectmodel/` (see [state model](/concepts/state-model)), so running again with
+the same `--exec-id` skips the jobs that already succeeded and carries their logs
+forward. `orun run --job <id> --retry` re-runs a single job. In CI, pin the ID with
+`--exec-id` or `ORUN_EXEC_ID` so a rerun resumes the same execution; see
+[resume-aware CI reruns](/cli/orun-run#resume-aware-ci-reruns).
+
+## GitHub Actions steps
+
+### Action isolation
+
+When multiple jobs run concurrently and both use the same remote action (e.g., `actions/setup-node@v4`), each job works from its own isolated copy of that action's directory. The shared on-disk cache is never modified during execution, so jobs cannot race on the same files.
+
+Isolation is zero-cost by default: files are hardlinked from the cache into each job's temp directory. A full copy only happens when the job temp directory is on a different filesystem than the cache.
+
+Local actions (paths starting with `./`) are not isolated — they are used directly from the workspace.
+
+### Action reference caching
+
+Resolving a non-SHA action reference (e.g., `v4`) to a commit SHA requires a GitHub API call. orun avoids redundant API calls through a three-tier cache:
+
+| Tier | Scope | What it stores |
+| --- | --- | --- |
+| In-memory | Current process | `repo@ref` → SHA map, deduplicated via singleflight |
+| On-disk | Persistent across runs | SHA written to `~/.orun/actions/<repo>/refs/<ref>` |
+| API | Fallback | GitHub REST API `/repos/<owner>/<repo>/commits/<ref>` |
+
+This ensures that `--concurrency 4` with many jobs using the same action versions never triggers API rate limits, even with large platform repositories containing dozens of concurrent jobs.
+
 
 ## Trigger-aware execution
 

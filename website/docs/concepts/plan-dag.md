@@ -1,6 +1,12 @@
 ---
 title: Plan DAG
+description: The plan is the checkpoint between your standards and execution - every default, rule, and dependency resolved into one deterministic, reviewable DAG before anything runs.
 ---
+
+The plan is the checkpoint between your standards and execution. Every default, rule,
+pin, and dependency is resolved into one deterministic artifact, `plan.json`, before
+anything runs, so a reviewer reads exactly what will happen and a runner has nothing left
+to decide.
 
 The plan is the compiled artifact produced by `orun plan`. It is the boundary between planning and execution.
 
@@ -8,7 +14,7 @@ The plan is the compiled artifact produced by `orun plan`. It is the boundary be
 
 A rendered plan includes:
 
-- metadata such as name, namespace, timestamp, and checksum
+- metadata such as name, namespace, checksum, the trigger that shaped it, and its revision (no wall-clock timestamp, so identical inputs give identical bytes)
 - execution settings such as concurrency, fail-fast behavior, and state-file name
 - concrete jobs with stable IDs like `web-app.production.deploy`
 - ordered steps with `run` or `use` instructions

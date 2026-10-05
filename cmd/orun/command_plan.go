@@ -64,13 +64,13 @@ func pushCatalogAfterPlan(ctx context.Context) error {
 func registerPlanCommand(root *cobra.Command) {
 	root.AddCommand(planCmd)
 
-	planCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output plan file path (default: .orun/plans/)")
+	planCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Also write the plan to this file (every plan is sealed into the object model regardless)")
 	planCmd.Flags().StringVarP(&outputFormat, "format", "f", "json", "Output format (json/yaml)")
 	planCmd.Flags().BoolVar(&debugMode, "debug", false, "Enable debug output")
 	planCmd.Flags().StringVarP(&environment, "env", "e", "", "Filter by environment (comma-separated)")
 	planCmd.Flags().BoolVar(&allEnvs, "all-envs", false, "Plan all environments explicitly (mutually exclusive with --env)")
 	planCmd.Flags().StringArrayVar(&planComponents, "component", nil, "Filter by component (repeatable)")
-	planCmd.Flags().StringVar(&planName, "name", "", "Named plan stored in .orun/plans/<name>.json")
+	planCmd.Flags().StringVar(&planName, "name", "", "Name shown in the plan summary (run a plan by its checksum or \"latest\")")
 	planCmd.Flags().StringVarP(&viewPlan, "view", "v", "", "View plan (dag/dag:long/dependencies/component=NAME)")
 	planCmd.Flags().BoolVar(&planLong, "long", false, "Show detailed output (step commands, IDs)")
 	planCmd.Flags().BoolVar(&changedOnly, "changed", false, "Show only changed components (requires git)")

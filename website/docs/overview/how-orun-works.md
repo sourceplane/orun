@@ -1,30 +1,32 @@
 ---
 title: How orun works
-description: The orun mental model — declared intent is compiled into an immutable plan, the plan is executed by a runner, and everything observed is recorded in a content-addressed object store.
+description: The runner's walkthrough - declared intent is verified, compiled into a deterministic plan, executed on the runner you choose, and recorded as content-addressed history, with one example followed from intent.yaml to a release.
 ---
 
 Everything orun does fits in one sentence:
 
-> **Declared intent is compiled into an immutable plan; a runner executes the
-> plan; everything observed is recorded as immutable objects.**
+> **Declared intent is verified and compiled into an immutable plan; a runner
+> executes the plan; everything observed is recorded as immutable objects.**
 
-Three artifacts, three verbs. This page walks one example through all of them.
-If you only read one page beyond [What is orun?](what-is-orun.md), read this
-one.
+This is pillar 4 of platform discipline as code, the runner, and it is what makes the
+other three pillars binding. The standards you [declare](../concepts/intent-model.md),
+[package](../concepts/stacks.md), and [share with agents](../ai-context/orun-repositories.md)
+only matter if something checks them before anything runs. This page follows one example
+through every step. If you only read one page beyond [What is orun?](what-is-orun.md),
+read this one.
 
 ```text
-   DECLARE                COMPILE                EXECUTE              RECORD
+   DECLARE           VERIFY            PLAN                    EXECUTE           RECORD
 intent.yaml ─┐
-component.yaml ├──▶  orun plan  ──▶  plan.json  ──▶  orun run  ──▶  .orun/objectmodel/
-compositions ─┘     (6 stages)     (immutable DAG)   (runner)      (the object graph:
-                                                                     catalog · runs · logs ·
-                                                                     contracts · sessions)
-                                                                        │
-                                          orun status · logs · tui · catalog · objects
-                                                  (every surface reads the record)
-                                                                        │
-                                                   Orunbase (optional): shared state,
-                                                   the task plane, sandboxed agents
+component.yaml ├──▶ orun validate ──▶ orun plan ──▶ plan.json ──▶ orun run ──▶ .orun/objectmodel/
+compositions ─┘    (intent, rules)   (schemas,     (immutable    (runner)     (catalog · runs · logs ·
+                                      6 stages)     DAG)                       contracts · sessions)
+                                                                                    │
+                                              orun status · logs · tui · catalog · objects
+                                                      (every surface reads the record)
+                                                                                    │
+                                                       Orunbase (optional): shared state,
+                                                       the task plane, sandboxed agents
 ```
 
 ## 1. Declare — say what should exist
@@ -33,8 +35,8 @@ You author two kinds of documents. Neither contains a single line of execution
 logic.
 
 The **intent** is the repository-level control document: which environments
-exist, which policies and defaults bind them, where components are discovered,
-and which events activate what.
+exist, which defaults apply to them, in what order they promote, where
+components are discovered, and which events activate what.
 
 ```yaml
 # intent.yaml
@@ -65,7 +67,7 @@ automation:
 ```
 
 Each **component** declares itself next to its code: a name, a *type*, the
-environments it subscribes to, and typed inputs.
+environments it subscribes to, and typed parameters.
 
 ```yaml
 # apps/web/component.yaml
@@ -82,8 +84,7 @@ spec:
       - { name: staging,    profile: verify }
       - { name: production, profile: deploy }
   parameters:
-    chart: charts/web-app
-    replicas: 3
+    chartPath: charts/web-app
   dependsOn:
     - component: checkout-api
 ```
@@ -93,31 +94,44 @@ The component's `type` is a contract name, not an implementation. *How* a
 versioned **composition** package — an input schema, job templates, and
 execution profiles. App teams never see it; they just satisfy its schema.
 
-## 2. Compile — turn intent into a decision
+## 2. Verify — check the declarations
+
+`orun validate` checks the intent file and the component manifests it discovers, the
+reserved `ORUN_` environment prefix, and every profile and dependency rule, without
+loading compositions or compiling anything. It is fast enough for a pre-commit hook and
+the first step of every CI run.
+
+```bash
+orun validate
+```
+
+The heavier checks need the golden paths, so they happen as the first stage of the plan.
+
+## 3. Plan — turn intent into a decision
 
 `orun plan` runs the six-stage compiler:
 
 | Stage | What it does |
 |---|---|
-| **Load** | Parse and schema-validate intent, discovered components, locked compositions |
-| **Normalize** | Canonicalize names, expand wildcards, fill documented defaults |
-| **Expand** | Materialize the environment × component matrix into instances; merge inputs; apply policies |
+| **Load** | Parse the intent and discovered components, resolve composition sources (verifying any `digest:` pin), and apply presets |
+| **Normalize** | Canonicalize names, expand wildcards, fill documented defaults, then check every component's parameters against its composition's schema |
+| **Expand** | Materialize the environment × component matrix into instances; merge parameters and `env`; check secret references |
 | **Bind** | Attach each instance to its composition's job templates; render steps |
 | **Resolve** | Convert dependencies to job-level edges; detect cycles; order the DAG |
 | **Materialize** | Emit `plan.json` — every reference concrete, nothing left to interpret |
 
-The output for our example: `web-app` becomes two instances —
-`web-app@staging` running the `verify` profile and `web-app@production`
-running `deploy` — each with fully merged inputs, an edge to
+The output for our example: `web-app` becomes two instances, one in staging
+running the `verify` profile and one in production running `deploy`, each with
+fully merged parameters, an edge to
 `checkout-api`'s jobs, and a promotion edge ordering production after staging.
 
 Three properties make the plan worth trusting:
 
 - **It is deterministic.** The compiler is a pure function of
-  `(intent, components, locked composition digests, trigger context)`.
+  `(intent, components, resolved composition digests, trigger context)`.
   Identical inputs produce byte-identical plans, so a plan diff in a pull
   request is a faithful preview of behavior.
-- **It is complete.** Every implicit default, policy merge, and dependency
+- **It is complete.** Every implicit default, merged parameter, and dependency
   edge is explicit in the artifact. If a behavior isn't visible in the plan,
   that's a bug.
 - **It is checked.** Every component's parameters are validated against its
@@ -137,7 +151,7 @@ orun plan --env staging --output plan.json --view dag   # compile + visualize
 orun plan --explain                                     # why was each job selected?
 ```
 
-## 3. Execute — run the plan, anywhere
+## 4. Execute — run the plan, anywhere
 
 `orun run` walks the DAG and executes steps through a **runner backend**:
 your local shell, Docker, or GitHub Actions. The plan is the boundary — it
@@ -150,11 +164,11 @@ orun run --plan plan.json --runner docker # isolated
 orun run --plan plan.json --gha           # GitHub Actions compatibility mode
 ```
 
-Execution is resumable: jobs that already succeeded are skipped (with their
-logs carried forward) when a run is resumed, because the record — not the
-runner's memory — is the source of truth.
+Execution is resumable: run again with the same `--exec-id` and jobs that
+already succeeded are skipped (with their logs carried forward), because the
+record, not the runner's memory, is the source of truth.
 
-## 4. Record — everything observed becomes an object
+## 5. Record — everything observed becomes an object
 
 orun persists what it learns the same way git persists commits: as a DAG of
 **immutable, content-addressed objects** with a thin layer of named refs on
@@ -207,8 +221,8 @@ write the same objects it does.
 For our example, a release looks like this:
 
 1. A `v1.4.0` tag fires the `github-tag-release` binding.
-2. orun compiles a full plan: staging jobs, production jobs ordered after
-   them, `checkout-api` before `web-app`, every input merged and visible.
+2. orun verifies and compiles a full plan: staging jobs, production jobs ordered
+   after them, `checkout-api` before `web-app`, every parameter merged and visible.
 3. The runner executes the DAG; `orun status --watch` shows it live.
 4. The sealed execution joins the object model. The catalog's live plane now
    answers "what is deployed in production?" with `web-app @ v1.4.0` —
@@ -223,9 +237,9 @@ declared sources and recorded facts.
 - [The resource model](resource-model.md) — the typed documents behind each
   layer, and how they version.
 - [Intent model](../concepts/intent-model.md) →
+  [Standards](../concepts/standards.md) →
   [Compositions](../concepts/compositions.md) →
-  [Plan DAG](../concepts/plan-dag.md) — the three core concepts, in reading
-  order.
+  [Plan DAG](../concepts/plan-dag.md) — the core concepts, in reading order.
 - [State model](../concepts/state-model.md) — the object store in detail.
 - [The task plane](../concepts/task-plane.md) and
   [the agent runtime](../concepts/agent-runtime.md) — the planes around the

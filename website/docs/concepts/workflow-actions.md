@@ -1,6 +1,13 @@
 ---
 title: Workflows
+description: Workflows (workflow steps) let side-effecting automation such as opening a PR, calling an API, or waiting on an approval run inside the plan's contract, with typed inputs and outputs and secrets as references, instead of leaking into shell.
 ---
+
+Workflows let the automation around a plan (opening a pull request, calling an
+authenticated API, waiting on an approval) run inside the same contract as everything
+else: typed inputs and outputs, secrets as references, every step in the plan and the
+record. A workflow is execution, never intent: it carries out what was declared and does
+not change what was declared.
 
 `orun` has two execution vocabularies at the plan-step level: `run:` (a shell
 command) and `use:` (a GitHub Actions action). Both are opaque to orun's data
@@ -144,7 +151,7 @@ not succeed.
 
 ## Surface B — a `workflow:` blueprint hook
 
-A [blueprint](./compositions.md) hook can be a workflow instead of a bare argv.
+A [blueprint](../cli/orun-new.md) hook can be a workflow instead of a bare argv.
 Hooks run **after** the gated tree is written, opt-in via `orun new --run-hooks`,
 in two granularities:
 

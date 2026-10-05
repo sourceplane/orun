@@ -22,7 +22,7 @@ my-repo/
 
 Running any `orun` command from `services/api/src/` finds `intent.yaml` at the repo root automatically.
 
-The `.orun/` state directory (plans, executions, logs) is always created at the intent root — never at your current working directory.
+The `.orun/` state directory (the object model under `.orun/objectmodel/`, holding catalogs, plans, executions, and logs) is always created at the intent root, never at your current working directory.
 
 ## Component context detection
 

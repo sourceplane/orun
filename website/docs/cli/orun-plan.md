@@ -1,6 +1,9 @@
 ---
 title: orun plan
+description: Compile intent, components, and compositions into a deterministic execution DAG - the plan step, where component schemas, source pins, and secret references are checked before anything runs.
 ---
+
+`orun plan` is the plan step, and the heaviest check before anything runs: it validates every component's parameters against its composition's schema, verifies any pinned source digest, applies inherited presets, rejects literal secrets, and refuses dependency cycles, then compiles the result into a deterministic plan.
 
 `orun plan` compiles intent, component discovery, and compositions into an immutable execution DAG.
 
@@ -86,7 +89,7 @@ Generate with an explicit output path (for backwards compatibility):
 orun plan -i examples/intent.yaml -o /tmp/orun-plan.json
 ```
 
-Generate a named plan that can be referenced by name later:
+Label a plan in its summary (run it later by its checksum or `latest`, not by this name):
 
 ```bash
 orun plan -i examples/intent.yaml --name release-candidate
@@ -150,9 +153,9 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | Flag | Meaning |
 | --- | --- |
 | `--intent`, `-i` | Intent file path (auto-discovered if not set) |
-| `--output`, `-o` | Explicit output path (optional; defaults to `.orun/plans/`) |
+| `--output`, `-o` | Also write the plan to this path (optional; every plan is sealed into the object model under `.orun/objectmodel/` regardless) |
 | `--format`, `-f` | Output format: `json` or `yaml` |
-| `--name` | Give the plan a memorable name for later reference via `--plan <name>` |
+| `--name` | A name shown in the plan summary. It is not a run reference: run a plan by its checksum or `latest` |
 | `--debug` | Enable debug logging during planning |
 | `--env`, `-e` | Restrict compilation to specific environments (comma-separated) |
 | `--all-envs` | Compile all environments explicitly (mutually exclusive with `--env`) |
