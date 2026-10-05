@@ -173,8 +173,10 @@ records, and replayed against any runner.
 
 `.orun/compositions.lock.yaml` (`sourceplane.io/v1alpha1`, kind `CompositionLock`) records
 the digest every composition source resolved to. `orun plan` and
-`orun compositions lock` write it; orun does not read it back. The binding pin
-is a `digest:` on the source in `intent.yaml`, which `orun plan` verifies, and
+`orun compositions lock` write it; the service catalog reads it to bind component
+types to compositions, and `orun compositions lock --check` compares against it. The
+binding pin is a `digest:` on the source in `intent.yaml`, which `orun plan` verifies
+(`orun compositions lock --write-intent` writes it for you), and
 the plan itself records each resolved digest under `spec.compositionSources`,
 so "which contract" is answered by the plan, never at run time.
 
