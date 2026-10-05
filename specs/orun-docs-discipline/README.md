@@ -17,7 +17,7 @@ appear as features in a list rather than as the point.
 
 | Field | Value |
 |-------|-------|
-| Status | **In progress.** PD1–PD6 below; progress in [IMPLEMENTATION-STATUS.md](./IMPLEMENTATION-STATUS.md) |
+| Status | **Complete.** PD1–PD6 merged and released as v2.73.0–v2.73.5; see [IMPLEMENTATION-STATUS.md](./IMPLEMENTATION-STATUS.md) |
 | Cluster | **PD**, milestones **PD1–PD6** |
 | Owner(s) | `website/` (docs, sidebar, site config), `README.md`, `cmd/orun/commands_root.go` (root help text), `context-for-ai/`, `skills/`, `agents/` (comments only) |
 | Target branch | `main` |

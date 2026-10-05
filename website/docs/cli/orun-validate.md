@@ -1,5 +1,6 @@
 ---
 title: orun validate
+description: The verify step - check the intent, its discovered component manifests, the reserved ORUN_ prefix, and every profile and dependency rule, without compiling a plan.
 ---
 
 `orun validate` is the verify step: it checks the intent file, the component manifests it discovers, the reserved `ORUN_` environment prefix, and the profile and dependency rules, without loading compositions or generating a plan. Checking each component's parameters against its composition's schema happens in [`orun plan`](./orun-plan.md); run both in CI. See [standards](../concepts/standards.md) for what each command enforces.

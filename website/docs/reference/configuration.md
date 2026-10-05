@@ -40,9 +40,9 @@ environments:
 
 The intent file is where you define environments, discovery roots, groups, selectors, defaults, and optional inline components. Root-level `env` provides global environment variables shared across all environments.
 
-It also declares where the repository keeps its **work** — the epics tree
-and the task contracts — when it keeps them somewhere other than the
-default (orun-cloud `saas-work-gitops`, design §1):
+It also declares where the repository keeps its **work** (the epics tree
+and the task contracts) when it keeps them somewhere other than the
+default; see [`orun work`](../cli/orun-work.md):
 
 ```yaml
 work:

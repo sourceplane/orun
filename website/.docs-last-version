@@ -1,6 +1,6 @@
 # Docs last updated for version
 
-v2.58.15
+v2.73.5
 
 ## How to use this file
 
@@ -8,14 +8,21 @@ When updating docs next time, run:
 
 ```bash
 # Get all changes since docs were last updated
-git log v2.58.15..HEAD --oneline
+git log v2.73.5..HEAD --oneline
 ```
 
 Then update this file to the new version after the docs PR is merged. Prefer
 writing a release-notes page under docs/release-notes/ for every minor
 release, so this file is a pointer rather than a changelog.
 
-## What was covered in this update (2026-09-22)
+## What was covered in this update (2026-10-05)
+
+- The docs epic `specs/orun-docs-discipline/` (PD1-PD6, v2.73.0 through
+  v2.73.5) re-framed the whole site around platform discipline as code and
+  its four pillars, and corrected the claims the code did not back. Each
+  milestone's release notes list what changed.
+
+## Previous update (2026-09-22)
 
 - Full refresh of the site against the v2.58.15 CLI: every top-level command
   now has a reference page (16 were missing), the command map in cli/orun.md

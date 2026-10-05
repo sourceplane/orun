@@ -1,5 +1,6 @@
 ---
 title: Use with kiox
+description: Run orun as an OCI-distributed provider inside a kiox workspace.
 ---
 
 `orun` can run as an OCI-distributed provider inside a `kiox` workspace.

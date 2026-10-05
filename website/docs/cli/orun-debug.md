@@ -1,5 +1,6 @@
 ---
 title: orun debug
+description: Print every compiler stage for an intent, to see what the planner does before it materialises a plan.
 ---
 
 `orun debug` traces intent processing so you can inspect what the planner is doing before it materializes a final plan.

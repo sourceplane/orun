@@ -1,9 +1,10 @@
 ---
 title: Workflow schema
+description: The field reference for orun.dev/v1 workflow files - steps, inputs, outputs, polling, and approval gates.
 ---
 
 The complete field reference for `orun.dev/v1` workflow files — the language
-executed in-process by orun since orun-workflows-v3, standalone via
+executed in-process by orun since v2.35.0, standalone via
 [`orun workflow run`](../cli/orun-workflow.md) or embedded as a
 [`workflow:` plan step or blueprint hook](../concepts/workflow-actions.md).
 

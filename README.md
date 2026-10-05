@@ -129,7 +129,7 @@ path:
 curl -fsSL https://raw.githubusercontent.com/sourceplane/orun/main/install.sh | sh
 ```
 
-It installs the latest release to `~/.local/bin`. `ORUN_VERSION=v2.58.15`
+It installs the latest release to `~/.local/bin`. `ORUN_VERSION=v2.73.4`
 pins a version and `ORUN_INSTALL_DIR` changes the destination.
 
 Other ways to install:
@@ -142,8 +142,8 @@ go install github.com/sourceplane/orun/cmd/orun@latest
 git clone https://github.com/sourceplane/orun.git && cd orun && make build
 
 # as a pinned kiox provider, or under Docker
-kiox init demo && kiox --workspace demo add ghcr.io/sourceplane/orun:v2.58.15 as orun
-docker run --rm -v "$PWD":/work -w /work ghcr.io/sourceplane/orun:v2.58.15 plan
+kiox init demo && kiox --workspace demo add ghcr.io/sourceplane/orun:v2.73.4 as orun
+docker run --rm -v "$PWD":/work -w /work ghcr.io/sourceplane/orun:v2.73.4 plan
 ```
 
 A release archive can be verified and installed by hand; see

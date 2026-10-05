@@ -1,5 +1,6 @@
 ---
 title: orun policy
+description: List, lint, test, and push the portable SecretPolicy documents that decide who may resolve which secrets, under which run facts.
 ---
 
 `orun policy` manages and tests the portable secret-access policy (Layer 2) —

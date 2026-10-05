@@ -1,11 +1,12 @@
 ---
 title: orun workflow
+description: Validate, digest, run, or view a standalone workflow file outside a plan.
 ---
 
 `orun workflow` is the standalone authoring on-ramp for
 [workflows](../concepts/workflow-actions.md) — validate, digest, run, or view an
 `orun.dev/v1` workflow file directly, before wiring it into a `workflow:` plan
-step or blueprint hook. Since orun-workflows-v3 the engine is **in-process**:
+step or blueprint hook. Since v2.35.0 the engine is **in-process**:
 there is no external engine binary, no engine pin, and no
 `ORUN_TORKFLOW_ENGINE`. The binary that compiles the plan runs the workflow.
 

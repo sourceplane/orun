@@ -1,5 +1,6 @@
 ---
 title: orun github
+description: Inspect GitHub Actions artifact shards and workflow runs, and import them into the local object model, with no download-artifact step.
 ---
 
 `orun github` inspects GitHub Actions artifact shards and workflow runs — no `actions/download-artifact` step required.

@@ -1,10 +1,11 @@
 ---
 title: orun backend
+description: Provision, inspect, and remove a self-hosted orun backend on your own Cloudflare account, as an alternative to Orunbase for remote state.
 ---
 
 The `orun backend` command group lets you provision, inspect, and remove a self-hosted Orun backend on your own Cloudflare account.
 
-This is an alternative to using Orunbase (`https://orun-api.sourceplane.ai`). After running `orun backend init`, the resulting Worker URL is stored in `~/.orun/config.yaml` so that `orun auth login`, `orun cloud link`, `orun run --remote-state`, `orun status --remote-state`, and `orun logs --remote-state` can find it by default.
+This is an alternative to using Orunbase, the hosted control plane orun talks to by default. After running `orun backend init`, the resulting Worker URL is stored in `~/.orun/config.yaml` so that `orun auth login`, `orun cloud link`, `orun run --remote-state`, `orun status --remote-state`, and `orun logs --remote-state` can find it by default.
 
 ## Prerequisites
 

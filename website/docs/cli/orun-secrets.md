@@ -1,5 +1,6 @@
 ---
 title: orun secrets
+description: Manage the workspace secrets that secret:// references resolve against. Values are write-only; orun never prints them back.
 ---
 
 `orun secrets` manages the workspace secrets that

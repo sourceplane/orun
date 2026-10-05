@@ -1,5 +1,6 @@
 ---
 title: State model
+description: The content-addressed object model under .orun/objectmodel/ - every catalog, plan, and run sealed as tamper-evident history.
 ---
 
 `orun` keeps a complete history of every catalog it has resolved, every plan it

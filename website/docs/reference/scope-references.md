@@ -1,5 +1,6 @@
 ---
 title: Scope references
+description: The grammar shared by secret://, config://, and flag:// references, parsed identically by the CLI and the platform.
 ---
 
 `secret://`, `config://`, and `flag://` references share one grammar — the

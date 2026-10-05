@@ -1,5 +1,6 @@
 ---
 title: orun tui
+description: The cockpit TUI - browse components, compose and run plans, and watch the record live in the terminal.
 ---
 
 `orun tui` opens the Orun Cockpit — an interactive terminal UI for browsing components, generating plans, running them, and watching logs stream live.

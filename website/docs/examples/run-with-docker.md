@@ -1,5 +1,6 @@
 ---
 title: Run with Docker
+description: Run a plan with the Docker backend, so every step executes in a container with the workspace mounted.
 ---
 
 The Docker backend executes each step inside a container and mounts the repository workspace at `/workspace`.

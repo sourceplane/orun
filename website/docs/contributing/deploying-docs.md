@@ -42,7 +42,7 @@ Replace `orun-docs` if your Cloudflare Pages project name differs.
 
 ## Tracking what the docs cover
 
-`website/.docs-last-version` used to record the release the docs were last refreshed against and what that refresh covered. It is being replaced by the release notes under `website/docs/release-notes/`: when you document a release, add its page there and update the navbar link in `docusaurus.config.js`.
+`website/.docs-last-version` used to record the release the docs were last refreshed against and what that refresh covered. It is being replaced by the release notes under `website/docs/release-notes/`: when you document a release, add its page there and list it first in the release-notes sidebar. The `Releases` navbar link points at the GitHub releases page and needs no update.
 
 ## Notes
 

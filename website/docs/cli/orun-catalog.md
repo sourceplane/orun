@@ -1,5 +1,6 @@
 ---
 title: orun catalog
+description: Resolve, persist, push, and query the service catalog derived from your declared intent - the same catalog that drives change detection and that agents read.
 ---
 
 `orun catalog` resolves, persists, and inspects the **service catalog** — the
@@ -163,7 +164,7 @@ orun catalog describe <name>      # the full v1 envelope for one component or en
 orun catalog docs <entity> [doc]  # a resolved doc from the catalog closure (default: overview)
 orun catalog tree                 # the catalog relationship graphs
 orun catalog history <name>       # a component's execution history
-orun catalog diff <a> <b>         # compare two catalog snapshots
+orun catalog diff [component]     # compare two catalog snapshots (--base, default main; --head, default current)
 orun catalog refs                 # every catalog ref + resolved source/catalog keys
 ```
 
