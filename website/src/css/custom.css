@@ -561,3 +561,41 @@ kbd {
     padding: 1rem 1rem 0.9rem;
   }
 }
+
+/* Keep the hero and terminal frames inside narrow viewports: the pre scrolls
+   on its own instead of widening the page. */
+.heroFrame,
+.cockpitFrame {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.cockpitFrame > pre {
+  max-width: 100%;
+}
+
+@media (max-width: 600px) {
+  .heroFrame {
+    padding: 1.75rem 1.1rem 1.25rem;
+  }
+
+  .heroTitle {
+    font-size: clamp(2rem, 9vw, 2.6rem);
+  }
+
+  .cockpitFrame {
+    padding: 1.1rem 1rem 1rem;
+    font-size: 0.78rem;
+  }
+}
+
+/* On narrow screens a wide table scrolls inside itself instead of widening
+   the page. */
+@media (max-width: 996px) {
+  .theme-doc-markdown table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}

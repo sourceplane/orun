@@ -1,181 +1,200 @@
 ---
 title: What is orun?
-description: orun is an intent compiler for platform engineering — it compiles declarative intent into deterministic plans, converges them on any runner, records everything it learns as a content-addressed object graph, and gives humans and coding agents one truthful surface over all of it.
+description: orun is platform discipline as code. A declarative language for your platform's structure and standards, a way to package and evolve them like code, a grounding for the coding agents that work in your repositories, and a runner that verifies, plans, and executes.
 ---
 
-orun is an **intent compiler for platform engineering**. You describe the
-desired shape of your delivery platform — which components exist, which
-environments they ship to, what policies bind them — and orun turns that
-description into something executable, observable, and queryable:
+orun is **platform discipline as code**. It gives a platform team a declarative language
+for the two things that are usually hardest to keep straight: the platform's *structure*
+(which components exist, where they ship, how they depend on each other) and its
+*standards* (how each kind of thing is built, what may run in which lane, in what order
+environments promote). You write both down as intent, in the repository, where they can be
+reviewed, versioned, and read by anyone, including a coding agent.
 
-- a **deterministic execution plan** (`plan.json`) compiled from your intent,
-- a **typed service catalog** derived from the same sources,
-- an **immutable object graph** under `.orun/` recording every run, plan,
-  catalog, contract, agent type, and session, addressed by content hash.
+From there, four things follow, and they are the four pillars these docs are organised
+around:
 
-If Kubernetes is a control plane for *running* software — you declare desired
-state, controllers reconcile reality toward it — orun is the equivalent for
-*delivering* software. The difference in mechanism is deliberate: delivery is
-an event-driven domain, so instead of a reconciling loop, orun gives you a
-**compiler**. Every event (a PR, a merge, a tag, a manual run) produces a
-complete, reviewable plan *before* anything executes, and `orun run`
-converges that plan on whichever runner you trust.
+1. **Declare.** Structure and standards live in `intent.yaml`, `component.yaml`, and
+   composition packages: typed, schema-checked documents instead of wiki pages and CI
+   conditionals.
+2. **Package and evolve.** Standards travel like code. Golden paths ship as versioned
+   **Stacks**, platform rules ship as **intent presets**, a lockfile pins every digest, and
+   a **baseline** packages a whole product so it can be rebuilt and upgraded rather than
+   copied and forked.
+3. **Ground agents.** A coding agent reads the same intent, catalog, and contracts your
+   platform does, through one MCP server and a versioned base literacy. What it may touch is
+   declared, so it works inside your standards instead of inferring them from the nearest
+   example.
+4. **Verify, plan, execute.** A runner checks the intent, compiles it into a deterministic
+   plan you can review as a diff, and executes that plan on your shell, in Docker, or on
+   GitHub Actions, recording everything it does.
 
-The same binary is also where work and the agents that do it are governed:
-a task plane whose status is derived, never typed; an agent runtime whose
-inputs and outputs are sealed content; an MCP server that gives a coding
-agent hands on all of it; and a scaffold engine that rebuilds an entire
-product from a registered baseline. The hosted control plane behind those
-surfaces is **Orunbase** (app.orunbase.com). orun works without it; Orunbase
-makes it shared.
+orun is a single Go binary, and its state lives in your repository. The hosted control
+plane, **Orunbase** (app.orunbase.com), adds shared state, workspaces, the task plane, and
+sandboxed agents when a team needs them. orun works without it.
 
 ## The problem orun solves
 
 A delivery system has three forces that grow independently:
 
-- **Components** — the things you ship: services, charts, Terraform stacks,
-  static sites. Tens to hundreds of them, owned by different teams.
-- **Environments** — the places they ship to: dev, staging, production,
-  per-region, per-tenant. Each with its own policies and promotion rules.
-- **Triggers** — the events that cause shipping: pull requests, merges,
-  tags, schedules. Each demanding different behavior from the same components.
+- **Components** are the things you ship: services, charts, Terraform stacks, static
+  sites. Tens to hundreds of them, owned by different teams.
+- **Environments** are the places they ship to: dev, staging, production, per-region,
+  per-tenant. Each has its own rules and promotion order.
+- **Triggers** are the events that cause shipping: pull requests, merges, tags, schedules.
+  Each demands different behaviour from the same components.
 
-Most organizations encode the product of these three forces in CI
-configuration. That encoding collapses **what should happen** into **how it
-happens**: the environment matrix lives in `if:` expressions, policy in code
-review vigilance, dependency order in job names. Nobody can answer "what will
-this change actually do?" without running it — and a coding agent joining the
-team inherits the same fog, plus a tracker it can update by typing.
+Most organisations encode the product of these three forces in CI configuration, and the
+standards that govern it in documents and review habits. That encoding collapses **what
+should happen** into **how it happens**: the environment matrix lives in `if:` expressions,
+the golden path lives in whichever repository was copied last, dependency order lives in
+job names. Nobody can answer "what will this change do?" without running it. A coding agent
+joining the team inherits the same fog and fills the gaps by imitation, at machine speed.
 
 orun separates those concerns into layers with stable schemas:
 
 | Layer | Question it answers | Lives in | Owned by |
 |---|---|---|---|
-| **Intent** | What exists, where does it ship, under which policies? | `intent.yaml`, `component.yaml` | Platform & app teams |
-| **Contract** | How does each component type execute? What does a task require? | Composition packages, `TaskContract` documents | Platform team, task authors |
-| **Plan** | Exactly what will run, in what order, with what inputs? | `plan.json` | Compiled — never edited |
+| **Intent** | What exists, where does it ship, under which rules? | `intent.yaml`, `component.yaml` | Platform and app teams |
+| **Contract** | How is each kind of component built? What may a task touch? | Composition packages, `TaskContract` documents | Platform team, task authors |
+| **Plan** | Exactly what will run, in what order, with what inputs? | `plan.json` | Compiled, never edited |
 | **Record** | What actually happened? | `.orun/objectmodel/` | Written by the runtime |
 
-Because the layers are separate, each can be reviewed, versioned, and evolved
-independently: a reviewer sees the full consequence of a YAML change as a plan
-diff, and a task's verdict is read off the record, not off an assertion.
+Because the layers are separate, each can be reviewed, versioned, and evolved on its own.
+A platform team can ship a new version of a golden path without touching any application
+repository; a reviewer sees the full consequence of a YAML change as a plan diff; a task's
+verdict is read off the record, not off an assertion.
 
-## What you get
+## What you get, pillar by pillar
 
-**A planner.** `orun plan` runs a six-stage compiler — load, normalize,
-expand, bind, resolve, materialize — over your intent, discovered components,
-and locked composition packages. Identical inputs produce byte-identical
-plans; `orun intent render` and `orun intent explain` show the effective intent.
+### 1 · Declare
 
-**A policy engine that runs at compile time.** Group and environment policies
-are enforced when the plan is built; a non-compliant intent fails
-`orun validate` with a structured error, not a half-deployed environment.
+- **A platform intent.** `intent.yaml` declares environments, groups, discovery roots,
+  trigger bindings, promotion order, and the composition sources the repository uses. See
+  the [intent model](../concepts/intent-model.md).
+- **Component intent next to the code.** Each `component.yaml` says what a unit is, which
+  golden path it follows, which environments it subscribes to with which profile, its
+  typed parameters, and what it depends on.
+- **Golden paths as contracts.** A [composition](../concepts/compositions.md) is the
+  schema a component must satisfy, the job templates it runs, and the execution profiles
+  allowed per lane. `orun plan` rejects a component whose parameters do not match its
+  composition's schema.
+- **Rules that adapt to the event.** [Trigger bindings](../concepts/trigger-bindings.md),
+  [profile rules](../concepts/profile-rules.md),
+  [dependency rules](../concepts/dependency-rules.md), and
+  [environment promotion](../concepts/environment-promotion.md) say which events activate
+  which environments, which profile runs in which lane, and what waits for what.
+- **Secrets as references.** A secret slot holds a `secret://` reference, never a value.
+  See [secrets](../concepts/secrets.md).
 
-**A runtime with swappable backends.** The plan is the boundary. Execute it on
-your local shell, in Docker, or on GitHub Actions without recompiling.
-Workflows (`kind: Workflow`) use the same step verbs as job templates for the
-glue around a plan, with `orun approve` for gated steps.
+### 2 · Package and evolve
 
-**A service catalog you don't have to maintain.** orun derives a typed
-catalog — Components, Systems, Domains, APIs, Resources, Environments, Groups,
-Compositions, and the Repo itself — as a projection of the sources.
-Ownership comes from `CODEOWNERS`; deployments and health from execution
-history.
+- **Stacks.** Compositions are packaged and published as versioned OCI artifacts with
+  `orun pack` and `orun publish`, and pulled by any repository like a dependency. See
+  [Stacks](../concepts/stacks.md).
+- **Intent presets.** A Stack can also publish platform rules (environments, triggers,
+  defaults, discovery roots) that repositories inherit with `extends:`.
+  `orun intent explain` shows where every effective field came from. See
+  [intent presets](../concepts/intent-presets.md).
+- **Locks.** `orun compositions lock` pins every resolved source by digest in
+  `compositions.lock.yaml`, so a standard changes only when you change the pin.
+- **Blueprints and baselines.** `orun new` places a `kind: Blueprint` phase by phase and
+  records a provenance lock so `orun new upgrade` can three-way merge a newer release.
+  `orun baseline` rebuilds a registered baseline, a whole product's structure and
+  standards, for a new owner. See [baselines](../concepts/baselines.md).
 
-**An object graph you can inspect.** Everything orun persists is a DAG of
-immutable, content-addressed objects with named refs on top; `orun objects`
-lets you `cat`, `ls-tree`, `log`, `fsck`, `push`, and `pull` it like a git
-store.
+### 3 · Ground agents
 
-**A task plane.** `orun task` creates tasks whose keys come from the platform
-allocator, whose contracts live in the repository sealed by content hash,
-and whose verdict — `draft → ready → in_progress → in_review → done →
-released` — is derived from branches, PRs, merges, and gates. Epics and
-milestones are the containers; `orun spec` pushes design docs beside them.
+- **One MCP server.** `orun mcp serve` gives a coding agent the platform's catalog, runs,
+  logs, skills, and task plane over one connection, plus the provenance pen for opening
+  pull requests. `--read-only` drops every write.
+- **Base literacy and agent types.** `orun agent context` prints the versioned literacy
+  every agent type extends. Agent types are `agents/*.md` files with a deny-by-default tool
+  policy, sealed into snapshots; briefs are frozen; sessions are append-only logs you can
+  attach to, steer, and replay. See the [agent runtime](../concepts/agent-runtime.md).
+- **Contracts and derived status.** `orun task` binds work to a `TaskContract` whose
+  `affects` list is the blast radius a change may touch. Status is derived from branches,
+  pull requests, merges, and gates; no agent has a tool to mark anything done. See the
+  [task plane](../concepts/task-plane.md).
+- **Skills.** `orun skills` pulls the hosted playbooks agents follow.
 
-**A provenance pen.** `orun pr open` writes a PR's lineage into the branch
-name (`orun/<KEY>-<slug>`), the `Orun-Task` commit trailer `orun githooks
-install` stamps, and a manifest in the body; `check` preflights, `land` merges.
+[Agents in orun repositories](../ai-context/orun-repositories.md) is the starting point
+for this pillar.
 
-**An agent runtime.** `orun agent` delegates a task to a coding agent behind
-a driver seam. Agent types are `agents/*.md` files sealed into snapshots;
-briefs are frozen; sessions are append-only logs you can attach to, steer,
-approve, detach from, and replay. `orun agent serve` runs the identical loop
-in an Orunbase sandbox, grounded in a real checkout of a linked repository.
+### 4 · Verify, plan, execute
 
-**One MCP server.** `orun mcp serve` composes the pen and the platform — 34
-tools over one connection; `--read-only` drops every platform write.
-`orun skills` pulls the hosted playbooks agents follow.
+- **Verify.** `orun validate` checks the intent and its profile and dependency rules
+  without compiling a plan.
+- **Plan.** `orun plan` runs a six-stage compiler (load, normalize, expand, bind,
+  resolve, materialize) over your intent, discovered components, and locked compositions.
+  Identical inputs produce byte-identical plans. `orun intent render` and
+  `orun intent explain` show the effective intent the plan was compiled from.
+- **Execute.** `orun run` executes the plan on your shell, in Docker, or on GitHub Actions
+  without recompiling. `--changed` compiles only what a commit touched. Workflows
+  (`kind: Workflow`) carry the glue around a plan, with `orun approve` for gated steps.
+- **Record.** Everything orun persists is a graph of immutable, content-addressed objects
+  under `.orun/` that `orun objects` can inspect like a git store. A typed
+  [service catalog](../concepts/service-catalog.md) is derived from the same sources,
+  with ownership from `CODEOWNERS` and deployments from execution history. `orun status`,
+  `orun logs`, and `orun tui` render the record in the [cockpit](../cockpit/overview.md).
 
-**A scaffold engine and baselines.** `orun new` places a `kind: Blueprint`
-phase by phase and writes a provenance lock so `orun new upgrade` can
-three-way merge a newer release. `orun baseline` builds a registered
-baseline — a complete product such as `cirrus` or `lumen` — with `--local`
-or `--via-platform`, and authors the build into the task plane as it goes.
+### Across all four
 
-**Workspaces, secrets, policy, integrations.** `orun workspace` chooses the
-tenancy every cloud command runs under; `orun secrets` moves values up
-without printing them back; `orun policy` lints and tests portable
+`orun workspace` chooses the tenancy every cloud command runs under; `orun secrets` moves
+values up without printing them back; `orun policy` lints and tests portable
 `SecretPolicy` documents; `orun integrations` mints provider-brokered secrets.
-
-**A cockpit.** `orun status`, `orun logs`, and `orun tui` render the same
-record through one view-model. `orun tui-next` previews cockpit v2 — Home,
-Agents, Activity, Catalog, and Events — the terminal head of Orunbase.
 
 ## What orun is not
 
-- **orun is not a CI system.** It does not host runners or replace GitHub
-  Actions. It runs *inside* your CI or your shell and gives it a
-  deterministic plan. Your CI provides compute and credentials; orun provides
-  the decision.
-- **orun is not an IaC or deployment tool.** It does not replace Terraform,
-  Helm, or wrangler — it orchestrates them through typed, versioned
-  compositions.
-- **orun is not a hosted platform, and Orunbase is not required.** orun is a
-  single binary whose state lives in your repository's `.orun/`. Orunbase
-  adds shared state, workspaces, the task plane's allocator, sandboxed agents,
-  and the console; `orun backend init` self-hosts remote state on Cloudflare.
-- **orun is not a tracker with an agent bolted on.** The agent is a client of
-  a truth engine that already exists; it has no tool to mark anything done.
-  It pushes a branch, opens a PR, and the observation moves the rung.
-- **orun is not a catalog you curate by hand.** Entities are derived from the
-  same declarative sources that drive execution. If it ships, it's in the
-  catalog; if it's in the catalog, the sources say so.
+- **orun is not a CI system.** It does not host runners or replace GitHub Actions. It runs
+  *inside* your CI or your shell and gives it a deterministic plan. Your CI provides
+  compute and credentials; orun provides the decision.
+- **orun is not an IaC or deployment tool.** It does not replace Terraform, Helm, or
+  wrangler. It orchestrates them through typed, versioned compositions.
+- **orun is not a wiki for standards.** A standard in orun is a document the planner
+  reads. If a rule is not in the intent or a composition, orun does not know it exists.
+- **orun is not a hosted platform, and Orunbase is not required.** orun is a single binary
+  whose state lives in your repository's `.orun/`. Orunbase adds shared state, workspaces,
+  the task plane's allocator, sandboxed agents, and the console; `orun backend init`
+  self-hosts remote state on Cloudflare.
+- **orun is not a tracker with an agent bolted on.** The agent is a client of the same
+  intent and record everyone else uses; it has no tool to mark anything done. It pushes a
+  branch, opens a pull request, and the observation moves the task.
+- **orun is not a catalog you curate by hand.** Entities are derived from the same
+  declarative sources that drive execution.
 
 ## Where orun fits
 
 ```text
-                 your repositories
-   intent.yaml · component.yaml · agents/*.md · tasks/*.TaskContract.yaml
-                        │
-        events ─────────┤  PR · merge · tag · manual · a delegated task
-                        ▼
-   ┌────────────────────────────────────────────────────────┐
-   │                        orun                            │
-   │  compile  ──▶ plan.json         (the decision)         │
-   │  converge ──▶ shell · docker · gha · workflows         │
-   │  record   ──▶ .orun/            (catalog · runs · …)   │
-   │  delegate ──▶ agent runtime + MCP  (sealed sessions)   │
-   └──────────────────────┬─────────────────────────────────┘
-                          ▼                     ▲ optional
-        terraform · helm · wrangler · …     Orunbase (workspaces ·
-              (your tools, unchanged)        task plane · sandboxes)
+                         your repositories
+     intent.yaml · component.yaml · agents/*.md · tasks/*.TaskContract.yaml
+                                  ▲
+        Stacks · presets ─────────┤ extends: · compositions.lock.yaml
+        baselines (OCI, registry) │
+                                  │
+        events ───────────────────┤ PR · merge · tag · manual · a delegated task
+                                  ▼
+   ┌───────────────────────────────────────────────────────────────┐
+   │                             orun                              │
+   │  verify   ──▶ orun validate        (intent and rules)         │
+   │  plan     ──▶ plan.json            (the decision)             │
+   │  execute  ──▶ shell · docker · gha · workflows                │
+   │  record   ──▶ .orun/               (catalog · runs · …)       │
+   │  ground   ──▶ orun mcp · agents    (same intent, sealed)      │
+   └──────────────────────────┬────────────────────────────────────┘
+                              ▼                       ▲ optional
+         terraform · helm · wrangler · …        Orunbase (workspaces ·
+               (your tools, unchanged)          task plane · sandboxes)
 ```
 
-orun sits between your repositories and your tools, inside whatever compute
-you already trust. It is to the delivery layer what a compiler is to a
-program: the place where intent becomes an artifact you can inspect before it
-becomes behavior you have to debug — and where an agent's work becomes
-evidence before it becomes a claim.
+orun sits between your repositories and your tools, inside whatever compute you already
+trust. It is where a standard stops being a recommendation and becomes something the
+platform reads, packages, shares with its agents, and checks before anything runs.
 
 ## Where to go next
 
-- [How orun works](how-orun-works.md) — the mental model: three artifacts,
-  one loop, one worked example.
-- [The resource model](resource-model.md) — every orun behavior is declared
-  in typed `apiVersion`/`kind` documents; this page is the map.
-- [The task plane](../concepts/task-plane.md), [the agent runtime](../concepts/agent-runtime.md),
-  and [baselines](../concepts/baselines.md) — work, the agents that do it,
-  and whole products rebuilt under your name.
-- [Quick start](../start/quick-start.md) — compile and run your first plan in
-  ten minutes.
+- [Design principles](../principles.md): the choices that make discipline enforceable.
+- [How orun works](how-orun-works.md): one worked example from intent to record.
+- [The resource model](resource-model.md): every orun behaviour is declared in typed
+  `apiVersion`/`kind` documents; this page is the map.
+- [Quick start](../start/quick-start.md): declare, verify, plan, and run your first
+  platform in ten minutes.
