@@ -321,3 +321,54 @@ func TestListRepoLinksReadsTheWorkspacesLinks(t *testing.T) {
 		t.Errorf("agentAccess lost: %+v", links[0])
 	}
 }
+
+// ── The bootstrap handoff (saas-bootstrap-handoff BH3) ────────────────────
+
+func TestGetBootstrapHandoffReadsTheRecord(t *testing.T) {
+	var path string
+	c := baselineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"bootstrap": map[string]any{
+			"id": "bst_7K2M9QAZ", "workspace": "ws_1",
+			"baseline":    map[string]any{"id": "cirrus", "tag": "baseline-v9", "source": "sourceplane/cirrus@baseline-v9"},
+			"repo":        map[string]any{"fullName": "acme/test-123", "linkId": nil},
+			"inputs":      map[string]any{"productname": "Test", "reponame": "test-123"},
+			"connections": map[string]any{"cloudflare": "int_1"},
+			"continuedBy": nil, "resolvedAt": "2026-10-05T00:00:00Z",
+		}}})
+	})
+	h, err := c.GetBootstrapHandoff(context.Background(), "ws_1", "bst_7K2M9QAZ")
+	if err != nil {
+		t.Fatalf("handoff: %v", err)
+	}
+	if !strings.HasSuffix(path, "/bootstraps/bst_7K2M9QAZ") {
+		t.Errorf("read the wrong door: %s", path)
+	}
+	if h.Baseline.ID != "cirrus" || h.Baseline.Tag != "baseline-v9" || h.Repo.FullName != "acme/test-123" || h.Repo.LinkID != "" {
+		t.Errorf("decoded %+v", h)
+	}
+	if h.Inputs["reponame"] != "test-123" || h.Connections["cloudflare"] != "int_1" {
+		t.Errorf("inputs/connections lost: %+v", h)
+	}
+}
+
+func TestContinueBootstrapPostsTheDoorAndReadsTheOneOnRecord(t *testing.T) {
+	var method, path string
+	var body map[string]string
+	c := baselineClient(t, func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		// first writer wins: the platform answers the door already on record
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"bootstrap": map[string]any{"id": "bst_7K2M9QAZ", "continuedBy": "agent"}}})
+	})
+	got, err := c.ContinueBootstrap(context.Background(), "ws_1", "bst_7K2M9QAZ", "cli")
+	if err != nil {
+		t.Fatalf("continue: %v", err)
+	}
+	if method != http.MethodPost || !strings.HasSuffix(path, "/bootstraps/bst_7K2M9QAZ/continue") || body["by"] != "cli" {
+		t.Errorf("sent %s %s %v", method, path, body)
+	}
+	if got != "agent" {
+		t.Errorf("the door on record must come back, got %q", got)
+	}
+}

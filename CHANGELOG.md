@@ -11,6 +11,7 @@ recent are:
 
 | Version | Date | Highlights |
 |---|---|---|
+| [v2.74.0](https://orun-docs.pages.dev/release-notes/v2.74.0) | 2026-10-05 | `orun baseline new --from bst_…` continues a bootstrap the console resolved: the id fills the baseline, repository and inputs, no token in the record, the platform reads which door took it |
 | [v2.73.5](https://orun-docs.pages.dev/release-notes/v2.73.5) | 2026-10-05 | Closes the platform discipline as code docs epic: descriptions on every page, stale pins and jargon removed, CLI reference matched to the binary (PD6) |
 | [v2.73.4](https://orun-docs.pages.dev/release-notes/v2.73.4) | 2026-10-05 | The Verify, plan, execute pillar: a verify step in the runner's walkthrough, selection versus blast radius in change detection, remote state rewritten for Orunbase, `orun run init` (PD5) |
 | [v2.73.3](https://orun-docs.pages.dev/release-notes/v2.73.3) | 2026-10-05 | The Ground agents pillar: how agents learn your standards and what keeps them inside them; `mayAffect` and `orun pr check` described accurately; context pack updated (PD4) |

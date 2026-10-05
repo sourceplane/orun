@@ -323,3 +323,59 @@ func (c *Client) AppendBuildEvents(
 	}
 	return &out, nil
 }
+
+// ── The bootstrap handoff (saas-bootstrap-handoff BH3) ────────────────────
+
+// BootstrapHandoff is a resolved bootstrap as the platform hands it to
+// whichever runner holds its id: what the console's Review step collected,
+// composed by the same function the platform's own kickoff uses. No secret
+// is in it — connections are ids the hooks resolve through the workspace.
+type BootstrapHandoff struct {
+	ID        string `json:"id"`
+	Workspace string `json:"workspace"`
+	Baseline  struct {
+		ID     string `json:"id"`
+		Tag    string `json:"tag"`
+		Source string `json:"source"`
+	} `json:"baseline"`
+	Repo struct {
+		FullName string `json:"fullName"`
+		LinkID   string `json:"linkId"`
+	} `json:"repo"`
+	Inputs      map[string]string `json:"inputs"`
+	Connections map[string]string `json:"connections"`
+	ContinuedBy string            `json:"continuedBy"`
+	ResolvedAt  string            `json:"resolvedAt"`
+}
+
+// GetBootstrapHandoff reads a bootstrap by its bst_… handle. The platform
+// answers 404 to a non-reader and for a handle that is not this workspace's
+// — the id alone is not a capability — and 409 until Review was reached
+// with every gate satisfied.
+func (c *Client) GetBootstrapHandoff(ctx context.Context, org, id string) (*BootstrapHandoff, error) {
+	var resp struct {
+		Bootstrap BootstrapHandoff `json:"bootstrap"`
+	}
+	path := fmt.Sprintf("/v1/organizations/%s/bootstraps/%s", urlSegment(org), urlSegment(id))
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp.Bootstrap, nil
+}
+
+// ContinueBootstrap tells the platform which door took the bootstrap: "cli"
+// or "agent". First writer wins on the server, and the door on record comes
+// back — so a second caller learns the first one's word rather than
+// overwriting it.
+func (c *Client) ContinueBootstrap(ctx context.Context, org, id, by string) (string, error) {
+	var resp struct {
+		Bootstrap struct {
+			ContinuedBy string `json:"continuedBy"`
+		} `json:"bootstrap"`
+	}
+	path := fmt.Sprintf("/v1/organizations/%s/bootstraps/%s/continue", urlSegment(org), urlSegment(id))
+	if err := c.doJSON(ctx, http.MethodPost, path, map[string]string{"by": by}, &resp, false); err != nil {
+		return "", err
+	}
+	return resp.Bootstrap.ContinuedBy, nil
+}

@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/sourceplane/orun/internal/remotestate"
 )
 
 // The build document is the one path in a baseline manifest this binary
@@ -346,5 +348,58 @@ func TestFetchBaselineSourceDialsTheQualifiedURL(t *testing.T) {
 	if dialed != "github.com/sourceplane/cirrus" {
 		t.Fatalf("the seam dialed %q — a host called %q does not exist",
 			dialed, strings.Split(dialed, "/")[0])
+	}
+}
+
+// ── `--from bst_…` (saas-bootstrap-handoff BH3) ────────────────────────────
+//
+// The console's Review step collected everything once; the id names that
+// record. Nothing is typed twice — and nothing typed is overridden by it.
+
+func TestBaselineNewNeedsABaselineOrABootstrap(t *testing.T) {
+	err := runBaselineNew(t, "--local", "--out", t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "--from") {
+		t.Fatalf("no id and no --from must say what to name: %v", err)
+	}
+}
+
+func handoffFixture() *remotestate.BootstrapHandoff {
+	h := &remotestate.BootstrapHandoff{ID: "bst_7K2M9QAZ", Workspace: "ws_1"}
+	h.Baseline.ID, h.Baseline.Tag = "cirrus", "baseline-v9"
+	h.Repo.FullName = "acme/test-123"
+	h.Inputs = map[string]string{"productname": "Test", "reponame": "test-123"}
+	return h
+}
+
+func TestApplyHandoffFillsWhatTheFlagsWould(t *testing.T) {
+	address, repo, link, sets := applyHandoff(handoffFixture(), "", "", "", nil)
+	if address != "cirrus@baseline-v9" {
+		t.Errorf("the record's baseline at its tag, got %q", address)
+	}
+	if repo != "acme/test-123" || link != "" {
+		t.Errorf("the record's repository by name when it has no link, got repo=%q link=%q", repo, link)
+	}
+	if len(sets) != 0 {
+		t.Errorf("--set is the operator's, not the record's: %v", sets)
+	}
+
+	h := handoffFixture()
+	h.Repo.LinkID = "repl_1"
+	_, repo, link, _ = applyHandoff(h, "", "", "", nil)
+	if link != "repl_1" || repo != "" {
+		t.Errorf("a record with a link names the link, got repo=%q link=%q", repo, link)
+	}
+}
+
+func TestApplyHandoffNeverOverridesAnExplicitFlag(t *testing.T) {
+	address, repo, link, sets := applyHandoff(handoffFixture(), "stratus", "acme/other", "", []string{"productname=Mine"})
+	if address != "stratus" {
+		t.Errorf("a positional id wins, got %q", address)
+	}
+	if repo != "acme/other" || link != "" {
+		t.Errorf("a named repository wins, got repo=%q link=%q", repo, link)
+	}
+	if len(sets) != 1 || sets[0] != "productname=Mine" {
+		t.Errorf("--set rides through untouched, got %v", sets)
 	}
 }

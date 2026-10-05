@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	yaml "gopkg.in/yaml.v3"
 
+	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/scaffold"
 )
 
@@ -168,6 +169,7 @@ func newBaselineNewCommand() *cobra.Command {
 	var (
 		workspace   string
 		backendURL  string
+		from        string
 		local       bool
 		viaPlatform bool
 		repo        string
@@ -185,7 +187,7 @@ func newBaselineNewCommand() *cobra.Command {
 		keepWork    bool
 	)
 	cmd := &cobra.Command{
-		Use:   "new <id[@tag]> (--local --out <dir> | --via-platform)",
+		Use:   "new [id[@tag]] (--local --out <dir> | --via-platform) [--from bst_…]",
 		Short: "Build a registered baseline — here, or on the platform",
 		Long: `Build a registered baseline, here or on the platform. Name one.
 
@@ -209,8 +211,13 @@ The repository defaults to this checkout's origin; --repo names another, and
 one link.
 
 The tag is the registry's, not yours: addressing ` + "`id@tag`" + ` that the registry has
-since moved past RESOLVES to what it publishes now, and says so.`,
-		Args: cobra.ExactArgs(1),
+since moved past RESOLVES to what it publishes now, and says so.
+
+--from bst_… continues a bootstrap the console's Review step resolved. The
+record carries the baseline at its tag, the repository, the inputs and the
+connections, so nothing is typed twice: the id fills what the flags would, an
+explicit flag still wins, and --set adds. The platform is told the CLI took it.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
 			case local && viaPlatform:
@@ -221,8 +228,43 @@ since moved past RESOLVES to what it publishes now, and says so.`,
 				return exitErr(2, "orun baseline new: name --local or --via-platform.\n"+
 					"--local builds into --out on this machine. --via-platform asks the platform to build\n"+
 					"into a repository this workspace has linked, and returns a session to watch.")
-			case viaPlatform:
-				return runBaselineViaPlatform(cmd, args[0], platformBuildOpts{
+			}
+			ctx := cmd.Context()
+			address := ""
+			if len(args) == 1 {
+				address = args[0]
+			}
+
+			// THE BOOTSTRAP RECORD FILLS THE FLAGS. Review collected the
+			// baseline, the repository, the inputs and the connections once;
+			// `--from` reads that record by its handle so none of it is typed
+			// again. An explicit flag still wins, and --set still adds.
+			var (
+				client  *remotestate.Client
+				handoff *remotestate.BootstrapHandoff
+			)
+			if h := strings.TrimSpace(from); h != "" {
+				var err error
+				client, err = cloudClient(ctx, backendURL, workspace)
+				if err != nil {
+					return err
+				}
+				handoff, err = client.GetBootstrapHandoff(ctx, client.Scope().OrgID, h)
+				if err != nil {
+					// Verbatim: the platform says "not reached Review" or
+					// "connect cloudflare", and either beats "handoff failed".
+					return fmt.Errorf("orun baseline new --from %s: %w", h, err)
+				}
+				address, repo, repoLink, sets = applyHandoff(handoff, address, repo, repoLink, sets)
+				scaffoldBootstrapInputs = handoff.Inputs
+				fmt.Fprintf(cmd.ErrOrStderr(), "continuing bootstrap %s: %s for %s\n", handoff.ID, address, handoff.Repo.FullName)
+			} else if strings.TrimSpace(address) == "" {
+				return exitErr(2, "orun baseline new: name a baseline (id or id@tag), or --from bst_… to continue\n"+
+					"a bootstrap the console resolved.")
+			}
+
+			if viaPlatform {
+				return runBaselineViaPlatform(cmd, address, platformBuildOpts{
 					backendURL: backendURL,
 					workspace:  workspace,
 					repo:       repo,
@@ -235,10 +277,19 @@ since moved past RESOLVES to what it publishes now, and says so.`,
 			if strings.TrimSpace(out) == "" {
 				return exitErr(2, "orun baseline new: --out is required — it is where the product is placed")
 			}
-			ctx := cmd.Context()
-			view, err := resolveBlueprint(ctx, backendURL, workspace, args[0])
-			if err != nil {
-				return err
+			var view *remotestate.BlueprintView
+			if client != nil {
+				var err error
+				view, err = client.GetBlueprint(ctx, client.Scope().OrgID, address)
+				if err != nil {
+					return fmt.Errorf("orun baseline: %w", err)
+				}
+			} else {
+				var err error
+				view, err = resolveBlueprint(ctx, backendURL, workspace, address)
+				if err != nil {
+					return err
+				}
 			}
 			b := view.Blueprint
 
@@ -264,6 +315,19 @@ since moved past RESOLVES to what it publishes now, and says so.`,
 				fmt.Fprintf(cmd.ErrOrStderr(),
 					"you asked for %s; the registry now publishes %s, and that is what this builds\n",
 					view.PinnedTag, b.Tag)
+			}
+
+			// THE PLATFORM LEARNS WHICH DOOR TOOK IT, before anything is
+			// fetched: the Overview then reads "continued from the orun CLI"
+			// instead of inviting a second setup. First writer wins on the
+			// server; a refusal here is a note, not a stop — the build is the
+			// operator's to run either way.
+			if handoff != nil {
+				if by, err := client.ContinueBootstrap(ctx, client.Scope().OrgID, handoff.ID, "cli"); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not record that the CLI took bootstrap %s: %v\n", handoff.ID, err)
+				} else if by != "cli" {
+					fmt.Fprintf(cmd.ErrOrStderr(), "note: bootstrap %s was already continued by %s\n", handoff.ID, continuedByWord(by))
+				}
 			}
 
 			work, err := os.MkdirTemp("", "orun-baseline-")
@@ -307,6 +371,7 @@ since moved past RESOLVES to what it publishes now, and says so.`,
 			return runScaffoldNew(ctx)
 		},
 	}
+	cmd.Flags().StringVar(&from, "from", "", "bst_… id of a bootstrap the console resolved; fills the baseline, repository and inputs")
 	cmd.Flags().BoolVar(&local, "local", false, "Build here, from a checkout of the baseline at the registry's tag")
 	cmd.Flags().BoolVar(&viaPlatform, "via-platform", false, "Ask the platform to build into a linked repository, and return a session to watch")
 	cmd.Flags().StringVar(&repo, "repo", "", "owner/name to build into (--via-platform); defaults to this checkout's origin")
@@ -325,4 +390,43 @@ since moved past RESOLVES to what it publishes now, and says so.`,
 	cmd.Flags().StringVar(&progress, "progress", "auto", "Progress rendering: auto | plain | verbose | json")
 	cmd.Flags().BoolVar(&keepWork, "keep-checkout", false, "Keep the baseline checkout instead of removing it (debugging)")
 	return cmd
+}
+
+// applyHandoff fills what the flags would from a resolved bootstrap. Explicit
+// flags win: a positional id keeps its own address, a named repository or
+// link keeps it, and every --set rides after the record's inputs so it
+// overrides per key. The record's inputs are also handed to the placement
+// engine separately, which keeps only the ones the build document declares
+// (the platform derives facts such as `apibaseurl` that a document need not
+// declare) — here they are --set entries for the platform door, which
+// accepts what the manifest accepts.
+func applyHandoff(h *remotestate.BootstrapHandoff, address, repo, repoLink string, sets []string) (string, string, string, []string) {
+	if strings.TrimSpace(address) == "" {
+		address = h.Baseline.ID
+		if tag := strings.TrimSpace(h.Baseline.Tag); tag != "" {
+			address += "@" + tag
+		}
+	}
+	if strings.TrimSpace(repo) == "" && strings.TrimSpace(repoLink) == "" {
+		if strings.TrimSpace(h.Repo.LinkID) != "" {
+			repoLink = h.Repo.LinkID
+		} else {
+			repo = h.Repo.FullName
+		}
+	}
+	return address, repo, repoLink, sets
+}
+
+// continuedByWord is the Overview's word for a door, for the note above.
+func continuedByWord(by string) string {
+	switch by {
+	case "cli":
+		return "the orun CLI"
+	case "agent":
+		return "a coding agent"
+	case "platform":
+		return "a cloud session"
+	default:
+		return by
+	}
 }
