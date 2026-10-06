@@ -1,0 +1,21 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: JobTemplate
+metadata:
+  name: node-service-ship
+spec:
+  description: Test, build, and package a Node.js service
+  timeout: 10m
+  capabilities: [node-service.test, node-service.build, node-service.package]
+  steps:
+    - id: test
+      name: test
+      capability: node-service.test
+      run: node --test
+    - id: build
+      name: build
+      capability: node-service.build
+      run: mkdir -p dist && cp server.js dist/
+    - id: package
+      name: package
+      capability: node-service.package
+      run: tar czf dist/{{.orun.component.name}}-{{.orun.environment.name}}.tgz -C dist server.js

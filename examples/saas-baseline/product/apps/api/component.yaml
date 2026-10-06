@@ -1,0 +1,13 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+metadata:
+  name: api
+spec:
+  type: node-service
+  domain: shop
+  subscribe:
+    environments:
+      - { name: staging, profile: verify }
+      - { name: production, profile: release }
+  parameters:
+    port: 8080

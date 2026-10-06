@@ -56,8 +56,14 @@ intent.
 A product built from a baseline, planned, and run, in thirty seconds:
 `orun new` places the baseline's golden paths and services and checks that
 the result plans; `orun plan` shows what will run in each environment and in
-what order; `orun run` executes it. Every command is real; the recording is
-reproducible with [`scripts/demo/`](scripts/demo/).
+what order; `orun run` executes it. Every command is real. Try it yourself:
+the baseline is [`examples/saas-baseline`](examples/saas-baseline/).
+
+```bash
+cd examples
+orun new --blueprint saas-baseline/blueprint.yaml --out acme-shop --set name=acme-shop
+cd acme-shop && orun plan
+```
 
 ## Table of contents
 
