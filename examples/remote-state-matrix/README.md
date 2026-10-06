@@ -60,7 +60,7 @@ cd examples/remote-state-matrix
 orun plan --name remote-state-e2e --all
 ```
 
-This creates `.orun/plans/remote-state-e2e.json` and prints the plan checksum.
+This seals the plan into the object model under `.orun/objectmodel/` and names it `remote-state-e2e`, so the commands below run it by name.
 
 ### Run all jobs locally
 

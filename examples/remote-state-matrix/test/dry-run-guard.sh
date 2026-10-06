@@ -55,7 +55,7 @@ pass "Dry-run: at least 1 api@dev.smoke command (${API_CMDS})"
 REQUIRED=(
   "auth status"
   "plan --name remote-state-e2e"
-  "get plans"
+  "run remote-state-e2e --job"
   "export ORUN_EXEC_ID="
   "process B — duplicate"
   "dep-wait"

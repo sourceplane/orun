@@ -33,6 +33,7 @@ BACKEND_URL="${ORUN_BACKEND_URL:-https://orun-api.sourceplane.ai}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ORUN_BIN="${ORUN_BIN:-orun}"
 DRY_RUN="${ORUN_DRY_RUN:-0}"
+PLAN_NAME="remote-state-e2e"
 
 # ── assertion helpers ──────────────────────────────────────────────────────────
 # shellcheck source=harness_helpers.sh
@@ -74,16 +75,16 @@ if [ "${DRY_RUN}" = "1" ]; then
   echo "[dry-run] preflight: command -v jq"
   echo "[dry-run] preflight: ${ORUN_BIN} auth status --backend-url ${BACKEND_URL}"
   echo "[dry-run] preflight: repo linkage check (informational — auto-resolved on first run if not cached)"
-  echo "[dry-run] ${ORUN_BIN} plan --name remote-state-e2e --all"
-  echo "[dry-run] ${ORUN_BIN} get plans -o json"
+  echo "[dry-run] ${ORUN_BIN} plan --name ${PLAN_NAME} --all -o <tmpdir>/${PLAN_NAME}.json"
+  echo "[dry-run] PLAN_ID=\$(jq -r '.metadata.checksum' <tmpdir>/${PLAN_NAME}.json)  (short checksum, for the exec ID)"
   PLAN_ID="dryrun000000"
   EXEC_ID="local-dryrun-${PLAN_ID}"
   echo "[dry-run] export ORUN_EXEC_ID=${EXEC_ID}"
   echo "[dry-run] export ORUN_BACKEND_URL=${BACKEND_URL}"
   echo "[dry-run] export ORUN_REMOTE_STATE=true"
-  echo "[dry-run] ${ORUN_BIN} run ${PLAN_ID} --job foundation@dev.smoke --remote-state --backend-url ${BACKEND_URL} &  (process A)"
-  echo "[dry-run] ${ORUN_BIN} run ${PLAN_ID} --job foundation@dev.smoke --remote-state --backend-url ${BACKEND_URL} &  (process B — duplicate)"
-  echo "[dry-run] ${ORUN_BIN} run ${PLAN_ID} --job api@dev.smoke        --remote-state --backend-url ${BACKEND_URL} &  (dep-wait)"
+  echo "[dry-run] ${ORUN_BIN} run ${PLAN_NAME} --job foundation@dev.smoke --remote-state --backend-url ${BACKEND_URL} &  (process A)"
+  echo "[dry-run] ${ORUN_BIN} run ${PLAN_NAME} --job foundation@dev.smoke --remote-state --backend-url ${BACKEND_URL} &  (process B — duplicate)"
+  echo "[dry-run] ${ORUN_BIN} run ${PLAN_NAME} --job api@dev.smoke        --remote-state --backend-url ${BACKEND_URL} &  (dep-wait)"
   echo "[dry-run] wait"
   echo "[dry-run] assert: duplicate claim — assert_exactly_one_duplicate_claimant foundation@dev.smoke '=== SMOKE: foundation' 2 foundation-a.log foundation-b.log"
   echo "[dry-run] assert: dep-wait — api@dev.smoke smoke markers > 0"
@@ -164,14 +165,18 @@ info "Repo linkage preflight done."
 
 # ── 2. plan ────────────────────────────────────────────────────────────────────
 cd "${SCRIPT_DIR}"
-info "Compiling plan (remote-state-e2e)..."
-"${ORUN_BIN}" plan --name remote-state-e2e --all
+info "Compiling plan (${PLAN_NAME})..."
+# The plan is published under its name (revisions/by-name/remote-state-e2e), so
+# the job processes below run it by name. The -o copy only supplies the
+# checksum that makes the exec ID unique.
+TMPDIR_H="$(mktemp -d)"
+# cleanup() above handles deletion on exit/signal
+"${ORUN_BIN}" plan --name "${PLAN_NAME}" --all -o "${TMPDIR_H}/${PLAN_NAME}.json"
 
-PLAN_ID="$("${ORUN_BIN}" get plans -o json 2>/dev/null \
-  | jq -r '.[] | select(.Name == "remote-state-e2e") | .Checksum' \
-  | head -1)"
-[ -n "${PLAN_ID}" ] || fail "Could not derive plan checksum from 'orun get plans'"
-info "Plan ID: ${PLAN_ID}"
+PLAN_ID="$(jq -r '.metadata.checksum // empty | sub("^sha256-"; "") | .[0:12]' \
+  "${TMPDIR_H}/${PLAN_NAME}.json")"
+[ -n "${PLAN_ID}" ] || fail "Could not read the plan checksum from ${TMPDIR_H}/${PLAN_NAME}.json"
+info "Plan: ${PLAN_NAME} (${PLAN_ID})"
 
 # ── 3. exec ID and env ─────────────────────────────────────────────────────────
 export ORUN_EXEC_ID="${ORUN_EXEC_ID:-local-$(date +%s)-${PLAN_ID}}"
@@ -180,15 +185,11 @@ export ORUN_REMOTE_STATE="true"
 info "Exec ID: ${ORUN_EXEC_ID}"
 info "Backend: ${ORUN_BACKEND_URL}"
 
-# ── 4. temp dir ────────────────────────────────────────────────────────────────
-TMPDIR_H="$(mktemp -d)"
-# cleanup() above handles deletion on exit/signal
-
-# ── 5. launch parallel job processes ──────────────────────────────────────────
+# ── 4. launch parallel job processes ──────────────────────────────────────────
 info "Launching job processes..."
 
 # Process A — first claimant for foundation@dev.smoke
-"${ORUN_BIN}" run "${PLAN_ID}" \
+"${ORUN_BIN}" run "${PLAN_NAME}" \
   --job foundation@dev.smoke \
   --remote-state \
   --backend-url "${BACKEND_URL}" \
@@ -197,7 +198,7 @@ PID_A=$!
 HARNESS_PIDS+=("${PID_A}")
 
 # Process B — duplicate claimant for the same job (must not re-execute the body)
-"${ORUN_BIN}" run "${PLAN_ID}" \
+"${ORUN_BIN}" run "${PLAN_NAME}" \
   --job foundation@dev.smoke \
   --remote-state \
   --backend-url "${BACKEND_URL}" \
@@ -206,7 +207,7 @@ PID_B=$!
 HARNESS_PIDS+=("${PID_B}")
 
 # Process C — api@dev.smoke depends on foundation@dev.smoke (dep-wait case)
-"${ORUN_BIN}" run "${PLAN_ID}" \
+"${ORUN_BIN}" run "${PLAN_NAME}" \
   --job api@dev.smoke \
   --remote-state \
   --backend-url "${BACKEND_URL}" \
@@ -214,7 +215,7 @@ HARNESS_PIDS+=("${PID_B}")
 PID_C=$!
 HARNESS_PIDS+=("${PID_C}")
 
-# ── 6. collect exit codes ──────────────────────────────────────────────────────
+# ── 5. collect exit codes ──────────────────────────────────────────────────────
 EXIT_FAIL=0
 
 wait "${PID_A}" || { info "foundation-a exited non-zero ($?)"; cat "${TMPDIR_H}/foundation-a.log" >&2; EXIT_FAIL=1; }
@@ -230,7 +231,7 @@ if [ "${EXIT_FAIL}" -ne 0 ]; then
 fi
 info "All job processes exited 0."
 
-# ── 7. assert: duplicate claim ─────────────────────────────────────────────────
+# ── 6. assert: duplicate claim ─────────────────────────────────────────────────
 # Each foundation@dev.smoke execution prints exactly 2 "=== SMOKE: foundation"
 # lines (one per step: validate + apply). The assertion requires exactly one
 # claimant log to contain 2 matching lines and the other to contain 0.
@@ -244,7 +245,7 @@ assert_exactly_one_duplicate_claimant \
   "${TMPDIR_H}/foundation-b.log" \
   || fail "DUPLICATE CLAIM DETECTED: see above for details."
 
-# ── 8. assert: api@dev.smoke dependency wait worked ───────────────────────────
+# ── 7. assert: api@dev.smoke dependency wait worked ───────────────────────────
 # If dep-wait failed (empty local state rather than polling backend /runnable),
 # api@dev.smoke would have exited 1. That is already caught above.
 # Additionally confirm the steps actually executed.
@@ -257,7 +258,7 @@ if [ "${API_SMOKE:-0}" -eq 0 ]; then
 fi
 info "Dependency wait check passed (api smoke step lines: ${API_SMOKE})."
 
-# ── 9. verify remote status ────────────────────────────────────────────────────
+# ── 8. verify remote status ────────────────────────────────────────────────────
 check "Fetching remote status..."
 STATUS_JSON=""
 STATUS_JSON="$("${ORUN_BIN}" status \
@@ -274,7 +275,7 @@ assert_jobs_all_succeeded "${STATUS_JSON}" \
   "api@dev.smoke" \
   || fail "Status assertion failed: see above for details."
 
-# ── 10. retrieve logs ──────────────────────────────────────────────────────────
+# ── 9. retrieve logs ──────────────────────────────────────────────────────────
 check "Log retrieval for foundation@dev.smoke..."
 REMOTE_LOGS=""
 REMOTE_LOGS="$("${ORUN_BIN}" logs \
