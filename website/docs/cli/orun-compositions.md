@@ -14,7 +14,7 @@ sources and their packages.
 orun compositions [composition] [-e]
 orun compositions list [composition] [-l] [-e]
 orun compositions pull
-orun compositions lock
+orun compositions lock [--write-intent | --check]
 orun compositions package build --root DIR --output FILE
 orun compositions package push <archive> <oci-ref>
 ```
@@ -53,14 +53,31 @@ orun compositions list terraform \
 
 ## `pull` and `lock`
 
-Resolve the sources declared under `compositions.sources` in `intent.yaml` into the local cache (`pull`), and record the digest each one resolved to in `.orun/compositions.lock.yaml` (`lock`). orun does not read the lock back; to pin a source, put its `digest:` in `intent.yaml`, which `orun plan` enforces. See [versioning and locking](../concepts/versioning-and-locking.md).
+Resolve the sources declared under `compositions.sources` in `intent.yaml` into the local cache (`pull`), and record the digest each one resolved to in `.orun/compositions.lock.yaml` (`lock`). See [versioning and locking](../concepts/versioning-and-locking.md).
 
 ```bash
 orun compositions pull --intent examples/intent.yaml
 orun compositions lock --intent examples/intent.yaml
 ```
 
-Neither subcommand takes flags of its own beyond the global `--intent` / `--config-dir`.
+The lock file is a local record. To turn it into an enforced pin, run `lock --write-intent`: it writes each resolved digest into the matching source's `digest:` field in `intent.yaml`, keeping comments and formatting. Commit that change; from then on `orun plan` fails with `composition source <name> digest mismatch` if the source resolves to anything else. Re-run it after a deliberate upgrade to move the pin.
+
+```bash
+orun compositions lock --intent examples/intent.yaml --write-intent
+```
+
+`lock --check` writes nothing. It resolves the sources and exits non-zero when a source without a `digest:` resolves to a different digest than the one recorded in the lock, so a CI job or pre-commit hook can catch a tag that moved underneath the repository. Sources with a `digest:` are already enforced by resolution, and a source the lock has no entry for is reported but does not fail the check.
+
+```bash
+orun compositions lock --intent examples/intent.yaml --check
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--write-intent` | `lock` only: also write each resolved digest into the source's `digest:` in `intent.yaml` |
+| `--check` | `lock` only: write nothing; exit non-zero if an unpinned source drifted from the lock |
+
+The two flags are mutually exclusive. `pull` takes no flags of its own beyond the global `--intent` / `--config-dir`.
 
 ## `package`
 
@@ -134,10 +151,10 @@ compositions:
       ref: oci://ghcr.io/my-org/my-platform-stack:v1.0.0
 ```
 
-Lock the resolved digest for reproducible plans:
+Pin the resolved digest in `intent.yaml` for reproducible plans:
 
 ```bash
-orun compositions lock --intent intent.yaml
+orun compositions lock --intent intent.yaml --write-intent
 ```
 
 Use this command to confirm which types are available before validating or planning against them. `--config-dir` remains available as a global legacy fallback for folder-shaped compositions.

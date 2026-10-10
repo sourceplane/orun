@@ -32,10 +32,23 @@ var compositionsPullCmd = &cobra.Command{
 var compositionsLockCmd = &cobra.Command{
 	Use:   "lock",
 	Short: "Resolve declared composition sources and write a lock file",
+	Long: `Resolve declared composition sources and record their digests in .orun/compositions.lock.yaml.
+
+With --write-intent, also write each resolved digest into the matching source's
+digest: field in intent.yaml (comments and formatting are kept). Resolution then
+enforces the pin: orun plan fails with "digest mismatch" if a source changes.
+
+With --check, write nothing and exit non-zero when a source without digest:
+resolves differently from the recorded lock.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return lockCompositions()
+		return lockCompositions(compositionsLockWriteIntent, compositionsLockCheck)
 	},
 }
+
+var (
+	compositionsLockWriteIntent bool
+	compositionsLockCheck       bool
+)
 
 var compositionsPackageCmd = &cobra.Command{
 	Use:   "package",
@@ -70,6 +83,9 @@ func registerCompositionsCommand(root *cobra.Command) {
 
 	compositionsListCmd.Flags().BoolVarP(&longFormat, "long", "l", false, "Show detailed information")
 	compositionsListCmd.Flags().BoolVarP(&expandJobs, "expand-jobs", "e", false, "Show all job steps and details (with -l)")
+	compositionsLockCmd.Flags().BoolVar(&compositionsLockWriteIntent, "write-intent", false, "Write resolved digests into the digest: field of each source in intent.yaml")
+	compositionsLockCmd.Flags().BoolVar(&compositionsLockCheck, "check", false, "Exit non-zero if an unpinned source resolves differently from the lock; writes nothing")
+	compositionsLockCmd.MarkFlagsMutuallyExclusive("write-intent", "check")
 	compositionsPackageBuildCmd.Flags().StringVar(&compositionPackageRoot, "root", "", "Composition package root directory")
 	compositionsPackageBuildCmd.Flags().StringVarP(&compositionPackageOutput, "output", "o", "", "Output .tgz archive path")
 
