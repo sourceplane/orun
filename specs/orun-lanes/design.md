@@ -177,8 +177,8 @@ runner slots, not work, will decide its wall-clock? If not, it changes nothing.
    A cluster larger than `ceil(jobs / lanes)` is cut by topological level
    into consecutive slices, each within that size.
 5. **Pack longest-first.**
-   - Sort the clusters by size (descending), then lowest level, then smallest
-     job id.
+   - Sort the clusters by size (descending), then lowest level, then the earliest
+     job in plan order.
    - Place each into the currently smallest lane; ties go to the lowest lane
      number.
    - Every job weighs one. There are **no per-job weights** in this epic

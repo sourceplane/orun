@@ -230,3 +230,158 @@ func TestListComponentsDropsCommonSuffix(t *testing.T) {
 		t.Fatalf("listComponents = %q", got)
 	}
 }
+
+// cirrusLike is shaped like the cirrus plan: 12 workers on dev, stage and
+// prod (stage waits on dev, prod on stage), 12 tests, and db-migrate on stage
+// and prod that notifications waits on.
+func cirrusLike() *model.Plan {
+	workers := []string{"billing", "config", "events", "identity", "notifications", "policy", "search", "storage", "audit", "export", "webhooks", "metering"}
+	var jobs []model.PlanJob
+	for _, w := range workers {
+		t := job(w+"-worker.test", w+"-worker", "test")
+		t.Composition = "test"
+		jobs = append(jobs, t)
+	}
+	for _, env := range []string{"dev", "stage", "prod"} {
+		if env != "dev" {
+			jobs = append(jobs, job("db-migrate."+env, "db-migrate", env))
+		}
+		for _, w := range workers {
+			var deps []string
+			switch env {
+			case "stage":
+				deps = append(deps, w+"-worker.dev")
+			case "prod":
+				deps = append(deps, w+"-worker.stage")
+			}
+			if w == "notifications" {
+				if env != "dev" {
+					deps = append(deps, "db-migrate."+env)
+				}
+				deps = append(deps, "events-worker."+env)
+			}
+			jobs = append(jobs, job(w+"-worker."+env, w+"-worker", env, deps...))
+		}
+	}
+	return plan(jobs...)
+}
+
+func TestAuto_PacksIntoMaxLanesKeepingChainsTogether(t *testing.T) {
+	p := cirrusLike()
+	if len(p.Jobs) != 50 {
+		t.Fatalf("fixture has %d jobs", len(p.Jobs))
+	}
+	res, err := Assign(p, Options{Config: &model.IntentLanes{Mode: "auto", MaxLanes: 16}, CheckName: checkName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Lanes) > 16 || len(p.Lanes) < 4 {
+		t.Fatalf("auto made %d lanes: %v", len(p.Lanes), laneIDs(p))
+	}
+	if len(res.Repairs) != 0 {
+		t.Fatalf("auto must not need splits here: %v", res.Repairs)
+	}
+	for _, env := range []string{"stage", "prod"} {
+		m, e, n := laneOf(p, "db-migrate."+env), laneOf(p, "events-worker."+env), laneOf(p, "notifications-worker."+env)
+		if m != n || e != n {
+			t.Fatalf("%s: migrate %s, events %s, notifications %s must share a lane", env, m, e, n)
+		}
+	}
+	seen := map[string]bool{}
+	for _, l := range p.Lanes {
+		if seen[l.ID] {
+			t.Fatalf("duplicate lane id %s", l.ID)
+		}
+		seen[l.ID] = true
+		if l.Source != "auto" || l.Concurrency != model.DefaultLaneConcurrency {
+			t.Fatalf("auto lane = %+v", l)
+		}
+		for _, id := range l.Jobs {
+			if laneOf(p, id) != l.ID {
+				t.Fatalf("job %s stamped %s, listed in %s", id, laneOf(p, id), l.ID)
+			}
+		}
+		if !strings.HasPrefix(l.ID, l.Environment+"/auto-") {
+			t.Fatalf("auto lane id %s", l.ID)
+		}
+	}
+	if !acyclicLanes(p) {
+		t.Fatalf("lane graph has a cycle")
+	}
+}
+
+func acyclicLanes(p *model.Plan) bool {
+	g := newJobGraph(p.Jobs)
+	idx := map[string]int{}
+	var ds []*draft
+	for i, l := range p.Lanes {
+		idx[l.ID] = i
+		ds = append(ds, &draft{})
+	}
+	for i, j := range p.Jobs {
+		ds[idx[j.Lane]].jobs = append(ds[idx[j.Lane]].jobs, i)
+	}
+	return acyclic(g, ds)
+}
+
+func TestAuto_SmallPlanIsJobLayout(t *testing.T) {
+	p := plan(job("a.stage", "a", "stage"), job("b.stage", "b", "stage", "a.stage"))
+	if _, err := Assign(p, Options{Config: &model.IntentLanes{Mode: "auto"}, CheckName: checkName}); err != nil {
+		t.Fatal(err)
+	}
+	if got := laneIDs(p); !reflect.DeepEqual(got, []string{"a.stage", "b.stage"}) || p.Lanes[0].Source != "job" {
+		t.Fatalf("small auto plan lanes = %v", got)
+	}
+}
+
+func TestAuto_IsolatedCountsAgainstBudget(t *testing.T) {
+	p := cirrusLike()
+	opts := Options{Config: &model.IntentLanes{Mode: "auto", MaxLanes: 8}, CheckName: checkName, ComponentLanes: map[string]string{"billing-worker": "isolated"}}
+	if _, err := Assign(p, opts); err != nil {
+		t.Fatal(err)
+	}
+	iso := 0
+	for _, l := range p.Lanes {
+		if l.Source == "isolated" {
+			iso++
+		}
+	}
+	if iso != 4 || len(p.Lanes) > 8+4 {
+		t.Fatalf("lanes = %v", laneIDs(p))
+	}
+	if !acyclicLanes(p) {
+		t.Fatalf("lane graph has a cycle")
+	}
+}
+
+func TestAuto_Deterministic(t *testing.T) {
+	var first string
+	for i := 0; i < 20; i++ {
+		p := cirrusLike()
+		if _, err := Assign(p, Options{Config: &model.IntentLanes{Mode: "auto", MaxLanes: 10}, CheckName: checkName}); err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(p)
+		if i == 0 {
+			first = string(b)
+		} else if string(b) != first {
+			t.Fatalf("run %d differs", i)
+		}
+	}
+}
+
+func TestAllocateLanesIsProportional(t *testing.T) {
+	sizes := []int{12, 12, 13, 13}
+	got := make([]int, 4)
+	allocateLanes(50, 16, 4, func(k int) int { return sizes[k] }, func(k, n int) { got[k] = n })
+	sum := 0
+	for _, n := range got {
+		sum += n
+		if n < 3 || n > 5 {
+			t.Fatalf("alloc = %v", got)
+		}
+	}
+	if sum != 16 {
+		t.Fatalf("alloc = %v sums to %d", got, sum)
+	}
+}
