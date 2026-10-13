@@ -160,7 +160,8 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | `--env`, `-e` | Restrict compilation to specific environments (comma-separated) |
 | `--all-envs` | Compile all environments explicitly (mutually exclusive with `--env`) |
 | `--component` | Restrict compilation to one or more components (repeatable) |
-| `--view`, `-v` | Render a view such as `dag`, `dag:long`, `dependencies`, or `component=<name>` |
+| `--view`, `-v` | Render a view such as `dag`, `dag:long`, `dependencies`, `lanes`, or `component=<name>` |
+| `--strict-lanes` | Fail the plan when lanes would need a cycle split (as `execution.lanes.onCycle: reject`) |
 | `--long` | Show detailed output (step commands, IDs) |
 | `--changed` | Enable change-aware filtering |
 | `--base` | Base git ref for change detection |
@@ -177,7 +178,7 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | `--from-ci` | CI provider for event normalization (e.g. `github`) |
 | `--event-file` | Path to provider event JSON file |
 | `--artifact` | Artifact backend for uploading plan shard from CI (`github`) |
-| `--github-output` | Write `matrix`, `plan_id`, `exec_id` to `$GITHUB_OUTPUT` (for GitHub Actions matrix) |
+| `--github-output` | Write `matrix`, `lane-matrix`, `lane-count`, `plan_id`, `exec_id` to `$GITHUB_OUTPUT` (for GitHub Actions matrix) |
 
 ### GitHub Actions usage
 
@@ -186,7 +187,7 @@ When run inside GitHub Actions with `--artifact github`, `orun plan`:
 1. Derives an execution ID from `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, and the plan checksum
 2. Writes a plan shard (manifest.json + plan.json + metadata) to a temp directory
 3. Uploads the shard as a GitHub Actions artifact using the embedded `@actions/artifact` helper
-4. With `--github-output`, writes `matrix`, `plan_id`, and `exec_id` to `$GITHUB_OUTPUT` for downstream matrix jobs
+4. With `--github-output`, writes `matrix`, `lane-matrix`, `lane-count`, `plan_id`, and `exec_id` to `$GITHUB_OUTPUT` for downstream matrix jobs. `lane-matrix` has one entry per lane, or one per job on a plan without lanes; run each with `orun run --lane ${{ matrix.lane }}` (see [Lanes](../concepts/lanes.md))
 
 Example:
 ```bash

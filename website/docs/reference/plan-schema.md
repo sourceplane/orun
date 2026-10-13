@@ -15,6 +15,7 @@ The plan is the artifact produced by `orun plan` and consumed by `orun run`. The
 | `execution` | `concurrency`, `failFast`, and `stateFile` |
 | `spec.jobBindings` | Optional metadata about bound jobs |
 | `jobs` | The concrete execution DAG |
+| `lanes` | Present only when the intent sets `execution.lanes`: the units a runner takes — `id`, `name`, `index`, `environment`, `jobs`, `concurrency`, `runsOn`, `source`, and `splitFrom`/`reason` after a cycle split. See [Lanes](../concepts/lanes.md) |
 
 Plans are deterministic: the same inputs produce byte-identical `plan.json`. `jobs[]` is in a stable topological order (the same graph always yields the same order and the same job `index`), so a plan diff in a pull request only shows real changes. Plans carry no generation timestamp. `metadata.generatedAt` is still accepted when reading plans written by older versions, but it is volatile and is left out of `metadata.checksum` and `metadata.revision.planHash`.
 
@@ -26,6 +27,7 @@ Plans are deterministic: the same inputs produce byte-identical `plan.json`. `jo
 | `name`, `component`, `environment` | Required identity of the job |
 | `composition`, `jobRegistry`, `job` | Which composition and job template the job was bound from |
 | `runsOn`, `path` | Runner image and working directory |
+| `lane` | The id of the lane the job runs in (only with `execution.lanes`) |
 | `steps` | The ordered step list (required) |
 | `dependsOn` | Hard dependency edges on other job IDs |
 | `advisoryDependsOn` | Advisory edges that order but do not gate |

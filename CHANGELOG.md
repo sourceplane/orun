@@ -11,6 +11,7 @@ recent are:
 
 | Version | Date | Highlights |
 |---|---|---|
+| [v2.76.0](https://orun-docs.pages.dev/release-notes/v2.76.0) | 2026-10-13 | Lanes: `execution.lanes` groups jobs into the units a runner takes (`job`, `component`, `env`, `auto` without weights), `orun run --lane`, `lane-matrix`, one check run per job; plans without lanes are unchanged |
 | [v2.75.0](https://orun-docs.pages.dev/release-notes/v2.75.0) | 2026-10-05 | `orun run <id>` now runs the plan `orun plan` printed; `orun plan` shows each environment's jobs and what they wait on; `orun new` ends in a short summary; a new README recording |
 | [v2.74.0](https://orun-docs.pages.dev/release-notes/v2.74.0) | 2026-10-05 | `orun baseline new --from bst_…` continues a bootstrap the console resolved: the id fills the baseline, repository and inputs, no token in the record, the platform reads which door took it |
 | [v2.73.5](https://orun-docs.pages.dev/release-notes/v2.73.5) | 2026-10-05 | Closes the platform discipline as code docs epic: descriptions on every page, stale pins and jargon removed, CLI reference matched to the binary (PD6) |
