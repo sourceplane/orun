@@ -50,9 +50,10 @@ type draft struct {
 	concurrency int
 	jobs        []int // indexes into plan.Jobs, in plan order
 	splitFrom   string
-	part        int // 1-based slice number after a split; 0 when unsplit
-	autoK       int // 1-based auto lane number within its partition
-	autoN       int // auto lanes in its partition
+	idSuffix    string // runner suffix when two lanes would share an id
+	part        int    // 1-based slice number after a split; 0 when unsplit
+	autoK       int    // 1-based auto lane number within its partition
+	autoN       int    // auto lanes in its partition
 }
 
 // Assign partitions plan.Jobs into plan.Lanes and stamps each job's Lane.
@@ -191,7 +192,7 @@ func disambiguateRunsOn(ds []*draft) {
 			if r == "" {
 				r = "default"
 			}
-			d.baseID += "-" + slug(r)
+			d.idSuffix = "-" + slug(r)
 		}
 	}
 }
@@ -214,9 +215,9 @@ func slug(s string) string {
 // laneID is the draft's final id: the base, plus -<k> after a split.
 func (d *draft) laneID() string {
 	if d.part > 0 {
-		return fmt.Sprintf("%s-%d", d.baseID, d.part)
+		return fmt.Sprintf("%s%s-%d", d.baseID, d.idSuffix, d.part)
 	}
-	return d.baseID
+	return d.baseID + d.idSuffix
 }
 
 // finalize orders the drafts, names them, writes plan.Lanes and stamps jobs.
