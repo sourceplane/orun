@@ -162,6 +162,11 @@ type Runner struct {
 	// specs/orun-lanes §8). LaneJobs nil means no lane selection.
 	LaneID   string
 	LaneJobs []string
+	// Checks posts per-job check runs from a multi-job lane; nil posts none.
+	Checks CheckReporter
+	// ghaHoldSteps holds a job's GitHub step groups until the job ends, so
+	// concurrent jobs of a lane never interleave their step groups.
+	ghaHoldSteps bool
 	// Hooks wires external lifecycle callbacks (remote state, log upload, etc.).
 	Hooks *RunnerHooks
 

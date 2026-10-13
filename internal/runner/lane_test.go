@@ -3,6 +3,7 @@ package runner
 import (
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -181,3 +182,112 @@ func TestLane_RetryRerunsOnlyUnfinishedJobs(t *testing.T) {
 		t.Fatalf("ran %s", got)
 	}
 }
+
+type fakeChecks struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (f *fakeChecks) Start(jobID, name string) {
+	f.mu.Lock()
+	f.calls = append(f.calls, "start "+jobID)
+	f.mu.Unlock()
+}
+
+func (f *fakeChecks) Finish(jobID, name, conclusion, _ string) {
+	f.mu.Lock()
+	f.calls = append(f.calls, "finish "+jobID+" "+conclusion)
+	f.mu.Unlock()
+}
+
+func (f *fakeChecks) sorted() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := append([]string(nil), f.calls...)
+	sort.Strings(out)
+	return out
+}
+
+func TestLane_PostsOneCheckPerJob(t *testing.T) {
+	step := []model.PlanStep{{ID: "run", Name: "run"}}
+	plan := &model.Plan{Jobs: []model.PlanJob{
+		{ID: "x", Component: "x", Lane: "L", Steps: step},
+		{ID: "y", Component: "y", Lane: "L", DependsOn: []string{"x"}, Steps: step},
+		{ID: "z", Component: "z", Lane: "L", Steps: step},
+		{ID: "w", Component: "w", Lane: "L", Steps: step},
+	}, Lanes: []model.PlanLane{{ID: "L", Jobs: []string{"x", "y", "z", "w"}, Concurrency: 2}}}
+	ex := &laneExecutor{fail: map[string]bool{"x": true}}
+	r := laneRunner(t, ex, "L", []string{"x", "y", "z", "w"}, 2)
+	r.ResumeJobs = map[string]*execmodel.JobState{"w": {Status: "completed"}}
+	fc := &fakeChecks{}
+	r.Checks = fc
+	_ = r.Run(plan)
+	want := []string{"finish w success", "finish x failure", "finish y cancelled", "finish z success", "start x", "start z"}
+	if got := fc.sorted(); strings.Join(got, ";") != strings.Join(want, ";") {
+		t.Fatalf("checks = %v", got)
+	}
+}
+
+func TestLane_SingleJobLanePostsNoCheck(t *testing.T) {
+	ex := &laneExecutor{}
+	r := laneRunner(t, ex, "A", []string{"a1"}, 1)
+	fc := &fakeChecks{}
+	r.Checks = fc
+	if err := r.Run(twoLanePlan()); err != nil {
+		t.Fatal(err)
+	}
+	if len(fc.calls) != 0 {
+		t.Fatalf("a single-job lane is its own check: %v", fc.calls)
+	}
+}
+
+func TestLaneSummaryMarkdown(t *testing.T) {
+	md := laneSummaryMarkdown("stage/auto-1", []*laneRecord{
+		{job: model.PlanJob{ID: "a", CheckName: "a · stage · Deploy"}, status: laneSucceeded, duration: 3 * time.Second, waited: []string{"a.dev"}},
+		{job: model.PlanJob{ID: "b"}, status: laneBlocked},
+	})
+	for _, want := range []string{"### Lane `stage/auto-1`", "| a · stage · Deploy | ✅ succeeded |", "| a.dev |", "| b | ⊘ blocked | — | — |"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("summary missing %q:\n%s", want, md)
+		}
+	}
+}
+
+func TestLane_GHAHoldsEachJobsStepsTogether(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("GITHUB_STEP_SUMMARY", t.TempDir()+"/summary.md")
+	steps := []model.PlanStep{{ID: "one", Name: "one"}, {ID: "two", Name: "two"}}
+	plan := &model.Plan{Jobs: []model.PlanJob{
+		{ID: "x", Component: "x", Environment: "stage", CheckName: "x · stage · Deploy", Lane: "L", Steps: steps},
+		{ID: "y", Component: "y", Environment: "stage", CheckName: "y · stage · Deploy", Lane: "L", Steps: steps},
+	}, Lanes: []model.PlanLane{{ID: "L", Jobs: []string{"x", "y"}, Concurrency: 2}}}
+	var out strings.Builder
+	var mu sync.Mutex
+	r := NewRunner(t.TempDir(), false, writerFunc(func(p []byte) (int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return out.Write(p)
+	}), io.Discard, false, "", false, false, &laneExecutor{}, executor.RuntimeContext{}, "exec_lane", 2, nil, "")
+	r.LaneID, r.LaneJobs = "L", []string{"x", "y"}
+	if err := r.Run(plan); err != nil {
+		t.Fatal(err)
+	}
+	// Each job's two step groups are adjacent: no other job's group between.
+	var owners []string
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.HasPrefix(line, "::group::") {
+			owners = append(owners, strings.SplitN(strings.TrimPrefix(line, "::group::"), " ", 2)[0])
+		}
+	}
+	if len(owners) != 4 || owners[0] != owners[1] || owners[2] != owners[3] || owners[0] == owners[2] {
+		t.Fatalf("step groups interleave or lack the job label: %v\n%s", owners, out.String())
+	}
+	data, _ := os.ReadFile(os.Getenv("GITHUB_STEP_SUMMARY"))
+	if !strings.Contains(string(data), "### Lane `L`") {
+		t.Fatalf("no step summary: %s", data)
+	}
+}
+
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }

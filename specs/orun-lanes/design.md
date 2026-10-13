@@ -281,9 +281,10 @@ changes. Branch protection must not depend on them. So:
 
 ### 9.3 Logs and summary
 
-- With more than one job in flight, each job's output is printed as one
-  `::group::<checkName>` block when the job ends, so concurrent jobs never
-  interleave.
+- With more than one job in flight, each job's output is held until the job
+  ends and then printed as one contiguous block, so concurrent jobs never
+  interleave. GitHub cannot nest groups, so the block keeps one
+  `::group::` per step, each titled `<checkName> › <step>`.
 - The lane writes a table to `$GITHUB_STEP_SUMMARY`: job, status, duration,
   and the upstream it waited on.
 

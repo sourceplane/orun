@@ -248,6 +248,9 @@ func (r *Runner) ghaEmitStep(job model.PlanJob, stepID string, index int, output
 		icon = "✕"
 	}
 	title := fmt.Sprintf("%s  %02d %s  %s", icon, index, stepID, formatStepDuration(duration))
+	if r.ghaHoldSteps {
+		title = r.ghaJobLabel(job) + " › " + title
+	}
 	if success && summary != "" {
 		title += "  ·  " + summary
 	} else if !success {
@@ -274,7 +277,9 @@ func (r *Runner) ghaEmitStep(job model.PlanJob, stepID string, index int, output
 		msg := summarizeExecError(err)
 		buf.Annotation("error", fmt.Sprintf("%s › %s: %s", r.ghaJobLabel(job), stepID, msg), nil)
 	}
-	r.gha.FlushStep(job.ID)
+	if !r.ghaHoldSteps {
+		r.gha.FlushStep(job.ID)
+	}
 }
 
 // ghaPrintStepDryRun emits a single visible line for a dry-run step

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/executor"
@@ -97,11 +98,22 @@ func dedupe(s []string) []string {
 // runLane runs the lane's jobs, each as soon as its upstreams finish, at most
 // concurrency at a time. A failed job stops the lane jobs that depend on it;
 // the rest continue unless failFast.
+//
+// A lane of more than one job also reports each job on its own (§9): a check
+// run per job through r.Checks, and a row per job in the step summary.
 func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, baseExecContext executor.ExecContext, persistState, failFast bool, summary *runSummary, concurrency int) error {
 	if r.DryRun || concurrency < 1 {
 		concurrency = 1
 	}
 	outside := outsideUpstreams(jobs)
+	multi := len(jobs) > 1
+	checks := r.Checks
+	if !multi || r.DryRun {
+		checks = nil
+	}
+	// With several jobs in flight, hold each job's step groups until it ends
+	// so its output reads as one block in the GitHub log.
+	r.ghaHoldSteps = multi && concurrency > 1
 
 	type outcome struct {
 		done chan struct{}
@@ -111,6 +123,7 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 	for _, job := range jobs {
 		outcomes[job.ID] = &outcome{done: make(chan struct{})}
 	}
+	records := make([]*laneRecord, len(jobs))
 
 	sem := make(chan struct{}, concurrency)
 	var mu sync.Mutex
@@ -129,12 +142,20 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 	}
 
 	var wg sync.WaitGroup
-	for _, job := range jobs {
+	for i, job := range jobs {
 		wg.Add(1)
-		go func(j model.PlanJob) {
+		rec := &laneRecord{job: job, status: laneNotRun, waited: outside[job.ID]}
+		records[i] = rec
+		go func(j model.PlanJob, rec *laneRecord) {
 			defer wg.Done()
 			o := outcomes[j.ID]
-			defer close(o.done)
+			defer func() {
+				o.ok = rec.status == laneSucceeded || rec.status == laneResumed
+				if checks != nil {
+					checks.Finish(j.ID, laneCheckName(j), rec.conclusion(), rec.note)
+				}
+				close(o.done)
+			}()
 
 			// Upstreams in this lane.
 			for _, dep := range j.DependsOn {
@@ -145,6 +166,7 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 				<-up.done
 				if !up.ok {
 					summary.addWaiting(1)
+					rec.status, rec.note = laneBlocked, "upstream "+dep+" did not succeed"
 					r.printLaneBlocked(j, dep)
 					return
 				}
@@ -155,7 +177,7 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 			completed := jobState.Status == "completed"
 			r.stateMu.Unlock()
 			if completed {
-				o.ok = true
+				rec.status = laneResumed
 				summary.addResumed()
 				r.printJobResumed(j)
 				return
@@ -165,6 +187,7 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 			if deps := outside[j.ID]; len(deps) > 0 && !r.DryRun && r.Hooks != nil && r.Hooks.AwaitUpstream != nil {
 				if err := r.Hooks.AwaitUpstream(j.ID, deps); err != nil {
 					summary.addWaiting(1)
+					rec.status, rec.note = laneBlocked, err.Error()
 					fail(err)
 					fmt.Fprintf(r.Stderr, "  %s\n", err)
 					return
@@ -183,6 +206,7 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 			if r.Hooks != nil && r.Hooks.BeforeJob != nil {
 				skip, err := r.Hooks.BeforeJob(j.ID)
 				if err != nil {
+					rec.status, rec.note = laneFailed, err.Error()
 					fail(err)
 					return
 				}
@@ -190,21 +214,36 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 					r.stateMu.Lock()
 					jobState.Status = "completed"
 					r.stateMu.Unlock()
-					o.ok = true
+					rec.status = laneResumed
 					summary.addResumed()
 					r.printJobResumed(j)
 					return
 				}
 			}
 
-			if failed := r.executeJob(j, jobState, execState, baseExecContext, persistState, failFast, summary); failed {
+			if checks != nil {
+				checks.Start(j.ID, laneCheckName(j))
+			}
+			started := time.Now()
+			failed := r.executeJob(j, jobState, execState, baseExecContext, persistState, failFast, summary)
+			rec.duration = time.Since(started)
+			if failed {
+				rec.status = laneFailed
+				r.stateMu.Lock()
+				rec.note = jobState.LastError
+				r.stateMu.Unlock()
 				fail(fmt.Errorf("job %s failed", j.ID))
 				return
 			}
-			o.ok = true
-		}(job)
+			rec.status = laneSucceeded
+		}(job, rec)
 	}
 	wg.Wait()
+	r.ghaHoldSteps = false
+
+	if multi && r.inGHA() && !r.DryRun {
+		writeLaneStepSummary(r.LaneID, records)
+	}
 
 	snap := summary.snapshot()
 	finalStatus := "completed"

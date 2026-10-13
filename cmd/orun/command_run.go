@@ -14,6 +14,7 @@ import (
 	"github.com/sourceplane/orun/internal/configsurface"
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/executor"
+	"github.com/sourceplane/orun/internal/ghchecks"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/objrun"
 	"github.com/sourceplane/orun/internal/redact"
@@ -338,6 +339,10 @@ func runPlan() error {
 	r.PlanID = planID
 	if runLaneJobs != nil {
 		r.LaneID, r.LaneJobs = runLaneID, runLaneJobs
+		// One check run per job of a multi-job lane (specs/orun-lanes §9.2).
+		if rep := ghchecks.FromEnv(os.Stderr); rep != nil {
+			r.Checks = rep
+		}
 	}
 	r.Isolation = runner.IsolationMode(strings.ToLower(strings.TrimSpace(runIsolation)))
 	r.KeepWorkspaces = runKeepWorkspaces
