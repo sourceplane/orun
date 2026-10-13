@@ -149,11 +149,14 @@ type RepoDeclaration struct {
 	Tags  []string
 }
 
-// RepoLink is one external link on a RepoDeclaration.
+// RepoLink is one external link on a RepoDeclaration or an enrichment. Role
+// is catalogmodel.LinkRolePrimary for an entity's front door (an
+// environment's declared url), "" otherwise.
 type RepoLink struct {
 	Title string
 	URL   string
 	Icon  string
+	Role  string
 }
 
 // Options configures DiscoverAndLoad and Resolve. Exactly one of

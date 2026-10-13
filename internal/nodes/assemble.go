@@ -363,6 +363,15 @@ func deriveEntities(manifests []ComponentManifest, enrichments []EntityEnrichmen
 		e.Spec["members"] = anyMem
 		e.Spec["memberCount"] = len(mem)
 	}
+	// Declared entities (an `environments.<name>` block) materialize whether
+	// or not a component references them: the block is their declaration
+	// site, the way component.yaml is a component's.
+	for _, enr := range enrichments {
+		if !enr.Declared || enr.EntityKey == "" {
+			continue
+		}
+		ensure(enr.Kind, enr.EntityKey, enr.Name, nil)
+	}
 	// Apply enrichments (CD2) onto the derived entities they target. Matching
 	// is by (kind, bare name); a Group's derived name may carry the `group:`
 	// typed-ref prefix (bare owner names normalize to "group:<name>"), so the
@@ -404,6 +413,18 @@ func deriveEntities(manifests []ComponentManifest, enrichments []EntityEnrichmen
 			if len(enr.Docs) > 0 && e.Docs == nil {
 				e.Docs = enr.Docs
 				e.PendingDocs = enr.PendingDocs
+			}
+			// The block's own facts (url, order) fold into spec beside the
+			// derived membership; a value the derivation already set stands.
+			if len(enr.Spec) > 0 {
+				if e.Spec == nil {
+					e.Spec = map[string]any{}
+				}
+				for k, v := range enr.Spec {
+					if _, has := e.Spec[k]; !has {
+						e.Spec[k] = v
+					}
+				}
 			}
 		}
 	}

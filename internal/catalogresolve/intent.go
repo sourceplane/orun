@@ -25,8 +25,32 @@ type intentFile struct {
 	Components []inlineComponent `yaml:"components"`
 	// Repo is the optional top-level block that self-describes THIS repo
 	// (saas-workspace-overview WO3). When present, the resolver emits a single
-	// Repo entity; when absent, nothing changes.
+	// Repo entity; when absent, the entity is still emitted from metadata
+	// (name, description) and a root README.md when one exists.
 	Repo *intentRepoBlock `yaml:"repo"`
+	// Environments is the catalog-relevant slice of the declared environments:
+	// a description, the front door (url), further links, and the promotion
+	// chain (for the entity's order). An environment named here is DECLARED,
+	// so it materializes as an Environment entity even before a component
+	// deploys to it.
+	Environments map[string]*intentEnvironment `yaml:"environments"`
+}
+
+// intentEnvironment mirrors the catalog-relevant keys of one
+// `environments.<name>` block (model.Environment carries the rest).
+type intentEnvironment struct {
+	Description string           `yaml:"description"`
+	URL         string           `yaml:"url"`
+	Links       []intentRepoLink `yaml:"links"`
+	Promotion   *intentPromotion `yaml:"promotion"`
+}
+
+type intentPromotion struct {
+	DependsOn []intentPromotionDependency `yaml:"dependsOn"`
+}
+
+type intentPromotionDependency struct {
+	Environment string `yaml:"environment"`
 }
 
 // intentMetadata mirrors intent.yaml's top-level metadata (name/description are

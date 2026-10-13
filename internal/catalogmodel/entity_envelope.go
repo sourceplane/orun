@@ -143,12 +143,18 @@ type EntityDocs struct {
 	ADRs     []string  `json:"adrs,omitempty"`
 }
 
-// EntityLink is one external link surfaced in the portal/CLI (§2).
+// EntityLink is one external link surfaced in the portal/CLI (§2). `role`
+// names what the link is to the entity: `primary` is its front door (an
+// environment's `url` in intent.yaml); other links carry no role.
 type EntityLink struct {
 	Title string `json:"title"`
 	URL   string `json:"url"`
 	Icon  string `json:"icon,omitempty"`
+	Role  string `json:"role,omitempty"`
 }
+
+// LinkRolePrimary marks the one link that is an entity's front door.
+const LinkRolePrimary = "primary"
 
 // EntityProvenance records where each resolved value came from. EXCLUDED from
 // manifestHash (§2, §10) — changing only provenance must not move the hash.

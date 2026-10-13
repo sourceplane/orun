@@ -668,7 +668,11 @@ func renderCatalogEntityText(e objcatalog.EntityView) error {
 		for _, l := range e.Links {
 			title := anyString(l["title"])
 			url := anyString(l["url"])
-			fmt.Fprintf(out, "  %-14s %s\n", title, url)
+			if role := anyString(l["role"]); role != "" {
+				fmt.Fprintf(out, "  %-14s %s  (%s)\n", title, url, role)
+			} else {
+				fmt.Fprintf(out, "  %-14s %s\n", title, url)
+			}
 		}
 	}
 

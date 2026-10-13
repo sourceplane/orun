@@ -11,6 +11,7 @@ recent are:
 
 | Version | Date | Highlights |
 |---|---|---|
+| [v2.77.0](https://orun-docs.pages.dev/release-notes/v2.77.0) | 2026-10-13 | `environments.<name>.url`, `links` and `description` in intent.yaml; every declared environment is a catalog `Environment` entity with its front door as the primary link and `spec.order`; the `Repo` entity is emitted from `metadata.description` alone, with a root `README.md` as the default overview; `links[].role` on the entity envelope |
 | [v2.76.0](https://orun-docs.pages.dev/release-notes/v2.76.0) | 2026-10-13 | Lanes: `execution.lanes` groups jobs into the units a runner takes (`job`, `component`, `env`, `auto` without weights), `orun run --lane`, `lane-matrix`, one check run per job; plans without lanes are unchanged |
 | [v2.75.0](https://orun-docs.pages.dev/release-notes/v2.75.0) | 2026-10-05 | `orun run <id>` now runs the plan `orun plan` printed; `orun plan` shows each environment's jobs and what they wait on; `orun new` ends in a short summary; a new README recording |
 | [v2.74.0](https://orun-docs.pages.dev/release-notes/v2.74.0) | 2026-10-05 | `orun baseline new --from bst_…` continues a bootstrap the console resolved: the id fills the baseline, repository and inputs, no token in the record, the platform reads which door took it |
