@@ -97,9 +97,33 @@ type Group struct {
 	ParameterDefaults map[string]map[string]interface{} `yaml:"parameterDefaults" json:"parameterDefaults"`
 }
 
+// EnvironmentLink is one door into a running environment beyond its front
+// door: an API host, an admin console, a status page. Surfaced on the
+// environment's catalog entity after the front door (url) — the Overview's
+// product head and `orun catalog describe environment:<name>` show them.
+type EnvironmentLink struct {
+	Title string `yaml:"title" json:"title"`
+	URL   string `yaml:"url" json:"url"`
+	Icon  string `yaml:"icon,omitempty" json:"icon,omitempty"`
+}
+
 // Environment defines environment runtime contexts
 type Environment struct {
-	Path              string                            `yaml:"path" json:"path"`
+	Path string `yaml:"path" json:"path"`
+	// Description is a one-line "what is this environment" for the catalog
+	// entity the environment materializes as (fill-empty; a
+	// catalog.entities enrichment for the same environment no longer needs
+	// to carry one).
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+	// URL is the environment's front door — the absolute http(s) address a
+	// person opens to reach the product running in this environment. It
+	// rides the catalog snapshot as the environment entity's primary link
+	// (links[0], role=primary) and spec.url, so the Orunbase Overview can
+	// show one door per environment next to the product's description. A
+	// relative or non-http(s) value is a resolve error.
+	URL string `yaml:"url,omitempty" json:"url,omitempty"`
+	// Links are further doors (API, admin, status page), after the URL.
+	Links             []EnvironmentLink                 `yaml:"links,omitempty" json:"links,omitempty"`
 	Activation        EnvironmentActivation             `yaml:"activation,omitempty" json:"activation,omitempty"`
 	Promotion         EnvironmentPromotion              `yaml:"promotion,omitempty" json:"promotion,omitempty"`
 	Selectors         EnvironmentSelectors              `yaml:"selectors" json:"selectors"`

@@ -396,4 +396,11 @@ type EntityEnrichment struct {
 	Tags        []string
 	Docs        map[string]any
 	PendingDocs map[string][]byte
+	// Declared marks an entity named by its own intent.yaml block (an
+	// `environments.<name>` entry): deriveEntities materializes it under
+	// EntityKey when no component references it. Spec carries the block's
+	// own facts (url, order) and is folded into the entity's spec.
+	Declared  bool
+	EntityKey string
+	Spec      map[string]any
 }
