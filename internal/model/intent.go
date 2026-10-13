@@ -37,6 +37,74 @@ type Intent struct {
 // orun binary's digest and a declared pin is a load-time error.
 type IntentExecution struct {
 	State IntentExecutionState `yaml:"state,omitempty" json:"state,omitempty"`
+	// Lanes groups plan jobs into the units a runner takes. Nil (the
+	// default) leaves every job its own lane and the plan byte-identical to
+	// a lane-unaware one (specs/orun-lanes §3.1, §4.6).
+	Lanes *IntentLanes `yaml:"lanes,omitempty" json:"lanes,omitempty"`
+}
+
+// Lane modes (specs/orun-lanes §3).
+const (
+	LaneModeJob       = "job"
+	LaneModeComponent = "component"
+	LaneModeEnv       = "env"
+	LaneModeAuto      = "auto"
+	// LaneIsolated is the component annotation that keeps a component's jobs
+	// on runners of their own; not a mode.
+	LaneIsolated = "isolated"
+	// Cycle policies between lanes (specs/orun-lanes §7).
+	LaneOnCycleSplit  = "split"
+	LaneOnCycleReject = "reject"
+	// Defaults applied when a field is unset.
+	DefaultLaneMaxLanes    = 16
+	DefaultLaneConcurrency = 4
+)
+
+// IntentLanes is execution.lanes in intent.yaml.
+type IntentLanes struct {
+	// Mode is job (default) | component | env | auto.
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	// MaxLanes caps the lanes auto mode emits (default 16).
+	MaxLanes int `yaml:"maxLanes,omitempty" json:"maxLanes,omitempty"`
+	// Concurrency is the jobs in flight inside one lane (default 4).
+	Concurrency int `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
+	// OnCycle is split (default) | reject.
+	OnCycle string `yaml:"onCycle,omitempty" json:"onCycle,omitempty"`
+	// Groups are named lanes a component joins with spec.lane.
+	Groups map[string]LaneGroup `yaml:"groups,omitempty" json:"groups,omitempty"`
+	// Rules switch the mode by trigger; the first whose triggerRef is active
+	// wins.
+	Rules []LaneRule `yaml:"rules,omitempty" json:"rules,omitempty"`
+}
+
+// LaneGroup is one named lane group.
+type LaneGroup struct {
+	// Concurrency overrides execution.lanes.concurrency for this group.
+	Concurrency int `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
+}
+
+// LaneRule selects a mode when a trigger binding is active.
+type LaneRule struct {
+	Mode string          `yaml:"mode" json:"mode"`
+	When ProfileRuleWhen `yaml:"when" json:"when"`
+}
+
+// IsValidLaneMode reports whether mode is a lane mode (empty means default).
+func IsValidLaneMode(mode string) bool {
+	switch mode {
+	case "", LaneModeJob, LaneModeComponent, LaneModeEnv, LaneModeAuto:
+		return true
+	}
+	return false
+}
+
+// IsReservedLaneName reports whether name cannot be a group name.
+func IsReservedLaneName(name string) bool {
+	switch name {
+	case LaneModeJob, LaneModeAuto, LaneIsolated:
+		return true
+	}
+	return false
 }
 
 // IntentExecutionState configures where execution state is stored.
@@ -197,6 +265,10 @@ type Component struct {
 	// in env, secretEnv, and optionalSecretEnv at once.
 	OptionalSecretEnv         map[string]string `yaml:"optionalSecretEnv,omitempty" json:"optionalSecretEnv,omitempty"`
 	Change                    ComponentChange   `yaml:"change,omitempty" json:"change,omitempty"`
+	// Lane places this component's jobs: the name of a group declared in
+	// execution.lanes.groups, or LaneIsolated so they never share a runner.
+	// Empty leaves them to execution.lanes.mode (specs/orun-lanes §3.2).
+	Lane                      string            `yaml:"lane,omitempty" json:"lane,omitempty"`
 	ResolvedComposition       string            `yaml:"-" json:"-"`
 	ResolvedCompositionSource string            `yaml:"-" json:"-"`
 	SourcePath                string            `yaml:"-" json:"-"`
