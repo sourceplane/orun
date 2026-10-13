@@ -2,7 +2,7 @@
 
 | Milestone | Status | What shipped |
 |---|---|---|
-| **LN0** | ✅ this PR | The design: the lane (one environment, one runner, many jobs), configuration and resolution, the planner's invariants, auto mode without weights, cycle repair by level, `orun run --lane`, the lane matrix and per-job check runs, and the compatibility table |
+| **LN0** | ✅ #722 | The design: the lane (one environment, one runner, many jobs), configuration and resolution, the planner's invariants, auto mode without weights, cycle repair by level, `orun run --lane`, the lane matrix and per-job check runs, and the compatibility table |
 | **LN1** | ✅ this PR | `execution.lanes` (mode, maxLanes, concurrency, onCycle, groups, rules) and `spec.lane` on the intent and component models, carried through the component cache and the catalog's component.yaml type (schema regenerated); `trigger.ValidateLanes` at every place dependency rules are validated. Inert: nothing reads the configuration yet, plans are unchanged |
 | **LN2** | 🗓️ planned | Explicit modes in the plan, cycle repair, `--view lanes` |
 | **LN3** | 🗓️ planned | `mode: auto` |
