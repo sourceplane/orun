@@ -123,9 +123,10 @@ accepted on an inline `components:` entry in `intent.yaml`.
    creates no lane edges.
 5. **Determinism.** The same plan inputs produce the same lanes, ids, names
    and indexes, so `orun plan` stays byte-identical for identical inputs.
-6. **Absence is invisible.** With no `execution.lanes` and no `spec.lane`, the
-   plan has no `lanes` key and no job has a `lane` field. The plan, its
-   checksum and its revision key are exactly what they are today.
+6. **Absence is invisible.** With no `execution.lanes`, the plan has no
+   `lanes` key and no job has a `lane` field, whatever `spec.lane`
+   annotations exist (they only take effect under a mode that groups). The
+   plan, its checksum and its revision key are exactly what they are today.
 
 ## 5. Ids, names and order
 
@@ -201,7 +202,7 @@ For every SCC with more than one lane:
 |---|---|
 | All `auto`, same partition | **Merge** them into one lane. Silent: auto chose the layout, so a cycle from auto is auto's to fix. |
 | Any `group`, `component` or `env` lane | **Split** each such lane in the SCC by topological level (§7.1). The lane keeps its group and runner and gets a `-<k>` suffix. A warning names the edges. |
-| An `isolated` lane | Never touched; the other lanes are split around it. |
+| An `isolated` lane | Never merged with anything. Split by level only if splitting the other lanes cannot break the cycle; no other job ever joins it. |
 
 With `onCycle: reject` (or `orun plan --strict-lanes`), a cycle that would need
 a split is a plan error naming it:
