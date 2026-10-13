@@ -2,6 +2,7 @@ package objplan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/sourceplane/orun/internal/catalogresolve"
@@ -63,7 +64,25 @@ type Input struct {
 type RefreshResult struct {
 	SourceID  objectstore.ObjectID
 	CatalogID objectstore.ObjectID
+	// CatalogSkipped is the resolve error the refresh tolerated (non-strict
+	// mode) when it left CatalogID empty and the catalogs/* refs unmoved. It
+	// is nil whenever CatalogID is set. Callers that need the catalog — the
+	// --changed selection does — must treat it as a failure; callers for
+	// which the catalog is best-effort may log it.
+	CatalogSkipped error
 }
+
+// ErrCatalogSkipped reports that a tolerant (non-strict) catalog write skipped
+// the catalog edge because the resolver failed. Err is the resolve error.
+type ErrCatalogSkipped struct {
+	Err error
+}
+
+func (e *ErrCatalogSkipped) Error() string {
+	return "objplan: catalog skipped: " + e.Err.Error()
+}
+
+func (e *ErrCatalogSkipped) Unwrap() error { return e.Err }
 
 // RefreshCatalog writes source → (catalog, memoized) to the object graph and
 // moves the catalogs/* refs (incl. catalogs/current) — the explicit-refresh
@@ -91,6 +110,11 @@ func RefreshCatalog(ctx context.Context, w *nodewriter.Writer, store objectstore
 	}
 	catID, err := writeCatalogMemoized(ctx, w, store, memo.WithInputsDigest(opts.InputsDigest), src, srcID, rv, in.Resolve, opts.Strict, opts.OwnerResolver, opts.CompositionResolver)
 	if err != nil {
+		var skipped *ErrCatalogSkipped
+		if errors.As(err, &skipped) {
+			res.CatalogSkipped = skipped.Err
+			return res, nil
+		}
 		return res, err
 	}
 	res.CatalogID = catID
@@ -119,7 +143,11 @@ func Plan(ctx context.Context, w *nodewriter.Writer, store objectstore.ObjectSto
 	if !opts.NoCatalog && in.Resolve != nil {
 		catID, err = writeCatalogMemoized(ctx, w, store, memo.WithInputsDigest(opts.InputsDigest), src, srcID, rv, in.Resolve, opts.Strict, opts.OwnerResolver, opts.CompositionResolver)
 		if err != nil {
-			return res, err
+			var skipped *ErrCatalogSkipped
+			if !errors.As(err, &skipped) {
+				return res, err
+			}
+			catID = "" // tolerant: the revision is written without a catalog edge
 		}
 		res.CatalogID = catID
 	}
@@ -155,8 +183,9 @@ func Plan(ctx context.Context, w *nodewriter.Writer, store objectstore.ObjectSto
 // On a memo hit whose object is still present, the cached catalog id is reused
 // (no resolve, no re-write) and its refs are refreshed. On a miss — or a stale
 // cache entry whose object is gone — the resolver runs, the catalog is written,
-// and the memo is updated. A resolve error is fatal under strict, else a
-// silently-skipped catalog (returns "", nil).
+// and the memo is updated. A resolve error is fatal under strict; otherwise
+// the catalog edge is skipped and the error comes back wrapped in
+// *ErrCatalogSkipped so the caller decides whether that is fatal for it.
 func writeCatalogMemoized(
 	ctx context.Context,
 	w *nodewriter.Writer,
@@ -188,7 +217,7 @@ func writeCatalogMemoized(
 		if strict {
 			return "", fmt.Errorf("objplan: resolve catalog: %w", err)
 		}
-		return "", nil // tolerant: skip the catalog edge
+		return "", &ErrCatalogSkipped{Err: err} // tolerant: skip the catalog edge, but say so
 	}
 	cat, manifests, graphs, ownership, fingerprints := BuildCatalogNodes(view, resolverVersion, ownerResolver, compositionResolver)
 	cat.SourceID = string(srcID)

@@ -173,9 +173,28 @@ func Resolve(ctx context.Context, opts Options) (*ResolvedCatalog, []ValidationI
 	}
 
 	if firstErr := firstError(issues); firstErr != nil {
-		return rc, issues, *firstErr
+		return rc, issues, resolveAbortError(*firstErr, manifests)
 	}
 	return rc, issues, nil
+}
+
+// resolveAbortError is the error Resolve aborts with for the first
+// error-severity issue. A duplicate componentKey becomes the typed
+// *ErrDuplicateComponent, which names every offending manifest in its
+// message; every other issue is returned as-is.
+func resolveAbortError(issue ValidationIssue, manifests []*catalogmodel.ComponentManifest) error {
+	if issue.Code != "component.key.duplicate" {
+		return issue
+	}
+	key, _ := issue.Detail["componentKey"].(string)
+	name := ""
+	for _, cm := range manifests {
+		if cm != nil && cm.Identity.ComponentKey == key {
+			name = cm.Identity.Name
+			break
+		}
+	}
+	return duplicateComponentError(issue, name)
 }
 
 // loadIntentForResolve re-reads the intent file using the same

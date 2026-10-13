@@ -165,7 +165,7 @@ environments:        # Environment definitions
       requireApproval: true
 
 discovery:           # Optional discovery roots for external components
-  roots: [services/, infra/, deploy/]
+  roots: [services/, infra/, deploy/]   # the planner and the catalog scan the same roots
 
 components:          # Optional inline execution-agnostic specs
   - name: component-charts

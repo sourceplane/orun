@@ -19,6 +19,16 @@ import (
 type intentFile struct {
 	Metadata *intentMetadata     `yaml:"metadata"`
 	Catalog  *intentCatalogBlock `yaml:"catalog"`
+	// Discovery is the top-level planner discovery block. Its roots bound
+	// catalog discovery too (see discoveryRoots): the catalog and the planner
+	// agree on where component manifests live.
+	Discovery *intentRootDiscovery `yaml:"discovery"`
+	// Extends lists the intent presets this file inherits. Presets may
+	// contribute discovery.roots the resolver cannot see (they are merged by
+	// the planner's loader, not here), so a file with presets keeps the
+	// whole-workspace walk. Decoded as a raw node so any authored shape is
+	// tolerated.
+	Extends yaml.Node `yaml:"extends"`
 	// Components are the inline component declarations. The catalog ingests
 	// these alongside discovered component.yaml files so the component set
 	// matches the legacy inline∪discovered set (orun-catalog-state CS5/CS6).
@@ -139,6 +149,38 @@ type intentCatalogDefaults struct {
 
 type intentDiscovery struct {
 	Exclude []string `yaml:"exclude"`
+}
+
+// intentRootDiscovery mirrors the top-level `discovery:` block the planner's
+// loader reads (internal/loader, model.Discovery).
+type intentRootDiscovery struct {
+	Roots []string `yaml:"roots"`
+}
+
+// hasExtends reports whether the intent inherits at least one preset.
+func (f *intentFile) hasExtends() bool {
+	if f == nil {
+		return false
+	}
+	switch f.Extends.Kind {
+	case 0:
+		return false
+	case yaml.SequenceNode:
+		return len(f.Extends.Content) > 0
+	case yaml.ScalarNode:
+		return f.Extends.Tag != "!!null" && f.Extends.Value != ""
+	default:
+		return true
+	}
+}
+
+// discoveryExcludes returns intent.yaml's catalog.discovery.exclude list, or
+// nil when the block is absent.
+func (f *intentFile) discoveryExcludes() []string {
+	if f == nil || f.Catalog == nil || f.Catalog.Discovery == nil {
+		return nil
+	}
+	return f.Catalog.Discovery.Exclude
 }
 
 // loadIntent reads the intent file at absPath, returning a parsed shape.

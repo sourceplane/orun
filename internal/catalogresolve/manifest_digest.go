@@ -50,20 +50,23 @@ func ManifestSetDigest(ctx context.Context, workspaceRoot string) (string, error
 		h.Write(body)
 	}
 
-	var excludes []string
+	var intent *intentFile
 	intentAbs := filepath.Join(root, "intent.yaml")
 	if raw, rerr := os.ReadFile(intentAbs); rerr == nil {
 		write("intent.yaml", raw)
-		intent, lerr := loadIntent(intentAbs, "intent.yaml")
-		if lerr != nil {
-			return "", lerr
-		}
-		if intent != nil && intent.Catalog != nil && intent.Catalog.Discovery != nil {
-			excludes = intent.Catalog.Discovery.Exclude
+		intent, err = loadIntent(intentAbs, "intent.yaml")
+		if err != nil {
+			return "", err
 		}
 	}
 
-	rels, err := discover(ctx, root, excludes)
+	// The same scope DiscoverAndLoad walks (discovery.roots + excludes), so
+	// the digest witnesses exactly the manifests the catalog is built from.
+	scope, err := discoveryScopeFor(root, intentAbs, "intent.yaml", intent)
+	if err != nil {
+		return "", err
+	}
+	rels, err := discover(ctx, root, scope)
 	if err != nil {
 		return "", err
 	}
