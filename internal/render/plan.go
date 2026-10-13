@@ -49,6 +49,24 @@ func (r *Renderer) RenderPlan(metadata model.Metadata, jobInstances map[string]*
 
 // RenderPlanWithOrder creates a plan from job instances using a caller-specified order.
 func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map[string]*model.JobInstance, jobBindings map[string]string, jobOrder []string) *model.Plan {
+	plan, _ := r.RenderPlanWithLanes(metadata, jobInstances, jobBindings, jobOrder, nil)
+	return plan
+}
+
+// LaneAssigner partitions a rendered plan's jobs into lanes (internal/lanes).
+// It runs before the checksum, so the lane layout is part of the plan's
+// identity; a plan it leaves without lanes is byte-identical to one rendered
+// without an assigner.
+type LaneAssigner func(plan *model.Plan) error
+
+// PlanJobCheckName is the check title of a plan job — `component · env ·
+// Display name` — the name GitHub shows for it (and a job-mode lane's name).
+func PlanJobCheckName(job model.PlanJob) string {
+	return jobCheckName(job.Component, job.Environment, jobDisplayNameFromKey(job.Name))
+}
+
+// RenderPlanWithLanes is RenderPlanWithOrder plus a lane assignment step.
+func (r *Renderer) RenderPlanWithLanes(metadata model.Metadata, jobInstances map[string]*model.JobInstance, jobBindings map[string]string, jobOrder []string, assign LaneAssigner) (*model.Plan, error) {
 	plan := &model.Plan{
 		APIVersion: planAPIVersion,
 		Kind:       "Plan",
@@ -127,10 +145,16 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 		plan.Jobs = append(plan.Jobs, planJob)
 	}
 
+	if assign != nil {
+		if err := assign(plan); err != nil {
+			return nil, err
+		}
+	}
+
 	r.attachChecksum(plan)
 	r.fillJobIdentity(plan)
 
-	return plan
+	return plan, nil
 }
 
 func buildPlanJobEnv(job *model.JobInstance) map[string]interface{} {

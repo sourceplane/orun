@@ -12,6 +12,7 @@ import (
 	"github.com/sourceplane/orun/internal/expand"
 	"github.com/sourceplane/orun/internal/git"
 	"github.com/sourceplane/orun/internal/inputglob"
+	"github.com/sourceplane/orun/internal/lanes"
 	"github.com/sourceplane/orun/internal/loader"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/normalize"
@@ -255,7 +256,18 @@ func (s *LiveOrunService) GeneratePlan(ctx context.Context, req PlanRequest) (*P
 		}
 	}
 	renderer := render.NewRenderer()
-	plan := renderer.RenderPlanWithOrder(intent.Metadata, jobInstances, jobBindings, sorted)
+	var laneTriggers []string
+	if triggerResolution != nil {
+		laneTriggers = triggerResolution.MatchedTriggerNames
+	}
+	laneOpts := lanes.ForIntent(intent, laneTriggers, false, render.PlanJobCheckName)
+	plan, err := renderer.RenderPlanWithLanes(intent.Metadata, jobInstances, jobBindings, sorted, func(p *model.Plan) error {
+		_, aerr := lanes.Assign(p, laneOpts)
+		return aerr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("lanes: %w", err)
+	}
 	plan.Spec.CompositionSources = compositionRegistry.Sources
 
 	if triggerResolution != nil {
