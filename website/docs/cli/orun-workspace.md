@@ -14,7 +14,7 @@ orun workspace list               # every workspace this session can reach
 orun workspace use <ws-id|slug>   # select it (persisted)
 orun workspace use                # no argument: pick from a numbered list
 orun workspace use --clear        # unselect
-orun workspace create <name>      # create a new one
+orun workspace create <name>      # create a new one (--account when you own several accounts)
 orun workspace <ws-id|slug>       # look one workspace up on the platform
 ```
 
@@ -25,10 +25,10 @@ aliases for `use`.
 
 ```bash
 $ orun workspace list
-   SLUG   WORKSPACE ID  ROLE
-   ogpic  ws_91J9CD5W   owner
-   halo   ws_7F3AQ2P1   owner
-   lumen  ws_K4M8ZX02   owner
+   SLUG   WORKSPACE ID  ROLE   ACCOUNT
+   ogpic  ws_91J9CD5W   owner  acme
+   halo   ws_7F3AQ2P1   owner  acme
+   lumen  ws_K4M8ZX02   owner  lab
 
 None selected. Choose one: `orun workspace use ogpic`
 
@@ -40,6 +40,11 @@ The slug, the `ws_…` Workspace ID, and the legacy `org_…` id are all accepte
 case-insensitively. A name that isn't on your session fails with a "did you
 mean" suggestion and the list of workspaces you can actually reach — nothing is
 persisted on a miss.
+
+The **ACCOUNT** column is the account each workspace belongs to — the billing
+and ownership boundary above a workspace, and the value
+`orun workspace create --account` takes. It is shown when the platform reports
+it and omitted otherwise.
 
 The selection is stored in `~/.orun/config.yaml`:
 
@@ -116,10 +121,47 @@ Creating a workspace does **not** select it; follow with
 `orun workspace use acme-platform`. The creator becomes the workspace's owner,
 and it starts on the free plan. Works with a CLI session or with `ORUN_TOKEN`.
 
+### Which account it belongs to
+
+A workspace belongs to an account. A login that owns exactly one account
+needs to say nothing; a login that owns **several** must name the one the
+workspace lands in, with `--account <ws_…|slug>`:
+
+```bash
+orun workspace create "Acme Platform" --slug acme-platform --account acme
+```
+
+```text
+✓ workspace created
+  id:   ws_XWDRVB8C
+  slug: acme-platform
+  account: acme (ws_91J9CD5W)
+  next: connect integrations (`orun integrations <provider> connect --org ws_XWDRVB8C`)
+```
+
+The account's slug and its `ws_…` id are both accepted. Without the flag the
+platform refuses rather than guess, and the CLI turns the refusal into the
+accounts you own and the exact command to rerun:
+
+```text
+✕ create workspace: You own more than one account. Name the account this workspace belongs to (accountId). (precondition_failed)
+
+  this login owns more than one account; name the one the workspace belongs to with --account.
+  accounts you own:
+    ACCOUNT  ACCOUNT ID   NAME
+    acme     ws_91J9CD5W  Acme Inc
+    lab      ws_K4M8ZX02  The Lab
+  rerun with one of:
+    orun workspace create 'Acme Platform' --slug acme-platform --account acme
+    orun workspace create 'Acme Platform' --slug acme-platform --account lab
+```
+
+`orun workspace list` shows which account each existing workspace belongs to.
+
 ## Looking one up
 
 `orun workspace <ws-id|slug>` fetches one workspace from the platform and
-prints its slug and id. It works with a workspace-scoped API key in
+prints its slug, id, and account. It works with a workspace-scoped API key in
 `ORUN_TOKEN`, which carries no membership list and so cannot answer
 `orun workspace list`; this is how a headless job confirms which workspace
 its key belongs to.

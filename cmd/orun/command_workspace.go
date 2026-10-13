@@ -58,7 +58,7 @@ always names the rung that actually won.`,
 		Aliases: []string{"ls"},
 		Short:   "List the workspaces this session can reach (marks the current one)",
 		Args:    cobra.NoArgs,
-		RunE:    func(cmd *cobra.Command, args []string) error { return runWorkspaceList() },
+		RunE:    func(cmd *cobra.Command, args []string) error { return runWorkspaceList(cmd.Context()) },
 	}
 
 	var clear bool
@@ -83,16 +83,27 @@ always names the rung that actually won.`,
 	}
 	useCmd.Flags().BoolVar(&clear, "clear", false, "Unset the selection (fall back to the repo link / explicit flags)")
 
-	var wsCreateSlug string
+	var wsCreateSlug, wsCreateAccount string
 	createCmd := &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create a new workspace owned by the current session",
-		Args:  cobra.ExactArgs(1),
+		Long: `Create a new workspace and print its ws_… id and slug. Creating one does not
+select it; follow with "orun workspace use <slug>".
+
+A login that owns more than one account must name the account the workspace
+belongs to with --account <ws_…|slug>; without it the platform refuses and
+the CLI lists the accounts to choose from.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCloudWorkspaceCreate(cmd.Context(), args[0], wsCreateSlug)
+			return runCloudWorkspaceCreate(cmd.Context(), workspaceCreateOpts{
+				Name:        args[0],
+				Slug:        wsCreateSlug,
+				Account:     wsCreateAccount,
+				CommandPath: cmd.CommandPath(),
+			})
 		},
 	}
-	createCmd.Flags().StringVar(&wsCreateSlug, "slug", "", "Workspace slug (default: derived from the name by the server)")
+	addWorkspaceCreateFlags(createCmd, &wsCreateSlug, &wsCreateAccount)
 
 	workspaceCmd.AddCommand(listCmd, useCmd, createCmd)
 	root.AddCommand(workspaceCmd)
@@ -139,7 +150,7 @@ func runWorkspaceShow() error {
 	return nil
 }
 
-func runWorkspaceList() error {
+func runWorkspaceList(ctx context.Context) error {
 	orgs := sessionOrgs()
 	if len(orgs) == 0 {
 		if creds, err := cliauth.LoadSession(); err != nil || creds == nil {
@@ -149,22 +160,37 @@ func runWorkspaceList() error {
 		return nil
 	}
 	current, source := currentWorkspace()
-	headers := []string{"", "SLUG", "WORKSPACE ID", "ROLE"}
-	rows := make([][]string, 0, len(orgs))
-	for _, o := range orgs {
-		mark := ""
-		if o.matches(current) {
-			mark = "*"
-		}
-		rows = append(rows, []string{mark, orDash(o.Slug), o.primaryID(), orDash(o.Role)})
-	}
-	fmt.Print(renderColumns(headers, rows))
+	fmt.Print(renderWorkspaceList(withOrgAccounts(ctx, orgs), current))
 	if current != "" {
 		fmt.Printf("\n* current, from %s. Switch: `orun workspace use <slug>`\n", source)
 		return nil
 	}
 	fmt.Printf("\nNone selected. Choose one: `orun workspace use %s`\n", orgs[0].Label)
 	return nil
+}
+
+// renderWorkspaceList is the `workspace list` table. The ACCOUNT column —
+// which account each workspace belongs to, the value `workspace create
+// --account` takes — appears only when at least one workspace's account is
+// known, so a backend that does not report accounts prints the old table.
+func renderWorkspaceList(orgs []orgChoice, current string) string {
+	headers := []string{"", "SLUG", "WORKSPACE ID", "ROLE"}
+	if anyOrgHasAccount(orgs) {
+		headers = append(headers, "ACCOUNT")
+	}
+	rows := make([][]string, 0, len(orgs))
+	for _, o := range orgs {
+		mark := ""
+		if o.matches(current) {
+			mark = "*"
+		}
+		row := []string{mark, orDash(o.Slug), o.primaryID(), orDash(o.Role)}
+		if len(headers) > 4 {
+			row = append(row, orDash(o.accountLabel()))
+		}
+		rows = append(rows, row)
+	}
+	return renderColumns(headers, rows)
 }
 
 func runWorkspaceUse(target string) error {
@@ -302,5 +328,8 @@ func runWorkspaceShowRemote(ctx context.Context, target string) error {
 	fmt.Printf("  slug: %s\n", org.Slug)
 	fmt.Printf("  name: %s\n", org.Name)
 	fmt.Printf("  id:   %s\n", org.ID)
+	if account := accountDisplay(org.AccountID, org.AccountSlug); account != "" {
+		fmt.Printf("  account: %s\n", account)
+	}
 	return nil
 }

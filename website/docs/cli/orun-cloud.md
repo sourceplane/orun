@@ -37,7 +37,7 @@ orun cloud unlink                                 # drop the local link (the ser
 orun cloud status                                 # show the linked org/project, remote, and backend URL
 orun cloud check                                  # is this repo allow-listed for the resolved org?
 orun cloud open                                   # open the project's console page in the browser
-orun cloud workspace create <name> [--slug s]     # create a workspace (same as `orun workspace create`)
+orun cloud workspace create <name> [--slug s] [--account a]   # create a workspace (same as `orun workspace create`)
 ```
 
 :::warning Two kinds of repository link
