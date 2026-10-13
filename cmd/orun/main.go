@@ -718,6 +718,9 @@ func generatePlan() error {
 
 			matrixJSON := githubMatrixJSON(plan)
 			outputLines = append(outputLines, fmt.Sprintf("matrix<<EOF\n%s\nEOF", matrixJSON))
+			laneMatrix, laneCount := githubLaneMatrixJSON(plan)
+			outputLines = append(outputLines, fmt.Sprintf("lane-matrix<<EOF\n%s\nEOF", laneMatrix))
+			outputLines = append(outputLines, fmt.Sprintf("lane-count=%d", laneCount))
 			outputLines = append(outputLines, fmt.Sprintf("plan_id=%s", planID))
 			outputLines = append(outputLines, fmt.Sprintf("exec_id=%s", execID))
 
@@ -751,6 +754,8 @@ func writeEmptyGithubMatrix() {
 	}
 	lines := []string{
 		"matrix<<EOF\n{\"include\":[]}\nEOF",
+		"lane-matrix<<EOF\n{\"include\":[]}\nEOF",
+		"lane-count=0",
 		"plan_id=",
 		"exec_id=",
 	}
