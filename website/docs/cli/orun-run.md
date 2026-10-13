@@ -190,7 +190,8 @@ orun run --changed --explain
 | `--verbose` | Expand full step logs instead of the compact summary view |
 | `--workdir` | Override the working directory for all jobs |
 | `--job` | Run only one job ID (matches plan job ID or prefix) |
-| `--retry` | Clear existing state for `--job` before running. On remote state, also re-opens the job's failed remote claim and waits out failed upstream dependencies — see [Resume-aware CI reruns](#resume-aware-ci-reruns) |
+| `--lane` | Run every job of one lane in this process (`plan.lanes`, see [Lanes](../concepts/lanes.md)); on a plan without lanes it is `--job`. Mutually exclusive with `--job` |
+| `--retry` | With `--lane`, re-opens the lane's failed jobs and leaves completed ones completed. Clear existing state for `--job` before running. On remote state, also re-opens the job's failed remote claim and waits out failed upstream dependencies — see [Resume-aware CI reruns](#resume-aware-ci-reruns) |
 | `--runner` | Execution backend: `local`, `docker`, or `github-actions` |
 | `--gha` | Shortcut for `--runner github-actions` |
 | `--exec-id` | Execution ID for resume or CI tracing (auto-generated if not set) |
