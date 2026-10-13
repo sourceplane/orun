@@ -33,7 +33,7 @@ credentials.
 | Product name | display name | derive from the idea |
 | `reponame` | `^[a-z][a-z0-9-]{1,38}$`; also the URL prefix | slug of the name |
 | Product domain | apex; need not exist | `<reponame>.app` |
-| Account | which Orunbase account the workspace lands in; a `ws_…` id from the console's account settings | the user's default (earliest-owned) account |
+| Account | which Orunbase account the workspace lands in; `orun workspace create --account <ws_…\|slug>`, an id from the console's account settings or `orun workspace list` | the user's only account; a login that owns several must name one |
 | Workspace name and slug | | product name and its slug |
 | Baseline | `cirrus` (Cloudflare only, free) or `lumen` (Cloudflare + Supabase, free) | `cirrus` |
 | GitHub organisation | `gh` must be able to create repositories there and the Orunbase GitHub App must be installed on it | ask |
@@ -94,13 +94,10 @@ on a build. This is the one blocking question in the skill.
 ## 3. Create the workspace and connect providers
 
 ```bash
-orun workspace create "<Product>" --slug <slug>            # lands in the user's default account
-# or, to name the account:
-TOK=$(cd /tmp && orun auth token)
-curl -s -X POST https://api.orunbase.com/v1/organizations \
-  -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" \
-  -H "Idempotency-Key: <reponame>-ws-$(date +%s)" \
-  -d '{"name":"<Product>","slug":"<slug>","accountId":"<ws_ACCOUNT>"}'
+orun workspace create "<Product>" --slug <slug>            # lands in the user's only account
+# a login that owns several accounts must name the one the workspace belongs to
+# (`orun workspace list` shows each workspace's account; the id or slug both work):
+orun workspace create "<Product>" --slug <slug> --account <ws_ACCOUNT>
 
 export ORUN_WORKSPACE=<ws_NEW>            # `orun workspace use` will not know it until the next login
 orun integrations cloudflare connect --workspace <slug> < "$NOTES_DIR/cf-token.txt"

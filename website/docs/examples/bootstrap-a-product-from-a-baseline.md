@@ -115,7 +115,10 @@ orun workspace create "Acme Cloud" --slug acme
 
 The `ws_…` id is permanent; the slug is what you will type. The slug is
 derived from the name if you omit `--slug`. `orun cloud workspace create` is
-the same command under its older spelling.
+the same command under its older spelling. If your login owns more than one
+account, add `--account <ws_…|slug>` to say which account the workspace
+belongs to; without it the command lists your accounts and the exact command
+to rerun.
 
 Creating a workspace does **not** select it. Select it once, and every cloud
 command runs against it until you change it:
