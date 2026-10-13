@@ -48,6 +48,7 @@ type ComponentTreeComponent struct {
 	Labels      map[string]string      `yaml:"labels,omitempty" json:"labels,omitempty"`
 	DependsOn   []Dependency           `yaml:"dependsOn,omitempty" json:"dependsOn,omitempty"`
 	Change      ComponentChange        `yaml:"change,omitempty" json:"change,omitempty"`
+	Lane        string                 `yaml:"lane,omitempty" json:"lane,omitempty"`
 	Source      string                 `yaml:"source" json:"source"`
 	SourcePath  string                 `yaml:"sourcePath,omitempty" json:"sourcePath,omitempty"`
 	FileSize    int64                  `yaml:"fileSize,omitempty" json:"fileSize,omitempty"`
@@ -71,6 +72,7 @@ func (entry ComponentTreeComponent) ToComponent() Component {
 		Labels:     entry.Labels,
 		DependsOn:  entry.DependsOn,
 		Change:     entry.Change,
+		Lane:       entry.Lane,
 		SourcePath: entry.SourcePath,
 	}
 }
@@ -92,6 +94,7 @@ func FromComponent(component Component, source string) ComponentTreeComponent {
 		Labels:     component.Labels,
 		DependsOn:  component.DependsOn,
 		Change:     component.Change,
+		Lane:       component.Lane,
 		Source:     source,
 		SourcePath: component.SourcePath,
 	}

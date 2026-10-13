@@ -114,6 +114,9 @@ func (s *LiveOrunService) GeneratePlan(ctx context.Context, req PlanRequest) (*P
 	if errs := trigger.ValidateDependencyRules(intent); len(errs) > 0 {
 		return nil, trigger.FormatErrors(errs)
 	}
+	if errs := trigger.ValidateLanes(intent); len(errs) > 0 {
+		return nil, trigger.FormatErrors(errs)
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
