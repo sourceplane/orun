@@ -87,6 +87,9 @@ type ComponentYAMLSpec struct {
 	Labels       map[string]string                   `json:"labels,omitempty"`
 	Env          map[string]string                   `json:"env,omitempty"`
 	Change       *ComponentYAMLChange                `json:"change,omitempty"`
+	// Lane places the component's jobs in a lane group, or `isolated`
+	// (plan-engine contract, specs/orun-lanes §3.2).
+	Lane string `json:"lane,omitempty"`
 	// Integrations / Links / Docs / Extensions are the catalog-hub authoring
 	// blocks (orun-service-catalog SC6). `integrations` is a map of typed join
 	// keys (datadog/pagerduty/…); `extensions` carries namespaced x-<vendor>

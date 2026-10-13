@@ -14,6 +14,7 @@ import (
 	"github.com/sourceplane/orun/internal/configsurface"
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/executor"
+	"github.com/sourceplane/orun/internal/ghchecks"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/objrun"
 	"github.com/sourceplane/orun/internal/redact"
@@ -28,14 +29,18 @@ import (
 )
 
 var (
-	runPlanRef              string
-	runResolvedRevisionArg  string
-	runRevision             string // --revision <key>: run a specific PlanRevision
-	runDryRun               bool
-	runVerbose              bool
-	runWorkDir              string
-	runUseWorkDirOverride   bool
-	runJobID                string
+	runPlanRef             string
+	runResolvedRevisionArg string
+	runRevision            string // --revision <key>: run a specific PlanRevision
+	runDryRun              bool
+	runVerbose             bool
+	runWorkDir             string
+	runUseWorkDirOverride  bool
+	runJobID               string
+	runLaneID              string
+	// runLaneJobs are the selected lane's jobs (nil without --lane, or when
+	// --lane fell back to --job on a lane-less plan).
+	runLaneJobs             []string
 	runRetry                bool
 	runRunner               string
 	runGHACompat            bool
@@ -93,7 +98,8 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().StringVar(&runWorkDir, "workdir", ".", "Override working directory for all jobs")
 	runCmd.Flags().StringVar(&runJobID, "job", "", "Run only a specific job (matches plan job ID or prefix)")
 	runCmd.Flags().StringVar(&runJobID, "job-id", "", "Run only a specific job ID (deprecated: use --job)")
-	runCmd.Flags().BoolVar(&runRetry, "retry", false, "Clear existing state for selected --job before running")
+	runCmd.Flags().StringVar(&runLaneID, "lane", "", "Run only the jobs of one lane (plan.lanes); on a plan without lanes, the same as --job")
+	runCmd.Flags().BoolVar(&runRetry, "retry", false, "Re-open the selected --job, or the selected --lane's failed jobs, before running")
 	runCmd.Flags().StringVar(&runRunner, "runner", "", "Execution backend: local, github-actions, docker")
 	runCmd.Flags().BoolVar(&runGHACompat, "gha", false, "Enable GitHub Actions compatibility mode")
 	runCmd.Flags().StringVar(&runExecID, "exec-id", "", "Execution ID (for resume or CI). Auto-generated if not set")
@@ -124,6 +130,8 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().StringVar(&artifactBackend, "artifact", "", "Artifact backend for upload (e.g. github)")
 
 	_ = runCmd.Flags().MarkDeprecated("job-id", "use --job instead")
+
+	runCmd.MarkFlagsMutuallyExclusive("lane", "job")
 
 	// env-scoping (Z model): --env and --all-envs are mutually exclusive.
 	runCmd.MarkFlagsMutuallyExclusive("env", "all-envs")
@@ -259,8 +267,13 @@ func runPlan() error {
 		execID = execmodel.GenerateExecID(plan.Metadata.Name)
 	}
 
-	if runRetry && runJobID == "" {
-		return fmt.Errorf("--retry requires --job")
+	laneConcurrency, err := selectLane(plan)
+	if err != nil {
+		return err
+	}
+
+	if runRetry && runJobID == "" && runLaneJobs == nil {
+		return fmt.Errorf("--retry requires --job or --lane")
 	}
 
 	// If --background and we are NOT already the detached child, fork ourselves
@@ -276,6 +289,9 @@ func runPlan() error {
 
 	// Concurrency override
 	concurrency := plan.Execution.Concurrency
+	if laneConcurrency > 0 {
+		concurrency = laneConcurrency
+	}
 	if runConcurrency > 0 {
 		concurrency = runConcurrency
 	}
@@ -321,6 +337,13 @@ func runPlan() error {
 		runEnv,
 	)
 	r.PlanID = planID
+	if runLaneJobs != nil {
+		r.LaneID, r.LaneJobs = runLaneID, runLaneJobs
+		// One check run per job of a multi-job lane (specs/orun-lanes §9.2).
+		if rep := ghchecks.FromEnv(os.Stderr); rep != nil {
+			r.Checks = rep
+		}
+	}
 	r.Isolation = runner.IsolationMode(strings.ToLower(strings.TrimSpace(runIsolation)))
 	r.KeepWorkspaces = runKeepWorkspaces
 	r.ComponentConcurrency = runComponentConcurrency
@@ -579,6 +602,11 @@ func initRemoteRun(ctx context.Context, plan *model.Plan, execID, backendURL str
 		if runRetry && runJobID != "" {
 			cb.MarkRetry(runJobID)
 		}
+		if runRetry {
+			for _, id := range runLaneJobs {
+				cb.MarkRetry(id)
+			}
+		}
 		backend = cb
 	}
 
@@ -729,6 +757,9 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 			// beat once the job begins executing.
 			lease(jobID).heartbeatInterval = heartbeatIntervalFromClaim(result)
 			return false, nil
+		},
+		AwaitUpstream: func(jobID string, upstreams []string) error {
+			return awaitRemoteUpstreams(ctx, backend, handle.RunID, plan, jobID, upstreams, r.Stdout, r.Color, runRetry)
 		},
 		OnJobStart: func(jobID string, jobCtx context.Context, jobCancel context.CancelFunc) {
 			l := lease(jobID)

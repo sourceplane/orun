@@ -8,6 +8,28 @@ type Plan struct {
 	Execution  PlanExecution `json:"execution,omitempty" yaml:"execution,omitempty"`
 	Spec       PlanSpec      `json:"spec,omitempty" yaml:"spec,omitempty"`
 	Jobs       []PlanJob     `json:"jobs" yaml:"jobs"`
+	// Lanes partitions Jobs into the units a runner takes. Present only when
+	// the intent declares execution.lanes, so a lane-unaware plan stays
+	// byte-identical (specs/orun-lanes §2, §4.6).
+	Lanes []PlanLane `json:"lanes,omitempty" yaml:"lanes,omitempty"`
+}
+
+// PlanLane is one lane: jobs of one environment that one runner executes in
+// one `orun run --lane` process (specs/orun-lanes §2).
+type PlanLane struct {
+	ID          string   `json:"id" yaml:"id"`
+	Name        string   `json:"name" yaml:"name"`
+	Index       int      `json:"index" yaml:"index"`
+	Environment string   `json:"environment" yaml:"environment"`
+	Jobs        []string `json:"jobs" yaml:"jobs"`
+	Concurrency int      `json:"concurrency" yaml:"concurrency"`
+	RunsOn      string   `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`
+	// Source is job | component | env | group | isolated | auto.
+	Source string `json:"source" yaml:"source"`
+	Group  string `json:"group,omitempty" yaml:"group,omitempty"`
+	// SplitFrom and Reason record a cycle repair (specs/orun-lanes §7).
+	SplitFrom string `json:"splitFrom,omitempty" yaml:"splitFrom,omitempty"`
+	Reason    string `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
 
 // PlanMetadata captures immutable plan generation details.
@@ -158,6 +180,9 @@ type PlanJob struct {
 	// (ghr-orun-job:<run>-<index>), so a runner launched for a lane can take
 	// only that lane; the platform maps the label back through the plan.
 	Index int `json:"index" yaml:"index"`
+	// Lane is the id of the lane this job runs in; empty on a lane-unaware
+	// plan (specs/orun-lanes §2).
+	Lane                     string                 `json:"lane,omitempty" yaml:"lane,omitempty"`
 	Path                     string                 `json:"path,omitempty" yaml:"path,omitempty"` // Working directory for job execution
 	Steps                    []PlanStep             `json:"steps" yaml:"steps"`
 	DependsOn                []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`

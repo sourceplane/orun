@@ -211,6 +211,9 @@
           },
           "type": "object"
         },
+        "lane": {
+          "type": "string"
+        },
         "lifecycle": {
           "type": "string"
         },

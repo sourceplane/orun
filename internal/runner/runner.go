@@ -102,6 +102,11 @@ type RunnerHooks struct {
 	// is treated as already complete and execution is skipped. An error cancels
 	// the run.
 	BeforeJob func(jobID string) (skipExec bool, err error)
+	// AwaitUpstream blocks until a lane job's upstreams in other lanes have
+	// succeeded (remote state), and errors when one failed or the wait timed
+	// out. It is called before the job takes a concurrency slot. Nil means
+	// local state: those upstreams must already be completed.
+	AwaitUpstream func(jobID string, upstreams []string) error
 	// OnJobStart is called once a job begins executing, with the per-job
 	// execution context and its cancel func. Remote state uses this to drive a
 	// heartbeat keyed to the job's lifetime and to abort the job (cancel) when
@@ -153,6 +158,15 @@ type Runner struct {
 	// running a single --job in remote mode. The remote backend's claim API
 	// already enforces dependency ordering.
 	SkipLocalDepsForJob bool
+	// LaneID and LaneJobs select one lane of the plan (`orun run --lane`,
+	// specs/orun-lanes §8). LaneJobs nil means no lane selection.
+	LaneID   string
+	LaneJobs []string
+	// Checks posts per-job check runs from a multi-job lane; nil posts none.
+	Checks CheckReporter
+	// ghaHoldSteps holds a job's GitHub step groups until the job ends, so
+	// concurrent jobs of a lane never interleave their step groups.
+	ghaHoldSteps bool
 	// Hooks wires external lifecycle callbacks (remote state, log upload, etc.).
 	Hooks *RunnerHooks
 
@@ -456,6 +470,18 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 			return err
 		}
 	}
+	laneMode := r.LaneJobs != nil
+	if laneMode {
+		orderedJobs = r.laneJobs(orderedJobs)
+		if len(orderedJobs) == 0 {
+			return fmt.Errorf("lane %s has no jobs to run", r.LaneID)
+		}
+		if !r.DryRun && (r.Hooks == nil || r.Hooks.AwaitUpstream == nil) {
+			if err := r.checkLocalUpstreams(plan, orderedJobs, execState); err != nil {
+				return err
+			}
+		}
+	}
 
 	r.groupMultiEnv = singleEnvironment(orderedJobs) == ""
 	r.initComponentCounts(orderedJobs)
@@ -501,6 +527,10 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		concurrency = 1
 	}
 	r.Concurrency = concurrency
+
+	if laneMode {
+		return r.runLane(orderedJobs, execState, baseExecContext, persistState, failFast, summary, concurrency)
+	}
 
 	if concurrency > 1 && !r.DryRun {
 		return r.runConcurrent(orderedJobs, plan, execState, baseExecContext, persistState, failFast, summary, concurrency)

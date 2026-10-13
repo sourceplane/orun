@@ -15,6 +15,7 @@ import (
 	"github.com/sourceplane/orun/internal/expand"
 	"github.com/sourceplane/orun/internal/git"
 	"github.com/sourceplane/orun/internal/loader"
+	"github.com/sourceplane/orun/internal/lanes"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/normalize"
 	"github.com/sourceplane/orun/internal/objrun"
@@ -107,6 +108,9 @@ func generatePlan() error {
 		return trigger.FormatErrors(errs)
 	}
 	if errs := trigger.ValidateDependencyRules(intent); len(errs) > 0 {
+		return trigger.FormatErrors(errs)
+	}
+	if errs := trigger.ValidateLanes(intent); len(errs) > 0 {
 		return trigger.FormatErrors(errs)
 	}
 
@@ -352,7 +356,23 @@ func generatePlan() error {
 	}
 
 	renderer := render.NewRenderer()
-	plan := renderer.RenderPlanWithOrder(intent.Metadata, jobInstances, jobBindings, sorted)
+	var laneTriggers []string
+	if triggerResolution != nil {
+		laneTriggers = triggerResolution.MatchedTriggerNames
+	}
+	laneOpts := lanes.ForIntent(intent, laneTriggers, strictLanes, render.PlanJobCheckName)
+	var laneResult lanes.Result
+	plan, err := renderer.RenderPlanWithLanes(intent.Metadata, jobInstances, jobBindings, sorted, func(p *model.Plan) error {
+		r, aerr := lanes.Assign(p, laneOpts)
+		laneResult = r
+		return aerr
+	})
+	if err != nil {
+		return err
+	}
+	for _, repair := range laneResult.Repairs {
+		fmt.Fprintf(os.Stderr, "%s lanes: %s\n", ui.Yellow(ui.ColorEnabledForWriter(os.Stderr), "⚠"), repair)
+	}
 	plan.Spec.CompositionSources = compositionRegistry.Sources
 	plan.Metadata.Selection = planSelection
 
@@ -587,6 +607,9 @@ func generatePlan() error {
 	if changedOnly {
 		field("mode", ui.Cyan(color, "changed-only"))
 	}
+	if line := laneSummary(plan, laneResult); line != "" {
+		field("lanes", line)
+	}
 	if planName != "" {
 		field("name", planName)
 	}
@@ -614,6 +637,8 @@ func generatePlan() error {
 			output = viewer.ViewDAG()
 		case viewPlan == "dependencies":
 			output = viewer.ViewDependencies()
+		case viewPlan == "lanes":
+			output = renderLanesView(plan, laneResult, ui.ColorEnabledForWriter(os.Stdout))
 		case strings.HasPrefix(viewPlan, "component="):
 			componentName := strings.TrimPrefix(viewPlan, "component=")
 			output = viewer.ViewByComponent(componentName)
@@ -693,6 +718,9 @@ func generatePlan() error {
 
 			matrixJSON := githubMatrixJSON(plan)
 			outputLines = append(outputLines, fmt.Sprintf("matrix<<EOF\n%s\nEOF", matrixJSON))
+			laneMatrix, laneCount := githubLaneMatrixJSON(plan)
+			outputLines = append(outputLines, fmt.Sprintf("lane-matrix<<EOF\n%s\nEOF", laneMatrix))
+			outputLines = append(outputLines, fmt.Sprintf("lane-count=%d", laneCount))
 			outputLines = append(outputLines, fmt.Sprintf("plan_id=%s", planID))
 			outputLines = append(outputLines, fmt.Sprintf("exec_id=%s", execID))
 
@@ -726,6 +754,8 @@ func writeEmptyGithubMatrix() {
 	}
 	lines := []string{
 		"matrix<<EOF\n{\"include\":[]}\nEOF",
+		"lane-matrix<<EOF\n{\"include\":[]}\nEOF",
+		"lane-count=0",
 		"plan_id=",
 		"exec_id=",
 	}
@@ -776,6 +806,9 @@ func validateFiles() error {
 		return trigger.FormatErrors(errs)
 	}
 	if errs := trigger.ValidateDependencyRules(intent); len(errs) > 0 {
+		return trigger.FormatErrors(errs)
+	}
+	if errs := trigger.ValidateLanes(intent); len(errs) > 0 {
 		return trigger.FormatErrors(errs)
 	}
 
