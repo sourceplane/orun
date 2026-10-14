@@ -603,7 +603,7 @@ func resolveSourcePackage(baseDir string, source model.CompositionSource, index 
 	case "archive":
 		return resolveArchiveSource(baseDir, source, index)
 	case "oci":
-		return resolveOCISource(source, index)
+		return resolveOCISource(baseDir, source, index)
 	default:
 		return nil, fmt.Errorf("unsupported composition source kind %q", source.Kind)
 	}
@@ -659,10 +659,24 @@ func resolveArchiveSource(baseDir string, source model.CompositionSource, index 
 	return loadPackageSource(cacheDir, source, digest, index)
 }
 
-func resolveOCISource(source model.CompositionSource, index int) (*sourcePackage, error) {
+func resolveOCISource(baseDir string, source model.CompositionSource, index int) (*sourcePackage, error) {
 	remoteRef := normalizeOCIRef(source.Ref)
 	if remoteRef == "" {
 		return nil, fmt.Errorf("composition source %s ref cannot be empty", source.Name)
+	}
+
+	// A source the lockfile pins is taken at its locked digest: from the
+	// cache when it holds it, else pulled by digest; the tag is not resolved
+	// against the registry on every plan (specs/orun-sync-efficiency F12).
+	// An explicit `digest:` on the source that disagrees with the lock keeps
+	// the resolving path, where the mismatch is reported.
+	if pinned := lockedOCIDigest(baseDir, source); pinned != "" && (source.Digest == "" || source.Digest == pinned) {
+		if dir, ok := cachedOCIDir(pinned); ok {
+			return loadPackageSource(dir, source, pinned, index)
+		}
+		if cacheDir, err := ensureCachedOCI(refAtDigest(remoteRef, pinned), pinned); err == nil {
+			return loadPackageSource(cacheDir, source, pinned, index)
+		}
 	}
 
 	resolvedDigest, err := resolveOCIDigest(remoteRef)
@@ -1234,17 +1248,61 @@ func ensureCachedArchive(archivePath, digest string) (string, error) {
 	return cacheDir, nil
 }
 
+// lockedOCIDigest is the digest the lockfile beside the intent recorded for
+// this source (same name, kind and ref), "" when there is no lock or no
+// matching entry.
+func lockedOCIDigest(baseDir string, source model.CompositionSource) string {
+	if strings.TrimSpace(baseDir) == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(baseDir, filepath.FromSlash(lockFilePath)))
+	if err != nil {
+		return ""
+	}
+	var lock model.CompositionLock
+	if yaml.Unmarshal(data, &lock) != nil {
+		return ""
+	}
+	for _, entry := range lock.Sources {
+		if entry.Name == source.Name && entry.Kind == "oci" && normalizeOCIRef(entry.Ref) == normalizeOCIRef(source.Ref) {
+			if d := strings.TrimSpace(entry.ResolvedDigest); strings.HasPrefix(d, "sha256:") {
+				return d
+			}
+		}
+	}
+	return ""
+}
+
+// refAtDigest is the reference pinned to a digest: repo@sha256:…, whatever
+// tag or digest the reference carried.
+func refAtDigest(remoteRef, digest string) string {
+	return stripRefTagOrDigest(remoteRef) + "@" + digest
+}
+
+// cachedOCIDir is the cache directory holding a pulled composition at this
+// digest, when it holds one (either manifest filename marks the hit).
+func cachedOCIDir(digest string) (string, bool) {
+	root, err := cacheRoot()
+	if err != nil {
+		return "", false
+	}
+	cacheDir := filepath.Join(root, strings.TrimPrefix(digest, "sha256:"))
+	if _, err := os.Stat(filepath.Join(cacheDir, "stack.yaml")); err == nil {
+		return cacheDir, true
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, "orun.yaml")); err == nil {
+		return cacheDir, true
+	}
+	return cacheDir, false
+}
+
 func ensureCachedOCI(remoteRef, digest string) (string, error) {
 	root, err := cacheRoot()
 	if err != nil {
 		return "", err
 	}
-	cacheDir := filepath.Join(root, strings.TrimPrefix(digest, "sha256:"))
-	// Check for either manifest filename as a cache-hit indicator.
-	if _, err := os.Stat(filepath.Join(cacheDir, "stack.yaml")); err == nil {
-		return cacheDir, nil
-	}
-	if _, err := os.Stat(filepath.Join(cacheDir, "orun.yaml")); err == nil {
+	cacheDir, hit := cachedOCIDir(digest)
+	if hit {
 		return cacheDir, nil
 	}
 
