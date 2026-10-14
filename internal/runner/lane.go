@@ -96,17 +96,19 @@ func dedupe(s []string) []string {
 }
 
 // runLane runs the lane's jobs, each as soon as its upstreams finish, at most
-// concurrency at a time. A failed job stops the lane jobs that depend on it
-// and nothing else (specs/orun-lanes §8). The plan's execution.failFast is not
-// read here: every rendered plan sets it, and honouring it cancelled every
-// unstarted job of the lane, dependent or not (orun#735). Because a job is
-// only ever left unrun below a failed upstream, a dependent in another lane
-// sees it as blocked and stops waiting (awaitRemoteUpstreams), rather than
-// waiting out the upstream timeout for a job nobody will run (orun#737).
+// concurrency at a time, a free slot going to the ready job with the most
+// work behind it in the plan (lane_gate.go). A failed job stops the lane jobs
+// that depend on it and nothing else (specs/orun-lanes §8). The plan's
+// execution.failFast is not read here: every rendered plan sets it, and
+// honouring it cancelled every unstarted job of the lane, dependent or not
+// (orun#735). Because a job is only ever left unrun below a failed upstream, a
+// dependent in another lane sees it as blocked and stops waiting
+// (awaitRemoteUpstreams), rather than waiting out the upstream timeout for a
+// job nobody will run (orun#737).
 //
 // A lane of more than one job also reports each job on its own (§9): a check
 // run per job through r.Checks, and a row per job in the step summary.
-func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, baseExecContext executor.ExecContext, persistState bool, summary *runSummary, concurrency int) error {
+func (r *Runner) runLane(planJobs, jobs []model.PlanJob, execState *execmodel.ExecState, baseExecContext executor.ExecContext, persistState bool, summary *runSummary, concurrency int) error {
 	if r.DryRun || concurrency < 1 {
 		concurrency = 1
 	}
@@ -130,7 +132,8 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 	}
 	records := make([]*laneRecord, len(jobs))
 
-	sem := make(chan struct{}, concurrency)
+	gate := newSlotGate(concurrency, len(jobs))
+	prio := criticalPath(planJobs)
 	var mu sync.Mutex
 	var firstErr error
 	fail := func(err error) {
@@ -146,8 +149,10 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 		wg.Add(1)
 		rec := &laneRecord{job: job, status: laneNotRun, waited: outside[job.ID]}
 		records[i] = rec
-		go func(j model.PlanJob, rec *laneRecord) {
+		ticket := gate.ticket(prio[job.ID], i)
+		go func(j model.PlanJob, rec *laneRecord, ticket *slotTicket) {
 			defer wg.Done()
+			defer ticket.settle()
 			o := outcomes[j.ID]
 			defer func() {
 				o.ok = rec.status == laneSucceeded || rec.status == laneResumed
@@ -163,6 +168,7 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 				if !ok {
 					continue
 				}
+				ticket.settle()
 				<-up.done
 				if !up.ok {
 					summary.addWaiting(1)
@@ -185,6 +191,7 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 
 			// Upstreams in other lanes: waited for without holding a slot.
 			if deps := outside[j.ID]; len(deps) > 0 && !r.DryRun && r.Hooks != nil && r.Hooks.AwaitUpstream != nil {
+				ticket.settle()
 				if err := r.Hooks.AwaitUpstream(j.ID, deps); err != nil {
 					summary.addWaiting(1)
 					rec.status, rec.note = laneBlocked, err.Error()
@@ -194,8 +201,8 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 				}
 			}
 
-			sem <- struct{}{}
-			defer func() { <-sem }()
+			ticket.acquire()
+			defer ticket.release()
 
 			if r.Hooks != nil && r.Hooks.BeforeJob != nil {
 				skip, err := r.Hooks.BeforeJob(j.ID)
@@ -230,7 +237,7 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 				return
 			}
 			rec.status = laneSucceeded
-		}(job, rec)
+		}(job, rec, ticket)
 	}
 	wg.Wait()
 	r.ghaHoldSteps = false

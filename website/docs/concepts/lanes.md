@@ -136,6 +136,9 @@ orun run --lane staging/auto-1 --remote-state --exec-id "$EXEC_ID"
 
 - Jobs inside the lane run as soon as their upstreams finish, up to the
   lane's `concurrency` (`--concurrency` overrides it).
+- When more jobs are ready than there are slots, a free slot goes to the job
+  with the longest chain of jobs waiting on it anywhere in the plan, including
+  other lanes; ties keep plan order.
 - An upstream in another lane is awaited through remote state before the job
   takes a slot. With local state it must already be completed, under the same
   `--exec-id`; otherwise the run refuses and names the lane to run first.
