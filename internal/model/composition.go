@@ -314,6 +314,7 @@ type JobTemplateSpec struct {
 	RunsOn       string                 `yaml:"runsOn,omitempty" json:"runsOn,omitempty"`
 	Timeout      string                 `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	Retries      int                    `yaml:"retries,omitempty" json:"retries,omitempty"`
+	Resources    *JobResources          `yaml:"resources,omitempty" json:"resources,omitempty"`
 	Labels       map[string]string      `yaml:"labels,omitempty" json:"labels,omitempty"`
 	Capabilities []string               `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
 	Steps        []Step                 `yaml:"steps" json:"steps"`
