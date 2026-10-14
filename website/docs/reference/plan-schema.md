@@ -19,6 +19,8 @@ The plan is the artifact produced by `orun plan` and consumed by `orun run`. The
 
 Plans are deterministic: the same inputs produce byte-identical `plan.json`. `jobs[]` is in a stable topological order (the same graph always yields the same order and the same job `index`), so a plan diff in a pull request only shows real changes. Plans carry no generation timestamp. `metadata.generatedAt` is still accepted when reading plans written by older versions, but it is volatile and is left out of `metadata.checksum` and `metadata.revision.planHash`.
 
+Each `jobs[].steps[]` entry carries the composition step's fields after templating; `scope: lane` marks a step the first job of a lane runs once for every job that shares it (see [Lanes](../concepts/lanes.md#share-a-lanes-setup)).
+
 ## Job fields
 
 | Field | Meaning |

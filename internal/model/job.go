@@ -42,8 +42,14 @@ type Step struct {
 	Capability string `yaml:"capability,omitempty" json:"capability,omitempty"`
 	Phase      string `yaml:"phase,omitempty" json:"phase,omitempty"`
 	Order      int    `yaml:"order,omitempty" json:"order,omitempty"`
-	Run        string `yaml:"run,omitempty" json:"run,omitempty"`
-	Use        string `yaml:"use,omitempty" json:"use,omitempty"`
+	// Scope is job (default) or lane. A lane-scoped step is a run step that
+	// every job of a lane would execute identically (an install, a cache
+	// warm): the first job to reach it runs it once in the shared tree, the
+	// others reuse the result (specs/orun-runner-efficiency §5.3). Lane-scoped
+	// steps come first in a job, before its private tree is staged.
+	Scope string `yaml:"scope,omitempty" json:"scope,omitempty"`
+	Run   string `yaml:"run,omitempty" json:"run,omitempty"`
+	Use   string `yaml:"use,omitempty" json:"use,omitempty"`
 	// Workflow names a torkflow workflow file to run as this step — the third
 	// execution vocabulary beside run/use (specs/orun-workflows §3). Exactly one
 	// of Run/Use/Workflow may be set on a step.
@@ -116,6 +122,36 @@ func (s Step) ValidateExecForm() error {
 		return fmt.Errorf("step %q sets %s — a step must use exactly one of run/use/workflow", s.Name, strings.Join(set, " and "))
 	}
 	return nil
+}
+
+// Step scopes.
+const (
+	StepScopeJob  = "job"
+	StepScopeLane = "lane"
+)
+
+// NormalizeScope lower-cases a step scope and defaults empty to job.
+func NormalizeScope(scope string) string {
+	s := strings.ToLower(strings.TrimSpace(scope))
+	if s == "" {
+		return StepScopeJob
+	}
+	return s
+}
+
+// ValidateScope checks a step's scope: job or lane, and lane only on a run
+// step (an action's exported environment stays with the job that ran it).
+func (s Step) ValidateScope() error {
+	switch NormalizeScope(s.Scope) {
+	case StepScopeJob:
+		return nil
+	case StepScopeLane:
+		if strings.TrimSpace(s.Run) == "" {
+			return fmt.Errorf("step %q: scope: lane applies to run steps only (a use or workflow step's effects stay with the job that ran it)", s.Name)
+		}
+		return nil
+	}
+	return fmt.Errorf("step %q: scope %q is not one of job|lane", s.Name, s.Scope)
 }
 
 // NormalizePhase returns a normalized phase string and defaults empty values to "main".
@@ -251,6 +287,7 @@ type RenderedStep struct {
 	Name  string `json:"name"`
 	Phase string `json:"phase,omitempty"`
 	Order int    `json:"order,omitempty"`
+	Scope string `json:"scope,omitempty"`
 	Run   string `json:"run,omitempty"`
 	Use   string `json:"use,omitempty"`
 	// Workflow is the rendered torkflow workflow reference; WorkflowDigest is the

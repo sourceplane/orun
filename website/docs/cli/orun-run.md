@@ -202,7 +202,7 @@ orun run --changed --explain
 | `--all-envs` | Run all environments explicitly (mutually exclusive with `--env`) |
 | `--all` | Disable CWD-based component scoping; run all jobs |
 | `--json` | Output execution summary in JSON format |
-| `--isolation` | Per-job workspace isolation: `auto` (on when concurrency > 1), `workspace` (always on), or `none` (legacy shared tree). Default: `auto` |
+| `--isolation` | Per-job workspace isolation: `auto` (on when concurrency > 1), `workspace` (always on), `component` (always on; copies only the job's directory and links the rest, see [execution runtime](../architecture/execution-runtime.md#per-job-workspace-isolation)), or `none` (legacy shared tree). Default: `auto` |
 | `--keep-workspaces` | Preserve per-job staged workspaces after the run for debugging |
 | `--background` | Run the plan detached and return immediately. Track progress with `orun status --watch` |
 | `--artifact` | Artifact backend for uploading job shard from CI (`github`) |

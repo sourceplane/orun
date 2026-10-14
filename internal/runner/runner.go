@@ -24,15 +24,28 @@ import (
 
 // IsolationMode controls how each job's working tree is materialized.
 //   - IsolationAuto: stage per-job when effective concurrency > 1 (default)
-//   - IsolationWorkspace: always stage per job
+//   - IsolationWorkspace: always stage the whole tree per job
+//   - IsolationComponent: always stage, but copy only the job's own directory
+//     and link everything else to the source tree
+//     (specs/orun-runner-efficiency §5.3)
 //   - IsolationNone: share the source tree across all jobs (legacy behavior)
 type IsolationMode string
 
 const (
 	IsolationAuto      IsolationMode = "auto"
 	IsolationWorkspace IsolationMode = "workspace"
+	IsolationComponent IsolationMode = "component"
 	IsolationNone      IsolationMode = "none"
 )
+
+// ValidIsolationMode reports whether s names an isolation mode.
+func ValidIsolationMode(s string) bool {
+	switch IsolationMode(s) {
+	case IsolationAuto, IsolationWorkspace, IsolationComponent, IsolationNone:
+		return true
+	}
+	return false
+}
 
 // StepRecord is a step's identity and outcome, as the runner knows them at the
 // moment it hands over the step's output.
@@ -203,6 +216,10 @@ type Runner struct {
 
 	printMu sync.Mutex
 	stateMu sync.Mutex
+
+	// laneSetup runs each distinct lane-scoped step once per process
+	// (lane_setup.go). Set at the start of Run.
+	laneSetup *laneSetup
 
 	// secretProvenance holds value-free resolve provenance keyed by jobID,
 	// recorded by the resolver (RecordSecretProvenance) and sealed onto the
@@ -457,6 +474,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	// Expose the live state to observers (object-model working tree).
 	r.stateMu.Lock()
 	r.liveState = execState
+	r.laneSetup = newLaneSetup()
 	r.stateMu.Unlock()
 
 	orderedJobs, err := topologicalOrder(plan.Jobs)
@@ -667,22 +685,40 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 	// Per-job workspace isolation. We stage the source tree into a job-private
 	// directory so concurrent jobs don't race on node_modules / .turbo / dist
 	// rewrites. UseWorkDirOverride means the user pinned a workdir explicitly —
-	// honor that and skip staging.
-	stagedRoot := ""
-	if r.shouldIsolate() && !r.DryRun && !r.UseWorkDirOverride {
-		staged, err := stageJobWorkspace(baseExecContext.WorkspaceDir, r.ExecID, job.ID, r.KeepWorkspaces)
+	// honor that and skip staging. Staging is lazy: a job's lane-scoped steps
+	// (its leading `scope: lane` steps) run first, in the shared tree, and
+	// the private tree is staged after them so it sees what they installed
+	// (specs/orun-runner-efficiency §5.3).
+	jobWorkingDir := r.resolveWorkingDir(job.Path)
+	prelude := leadingLaneSteps(job)
+	var cleanups []func()
+	defer func() {
+		for _, c := range cleanups {
+			c()
+		}
+	}()
+	staged := false
+	stage := func() {
+		if staged {
+			return
+		}
+		staged = true
+		if !r.shouldIsolate() || r.DryRun || r.UseWorkDirOverride {
+			return
+		}
+		policy := stagePolicy{mode: r.stagingMode(), jobPath: job.Path, sharedDeps: prelude > 0}
+		ws, err := stageJobWorkspace(baseExecContext.WorkspaceDir, r.ExecID, job.ID, r.KeepWorkspaces, policy)
 		if err != nil {
 			fmt.Fprintf(r.Stderr, "warning: workspace isolation failed for %s, falling back to shared tree: %v\n", job.ID, err)
-		} else {
-			defer staged.Cleanup()
-			stagedRoot = staged.Path()
-			baseExecContext.WorkspaceDir = stagedRoot
-			baseExecContext.WorkDir = stagedRoot
+			return
 		}
-	}
-
-	jobWorkingDir := r.resolveWorkingDir(job.Path)
-	if stagedRoot != "" {
+		cleanups = append(cleanups, ws.Cleanup)
+		stagedRoot := ws.Path()
+		baseExecContext.WorkspaceDir = stagedRoot
+		baseExecContext.WorkDir = stagedRoot
+		// A new map: BaseEnv is shared by every job of the run.
+		baseExecContext.BaseEnv = executor.MergeEnvironment(baseExecContext.BaseEnv, ws.Env(r.ExecID))
+		baseExecContext.Env = executor.MergeEnvironment(baseExecContext.BaseEnv)
 		jobWorkingDir = resolveWorkingDirAt(stagedRoot, job.Path)
 	}
 	currentPhase := ""
@@ -693,6 +729,9 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 	wfOutputs := map[string]map[string]any{}
 	for idx, step := range job.Steps {
 		stepID := stepIdentifier(step)
+		if idx == prelude {
+			stage()
+		}
 		stepPhase := normalizeStepPhase(step.Phase)
 		if stepPhase != currentPhase {
 			if stepPhase != "main" {
@@ -737,6 +776,46 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				r.ghaPrintStepDryRun(job, stepID, idx+1)
 			}
 			continue
+		}
+
+		// A lane-scoped step: the first job to reach it runs it (below, in the
+		// shared tree); every other job with the same step waits for that run
+		// and reuses its result.
+		var laneRun *laneSetupRun
+		if idx < prelude && r.laneSetup != nil {
+			key := laneStepKey(step, workingDir, executor.MergeEnvironment(executor.JobEnvironment(job.Env), executor.JobEnvironment(step.Env)))
+			run, own := r.laneSetup.claim(key, job.ID)
+			if !own {
+				<-run.done
+				if run.err != nil {
+					r.updateState(persistState, execState, func() {
+						jobState.Steps[stepID] = "failed"
+						jobState.Status = "failed"
+						jobState.LastError = fmt.Sprintf("step %s: lane step failed in %s: %v", stepID, run.owner, run.err)
+						jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+					})
+					r.emitStepTerminal(job.ID, stepID, "failed")
+					fmt.Fprintf(r.Stderr, "  %s %s: lane step %s failed in %s: %v\n", ui.Red(r.Color, "✗"), job.ID, stepID, run.owner, run.err)
+					jobFailed = true
+					summary.addFailed()
+					if r.Hooks != nil && r.Hooks.AfterJobTerminal != nil {
+						r.Hooks.AfterJobTerminal(job.ID, false, jobState.LastError)
+					}
+					break
+				}
+				r.updateState(persistState, execState, func() {
+					jobState.Steps[stepID] = "completed"
+				})
+				r.emitStepTerminal(job.ID, stepID, "completed")
+				if r.inGHA() {
+					r.ghaPrintStepShared(job, stepID, idx+1, run.owner)
+				} else {
+					r.printStepShared(stepID, idx+1, len(job.Steps), run.owner)
+				}
+				jobReport.observeStepDone(stepID, true, true, 0)
+				continue
+			}
+			laneRun = run
 		}
 
 		var output string
@@ -808,6 +887,9 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 			if attempt < attempts && !r.inGHA() {
 				fmt.Fprintf(r.Stdout, "  │ %s retrying after failure\n", ui.Yellow(r.Color, "↻"))
 			}
+		}
+		if laneRun != nil {
+			laneRun.settle(output, stepErr)
 		}
 		stepDuration := time.Since(stepStartedAt)
 		view := analyzeStepOutput(step, output)
@@ -1329,11 +1411,33 @@ func (r *Runner) shouldIsolate() bool {
 	switch r.Isolation {
 	case IsolationNone:
 		return false
-	case IsolationWorkspace:
+	case IsolationWorkspace, IsolationComponent:
 		return true
 	default:
 		return r.Concurrency > 1
 	}
+}
+
+// stagingMode is how a staged tree is built: the whole tree, or the job's
+// directory with the rest linked (IsolationComponent).
+func (r *Runner) stagingMode() IsolationMode {
+	if r.Isolation == IsolationComponent {
+		return IsolationComponent
+	}
+	return IsolationWorkspace
+}
+
+// leadingLaneSteps counts the job's leading lane-scoped steps; the planner
+// guarantees no lane-scoped step follows a job-scoped one.
+func leadingLaneSteps(job model.PlanJob) int {
+	n := 0
+	for _, s := range job.Steps {
+		if s.Scope != model.StepScopeLane {
+			break
+		}
+		n++
+	}
+	return n
 }
 
 // resolveWorkingDirAt computes a job's working directory anchored at the given

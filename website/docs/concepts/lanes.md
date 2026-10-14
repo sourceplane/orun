@@ -84,6 +84,43 @@ budget it was given and where it came from in `metadata.lanes`. Mark a
 component `isolated` when its jobs must not share a runner (a browser suite,
 a build that needs the whole machine).
 
+### Share a lane's setup
+
+Jobs of a lane share one runner but, with per-job isolation on, each gets a
+private copy of the tree without `node_modules`, so each runs the install
+its composition declares: a lane of twelve jobs installs twelve times. Mark
+the step `scope: lane` in the composition:
+
+```yaml
+steps:
+  - id: install
+    name: install
+    scope: lane
+    run: pnpm install --frozen-lockfile
+  - id: build
+    name: build
+    run: pnpm exec turbo run build --filter=./
+```
+
+The first job of the lane to reach it runs it once in the shared source
+tree; every other job whose step is the same after templating (same
+command, shell, environment and working directory) waits for that run and
+reuses it, recorded as `shared with <job>`. Lane-scoped steps come first in
+a job, before its private tree is staged, and the staged tree then keeps the
+installed dependencies: the top-level `node_modules` is linked to the source
+tree's, nested ones are copied with their symlinks intact. Jobs of different
+compositions in one lane each run their own install once. A lane-scoped step
+is a `run` step: an action such as `setup-node` exports its environment to
+the job that ran it, so it stays per job (the tool cache is shared, so a
+repeat is a few seconds).
+
+Two more things every staged job gets: `.git` is never copied — `GIT_DIR`
+and `GIT_WORK_TREE` point `git` at the source repository — and
+`TURBO_CACHE_DIR` names one cache per run, so the second job of a lane hits
+what the first built. `orun run --isolation component` goes further for
+jobs that write only under their own directory: it copies just that
+directory and links everything else to the source tree.
+
 ## Auto mode
 
 Auto mode asks one question: is the plan big enough that runner setup and
