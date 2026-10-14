@@ -491,3 +491,114 @@ func TestAssign_MaxLanesOverrideIsRecorded(t *testing.T) {
 		}
 	}
 }
+
+// With weights (a template's estimatedSeconds, or --weights), auto mode
+// packs by work rather than by count: the heavy jobs spread across lanes
+// instead of landing together, every lane carries its estimate, and the
+// budget is shared by weight (specs/orun-runner-efficiency §5.4).
+func TestAuto_WeightsSpreadTheHeavyJobs(t *testing.T) {
+	var jobs []model.PlanJob
+	for i := 0; i < 8; i++ {
+		j := job(fmt.Sprintf("w%d.stage", i), fmt.Sprintf("w%d", i), "stage")
+		j.EstimatedSeconds = 20
+		jobs = append(jobs, j)
+	}
+	for i := 0; i < 4; i++ {
+		j := job(fmt.Sprintf("heavy%d.stage", i), fmt.Sprintf("heavy%d", i), "stage")
+		j.EstimatedSeconds = 180
+		j.Resources = &model.JobResources{CPU: 2, EstimatedSeconds: 180}
+		jobs = append(jobs, j)
+	}
+	// 12 jobs over 4 lanes: by count each lane gets 3; by weight each heavy
+	// job gets a lane of its own with light jobs around it.
+	p := plan(jobs...)
+	if _, err := Assign(p, Options{Config: &model.IntentLanes{Mode: "auto", MaxLanes: 4}, CheckName: checkName}); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Lanes) != 4 {
+		t.Fatalf("%d lanes: %v", len(p.Lanes), laneIDs(p))
+	}
+	heavyPerLane := map[string]int{}
+	for _, j := range p.Jobs {
+		if j.EstimatedSeconds == 180 {
+			heavyPerLane[j.Lane]++
+		}
+	}
+	for _, l := range p.Lanes {
+		if heavyPerLane[l.ID] != 1 {
+			t.Fatalf("lane %s holds %d heavy jobs; one each: %v", l.ID, heavyPerLane[l.ID], heavyPerLane)
+		}
+		if l.EstimatedSeconds < 180 || l.EstimatedSeconds > 260 {
+			t.Fatalf("lane %s estimate %ds; want 180 + a few 20s", l.ID, l.EstimatedSeconds)
+		}
+		if l.VCPU != 2 {
+			t.Fatalf("lane %s vcpu %d; the heavy job declared 2", l.ID, l.VCPU)
+		}
+	}
+	if p.Metadata.Lanes.WeightsFrom != "declared" {
+		t.Fatalf("weightsFrom = %q", p.Metadata.Lanes.WeightsFrom)
+	}
+
+	// Supplied weights overwrite the declared ones and are recorded as such.
+	p = plan(jobs...)
+	w := map[string]int{}
+	for _, j := range jobs {
+		w[j.ID] = 30
+	}
+	if _, err := Assign(p, Options{Config: &model.IntentLanes{Mode: "auto", MaxLanes: 4}, CheckName: checkName, Weights: w, WeightsFrom: "history"}); err != nil {
+		t.Fatal(err)
+	}
+	if p.Metadata.Lanes.WeightsFrom != "history" || p.Jobs[0].EstimatedSeconds != 30 {
+		t.Fatalf("weights not applied: %s %d", p.Metadata.Lanes.WeightsFrom, p.Jobs[0].EstimatedSeconds)
+	}
+	for _, l := range p.Lanes {
+		if l.EstimatedSeconds != 90 {
+			t.Fatalf("12 jobs of 30 s over 4 lanes: lane %s is %ds", l.ID, l.EstimatedSeconds)
+		}
+	}
+}
+
+// A chain's weight is its critical path, so a long chain is placed first
+// and the budget is not split by count across a partition's weight.
+func TestAuto_WeightedChainIsPlacedByItsCriticalPath(t *testing.T) {
+	a := job("a.stage", "a", "stage")
+	b := job("b.stage", "b", "stage", "a.stage")
+	c := job("c.stage", "c", "stage", "b.stage")
+	a.EstimatedSeconds, b.EstimatedSeconds, c.EstimatedSeconds = 60, 60, 60
+	var singles []model.PlanJob
+	for i := 0; i < 6; i++ {
+		j := job(fmt.Sprintf("s%d.stage", i), fmt.Sprintf("s%d", i), "stage")
+		j.EstimatedSeconds = 50
+		singles = append(singles, j)
+	}
+	// 480 s of work over 2 lanes: a 240 s share, so the 180 s chain stays
+	// whole and takes the first lane; the singles fill the other.
+	p := plan(append([]model.PlanJob{a, b, c}, singles...)...)
+	if _, err := Assign(p, Options{Config: &model.IntentLanes{Mode: "auto", MaxLanes: 2}, CheckName: checkName}); err != nil {
+		t.Fatal(err)
+	}
+	if laneOf(p, "a.stage") != laneOf(p, "b.stage") || laneOf(p, "b.stage") != laneOf(p, "c.stage") {
+		t.Fatalf("the chain stays together: %s %s %s", laneOf(p, "a.stage"), laneOf(p, "b.stage"), laneOf(p, "c.stage"))
+	}
+	for _, l := range p.Lanes {
+		if l.EstimatedSeconds < 200 || l.EstimatedSeconds > 280 {
+			t.Fatalf("lane %s carries %ds; the two lanes share 480 s of work", l.ID, l.EstimatedSeconds)
+		}
+	}
+	// With a 3-lane budget the 160 s share cuts the chain by level, as
+	// designed: a cluster larger than a lane's share is sliced.
+	p = plan(append([]model.PlanJob{a, b, c}, singles...)...)
+	if _, err := Assign(p, Options{Config: &model.IntentLanes{Mode: "auto", MaxLanes: 3}, CheckName: checkName}); err != nil {
+		t.Fatal(err)
+	}
+	if laneOf(p, "a.stage") == laneOf(p, "c.stage") {
+		t.Fatalf("a 180 s chain over a 160 s share is cut: %s %s", laneOf(p, "a.stage"), laneOf(p, "c.stage"))
+	}
+	g := newJobGraph(p.Jobs)
+	if cp := g.criticalPath([]int{0, 1, 2}); cp != 180 {
+		t.Fatalf("critical path of a→b→c = %d", cp)
+	}
+	if cp := g.criticalPath([]int{3, 4}); cp != 50 {
+		t.Fatalf("two independent jobs: critical path %d", cp)
+	}
+}

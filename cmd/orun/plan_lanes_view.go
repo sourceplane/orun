@@ -34,6 +34,9 @@ func laneSummary(plan *model.Plan, res lanes.Result) string {
 		if m := plan.Metadata.Lanes; m != nil && (m.MaxLanesFrom == "flag" || m.MaxLanesFrom == "env") {
 			line += fmt.Sprintf(", maxLanes %d from %s", m.MaxLanes, m.MaxLanesFrom)
 		}
+		if m := plan.Metadata.Lanes; m != nil && m.WeightsFrom != "" {
+			line += ", weights " + m.WeightsFrom
+		}
 		line += ")"
 	}
 	return line
@@ -75,6 +78,12 @@ func renderLanesView(plan *model.Plan, res lanes.Result, color bool) string {
 		}
 		if len(l.UpstreamLanes) > 0 {
 			detail += " · after " + strings.Join(l.UpstreamLanes, ", ")
+		}
+		if l.EstimatedSeconds > 0 {
+			detail += fmt.Sprintf(" · ~%ds", l.EstimatedSeconds)
+		}
+		if l.VCPU > 0 {
+			detail += fmt.Sprintf(" · vcpu %d", l.VCPU)
 		}
 		fmt.Fprintf(&b, "  ├─ %s  %s\n", ui.Bold(color, l.Name), ui.Dim(color, "["+l.ID+"]"))
 		fmt.Fprintf(&b, "  │    %s\n", ui.Dim(color, detail))

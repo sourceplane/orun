@@ -39,6 +39,11 @@ type PlanLane struct {
 	// the jobs in them, both sorted; what a pool gates a runner on.
 	UpstreamLanes []string `json:"upstreamLanes,omitempty" yaml:"upstreamLanes,omitempty"`
 	UpstreamJobs  []string `json:"upstreamJobs,omitempty" yaml:"upstreamJobs,omitempty"`
+	// EstimatedSeconds is the sum of the lane's job weights when the plan
+	// carries weights; VCPU the most cores one of its jobs declared. What a
+	// pool sizes a runner by (specs/orun-runner-efficiency §5.4).
+	EstimatedSeconds int `json:"estimatedSeconds,omitempty" yaml:"estimatedSeconds,omitempty"`
+	VCPU             int `json:"vcpu,omitempty" yaml:"vcpu,omitempty"`
 }
 
 // PlanMetadata captures immutable plan generation details.
@@ -77,6 +82,10 @@ type PlanLanesMeta struct {
 	MaxLanes int    `json:"maxLanes" yaml:"maxLanes"`
 	// MaxLanesFrom is intent | default | flag | env.
 	MaxLanesFrom string `json:"maxLanesFrom" yaml:"maxLanesFrom"`
+	// WeightsFrom says where the packing weights came from — declared (the
+	// templates' estimatedSeconds), history, or file — and is absent when
+	// every job weighs one.
+	WeightsFrom string `json:"weightsFrom,omitempty" yaml:"weightsFrom,omitempty"`
 }
 
 // PlanTrigger records which trigger bindings activated the plan. Type / Name
@@ -199,6 +208,11 @@ type PlanJob struct {
 	JobRegistry           string `json:"jobRegistry,omitempty" yaml:"jobRegistry,omitempty"` // Name of the JobRegistry used
 	Job                   string `json:"job,omitempty" yaml:"job,omitempty"`                 // Specific job from registry
 	RunsOn                string `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`
+	// Resources is what the job's template declared it needs; EstimatedSeconds
+	// is the job's effective packing weight — the declared estimate, or the
+	// one `orun plan --weights` supplied (specs/orun-runner-efficiency §5.4).
+	Resources        *JobResources `json:"resources,omitempty" yaml:"resources,omitempty"`
+	EstimatedSeconds int           `json:"estimatedSeconds,omitempty" yaml:"estimatedSeconds,omitempty"`
 	// Index is the job's position in Jobs: a stable, dense 0-based number for
 	// one plan. CI composes a per-job runner label from it
 	// (ghr-orun-job:<run>-<index>), so a runner launched for a lane can take

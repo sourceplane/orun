@@ -160,3 +160,22 @@ func TestLaneConcurrencyLabel(t *testing.T) {
 		t.Fatal("0 is auto")
 	}
 }
+
+func TestSelectLane_AutoConcurrencyDividesByDeclaredCPU(t *testing.T) {
+	plan := &model.Plan{
+		Jobs:  []model.PlanJob{{ID: "a"}, {ID: "b"}},
+		Lanes: []model.PlanLane{{ID: "stage/auto-1", Jobs: []string{"a", "b"}, Concurrency: 0, VCPU: 2}},
+	}
+	withLaneFlags(t, "stage/auto-1", "")
+	conc, err := selectLane(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := runtime.NumCPU() / 2
+	if want < 1 {
+		want = 1
+	}
+	if conc != want {
+		t.Fatalf("concurrency = %d, want %d cores / 2 per job", conc, want)
+	}
+}

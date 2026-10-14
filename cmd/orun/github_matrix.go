@@ -38,6 +38,10 @@ type laneMatrixEntry struct {
 	RunsOn        string   `json:"runsOn"`
 	Level         int      `json:"level"`
 	UpstreamLanes []string `json:"upstreamLanes"`
+	// EstimatedSeconds and VCPU size a runner for the lane; absent when the
+	// plan carries no weights, or no job declared cpu.
+	EstimatedSeconds int `json:"estimatedSeconds,omitempty"`
+	VCPU             int `json:"vcpu,omitempty"`
 }
 
 type laneMatrix struct {
@@ -57,7 +61,7 @@ func laneMatrixEntries(plan *model.Plan) []laneMatrixEntry {
 			if up == nil {
 				up = []string{}
 			}
-			entries = append(entries, laneMatrixEntry{Lane: lane.ID, Name: lane.Name, Index: lane.Index, Env: lane.Environment, Jobs: len(lane.Jobs), RunsOn: lane.RunsOn, Level: lane.Level, UpstreamLanes: up})
+			entries = append(entries, laneMatrixEntry{Lane: lane.ID, Name: lane.Name, Index: lane.Index, Env: lane.Environment, Jobs: len(lane.Jobs), RunsOn: lane.RunsOn, Level: lane.Level, UpstreamLanes: up, EstimatedSeconds: lane.EstimatedSeconds, VCPU: lane.VCPU})
 		}
 		return entries
 	}
@@ -81,9 +85,21 @@ func laneMatrixEntries(plan *model.Plan) []laneMatrixEntry {
 			}
 		}
 		sort.Strings(up)
-		entries = append(entries, laneMatrixEntry{Lane: job.ID, Name: name, Index: job.Index, Env: job.Environment, Jobs: 1, RunsOn: job.RunsOn, Level: depth[job.ID], UpstreamLanes: up})
+		entries = append(entries, laneMatrixEntry{Lane: job.ID, Name: name, Index: job.Index, Env: job.Environment, Jobs: 1, RunsOn: job.RunsOn, Level: depth[job.ID], UpstreamLanes: up, EstimatedSeconds: job.EstimatedSeconds, VCPU: jobVCPU(job)})
 	}
 	return entries
+}
+
+// jobVCPU is the whole cores a job declared, 0 when none.
+func jobVCPU(job model.PlanJob) int {
+	if job.Resources == nil || job.Resources.CPU <= 0 {
+		return 0
+	}
+	n := int(job.Resources.CPU)
+	if float64(n) < job.Resources.CPU {
+		n++
+	}
+	return n
 }
 
 // jobDepths is each job's depth in the plan's dependency graph: 0 with no

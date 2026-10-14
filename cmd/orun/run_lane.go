@@ -44,14 +44,23 @@ func selectLane(plan *model.Plan) (int, error) {
 		if lane.ID == id {
 			runLaneJobs = append([]string{}, lane.Jobs...)
 			if lane.Concurrency == 0 {
-				// concurrency: auto — the runner's core count, on this machine
-				// (specs/orun-runner-efficiency §5.2).
-				n := runtime.NumCPU()
+				// concurrency: auto — the runner's core count, on this machine,
+				// divided by the most cores one of the lane's jobs declared
+				// (specs/orun-runner-efficiency §5.2, §5.4).
+				per := 1
+				if lane.VCPU > per {
+					per = lane.VCPU
+				}
+				n := runtime.NumCPU() / per
 				if n < 1 {
 					n = 1
 				}
 				if runConcurrency == 0 {
-					fmt.Fprintf(os.Stderr, "  %s lane %s: concurrency auto → %d (%d CPUs)\n", ui.Dim(ui.ColorEnabledForWriter(os.Stderr), "○"), id, n, runtime.NumCPU())
+					note := ""
+					if per > 1 {
+						note = fmt.Sprintf(", %d per job", per)
+					}
+					fmt.Fprintf(os.Stderr, "  %s lane %s: concurrency auto → %d (%d CPUs%s)\n", ui.Dim(ui.ColorEnabledForWriter(os.Stderr), "○"), id, n, runtime.NumCPU(), note)
 				}
 				return n, nil
 			}
