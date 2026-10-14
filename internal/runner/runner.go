@@ -531,7 +531,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	r.Concurrency = concurrency
 
 	if laneMode {
-		return r.runScheduled(plan.Jobs, orderedJobs, execState, baseExecContext, persistState, failFast, summary, concurrency)
+		return r.runScheduled(plan.Jobs, orderedJobs, execState, baseExecContext, persistState, false, summary, concurrency)
 	}
 
 	if concurrency > 1 && !r.DryRun {

@@ -98,15 +98,21 @@ func dedupe(s []string) []string {
 // runScheduled runs jobs each as soon as its upstreams finish, at most
 // concurrency at a time, a free slot going to the ready job with the most
 // work behind it in the plan (lane_gate.go). A failed job stops the jobs that
-// depend on it; the rest continue unless failFast.
+// depend on it and nothing else (specs/orun-lanes §8). Because a job is only
+// ever left unrun below a failed upstream, a dependent in another lane sees
+// it as blocked and stops waiting (awaitRemoteUpstreams), rather than waiting
+// out the upstream timeout for a job nobody will run (orun#737).
 //
 // It is the one scheduler for a lane (`orun run --lane`, jobs = the lane's)
 // and for a whole plan at concurrency > 1 (jobs = every selected job;
-// specs/orun-runner-efficiency RE1). The two differ only in how an upstream
-// outside jobs is treated: a lane awaits it through remote state or has
+// specs/orun-runner-efficiency RE1). The two differ in how an upstream
+// outside jobs is treated — a lane awaits it through remote state or has
 // already been refused by checkLocalUpstreams; a plan selection (a
 // --component or --env filter, or --job) requires it completed in this run's
-// state, exactly as the sequential path does.
+// state, exactly as the sequential path does — and in failFast: a lane
+// passes false, since every rendered plan sets execution.failFast and
+// honouring it cancelled every unstarted job of the lane, dependent or not
+// (orun#735); a whole plan keeps honouring it, as the sequential path does.
 //
 // A lane of more than one job also reports each job on its own (§9): a check
 // run per job through r.Checks, and a row per job in the step summary.
@@ -140,6 +146,7 @@ func (r *Runner) runScheduled(planJobs, jobs []model.PlanJob, execState *execmod
 	prio := criticalPath(planJobs)
 	var mu sync.Mutex
 	var firstErr error
+	// stopped is a whole-plan run's fail-fast: never true for a lane (see above).
 	stopped := func() bool {
 		mu.Lock()
 		defer mu.Unlock()
@@ -272,7 +279,7 @@ func (r *Runner) runScheduled(planJobs, jobs []model.PlanJob, execState *execmod
 				checks.Start(j.ID, laneCheckName(j))
 			}
 			started := time.Now()
-			failed := r.executeJob(j, jobState, execState, baseExecContext, persistState, failFast, summary)
+			failed := r.executeJob(j, jobState, execState, baseExecContext, persistState, false, summary)
 			rec.duration = time.Since(started)
 			if failed {
 				rec.status = laneFailed
