@@ -147,9 +147,9 @@ Override plan concurrency:
 orun run --concurrency 4
 ```
 
-When `--concurrency` is greater than 1, result lines carry inline component and environment labels (e.g., `platform-shared·production/verify-turbo-package`) so each line is self-describing without group headers.
+When `--concurrency` is greater than 1, every job starts as soon as its upstreams finish, and a free slot goes to the ready job with the longest chain of dependents behind it (the scheduler a [lane](../concepts/lanes.md) uses). Result lines carry inline component and environment labels (e.g., `platform-shared·production/verify-turbo-package`) so each line is self-describing without group headers.
 
-Process up to 3 components concurrently while keeping the dashboard grouped:
+Keep a terminal run's output grouped by component by capping how many components have jobs in flight at once:
 
 ```bash
 orun run --concurrency 8 --component-concurrency 3
@@ -195,8 +195,8 @@ orun run --changed --explain
 | `--runner` | Execution backend: `local`, `docker`, or `github-actions` |
 | `--gha` | Shortcut for `--runner github-actions` |
 | `--exec-id` | Execution ID for resume or CI tracing (auto-generated if not set) |
-| `--concurrency` | Override plan concurrency (0 uses the plan's value) |
-| `--component-concurrency` | Max components processed concurrently (default 1; 0 = unlimited). Default 1 keeps the dashboard component-grouped |
+| `--concurrency` | Override plan concurrency (0 uses the plan's value). Above 1, jobs run on the lane scheduler: each starts as soon as its upstreams finish |
+| `--component-concurrency` | Max components with jobs in flight at once (default 0 = no cap). A job of a new component waits, holding no slot, until a component drains; set it to keep a terminal run's output grouped by component |
 | `--component` | Filter jobs to a specific component (repeatable) |
 | `--env`, `-e` | Filter jobs to specific environments (comma-separated) |
 | `--all-envs` | Run all environments explicitly (mutually exclusive with `--env`) |

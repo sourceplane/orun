@@ -225,6 +225,8 @@ type Runner struct {
 	componentJobTotal map[string]int
 	componentFinished map[string][]finishedJobEntry
 
+	// ComponentConcurrency caps the distinct components in flight at once;
+	// 0 (the default) is no cap. See componentGate.
 	ComponentConcurrency int
 }
 
@@ -387,7 +389,7 @@ func NewRunner(
 		Concurrency:          concurrency,
 		FilterComponents:     filterComponents,
 		FilterEnv:            filterEnv,
-		ComponentConcurrency: 1,
+		ComponentConcurrency: 0,
 	}
 }
 
@@ -529,11 +531,13 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	r.Concurrency = concurrency
 
 	if laneMode {
-		return r.runLane(plan.Jobs, orderedJobs, execState, baseExecContext, persistState, failFast, summary, concurrency)
+		return r.runScheduled(plan.Jobs, orderedJobs, execState, baseExecContext, persistState, failFast, summary, concurrency)
 	}
 
 	if concurrency > 1 && !r.DryRun {
-		return r.runConcurrent(orderedJobs, plan, execState, baseExecContext, persistState, failFast, summary, concurrency)
+		// A whole plan at concurrency > 1 runs on the lane scheduler: every
+		// selected job starts as soon as its upstreams finish (RE1).
+		return r.runScheduled(plan.Jobs, r.targetJobs(orderedJobs), execState, baseExecContext, persistState, failFast, summary, concurrency)
 	}
 
 	for _, job := range orderedJobs {
@@ -964,232 +968,17 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 	return jobFailed
 }
 
-func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState *execmodel.ExecState, baseExecContext executor.ExecContext, persistState, failFast bool, summary *runSummary, concurrency int) error {
-	if r.JobID != "" {
-		var filtered []model.PlanJob
-		for _, job := range jobs {
-			if job.ID == r.JobID {
-				filtered = append(filtered, job)
-				break
-			}
-		}
-		jobs = filtered
+// targetJobs narrows jobs to the one --job names, when set.
+func (r *Runner) targetJobs(jobs []model.PlanJob) []model.PlanJob {
+	if r.JobID == "" {
+		return jobs
 	}
-
-	sem := make(chan struct{}, concurrency)
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	var firstErr error
-
-	completed := make(map[string]bool)
-	for jobID, js := range execState.Jobs {
-		if js != nil && js.Status == "completed" {
-			completed[jobID] = true
-		}
-	}
-
-	jobMap := make(map[string]model.PlanJob)
 	for _, job := range jobs {
-		jobMap[job.ID] = job
-	}
-
-	pending := make(map[string]bool)
-	for _, job := range jobs {
-		if !completed[job.ID] {
-			pending[job.ID] = true
+		if job.ID == r.JobID {
+			return []model.PlanJob{job}
 		}
 	}
-
-	// Component-aware scheduling: cap how many distinct components are
-	// concurrently in-flight. activeComps tracks components with at least one
-	// running or scheduled-but-not-finished job. compRemaining counts pending
-	// jobs per component so we know when a component is fully drained.
-	activeComps := map[string]int{}
-	compRemaining := map[string]int{}
-	for _, job := range jobs {
-		if !completed[job.ID] {
-			compRemaining[job.Component]++
-		}
-	}
-	compCap := r.ComponentConcurrency
-	if compCap <= 0 {
-		compCap = 0 // 0 = unlimited
-	}
-
-	for len(pending) > 0 {
-		mu.Lock()
-		if failFast && firstErr != nil {
-			mu.Unlock()
-			break
-		}
-
-		var ready []model.PlanJob
-		for id := range pending {
-			job := jobMap[id]
-			// In single-job mode with SkipLocalDepsForJob, the remote coordinator
-			// has already verified deps via the claim loop — skip the local check.
-			allDepsMet := r.JobID != "" && r.SkipLocalDepsForJob
-			if !allDepsMet {
-				allDepsMet = true
-				for _, dep := range job.DependsOn {
-					if !completed[dep] {
-						allDepsMet = false
-						break
-					}
-				}
-			}
-			if allDepsMet {
-				ready = append(ready, job)
-			}
-		}
-
-		// Partition ready jobs: those for already-active components first.
-		var readyActive, readyNew []model.PlanJob
-		for _, job := range ready {
-			if _, ok := activeComps[job.Component]; ok {
-				readyActive = append(readyActive, job)
-			} else {
-				readyNew = append(readyNew, job)
-			}
-		}
-
-		// Pick which jobs to actually launch this iteration.
-		var pick []model.PlanJob
-		pick = append(pick, readyActive...)
-		// Add jobs from new components, respecting compCap. Jobs whose
-		// component becomes active in this same batch should also be picked.
-		// If no active components have ready work, allow expansion to avoid
-		// deadlock.
-		for _, job := range readyNew {
-			if _, alreadyActive := activeComps[job.Component]; alreadyActive {
-				pick = append(pick, job)
-				continue
-			}
-			if compCap > 0 && len(activeComps) >= compCap && len(readyActive) > 0 {
-				continue
-			}
-			if compCap > 0 && len(activeComps) >= compCap && len(readyActive) == 0 && len(pick) > 0 {
-				continue
-			}
-			activeComps[job.Component] = 0
-			pick = append(pick, job)
-		}
-		// Account active counts for picked jobs.
-		for _, job := range pick {
-			activeComps[job.Component]++
-		}
-
-		if len(pick) == 0 {
-			mu.Unlock()
-			wg.Wait()
-			mu.Lock()
-			stillPending := len(pending) > 0
-			mu.Unlock()
-			if stillPending && firstErr == nil {
-				summary.addWaiting(len(pending))
-			}
-			break
-		}
-		mu.Unlock()
-
-		for _, job := range pick {
-			mu.Lock()
-			delete(pending, job.ID)
-			mu.Unlock()
-
-			wg.Add(1)
-			sem <- struct{}{}
-
-			go func(j model.PlanJob) {
-				defer func() {
-					<-sem
-					wg.Done()
-				}()
-
-				mu.Lock()
-				if failFast && firstErr != nil {
-					mu.Unlock()
-					return
-				}
-				r.stateMu.Lock()
-				jobState := ensureJobState(execState, j)
-				alreadyCompleted := jobState.Status == "completed"
-				r.stateMu.Unlock()
-				if alreadyCompleted {
-					completed[j.ID] = true
-					summary.addResumed()
-					compRemaining[j.Component]--
-					activeComps[j.Component]--
-					if activeComps[j.Component] <= 0 {
-						delete(activeComps, j.Component)
-					}
-					mu.Unlock()
-					r.printJobResumed(j)
-					return
-				}
-
-				// BeforeJob hook: allow external code to decide whether to skip.
-				if r.Hooks != nil && r.Hooks.BeforeJob != nil {
-					skip, hookErr := r.Hooks.BeforeJob(j.ID)
-					if hookErr != nil {
-						if firstErr == nil {
-							firstErr = hookErr
-						}
-						compRemaining[j.Component]--
-						activeComps[j.Component]--
-						if activeComps[j.Component] <= 0 {
-							delete(activeComps, j.Component)
-						}
-						mu.Unlock()
-						return
-					}
-					if skip {
-						completed[j.ID] = true
-						summary.addResumed()
-						compRemaining[j.Component]--
-						activeComps[j.Component]--
-						if activeComps[j.Component] <= 0 {
-							delete(activeComps, j.Component)
-						}
-						mu.Unlock()
-						r.printJobResumed(j)
-						return
-					}
-				}
-				mu.Unlock()
-
-				failed := r.executeJob(j, jobState, execState, baseExecContext, persistState, failFast, summary)
-
-				mu.Lock()
-				if failed {
-					if firstErr == nil {
-						firstErr = fmt.Errorf("job %s failed", j.ID)
-					}
-				} else {
-					completed[j.ID] = true
-				}
-				compRemaining[j.Component]--
-				activeComps[j.Component]--
-				if activeComps[j.Component] <= 0 {
-					delete(activeComps, j.Component)
-				}
-				mu.Unlock()
-			}(job)
-		}
-
-		wg.Wait()
-	}
-
-	wg.Wait()
-
-	snap := summary.snapshot()
-	finalStatus := "completed"
-	if snap.failed > 0 || firstErr != nil {
-		finalStatus = "failed"
-	}
-	r.printRunSummary(summary, finalStatus)
-
-	return firstErr
+	return nil
 }
 
 func (r *Runner) filterJobs(jobs []model.PlanJob) []model.PlanJob {
