@@ -267,7 +267,7 @@ Two consumers, neither of which needs a change to the runner:
    runner for a lane only when its upstream work is done. The run coordinator
    already knows; the gate reads the same run state the lane would have
    polled, from one place instead of from every runner. Two policies, and the
-   model in §9 shows they are a real trade:
+   model in §8 shows they are a real trade:
    - **`all`** — release when every `upstreamJobs` entry is complete. No
      runner ever idles on an upstream; peak quota use halves. The cost is the
      critical path: a chain lane's level-0 job (the production migration) now
