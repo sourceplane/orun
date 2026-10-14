@@ -244,7 +244,11 @@ cut, then two, and stops at the first that works. It never needs to reject.
   leaves its completed ones completed. `gh run rerun --failed` on a lane is
   therefore a true resume, as it is for a job today.
 - **Failure.** A failed job stops the jobs in its lane that depend on it; the
-  rest of the lane continues unless the plan sets `failFast`.
+  rest of the lane continues. The plan's `execution.failFast` is not read:
+  every rendered plan sets it, and honouring it cancelled every unstarted job
+  of the lane (orun#735, fixed in v2.77.2). A job left unrun this way has a
+  failed upstream on the platform, so a dependent in another lane sees it as
+  blocked and stops waiting (orun#737).
 
 ## 9. The GitHub surface
 
