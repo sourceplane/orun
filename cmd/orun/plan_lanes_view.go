@@ -50,7 +50,7 @@ func renderLanesView(plan *model.Plan, res lanes.Result, color bool) string {
 			env = l.Environment
 			fmt.Fprintf(&b, "\n  %s\n", ui.Bold(color, env))
 		}
-		detail := fmt.Sprintf("%s · concurrency %d", l.Source, l.Concurrency)
+		detail := fmt.Sprintf("%s · concurrency %d · level %d", l.Source, l.Concurrency, l.Level)
 		if l.Group != "" {
 			detail += " · group " + l.Group
 		}
@@ -59,6 +59,9 @@ func renderLanesView(plan *model.Plan, res lanes.Result, color bool) string {
 		}
 		if l.SplitFrom != "" {
 			detail += " · split from " + l.SplitFrom
+		}
+		if len(l.UpstreamLanes) > 0 {
+			detail += " · after " + strings.Join(l.UpstreamLanes, ", ")
 		}
 		fmt.Fprintf(&b, "  ├─ %s  %s\n", ui.Bold(color, l.Name), ui.Dim(color, "["+l.ID+"]"))
 		fmt.Fprintf(&b, "  │    %s\n", ui.Dim(color, detail))

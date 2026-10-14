@@ -187,6 +187,59 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 ```
 
+### Level by level
+
+Every lane carries its `level` in the lane graph (0 when no other lane feeds
+it, else one more than the deepest lane it waits on), `upstreamLanes` and
+`upstreamJobs`; `orun plan --view lanes` shows them. A matrix fans every lane
+out at once, so a lane whose upstream lane is still running takes a runner
+and waits on it. To never provision a runner before its upstream lanes are
+done, run the levels as chained jobs: `--github-output` also writes
+`lane-matrix-<k>` for each level `k`, `lane-matrix-levels` (the array of
+them) and `lane-level-count`.
+
+```yaml
+jobs:
+  plan:
+    outputs:
+      lanes-0: ${{ steps.plan.outputs.lane-matrix-0 }}
+      lanes-1: ${{ steps.plan.outputs.lane-matrix-1 }}
+      lanes-2: ${{ steps.plan.outputs.lane-matrix-2 }}
+    steps:
+      - id: plan
+        run: orun plan --from-ci github --event-file "$GITHUB_EVENT_PATH" --github-output
+
+  run-0:
+    needs: plan
+    if: needs.plan.outputs.lanes-0 != '' && needs.plan.outputs.lanes-0 != '{"include":[]}'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.lanes-0) }}
+    name: ${{ matrix.name }}
+    steps:
+      - run: orun run --lane "${{ matrix.lane }}" --remote-state --exec-id "$EXEC_ID"
+
+  run-1:
+    needs: [plan, run-0]
+    if: needs.plan.outputs.lanes-1 != '' && needs.plan.outputs.lanes-1 != '{"include":[]}'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.lanes-1) }}
+    name: ${{ matrix.name }}
+    steps:
+      - run: orun run --lane "${{ matrix.lane }}" --remote-state --exec-id "$EXEC_ID"
+  # run-2 likewise, needs: [plan, run-1]
+```
+
+Declare as many levels as the plan can have (a promotion chain of two
+environments is usually two or three); a level the plan does not reach is
+skipped by its `if`, and everything after it with it. The trade is a barrier
+per level: a lane at level 1 starts only when every level-0 lane has
+finished, not when its own upstreams have. A pool that reads
+`upstreamLanes` (or `upstreamJobs`) from the matrix can release each runner
+on exactly its own upstreams instead. Either way the runner, once started,
+still waits for any upstream that is not yet done, as before.
+
 A GitHub job named after a lane changes when the partition changes, so branch
 protection must not depend on it. A lane of more than one job therefore posts
 **one check run per job**, named by the job's check title (for example

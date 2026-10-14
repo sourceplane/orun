@@ -30,13 +30,22 @@ type PlanLane struct {
 	// SplitFrom and Reason record a cycle repair (specs/orun-lanes §7).
 	SplitFrom string `json:"splitFrom,omitempty" yaml:"splitFrom,omitempty"`
 	Reason    string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	// Level is the lane's depth in the lane graph: 0 for a lane no other
+	// lane's job feeds, else one more than the deepest lane it waits on. A
+	// workflow that runs the lanes level by level never provisions a runner
+	// before its upstream lanes are done (specs/orun-runner-efficiency §5.1).
+	Level int `json:"level" yaml:"level"`
+	// UpstreamLanes are the lanes this lane's jobs wait on, and UpstreamJobs
+	// the jobs in them, both sorted; what a pool gates a runner on.
+	UpstreamLanes []string `json:"upstreamLanes,omitempty" yaml:"upstreamLanes,omitempty"`
+	UpstreamJobs  []string `json:"upstreamJobs,omitempty" yaml:"upstreamJobs,omitempty"`
 }
 
 // PlanMetadata captures immutable plan generation details.
 type PlanMetadata struct {
-	Name        string            `json:"name" yaml:"name"`
-	Description string            `json:"description,omitempty" yaml:"description,omitempty"`
-	Namespace   string            `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	Name        string `json:"name" yaml:"name"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	Namespace   string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
 	// GeneratedAt is volatile and not stamped by the renderer (plans are
 	// byte-identical for identical inputs). It is kept for reading older
 	// plans and is excluded from checksum and planHash.
@@ -161,20 +170,20 @@ type ResolvedCompositionSource struct {
 
 // PlanJob is the execution unit in the final plan
 type PlanJob struct {
-	ID                       string                 `json:"id" yaml:"id"`
-	UID                      string                 `json:"uid,omitempty" yaml:"uid,omitempty"`
-	DisplayName              string                 `json:"displayName,omitempty" yaml:"displayName,omitempty"`
-	CheckName                string                 `json:"checkName,omitempty" yaml:"checkName,omitempty"`
-	Name                     string                 `json:"name" yaml:"name"`
-	Component                string                 `json:"component" yaml:"component"`
-	Environment              string                 `json:"environment" yaml:"environment"`
-	Composition              string                 `json:"composition,omitempty" yaml:"composition,omitempty"`
-	Profile                  string                 `json:"profile,omitempty" yaml:"profile,omitempty"`
-	ProfileSource            string                 `json:"profileSource,omitempty" yaml:"profileSource,omitempty"`
-	ProfileRuleTriggerRef    string                 `json:"profileRuleTriggerRef,omitempty" yaml:"profileRuleTriggerRef,omitempty"`
-	JobRegistry              string                 `json:"jobRegistry,omitempty" yaml:"jobRegistry,omitempty"` // Name of the JobRegistry used
-	Job                      string                 `json:"job,omitempty" yaml:"job,omitempty"`                 // Specific job from registry
-	RunsOn                   string                 `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`
+	ID                    string `json:"id" yaml:"id"`
+	UID                   string `json:"uid,omitempty" yaml:"uid,omitempty"`
+	DisplayName           string `json:"displayName,omitempty" yaml:"displayName,omitempty"`
+	CheckName             string `json:"checkName,omitempty" yaml:"checkName,omitempty"`
+	Name                  string `json:"name" yaml:"name"`
+	Component             string `json:"component" yaml:"component"`
+	Environment           string `json:"environment" yaml:"environment"`
+	Composition           string `json:"composition,omitempty" yaml:"composition,omitempty"`
+	Profile               string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	ProfileSource         string `json:"profileSource,omitempty" yaml:"profileSource,omitempty"`
+	ProfileRuleTriggerRef string `json:"profileRuleTriggerRef,omitempty" yaml:"profileRuleTriggerRef,omitempty"`
+	JobRegistry           string `json:"jobRegistry,omitempty" yaml:"jobRegistry,omitempty"` // Name of the JobRegistry used
+	Job                   string `json:"job,omitempty" yaml:"job,omitempty"`                 // Specific job from registry
+	RunsOn                string `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`
 	// Index is the job's position in Jobs: a stable, dense 0-based number for
 	// one plan. CI composes a per-job runner label from it
 	// (ghr-orun-job:<run>-<index>), so a runner launched for a lane can take
