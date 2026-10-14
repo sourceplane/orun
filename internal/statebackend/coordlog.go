@@ -103,27 +103,54 @@ func (w wireEvent) toEvent() CoordinationEvent {
 // waitSeconds turns the read into a long-poll: the server holds the request until
 // an event lands past the cursor or the wait lapses (live-tail without busy poll).
 func (c *CoordClient) ReadLog(ctx context.Context, runID string, fromSeq, waitSeconds int) ([]CoordinationEvent, error) {
+	events, _, err := c.ReadLogWait(ctx, runID, fromSeq, waitSeconds, false)
+	return events, err
+}
+
+// LogHead is where the run's stream stands: its newest seq, and the newest
+// seq that is progress (anything but a lease renewal), when the server
+// reports one.
+type LogHead struct {
+	Seq         int
+	ProgressSeq int
+}
+
+// ReadLogWait is ReadLog with the stream's head. With wakeOnProgress a held
+// long-poll is woken by progress alone (coordination-api.md §2
+// `wake=progress`): lease renewals, which keep a job alive without changing
+// what it is, no longer wake every waiter in the run; they still ride the
+// page, so the fold stays whole and the cursor moves past them
+// (specs/orun-sync-efficiency F3). A server without the parameter ignores
+// it and wakes as before.
+func (c *CoordClient) ReadLogWait(ctx context.Context, runID string, fromSeq, waitSeconds int, wakeOnProgress bool) ([]CoordinationEvent, LogHead, error) {
 	path := fmt.Sprintf("/runs/%s/log?from=%d", runID, fromSeq)
 	if waitSeconds > 0 {
 		path += fmt.Sprintf("&wait=%d", waitSeconds)
 	}
+	if wakeOnProgress {
+		path += "&wake=progress"
+	}
 	resp, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		return nil, err
+		return nil, LogHead{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("read log %s: unexpected status %d", runID, resp.StatusCode)
+		return nil, LogHead{}, fmt.Errorf("read log %s: unexpected status %d", runID, resp.StatusCode)
 	}
 	var body struct {
 		Events []wireEvent `json:"events"`
+		Head   struct {
+			Seq         int `json:"seq"`
+			ProgressSeq int `json:"progressSeq"`
+		} `json:"head"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, err
+		return nil, LogHead{}, err
 	}
 	out := make([]CoordinationEvent, len(body.Events))
 	for i, w := range body.Events {
 		out[i] = w.toEvent()
 	}
-	return out, nil
+	return out, LogHead{Seq: body.Head.Seq, ProgressSeq: body.Head.ProgressSeq}, nil
 }

@@ -461,6 +461,46 @@ func (b *CoordBackend) WaitForRunEvents(ctx context.Context, runID string, since
 	return head, nil
 }
 
+// WaitForRunProgress is WaitForRunEvents for a waiter that cares about
+// progress alone: it asks the server to hold through lease renewals
+// (`wake=progress`), folds everything the page carries onto the view, and
+// reports the stream head with whether any event past sinceSeq was more than
+// a renewal. A runner waiting on its upstreams is woken when one of them
+// changes, not every 20 s per running job (specs/orun-sync-efficiency F3).
+func (b *CoordBackend) WaitForRunProgress(ctx context.Context, runID string, sinceSeq, waitSeconds int) (head int, progressed bool, err error) {
+	wire := wireRunID(runID)
+	b.viewMu.Lock()
+	v := b.viewLocked(wire)
+	if sinceSeq == 0 && v.started {
+		sinceSeq = v.fold.LastSeq
+	}
+	b.viewMu.Unlock()
+
+	events, _, err := b.coord.ReadLogWait(ctx, wire, sinceSeq, waitSeconds, true)
+	if err != nil {
+		return sinceSeq, false, err
+	}
+	head = sinceSeq
+	for _, e := range events {
+		if e.Seq > head {
+			head = e.Seq
+		}
+		if e.Seq > sinceSeq && e.Kind != EventLeaseRenewed {
+			progressed = true
+		}
+	}
+
+	b.viewMu.Lock()
+	defer b.viewMu.Unlock()
+	switch {
+	case v.started && sinceSeq <= v.fold.LastSeq:
+		v.absorbLocked(events)
+	case !v.started && sinceSeq == 0 && len(events) > 0:
+		_ = b.primeLocked(ctx, wire, v, func() ([]CoordinationEvent, error) { return events, nil })
+	}
+	return head, progressed, nil
+}
+
 // ── Delegated to the inner backend (native surface does not yet own these) ──
 
 func (b *CoordBackend) AppendStepLog(ctx context.Context, runID, jobID, content string, step *LogStep) error {

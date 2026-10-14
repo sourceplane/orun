@@ -300,6 +300,17 @@ func (q *quietBackend) WaitForRunEvents(_ context.Context, _ string, sinceSeq, w
 	return sinceSeq, nil // nothing happened
 }
 
+// WaitForRunProgress: the server held the wait through lease renewals and
+// lapsed; the page carried one renewal, so the cursor moves and nothing
+// woke.
+func (q *quietBackend) WaitForRunProgress(ctx context.Context, runID string, sinceSeq, waitSeconds int) (int, bool, error) {
+	head, err := q.WaitForRunEvents(ctx, runID, sinceSeq, waitSeconds)
+	if waitSeconds == 0 {
+		return head, false, err
+	}
+	return head + 1, false, err
+}
+
 func (q *quietBackend) waits() []int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -307,12 +318,20 @@ func (q *quietBackend) waits() []int {
 }
 
 // A lapsed long-poll is not an event (specs/orun-sync-efficiency F1): the
-// wait reports it as time spent, not as news.
+// wait reports it as time spent, not as news. Nor is a lease renewal (F3):
+// a backend that can hold through renewals reports the lapse with the
+// cursor moved past them.
 func TestEventWait_LapseIsNotAnEvent(t *testing.T) {
 	quiet := &quietBackend{fakeRunState: &fakeRunState{states: []map[string]string{{"up": "running"}}}}
 	w := newEventWait(context.Background(), quiet, "run")
 	if woke, blocked := w.wait(context.Background(), time.Second); woke || !blocked {
 		t.Fatalf("a lapsed long-poll: woke=%v blocked=%v; want time spent and no news", woke, blocked)
+	}
+	if w.seq != 1 {
+		t.Fatalf("the cursor must move past the renewal the lapse carried: seq=%d", w.seq)
+	}
+	if w.progress == nil {
+		t.Fatal("the runner's wait must use the progress wait when the backend has one")
 	}
 
 	ev := &eventBackend{fakeRunState: &fakeRunState{states: []map[string]string{{"up": "running"}}}}
