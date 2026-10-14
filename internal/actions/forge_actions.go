@@ -25,7 +25,7 @@ func init() {
 			{Name: "private", Type: ParamBool, Default: true,
 				Description: "create it private"},
 			{Name: "inOrg", Type: ParamBool, Default: true,
-				Description: "owner is an organization; false creates in the token's own account"},
+				Description: "owner is an organization; consulted only when GitHub cannot say whether owner is an organization or a user"},
 		},
 		Outputs: []string{"fullName", "cloneUrl", "created", "remote"},
 	}, runRepoEnsure)

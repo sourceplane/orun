@@ -42,50 +42,207 @@ func TestEnsureRepoFindsAnExistingOne(t *testing.T) {
 	}
 }
 
+// fakeGitHub is the slice of the GitHub API EnsureRepo talks to: repositories
+// by full name, accounts by login with their kind, and the identity the token
+// authenticates as ("" answers /user the way an installation token does).
+type fakeGitHub struct {
+	repos    map[string]bool
+	accounts map[string]string
+	me       string
+	posts    []fakePost
+}
+
+type fakePost struct {
+	Path    string
+	Name    string `json:"name"`
+	Private bool   `json:"private"`
+}
+
+func (f *fakeGitHub) client(t *testing.T) *Client {
+	t.Helper()
+	return client(t, func(w http.ResponseWriter, r *http.Request) {
+		notFound := func() {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{"message": "Not Found"})
+		}
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/repos/"):
+			full := strings.TrimPrefix(r.URL.Path, "/repos/")
+			if !f.repos[full] {
+				notFound()
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"full_name": full, "clone_url": "https://github.com/" + full + ".git"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/users/"):
+			login := strings.TrimPrefix(r.URL.Path, "/users/")
+			kind, ok := f.accounts[login]
+			if !ok {
+				notFound()
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"login": login, "type": kind})
+		case r.Method == http.MethodGet && r.URL.Path == "/user":
+			if f.me == "" {
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]any{"message": "Resource not accessible by integration"})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"login": f.me})
+		case r.Method == http.MethodPost:
+			post := fakePost{Path: r.URL.Path}
+			_ = json.NewDecoder(r.Body).Decode(&post)
+			f.posts = append(f.posts, post)
+			var owner string
+			switch {
+			case r.URL.Path == "/user/repos":
+				owner = f.me
+			case strings.HasPrefix(r.URL.Path, "/orgs/") && f.accounts[strings.Split(r.URL.Path, "/")[2]] == "Organization":
+				owner = strings.Split(r.URL.Path, "/")[2]
+			default:
+				// What GitHub does with /orgs/{user}/repos: the 2026-10-14 failure.
+				notFound()
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"full_name": owner + "/" + post.Name, "clone_url": "https://github.com/" + owner + "/" + post.Name + ".git",
+			})
+		default:
+			notFound()
+		}
+	})
+}
+
 // Phase 01 is re-run like any other phase, so the second run must find the
 // repository the first one made rather than fail on a name collision.
 func TestEnsureRepoCreatesWhenAbsent(t *testing.T) {
-	var postedTo string
-	c := client(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]any{"message": "Not Found"})
-			return
-		}
-		postedTo = r.URL.Path
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"full_name": "acme/product", "clone_url": "https://github.com/acme/product.git",
-		})
-	})
-	res, err := c.EnsureRepo(context.Background(), "acme", "product", true, true)
+	gh := &fakeGitHub{accounts: map[string]string{"acme": "Organization", "bot": "User"}, me: "bot"}
+	res, err := gh.client(t).EnsureRepo(context.Background(), "acme", "product", true, true)
 	if err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-	if !res.Created {
-		t.Error("a fresh repo should be reported as created")
+	if !res.Created || res.FullName != "acme/product" {
+		t.Errorf("a fresh org repo should be reported as created as acme/product, got %+v", res)
 	}
-	if postedTo != "/orgs/acme/repos" {
-		t.Errorf("an org create must use the org endpoint, got %q", postedTo)
+	if len(gh.posts) != 1 || gh.posts[0].Path != "/orgs/acme/repos" {
+		t.Fatalf("an org create must use the org endpoint, got %+v", gh.posts)
+	}
+	if !gh.posts[0].Private {
+		t.Error("private must be passed through")
 	}
 }
 
-// GitHub reads the owner of POST /user/repos off the token's own identity, so
-// the two endpoints are not interchangeable.
-func TestEnsureRepoUsesTheUserEndpointOutsideAnOrg(t *testing.T) {
-	var postedTo string
-	c := client(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			w.WriteHeader(http.StatusNotFound)
-			return
+// A blueprint's `githuborg` may name a personal account. GitHub answers
+// POST /orgs/{user}/repos with a bare 404, which is how
+// `--set githuborg=pullely` failed in 01-scaffold; the user's own token
+// creates through /user/repos, whatever inOrg says.
+func TestEnsureRepoCreatesInTheTokensOwnPersonalAccount(t *testing.T) {
+	for _, private := range []bool{true, false} {
+		gh := &fakeGitHub{accounts: map[string]string{"pullely": "User"}, me: "Pullely"}
+		res, err := gh.client(t).EnsureRepo(context.Background(), "pullely", "product", private, true)
+		if err != nil {
+			t.Fatalf("private=%v: ensure: %v", private, err)
 		}
-		postedTo = r.URL.Path
-		_ = json.NewEncoder(w).Encode(map[string]any{"full_name": "me/product"})
-	})
-	if _, err := c.EnsureRepo(context.Background(), "me", "product", true, false); err != nil {
+		if !res.Created || !strings.EqualFold(res.FullName, "pullely/product") {
+			t.Errorf("private=%v: want pullely/product created, got %+v", private, res)
+		}
+		if len(gh.posts) != 1 || gh.posts[0].Path != "/user/repos" {
+			t.Fatalf("private=%v: a personal create must use /user/repos, got %+v", private, gh.posts)
+		}
+		if gh.posts[0].Private != private || gh.posts[0].Name != "product" {
+			t.Errorf("private=%v: posted %+v", private, gh.posts[0])
+		}
+	}
+}
+
+// /user/repos creates in the TOKEN's account, so another user's token would
+// put the repository somewhere the caller did not ask. Refuse, and say how.
+func TestEnsureRepoRefusesAnotherUsersPersonalAccount(t *testing.T) {
+	gh := &fakeGitHub{accounts: map[string]string{"pullely": "User", "rahul": "User"}, me: "rahul"}
+	_, err := gh.client(t).EnsureRepo(context.Background(), "pullely", "product", false, true)
+	if err == nil {
+		t.Fatal("creating in someone else's personal account must be refused")
+	}
+	if len(gh.posts) != 0 {
+		t.Errorf("nothing should have been POSTed, got %+v", gh.posts)
+	}
+	for _, want := range []string{"pullely is a personal GitHub account", "rahul's", "gh repo create pullely/product --public"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q; got %v", want, err)
+		}
+	}
+}
+
+// An installation token has no user behind it: /user answers 403, and there
+// is no personal account for /user/repos to create in.
+func TestEnsureRepoRefusesAPersonalAccountWithoutAUserToken(t *testing.T) {
+	gh := &fakeGitHub{accounts: map[string]string{"pullely": "User"}}
+	_, err := gh.client(t).EnsureRepo(context.Background(), "pullely", "product", true, true)
+	if err == nil {
+		t.Fatal("a token with no user cannot create in a personal account")
+	}
+	if len(gh.posts) != 0 {
+		t.Errorf("nothing should have been POSTed, got %+v", gh.posts)
+	}
+	for _, want := range []string{"has no user of its own", "gh repo create pullely/product --private"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q; got %v", want, err)
+		}
+	}
+}
+
+// The workaround that unblocked 2026-10-14 — pre-creating the repository —
+// keeps working: an existing repo is found before the owner is looked at.
+func TestEnsureRepoFindsAnExistingRepoInAnotherUsersAccount(t *testing.T) {
+	gh := &fakeGitHub{repos: map[string]bool{"pullely/product": true}, accounts: map[string]string{"pullely": "User"}, me: "rahul"}
+	res, err := gh.client(t).EnsureRepo(context.Background(), "pullely", "product", true, true)
+	if err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-	if postedTo != "/user/repos" {
-		t.Errorf("a personal create must use /user/repos, got %q", postedTo)
+	if res.Created || res.FullName != "pullely/product" {
+		t.Errorf("an existing repo must be found, not created; got %+v", res)
+	}
+	if len(gh.posts) != 0 {
+		t.Errorf("nothing should have been POSTed, got %+v", gh.posts)
+	}
+}
+
+func TestEnsureRepoNamesAnOwnerGitHubDoesNotKnow(t *testing.T) {
+	gh := &fakeGitHub{me: "rahul"}
+	_, err := gh.client(t).EnsureRepo(context.Background(), "nobody", "product", true, true)
+	if err == nil || !strings.Contains(err.Error(), `no organization or user named "nobody"`) {
+		t.Fatalf("an unknown owner should be named; got %v", err)
+	}
+	if len(gh.posts) != 0 {
+		t.Errorf("nothing should have been POSTed, got %+v", gh.posts)
+	}
+}
+
+// When GitHub cannot say what the owner is, the declared inOrg decides, as it
+// did before the owner was looked up.
+func TestEnsureRepoFallsBackToInOrgWhenTheOwnerCannotBeRead(t *testing.T) {
+	for _, tc := range []struct {
+		inOrg bool
+		want  string
+	}{{true, "/orgs/me/repos"}, {false, "/user/repos"}} {
+		var postedTo string
+		c := client(t, func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost:
+				postedTo = r.URL.Path
+				_ = json.NewEncoder(w).Encode(map[string]any{"full_name": "me/product"})
+			case strings.HasPrefix(r.URL.Path, "/users/"):
+				w.WriteHeader(http.StatusUnprocessableEntity)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		})
+		if _, err := c.EnsureRepo(context.Background(), "me", "product", true, tc.inOrg); err != nil {
+			t.Fatalf("inOrg=%v: ensure: %v", tc.inOrg, err)
+		}
+		if postedTo != tc.want {
+			t.Errorf("inOrg=%v: want %s, got %q", tc.inOrg, tc.want, postedTo)
+		}
 	}
 }
 
