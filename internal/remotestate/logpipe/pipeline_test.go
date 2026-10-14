@@ -169,16 +169,143 @@ func TestPipeline_RetryBackoff_SuppressesHammering(t *testing.T) {
 	u.setFail(true)
 
 	p.Append(ctx, "r", "j", "a\n", nil) // attempt 1 (fails)
+	p.waitIdle()
 	p.Append(ctx, "r", "j", "b\n", nil) // within backoff → no upload attempt
 	p.Append(ctx, "r", "j", "c\n", nil) // within backoff → no upload attempt
-	if u.calls != 1 {
-		t.Fatalf("upload attempts = %d, want 1 (backoff should suppress the rest)", u.calls)
+	p.waitIdle()
+	if n := u.attempts(); n != 1 {
+		t.Fatalf("upload attempts = %d, want 1 (backoff should suppress the rest)", n)
 	}
 
 	now = now.Add(11 * time.Second)     // past backoff
 	p.Append(ctx, "r", "j", "d\n", nil) // attempt 2 (fails)
-	if u.calls != 2 {
-		t.Fatalf("upload attempts = %d, want 2 after backoff elapsed", u.calls)
+	p.waitIdle()
+	if n := u.attempts(); n != 2 {
+		t.Fatalf("upload attempts = %d, want 2 after backoff elapsed", n)
+	}
+}
+
+func (u *recordingUploader) attempts() int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.calls
+}
+
+// A step never waits for its block to land: Append returns while the
+// upload is still in flight (specs/orun-sync-efficiency F8).
+func TestPipeline_AppendNeverWaitsForTheUpload(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	var mu sync.Mutex
+	var got []string
+	up := func(_ context.Context, _ string, jobID, content string, _ *statebackend.LogStep) error {
+		started <- struct{}{}
+		<-release
+		mu.Lock()
+		got = append(got, jobID+":"+content)
+		mu.Unlock()
+		return nil
+	}
+	p := New(up, Options{})
+	ctx := context.Background()
+	done := make(chan struct{})
+	go func() {
+		p.Append(ctx, "r", "j", "one\n", nil)
+		p.Append(ctx, "r", "j", "two\n", nil)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Append blocked on the upload")
+	}
+	<-started
+	close(release)
+	if rep := p.Close(ctx); rep.Undrained != 0 {
+		t.Fatalf("Undrained = %d", rep.Undrained)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 2 || got[0] != "j:one\n" || got[1] != "j:two\n" {
+		t.Fatalf("delivered = %v", got)
+	}
+}
+
+// The jobs of a lane upload beside each other, each in its own order.
+func TestPipeline_JobsUploadInParallel_EachInOrder(t *testing.T) {
+	var mu sync.Mutex
+	inFlight, peak := 0, 0
+	perJob := map[string][]string{}
+	up := func(_ context.Context, _ string, jobID, content string, _ *statebackend.LogStep) error {
+		mu.Lock()
+		inFlight++
+		if inFlight > peak {
+			peak = inFlight
+		}
+		mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+		mu.Lock()
+		inFlight--
+		perJob[jobID] = append(perJob[jobID], content)
+		mu.Unlock()
+		return nil
+	}
+	p := New(up, Options{MaxInFlight: 4})
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		for _, j := range []string{"a", "b", "c"} {
+			p.Append(ctx, "r", j, j+string(rune('0'+i))+"\n", nil)
+		}
+	}
+	if rep := p.Close(ctx); rep.Undrained != 0 {
+		t.Fatalf("Undrained = %d", rep.Undrained)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if peak < 2 {
+		t.Fatalf("the jobs' uploads never overlapped: peak in flight = %d", peak)
+	}
+	for _, j := range []string{"a", "b", "c"} {
+		if got := perJob[j]; len(got) != 3 || got[0] != j+"0\n" || got[1] != j+"1\n" || got[2] != j+"2\n" {
+			t.Fatalf("job %s out of order: %v", j, got)
+		}
+	}
+}
+
+type rateLimited struct{ after time.Duration }
+
+func (e rateLimited) Error() string                 { return "429 rate limited" }
+func (e rateLimited) RetryAfterHint() time.Duration { return e.after }
+
+// A 429 with a Retry-After is honoured on the spot: the chunk lands after
+// the wait, without the backoff or the spill.
+func TestPipeline_RetryAfterIsHonoured(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	var got []string
+	up := func(_ context.Context, _ string, jobID, content string, _ *statebackend.LogStep) error {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls == 1 {
+			return rateLimited{after: 10 * time.Millisecond}
+		}
+		got = append(got, jobID+":"+content)
+		return nil
+	}
+	p := New(up, Options{RetryBackoff: time.Hour})
+	ctx := context.Background()
+	p.Append(ctx, "r", "j", "a\n", nil)
+	p.Append(ctx, "r", "j", "b\n", nil)
+	p.waitIdle()
+	mu.Lock()
+	if calls != 3 || len(got) != 2 {
+		mu.Unlock()
+		t.Fatalf("calls=%d delivered=%v; want the 429 retried after its hint and both chunks landed", calls, got)
+	}
+	mu.Unlock()
+	if rep := p.Close(ctx); rep.Undrained != 0 {
+		t.Fatalf("Undrained = %d", rep.Undrained)
 	}
 }
 

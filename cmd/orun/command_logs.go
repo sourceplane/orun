@@ -182,6 +182,18 @@ func showRemoteLogs(runID string, backend statebackend.Backend, color bool) erro
 	return nil
 }
 
+// jobLogWaiter is the optional seam a backend offers `--follow`: a tail read
+// the server holds while nothing new sits past the cursor and the job still
+// runs, so the tail costs one request per wait instead of one per poll
+// (specs/orun-sync-efficiency P6).
+type jobLogWaiter interface {
+	TailJobLogWait(ctx context.Context, runID, jobID string, fromSeq, waitSeconds int) (content string, nextSeq int, complete bool, err error)
+}
+
+// followWaitSeconds is how long one held tail read blocks: under the
+// server's cap and the edge's timeouts.
+const followWaitSeconds = 15
+
 // followRemoteLog live-tails a single job's log via the fromSeq cursor until the
 // job completes (or the user interrupts with Ctrl-C). Requires --job; multi-job
 // follow is a later increment.
@@ -198,9 +210,19 @@ func followRemoteLog(runID string, backend statebackend.Backend, color bool) err
 	const maxConsecutiveErrors = 5
 	fromSeq := 0
 	errCount := 0
+	waiter, _ := backend.(jobLogWaiter)
 	fmt.Fprintf(os.Stdout, "%s tailing %s (Ctrl-C to stop)\n", ui.Dim(color, "○"), jobID)
 	for {
-		content, nextSeq, complete, err := backend.TailJobLog(ctx, runID, jobID, fromSeq)
+		var content string
+		var nextSeq int
+		var complete bool
+		var err error
+		asked := time.Now()
+		if waiter != nil {
+			content, nextSeq, complete, err = waiter.TailJobLogWait(ctx, runID, jobID, fromSeq, followWaitSeconds)
+		} else {
+			content, nextSeq, complete, err = backend.TailJobLog(ctx, runID, jobID, fromSeq)
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil // interrupted
@@ -218,6 +240,12 @@ func followRemoteLog(runID string, backend statebackend.Backend, color bool) err
 			}
 			if complete {
 				return nil
+			}
+			// The server held the read: ask again at once. An answer that
+			// came back empty within the poll interval means the server has
+			// no hold (an older platform): poll as before.
+			if waiter != nil && (content != "" || time.Since(asked) >= pollInterval) {
+				continue
 			}
 		}
 		select {

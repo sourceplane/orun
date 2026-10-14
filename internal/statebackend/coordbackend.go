@@ -591,6 +591,11 @@ func (b *CoordBackend) TailJobLog(ctx context.Context, runID, jobID string, from
 	return b.inner.TailJobLog(ctx, runID, jobID, fromSeq)
 }
 
+// TailJobLogWait is the held tail read (`logs --follow`), delegated.
+func (b *CoordBackend) TailJobLogWait(ctx context.Context, runID, jobID string, fromSeq, waitSeconds int) (string, int, bool, error) {
+	return b.inner.TailJobLogWait(ctx, runID, jobID, fromSeq, waitSeconds)
+}
+
 func (b *CoordBackend) Close(ctx context.Context) error { return b.inner.Close(ctx) }
 
 func (b *CoordBackend) setLease(jobID string, epoch int) {
