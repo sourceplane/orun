@@ -180,6 +180,26 @@ Debug how `--changed` resolved its git refs:
 orun run --changed --explain
 ```
 
+### Interrupting a run
+
+`SIGTERM` (a spot runner's interruption notice forwarded by the pool, a
+cancelled CI job) or `SIGINT` (Ctrl-C) drains the run: running steps are
+stopped, no further job is admitted, and every job that was cut is reported
+`failed` with an `interrupted` error — to the platform too, so a lane
+waiting on one of them stops waiting at once instead of waiting out the
+upstream timeout. The run exits with the shell's code for the signal (130
+for `SIGINT`, 143 for `SIGTERM`); a second signal exits immediately.
+`orun run --retry` with the same `--exec-id` and `--job`/`--lane` re-opens
+the cut jobs; a job is re-run from its first step, since the staged tree its
+earlier steps built no longer exists on the runner that picks it up.
+
+A runner that disappears without a signal (a reclaimed instance) stops
+heartbeating. A job waiting on one of its jobs treats a `running` upstream
+whose heartbeat is older than two of the server's leases as having lost its
+runner and ends its wait naming it, rather than holding its own runner;
+before any claim has told the run the lease length, the legacy five minutes
+apply.
+
 ## Flags
 
 ### Execution flags

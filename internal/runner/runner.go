@@ -182,6 +182,12 @@ type Runner struct {
 	ghaHoldSteps bool
 	// Hooks wires external lifecycle callbacks (remote state, log upload, etc.).
 	Hooks *RunnerHooks
+	// Context is the run's root context. Cancelling it (a SIGTERM on a spot
+	// runner, Ctrl-C) stops every running step, admits no further job, and
+	// reports the jobs it cut as failed with an "interrupted" error, so a
+	// dependent lane stops waiting and `--retry` re-opens them
+	// (specs/orun-runner-efficiency §5.6). Nil is Background.
+	Context context.Context
 
 	// Redactor masks resolved secret values in step output before it reaches
 	// ANY sink — view analysis, the AfterStepLog hook (remote log upload +
@@ -426,8 +432,12 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		return err
 	}
 
+	rootCtx := r.Context
+	if rootCtx == nil {
+		rootCtx = context.Background()
+	}
 	baseExecContext := executor.ExecContext{
-		Context:            context.Background(),
+		Context:            rootCtx,
 		WorkspaceDir:       workspaceDir,
 		UseWorkDirOverride: r.UseWorkDirOverride,
 		BaseEnv: executor.MergeEnvironment(
@@ -562,6 +572,9 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		if r.JobID != "" && job.ID != r.JobID {
 			continue
 		}
+		if rootCtx.Err() != nil {
+			break
+		}
 
 		unmet := unresolvedDependencies(job, execState)
 		if len(unmet) > 0 {
@@ -611,18 +624,35 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		}
 	}
 
-	if r.JobID != "" && !executedTarget {
+	if r.JobID != "" && !executedTarget && rootCtx.Err() == nil {
 		return fmt.Errorf("job not found in runnable set: %s", r.JobID)
 	}
 
 	snap := summary.snapshot()
 	finalStatus := "completed"
-	if snap.failed > 0 {
+	if snap.failed > 0 || rootCtx.Err() != nil {
 		finalStatus = "failed"
 	}
 	r.printRunSummary(summary, finalStatus)
 
-	return nil
+	return r.interruptedError(rootCtx, execState, orderedJobs)
+}
+
+// interruptedError is the run's error after its context was cancelled: how
+// many jobs were cut or never started, and how to pick them up.
+func (r *Runner) interruptedError(ctx context.Context, execState *execmodel.ExecState, jobs []model.PlanJob) error {
+	if ctx.Err() == nil {
+		return nil
+	}
+	r.stateMu.Lock()
+	left := 0
+	for _, job := range jobs {
+		if js := execState.Jobs[job.ID]; js == nil || js.Status != "completed" {
+			left++
+		}
+	}
+	r.stateMu.Unlock()
+	return fmt.Errorf("interrupted: %d job(s) failed or did not run; rerun with --retry to pick them up", left)
 }
 
 func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, execState *execmodel.ExecState, baseExecContext executor.ExecContext, persistState, failFast bool, summary *runSummary) bool {
@@ -923,6 +953,12 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 		jobReport.observeStepDone(stepID, stepErr == nil, false, stepDuration)
 
 		if stepErr != nil {
+			if baseExecContext.Context.Err() != nil {
+				// Cut by a cancelled run (a signal), not by its own doing: say
+				// so, so the terminal record and a waiting lane read it as
+				// preempted, and --retry re-opens it.
+				stepErr = fmt.Errorf("interrupted: %w", stepErr)
+			}
 			r.updateState(persistState, execState, func() {
 				jobState.Steps[stepID] = "failed"
 				jobState.Status = "failed"

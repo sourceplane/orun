@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -224,5 +225,53 @@ func TestComponentGate_ZeroIsNoCap(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("a cap of 0 must admit every component")
+	}
+}
+
+// ctxExecutor sleeps for the step's duration but stops when the run's
+// context is cancelled, as a real process under exec.CommandContext does.
+type ctxExecutor struct{ *trackingExecutor }
+
+func (e ctxExecutor) RunStep(ctx executor.ExecContext, job model.PlanJob, step model.PlanStep) (string, error) {
+	d, _ := time.ParseDuration(strings.TrimSpace(step.Run))
+	select {
+	case <-time.After(d):
+		return e.trackingExecutor.RunStep(ctx, job, model.PlanStep{ID: step.ID, Run: "0ms"})
+	case <-ctx.Context.Done():
+		return "", ctx.Context.Err()
+	}
+}
+
+// Cancelling the run's context (a SIGTERM on a spot runner) stops the
+// running step, reports its job failed as interrupted, admits no further job
+// and returns an error naming what is left (specs/orun-runner-efficiency §5.6).
+func TestRun_InterruptStopsAdmittingAndNamesWhatIsLeft(t *testing.T) {
+	for _, concurrency := range []int{1, 2} {
+		ex := ctxExecutor{newTrackingExecutor()}
+		plan := &model.Plan{Jobs: []model.PlanJob{
+			sleepJob("a", "a", "2s"), sleepJob("b", "b", "2s", "a"), sleepJob("c", "c", "2s", "a"),
+		}}
+		r := planRunner(t, ex, concurrency)
+		ctx, cancel := context.WithCancel(context.Background())
+		r.Context = ctx
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			cancel()
+		}()
+		start := time.Now()
+		err := r.Run(plan)
+		if err == nil || !strings.Contains(err.Error(), "interrupted: 3 job(s)") {
+			t.Fatalf("concurrency %d: want the interruption naming 3 jobs, got %v", concurrency, err)
+		}
+		if el := time.Since(start); el > time.Second {
+			t.Fatalf("concurrency %d: the running step was not stopped: %v", concurrency, el)
+		}
+		st := r.SnapshotState()
+		if js := st.Jobs["a"]; js == nil || js.Status != "failed" || !strings.Contains(js.LastError, "interrupted") {
+			t.Fatalf("concurrency %d: the cut job reports failed as interrupted: %+v", concurrency, js)
+		}
+		if ex.ran() != "" {
+			t.Fatalf("concurrency %d: no job finished: %s", concurrency, ex.ran())
+		}
 	}
 }

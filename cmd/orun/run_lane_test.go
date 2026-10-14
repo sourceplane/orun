@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -58,6 +61,8 @@ type fakeRunState struct {
 	mu     sync.Mutex
 	states []map[string]string
 	calls  int
+	// heartbeats is each job's HeartbeatAt, applied to every state.
+	heartbeats map[string]string
 }
 
 func (f *fakeRunState) LoadRunState(context.Context, string) (*execmodel.ExecState, *execmodel.ExecMetadata, error) {
@@ -70,7 +75,7 @@ func (f *fakeRunState) LoadRunState(context.Context, string) (*execmodel.ExecSta
 	f.calls++
 	st := &execmodel.ExecState{Jobs: map[string]*execmodel.JobState{}}
 	for id, status := range f.states[i] {
-		st.Jobs[id] = &execmodel.JobState{Status: status}
+		st.Jobs[id] = &execmodel.JobState{Status: status, HeartbeatAt: f.heartbeats[id]}
 	}
 	return st, nil, nil
 }
@@ -83,18 +88,18 @@ func TestAwaitRemoteUpstreams(t *testing.T) {
 	ctx := context.Background()
 
 	waits := &fakeRunState{states: []map[string]string{{"up": "pending"}, {"up": "running"}, {"up": "completed"}}}
-	if err := awaitRemoteUpstreams(ctx, waits, "run", plan, "down", []string{"up"}, io.Discard, false, false); err != nil || waits.calls != 3 {
+	if err := awaitRemoteUpstreams(ctx, waits, "run", plan, "down", []string{"up"}, io.Discard, false, false, nil); err != nil || waits.calls != 3 {
 		t.Fatalf("want success after 3 polls: %v (%d)", err, waits.calls)
 	}
 
 	failed := &fakeRunState{states: []map[string]string{{"up": "failed"}}}
-	if err := awaitRemoteUpstreams(ctx, failed, "run", plan, "down", []string{"up"}, io.Discard, false, false); err == nil || !strings.Contains(err.Error(), "upstream up failed") {
+	if err := awaitRemoteUpstreams(ctx, failed, "run", plan, "down", []string{"up"}, io.Discard, false, false, nil); err == nil || !strings.Contains(err.Error(), "upstream up failed") {
 		t.Fatalf("want the failure: %v", err)
 	}
 
 	// --retry: a failed upstream may be re-run by its own lane; keep waiting.
 	retried := &fakeRunState{states: []map[string]string{{"up": "failed"}, {"up": "completed"}}}
-	if err := awaitRemoteUpstreams(ctx, retried, "run", plan, "down", []string{"up"}, io.Discard, false, true); err != nil {
+	if err := awaitRemoteUpstreams(ctx, retried, "run", plan, "down", []string{"up"}, io.Discard, false, true, nil); err != nil {
 		t.Fatalf("retry run must wait out a failed upstream: %v", err)
 	}
 
@@ -103,12 +108,12 @@ func TestAwaitRemoteUpstreams(t *testing.T) {
 	// it as blocked on the first poll, not wait out the upstream timeout.
 	chain := &model.Plan{Jobs: []model.PlanJob{{ID: "root"}, {ID: "up", DependsOn: []string{"root"}}, {ID: "down", DependsOn: []string{"up"}}}}
 	blocked := &fakeRunState{states: []map[string]string{{"root": "failed", "up": "pending"}}}
-	if err := awaitRemoteUpstreams(ctx, blocked, "run", chain, "down", []string{"up"}, io.Discard, false, false); err == nil || !strings.Contains(err.Error(), "blocked by an upstream failure") || blocked.calls != 1 {
+	if err := awaitRemoteUpstreams(ctx, blocked, "run", chain, "down", []string{"up"}, io.Discard, false, false, nil); err == nil || !strings.Contains(err.Error(), "blocked by an upstream failure") || blocked.calls != 1 {
 		t.Fatalf("want the blocked upstream on the first poll: %v (%d polls)", err, blocked.calls)
 	}
 
 	stuck := &fakeRunState{states: []map[string]string{{"up": "running"}}}
-	if err := awaitRemoteUpstreams(ctx, stuck, "run", plan, "down", []string{"up"}, io.Discard, false, false); err == nil || !strings.Contains(err.Error(), "timeout") {
+	if err := awaitRemoteUpstreams(ctx, stuck, "run", plan, "down", []string{"up"}, io.Discard, false, false, nil); err == nil || !strings.Contains(err.Error(), "timeout") {
 		t.Fatalf("want a timeout: %v", err)
 	}
 }
@@ -177,5 +182,51 @@ func TestSelectLane_AutoConcurrencyDividesByDeclaredCPU(t *testing.T) {
 	}
 	if conc != want {
 		t.Fatalf("concurrency = %d, want %d cores / 2 per job", conc, want)
+	}
+}
+
+// An upstream that is "running" but whose runner stopped heartbeating (a
+// reclaimed spot instance) ends the wait within two leases, not the
+// upstream timeout (specs/orun-runner-efficiency §5.6).
+func TestAwaitRemoteUpstreams_StaleHeartbeatEndsTheWait(t *testing.T) {
+	oldWait, oldPoll := laneUpstreamWait, laneUpstreamPoll
+	laneUpstreamWait, laneUpstreamPoll = 5*time.Second, time.Millisecond
+	t.Cleanup(func() { laneUpstreamWait, laneUpstreamPoll = oldWait, oldPoll })
+	plan := &model.Plan{Jobs: []model.PlanJob{{ID: "up"}, {ID: "down", DependsOn: []string{"up"}}}}
+	old := time.Now().Add(-3 * time.Minute).UTC().Format(time.RFC3339)
+	fresh := time.Now().UTC().Format(time.RFC3339)
+
+	leases := newJobLeases()
+	leases.observeLease(60)
+	if leases.staleAfter() != 2*time.Minute {
+		t.Fatalf("stale after two leases: %s", leases.staleAfter())
+	}
+	stale := &fakeRunState{states: []map[string]string{{"up": "running"}}, heartbeats: map[string]string{"up": old}}
+	err := awaitRemoteUpstreams(context.Background(), stale, "run", plan, "down", []string{"up"}, io.Discard, false, false, leases.staleAfter)
+	if err == nil || !strings.Contains(err.Error(), "lost its runner") || stale.calls != 1 {
+		t.Fatalf("want the lost runner on the first poll: %v (%d polls)", err, stale.calls)
+	}
+
+	// Before any claim told us the lease, the legacy five minutes apply: a
+	// three-minute-old heartbeat is still live.
+	live := &fakeRunState{states: []map[string]string{{"up": "running"}, {"up": "completed"}}, heartbeats: map[string]string{"up": old}}
+	if err := awaitRemoteUpstreams(context.Background(), live, "run", plan, "down", []string{"up"}, io.Discard, false, false, newJobLeases().staleAfter); err != nil {
+		t.Fatalf("a heartbeat within the default window is live: %v", err)
+	}
+	_ = fresh
+	if !heartbeatOlderThan(old, time.Minute) || heartbeatOlderThan(fresh, time.Minute) || heartbeatOlderThan("", time.Minute) || heartbeatOlderThan("garbage", time.Minute) {
+		t.Fatal("heartbeatOlderThan")
+	}
+}
+
+func TestInterruptContext(t *testing.T) {
+	ctx, interrupted, stop := interruptContext(io.Discard)
+	defer stop()
+	if interrupted() != nil || ctx.Err() != nil {
+		t.Fatal("nothing yet")
+	}
+	e := &interruptedError{err: fmt.Errorf("interrupted by terminated"), sig: syscall.SIGTERM}
+	if e.ExitCode() != 143 || (&interruptedError{sig: os.Interrupt}).ExitCode() != 130 {
+		t.Fatal("exit codes follow the shell's convention")
 	}
 }

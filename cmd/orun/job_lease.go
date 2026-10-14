@@ -12,6 +12,11 @@ import (
 type jobLeases struct {
 	mu   sync.Mutex
 	jobs map[string]*jobLease
+	// leaseTTL is the lease length the server granted on the latest claim or
+	// heartbeat (never a client-hardcoded value). It is the run's measure of
+	// a dead runner: an upstream whose heartbeat is older than two leases
+	// has lost its runner (specs/orun-runner-efficiency §5.6).
+	leaseTTL time.Duration
 }
 
 // jobLease holds one job's lease state.
@@ -38,6 +43,31 @@ func (l *jobLeases) get(jobID string) *jobLease {
 	}
 	return j
 }
+
+// observeLease records a server-granted lease length.
+func (l *jobLeases) observeLease(seconds int) {
+	if seconds <= 0 {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.leaseTTL = time.Duration(seconds) * time.Second
+}
+
+// staleAfter is how old a running job's heartbeat may be before the job is
+// taken to have lost its runner: two of the server's leases, or, before any
+// claim told us the lease, the legacy coordinator's five minutes.
+func (l *jobLeases) staleAfter() time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.leaseTTL > 0 {
+		return 2 * l.leaseTTL
+	}
+	return defaultStaleAfter
+}
+
+// defaultStaleAfter matches the legacy coordinator's HEARTBEAT_TIMEOUT_MS.
+const defaultStaleAfter = 5 * time.Minute
 
 func (l *jobLeases) setInterval(jobID string, d time.Duration) {
 	l.mu.Lock()

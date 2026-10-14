@@ -241,7 +241,10 @@ func (r *Runner) runScheduled(planJobs, jobs []model.PlanJob, execState *execmod
 				}
 			}
 
-			if stopped() {
+			if stopped() || baseExecContext.Context.Err() != nil {
+				if baseExecContext.Context.Err() != nil {
+					rec.status, rec.note = laneNotRun, "interrupted"
+				}
 				return
 			}
 			// --component-concurrency: a job of a component not yet in flight
@@ -253,7 +256,10 @@ func (r *Runner) runScheduled(planJobs, jobs []model.PlanJob, execState *execmod
 			defer components.leave(j.Component)
 			ticket.acquire()
 			defer ticket.release()
-			if stopped() {
+			if stopped() || baseExecContext.Context.Err() != nil {
+				if baseExecContext.Context.Err() != nil {
+					rec.status, rec.note = laneNotRun, "interrupted"
+				}
 				return
 			}
 
@@ -301,10 +307,13 @@ func (r *Runner) runScheduled(planJobs, jobs []model.PlanJob, execState *execmod
 
 	snap := summary.snapshot()
 	finalStatus := "completed"
-	if snap.failed > 0 || firstErr != nil {
+	if snap.failed > 0 || firstErr != nil || baseExecContext.Context.Err() != nil {
 		finalStatus = "failed"
 	}
 	r.printRunSummary(summary, finalStatus)
+	if err := r.interruptedError(baseExecContext.Context, execState, jobs); err != nil {
+		return err
+	}
 	return firstErr
 }
 
