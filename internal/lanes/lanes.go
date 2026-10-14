@@ -29,6 +29,17 @@ type Options struct {
 	Strict bool
 	// CheckName gives a job's check title, the name of a job-mode lane.
 	CheckName func(model.PlanJob) string
+	// MaxLanes, when > 0, overrides the intent's maxLanes for this plan
+	// (`orun plan --max-lanes`, ORUN_MAX_LANES); MaxLanesFrom says which
+	// ("flag" or "env") and is recorded in plan.metadata.lanes.
+	MaxLanes     int
+	MaxLanesFrom string
+	// Weights, when set, are per-job packing weights in seconds (`orun plan
+	// --weights`): they overwrite each job's estimatedSeconds before the
+	// layout; WeightsFrom ("history" or "file") is recorded in
+	// plan.metadata.lanes.
+	Weights     map[string]int
+	WeightsFrom string
 }
 
 // Result reports what Assign decided beyond the plan itself.
@@ -68,6 +79,24 @@ func Assign(plan *model.Plan, opts Options) (Result, error) {
 		plan.Lanes = nil
 		return res, nil
 	}
+	// The lane budget: an override for this plan, else the intent's, else
+	// the default; recorded with its provenance so a plan reader sees why
+	// the plan has the lanes it has.
+	meta := &model.PlanLanesMeta{Mode: mode, MaxLanes: cfg.MaxLanes, MaxLanesFrom: "intent", UpstreamWait: cfg.UpstreamWait}
+	switch {
+	case opts.MaxLanes > 0:
+		c := *cfg
+		c.MaxLanes = opts.MaxLanes
+		cfg = &c
+		meta.MaxLanes, meta.MaxLanesFrom = opts.MaxLanes, opts.MaxLanesFrom
+		if meta.MaxLanesFrom == "" {
+			meta.MaxLanesFrom = "flag"
+		}
+	case cfg.MaxLanes <= 0:
+		meta.MaxLanes, meta.MaxLanesFrom = model.DefaultLaneMaxLanes, "default"
+	}
+	plan.Metadata.Lanes = meta
+	meta.WeightsFrom = applyWeights(plan, opts)
 
 	g := newJobGraph(plan.Jobs)
 	drafts := initialDrafts(plan, cfg, mode, opts.ComponentLanes, g)
@@ -80,6 +109,31 @@ func Assign(plan *model.Plan, opts Options) (Result, error) {
 
 	finalize(plan, g, *drafts, opts.CheckName)
 	return res, nil
+}
+
+// applyWeights stamps the supplied weights onto the jobs and says where the
+// plan's weights come from: file or history when supplied, declared when a
+// template's estimatedSeconds is the only source, "" when every job weighs
+// one (the layout is then the count-based one, byte-identical to before
+// weights existed).
+func applyWeights(plan *model.Plan, opts Options) string {
+	if len(opts.Weights) > 0 {
+		for i := range plan.Jobs {
+			if w, ok := opts.Weights[plan.Jobs[i].ID]; ok && w > 0 {
+				plan.Jobs[i].EstimatedSeconds = w
+			}
+		}
+		if opts.WeightsFrom != "" {
+			return opts.WeightsFrom
+		}
+		return "file"
+	}
+	for _, j := range plan.Jobs {
+		if j.EstimatedSeconds > 0 {
+			return "declared"
+		}
+	}
+	return ""
 }
 
 // EffectiveMode is the mode a plan is laid out in: the first rule whose
@@ -103,11 +157,21 @@ func EffectiveMode(cfg *model.IntentLanes, matched []string) string {
 	return cfg.Mode
 }
 
+// laneConcurrency is a draft's concurrency from the intent: the count, -1
+// for auto (the runner's core count, resolved by `orun run`; the plan carries
+// 0), else the default.
 func laneConcurrency(cfg *model.IntentLanes) int {
-	if cfg.Concurrency > 0 {
-		return cfg.Concurrency
+	return concurrencyOf(cfg.Concurrency, model.DefaultLaneConcurrency)
+}
+
+func concurrencyOf(c model.LaneConcurrency, fallback int) int {
+	switch {
+	case c.IsAuto():
+		return -1
+	case c > 0:
+		return int(c)
 	}
-	return model.DefaultLaneConcurrency
+	return fallback
 }
 
 // initialDrafts applies resolution (§3.3) under the boundaries of §4: one
@@ -143,8 +207,8 @@ func initialDrafts(plan *model.Plan, cfg *model.IntentLanes, mode string, compLa
 			continue
 		case ann != "":
 			conc := laneConcurrency(cfg)
-			if grp, ok := cfg.Groups[ann]; ok && grp.Concurrency > 0 {
-				conc = grp.Concurrency
+			if grp, ok := cfg.Groups[ann]; ok && grp.Concurrency != 0 {
+				conc = concurrencyOf(grp.Concurrency, conc)
 			}
 			add("grp\x00"+env+"\x00"+ann+"\x00"+runsOn, func() *draft {
 				return &draft{baseID: env + "/" + ann, env: env, runsOn: runsOn, source: "group", group: ann, concurrency: conc}
@@ -257,7 +321,10 @@ func finalize(plan *model.Plan, g *jobGraph, drafts []*draft, checkName func(mod
 			plan.Jobs[j].Lane = d.laneID()
 		}
 		conc := d.concurrency
-		if conc < 1 {
+		switch {
+		case conc < 0: // auto: the runner sizes it to its cores
+			conc = 0
+		case conc == 0:
 			conc = 1
 		}
 		lane := model.PlanLane{
@@ -275,8 +342,90 @@ func finalize(plan *model.Plan, g *jobGraph, drafts []*draft, checkName func(mod
 			lane.SplitFrom = d.splitFrom
 			lane.Reason = "cycle"
 		}
+		if g.weighted {
+			for _, j := range d.jobs {
+				lane.EstimatedSeconds += g.weight[j]
+			}
+		}
+		for _, j := range d.jobs {
+			if v := jobVCPU(plan.Jobs[j]); v > lane.VCPU {
+				lane.VCPU = v
+			}
+		}
 		plan.Lanes = append(plan.Lanes, lane)
 	}
+	stampUpstreams(plan, g, drafts)
+}
+
+// stampUpstreams records, per lane, the lanes and jobs its jobs wait on and
+// its level in the lane graph (specs/orun-runner-efficiency §5.1). The lane
+// graph is acyclic here (repairCycles ran), so levels are well defined: a
+// lane's level is one more than the deepest lane it waits on, 0 when it waits
+// on none. Lanes are in plan.Lanes order, drafts[i] being plan.Lanes[i].
+func stampUpstreams(plan *model.Plan, g *jobGraph, drafts []*draft) {
+	laneOf := make([]int, len(plan.Jobs))
+	for li, d := range drafts {
+		for _, j := range d.jobs {
+			laneOf[j] = li
+		}
+	}
+	upLanes := make([]map[int]struct{}, len(drafts))
+	upJobs := make([]map[int]struct{}, len(drafts))
+	for li, d := range drafts {
+		upLanes[li] = map[int]struct{}{}
+		upJobs[li] = map[int]struct{}{}
+		for _, j := range d.jobs {
+			for _, dep := range g.deps[j] {
+				if laneOf[dep] == li {
+					continue
+				}
+				upLanes[li][laneOf[dep]] = struct{}{}
+				upJobs[li][dep] = struct{}{}
+			}
+		}
+	}
+	level := make([]int, len(drafts))
+	done := make([]bool, len(drafts))
+	var visit func(li int) int
+	visit = func(li int) int {
+		if done[li] {
+			return level[li]
+		}
+		done[li] = true
+		l := 0
+		for up := range upLanes[li] {
+			if v := visit(up) + 1; v > l {
+				l = v
+			}
+		}
+		level[li] = l
+		return l
+	}
+	for li := range drafts {
+		visit(li)
+		lane := &plan.Lanes[li]
+		lane.Level = level[li]
+		for up := range upLanes[li] {
+			lane.UpstreamLanes = append(lane.UpstreamLanes, plan.Lanes[up].ID)
+		}
+		sort.Strings(lane.UpstreamLanes)
+		for j := range upJobs[li] {
+			lane.UpstreamJobs = append(lane.UpstreamJobs, plan.Jobs[j].ID)
+		}
+		sort.Strings(lane.UpstreamJobs)
+	}
+}
+
+// jobVCPU is the whole cores a job declared, 0 when it declared none.
+func jobVCPU(job model.PlanJob) int {
+	if job.Resources == nil || job.Resources.CPU <= 0 {
+		return 0
+	}
+	n := int(job.Resources.CPU)
+	if float64(n) < job.Resources.CPU {
+		n++
+	}
+	return n
 }
 
 const maxNameLen = 80

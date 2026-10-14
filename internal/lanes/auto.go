@@ -59,7 +59,19 @@ func autoDrafts(plan *model.Plan, cfg *model.IntentLanes, pending []int, fixed i
 		p.jobs = append(p.jobs, i)
 	}
 
-	allocateLanes(len(pending), budget, len(parts), func(k int) int { return len(parts[k].jobs) }, func(k, n int) { parts[k].lanes = n })
+	// The budget is shared in proportion to work: job count, or, when the plan
+	// carries weights, weight. A partition never gets more lanes than jobs.
+	size := func(k int) int { return g.sum(parts[k].jobs) }
+	total := 0
+	for k := range parts {
+		total += size(k)
+	}
+	allocateLanes(total, budget, len(parts), size, func(k, n int) {
+		if n > len(parts[k].jobs) {
+			n = len(parts[k].jobs)
+		}
+		parts[k].lanes = n
+	})
 
 	conc := laneConcurrency(cfg)
 	var out []*draft
@@ -180,9 +192,14 @@ func packPartition(g *jobGraph, jobs []int, lanes int) [][]int {
 		clusters[r] = append(clusters[r], j)
 	}
 
-	capacity := (len(jobs) + lanes - 1) / lanes
+	// A lane's share of the work; a cluster bigger than it is cut by level
+	// into consecutive slices within the share. By count, or by weight when
+	// the plan carries weights (specs/orun-runner-efficiency §5.4).
+	capacity := (g.sum(jobs) + lanes - 1) / lanes
 	type item struct {
 		jobs     []int
+		weight   int
+		critical int
 		minLevel int
 		minJob   int
 	}
@@ -195,10 +212,12 @@ func packPartition(g *jobGraph, jobs []int, lanes int) [][]int {
 			}
 			return c[a] < c[b]
 		})
-		for start := 0; start < len(c); start += capacity {
-			end := start + capacity
-			if end > len(c) {
-				end = len(c)
+		for start := 0; start < len(c); {
+			end := start
+			acc := 0
+			for end < len(c) && (end == start || acc+g.weight[c[end]] <= capacity) {
+				acc += g.weight[c[end]]
+				end++
 			}
 			slice := append([]int(nil), c[start:end]...)
 			minJob := slice[0]
@@ -207,12 +226,19 @@ func packPartition(g *jobGraph, jobs []int, lanes int) [][]int {
 					minJob = j
 				}
 			}
-			items = append(items, item{jobs: slice, minLevel: g.level[slice[0]], minJob: minJob})
+			items = append(items, item{jobs: slice, weight: acc, critical: g.criticalPath(slice), minLevel: g.level[slice[0]], minJob: minJob})
+			start = end
 		}
 	}
+	// Longest work first: by the longest chain of work in the slice when
+	// weighted (the lane that bounds the wall-clock), else by size; then the
+	// slice's weight, its lowest level and its earliest job.
 	sort.SliceStable(items, func(a, b int) bool {
-		if len(items[a].jobs) != len(items[b].jobs) {
-			return len(items[a].jobs) > len(items[b].jobs)
+		if g.weighted && items[a].critical != items[b].critical {
+			return items[a].critical > items[b].critical
+		}
+		if items[a].weight != items[b].weight {
+			return items[a].weight > items[b].weight
 		}
 		if items[a].minLevel != items[b].minLevel {
 			return items[a].minLevel < items[b].minLevel
@@ -221,14 +247,16 @@ func packPartition(g *jobGraph, jobs []int, lanes int) [][]int {
 	})
 
 	bins := make([][]int, lanes)
+	load := make([]int, lanes)
 	for _, it := range items {
 		best := 0
 		for b := 1; b < lanes; b++ {
-			if len(bins[b]) < len(bins[best]) {
+			if load[b] < load[best] {
 				best = b
 			}
 		}
 		bins[best] = append(bins[best], it.jobs...)
+		load[best] += it.weight
 	}
 	var out [][]int
 	for _, b := range bins {
@@ -247,6 +275,48 @@ func packPartition(g *jobGraph, jobs []int, lanes int) [][]int {
 		return out[a][0] < out[b][0]
 	})
 	return out
+}
+
+// sum is the jobs' total weight (their count when the plan has no weights).
+func (g *jobGraph) sum(jobs []int) int {
+	n := 0
+	for _, j := range jobs {
+		n += g.weight[j]
+	}
+	return n
+}
+
+// criticalPath is the heaviest chain of enforced dependencies inside jobs:
+// the least time the slice can take however wide the lane is.
+func (g *jobGraph) criticalPath(jobs []int) int {
+	in := make(map[int]bool, len(jobs))
+	for _, j := range jobs {
+		in[j] = true
+	}
+	memo := map[int]int{}
+	var longest func(j int) int
+	longest = func(j int) int {
+		if v, ok := memo[j]; ok {
+			return v
+		}
+		best := 0
+		for _, d := range g.deps[j] {
+			if in[d] {
+				if v := longest(d); v > best {
+					best = v
+				}
+			}
+		}
+		memo[j] = best + g.weight[j]
+		return memo[j]
+	}
+	m := 0
+	for _, j := range jobs {
+		if v := longest(j); v > m {
+			m = v
+		}
+	}
+	return m
 }
 
 func minLevelOf(g *jobGraph, jobs []int) int {

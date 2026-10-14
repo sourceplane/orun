@@ -284,6 +284,23 @@ The `ws_…` / slug / `org_…` value is passed opaquely; the platform resolves 
 
 When `mode: remote` is set, all three commands that read execution state (`run`, `status`, `logs`) automatically use the backend without requiring `--remote-state` on the command line.
 
+## Execution defaults
+
+`execution.defaults` sets run-time bounds every job inherits unless it sets its own:
+
+```yaml
+execution:
+  defaults:
+    timeout: 45m        # bounds every step whose job and step set none (runner default: 60m)
+  lanes:
+    upstreamWait: 90m   # how long a lane job waits for an upstream in another lane (default 60m)
+```
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `defaults.timeout` | Go duration | The bound on every step whose job template and step declare no `timeout`; carried on the plan as `execution.timeout`. Without it the runner applies 60 minutes, so no step holds a runner for the CI limit. See [Timeouts](../cli/orun-run.md#timeouts) |
+| `lanes.upstreamWait` | Go duration | How long a lane job waits for an upstream in another lane through remote state (default 60 minutes); carried as `metadata.lanes.upstreamWait`. See [Lanes](../concepts/lanes.md#run-a-lane) |
+
 ## Related
 
 - [Environment variables](./environment-variables.md) — the shell-level overrides for everything above.

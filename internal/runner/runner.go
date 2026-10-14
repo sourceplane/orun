@@ -24,15 +24,28 @@ import (
 
 // IsolationMode controls how each job's working tree is materialized.
 //   - IsolationAuto: stage per-job when effective concurrency > 1 (default)
-//   - IsolationWorkspace: always stage per job
+//   - IsolationWorkspace: always stage the whole tree per job
+//   - IsolationComponent: always stage, but copy only the job's own directory
+//     and link everything else to the source tree
+//     (specs/orun-runner-efficiency §5.3)
 //   - IsolationNone: share the source tree across all jobs (legacy behavior)
 type IsolationMode string
 
 const (
 	IsolationAuto      IsolationMode = "auto"
 	IsolationWorkspace IsolationMode = "workspace"
+	IsolationComponent IsolationMode = "component"
 	IsolationNone      IsolationMode = "none"
 )
+
+// ValidIsolationMode reports whether s names an isolation mode.
+func ValidIsolationMode(s string) bool {
+	switch IsolationMode(s) {
+	case IsolationAuto, IsolationWorkspace, IsolationComponent, IsolationNone:
+		return true
+	}
+	return false
+}
 
 // StepRecord is a step's identity and outcome, as the runner knows them at the
 // moment it hands over the step's output.
@@ -169,6 +182,16 @@ type Runner struct {
 	ghaHoldSteps bool
 	// Hooks wires external lifecycle callbacks (remote state, log upload, etc.).
 	Hooks *RunnerHooks
+	// DefaultTimeout bounds a step whose job and step set none: the plan's
+	// execution.timeout, else model.DefaultStepTimeout. Empty disables the
+	// bound (tests). Set by cmd/orun from the plan.
+	DefaultTimeout string
+	// Context is the run's root context. Cancelling it (a SIGTERM on a spot
+	// runner, Ctrl-C) stops every running step, admits no further job, and
+	// reports the jobs it cut as failed with an "interrupted" error, so a
+	// dependent lane stops waiting and `--retry` re-opens them
+	// (specs/orun-runner-efficiency §5.6). Nil is Background.
+	Context context.Context
 
 	// Redactor masks resolved secret values in step output before it reaches
 	// ANY sink — view analysis, the AfterStepLog hook (remote log upload +
@@ -204,6 +227,10 @@ type Runner struct {
 	printMu sync.Mutex
 	stateMu sync.Mutex
 
+	// laneSetup runs each distinct lane-scoped step once per process
+	// (lane_setup.go). Set at the start of Run.
+	laneSetup *laneSetup
+
 	// secretProvenance holds value-free resolve provenance keyed by jobID,
 	// recorded by the resolver (RecordSecretProvenance) and sealed onto the
 	// job's ExecState record after a successful resolve (Invariant 6).
@@ -225,6 +252,8 @@ type Runner struct {
 	componentJobTotal map[string]int
 	componentFinished map[string][]finishedJobEntry
 
+	// ComponentConcurrency caps the distinct components in flight at once;
+	// 0 (the default) is no cap. See componentGate.
 	ComponentConcurrency int
 }
 
@@ -387,7 +416,7 @@ func NewRunner(
 		Concurrency:          concurrency,
 		FilterComponents:     filterComponents,
 		FilterEnv:            filterEnv,
-		ComponentConcurrency: 1,
+		ComponentConcurrency: 0,
 	}
 }
 
@@ -407,8 +436,12 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		return err
 	}
 
+	rootCtx := r.Context
+	if rootCtx == nil {
+		rootCtx = context.Background()
+	}
 	baseExecContext := executor.ExecContext{
-		Context:            context.Background(),
+		Context:            rootCtx,
 		WorkspaceDir:       workspaceDir,
 		UseWorkDirOverride: r.UseWorkDirOverride,
 		BaseEnv: executor.MergeEnvironment(
@@ -455,6 +488,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	// Expose the live state to observers (object-model working tree).
 	r.stateMu.Lock()
 	r.liveState = execState
+	r.laneSetup = newLaneSetup()
 	r.stateMu.Unlock()
 
 	orderedJobs, err := topologicalOrder(plan.Jobs)
@@ -529,16 +563,21 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	r.Concurrency = concurrency
 
 	if laneMode {
-		return r.runLane(plan.Jobs, orderedJobs, execState, baseExecContext, persistState, summary, concurrency)
+		return r.runScheduled(plan.Jobs, orderedJobs, execState, baseExecContext, persistState, false, summary, concurrency)
 	}
 
 	if concurrency > 1 && !r.DryRun {
-		return r.runConcurrent(orderedJobs, plan, execState, baseExecContext, persistState, failFast, summary, concurrency)
+		// A whole plan at concurrency > 1 runs on the lane scheduler: every
+		// selected job starts as soon as its upstreams finish (RE1).
+		return r.runScheduled(plan.Jobs, r.targetJobs(orderedJobs), execState, baseExecContext, persistState, failFast, summary, concurrency)
 	}
 
 	for _, job := range orderedJobs {
 		if r.JobID != "" && job.ID != r.JobID {
 			continue
+		}
+		if rootCtx.Err() != nil {
+			break
 		}
 
 		unmet := unresolvedDependencies(job, execState)
@@ -589,18 +628,35 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		}
 	}
 
-	if r.JobID != "" && !executedTarget {
+	if r.JobID != "" && !executedTarget && rootCtx.Err() == nil {
 		return fmt.Errorf("job not found in runnable set: %s", r.JobID)
 	}
 
 	snap := summary.snapshot()
 	finalStatus := "completed"
-	if snap.failed > 0 {
+	if snap.failed > 0 || rootCtx.Err() != nil {
 		finalStatus = "failed"
 	}
 	r.printRunSummary(summary, finalStatus)
 
-	return nil
+	return r.interruptedError(rootCtx, execState, orderedJobs)
+}
+
+// interruptedError is the run's error after its context was cancelled: how
+// many jobs were cut or never started, and how to pick them up.
+func (r *Runner) interruptedError(ctx context.Context, execState *execmodel.ExecState, jobs []model.PlanJob) error {
+	if ctx.Err() == nil {
+		return nil
+	}
+	r.stateMu.Lock()
+	left := 0
+	for _, job := range jobs {
+		if js := execState.Jobs[job.ID]; js == nil || js.Status != "completed" {
+			left++
+		}
+	}
+	r.stateMu.Unlock()
+	return fmt.Errorf("interrupted: %d job(s) failed or did not run; rerun with --retry to pick them up", left)
 }
 
 func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, execState *execmodel.ExecState, baseExecContext executor.ExecContext, persistState, failFast bool, summary *runSummary) bool {
@@ -663,22 +719,40 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 	// Per-job workspace isolation. We stage the source tree into a job-private
 	// directory so concurrent jobs don't race on node_modules / .turbo / dist
 	// rewrites. UseWorkDirOverride means the user pinned a workdir explicitly —
-	// honor that and skip staging.
-	stagedRoot := ""
-	if r.shouldIsolate() && !r.DryRun && !r.UseWorkDirOverride {
-		staged, err := stageJobWorkspace(baseExecContext.WorkspaceDir, r.ExecID, job.ID, r.KeepWorkspaces)
+	// honor that and skip staging. Staging is lazy: a job's lane-scoped steps
+	// (its leading `scope: lane` steps) run first, in the shared tree, and
+	// the private tree is staged after them so it sees what they installed
+	// (specs/orun-runner-efficiency §5.3).
+	jobWorkingDir := r.resolveWorkingDir(job.Path)
+	prelude := leadingLaneSteps(job)
+	var cleanups []func()
+	defer func() {
+		for _, c := range cleanups {
+			c()
+		}
+	}()
+	staged := false
+	stage := func() {
+		if staged {
+			return
+		}
+		staged = true
+		if !r.shouldIsolate() || r.DryRun || r.UseWorkDirOverride {
+			return
+		}
+		policy := stagePolicy{mode: r.stagingMode(), jobPath: job.Path, sharedDeps: prelude > 0}
+		ws, err := stageJobWorkspace(baseExecContext.WorkspaceDir, r.ExecID, job.ID, r.KeepWorkspaces, policy)
 		if err != nil {
 			fmt.Fprintf(r.Stderr, "warning: workspace isolation failed for %s, falling back to shared tree: %v\n", job.ID, err)
-		} else {
-			defer staged.Cleanup()
-			stagedRoot = staged.Path()
-			baseExecContext.WorkspaceDir = stagedRoot
-			baseExecContext.WorkDir = stagedRoot
+			return
 		}
-	}
-
-	jobWorkingDir := r.resolveWorkingDir(job.Path)
-	if stagedRoot != "" {
+		cleanups = append(cleanups, ws.Cleanup)
+		stagedRoot := ws.Path()
+		baseExecContext.WorkspaceDir = stagedRoot
+		baseExecContext.WorkDir = stagedRoot
+		// A new map: BaseEnv is shared by every job of the run.
+		baseExecContext.BaseEnv = executor.MergeEnvironment(baseExecContext.BaseEnv, ws.Env(r.ExecID))
+		baseExecContext.Env = executor.MergeEnvironment(baseExecContext.BaseEnv)
 		jobWorkingDir = resolveWorkingDirAt(stagedRoot, job.Path)
 	}
 	currentPhase := ""
@@ -689,6 +763,9 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 	wfOutputs := map[string]map[string]any{}
 	for idx, step := range job.Steps {
 		stepID := stepIdentifier(step)
+		if idx == prelude {
+			stage()
+		}
 		stepPhase := normalizeStepPhase(step.Phase)
 		if stepPhase != currentPhase {
 			if stepPhase != "main" {
@@ -733,6 +810,46 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				r.ghaPrintStepDryRun(job, stepID, idx+1)
 			}
 			continue
+		}
+
+		// A lane-scoped step: the first job to reach it runs it (below, in the
+		// shared tree); every other job with the same step waits for that run
+		// and reuses its result.
+		var laneRun *laneSetupRun
+		if idx < prelude && r.laneSetup != nil {
+			key := laneStepKey(step, workingDir, executor.MergeEnvironment(executor.JobEnvironment(job.Env), executor.JobEnvironment(step.Env)))
+			run, own := r.laneSetup.claim(key, job.ID)
+			if !own {
+				<-run.done
+				if run.err != nil {
+					r.updateState(persistState, execState, func() {
+						jobState.Steps[stepID] = "failed"
+						jobState.Status = "failed"
+						jobState.LastError = fmt.Sprintf("step %s: lane step failed in %s: %v", stepID, run.owner, run.err)
+						jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+					})
+					r.emitStepTerminal(job.ID, stepID, "failed")
+					fmt.Fprintf(r.Stderr, "  %s %s: lane step %s failed in %s: %v\n", ui.Red(r.Color, "✗"), job.ID, stepID, run.owner, run.err)
+					jobFailed = true
+					summary.addFailed()
+					if r.Hooks != nil && r.Hooks.AfterJobTerminal != nil {
+						r.Hooks.AfterJobTerminal(job.ID, false, jobState.LastError)
+					}
+					break
+				}
+				r.updateState(persistState, execState, func() {
+					jobState.Steps[stepID] = "completed"
+				})
+				r.emitStepTerminal(job.ID, stepID, "completed")
+				if r.inGHA() {
+					r.ghaPrintStepShared(job, stepID, idx+1, run.owner)
+				} else {
+					r.printStepShared(stepID, idx+1, len(job.Steps), run.owner)
+				}
+				jobReport.observeStepDone(stepID, true, true, 0)
+				continue
+			}
+			laneRun = run
 		}
 
 		var output string
@@ -805,6 +922,9 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				fmt.Fprintf(r.Stdout, "  │ %s retrying after failure\n", ui.Yellow(r.Color, "↻"))
 			}
 		}
+		if laneRun != nil {
+			laneRun.settle(output, stepErr)
+		}
 		stepDuration := time.Since(stepStartedAt)
 		view := analyzeStepOutput(step, output)
 		jobReport.observeStep(job.ID, stepID, view)
@@ -837,6 +957,12 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 		jobReport.observeStepDone(stepID, stepErr == nil, false, stepDuration)
 
 		if stepErr != nil {
+			if baseExecContext.Context.Err() != nil {
+				// Cut by a cancelled run (a signal), not by its own doing: say
+				// so, so the terminal record and a waiting lane read it as
+				// preempted, and --retry re-opens it.
+				stepErr = fmt.Errorf("interrupted: %w", stepErr)
+			}
 			r.updateState(persistState, execState, func() {
 				jobState.Steps[stepID] = "failed"
 				jobState.Status = "failed"
@@ -964,232 +1090,17 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 	return jobFailed
 }
 
-func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState *execmodel.ExecState, baseExecContext executor.ExecContext, persistState, failFast bool, summary *runSummary, concurrency int) error {
-	if r.JobID != "" {
-		var filtered []model.PlanJob
-		for _, job := range jobs {
-			if job.ID == r.JobID {
-				filtered = append(filtered, job)
-				break
-			}
-		}
-		jobs = filtered
+// targetJobs narrows jobs to the one --job names, when set.
+func (r *Runner) targetJobs(jobs []model.PlanJob) []model.PlanJob {
+	if r.JobID == "" {
+		return jobs
 	}
-
-	sem := make(chan struct{}, concurrency)
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	var firstErr error
-
-	completed := make(map[string]bool)
-	for jobID, js := range execState.Jobs {
-		if js != nil && js.Status == "completed" {
-			completed[jobID] = true
-		}
-	}
-
-	jobMap := make(map[string]model.PlanJob)
 	for _, job := range jobs {
-		jobMap[job.ID] = job
-	}
-
-	pending := make(map[string]bool)
-	for _, job := range jobs {
-		if !completed[job.ID] {
-			pending[job.ID] = true
+		if job.ID == r.JobID {
+			return []model.PlanJob{job}
 		}
 	}
-
-	// Component-aware scheduling: cap how many distinct components are
-	// concurrently in-flight. activeComps tracks components with at least one
-	// running or scheduled-but-not-finished job. compRemaining counts pending
-	// jobs per component so we know when a component is fully drained.
-	activeComps := map[string]int{}
-	compRemaining := map[string]int{}
-	for _, job := range jobs {
-		if !completed[job.ID] {
-			compRemaining[job.Component]++
-		}
-	}
-	compCap := r.ComponentConcurrency
-	if compCap <= 0 {
-		compCap = 0 // 0 = unlimited
-	}
-
-	for len(pending) > 0 {
-		mu.Lock()
-		if failFast && firstErr != nil {
-			mu.Unlock()
-			break
-		}
-
-		var ready []model.PlanJob
-		for id := range pending {
-			job := jobMap[id]
-			// In single-job mode with SkipLocalDepsForJob, the remote coordinator
-			// has already verified deps via the claim loop — skip the local check.
-			allDepsMet := r.JobID != "" && r.SkipLocalDepsForJob
-			if !allDepsMet {
-				allDepsMet = true
-				for _, dep := range job.DependsOn {
-					if !completed[dep] {
-						allDepsMet = false
-						break
-					}
-				}
-			}
-			if allDepsMet {
-				ready = append(ready, job)
-			}
-		}
-
-		// Partition ready jobs: those for already-active components first.
-		var readyActive, readyNew []model.PlanJob
-		for _, job := range ready {
-			if _, ok := activeComps[job.Component]; ok {
-				readyActive = append(readyActive, job)
-			} else {
-				readyNew = append(readyNew, job)
-			}
-		}
-
-		// Pick which jobs to actually launch this iteration.
-		var pick []model.PlanJob
-		pick = append(pick, readyActive...)
-		// Add jobs from new components, respecting compCap. Jobs whose
-		// component becomes active in this same batch should also be picked.
-		// If no active components have ready work, allow expansion to avoid
-		// deadlock.
-		for _, job := range readyNew {
-			if _, alreadyActive := activeComps[job.Component]; alreadyActive {
-				pick = append(pick, job)
-				continue
-			}
-			if compCap > 0 && len(activeComps) >= compCap && len(readyActive) > 0 {
-				continue
-			}
-			if compCap > 0 && len(activeComps) >= compCap && len(readyActive) == 0 && len(pick) > 0 {
-				continue
-			}
-			activeComps[job.Component] = 0
-			pick = append(pick, job)
-		}
-		// Account active counts for picked jobs.
-		for _, job := range pick {
-			activeComps[job.Component]++
-		}
-
-		if len(pick) == 0 {
-			mu.Unlock()
-			wg.Wait()
-			mu.Lock()
-			stillPending := len(pending) > 0
-			mu.Unlock()
-			if stillPending && firstErr == nil {
-				summary.addWaiting(len(pending))
-			}
-			break
-		}
-		mu.Unlock()
-
-		for _, job := range pick {
-			mu.Lock()
-			delete(pending, job.ID)
-			mu.Unlock()
-
-			wg.Add(1)
-			sem <- struct{}{}
-
-			go func(j model.PlanJob) {
-				defer func() {
-					<-sem
-					wg.Done()
-				}()
-
-				mu.Lock()
-				if failFast && firstErr != nil {
-					mu.Unlock()
-					return
-				}
-				r.stateMu.Lock()
-				jobState := ensureJobState(execState, j)
-				alreadyCompleted := jobState.Status == "completed"
-				r.stateMu.Unlock()
-				if alreadyCompleted {
-					completed[j.ID] = true
-					summary.addResumed()
-					compRemaining[j.Component]--
-					activeComps[j.Component]--
-					if activeComps[j.Component] <= 0 {
-						delete(activeComps, j.Component)
-					}
-					mu.Unlock()
-					r.printJobResumed(j)
-					return
-				}
-
-				// BeforeJob hook: allow external code to decide whether to skip.
-				if r.Hooks != nil && r.Hooks.BeforeJob != nil {
-					skip, hookErr := r.Hooks.BeforeJob(j.ID)
-					if hookErr != nil {
-						if firstErr == nil {
-							firstErr = hookErr
-						}
-						compRemaining[j.Component]--
-						activeComps[j.Component]--
-						if activeComps[j.Component] <= 0 {
-							delete(activeComps, j.Component)
-						}
-						mu.Unlock()
-						return
-					}
-					if skip {
-						completed[j.ID] = true
-						summary.addResumed()
-						compRemaining[j.Component]--
-						activeComps[j.Component]--
-						if activeComps[j.Component] <= 0 {
-							delete(activeComps, j.Component)
-						}
-						mu.Unlock()
-						r.printJobResumed(j)
-						return
-					}
-				}
-				mu.Unlock()
-
-				failed := r.executeJob(j, jobState, execState, baseExecContext, persistState, failFast, summary)
-
-				mu.Lock()
-				if failed {
-					if firstErr == nil {
-						firstErr = fmt.Errorf("job %s failed", j.ID)
-					}
-				} else {
-					completed[j.ID] = true
-				}
-				compRemaining[j.Component]--
-				activeComps[j.Component]--
-				if activeComps[j.Component] <= 0 {
-					delete(activeComps, j.Component)
-				}
-				mu.Unlock()
-			}(job)
-		}
-
-		wg.Wait()
-	}
-
-	wg.Wait()
-
-	snap := summary.snapshot()
-	finalStatus := "completed"
-	if snap.failed > 0 || firstErr != nil {
-		finalStatus = "failed"
-	}
-	r.printRunSummary(summary, finalStatus)
-
-	return firstErr
+	return nil
 }
 
 func (r *Runner) filterJobs(jobs []model.PlanJob) []model.PlanJob {
@@ -1540,11 +1451,33 @@ func (r *Runner) shouldIsolate() bool {
 	switch r.Isolation {
 	case IsolationNone:
 		return false
-	case IsolationWorkspace:
+	case IsolationWorkspace, IsolationComponent:
 		return true
 	default:
 		return r.Concurrency > 1
 	}
+}
+
+// stagingMode is how a staged tree is built: the whole tree, or the job's
+// directory with the rest linked (IsolationComponent).
+func (r *Runner) stagingMode() IsolationMode {
+	if r.Isolation == IsolationComponent {
+		return IsolationComponent
+	}
+	return IsolationWorkspace
+}
+
+// leadingLaneSteps counts the job's leading lane-scoped steps; the planner
+// guarantees no lane-scoped step follows a job-scoped one.
+func leadingLaneSteps(job model.PlanJob) int {
+	n := 0
+	for _, s := range job.Steps {
+		if s.Scope != model.StepScopeLane {
+			break
+		}
+		n++
+	}
+	return n
 }
 
 // resolveWorkingDirAt computes a job's working directory anchored at the given
@@ -1609,7 +1542,10 @@ func (r *Runner) resolveTimeout(job model.PlanJob, step model.PlanStep) string {
 	if strings.TrimSpace(step.Timeout) != "" {
 		return strings.TrimSpace(step.Timeout)
 	}
-	return strings.TrimSpace(job.Timeout)
+	if strings.TrimSpace(job.Timeout) != "" {
+		return strings.TrimSpace(job.Timeout)
+	}
+	return strings.TrimSpace(r.DefaultTimeout)
 }
 
 // RecordSecretProvenance stores the value-free resolve provenance for a job so

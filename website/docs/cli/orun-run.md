@@ -147,9 +147,9 @@ Override plan concurrency:
 orun run --concurrency 4
 ```
 
-When `--concurrency` is greater than 1, result lines carry inline component and environment labels (e.g., `platform-shared·production/verify-turbo-package`) so each line is self-describing without group headers.
+When `--concurrency` is greater than 1, every job starts as soon as its upstreams finish, and a free slot goes to the ready job with the longest chain of dependents behind it (the scheduler a [lane](../concepts/lanes.md) uses). Result lines carry inline component and environment labels (e.g., `platform-shared·production/verify-turbo-package`) so each line is self-describing without group headers.
 
-Process up to 3 components concurrently while keeping the dashboard grouped:
+Keep a terminal run's output grouped by component by capping how many components have jobs in flight at once:
 
 ```bash
 orun run --concurrency 8 --component-concurrency 3
@@ -180,6 +180,42 @@ Debug how `--changed` resolved its git refs:
 orun run --changed --explain
 ```
 
+### Timeouts
+
+Every step is bounded: by its own `timeout`, else its job's, else the
+intent's `execution.defaults.timeout` (carried on the plan as
+`execution.timeout`), else 60 minutes. A step that outlives its bound fails
+its job; the run goes on with jobs that do not depend on it. Set
+`execution.defaults.timeout` for a platform whose longest step (a large
+`terraform apply`, a full rebuild) needs more than an hour, and a job
+template's `timeout` for the one job that does.
+
+A lane job's wait for an upstream in another lane is bounded by
+`execution.lanes.upstreamWait` (default 60 minutes). On Orunbase the wait
+is event-driven: the job is woken by the run's next event and starts within
+moments of its upstream finishing; elsewhere it polls, backing off to 15
+seconds.
+
+### Interrupting a run
+
+`SIGTERM` (a spot runner's interruption notice forwarded by the pool, a
+cancelled CI job) or `SIGINT` (Ctrl-C) drains the run: running steps are
+stopped, no further job is admitted, and every job that was cut is reported
+`failed` with an `interrupted` error — to the platform too, so a lane
+waiting on one of them stops waiting at once instead of waiting out the
+upstream timeout. The run exits with the shell's code for the signal (130
+for `SIGINT`, 143 for `SIGTERM`); a second signal exits immediately.
+`orun run --retry` with the same `--exec-id` and `--job`/`--lane` re-opens
+the cut jobs; a job is re-run from its first step, since the staged tree its
+earlier steps built no longer exists on the runner that picks it up.
+
+A runner that disappears without a signal (a reclaimed instance) stops
+heartbeating. A job waiting on one of its jobs treats a `running` upstream
+whose heartbeat is older than two of the server's leases as having lost its
+runner and ends its wait naming it, rather than holding its own runner;
+before any claim has told the run the lease length, the legacy five minutes
+apply.
+
 ## Flags
 
 ### Execution flags
@@ -195,14 +231,14 @@ orun run --changed --explain
 | `--runner` | Execution backend: `local`, `docker`, or `github-actions` |
 | `--gha` | Shortcut for `--runner github-actions` |
 | `--exec-id` | Execution ID for resume or CI tracing (auto-generated if not set) |
-| `--concurrency` | Override plan concurrency (0 uses the plan's value) |
-| `--component-concurrency` | Max components processed concurrently (default 1; 0 = unlimited). Default 1 keeps the dashboard component-grouped |
+| `--concurrency` | Override plan concurrency (0 uses the plan's value). Above 1, jobs run on the lane scheduler: each starts as soon as its upstreams finish |
+| `--component-concurrency` | Max components with jobs in flight at once (default 0 = no cap). A job of a new component waits, holding no slot, until a component drains; set it to keep a terminal run's output grouped by component |
 | `--component` | Filter jobs to a specific component (repeatable) |
 | `--env`, `-e` | Filter jobs to specific environments (comma-separated) |
 | `--all-envs` | Run all environments explicitly (mutually exclusive with `--env`) |
 | `--all` | Disable CWD-based component scoping; run all jobs |
 | `--json` | Output execution summary in JSON format |
-| `--isolation` | Per-job workspace isolation: `auto` (on when concurrency > 1), `workspace` (always on), or `none` (legacy shared tree). Default: `auto` |
+| `--isolation` | Per-job workspace isolation: `auto` (on when concurrency > 1), `workspace` (always on), `component` (always on; copies only the job's directory and links the rest, see [execution runtime](../architecture/execution-runtime.md#per-job-workspace-isolation)), or `none` (legacy shared tree). Default: `auto` |
 | `--keep-workspaces` | Preserve per-job staged workspaces after the run for debugging |
 | `--background` | Run the plan detached and return immediately. Track progress with `orun status --watch` |
 | `--artifact` | Artifact backend for uploading job shard from CI (`github`) |

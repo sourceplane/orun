@@ -11,13 +11,17 @@ The plan is the artifact produced by `orun plan` and consumed by `orun run`. The
 | --- | --- |
 | `apiVersion` | `orun.io/v1` |
 | `kind` | Always `Plan` |
-| `metadata` | Name, description, namespace, checksum, selection, trigger, and revision |
-| `execution` | `concurrency`, `failFast`, and `stateFile` |
+| `metadata` | Name, description, namespace, checksum, selection, trigger, and revision; `metadata.lanes` (`mode`, `maxLanes`, `maxLanesFrom`: `intent`, `default`, `flag` or `env`; `weightsFrom`: `declared`, `history` or `file` when the plan carries packing weights; `upstreamWait` when the intent sets `execution.lanes.upstreamWait`) when the intent sets `execution.lanes` |
+| `execution` | `concurrency`, `failFast`, `stateFile`, and `timeout` (the intent's `execution.defaults.timeout`, the bound on every step whose job and step set none; absent, the runner applies 60m) |
 | `spec.jobBindings` | Optional metadata about bound jobs |
 | `jobs` | The concrete execution DAG |
-| `lanes` | Present only when the intent sets `execution.lanes`: the units a runner takes — `id`, `name`, `index`, `environment`, `jobs`, `concurrency`, `runsOn`, `source`, and `splitFrom`/`reason` after a cycle split. See [Lanes](../concepts/lanes.md) |
+| `lanes` | Present only when the intent sets `execution.lanes`: the units a runner takes — `id`, `name`, `index`, `environment`, `jobs`, `concurrency` (0 is `auto`: `orun run --lane` sizes it to the runner's cores), `runsOn`, `source`, `estimatedSeconds` and `vcpu` when the plan carries weights or declared cpu, `splitFrom`/`reason` after a cycle split, and what the lane waits on: `level` (0 for a lane no other lane feeds, else one more than the deepest lane it waits on), `upstreamLanes` and `upstreamJobs`. See [Lanes](../concepts/lanes.md) |
 
 Plans are deterministic: the same inputs produce byte-identical `plan.json`. `jobs[]` is in a stable topological order (the same graph always yields the same order and the same job `index`), so a plan diff in a pull request only shows real changes. Plans carry no generation timestamp. `metadata.generatedAt` is still accepted when reading plans written by older versions, but it is volatile and is left out of `metadata.checksum` and `metadata.revision.planHash`.
+
+`jobs[].resources` is what the job's template declared (`cpu`, `memory`, `estimatedSeconds`) and `jobs[].estimatedSeconds` the job's effective packing weight — the declared estimate, or the one `orun plan --weights` supplied; both are absent when nothing was declared or supplied.
+
+Each `jobs[].steps[]` entry carries the composition step's fields after templating; `scope: lane` marks a step the first job of a lane runs once for every job that shares it (see [Lanes](../concepts/lanes.md#share-a-lanes-setup)).
 
 ## Job fields
 

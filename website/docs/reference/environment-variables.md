@@ -36,6 +36,7 @@ description: Every ORUN_* variable the CLI reads, grouped by area, with where it
 | Variable | Read in | Meaning |
 | --- | --- | --- |
 | `ORUN_REMOTE_STATE` | `cmd/orun/commands_root.go`, `command_run.go` | Set to `true` to coordinate the run through the Orunbase state backend. `orun run --remote-state` sets it |
+| `ORUN_MAX_LANES` | `cmd/orun/github_matrix.go` | Override `execution.lanes.maxLanes` for one `orun plan`, so a CI plan job can size the lane budget to the runner pool's free capacity; `--max-lanes` wins over it |
 | `ORUN_CHECK_RUNS` | `internal/ghchecks` | Set to `0` to stop `orun run --lane` from posting one GitHub check run per job of a multi-job lane |
 | `ORUN_BACKEND_URL` | `cmd/orun/commands_root.go`, `internal/actions/cloud.go`, `internal/tui2/data/cloud.go` | Backend URL — Orunbase or a self-hosted backend. Precedence: `--backend-url` flag > this variable > `intent.yaml` `execution.state.backendUrl` > `~/.orun/config.yaml` `cloud.url` > the built-in default |
 | `ORUN_TOKEN` | `cmd/orun/command_cloud.go`, `internal/remotestate/auth.go` | A headless bearer token for CI and automation. Honoured by every auth path, including `orun cloud link` and `orun cloud check`, so a container can self-link without a browser login. Interactive use should rely on `orun auth login` instead |

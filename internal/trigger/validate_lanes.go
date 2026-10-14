@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/sourceplane/orun/internal/model"
 )
@@ -19,6 +21,19 @@ func ValidateLanes(intent *model.Intent) []error {
 	var errs []error
 	lanes := intent.Execution.Lanes
 
+	// execution.defaults rides along: every place lanes are validated is a
+	// place the intent's run-time bounds must hold too.
+	if d := intent.Execution.Defaults; d != nil && strings.TrimSpace(d.Timeout) != "" {
+		if v, err := time.ParseDuration(strings.TrimSpace(d.Timeout)); err != nil || v <= 0 {
+			errs = append(errs, fmt.Errorf("execution.defaults.timeout %q is not a positive duration (e.g. 45m)", d.Timeout))
+		}
+	}
+	if lanes != nil && strings.TrimSpace(lanes.UpstreamWait) != "" {
+		if v, err := time.ParseDuration(strings.TrimSpace(lanes.UpstreamWait)); err != nil || v <= 0 {
+			errs = append(errs, fmt.Errorf("execution.lanes.upstreamWait %q is not a positive duration (e.g. 90m)", lanes.UpstreamWait))
+		}
+	}
+
 	groups := map[string]struct{}{}
 	if lanes != nil {
 		if !model.IsValidLaneMode(lanes.Mode) {
@@ -28,8 +43,8 @@ func ValidateLanes(intent *model.Intent) []error {
 		if lanes.MaxLanes < 0 {
 			errs = append(errs, fmt.Errorf("execution.lanes.maxLanes must be at least 1, got %d", lanes.MaxLanes))
 		}
-		if lanes.Concurrency < 0 {
-			errs = append(errs, fmt.Errorf("execution.lanes.concurrency must be at least 1, got %d", lanes.Concurrency))
+		if lanes.Concurrency < 0 && !lanes.Concurrency.IsAuto() {
+			errs = append(errs, fmt.Errorf("execution.lanes.concurrency must be at least 1 or auto, got %d", lanes.Concurrency))
 		}
 		switch lanes.OnCycle {
 		case "", model.LaneOnCycleSplit, model.LaneOnCycleReject:
@@ -54,9 +69,9 @@ func ValidateLanes(intent *model.Intent) []error {
 			default:
 				groups[name] = struct{}{}
 			}
-			if g := lanes.Groups[name]; g.Concurrency < 0 {
+			if g := lanes.Groups[name]; g.Concurrency < 0 && !g.Concurrency.IsAuto() {
 				errs = append(errs, fmt.Errorf(
-					"execution.lanes.groups.%s.concurrency must be at least 1, got %d", name, g.Concurrency))
+					"execution.lanes.groups.%s.concurrency must be at least 1 or auto, got %d", name, g.Concurrency))
 			}
 		}
 

@@ -141,7 +141,7 @@ func generatePlan() error {
 			// rather than failing the pipeline.
 			if triggerCtx.Mode == "event-file" && errors.Is(err, trigger.ErrNoTriggerMatch) {
 				fmt.Fprintf(os.Stderr, "○ %v — nothing to plan\n", err)
-				writeEmptyGithubMatrix()
+				emitGithubOutput(nil, "", "")
 				return nil
 			}
 			return err
@@ -361,6 +361,29 @@ func generatePlan() error {
 		laneTriggers = triggerResolution.MatchedTriggerNames
 	}
 	laneOpts := lanes.ForIntent(intent, laneTriggers, strictLanes, render.PlanJobCheckName)
+	if maxLanes, from, err := resolveMaxLanes(maxLanesFlag); err != nil {
+		return err
+	} else if maxLanes > 0 {
+		laneOpts.MaxLanes, laneOpts.MaxLanesFrom = maxLanes, from
+	}
+	if w, from, err := resolveWeights(context.Background(), weightsFlag); err != nil {
+		return err
+	} else if len(w) > 0 {
+		laneOpts.Weights, laneOpts.WeightsFrom = w, from
+	}
+	if writeWeightsFlag != "" {
+		w := laneOpts.Weights
+		if laneOpts.WeightsFrom != "history" {
+			var err error
+			if w, err = weightsFromHistory(context.Background()); err != nil {
+				return err
+			}
+		}
+		if err := writeWeights(writeWeightsFlag, w); err != nil {
+			return fmt.Errorf("--write-weights: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "✓ wrote %d job weight(s) from history to %s\n", len(w), writeWeightsFlag)
+	}
 	var laneResult lanes.Result
 	plan, err := renderer.RenderPlanWithLanes(intent.Metadata, jobInstances, jobBindings, sorted, func(p *model.Plan) error {
 		r, aerr := lanes.Assign(p, laneOpts)
@@ -375,6 +398,9 @@ func generatePlan() error {
 	}
 	plan.Spec.CompositionSources = compositionRegistry.Sources
 	plan.Metadata.Selection = planSelection
+	if d := intent.Execution.Defaults; d != nil && strings.TrimSpace(d.Timeout) != "" {
+		plan.Execution.Timeout = strings.TrimSpace(d.Timeout)
+	}
 
 	// --- M5A: always resolve TriggerOccurrence and write a PlanRevision.
 	// The new pipeline replaces the legacy `state.SavePlan` call below.
@@ -650,6 +676,11 @@ func generatePlan() error {
 		fmt.Println("\n" + output)
 	}
 
+	// The execution id a plan made in GitHub Actions carries, shared by the
+	// plan shard --artifact github uploads and the exec_id --github-output
+	// hands to the run jobs.
+	execID := githubExecID(planID)
+
 	// Artifact upload for CI: write plan shard and upload via --artifact flag
 	if artifactBackend == "github" && os.Getenv("GITHUB_ACTIONS") == "true" && plan != nil {
 		runID := os.Getenv("GITHUB_RUN_ID")
@@ -657,11 +688,6 @@ func generatePlan() error {
 		if runAttempt == "" {
 			runAttempt = "1"
 		}
-		shortSHA := planID
-		if len(shortSHA) > 12 {
-			shortSHA = shortSHA[:12]
-		}
-		execID := runbundle.ExecID(runID, runAttempt, shortSHA)
 
 		// Create shard source metadata
 		source := runbundle.ShardSource{
@@ -710,64 +736,13 @@ func generatePlan() error {
 				}
 			}
 		}
-
-		// --github-output: write matrix, plan_id, exec_id to $GITHUB_OUTPUT
-		if githubOutput && os.Getenv("GITHUB_OUTPUT") != "" {
-			outputPath := os.Getenv("GITHUB_OUTPUT")
-			var outputLines []string
-
-			matrixJSON := githubMatrixJSON(plan)
-			outputLines = append(outputLines, fmt.Sprintf("matrix<<EOF\n%s\nEOF", matrixJSON))
-			laneMatrix, laneCount := githubLaneMatrixJSON(plan)
-			outputLines = append(outputLines, fmt.Sprintf("lane-matrix<<EOF\n%s\nEOF", laneMatrix))
-			outputLines = append(outputLines, fmt.Sprintf("lane-count=%d", laneCount))
-			outputLines = append(outputLines, fmt.Sprintf("plan_id=%s", planID))
-			outputLines = append(outputLines, fmt.Sprintf("exec_id=%s", execID))
-
-			f, err := os.OpenFile(outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "⚠ warning: failed to open %s: %v\n", outputPath, err)
-			} else {
-				_, err = f.WriteString(strings.Join(outputLines, "\n") + "\n")
-				f.Close()
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "⚠ warning: failed to write %s: %v\n", outputPath, err)
-				}
-			}
-		}
 	}
+
+	// --github-output needs no artifact backend: a workflow whose run jobs
+	// take the plan from the platform passes none (concepts/lanes.md).
+	emitGithubOutput(plan, planID, execID)
 
 	return nil
-}
-
-// writeEmptyGithubMatrix writes an empty job matrix to $GITHUB_OUTPUT when
-// --github-output is set, so a no-op plan (no trigger matched) still produces a
-// well-formed `matrix` output. The workflow's execute job guards on
-// matrix != '{"include":[]}', so an empty matrix cleanly skips downstream jobs.
-func writeEmptyGithubMatrix() {
-	if !githubOutput {
-		return
-	}
-	outputPath := os.Getenv("GITHUB_OUTPUT")
-	if outputPath == "" {
-		return
-	}
-	lines := []string{
-		"matrix<<EOF\n{\"include\":[]}\nEOF",
-		"lane-matrix<<EOF\n{\"include\":[]}\nEOF",
-		"lane-count=0",
-		"plan_id=",
-		"exec_id=",
-	}
-	f, err := os.OpenFile(outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "⚠ warning: failed to open %s: %v\n", outputPath, err)
-		return
-	}
-	defer f.Close()
-	if _, err := f.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
-		fmt.Fprintf(os.Stderr, "⚠ warning: failed to write %s: %v\n", outputPath, err)
-	}
 }
 
 // computePlanHashForRevision returns the canonical "sha256:<hex>" digest of
