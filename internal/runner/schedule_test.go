@@ -275,3 +275,28 @@ func TestRun_InterruptStopsAdmittingAndNamesWhatIsLeft(t *testing.T) {
 		}
 	}
 }
+
+// A step with no timeout of its own, none on its job and none on the plan is
+// bounded by the runner's default (specs/orun-runner-efficiency §5.7).
+func TestRun_DefaultTimeoutBoundsAStep(t *testing.T) {
+	ex := ctxExecutor{newTrackingExecutor()}
+	plan := &model.Plan{Jobs: []model.PlanJob{sleepJob("slow", "s", "5s")}}
+	r := planRunner(t, ex, 1)
+	r.DefaultTimeout = "100ms"
+	start := time.Now()
+	if err := r.Run(plan); err != nil {
+		t.Fatalf("a timed-out step fails its job, not the run: %v", err)
+	}
+	if el := time.Since(start); el > 2*time.Second {
+		t.Fatalf("the default timeout did not bound the step: %v", el)
+	}
+	if js := r.SnapshotState().Jobs["slow"]; js == nil || js.Status != "failed" {
+		t.Fatalf("job = %+v", js)
+	}
+	if got := r.resolveTimeout(model.PlanJob{Timeout: "2m"}, model.PlanStep{}); got != "2m" {
+		t.Fatalf("a job's timeout wins over the default: %s", got)
+	}
+	if got := r.resolveTimeout(model.PlanJob{}, model.PlanStep{Timeout: "1m"}); got != "1m" {
+		t.Fatalf("a step's timeout wins: %s", got)
+	}
+}

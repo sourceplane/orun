@@ -11,8 +11,8 @@ The plan is the artifact produced by `orun plan` and consumed by `orun run`. The
 | --- | --- |
 | `apiVersion` | `orun.io/v1` |
 | `kind` | Always `Plan` |
-| `metadata` | Name, description, namespace, checksum, selection, trigger, and revision; `metadata.lanes` (`mode`, `maxLanes`, `maxLanesFrom`: `intent`, `default`, `flag` or `env`; `weightsFrom`: `declared`, `history` or `file` when the plan carries packing weights) when the intent sets `execution.lanes` |
-| `execution` | `concurrency`, `failFast`, and `stateFile` |
+| `metadata` | Name, description, namespace, checksum, selection, trigger, and revision; `metadata.lanes` (`mode`, `maxLanes`, `maxLanesFrom`: `intent`, `default`, `flag` or `env`; `weightsFrom`: `declared`, `history` or `file` when the plan carries packing weights; `upstreamWait` when the intent sets `execution.lanes.upstreamWait`) when the intent sets `execution.lanes` |
+| `execution` | `concurrency`, `failFast`, `stateFile`, and `timeout` (the intent's `execution.defaults.timeout`, the bound on every step whose job and step set none; absent, the runner applies 60m) |
 | `spec.jobBindings` | Optional metadata about bound jobs |
 | `jobs` | The concrete execution DAG |
 | `lanes` | Present only when the intent sets `execution.lanes`: the units a runner takes — `id`, `name`, `index`, `environment`, `jobs`, `concurrency` (0 is `auto`: `orun run --lane` sizes it to the runner's cores), `runsOn`, `source`, `estimatedSeconds` and `vcpu` when the plan carries weights or declared cpu, `splitFrom`/`reason` after a cycle split, and what the lane waits on: `level` (0 for a lane no other lane feeds, else one more than the deepest lane it waits on), `upstreamLanes` and `upstreamJobs`. See [Lanes](../concepts/lanes.md) |

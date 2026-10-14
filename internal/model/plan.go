@@ -86,6 +86,9 @@ type PlanLanesMeta struct {
 	// templates' estimatedSeconds), history, or file — and is absent when
 	// every job weighs one.
 	WeightsFrom string `json:"weightsFrom,omitempty" yaml:"weightsFrom,omitempty"`
+	// UpstreamWait is execution.lanes.upstreamWait when set: how long a lane
+	// job waits for an upstream in another lane.
+	UpstreamWait string `json:"upstreamWait,omitempty" yaml:"upstreamWait,omitempty"`
 }
 
 // PlanTrigger records which trigger bindings activated the plan. Type / Name
@@ -174,6 +177,9 @@ type PlanExecution struct {
 	Concurrency int    `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
 	FailFast    bool   `json:"failFast" yaml:"failFast"`
 	StateFile   string `json:"stateFile,omitempty" yaml:"stateFile,omitempty"`
+	// Timeout is execution.defaults.timeout: the bound on every step whose
+	// job and step set none; absent, the runner applies its 60m default.
+	Timeout string `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 }
 
 // PlanSpec holds specification about the plan and its bindings

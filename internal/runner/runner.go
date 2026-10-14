@@ -182,6 +182,10 @@ type Runner struct {
 	ghaHoldSteps bool
 	// Hooks wires external lifecycle callbacks (remote state, log upload, etc.).
 	Hooks *RunnerHooks
+	// DefaultTimeout bounds a step whose job and step set none: the plan's
+	// execution.timeout, else model.DefaultStepTimeout. Empty disables the
+	// bound (tests). Set by cmd/orun from the plan.
+	DefaultTimeout string
 	// Context is the run's root context. Cancelling it (a SIGTERM on a spot
 	// runner, Ctrl-C) stops every running step, admits no further job, and
 	// reports the jobs it cut as failed with an "interrupted" error, so a
@@ -1538,7 +1542,10 @@ func (r *Runner) resolveTimeout(job model.PlanJob, step model.PlanStep) string {
 	if strings.TrimSpace(step.Timeout) != "" {
 		return strings.TrimSpace(step.Timeout)
 	}
-	return strings.TrimSpace(job.Timeout)
+	if strings.TrimSpace(job.Timeout) != "" {
+		return strings.TrimSpace(job.Timeout)
+	}
+	return strings.TrimSpace(r.DefaultTimeout)
 }
 
 // RecordSecretProvenance stores the value-free resolve provenance for a job so
