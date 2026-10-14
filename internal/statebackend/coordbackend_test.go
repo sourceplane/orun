@@ -504,8 +504,9 @@ func TestCoordBackendLoadRunStateFoldsRetriedJob(t *testing.T) {
 type viewServer struct {
 	planDigest string
 	mu         sync.Mutex
-	reads      []string // "log from=N wait=W" / "object" / "frontier"
+	reads      []string // "state" / "log from=N wait=W" / "object" / "frontier"
 	appended   bool
+	noState    bool // an older server: no state read (404)
 }
 
 func newViewServer(t *testing.T) (*viewServer, *httptest.Server) {
@@ -519,12 +520,29 @@ func newViewServer(t *testing.T) (*viewServer, *httptest.Server) {
 		`{"seq":5,"kind":"state.job.ready","runId":"R","jobId":"b","actor":{"id":"sys","type":"system"},"at":"2026-01-01T00:01:31Z","payload":{"attempt":1}}`,
 	}
 	claimB := `{"seq":6,"kind":"state.job.claimed","runId":"R","jobId":"b","actor":{"id":"r2","type":"workflow"},"at":"2026-01-01T00:02:00Z","payload":{"runnerId":"r2","leaseEpoch":1,"leaseExpiresAt":"2026-01-01T00:03:00Z","attempt":1}}`
+	// The server's fold of the five events (the wire RunFoldState, nulls and
+	// all), and of the six once b's claim was appended.
+	jobA := `"a":{"jobId":"a","phase":"succeeded","holder":null,"leaseEpoch":null,"leaseExpiresAt":null,"attempt":1,"resultDigest":"sha256:ra","errorText":null}`
+	timesA := `"a":{"startedAt":"2026-01-01T00:01:00Z","finishedAt":"2026-01-01T00:01:30Z"}`
+	state5 := `{"runId":"R","planDigest":"` + vs.planDigest + `","sourceHash":"sha256:s","phase":"running","jobs":{` + jobA + `,"b":{"jobId":"b","phase":"queued","holder":null,"leaseEpoch":null,"leaseExpiresAt":null,"attempt":1,"resultDigest":null,"errorText":null}},"frontier":["b"],"lastSeq":5,"timings":{"startedAt":"2026-01-01T00:01:00Z","finishedAt":null,"jobs":{` + timesA + `,"b":{"startedAt":null,"finishedAt":null}}}}`
+	state6 := `{"runId":"R","planDigest":"` + vs.planDigest + `","sourceHash":"sha256:s","phase":"running","jobs":{` + jobA + `,"b":{"jobId":"b","phase":"claimed","holder":"r2","leaseEpoch":1,"leaseExpiresAt":"2026-01-01T00:03:00Z","attempt":1,"resultDigest":null,"errorText":null}},"frontier":[],"lastSeq":6,"timings":{"startedAt":"2026-01-01T00:01:00Z","finishedAt":null,"jobs":{` + timesA + `,"b":{"startedAt":"2026-01-01T00:02:00Z","finishedAt":null}}}}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		q := r.URL.Query()
 		vs.mu.Lock()
 		defer vs.mu.Unlock()
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/state"):
+			vs.reads = append(vs.reads, "state")
+			if vs.noState {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			if vs.appended {
+				_, _ = w.Write([]byte(state6))
+			} else {
+				_, _ = w.Write([]byte(state5))
+			}
 		case strings.HasSuffix(r.URL.Path, "/log"):
 			from, _ := strconv.Atoi(q.Get("from"))
 			vs.reads = append(vs.reads, "log from="+q.Get("from")+" wait="+q.Get("wait"))
@@ -588,8 +606,8 @@ func TestCoordBackendRunView_WakeCostsOneRequest(t *testing.T) {
 	if st.Jobs["b"].Status != "pending" {
 		t.Fatalf("b before the wake: %+v", st.Jobs["b"])
 	}
-	if got := vs.served(); !reflect.DeepEqual(got, []string{"log from=0 wait=", "object"}) {
-		t.Fatalf("the first read is the whole log and the plan, once: %v", got)
+	if got := vs.served(); !reflect.DeepEqual(got, []string{"state", "object"}) {
+		t.Fatalf("the first read is the server's fold and the plan, once: %v", got)
 	}
 
 	head, err := b.WaitForRunEvents(ctx, "run-1", 5, 15)
@@ -607,7 +625,7 @@ func TestCoordBackendRunView_WakeCostsOneRequest(t *testing.T) {
 	if err != nil || len(frontier) != 0 {
 		t.Fatalf("frontier from the view (b is claimed): %v %v", frontier, err)
 	}
-	if got := vs.served(); !reflect.DeepEqual(got, []string{"log from=0 wait=", "object", "log from=5 wait=15"}) {
+	if got := vs.served(); !reflect.DeepEqual(got, []string{"state", "object", "log from=5 wait=15"}) {
 		t.Fatalf("after the wake, the state and frontier reads cost nothing: %v", got)
 	}
 
@@ -638,8 +656,67 @@ func TestCoordBackendRunView_StaleViewReadsTheDelta(t *testing.T) {
 	if _, err := b.RunnableJobs(ctx, "run-1"); err != nil {
 		t.Fatal(err)
 	}
-	if got := vs.served(); !reflect.DeepEqual(got, []string{"log from=0 wait=", "object", "log from=5 wait=", "log from=5 wait="}) {
+	if got := vs.served(); !reflect.DeepEqual(got, []string{"state", "object", "log from=5 wait=", "log from=5 wait="}) {
 		t.Fatalf("a stale view reads the delta only: %v", got)
+	}
+}
+
+// The first read of a run is the server's fold in one request, with the
+// timings the presenter shows, instead of the whole event log
+// (specs/orun-sync-efficiency P1, SE2).
+func TestCoordBackendRunView_FirstReadIsTheStateRead(t *testing.T) {
+	vs, srv := newViewServer(t)
+	b := viewBackend(srv)
+	ctx := context.Background()
+	st, meta, err := b.LoadRunState(ctx, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := vs.served(); !reflect.DeepEqual(got, []string{"state", "object"}) {
+		t.Fatalf("served: %v", got)
+	}
+	a := st.Jobs["a"]
+	if a.Status != "completed" || a.StartedAt != "2026-01-01T00:01:00Z" || a.FinishedAt != "2026-01-01T00:01:30Z" {
+		t.Fatalf("a from the state read: %+v", a)
+	}
+	if st.Jobs["b"].Status != "pending" || st.Jobs["b"].StartedAt != "" {
+		t.Fatalf("b from the state read: %+v", st.Jobs["b"])
+	}
+	if meta.StartedAt != "2026-01-01T00:01:00Z" || meta.FinishedAt != "" || meta.JobTotal != 2 || meta.JobDone != 1 || meta.Status != "running" {
+		t.Fatalf("meta from the state read: %+v", meta)
+	}
+	frontier, err := b.RunnableJobs(ctx, "run-1")
+	if err != nil || !reflect.DeepEqual(frontier, []string{"b"}) {
+		t.Fatalf("frontier from the view: %v %v", frontier, err)
+	}
+	if got := vs.served(); len(got) != 2 {
+		t.Fatalf("the frontier read right after cost nothing: %v", got)
+	}
+}
+
+// A server without the state read (an older orun-cloud, or a run its shard
+// does not back) answers 404: the view is primed from the log as before,
+// and the state read is not asked again for the run.
+func TestCoordBackendRunView_NoStateReadFallsBackToTheLog(t *testing.T) {
+	old := viewFreshFor
+	viewFreshFor = 0
+	t.Cleanup(func() { viewFreshFor = old })
+	vs, srv := newViewServer(t)
+	vs.noState = true
+	b := viewBackend(srv)
+	ctx := context.Background()
+	st, _, err := b.LoadRunState(ctx, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Jobs["a"].Status != "completed" || st.Jobs["a"].StartedAt != "2026-01-01T00:01:00Z" {
+		t.Fatalf("a from the log: %+v", st.Jobs["a"])
+	}
+	if _, _, err := b.LoadRunState(ctx, "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := vs.served(); !reflect.DeepEqual(got, []string{"state", "log from=0 wait=", "object", "log from=5 wait="}) {
+		t.Fatalf("the log primes the view once the state read answered 404, which is not asked again: %v", got)
 	}
 }
 
@@ -664,5 +741,8 @@ func TestCoordBackendRunView_SeededPlanSkipsThePlanObject(t *testing.T) {
 		if r == "object" {
 			t.Fatalf("the plan object was fetched although this process holds the plan: %v", vs.served())
 		}
+	}
+	if got := vs.served(); got[len(got)-1] != "state" {
+		t.Fatalf("the first read is the one state read: %v", got)
 	}
 }

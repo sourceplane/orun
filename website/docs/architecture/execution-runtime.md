@@ -103,7 +103,9 @@ by the run's next event when the backend can long-poll its event stream
 (the native coordination backend; `runEventWaiter`). The process keeps a
 view of the run: the folded state, the plan's dependency graph (seeded from
 the plan it holds, or fetched once) and the timestamps the presenter shows.
-Each long-poll's events are folded onto that view, so a wake costs the one
+The view is first filled by the server's own fold in one read
+(`GET …/runs/{id}/state`; the whole event log on a platform without that
+read). Each long-poll's events are folded onto it, so a wake costs the one
 long-poll and the state and frontier reads that follow it ask the server
 nothing; a view that has not been synced for a while reads only the events
 past its last sequence number. While nothing happens the long-polls

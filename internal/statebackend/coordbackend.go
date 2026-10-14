@@ -3,6 +3,7 @@ package statebackend
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -93,6 +94,10 @@ type runView struct {
 	runFinish  string
 	user       string
 	syncedAt   time.Time
+	// noStateRead remembers a server with no state read for this run (an
+	// older server, or a run its shard does not back): the first sync reads
+	// the log instead, and is not asked again.
+	noStateRead bool
 }
 
 type jobTimes struct{ started, finished string }
@@ -189,42 +194,97 @@ func (v *runView) at(jobID string) *jobTimes {
 	return t
 }
 
-// ensurePlanLocked fetches the plan object named by the run's created event
-// when this process did not seed the view from its own plan: once per run,
-// not once per read. viewMu held.
-func (b *CoordBackend) ensurePlanLocked(ctx context.Context, v *runView, events []CoordinationEvent) bool {
+// planDigestOf is the plan digest the run's created event names, "" when
+// the events do not include it.
+func planDigestOf(events []CoordinationEvent) string {
+	for _, e := range events {
+		if e.Kind == EventRunCreated && e.PlanDigest != "" {
+			return e.PlanDigest
+		}
+	}
+	return ""
+}
+
+// ensurePlanLocked fetches the plan object the run was created from when
+// this process did not seed the view from its own plan: once per run, not
+// once per read. viewMu held.
+func (b *CoordBackend) ensurePlanLocked(ctx context.Context, v *runView, planDigest string) bool {
 	if v.havePlan {
 		return true
 	}
-	if b.inner == nil {
+	if b.inner == nil || planDigest == "" {
 		return false
 	}
-	for _, e := range events {
-		if e.Kind != EventRunCreated || e.PlanDigest == "" {
-			continue
-		}
-		blob, err := b.inner.GetObject(ctx, e.PlanDigest)
-		if err != nil || blob == nil {
-			return false
-		}
-		var bp remotestate.BackendPlan
-		if json.Unmarshal(blob, &bp) != nil {
-			return false
-		}
-		cp := CoordinationPlan{Jobs: make(map[string]PlanNode, len(bp.Jobs))}
-		for _, j := range bp.Jobs {
-			cp.Jobs[j.JobID] = PlanNode{Deps: j.Deps}
-		}
-		v.plan, v.havePlan = cp, true
-		return true
+	blob, err := b.inner.GetObject(ctx, planDigest)
+	if err != nil || blob == nil {
+		return false
 	}
-	return false
+	var bp remotestate.BackendPlan
+	if json.Unmarshal(blob, &bp) != nil {
+		return false
+	}
+	cp := CoordinationPlan{Jobs: make(map[string]PlanNode, len(bp.Jobs))}
+	for _, j := range bp.Jobs {
+		cp.Jobs[j.JobID] = PlanNode{Deps: j.Deps}
+	}
+	v.plan, v.havePlan = cp, true
+	return true
 }
 
-// syncView brings the run's view up to the server: the whole log when the
-// view has nothing yet, else only the events past its last seq, and nothing
-// at all within viewFreshFor of the last sync. It reports whether the view
-// holds the run's state afterwards.
+// adoptLocked makes the server's fold the view's state: the first read of a
+// run is the one state read instead of its whole log. The timings beside the
+// fold are the presenter's timestamps; a fold the server built before it
+// recorded them leaves them unset. viewMu held.
+func (v *runView) adoptLocked(st *RunStateRead) {
+	v.fold = st.Fold
+	if v.fold.Jobs == nil {
+		v.fold.Jobs = map[string]*JobFoldState{}
+	}
+	v.started = true
+	if st.Timings != nil {
+		v.runStarted, v.runFinish = st.Timings.StartedAt, st.Timings.FinishedAt
+		for id, jt := range st.Timings.Jobs {
+			t := v.at(id)
+			t.started, t.finished = jt.StartedAt, jt.FinishedAt
+		}
+	}
+	v.syncedAt = time.Now()
+}
+
+// primeLocked gives a view with nothing yet the run's state: the server's
+// fold in one read when it has one for the run (and the plan object once,
+// when this process did not seed the plan), else the log it was given. It
+// reports whether the view holds the run's state afterwards. viewMu held.
+func (b *CoordBackend) primeLocked(ctx context.Context, wire string, v *runView, log func() ([]CoordinationEvent, error)) bool {
+	if !v.noStateRead {
+		st, err := b.coord.ReadState(ctx, wire)
+		switch {
+		case err == nil:
+			if !b.ensurePlanLocked(ctx, v, st.Fold.PlanDigest) {
+				return false
+			}
+			v.adoptLocked(st)
+			return true
+		case errors.Is(err, ErrStateReadUnsupported):
+			v.noStateRead = true
+		}
+	}
+	if log == nil {
+		return false
+	}
+	events, err := log()
+	if err != nil || len(events) == 0 || !b.ensurePlanLocked(ctx, v, planDigestOf(events)) {
+		return false
+	}
+	v.absorbLocked(events)
+	return true
+}
+
+// syncView brings the run's view up to the server: the server's fold in one
+// read when the view has nothing yet (the whole log on a server without the
+// state read), else only the events past its last seq, and nothing at all
+// within viewFreshFor of the last sync. It reports whether the view holds
+// the run's state afterwards.
 func (b *CoordBackend) syncView(ctx context.Context, wire string) (*runView, bool) {
 	b.viewMu.Lock()
 	defer b.viewMu.Unlock()
@@ -232,18 +292,12 @@ func (b *CoordBackend) syncView(ctx context.Context, wire string) (*runView, boo
 	if v.started && time.Since(v.syncedAt) < viewFreshFor {
 		return v, true
 	}
-	from := 0
-	if v.started {
-		from = v.fold.LastSeq
-	}
-	events, err := b.coord.ReadLog(ctx, wire, from, 0)
-	if err != nil {
-		return v, v.started
-	}
 	if !v.started {
-		if len(events) == 0 || !b.ensurePlanLocked(ctx, v, events) {
-			return v, false
-		}
+		return v, b.primeLocked(ctx, wire, v, func() ([]CoordinationEvent, error) { return b.coord.ReadLog(ctx, wire, 0, 0) })
+	}
+	events, err := b.coord.ReadLog(ctx, wire, v.fold.LastSeq, 0)
+	if err != nil {
+		return v, true
 	}
 	v.absorbLocked(events)
 	return v, true
@@ -400,9 +454,7 @@ func (b *CoordBackend) WaitForRunEvents(ctx context.Context, runID string, since
 		// with the long-poll (FoldFrom ignores the events it already folded).
 		v.absorbLocked(events)
 	case !v.started && sinceSeq == 0 && len(events) > 0:
-		if b.ensurePlanLocked(ctx, v, events) {
-			v.absorbLocked(events)
-		}
+		_ = b.primeLocked(ctx, wire, v, func() ([]CoordinationEvent, error) { return events, nil })
 	}
 	// A page the view has not seen the start of leaves it alone; the next
 	// state read continues from the view's own seq.

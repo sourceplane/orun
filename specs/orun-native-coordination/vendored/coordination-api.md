@@ -63,6 +63,7 @@ The server derives the job set from the `plan` object — **no jobs array is sen
 GET …/state/runs/{runId}                 → projected snapshot { run, jobCounts }   // delayed, cacheable
 GET …/state/runs/{runId}/log?from={seq}  → { "events":[ {seq,kind,jobId?,actor,at,...} ], "next":N, "open":true }
 GET …/state/runs/{runId}/frontier        → { "jobs":[ jobId… ] }                   // projection of the fold
+GET …/state/runs/{runId}/state           → RunFoldState (§8.2: jobs, frontier, lastSeq, timings)  // the fold itself: a client's first read
 GET …/state/runs?environment=&status=&cursor=   → paginated list (projection)
 ```
 
