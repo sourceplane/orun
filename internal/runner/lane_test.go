@@ -291,3 +291,37 @@ func TestLane_GHAHoldsEachJobsStepsTogether(t *testing.T) {
 type writerFunc func([]byte) (int, error)
 
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+// A job that fails in a lane holding step groups must still print them: the
+// failed step's group, its error annotation and the job footer. They were
+// buffered and never flushed (cirrus-baseline run 38514815544: projects-worker
+// failed with nothing of its own in the log).
+func TestLane_GHAPrintsAFailedJobsHeldSteps(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("GITHUB_STEP_SUMMARY", t.TempDir()+"/summary.md")
+	steps := []model.PlanStep{{ID: "setup", Name: "setup"}}
+	plan := &model.Plan{Jobs: []model.PlanJob{
+		{ID: "ok", Component: "ok", Environment: "stage", CheckName: "ok · stage · Deploy", Lane: "L", Steps: steps},
+		{ID: "bad", Component: "bad", Environment: "stage", CheckName: "bad · stage · Deploy", Lane: "L", Steps: steps},
+	}, Lanes: []model.PlanLane{{ID: "L", Jobs: []string{"ok", "bad"}, Concurrency: 2}}}
+	var out strings.Builder
+	var mu sync.Mutex
+	r := NewRunner(t.TempDir(), false, writerFunc(func(p []byte) (int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return out.Write(p)
+	}), io.Discard, false, "", false, false, &laneExecutor{fail: map[string]bool{"bad": true}}, executor.RuntimeContext{}, "exec_lane", 2, nil, "")
+	r.LaneID, r.LaneJobs = "L", []string{"ok", "bad"}
+	_ = r.Run(plan)
+	log := out.String()
+	for _, want := range []string{
+		"::group::bad · stage · Deploy › ✕  01 setup",
+		"boom",
+		"::error",
+		"✕ bad failed",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("failed job's output missing %q:\n%s", want, log)
+		}
+	}
+}

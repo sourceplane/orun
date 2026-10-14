@@ -21,6 +21,7 @@ const (
 	EventJobSucceeded = "state.job.succeeded"
 	EventJobMemoized  = "state.job.memoized"
 	EventJobFailed    = "state.job.failed"
+	EventJobRetried   = "state.job.retried"
 	EventLogChunk     = "state.job.log_chunk"
 	EventRunCompleted = "state.run.completed"
 	EventRunFailed    = "state.run.failed"
@@ -160,11 +161,22 @@ func Fold(events []CoordinationEvent, plan CoordinationPlan) RunFoldState {
 		if job == nil {
 			continue // event for a job not in the plan — ignore
 		}
-		if jobTerminal(job.Phase) && e.Kind != EventJobReady {
-			continue // terminal states are sticky
+		if jobTerminal(job.Phase) && e.Kind != EventJobReady && e.Kind != EventJobRetried {
+			continue // terminal states are sticky — JobRetried is the one sanctioned re-opening
 		}
 
 		switch e.Kind {
+		case EventJobRetried:
+			// The explicit re-open of a FAILED/TIMED-OUT job (`orun run --retry`,
+			// a CI rerun resuming one execution). Without this a re-run job that
+			// went on to succeed still folds as failed, and a lane waiting on it
+			// under --retry waits until its timeout.
+			if job.Phase == "failed" || job.Phase == "timed_out" {
+				job.Phase = "queued"
+				job.Holder = ""
+				job.LeaseEpoch = 0
+				job.LeaseExpiresAt = ""
+			}
 		case EventJobReady:
 			if !jobTerminal(job.Phase) {
 				job.Phase = "queued"
