@@ -628,3 +628,17 @@ func TestEngineGivesConcurrentJobsTheirOwnTerraformPluginCache(t *testing.T) {
 		t.Fatalf("job-c should reuse job-a's finished cache %q, got %q", a, c)
 	}
 }
+
+// A plan step's `working-directory` is resolved by the runner into the
+// working directory this engine is given; the spec must not carry it a
+// second time, or a relative value is joined twice (`../..` from apps/x ran
+// two directories above the repository on cirrus-baseline#25).
+func TestPlanStepToSpecDoesNotReapplyWorkingDirectory(t *testing.T) {
+	spec := planStepToSpec(model.PlanStep{ID: "install", Run: "pnpm install", WorkingDirectory: "../.."})
+	if spec.WorkingDirectory != "" {
+		t.Fatalf("WorkingDirectory = %q, want empty: the runner resolved it", spec.WorkingDirectory)
+	}
+	if resolveWorkingDirectory("/repo", spec.WorkingDirectory, nil) != "/repo" {
+		t.Fatal("the engine runs the step where the runner put it")
+	}
+}
