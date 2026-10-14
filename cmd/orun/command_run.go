@@ -1052,7 +1052,7 @@ func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID
 		}
 		// Woken by the run's next event where the backend can say so, else
 		// by the timer (specs/orun-runner-efficiency §5.7).
-		if !events.wait(ctx, poll) {
+		if _, blocked := events.wait(ctx, poll); !blocked {
 			if err := sleepOrDone(ctx, poll); err != nil {
 				return err
 			}

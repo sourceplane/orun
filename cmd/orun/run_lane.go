@@ -132,11 +132,14 @@ func awaitRemoteUpstreams(ctx context.Context, backend statebackend.Backend, run
 		if time.Now().After(deadline) {
 			return fmt.Errorf("job %s: upstream wait timeout (%s) exceeded", jobID, wait)
 		}
-		if events.wait(ctx, delay) {
-			continue
+		woke, blocked := events.wait(ctx, delay)
+		if woke {
+			continue // news: re-read now, and keep the short interval
 		}
-		if err := sleepOrDone(ctx, delay); err != nil {
-			return err
+		if !blocked {
+			if err := sleepOrDone(ctx, delay); err != nil {
+				return err
+			}
 		}
 		if delay = nextBackoff(delay, 15*time.Second); delay > wait {
 			delay = wait
@@ -145,9 +148,19 @@ func awaitRemoteUpstreams(ctx context.Context, backend statebackend.Backend, run
 }
 
 // eventWait is the event-driven half of a remote wait: on a backend that
-// long-polls its event stream it blocks until the next event (or the
-// long-poll lapses), and reports whether it did; on any other backend it
-// reports false and the caller sleeps as before.
+// long-polls its event stream it blocks until the next event or until the
+// long-poll lapses, and reports which; on any other backend it does not block
+// and the caller sleeps as before.
+//
+// A LAPSED LONG-POLL IS NOT AN EVENT. The first version reported every
+// successful long-poll as a wake, a timeout included. A lane job waiting on
+// another lane's job then re-read the whole run every 2 s for as long as it
+// waited (its backoff never grew, because a wake skips the backoff), and a
+// --job's wait re-read on every timeout: three requests, the whole event log
+// and the plan object each time (specs/orun-sync-efficiency F1). Now a wake
+// is reported only when the head sequence advanced, and a lapse is reported
+// as time already spent, so the caller neither sleeps again nor treats it as
+// news.
 type eventWait struct {
 	waiter runEventWaiter
 	runID  string
@@ -171,9 +184,14 @@ func newEventWait(ctx context.Context, backend statebackend.Backend, runID strin
 	return e
 }
 
-func (e *eventWait) wait(ctx context.Context, max time.Duration) bool {
+// wait blocks for up to max (at most eventLongPollSeconds) on the run's next
+// event. woke is true when new events arrived; blocked is true when the wait
+// held for its interval, whether or not events came, so the caller does not
+// sleep the same interval again. On a backend that cannot long-poll, or once
+// the long-poll fails, both are false and the caller sleeps as before.
+func (e *eventWait) wait(ctx context.Context, max time.Duration) (woke, blocked bool) {
 	if e == nil || e.waiter == nil {
-		return false
+		return false, false
 	}
 	secs := eventLongPollSeconds
 	if max > 0 && max < time.Duration(secs)*time.Second {
@@ -185,13 +203,16 @@ func (e *eventWait) wait(ctx context.Context, max time.Duration) bool {
 	head, err := e.waiter.WaitForRunEvents(ctx, e.runID, e.seq, secs)
 	if err != nil {
 		if ctx.Err() != nil {
-			return false
+			return false, false
 		}
 		e.waiter = nil // fall back to polling for the rest of this wait
-		return false
+		return false, false
 	}
-	e.seq = head
-	return true
+	woke = head > e.seq
+	if woke {
+		e.seq = head
+	}
+	return woke, true
 }
 
 // heartbeatOlderThan reports whether a job's last heartbeat is older than
