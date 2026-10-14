@@ -98,7 +98,10 @@ Within each phase, `order` and declaration order determine the exact step sequen
 ## Interruption
 
 The runner's root context is cancelled by `SIGTERM` or `SIGINT`. Every step
-runs under it (`exec.CommandContext`), so a running step is killed; the
+runs under it (`exec.CommandContext`) in a process group of its own
+(`internal/procgroup`): the cancel kills the whole group, shell and
+children alike, and the wait on the step's output pipes is bounded, so a
+`sleep` or a build server a step started cannot keep the step alive; the
 scheduler admits no further job; each cut job's error is prefixed
 `interrupted:` and reported through `AfterJobTerminal` as failed, which on
 a remote run tells the platform (and any lane waiting on the job) at once.
