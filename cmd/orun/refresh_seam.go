@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/sourceplane/orun/internal/catalogresolve"
@@ -69,6 +70,14 @@ func refreshObjectCatalog(ctx context.Context) (refreshedCatalog, error) {
 	}, objplan.Options{OwnerResolver: objplan.OwnerResolverForWorkspace(workspaceRoot), CompositionResolver: objplan.CompositionResolverForWorkspace(workspaceRoot), InputsDigest: objplan.WorkspaceInputsDigest(workspaceRoot)})
 	if err != nil {
 		return refreshedCatalog{}, err
+	}
+	if res.CatalogID == "" && res.CatalogSkipped != nil {
+		// The tolerant write left catalogs/current where it was (or absent on a
+		// cold store). Every caller of this seam needs the catalog, so a
+		// resolve failure is this command's failure — with the resolver's own
+		// message (a duplicate component names every file, for instance),
+		// not a later "object not found" on the missing ref.
+		return refreshedCatalog{}, fmt.Errorf("resolve catalog from the working tree: %w", res.CatalogSkipped)
 	}
 
 	return refreshedCatalog{store: store, refs: refs, sourceKey: srcKey, result: res}, nil

@@ -25,10 +25,12 @@ branch switch, in a fresh `git worktree`, in a gitignored directory, or in a
 workspace without git.
 
 The check is cheap. The snapshot is keyed on the git source and on a digest of
-`intent.yaml` plus every component manifest discovery finds. When nothing
-changed, the existing snapshot is reused without resolving. When the rebuilt
-snapshot has a different component graph from the old one, one line on stderr
-says so:
+`intent.yaml` plus every component manifest discovery finds under the intent's
+`discovery.roots` (the whole workspace when none are declared; see
+[where the catalog looks](./service-catalog.md#where-the-catalog-looks)). When
+nothing changed, the existing snapshot is reused without resolving. When the
+rebuilt snapshot has a different component graph from the old one, one line on
+stderr says so:
 
 ```
 orun: catalog was stale (1 component added); refreshed from the working tree
@@ -38,6 +40,15 @@ orun: catalog was stale (1 component added); refreshed from the working tree
 snapshot as it is. If that snapshot was not built from the current working
 tree, orun prints a warning that names `orun catalog refresh`, and it stops
 with an error if there is no snapshot yet.
+
+When the working tree cannot be resolved into a catalog, `--changed` fails with
+the resolver's error rather than selecting from a stale or missing snapshot.
+The most common cause is two manifests that declare the same `metadata.name`;
+the error names every file involved:
+
+```text
+✕ failed to compute changed components: resolve catalog from the working tree: catalogresolve: duplicate component name "api-edge" (componentKey default/cirrus/api-edge) declared in both apps/api-edge/component.yaml and variations/blue/overlay/apps/api-edge/component.yaml; every component manifest discovery finds must have a unique metadata.name (exclude copies with catalog.discovery.exclude, or narrow discovery.roots)
+```
 
 ## Commands that support change detection
 

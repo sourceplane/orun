@@ -2,6 +2,7 @@ package catalogresolve
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -93,15 +94,68 @@ func (e *ErrComponentInvalid) Error() string {
 }
 
 // ErrDuplicateComponent reports two or more authored component.yaml
-// files that resolve to the same componentKey. Paths are sorted
-// workspace-relative slash paths.
+// files that resolve to the same componentKey (the same metadata.name
+// within one namespace and repo). Paths are sorted workspace-relative
+// slash paths. Resolve returns it in place of the bare
+// component.key.duplicate issue so a caller can name every offending
+// file; the issue itself is still recorded and reachable via Unwrap.
 type ErrDuplicateComponent struct {
-	Key   string
+	// Key is the colliding componentKey (`<namespace>/<repo>/<name>`).
+	Key string
+	// Name is the authored metadata.name the files share. May be empty
+	// when the error is built without the authored manifests.
+	Name string
+	// Paths are the sorted workspace-relative manifest paths.
 	Paths []string
+	// Issue is the component.key.duplicate validation issue this error
+	// stands in for, when it came out of the validate stage.
+	Issue *ValidationIssue
 }
 
 func (e *ErrDuplicateComponent) Error() string {
-	return fmt.Sprintf("catalogresolve: duplicate component %s: %v", e.Key, e.Paths)
+	what := "component " + e.Key
+	if e.Name != "" {
+		what = fmt.Sprintf("component name %q (componentKey %s)", e.Name, e.Key)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "catalogresolve: duplicate %s", what)
+	switch len(e.Paths) {
+	case 0:
+	case 1:
+		fmt.Fprintf(&b, " declared in %s", e.Paths[0])
+	case 2:
+		fmt.Fprintf(&b, " declared in both %s and %s", e.Paths[0], e.Paths[1])
+	default:
+		fmt.Fprintf(&b, " declared in %d manifests: %s", len(e.Paths), strings.Join(e.Paths, ", "))
+	}
+	b.WriteString("; every component manifest discovery finds must have a unique metadata.name (exclude copies with catalog.discovery.exclude, or narrow discovery.roots)")
+	return b.String()
+}
+
+// Unwrap exposes the underlying validation issue so errors.As against a
+// ValidationIssue keeps working for callers that match on Code.
+func (e *ErrDuplicateComponent) Unwrap() error {
+	if e.Issue == nil {
+		return nil
+	}
+	return *e.Issue
+}
+
+// duplicateComponentError turns a component.key.duplicate issue into the
+// typed error, reading the key and paths back out of its Detail payload.
+// name is the authored metadata.name shared by the manifests (may be "").
+func duplicateComponentError(issue ValidationIssue, name string) *ErrDuplicateComponent {
+	e := &ErrDuplicateComponent{Name: name}
+	cp := issue
+	e.Issue = &cp
+	if k, ok := issue.Detail["componentKey"].(string); ok {
+		e.Key = k
+	}
+	if ps, ok := issue.Detail["paths"].([]string); ok {
+		e.Paths = append([]string(nil), ps...)
+	}
+	sort.Strings(e.Paths)
+	return e
 }
 
 // ErrDependencyMissing reports a `spec.dependsOn[*].component`

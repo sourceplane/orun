@@ -2,6 +2,7 @@ package objplan
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/sourceplane/orun/internal/catalogresolve"
@@ -70,5 +71,38 @@ func TestRefreshCatalogNoCatalog(t *testing.T) {
 	}
 	if res.CatalogID != "" {
 		t.Errorf("NoCatalog ⇒ no catalog id, got %s", res.CatalogID)
+	}
+}
+
+func TestRefreshCatalogTolerantResolveErrorReportsSkip(t *testing.T) {
+	t.Parallel()
+	w, _, memo, refs := rig(t)
+	ctx := context.Background()
+
+	res, err := RefreshCatalog(ctx, w, w.Store(), memo,
+		sampleInput(func() (*catalogresolve.CatalogView, error) { return nil, errBoom }),
+		Options{})
+	if err != nil {
+		t.Fatalf("tolerant resolve error should not fail RefreshCatalog: %v", err)
+	}
+	if res.CatalogID != "" {
+		t.Fatalf("catalog id should be empty on a skipped resolve, got %s", res.CatalogID)
+	}
+	if !errors.Is(res.CatalogSkipped, errBoom) {
+		t.Fatalf("CatalogSkipped = %v, want errBoom", res.CatalogSkipped)
+	}
+	if _, rerr := refs.Read(ctx, "catalogs/current"); rerr == nil {
+		t.Errorf("a skipped resolve must not point catalogs/current anywhere")
+	}
+}
+
+func TestRefreshCatalogStrictResolveErrorFails(t *testing.T) {
+	t.Parallel()
+	w, _, memo, _ := rig(t)
+	_, err := RefreshCatalog(context.Background(), w, w.Store(), memo,
+		sampleInput(func() (*catalogresolve.CatalogView, error) { return nil, errBoom }),
+		Options{Strict: true})
+	if !errors.Is(err, errBoom) {
+		t.Fatalf("strict resolve error = %v, want errBoom", err)
 	}
 }
