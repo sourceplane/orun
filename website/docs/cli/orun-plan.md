@@ -162,6 +162,7 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | `--component` | Restrict compilation to one or more components (repeatable) |
 | `--view`, `-v` | Render a view such as `dag`, `dag:long`, `dependencies`, `lanes`, or `component=<name>` |
 | `--strict-lanes` | Fail the plan when lanes would need a cycle split (as `execution.lanes.onCycle: reject`) |
+| `--max-lanes` | Override `execution.lanes.maxLanes` for this plan, for example from the runner pool's free capacity (`ORUN_MAX_LANES` does the same; the flag wins). Recorded in `metadata.lanes` |
 | `--long` | Show detailed output (step commands, IDs) |
 | `--changed` | Enable change-aware filtering |
 | `--base` | Base git ref for change detection |

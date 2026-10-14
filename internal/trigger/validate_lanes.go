@@ -28,8 +28,8 @@ func ValidateLanes(intent *model.Intent) []error {
 		if lanes.MaxLanes < 0 {
 			errs = append(errs, fmt.Errorf("execution.lanes.maxLanes must be at least 1, got %d", lanes.MaxLanes))
 		}
-		if lanes.Concurrency < 0 {
-			errs = append(errs, fmt.Errorf("execution.lanes.concurrency must be at least 1, got %d", lanes.Concurrency))
+		if lanes.Concurrency < 0 && !lanes.Concurrency.IsAuto() {
+			errs = append(errs, fmt.Errorf("execution.lanes.concurrency must be at least 1 or auto, got %d", lanes.Concurrency))
 		}
 		switch lanes.OnCycle {
 		case "", model.LaneOnCycleSplit, model.LaneOnCycleReject:
@@ -54,9 +54,9 @@ func ValidateLanes(intent *model.Intent) []error {
 			default:
 				groups[name] = struct{}{}
 			}
-			if g := lanes.Groups[name]; g.Concurrency < 0 {
+			if g := lanes.Groups[name]; g.Concurrency < 0 && !g.Concurrency.IsAuto() {
 				errs = append(errs, fmt.Errorf(
-					"execution.lanes.groups.%s.concurrency must be at least 1, got %d", name, g.Concurrency))
+					"execution.lanes.groups.%s.concurrency must be at least 1 or auto, got %d", name, g.Concurrency))
 			}
 		}
 

@@ -31,8 +31,8 @@ Lanes are off unless the intent asks for them. A plan from an intent without
 execution:
   lanes:
     mode: auto          # job | component | env | auto (default: job)
-    maxLanes: 16        # auto mode's budget (default 16)
-    concurrency: 4      # jobs in flight inside a lane (default 4)
+    maxLanes: 16        # auto mode's budget (default 16; `orun plan --max-lanes` overrides it)
+    concurrency: 4      # jobs in flight inside a lane (default 4), or auto: the runner's cores
     onCycle: split      # split (default) | reject
     groups:
       fleet:
@@ -71,11 +71,18 @@ reason to fail. On a 2-vCPU runner, orun-cloud's 128-job full verify measured:
 | `maxLanes: 16`, `concurrency: 4` | 1.83× / 2.78×, and two tests with a 10 s timeout failed |
 | `maxLanes: 56`, `concurrency: 2` | 1.20× / 1.57× |
 
-Set `concurrency` to about the runner's core count. Set `maxLanes` to about
-the number of runners your pool starts at once: a plan of that many jobs or
-fewer keeps one job per runner, and a larger one fits in a single wave instead
-of queueing behind it. Mark a component `isolated` when its jobs must not
-share a runner (a browser suite, a build that needs the whole machine).
+Set `concurrency` to about the runner's core count, or to `auto` to let
+`orun run --lane` read the core count of the machine it runs on (the plan
+then carries `concurrency: 0` for the lane; `--concurrency` still overrides
+it). A pool that mixes runner sizes gets the right number on each. Set
+`maxLanes` to about the number of runners your pool starts at once: a plan of
+that many jobs or fewer keeps one job per runner, and a larger one fits in a
+single wave instead of queueing behind it. A CI plan job can set the budget
+from the pool's free capacity rather than from the intent:
+`orun plan --max-lanes 24` or `ORUN_MAX_LANES=24`; the plan records the
+budget it was given and where it came from in `metadata.lanes`. Mark a
+component `isolated` when its jobs must not share a runner (a browser suite,
+a build that needs the whole machine).
 
 ## Auto mode
 

@@ -62,6 +62,21 @@ type PlanMetadata struct {
 	// intent auto-discovery fails (e.g. in GHA where the intent lives in a
 	// subdirectory of GITHUB_WORKSPACE).
 	WorkDir string `json:"workDir,omitempty" yaml:"workDir,omitempty"`
+	// Lanes records how the plan's lanes were laid out; absent when the
+	// intent sets no execution.lanes (the plan then has no lanes either).
+	Lanes *PlanLanesMeta `json:"lanes,omitempty" yaml:"lanes,omitempty"`
+}
+
+// PlanLanesMeta is metadata.lanes: the effective mode and the lane budget
+// auto mode was given, with where the budget came from — the intent's
+// maxLanes, its default, or an override (`orun plan --max-lanes`,
+// ORUN_MAX_LANES) that a plan reader would otherwise not see
+// (specs/orun-runner-efficiency §5.2).
+type PlanLanesMeta struct {
+	Mode     string `json:"mode" yaml:"mode"`
+	MaxLanes int    `json:"maxLanes" yaml:"maxLanes"`
+	// MaxLanesFrom is intent | default | flag | env.
+	MaxLanesFrom string `json:"maxLanesFrom" yaml:"maxLanesFrom"`
 }
 
 // PlanTrigger records which trigger bindings activated the plan. Type / Name
