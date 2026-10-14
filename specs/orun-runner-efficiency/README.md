@@ -45,23 +45,24 @@ through the scheduler the lane path already has.
 
 The lane spec measured a Cirrus `04-workers` convergence (`specs/orun-lanes/design.md`
 §1): per job ~70 s of runner setup for ~20 s of work, 49 jobs through 16
-slots, 6m59s wall-clock. Take a 200-vCPU quota of 4-vCPU runners (50 slots)
-and the same shape. The four regimes:
+slots, 6m59s wall-clock. [`model.py`](model.py) turns that into a
+discrete-time model of a Cirrus-shaped plan on a 200-vCPU pool — 88 jobs in
+two environments with promotion, migration → worker chains, a 20 s / 60 s /
+180 s mix of work with the heavy jobs sharing one migration — and runs the
+regimes orun supports today:
 
-| Regime | Runners | vCPU·s provisioned | vCPU·s on job work (≈1 vCPU × 20 s × 49) | Useful share |
-|---|---|---|---|---|
-| `mode: job`, one runner per job | 49 | 49 × 4 × 90 s = 17,640 | 980 | **≈ 6 %** |
-| `mode: auto`, 16 lanes, concurrency 4, each job re-installs (today) | 16 | 16 × 4 × (70 + ~3 × (40 + 20)) s ≈ 16,000 | 980 | **≈ 6 %** |
-| 16 lanes, install once per lane, isolation per component (§5.3) | 16 | 16 × 4 × (70 + 40 + 3 × 20) s ≈ 10,900 | 980 | ≈ 9 % |
-| 8 lanes on 16-vCPU runners, concurrency 8, install once, weighted packing | 8 | 8 × 16 × (70 + 40 + 6 × 20 / 4) s ≈ 17,900 | 980 | ≈ 5 % — but wall-clock ≈ 2.3 min and **128 of 200 vCPUs free for the next run** |
+| Regime (4-vCPU runners) | Runners | Wall | vCPU·h per run | Peak vCPU | vCPU·s on job work | Runs/h the quota sustains |
+|---|---|---|---|---|---|---|
+| `mode: job`, one runner per job | 88 | 7.9 min | 13.4 | 200 | 11.9 % | 7.6 |
+| `mode: auto`, 16 lanes, concurrency 4, each job re-installs | 16 | 15.2 min | 6.5 | 64 | 24.5 % | 12.3 |
 
-The point of the table is not the exact numbers (the 40 s install and the
-3-at-a-time contention are estimates; the 70/20 split is the spec's own
-measurement) but the shape: **lanes alone do not raise the useful share,
-because the install that CI used to do once per runner moved inside the lane
-and is now done once per job.** The useful share only moves when a lane shares
-its setup and when the runner is sized to the lane. On a quota, the second
-column is the number that matters: it is what the next run cannot have.
+Three things the model makes visible. **Lanes already halve the vCPU-hours**
+and free two thirds of the quota, which is why they were the right first
+step. **Lanes alone do not raise the useful share much, because the install
+CI did once per runner moved inside the lane and is now done once per job.**
+And **count-based packing doubles the wall-clock** on this shape: the four
+heavy jobs share a migration, so they share a lane, and the whole run waits
+for it. §8 runs the same model with each proposal switched on.
 
 ## 3. Findings
 
@@ -250,21 +251,35 @@ the invariant it keeps.
 Add to each `lane-matrix` entry (and to `plan.lanes[]`):
 
 ```json
-{ "lane": "stage/auto-3", "level": 1, "upstreamLanes": ["stage/auto-1"], "estimatedSeconds": 140, "vcpu": 4 }
+{ "lane": "stage/auto-3", "level": 1, "upstreamLanes": ["stage/auto-1"],
+  "upstreamJobs": ["billing-db.stage.migrate"], "estimatedSeconds": 140, "vcpu": 4 }
 ```
 
 - `level`: the lowest topological level of the lane's jobs (already computed
   for ordering, §5 of the lane spec).
 - `upstreamLanes`: the lanes the enforced edges contract to (the lane graph
-  already exists for cycle repair, `internal/lanes/graph.go`).
+  already exists for cycle repair, `internal/lanes/graph.go`);
+  `upstreamJobs`: the jobs outside the lane that lane jobs depend on.
 
 Two consumers, neither of which needs a change to the runner:
 
 1. **A pool gate** (the `orun-managed-runners` milestone): provision the
-   runner for a lane only when every `upstreamLanes` entry has completed.
-   The run coordinator already knows; the gate reads the same run state the
-   lane would have polled, from one place instead of from every runner. With
-   this, a runner never idles on an upstream wait at all; the `AwaitUpstream`
+   runner for a lane only when its upstream work is done. The run coordinator
+   already knows; the gate reads the same run state the lane would have
+   polled, from one place instead of from every runner. Two policies, and the
+   model in §9 shows they are a real trade:
+   - **`all`** — release when every `upstreamJobs` entry is complete. No
+     runner ever idles on an upstream; peak quota use halves. The cost is the
+     critical path: a chain lane's level-0 job (the production migration) now
+     runs after the gate instead of before it, and the runner's setup lands
+     after the gate too. Pairs with **pre-warm**: release at
+     `estimatedSeconds(upstream) − setup`, so the setup overlaps the upstream's
+     tail.
+   - **`first`** — release when some lane job with no in-lane upstream has its
+     cross-lane upstreams complete. No critical-path cost; the runner may idle
+     for its later jobs, bounded by the in-lane chain.
+   A quota-bound pool wants `all` + pre-warm; a latency-bound one wants
+   `first`. The plan carries what both need. With either, the `AwaitUpstream`
    path becomes the fallback for GitHub-hosted runners.
 2. **Levelled matrices for GitHub-hosted runners** — `orun plan --github-output`
    additionally writes `lane-matrix-levels`: a list of matrices, one per level,
@@ -288,9 +303,15 @@ is unchanged.
   (`quota_vcpu / vcpu_per_runner`, or whatever the pool reports) rather than
   from a constant in `intent.yaml`. Determinism holds for identical inputs; the
   flag is an input and is recorded in `plan.metadata`.
-- A guidance note in `concepts/lanes.md`: on a quota, prefer fewer, larger
-  runners with `concurrency: auto` over many small ones; the setup is paid per
-  runner, the work scales with vCPU.
+- A guidance note in `concepts/lanes.md`: size the lane to the runner, not
+  the runner to the plan. A lane's parallel frontier is narrow when its jobs
+  form chains (a migration, then its workers), so `concurrency × cpu per job
+  ≈ vCPU` on a *small* runner beats a large runner that idles through the
+  chain. On the model in §8, 16-vCPU runners with two lanes per environment
+  cost the same vCPU-hours as today; 4-vCPU runners with four lanes per
+  environment and concurrency 3 cost 45 % less at the same wall-clock. Large
+  runners pay only for wide lanes (many independent jobs), which the
+  `estimatedSeconds`/`vcpu` fields let the pool recognise per lane.
 
 ### 5.3 Share the lane's setup; isolate the component, not the repository (F3)
 
@@ -431,7 +452,65 @@ checkout. Numbers are from one run on the session's container (ext4, Go
 | 1,000 ms job + chain of 4 × 100 ms, concurrency 4 | 1,303 ms | 1,002 ms |
 | stage this checkout (1,780 files, 17.4 MB, `.git` 5 MB) | 130–160 ms copy, ~95 ms cleanup | — |
 
-## 8. Risks and open questions
+## 8. Expected effect
+
+[`model.py`](model.py) (run with `python3 -I specs/orun-runner-efficiency/model.py`)
+switches the proposals on cumulatively over the plan of §2. Inputs: 70 s runner
+setup on 4 vCPU (30 s network + 40 s CPU-bound, scaled by 4/vCPU), 35 s for a
+job's own install and cold build cache in an isolated tree, 1.5 vCPU demand
+per running job, 8 s average poll latency per cross-lane wait, no spot
+interruptions, perfect `estimatedSeconds` for pre-warm. The 70/20 split is the
+lane spec's measurement; the rest are assumptions to be replaced by numbers
+from a real pool.
+
+| | Scenario | Lanes | vCPU | Wall | vCPU·h | Peak | Useful | Runs/h | vs B: wall | vCPU·h | runs/h |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| A | today, `mode: job` | 88 | 4 | 7.9 m | 13.4 | 200 | 12 % | 7.6 | ×0.52 | ×2.06 | ×0.61 |
+| B | **today, lanes** (16, concurrency 4) | 16 | 4 | 15.2 m | 6.5 | 64 | 25 % | 12.3 | — | — | — |
+| C1 | B + RE2 gate `all` | 16 | 4 | 19.4 m | 5.3 | 32 | 30 % | 19.3 | ×1.28 | ×0.81 | ×1.56 |
+| C2 | B + RE2 gate `first` | 16 | 4 | 15.2 m | 5.5 | 64 | 29 % | 12.3 | ×1.00 | ×0.84 | ×1.00 |
+| D | C2 + RE4 shared setup | 16 | 4 | 12.6 m | 4.8 | 64 | 33 % | 14.9 | ×0.83 | ×0.74 | ×1.21 |
+| E | D + RE5 weighted packing | 16 | 4 | 8.9 m | 5.7 | 64 | 28 % | 21.1 | ×0.59 | ×0.88 | ×1.71 |
+| F | E + RE7 event waits | 16 | 4 | 8.4 m | 5.5 | 64 | 29 % | 22.2 | ×0.56 | ×0.84 | ×1.80 |
+| G | F, 8-vCPU runners, 4 lanes/env, concurrency 5 | 8 | 8 | 7.9 m | 6.5 | 64 | 25 % | 23.7 | ×0.52 | ×1.00 | ×1.92 |
+| H | F, 16-vCPU runners, 2 lanes/env, concurrency 10 | 4 | 16 | 7.7 m | 6.4 | 64 | 25 % | 24.2 | ×0.51 | ×0.97 | ×1.97 |
+| I | F, 2-vCPU runners, 8 lanes/env, concurrency 2 | 16 | 2 | 9.9 m | 3.5 | 32 | 46 % | 37.8 | ×0.65 | ×0.53 | ×3.06 |
+| **J** | **F, 4-vCPU runners, 4 lanes/env, concurrency 3** | 8 | 4 | 8.5 m | 3.6 | 32 | 45 % | 44.1 | **×0.56** | **×0.55** | **×3.58** |
+
+Reading it:
+
+- **On the runners a pool has today (4 vCPU), the whole program (F) is
+  ≈ 45 % less wall-clock, ≈ 15–25 % fewer vCPU-hours, ≈ 1.8× the runs a 200-vCPU
+  quota sustains.** Most of the wall-clock comes from RE5 (the heavy jobs stop
+  sharing a lane); most of the vCPU-hours from RE4 (one install per lane).
+- **Matching the lane to the runner (J) roughly doubles that again: ≈ 45 %
+  less wall-clock, ≈ 45 % fewer vCPU-hours, ≈ 3.5× the runs per quota.** Same
+  runner size as today, half the lanes, concurrency set so `3 × 1.5 ≈ 4 vCPU`.
+- **Against `mode: job` (A) — what a managed-runner pool runs today per the
+  lane spec §12 — J is ≈ 3.7× fewer vCPU-hours and ≈ 5.8× the runs per quota at
+  about the same wall-clock.**
+- Bigger runners (G, H) buy nothing on this shape: the lanes are chains, so a
+  16-vCPU box idles through them. They pay for wide lanes only.
+- The gate policy is a trade (C1 vs C2): `all` halves the peak and adds a
+  quarter to the wall-clock; `first` keeps the wall-clock and frees less.
+  RE7's event-driven waits are worth ~8 s per cross-lane edge (E → F); their
+  value is bounded waits and server load, not throughput.
+- Not in the model: **RE6**. Per spot interruption of a lane on the critical
+  path, today costs the time for someone to notice and rerun plus a full lane
+  rerun (10–20 min); with RE6 it is one lease (60 s) to detect, one setup, and
+  the remaining steps (2–3 min). At a few interruptions per hundred
+  runner-hours this is a tail effect, but it is the tail that misses a deploy
+  window. **RE1** is outside the fleet too: it affects `orun run` without
+  `--lane` (local runs, `--env` fan-out) and was measured at 4× on independent
+  components and 30 % on a chain beside a long job (§7).
+
+The sensitivities: the RE4 gain scales with install time × jobs per lane; the
+RE5 gain with how unevenly the heavy jobs land under count packing; the RE2
+gain with level depth × lane lifetime; and the runner-size result with how
+wide a lane's parallel frontier is. A pool should measure its own 70/35/1.5
+before choosing between F and J.
+
+## 9. Risks and open questions
 
 | # | Question | Proposed answer |
 |---|---|---|
