@@ -325,3 +325,110 @@ func TestLane_GHAPrintsAFailedJobsHeldSteps(t *testing.T) {
 		}
 	}
 }
+
+// edgePlan is cirrus-baseline's edge phase in miniature: one lane holds the
+// fleet and the API edge, the console waits on the edge from a lane of its
+// own, and the edge is listed last.
+func edgePlan() *model.Plan {
+	step := []model.PlanStep{{ID: "run", Name: "run"}}
+	return &model.Plan{
+		Jobs: []model.PlanJob{
+			{ID: "w1", Component: "w1", Lane: "F", Steps: step},
+			{ID: "w2", Component: "w2", Lane: "F", Steps: step},
+			{ID: "w3", Component: "w3", Lane: "F", Steps: step},
+			{ID: "edge", Component: "edge", Lane: "F", Steps: step},
+			{ID: "console", Component: "console", Lane: "C", DependsOn: []string{"edge"}, Steps: step},
+		},
+		Lanes: []model.PlanLane{
+			{ID: "F", Jobs: []string{"w1", "w2", "w3", "edge"}, Concurrency: 1},
+			{ID: "C", Jobs: []string{"console"}, Concurrency: 1},
+		},
+	}
+}
+
+// The slot goes to the job another lane waits on, not to the first listed.
+func TestLane_SlotGoesToTheJobOthersWaitOn(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		ex := &laneExecutor{}
+		r := laneRunner(t, ex, "F", []string{"w1", "w2", "w3", "edge"}, 1)
+		if err := r.Run(edgePlan()); err != nil {
+			t.Fatal(err)
+		}
+		if ex.ran[0] != "edge" {
+			t.Fatalf("run %d: ran %v; the edge must take the first slot", i, ex.ran)
+		}
+		if got := strings.Join(ex.ran[1:], ","); got != "w1,w2,w3" {
+			t.Fatalf("run %d: ties must keep plan order, ran %v", i, ex.ran)
+		}
+	}
+}
+
+// Inside a lane the head of the longer chain goes first: at one slot, y1 → y2
+// is two jobs behind y1 and x is one, so y1 runs before x although x is
+// listed first.
+func TestLane_SlotGoesToTheLongerChain(t *testing.T) {
+	step := []model.PlanStep{{ID: "run", Name: "run"}}
+	plan := &model.Plan{
+		Jobs: []model.PlanJob{
+			{ID: "x", Component: "x", Lane: "L", Steps: step},
+			{ID: "y1", Component: "y", Lane: "L", Steps: step},
+			{ID: "y2", Component: "y", Lane: "L", DependsOn: []string{"y1"}, Steps: step},
+		},
+		Lanes: []model.PlanLane{{ID: "L", Jobs: []string{"x", "y1", "y2"}, Concurrency: 1}},
+	}
+	for i := 0; i < 20; i++ {
+		ex := &laneExecutor{}
+		r := laneRunner(t, ex, "L", []string{"x", "y1", "y2"}, 1)
+		if err := r.Run(plan); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(ex.ran, ","); got != "y1,x,y2" && got != "y1,y2,x" {
+			t.Fatalf("run %d: ran %s; y1 must go first", i, got)
+		}
+	}
+}
+
+func TestCriticalPath(t *testing.T) {
+	got := criticalPath(edgePlan().Jobs)
+	want := map[string]int{"w1": 1, "w2": 1, "w3": 1, "edge": 2, "console": 1}
+	for id, n := range want {
+		if got[id] != n {
+			t.Errorf("%s: %d, want %d", id, got[id], n)
+		}
+	}
+}
+
+// Every slot comes back, and no more jobs run at once than there are slots.
+func TestSlotGate_NeverExceedsItsSlots(t *testing.T) {
+	const jobs, slots = 40, 3
+	g := newSlotGate(slots, jobs)
+	var mu sync.Mutex
+	inFlight, peak := 0, 0
+	var wg sync.WaitGroup
+	for i := 0; i < jobs; i++ {
+		tk := g.ticket(i%5, i)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tk.acquire()
+			mu.Lock()
+			inFlight++
+			if inFlight > peak {
+				peak = inFlight
+			}
+			mu.Unlock()
+			time.Sleep(time.Millisecond)
+			mu.Lock()
+			inFlight--
+			mu.Unlock()
+			tk.release()
+		}()
+	}
+	wg.Wait()
+	if peak > slots {
+		t.Fatalf("peak %d > %d slots", peak, slots)
+	}
+	if g.free != slots {
+		t.Fatalf("free %d after all released, want %d", g.free, slots)
+	}
+}
