@@ -103,7 +103,7 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().BoolVar(&runGHACompat, "gha", false, "Enable GitHub Actions compatibility mode")
 	runCmd.Flags().StringVar(&runExecID, "exec-id", "", "Execution ID (for resume or CI). Auto-generated if not set")
 	runCmd.Flags().IntVar(&runConcurrency, "concurrency", 0, "Override plan concurrency (0 = use plan value)")
-	runCmd.Flags().IntVar(&runComponentConcurrency, "component-concurrency", 1, "Max number of components processed concurrently (0 = unlimited). Default 1 keeps the dashboard component-grouped.")
+	runCmd.Flags().IntVar(&runComponentConcurrency, "component-concurrency", 0, "Max number of components with jobs in flight at once (0 = no cap). Set it to keep a terminal run's output grouped by component.")
 	runCmd.Flags().StringArrayVar(&runComponent, "component", nil, "Filter jobs by component (repeatable)")
 	runCmd.Flags().StringVarP(&runEnv, "env", "e", "", "Filter jobs by environment (comma-separated)")
 	runCmd.Flags().BoolVar(&runAllEnvs, "all-envs", false, "Run all environments explicitly (mutually exclusive with --env)")
