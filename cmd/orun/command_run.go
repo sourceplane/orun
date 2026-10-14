@@ -108,7 +108,7 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().StringVarP(&runEnv, "env", "e", "", "Filter jobs by environment (comma-separated)")
 	runCmd.Flags().BoolVar(&runAllEnvs, "all-envs", false, "Run all environments explicitly (mutually exclusive with --env)")
 	runCmd.Flags().BoolVar(&runJSON, "json", false, "Output in JSON format")
-	runCmd.Flags().StringVar(&runIsolation, "isolation", "auto", "Per-job workspace isolation: auto (on when concurrency>1), workspace (always on), none (legacy shared tree)")
+	runCmd.Flags().StringVar(&runIsolation, "isolation", "auto", "Per-job workspace isolation: auto (on when concurrency>1), workspace (always on), component (always on; copy only the job's directory, link the rest), none (legacy shared tree)")
 	runCmd.Flags().BoolVar(&runKeepWorkspaces, "keep-workspaces", false, "Don't delete per-job staged workspaces after the run (debug)")
 	runCmd.Flags().BoolVar(&runBackground, "background", false, "Run the plan detached and return immediately. Track via 'orun status --watch'")
 
@@ -342,6 +342,9 @@ func runPlan() error {
 		if rep := ghchecks.FromEnv(os.Stderr); rep != nil {
 			r.Checks = rep
 		}
+	}
+	if !runner.ValidIsolationMode(strings.ToLower(strings.TrimSpace(runIsolation))) {
+		return fmt.Errorf("--isolation %q is not one of auto|workspace|component|none", runIsolation)
 	}
 	r.Isolation = runner.IsolationMode(strings.ToLower(strings.TrimSpace(runIsolation)))
 	r.KeepWorkspaces = runKeepWorkspaces

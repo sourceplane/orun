@@ -266,6 +266,10 @@ type PlanStep struct {
 	Name  string `json:"name,omitempty" yaml:"name,omitempty"`
 	Phase string `json:"phase,omitempty" yaml:"phase,omitempty"`
 	Order int    `json:"order,omitempty" yaml:"order,omitempty"`
+	// Scope is lane for a run step the first job of a lane runs once in the
+	// shared tree for every job that shares it (specs/orun-runner-efficiency
+	// §5.3); absent is job.
+	Scope string `json:"scope,omitempty" yaml:"scope,omitempty"`
 	Run   string `json:"run,omitempty" yaml:"run,omitempty"`
 	Use   string `json:"use,omitempty" yaml:"use,omitempty"`
 	// Workflow is the workflow file this step runs (the third execution

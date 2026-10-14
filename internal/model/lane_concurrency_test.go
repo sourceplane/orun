@@ -55,3 +55,18 @@ func TestLaneConcurrency_JSON(t *testing.T) {
 		t.Fatalf("zero must be omitted: %s", b)
 	}
 }
+
+func TestStep_ValidateScope(t *testing.T) {
+	if err := (Step{Name: "x", Run: "pnpm install"}).ValidateScope(); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Step{Name: "x", Run: "pnpm install", Scope: "lane"}).ValidateScope(); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Step{Name: "x", Use: "actions/setup-node@v4", Scope: "lane"}).ValidateScope(); err == nil || !strings.Contains(err.Error(), "run steps only") {
+		t.Fatalf("a use step cannot be lane-scoped: %v", err)
+	}
+	if err := (Step{Name: "x", Run: "true", Scope: "fleet"}).ValidateScope(); err == nil || !strings.Contains(err.Error(), "job|lane") {
+		t.Fatalf("an unknown scope is refused: %v", err)
+	}
+}

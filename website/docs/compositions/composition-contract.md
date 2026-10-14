@@ -315,7 +315,9 @@ Runtime environment variables declared in intent or component env blocks:
 
 Jobs can declare: `runsOn`, `timeout`, `retries`, `labels`, `capabilities`, `steps`.
 
-Steps can declare: `run` or `use`, `capability`, `phase`, `order`, `with`, `env`, `shell`, `working-directory`, `timeout`, `retry`, `onFailure`.
+Steps can declare: `run` or `use`, `capability`, `phase`, `order`, `scope`, `with`, `env`, `shell`, `working-directory`, `timeout`, `retry`, `onFailure`.
+
+`scope: lane` marks a `run` step that every job of a [lane](../concepts/lanes.md#share-a-lanes-setup) would execute identically — an install, a cache warm. The first job to reach it runs it once in the shared source tree; every other job of the lane whose step is the same after templating (same command, shell, environment and working directory) reuses the result. Lane-scoped steps must come first in a job, before its private tree is staged, and apply to `run` steps only: an action's exported environment stays with the job that ran it.
 
 ## Breaking changes (v2.0.0)
 

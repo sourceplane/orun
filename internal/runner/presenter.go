@@ -286,6 +286,17 @@ func (r *Runner) printStepSkipped(stepID string, index, total int) {
 	})
 }
 
+// printStepShared reports a lane-scoped step this job did not run: another
+// job of the lane ran it once for every job (lane_setup.go).
+func (r *Runner) printStepShared(stepID string, index, total int, owner string) {
+	if r.inGHA() || !r.Verbose {
+		return
+	}
+	r.withPrintLock(func() {
+		fmt.Fprintf(r.Stdout, "  %s %s (%d/%d) shared with %s\n", ui.Yellow(r.Color, "↷"), stepID, index, total, owner)
+	})
+}
+
 // updateLiveStep updates the spinner row label for an in-flight job.
 func (r *Runner) updateLiveStep(job model.PlanJob, stepID string, stepIndex, stepTotal int) {
 	if r.live == nil {
