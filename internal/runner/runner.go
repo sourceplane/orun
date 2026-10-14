@@ -1773,7 +1773,13 @@ func (r *Runner) stepExecContext(base executor.ExecContext, job model.PlanJob, s
 	}
 	execContext.StepEnv = executor.JobEnvironment(step.Env)
 	execContext.SecretEnv = secretEnv
-	execContext.WorkDir = r.resolveStepWorkingDir(workingDir, step.WorkingDirectory)
+	// workingDir is the step's directory, already resolved by the caller
+	// against the job's directory (the only place a step's
+	// `working-directory` is applied). Applying it here again joined a
+	// relative value twice: `../..` from apps/x reached the parent of the
+	// repository, and the first composition to use one failed with "No
+	// package.json found in /home".
+	execContext.WorkDir = workingDir
 	// Secret env is the highest-precedence layer and lives only in this
 	// context (never in job.Env, the plan, or persisted state).
 	execContext.Env = executor.MergeEnvironment(execContext.BaseEnv, execContext.JobEnv, execContext.StepEnv, secretEnv)
