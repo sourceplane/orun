@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/sourceplane/orun/internal/discovery"
 	"github.com/sourceplane/orun/internal/remotestate"
@@ -215,7 +216,16 @@ func newRemoteBackend(backendURL string) (statebackend.Backend, error) {
 	scope := resolveScope("", "", intentOrg, intentProject, linkOrg, linkProject)
 	client := remotestate.NewClientWithScope(backendURL, version, tokenSrc, scope)
 	runnerID := statebackend.DeriveRunnerID()
-	return statebackend.NewRemoteStateBackend(client, runnerID), nil
+	inner := statebackend.NewRemoteStateBackend(client, runnerID)
+	if strings.EqualFold(os.Getenv("ORUN_COORDINATION"), "legacy") {
+		return inner, nil
+	}
+	// The coordination backend, as `orun run` uses: its reads fold the run's
+	// event log, and it can long-poll that log, so `status --watch` is woken
+	// by the run's events instead of polling every second
+	// (specs/orun-sync-efficiency F5).
+	coord := &statebackend.CoordClient{BaseURL: client.ScopedStateBaseURL(), TokenSource: tokenSrc}
+	return statebackend.NewCoordBackend(coord, inner, runnerID), nil
 }
 
 func commandUsesIntent(cmd *cobra.Command) bool {

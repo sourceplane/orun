@@ -69,7 +69,9 @@ def simulate_wait(shape, level, fixes, kind):
 
     kind="matrix": waitForJobRunnable (cmd/orun/command_run.go). Each iteration
     long-polls for min(poll, 15) s, then reads the frontier and (deps > 0) the
-    run state; poll doubles to 15 s after every iteration.
+    run state; poll doubles to 15 s after every iteration. (Before SE0 a lapse
+    was reported as an event; for this loop that made no difference to the
+    request count, so the F1 row equals today's for the matrix shape.)
     kind="lane": awaitRemoteUpstreams (cmd/orun/run_lane.go). Reads the run state,
     then long-polls for min(delay, 15) s; `continue` on a reported event (delay
     unchanged), else sleeps delay and doubles it to 15 s.
@@ -110,8 +112,8 @@ def simulate_wait(shape, level, fixes, kind):
             if fixes.get("incremental_state"):
                 pass  # the long-poll's events are folded locally; nothing else to read
             else:
-                if not reported:
-                    t += step  # the sleep on a (correctly reported) timeout, as coded
+                # the long-poll is the sleep (SE0); a lapse still re-reads, on
+                # the 2, 4, 8, 15 s schedule, until SE1 folds the events locally
                 frontier_reads += 1
                 state_reads += 1
             step = min(step * 2, 15.0)

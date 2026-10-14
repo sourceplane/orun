@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -416,5 +417,42 @@ func TestPerformRemoteJobClaim_RetryRun_DepsBlockedRetriesUntilClaim(t *testing.
 	}
 	if backend.claimCalls < 3 {
 		t.Fatalf("expected at least 3 claim attempts, got %d", backend.claimCalls)
+	}
+}
+
+// quietClaimBackend is a fakeBackend whose long-poll lapses with no events
+// (as a run with nothing happening does), recording what each asked for.
+type quietClaimBackend struct {
+	*fakeBackend
+	asked []int
+}
+
+func (q *quietClaimBackend) WaitForRunEvents(_ context.Context, _ string, sinceSeq, waitSeconds int) (int, error) {
+	if waitSeconds == 0 {
+		return sinceSeq, nil
+	}
+	q.asked = append(q.asked, waitSeconds)
+	time.Sleep(time.Duration(waitSeconds) * time.Millisecond)
+	return sinceSeq, nil
+}
+
+// A --job waiting on its dependencies long-polls the run's events; when the
+// long-poll lapses it does not also sleep the same interval, and it backs
+// off 2, 4, 8, 15 s (specs/orun-sync-efficiency F1).
+func TestWaitForJobRunnable_QuietRunBacksOffWithoutSleepingTwice(t *testing.T) {
+	q := &quietClaimBackend{fakeBackend: &fakeBackend{runnableJobs: [][]string{{"other"}}}}
+	start := time.Now()
+	err := waitForJobRunnable(context.Background(), q, "run-1", "target-job", nil, nil, 2*time.Second, time.Now().Add(80*time.Millisecond), false, nil)
+	if err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("want the deadline: %v", err)
+	}
+	if el := time.Since(start); el > time.Second {
+		t.Fatalf("the loop slept 2 s on a timer after a 2 s long-poll: %v", el)
+	}
+	if len(q.asked) < 4 || q.asked[0] != 2 || q.asked[1] != 4 || q.asked[2] != 8 || q.asked[3] != 15 {
+		t.Fatalf("the long-polls must lengthen 2, 4, 8, 15: %v", q.asked)
+	}
+	if q.runnableCalls != len(q.asked) {
+		t.Fatalf("one frontier read per long-poll: reads=%d long-polls=%d", q.runnableCalls, len(q.asked))
 	}
 }

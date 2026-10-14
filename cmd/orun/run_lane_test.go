@@ -278,3 +278,79 @@ func TestAwaitRemoteUpstreams_EventDrivenAndBoundedByThePlan(t *testing.T) {
 		t.Fatalf("want the plan's bound in the timeout: %v", err)
 	}
 }
+
+// quietBackend is a fakeRunState whose long-poll always lapses with no
+// events: it records the wait each long-poll asked for and sleeps a
+// millisecond per second of it, so a loop that backs off is seen backing off
+// and a loop that does not is seen spinning.
+type quietBackend struct {
+	*fakeRunState
+	mu    sync.Mutex
+	asked []int
+}
+
+func (q *quietBackend) WaitForRunEvents(_ context.Context, _ string, sinceSeq, waitSeconds int) (int, error) {
+	if waitSeconds == 0 {
+		return sinceSeq, nil
+	}
+	q.mu.Lock()
+	q.asked = append(q.asked, waitSeconds)
+	q.mu.Unlock()
+	time.Sleep(time.Duration(waitSeconds) * time.Millisecond)
+	return sinceSeq, nil // nothing happened
+}
+
+func (q *quietBackend) waits() []int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return append([]int(nil), q.asked...)
+}
+
+// A lapsed long-poll is not an event (specs/orun-sync-efficiency F1): the
+// wait reports it as time spent, not as news.
+func TestEventWait_LapseIsNotAnEvent(t *testing.T) {
+	quiet := &quietBackend{fakeRunState: &fakeRunState{states: []map[string]string{{"up": "running"}}}}
+	w := newEventWait(context.Background(), quiet, "run")
+	if woke, blocked := w.wait(context.Background(), time.Second); woke || !blocked {
+		t.Fatalf("a lapsed long-poll: woke=%v blocked=%v; want time spent and no news", woke, blocked)
+	}
+
+	ev := &eventBackend{fakeRunState: &fakeRunState{states: []map[string]string{{"up": "running"}}}}
+	w = newEventWait(context.Background(), ev, "run")
+	if woke, blocked := w.wait(context.Background(), time.Second); !woke || !blocked {
+		t.Fatalf("an event: woke=%v blocked=%v", woke, blocked)
+	}
+
+	plain := &fakeRunState{states: []map[string]string{{"up": "running"}}}
+	w = newEventWait(context.Background(), plain, "run")
+	if woke, blocked := w.wait(context.Background(), time.Second); woke || blocked {
+		t.Fatalf("no long-poll on this backend: woke=%v blocked=%v", woke, blocked)
+	}
+}
+
+// On a run with no news a lane's wait backs off: its long-polls lengthen
+// 2, 4, 8, 15 s and the state is re-read once per long-poll, never between.
+// The first version re-read every 2 s for the whole wait (F1).
+func TestAwaitRemoteUpstreams_QuietRunBacksOff(t *testing.T) {
+	oldWait, oldPoll := laneUpstreamWait, laneUpstreamPoll
+	laneUpstreamWait, laneUpstreamPoll = time.Minute, 2*time.Second
+	t.Cleanup(func() { laneUpstreamWait, laneUpstreamPoll = oldWait, oldPoll })
+	plan := &model.Plan{Jobs: []model.PlanJob{{ID: "up"}, {ID: "down", DependsOn: []string{"up"}}}}
+	running := map[string]string{"up": "running"}
+	// Four quiet reads, then the upstream is done: four long-polls in between.
+	quiet := &quietBackend{fakeRunState: &fakeRunState{states: []map[string]string{running, running, running, running, {"up": "completed"}}}}
+
+	start := time.Now()
+	if err := awaitRemoteUpstreams(context.Background(), quiet, "run", plan, "down", []string{"up"}, io.Discard, false, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if el := time.Since(start); el > time.Second {
+		t.Fatalf("the loop slept on a timer beside the long-poll: %v", el)
+	}
+	if got := quiet.waits(); !reflect.DeepEqual(got, []int{2, 4, 8, 15}) {
+		t.Fatalf("the long-polls must lengthen 2, 4, 8, 15: %v", got)
+	}
+	if quiet.calls != 5 {
+		t.Fatalf("one state read before the first long-poll and one after each: reads=%d", quiet.calls)
+	}
+}
