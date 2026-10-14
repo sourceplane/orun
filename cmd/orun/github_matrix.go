@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/sourceplane/orun/internal/model"
@@ -165,4 +167,23 @@ func githubLaneMatrixLevelsJSON(plan *model.Plan) string {
 		return "[]"
 	}
 	return "[" + strings.Join(levels, ",") + "]"
+}
+
+// resolveMaxLanes is the lane budget override for this plan: the --max-lanes
+// flag, else ORUN_MAX_LANES, else none (0). A CI plan job sets it from the
+// runner pool's free capacity instead of a constant in intent.yaml
+// (specs/orun-runner-efficiency §5.2).
+func resolveMaxLanes(flag int) (int, string, error) {
+	if flag > 0 {
+		return flag, "flag", nil
+	}
+	v := strings.TrimSpace(os.Getenv("ORUN_MAX_LANES"))
+	if v == "" {
+		return 0, "", nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return 0, "", fmt.Errorf("ORUN_MAX_LANES must be a positive integer, got %q", v)
+	}
+	return n, "env", nil
 }

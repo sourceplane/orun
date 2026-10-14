@@ -2,6 +2,7 @@ package lanes
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -425,5 +426,68 @@ func TestAssign_LanesCarryLevelAndUpstreams(t *testing.T) {
 	}
 	if l := p.Lanes[0]; l.Level != 0 || l.UpstreamLanes != nil || l.UpstreamJobs != nil {
 		t.Fatalf("env lane = %+v", l)
+	}
+}
+
+// concurrency: auto is carried to the plan as 0, which `orun run --lane`
+// resolves to the runner's core count (specs/orun-runner-efficiency §5.2).
+// Job-mode lanes stay at 1: one job needs no slots.
+func TestAssign_AutoConcurrencyIsZeroInPlan(t *testing.T) {
+	cfg := &model.IntentLanes{Mode: "env", Concurrency: model.LaneConcurrencyAuto,
+		Groups: map[string]model.LaneGroup{"fleet": {Concurrency: model.LaneConcurrencyAuto}, "big": {Concurrency: 8}}}
+	p := plan(job("a.stage", "a", "stage"), job("b.stage", "b", "stage"), job("c.stage", "c", "stage"), job("d.stage", "d", "stage"))
+	if _, err := Assign(p, Options{Config: cfg, ComponentLanes: map[string]string{"b": "fleet", "c": "big"}, CheckName: checkName}); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	for _, l := range p.Lanes {
+		got[l.ID] = l.Concurrency
+	}
+	if got["stage"] != 0 || got["stage/fleet"] != 0 || got["stage/big"] != 8 {
+		t.Fatalf("concurrency per lane = %v; want env and fleet auto (0), big 8", got)
+	}
+	p = plan(job("a.stage", "a", "stage"))
+	if _, err := Assign(p, Options{Config: &model.IntentLanes{Concurrency: model.LaneConcurrencyAuto}, CheckName: checkName}); err != nil {
+		t.Fatal(err)
+	}
+	if p.Lanes[0].Concurrency != 1 {
+		t.Fatalf("a job-mode lane runs one job: concurrency %d", p.Lanes[0].Concurrency)
+	}
+}
+
+// --max-lanes / ORUN_MAX_LANES override the intent's budget for one plan,
+// and plan.metadata.lanes records the budget and where it came from.
+func TestAssign_MaxLanesOverrideIsRecorded(t *testing.T) {
+	var jobs []model.PlanJob
+	for i := 0; i < 20; i++ {
+		jobs = append(jobs, job(fmt.Sprintf("c%02d.stage", i), fmt.Sprintf("c%02d", i), "stage"))
+	}
+	cases := []struct {
+		name  string
+		cfg   *model.IntentLanes
+		opts  Options
+		lanes int
+		meta  model.PlanLanesMeta
+	}{
+		{"default", &model.IntentLanes{Mode: "auto"}, Options{}, 16, model.PlanLanesMeta{Mode: "auto", MaxLanes: 16, MaxLanesFrom: "default"}},
+		{"intent", &model.IntentLanes{Mode: "auto", MaxLanes: 8}, Options{}, 8, model.PlanLanesMeta{Mode: "auto", MaxLanes: 8, MaxLanesFrom: "intent"}},
+		{"flag", &model.IntentLanes{Mode: "auto", MaxLanes: 8}, Options{MaxLanes: 4, MaxLanesFrom: "flag"}, 4, model.PlanLanesMeta{Mode: "auto", MaxLanes: 4, MaxLanesFrom: "flag"}},
+		{"env", &model.IntentLanes{Mode: "auto"}, Options{MaxLanes: 5, MaxLanesFrom: "env"}, 5, model.PlanLanesMeta{Mode: "auto", MaxLanes: 5, MaxLanesFrom: "env"}},
+	}
+	for _, c := range cases {
+		p := plan(jobs...)
+		c.opts.Config, c.opts.CheckName = c.cfg, checkName
+		if _, err := Assign(p, c.opts); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if len(p.Lanes) != c.lanes {
+			t.Fatalf("%s: %d lanes, want %d: %v", c.name, len(p.Lanes), c.lanes, laneIDs(p))
+		}
+		if p.Metadata.Lanes == nil || *p.Metadata.Lanes != c.meta {
+			t.Fatalf("%s: metadata.lanes = %+v, want %+v", c.name, p.Metadata.Lanes, c.meta)
+		}
+		if c.cfg.MaxLanes == 8 && c.opts.MaxLanes > 0 && c.cfg.MaxLanes != 8 {
+			t.Fatalf("%s: the intent must not be mutated", c.name)
+		}
 	}
 }

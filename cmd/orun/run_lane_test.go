@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -109,5 +110,53 @@ func TestAwaitRemoteUpstreams(t *testing.T) {
 	stuck := &fakeRunState{states: []map[string]string{{"up": "running"}}}
 	if err := awaitRemoteUpstreams(ctx, stuck, "run", plan, "down", []string{"up"}, io.Discard, false, false); err == nil || !strings.Contains(err.Error(), "timeout") {
 		t.Fatalf("want a timeout: %v", err)
+	}
+}
+
+// concurrency: auto reaches the plan as 0 and is sized to this machine's
+// cores when the lane is selected (specs/orun-runner-efficiency §5.2).
+func TestSelectLane_AutoConcurrencyIsTheMachinesCores(t *testing.T) {
+	plan := &model.Plan{
+		Jobs:  []model.PlanJob{{ID: "a"}, {ID: "b"}},
+		Lanes: []model.PlanLane{{ID: "stage/auto-1", Jobs: []string{"a", "b"}, Concurrency: 0}},
+	}
+	withLaneFlags(t, "stage/auto-1", "")
+	conc, err := selectLane(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := runtime.NumCPU(); conc != want {
+		t.Fatalf("concurrency = %d, want the machine's %d cores", conc, want)
+	}
+}
+
+func TestResolveMaxLanes(t *testing.T) {
+	t.Setenv("ORUN_MAX_LANES", "")
+	if n, from, err := resolveMaxLanes(0); n != 0 || from != "" || err != nil {
+		t.Fatalf("nothing set: %d %q %v", n, from, err)
+	}
+	if n, from, err := resolveMaxLanes(7); n != 7 || from != "flag" || err != nil {
+		t.Fatalf("flag: %d %q %v", n, from, err)
+	}
+	t.Setenv("ORUN_MAX_LANES", "24")
+	if n, from, err := resolveMaxLanes(0); n != 24 || from != "env" || err != nil {
+		t.Fatalf("env: %d %q %v", n, from, err)
+	}
+	if n, from, err := resolveMaxLanes(7); n != 7 || from != "flag" || err != nil {
+		t.Fatalf("the flag wins over the env: %d %q %v", n, from, err)
+	}
+	t.Setenv("ORUN_MAX_LANES", "lots")
+	if _, _, err := resolveMaxLanes(0); err == nil || !strings.Contains(err.Error(), "ORUN_MAX_LANES") {
+		t.Fatalf("a bad env value must be refused: %v", err)
+	}
+	t.Setenv("ORUN_MAX_LANES", "0")
+	if _, _, err := resolveMaxLanes(0); err == nil {
+		t.Fatal("zero must be refused")
+	}
+}
+
+func TestLaneConcurrencyLabel(t *testing.T) {
+	if laneConcurrencyLabel(0) != "auto" || laneConcurrencyLabel(6) != "6" {
+		t.Fatal("0 is auto")
 	}
 }

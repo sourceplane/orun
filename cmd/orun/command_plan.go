@@ -11,6 +11,7 @@ var (
 	planComponents       []string
 	planLong             bool
 	strictLanes          bool
+	maxLanesFlag         int
 	artifactBackend      string
 	githubOutput         bool
 	planNoCatalogRefresh bool
@@ -74,6 +75,7 @@ func registerPlanCommand(root *cobra.Command) {
 	planCmd.Flags().StringVar(&planName, "name", "", "Name shown in the plan summary (run a plan by its checksum or \"latest\")")
 	planCmd.Flags().StringVarP(&viewPlan, "view", "v", "", "View plan (dag/dag:long/dependencies/lanes/component=NAME)")
 	planCmd.Flags().BoolVar(&strictLanes, "strict-lanes", false, "Fail the plan when lanes form a cycle instead of splitting them (execution.lanes.onCycle: reject)")
+	planCmd.Flags().IntVar(&maxLanesFlag, "max-lanes", 0, "Override execution.lanes.maxLanes for this plan, e.g. from the runner pool's free capacity (or set ORUN_MAX_LANES; 0 = the intent's value)")
 	planCmd.Flags().BoolVar(&planLong, "long", false, "Show detailed output (step commands, IDs)")
 	planCmd.Flags().BoolVar(&changedOnly, "changed", false, "Show only changed components (requires git)")
 	planCmd.Flags().StringVar(&baseBranch, "base", "", "Base ref for changed detection (default: main)")

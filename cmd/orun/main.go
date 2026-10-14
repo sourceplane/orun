@@ -361,6 +361,11 @@ func generatePlan() error {
 		laneTriggers = triggerResolution.MatchedTriggerNames
 	}
 	laneOpts := lanes.ForIntent(intent, laneTriggers, strictLanes, render.PlanJobCheckName)
+	if maxLanes, from, err := resolveMaxLanes(maxLanesFlag); err != nil {
+		return err
+	} else if maxLanes > 0 {
+		laneOpts.MaxLanes, laneOpts.MaxLanesFrom = maxLanes, from
+	}
 	var laneResult lanes.Result
 	plan, err := renderer.RenderPlanWithLanes(intent.Metadata, jobInstances, jobBindings, sorted, func(p *model.Plan) error {
 		r, aerr := lanes.Assign(p, laneOpts)

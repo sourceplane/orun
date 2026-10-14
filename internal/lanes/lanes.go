@@ -29,6 +29,11 @@ type Options struct {
 	Strict bool
 	// CheckName gives a job's check title, the name of a job-mode lane.
 	CheckName func(model.PlanJob) string
+	// MaxLanes, when > 0, overrides the intent's maxLanes for this plan
+	// (`orun plan --max-lanes`, ORUN_MAX_LANES); MaxLanesFrom says which
+	// ("flag" or "env") and is recorded in plan.metadata.lanes.
+	MaxLanes     int
+	MaxLanesFrom string
 }
 
 // Result reports what Assign decided beyond the plan itself.
@@ -68,6 +73,23 @@ func Assign(plan *model.Plan, opts Options) (Result, error) {
 		plan.Lanes = nil
 		return res, nil
 	}
+	// The lane budget: an override for this plan, else the intent's, else
+	// the default; recorded with its provenance so a plan reader sees why
+	// the plan has the lanes it has.
+	meta := &model.PlanLanesMeta{Mode: mode, MaxLanes: cfg.MaxLanes, MaxLanesFrom: "intent"}
+	switch {
+	case opts.MaxLanes > 0:
+		c := *cfg
+		c.MaxLanes = opts.MaxLanes
+		cfg = &c
+		meta.MaxLanes, meta.MaxLanesFrom = opts.MaxLanes, opts.MaxLanesFrom
+		if meta.MaxLanesFrom == "" {
+			meta.MaxLanesFrom = "flag"
+		}
+	case cfg.MaxLanes <= 0:
+		meta.MaxLanes, meta.MaxLanesFrom = model.DefaultLaneMaxLanes, "default"
+	}
+	plan.Metadata.Lanes = meta
 
 	g := newJobGraph(plan.Jobs)
 	drafts := initialDrafts(plan, cfg, mode, opts.ComponentLanes, g)
@@ -103,11 +125,21 @@ func EffectiveMode(cfg *model.IntentLanes, matched []string) string {
 	return cfg.Mode
 }
 
+// laneConcurrency is a draft's concurrency from the intent: the count, -1
+// for auto (the runner's core count, resolved by `orun run`; the plan carries
+// 0), else the default.
 func laneConcurrency(cfg *model.IntentLanes) int {
-	if cfg.Concurrency > 0 {
-		return cfg.Concurrency
+	return concurrencyOf(cfg.Concurrency, model.DefaultLaneConcurrency)
+}
+
+func concurrencyOf(c model.LaneConcurrency, fallback int) int {
+	switch {
+	case c.IsAuto():
+		return -1
+	case c > 0:
+		return int(c)
 	}
-	return model.DefaultLaneConcurrency
+	return fallback
 }
 
 // initialDrafts applies resolution (§3.3) under the boundaries of §4: one
@@ -143,8 +175,8 @@ func initialDrafts(plan *model.Plan, cfg *model.IntentLanes, mode string, compLa
 			continue
 		case ann != "":
 			conc := laneConcurrency(cfg)
-			if grp, ok := cfg.Groups[ann]; ok && grp.Concurrency > 0 {
-				conc = grp.Concurrency
+			if grp, ok := cfg.Groups[ann]; ok && grp.Concurrency != 0 {
+				conc = concurrencyOf(grp.Concurrency, conc)
 			}
 			add("grp\x00"+env+"\x00"+ann+"\x00"+runsOn, func() *draft {
 				return &draft{baseID: env + "/" + ann, env: env, runsOn: runsOn, source: "group", group: ann, concurrency: conc}
@@ -257,7 +289,10 @@ func finalize(plan *model.Plan, g *jobGraph, drafts []*draft, checkName func(mod
 			plan.Jobs[j].Lane = d.laneID()
 		}
 		conc := d.concurrency
-		if conc < 1 {
+		switch {
+		case conc < 0: // auto: the runner sizes it to its cores
+			conc = 0
+		case conc == 0:
 			conc = 1
 		}
 		lane := model.PlanLane{

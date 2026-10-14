@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -41,6 +43,18 @@ func selectLane(plan *model.Plan) (int, error) {
 	for _, lane := range plan.Lanes {
 		if lane.ID == id {
 			runLaneJobs = append([]string{}, lane.Jobs...)
+			if lane.Concurrency == 0 {
+				// concurrency: auto — the runner's core count, on this machine
+				// (specs/orun-runner-efficiency §5.2).
+				n := runtime.NumCPU()
+				if n < 1 {
+					n = 1
+				}
+				if runConcurrency == 0 {
+					fmt.Fprintf(os.Stderr, "  %s lane %s: concurrency auto → %d (%d CPUs)\n", ui.Dim(ui.ColorEnabledForWriter(os.Stderr), "○"), id, n, runtime.NumCPU())
+				}
+				return n, nil
+			}
 			return lane.Concurrency, nil
 		}
 	}
