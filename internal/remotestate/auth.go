@@ -285,10 +285,24 @@ func (s *FileTokenSource) Token(_ context.Context) (string, error) {
 }
 
 // SessionTokenSource resolves and refreshes a local Orun CLI session token.
+// The access token last read from the store is reused for sessionReuseFor
+// while it is not near expiry: a run makes a request every few seconds per
+// job, and each one read and parsed the session (a file, or the keychain)
+// again (specs/orun-sync-efficiency F10). A login made or revoked elsewhere
+// is seen within sessionReuseFor.
 type SessionTokenSource struct {
 	BackendURL string
 	Version    string
+
+	mu     sync.Mutex
+	token  string
+	expiry time.Time
+	readAt time.Time
 }
+
+// sessionReuseFor is how long a token read from the session store serves
+// requests before the store is consulted again.
+const sessionReuseFor = 30 * time.Second
 
 // refreshGroup coalesces concurrent refreshes within a single process: when
 // many goroutines (e.g. a `run` firing parallel state requests) hit an expired
@@ -311,6 +325,14 @@ var refreshGroup singleflight.Group
 // instead of replaying a spent one (which would trip reuse-detection and revoke
 // the whole session).
 func (s *SessionTokenSource) Token(ctx context.Context) (string, error) {
+	s.mu.Lock()
+	if s.token != "" && time.Since(s.readAt) < sessionReuseFor && !tokenExpired(s.expiry) {
+		t := s.token
+		s.mu.Unlock()
+		return t, nil
+	}
+	s.mu.Unlock()
+
 	creds, err := cliauth.LoadSession()
 	if err != nil {
 		return "", err
@@ -319,6 +341,7 @@ func (s *SessionTokenSource) Token(ctx context.Context) (string, error) {
 		return "", os.ErrNotExist
 	}
 	if creds.AccessToken != "" && !tokenExpired(creds.AccessExpiryTime()) {
+		s.remember(creds.AccessToken, creds.AccessExpiryTime())
 		return creds.AccessToken, nil
 	}
 	if strings.TrimSpace(creds.RefreshToken) == "" {
@@ -331,7 +354,15 @@ func (s *SessionTokenSource) Token(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The refreshed token's expiry is read with the session next time.
+	s.remember(token.(string), time.Time{})
 	return token.(string), nil
+}
+
+func (s *SessionTokenSource) remember(token string, expiry time.Time) {
+	s.mu.Lock()
+	s.token, s.expiry, s.readAt = token, expiry, time.Now()
+	s.mu.Unlock()
 }
 
 // refreshOnce performs a single, serialized refresh via the shared critical

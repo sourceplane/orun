@@ -224,7 +224,7 @@ func newRemoteBackend(backendURL string) (statebackend.Backend, error) {
 	// event log, and it can long-poll that log, so `status --watch` is woken
 	// by the run's events instead of polling every second
 	// (specs/orun-sync-efficiency F5).
-	coord := &statebackend.CoordClient{BaseURL: client.ScopedStateBaseURL(), TokenSource: tokenSrc}
+	coord := &statebackend.CoordClient{HTTP: client.CoordinationHTTPClient(), BaseURL: client.ScopedStateBaseURL(), TokenSource: tokenSrc}
 	return statebackend.NewCoordBackend(coord, inner, runnerID), nil
 }
 

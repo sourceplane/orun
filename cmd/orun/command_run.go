@@ -619,7 +619,7 @@ func initRemoteRun(ctx context.Context, plan *model.Plan, execID, backendURL str
 	// only as a temporary escape hatch. Run create, logs, and read-model loads
 	// still delegate to the inner REST client (same backend, not the old plane).
 	if !strings.EqualFold(os.Getenv("ORUN_COORDINATION"), "legacy") {
-		coord := &statebackend.CoordClient{BaseURL: client.ScopedStateBaseURL(), TokenSource: tokenSrc}
+		coord := &statebackend.CoordClient{HTTP: client.CoordinationHTTPClient(), BaseURL: client.ScopedStateBaseURL(), TokenSource: tokenSrc}
 		cb := statebackend.NewCoordBackend(coord, remoteBackend, runnerID)
 		// --retry re-opens the selected job when it already FAILED in this
 		// execution (a CI rerun resuming the same exec-id); the claim carries

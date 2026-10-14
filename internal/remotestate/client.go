@@ -25,10 +25,13 @@ const (
 	resolveReadTimeout = 120 * time.Second
 	resolveMaxAttempts = 3
 	logUploadTimeout   = 60 * time.Second
-	connectTimeout     = 5 * time.Second
-	maxRetryAttempts   = 3
-	retryBaseDelay     = 2 * time.Second
-	retryMaxDelay      = 10 * time.Second
+	// coordinationTimeout bounds a coordination verb or a long-poll read: the
+	// server holds a long-poll for at most 25 s.
+	coordinationTimeout = 45 * time.Second
+	connectTimeout      = 5 * time.Second
+	maxRetryAttempts    = 3
+	retryBaseDelay      = 2 * time.Second
+	retryMaxDelay       = 10 * time.Second
 
 	// objectWriteRetryAttempts caps attempts for raw object-plane writes (blob
 	// PUTs, multipart parts). Set higher than maxRetryAttempts because a catalog
@@ -270,6 +273,14 @@ func NewClientWithScope(baseURL, version string, tokenSrc TokenSource, scope Sco
 
 // Scope returns the org/project scope this client is bound to.
 func (c *Client) Scope() Scope { return c.scope }
+
+// CoordinationHTTPClient is the HTTP client for the coordination verbs and
+// long-polls: this client's keep-alive transport (one pool for every request
+// a run makes, instead of http.DefaultClient's two idle connections and no
+// timeout) under a timeout that outlasts the server's longest hold.
+func (c *Client) CoordinationHTTPClient() *http.Client {
+	return &http.Client{Transport: c.httpClient.Transport, Timeout: coordinationTimeout}
+}
 
 // ScopedStateBaseURL returns the absolute base URL of this client's scoped state
 // plane: {baseURL}/v1/organizations/{org}/projects/{proj}/state. Adapters that
