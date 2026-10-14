@@ -721,6 +721,16 @@ func generatePlan() error {
 			laneMatrix, laneCount := githubLaneMatrixJSON(plan)
 			outputLines = append(outputLines, fmt.Sprintf("lane-matrix<<EOF\n%s\nEOF", laneMatrix))
 			outputLines = append(outputLines, fmt.Sprintf("lane-count=%d", laneCount))
+			// Level by level: lane-matrix-<k> per level, the array of them, and
+			// the level count, so a workflow can chain one matrix job per level
+			// with needs: and never provision a runner before its upstream lanes
+			// are done (specs/orun-runner-efficiency §5.1).
+			levels := githubLaneMatrixLevels(plan)
+			for k, m := range levels {
+				outputLines = append(outputLines, fmt.Sprintf("lane-matrix-%d<<EOF\n%s\nEOF", k, m))
+			}
+			outputLines = append(outputLines, fmt.Sprintf("lane-matrix-levels<<EOF\n%s\nEOF", githubLaneMatrixLevelsJSON(plan)))
+			outputLines = append(outputLines, fmt.Sprintf("lane-level-count=%d", len(levels)))
 			outputLines = append(outputLines, fmt.Sprintf("plan_id=%s", planID))
 			outputLines = append(outputLines, fmt.Sprintf("exec_id=%s", execID))
 
@@ -756,6 +766,8 @@ func writeEmptyGithubMatrix() {
 		"matrix<<EOF\n{\"include\":[]}\nEOF",
 		"lane-matrix<<EOF\n{\"include\":[]}\nEOF",
 		"lane-count=0",
+		"lane-matrix-levels<<EOF\n[]\nEOF",
+		"lane-level-count=0",
 		"plan_id=",
 		"exec_id=",
 	}

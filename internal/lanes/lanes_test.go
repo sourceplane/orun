@@ -385,3 +385,45 @@ func TestAllocateLanesIsProportional(t *testing.T) {
 		t.Fatalf("alloc = %v sums to %d", got, sum)
 	}
 }
+
+// Each lane records the lanes and jobs it waits on and its level in the lane
+// graph (specs/orun-runner-efficiency §5.1): 0 with no upstream lane, else
+// one more than the deepest upstream lane.
+func TestAssign_LanesCarryLevelAndUpstreams(t *testing.T) {
+	p := plan(
+		job("db.stage", "db", "stage"),
+		job("api.stage", "api", "stage", "db.stage"),
+		job("db.prod", "db", "prod", "db.stage"),
+		job("api.prod", "api", "prod", "db.prod", "api.stage"),
+	)
+	if _, err := Assign(p, Options{Config: &model.IntentLanes{Mode: "component"}, CheckName: checkName}); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]model.PlanLane{}
+	for _, l := range p.Lanes {
+		got[l.ID] = l
+	}
+	check := func(id string, level int, lanes, jobs []string) {
+		t.Helper()
+		l, ok := got[id]
+		if !ok {
+			t.Fatalf("no lane %s in %v", id, laneIDs(p))
+		}
+		if l.Level != level || !reflect.DeepEqual(l.UpstreamLanes, lanes) || !reflect.DeepEqual(l.UpstreamJobs, jobs) {
+			t.Fatalf("%s: level %d after %v via %v; want level %d after %v via %v", id, l.Level, l.UpstreamLanes, l.UpstreamJobs, level, lanes, jobs)
+		}
+	}
+	check("stage/db", 0, nil, nil)
+	check("stage/api", 1, []string{"stage/db"}, []string{"db.stage"})
+	check("prod/db", 1, []string{"stage/db"}, []string{"db.stage"})
+	check("prod/api", 2, []string{"prod/db", "stage/api"}, []string{"api.stage", "db.prod"})
+
+	// Everything in one lane waits on nothing outside it.
+	p = plan(job("a.stage", "a", "stage"), job("b.stage", "b", "stage", "a.stage"))
+	if _, err := Assign(p, Options{Config: &model.IntentLanes{Mode: "env"}, CheckName: checkName}); err != nil {
+		t.Fatal(err)
+	}
+	if l := p.Lanes[0]; l.Level != 0 || l.UpstreamLanes != nil || l.UpstreamJobs != nil {
+		t.Fatalf("env lane = %+v", l)
+	}
+}

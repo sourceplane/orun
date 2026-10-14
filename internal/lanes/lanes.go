@@ -277,6 +277,66 @@ func finalize(plan *model.Plan, g *jobGraph, drafts []*draft, checkName func(mod
 		}
 		plan.Lanes = append(plan.Lanes, lane)
 	}
+	stampUpstreams(plan, g, drafts)
+}
+
+// stampUpstreams records, per lane, the lanes and jobs its jobs wait on and
+// its level in the lane graph (specs/orun-runner-efficiency §5.1). The lane
+// graph is acyclic here (repairCycles ran), so levels are well defined: a
+// lane's level is one more than the deepest lane it waits on, 0 when it waits
+// on none. Lanes are in plan.Lanes order, drafts[i] being plan.Lanes[i].
+func stampUpstreams(plan *model.Plan, g *jobGraph, drafts []*draft) {
+	laneOf := make([]int, len(plan.Jobs))
+	for li, d := range drafts {
+		for _, j := range d.jobs {
+			laneOf[j] = li
+		}
+	}
+	upLanes := make([]map[int]struct{}, len(drafts))
+	upJobs := make([]map[int]struct{}, len(drafts))
+	for li, d := range drafts {
+		upLanes[li] = map[int]struct{}{}
+		upJobs[li] = map[int]struct{}{}
+		for _, j := range d.jobs {
+			for _, dep := range g.deps[j] {
+				if laneOf[dep] == li {
+					continue
+				}
+				upLanes[li][laneOf[dep]] = struct{}{}
+				upJobs[li][dep] = struct{}{}
+			}
+		}
+	}
+	level := make([]int, len(drafts))
+	done := make([]bool, len(drafts))
+	var visit func(li int) int
+	visit = func(li int) int {
+		if done[li] {
+			return level[li]
+		}
+		done[li] = true
+		l := 0
+		for up := range upLanes[li] {
+			if v := visit(up) + 1; v > l {
+				l = v
+			}
+		}
+		level[li] = l
+		return l
+	}
+	for li := range drafts {
+		visit(li)
+		lane := &plan.Lanes[li]
+		lane.Level = level[li]
+		for up := range upLanes[li] {
+			lane.UpstreamLanes = append(lane.UpstreamLanes, plan.Lanes[up].ID)
+		}
+		sort.Strings(lane.UpstreamLanes)
+		for j := range upJobs[li] {
+			lane.UpstreamJobs = append(lane.UpstreamJobs, plan.Jobs[j].ID)
+		}
+		sort.Strings(lane.UpstreamJobs)
+	}
 }
 
 const maxNameLen = 80
