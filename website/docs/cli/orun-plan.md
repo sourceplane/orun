@@ -185,14 +185,31 @@ orun plan --trigger github-pull-request --base main --head HEAD
 
 ### GitHub Actions usage
 
-When run inside GitHub Actions with `--artifact github`, `orun plan`:
+`--github-output` appends the step outputs a workflow fans out on to the file
+`$GITHUB_OUTPUT` names: `matrix`, `lane-matrix`, `lane-count`,
+`lane-matrix-<k>` for each level `k`, `lane-matrix-levels`,
+`lane-level-count`, `plan_id` and `exec_id`. `lane-matrix` has one entry per
+lane, or one per job on a plan without lanes, each with its `level` and
+`upstreamLanes`; run each with `orun run --lane ${{ matrix.lane }}`.
+`lane-matrix-<k>` holds the lanes of level `k`, so a workflow can run the
+levels as chained matrix jobs (see
+[Lanes](../concepts/lanes.md#level-by-level)). `exec_id` is derived from
+`GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT` and the plan checksum.
 
-1. Derives an execution ID from `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, and the plan checksum
-2. Writes a plan shard (manifest.json + plan.json + metadata) to a temp directory
-3. Uploads the shard as a GitHub Actions artifact using the embedded `@actions/artifact` helper
-4. With `--github-output`, writes `matrix`, `lane-matrix`, `lane-count`, `lane-matrix-<k>` for each level `k`, `lane-matrix-levels`, `lane-level-count`, `plan_id`, and `exec_id` to `$GITHUB_OUTPUT` for downstream matrix jobs. `lane-matrix` has one entry per lane, or one per job on a plan without lanes, each with its `level` and `upstreamLanes`; run each with `orun run --lane ${{ matrix.lane }}`. `lane-matrix-<k>` holds the lanes of level `k`, so a workflow can run the levels as chained matrix jobs (see [Lanes](../concepts/lanes.md#level-by-level))
+The outputs need nothing but `$GITHUB_OUTPUT`: a workflow whose run jobs take
+the plan from the platform (`orun run --remote-state`) passes no `--artifact`.
+When `$GITHUB_OUTPUT` is not set, the plan succeeds and warns that nothing was
+written.
 
-Example:
+```bash
+orun plan --from-ci github --event-file "$GITHUB_EVENT_PATH" --github-output
+```
+
+With `--artifact github`, `orun plan` also writes a plan shard (manifest.json +
+plan.json + metadata) to a temp directory and uploads it as a GitHub Actions
+artifact named by the same `exec_id`, using the embedded `@actions/artifact`
+helper, for run jobs that download the plan with `orun run --artifact github`:
+
 ```bash
 orun plan \
   --from-ci github \

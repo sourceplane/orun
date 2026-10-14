@@ -93,7 +93,7 @@ func registerPlanCommand(root *cobra.Command) {
 	planCmd.Flags().StringVar(&fromCI, "from-ci", "", "CI provider for event normalization (e.g. github)")
 	planCmd.Flags().StringVar(&eventFile, "event-file", "", "Path to provider event JSON file")
 	planCmd.Flags().StringVar(&artifactBackend, "artifact", "", "Artifact backend for upload (e.g. github)")
-	planCmd.Flags().BoolVar(&githubOutput, "github-output", false, "Write matrix/plan_id/exec_id to $GITHUB_OUTPUT")
+	planCmd.Flags().BoolVar(&githubOutput, "github-output", false, "Append matrix, lane-matrix (and one per level), lane-count, plan_id and exec_id to $GITHUB_OUTPUT; needs no --artifact")
 
 	planCmd.Flags().BoolVar(&planNoCatalogRefresh, "no-catalog-refresh", false, "Skip catalog refresh; plan proceeds without catalog context")
 	planCmd.Flags().BoolVar(&planPushCatalog, "push-catalog", false, "After planning, sync the resolved catalog snapshot to the configured backend and advance the head")
