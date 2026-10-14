@@ -301,6 +301,19 @@ func (r *Runner) ghaPrintStepSkipped(job model.PlanJob, stepID string, index, to
 	buf.Println(fmt.Sprintf("  ↷  %02d %s  cached", index, stepID))
 }
 
+// ghaFinishFailedJob closes a job that failed on a path that does not print
+// the job footer (a failed step, finalizer, materialize, output-secret publish
+// or secret resolve). The footer is where the job's buffered GitHub output is
+// flushed, so without it a lane holding step groups (several jobs in flight)
+// dropped the failed job's whole log, its failing step included. Outside
+// GitHub Actions nothing is buffered and nothing changes.
+func (r *Runner) ghaFinishFailedJob(job model.PlanJob, report *jobReport, duration time.Duration) {
+	if !r.inGHA() {
+		return
+	}
+	r.ghaPrintJobFooter(job, report, false, duration)
+}
+
 func (r *Runner) ghaPrintJobFooter(job model.PlanJob, report *jobReport, success bool, duration time.Duration) {
 	buf := r.ghaJobOut(job.ID)
 	if buf == nil {

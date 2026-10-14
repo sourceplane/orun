@@ -447,3 +447,50 @@ func TestCoordBackendWaitForRunEventsTimeout(t *testing.T) {
 		t.Fatalf("head on timeout: got %d, want 5 (unchanged)", head)
 	}
 }
+
+// A CI rerun resumes one execution with --retry: the failed job is re-opened
+// (state.job.retried), re-claimed and succeeds. The fold must read it as
+// completed; it used to stay failed (terminal-sticky), and a lane waiting on it
+// under --retry sat until its upstream-wait timeout (cirrus-baseline run
+// 38511459165, attempt 2).
+func TestCoordBackendLoadRunStateFoldsRetriedJob(t *testing.T) {
+	planDigest := "sha256:" + strings.Repeat("b", 64)
+	planJSON := `{"version":"sourceplane.io/v1","jobs":[{"jobId":"a","deps":[]},{"jobId":"b","deps":["a"]}]}`
+	eventsJSON := `{"events":[
+		{"seq":1,"kind":"state.run.created","runId":"R","actor":{"id":"u1","type":"user"},"at":"2026-01-01T00:00:00Z","payload":{"planDigest":"` + planDigest + `","sourceHash":"sha256:s"}},
+		{"seq":2,"kind":"state.job.claimed","runId":"R","jobId":"a","actor":{"id":"r1","type":"workflow"},"at":"2026-01-01T00:01:00Z","payload":{"runnerId":"gha-1-1-run","leaseEpoch":1,"leaseExpiresAt":"2026-01-01T00:02:00Z","attempt":1}},
+		{"seq":3,"kind":"state.job.failed","runId":"R","jobId":"a","actor":{"id":"r1","type":"workflow"},"at":"2026-01-01T00:01:20Z","payload":{"runnerId":"gha-1-1-run","leaseEpoch":1,"reason":"step_failed","errorText":"text file busy"}},
+		{"seq":4,"kind":"state.job.retried","runId":"R","jobId":"a","actor":{"id":"r2","type":"workflow"},"at":"2026-01-01T00:05:00Z","payload":{"runnerId":"gha-1-2-run"}},
+		{"seq":5,"kind":"state.job.claimed","runId":"R","jobId":"a","actor":{"id":"r2","type":"workflow"},"at":"2026-01-01T00:05:00Z","payload":{"runnerId":"gha-1-2-run","leaseEpoch":2,"leaseExpiresAt":"2026-01-01T00:06:00Z","attempt":2}},
+		{"seq":6,"kind":"state.job.succeeded","runId":"R","jobId":"a","actor":{"id":"r2","type":"workflow"},"at":"2026-01-01T00:06:00Z","payload":{"runnerId":"gha-1-2-run","leaseEpoch":2,"resultDigest":""}}
+	]}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/log"):
+			_, _ = w.Write([]byte(eventsJSON))
+		case strings.Contains(r.URL.Path, "/objects/"):
+			_, _ = w.Write([]byte(planJSON))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	coord := &CoordClient{HTTP: srv.Client(), BaseURL: srv.URL + "/v1/organizations/o/projects/p/state"}
+	inner := NewRemoteStateBackend(
+		remotestate.NewClientWithScope(srv.URL, "test", stubToken{}, remotestate.Scope{OrgID: "o", ProjectID: "p"}), "r2")
+	b := NewCoordBackend(coord, inner, "r2")
+
+	st, meta, err := b.LoadRunState(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if a := st.Jobs["a"]; a == nil || a.Status != "completed" {
+		t.Fatalf("job a: %+v, want completed after retry", a)
+	}
+	if meta.JobDone != 1 || meta.JobFailed != 0 {
+		t.Fatalf("counts: done=%d failed=%d, want 1/0", meta.JobDone, meta.JobFailed)
+	}
+}

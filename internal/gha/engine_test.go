@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sourceplane/orun/internal/model"
@@ -474,5 +476,101 @@ func TestEngineRunStepReceivesSecretEnvAsTopLayer(t *testing.T) {
 	want := "sbp_minted_0123456789abcdef|from_secret_env|${{ not.evaluated }}"
 	if output != want {
 		t.Fatalf("read-secret output = %q, want %q", output, want)
+	}
+}
+
+// Two jobs of one lane run a tool installer at the same time against the
+// shared tool cache (cirrus-baseline run 38514815544: two setup-node steps
+// extracting Node 22.23.3 into ~/.orun/tool-cache at once). The installer below
+// writes non-atomically, like the real ones, and fails if it finds another
+// job's half-finished install.
+func TestEngineSerializesToolInstallersOnSharedCache(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not on PATH")
+	}
+	workspaceDir := t.TempDir()
+	actionDir := filepath.Join(workspaceDir, ".github", "actions", "setup-tool")
+	if err := os.MkdirAll(actionDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metadata := "name: setup-tool\nruns:\n  using: node20\n  main: index.js\n"
+	script := `
+const fs = require('fs'), path = require('path');
+const dir = path.join(process.env.RUNNER_TOOL_CACHE, 'tool', '1.0.0');
+const done = dir + '.complete';
+if (fs.existsSync(done)) { console.log('cached'); process.exit(0); }
+if (fs.existsSync(dir)) { console.error('found a half-written install at ' + dir); process.exit(1); }
+fs.mkdirSync(dir, { recursive: true });
+const until = Date.now() + 150; while (Date.now() < until) {}
+fs.writeFileSync(path.join(dir, 'bin'), 'x');
+fs.writeFileSync(done, '');
+console.log('installed');
+`
+	if err := os.WriteFile(filepath.Join(actionDir, "action.yml"), []byte(metadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(actionDir, "index.js"), []byte(script), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := NewEngine(Options{
+		CacheDir:     filepath.Join(workspaceDir, ".cache", "actions"),
+		ToolCacheDir: filepath.Join(workspaceDir, ".cache", "tools"),
+	})
+	execCtx := ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: workspaceDir,
+		WorkDir:      workspaceDir,
+		BaseEnv:      map[string]string{"PATH": os.Getenv("PATH"), "HOME": os.Getenv("HOME")},
+	}
+	if err := engine.Prepare(execCtx); err != nil {
+		t.Fatal(err)
+	}
+
+	const jobs = 4
+	var wg sync.WaitGroup
+	errs := make([]error, jobs)
+	outs := make([]string, jobs)
+	for i := 0; i < jobs; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			job := model.PlanJob{ID: fmt.Sprintf("job-%d", i)}
+			outs[i], errs[i] = engine.RunStep(execCtx, job, model.PlanStep{ID: "setup", Use: "./.github/actions/setup-tool"})
+			_, _ = engine.FinalizeJob(execCtx, job)
+		}(i)
+	}
+	wg.Wait()
+	installed := 0
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("job-%d: %v\n%s", i, err, outs[i])
+		}
+		if strings.Contains(outs[i], "installed") {
+			installed++
+		}
+	}
+	if installed != 1 {
+		t.Fatalf("want exactly one install and the rest cached, got %d installs: %q", installed, outs)
+	}
+}
+
+func TestInstallsTools(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"actions/setup-node@v4":          true,
+		"pnpm/action-setup@v4":           true,
+		"hashicorp/setup-terraform@v3":   true,
+		"./.github/actions/setup-tool":   true,
+		"actions/checkout@v4":            false,
+		"actions/cache@v4":               false,
+		"sourceplane/orun-action@v1.2.0": false,
+	} {
+		ref, err := ParseActionReference(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := installsTools(ref); got != want {
+			t.Errorf("installsTools(%s) = %v, want %v", raw, got, want)
+		}
 	}
 }

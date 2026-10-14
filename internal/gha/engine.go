@@ -670,10 +670,14 @@ func (e *Engine) executeUsesStep(ctx ExecContext, state *jobState, scope *scope,
 
 	switch resolved.Metadata.Runs.Using {
 	case "node12", "node16", "node20", "node24":
+		defer e.lockToolCache(resolved.Reference)()
 		return e.executeNodeAction(ctx, state, actionScope, invocation, sharedEnv)
 	case "composite":
+		// Not locked: its own uses: steps lock themselves, and holding the lock
+		// across them would deadlock on a setup action nested inside.
 		return e.executeCompositeAction(ctx, state, scope, resolved, invocation, sharedEnv)
 	case "docker":
+		defer e.lockToolCache(resolved.Reference)()
 		return e.executeDockerAction(ctx, state, actionScope, invocation, sharedEnv)
 	default:
 		return stepExecutionResult{}, fmt.Errorf("unsupported action runtime %q in %s", resolved.Metadata.Runs.Using, resolved.ActionDir)
@@ -1708,4 +1712,36 @@ func gitOutput(ctx context.Context, dir string, args ...string) string {
 		return ""
 	}
 	return string(bytes.TrimSpace(data))
+}
+
+// toolCacheLocks holds one mutex per tool-cache directory, shared by every
+// Engine in the process.
+var toolCacheLocks sync.Map // dir -> *sync.Mutex
+
+// lockToolCache serializes tool-installing actions (setup-node, pnpm's
+// action-setup, setup-terraform, …) that share this engine's tool cache, and
+// returns the unlock. Several jobs run in one process when a lane runs them in
+// parallel, and they share RUNNER_TOOL_CACHE: two setup-node steps extracted
+// the same Node version into it at once, so one job saw a half-written tree
+// (`ENOENT … symlink … bin/npm`) or exec'd a node binary another job was still
+// writing (`text file busy`). Run one at a time, the second finds the first's
+// finished install and reuses it. Other actions are not affected.
+func (e *Engine) lockToolCache(ref ActionReference) func() {
+	if !installsTools(ref) || e.toolCacheDir == "" {
+		return func() {}
+	}
+	value, _ := toolCacheLocks.LoadOrStore(filepath.Clean(e.toolCacheDir), &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+// installsTools reports whether an action looks like a tool installer — by the
+// convention every one of them follows, "setup" in its name.
+func installsTools(ref ActionReference) bool {
+	name := ref.Repo + "/" + ref.Path
+	if ref.Kind == referenceKindLocal {
+		name = ref.Local
+	}
+	return strings.Contains(strings.ToLower(name), "setup")
 }

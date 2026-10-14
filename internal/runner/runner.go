@@ -646,6 +646,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 			if r.Hooks != nil && r.Hooks.AfterJobTerminal != nil {
 				r.Hooks.AfterJobTerminal(job.ID, false, jobState.LastError)
 			}
+			r.ghaFinishFailedJob(job, jobReport, time.Since(jobStartedAt))
 			return true
 		}
 		jobSecretEnv = resolved
@@ -956,6 +957,8 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 		if r.Hooks != nil && r.Hooks.AfterJobTerminal != nil {
 			r.Hooks.AfterJobTerminal(job.ID, false, jobState.LastError)
 		}
+	} else {
+		r.ghaFinishFailedJob(job, jobReport, time.Since(jobStartedAt))
 	}
 
 	return jobFailed

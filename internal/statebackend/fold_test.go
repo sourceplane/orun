@@ -310,3 +310,27 @@ func TestFoldIgnoresUnknownJob(t *testing.T) {
 		t.Fatalf("unknown-job event not ignored: %+v", s)
 	}
 }
+
+func TestFoldRetriedReopensFailedJob(t *testing.T) {
+	plan := CoordinationPlan{Jobs: map[string]PlanNode{"a": {}}}
+	retried := CoordinationEvent{Seq: 4, Kind: EventJobRetried, RunID: "r", JobID: "a", Actor: vecActor, At: vecAT, RunnerID: "runner-2"}
+	reclaim := evClaimed(5, "a")
+	reclaim.RunnerID, reclaim.LeaseEpoch, reclaim.Attempt = "runner-2", 2, 2
+	done := evSucceeded(6, "a", "sha256:ok")
+	done.RunnerID, done.LeaseEpoch = "runner-2", 2
+
+	s := Fold([]CoordinationEvent{evCreated(1), evClaimed(2, "a"), evFailed(3, "a", "step_failed", "boom"), retried}, plan)
+	if s.Jobs["a"].Phase != "queued" {
+		t.Fatalf("retried job should be queued, got %+v", s.Jobs["a"])
+	}
+	s = Fold([]CoordinationEvent{evCreated(1), evClaimed(2, "a"), evFailed(3, "a", "step_failed", "boom"), retried, reclaim, done}, plan)
+	if s.Jobs["a"].Phase != "succeeded" || s.Phase != "succeeded" {
+		t.Fatalf("re-run job should succeed: job=%+v run=%s", s.Jobs["a"], s.Phase)
+	}
+
+	// Retried never revives a succeeded job.
+	s = Fold([]CoordinationEvent{evCreated(1), evClaimed(2, "a"), evSucceeded(3, "a", "sha256:x"), retried}, plan)
+	if s.Jobs["a"].Phase != "succeeded" {
+		t.Fatalf("retried must not re-open a succeeded job: %+v", s.Jobs["a"])
+	}
+}

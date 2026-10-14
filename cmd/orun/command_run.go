@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sourceplane/orun/internal/configsurface"
@@ -680,21 +679,10 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	// Use the run ID returned by the backend (idempotent join may return existing ID).
 	r.ExecID = handle.RunID
 
-	// Per-job lease state: the server-supplied heartbeat interval (from the claim)
-	// and a "preempted" flag set when the heartbeat observes the lease was lost.
-	// Jobs run in parallel, so access is mutex-guarded.
-	var leaseMu sync.Mutex
-	leases := map[string]*jobLease{}
-	lease := func(jobID string) *jobLease {
-		leaseMu.Lock()
-		defer leaseMu.Unlock()
-		l := leases[jobID]
-		if l == nil {
-			l = &jobLease{}
-			leases[jobID] = l
-		}
-		return l
-	}
+	// Per-job lease state: the server-supplied heartbeat interval (from the
+	// claim), the job's heartbeat, and whether it was preempted. Jobs run in
+	// parallel (a lane runs several in one process), so it is mutex-guarded.
+	leases := newJobLeases()
 
 	// For remote --job mode, perform the claim loop before the runner executes
 	// and disable the local dependency check. The claim returns the lease
@@ -704,7 +692,7 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		if err != nil {
 			return err
 		}
-		lease(r.JobID).heartbeatInterval = interval
+		leases.setInterval(r.JobID, interval)
 		r.SkipLocalDepsForJob = true
 	}
 
@@ -755,22 +743,23 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 			}
 			// Stash the server-supplied heartbeat interval; OnJobStart starts the
 			// beat once the job begins executing.
-			lease(jobID).heartbeatInterval = heartbeatIntervalFromClaim(result)
+			leases.setInterval(jobID, heartbeatIntervalFromClaim(result))
 			return false, nil
 		},
 		AwaitUpstream: func(jobID string, upstreams []string) error {
 			return awaitRemoteUpstreams(ctx, backend, handle.RunID, plan, jobID, upstreams, r.Stdout, r.Color, runRetry)
 		},
 		OnJobStart: func(jobID string, jobCtx context.Context, jobCancel context.CancelFunc) {
-			l := lease(jobID)
-			// Heartbeat at the server-supplied interval for the job's lifetime
-			// (jobCtx is cancelled when the job ends, stopping the goroutine). On
-			// lease_lost, mark the job preempted and cancel it: another runner has
-			// taken it over (design §4 — stop work silently).
-			go runHeartbeat(jobCtx, backend, handle.RunID, jobID, runnerID, l.heartbeatInterval, func() {
-				leaseMu.Lock()
-				l.preempted = true
-				leaseMu.Unlock()
+			// Heartbeat at the server-supplied interval until the job reaches a
+			// terminal state (AfterJobTerminal stops it) or jobCtx ends. On
+			// lease_lost while the job is still live, mark it preempted and
+			// cancel it: another runner has taken it over (design §4 — stop work
+			// silently).
+			beatCtx, interval := leases.start(jobID, jobCtx)
+			go runHeartbeat(beatCtx, backend, handle.RunID, jobID, runnerID, interval, func() {
+				if !leases.lost(jobID) {
+					return // the job already reported terminal: a 409 now is expected
+				}
 				fmt.Fprintf(r.Stderr, "  %s lease lost on %s — another runner has taken it over; stopping\n",
 					ui.Yellow(r.Color, "↻"), jobID)
 				jobCancel()
@@ -804,10 +793,13 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 			logPipeline.Append(ctx, handle.RunID, jobID, chunk, coord)
 		},
 		AfterJobTerminal: func(jobID string, success bool, errText string) {
-			leaseMu.Lock()
-			preempted := leases[jobID] != nil && leases[jobID].preempted
-			leaseMu.Unlock()
-			if preempted {
+			// Stop the heartbeat BEFORE completing: once :complete lands, the
+			// job is terminal on the server and every later heartbeat answers
+			// 409. The job keeps running post-steps and printing its held
+			// output after this point, so a beat left running read that 409 as
+			// "another runner has taken it over" and cancelled the job's
+			// context (cirrus-baseline runs 38511459165, 38514815544).
+			if leases.terminal(jobID) {
 				// Lease lost mid-job: another runner owns it now. Stop silently —
 				// sending a terminal update would be rejected (409 lease_lost) and
 				// must not race the new owner's result.
@@ -838,15 +830,6 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	attachTfBackend(r, backendURL, tokenSrc, scope.OrgID, scope.ProjectID)
 
 	return nil
-}
-
-// jobLease holds per-job remote-state lease bookkeeping.
-type jobLease struct {
-	// heartbeatInterval is the cadence the server granted on claim (never a
-	// client-hardcoded value); zero falls back to defaultHeartbeatInterval.
-	heartbeatInterval time.Duration
-	// preempted is set when a heartbeat observes the lease was lost.
-	preempted bool
 }
 
 // heartbeatIntervalFromClaim returns the server-supplied heartbeat cadence from
