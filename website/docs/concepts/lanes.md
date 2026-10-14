@@ -107,7 +107,10 @@ The first job of the lane to reach it runs it once in the shared source
 tree; every other job whose step is the same after templating (same
 command, shell, environment and working directory) waits for that run and
 reuses it, recorded as `shared with <job>`. Lane-scoped steps come first in
-a job, before its private tree is staged, and the staged tree then keeps the
+a job, before its private tree is staged — only the `use:` steps that set
+them up (`setup-node`, `setup-pnpm`) may precede them, since an action
+touches the tool cache and exports its environment, not the tree — and the
+staged tree then keeps the
 installed dependencies: the top-level `node_modules` is linked to the source
 tree's, nested ones are copied with their symlinks intact. Jobs of different
 compositions in one lane each run their own install once. A lane-scoped step
