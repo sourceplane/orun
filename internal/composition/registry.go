@@ -911,6 +911,7 @@ func loadJobTemplateFromDir(compositionDir, name, jobName string) (*model.JobSpe
 				RunsOn:       doc.Spec.RunsOn,
 				Timeout:      doc.Spec.Timeout,
 				Retries:      doc.Spec.Retries,
+				Resources:    doc.Spec.Resources,
 				Steps:        doc.Spec.Steps,
 				Inputs:       doc.Spec.Inputs,
 				Labels:       doc.Spec.Labels,

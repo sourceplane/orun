@@ -135,9 +135,36 @@ runner slots, not work, will decide its wall-clock? If not, it changes nothing.
 4. **Keep chains together.** Jobs joined by an enforced `dependsOn` edge stay
    in one lane, so a migration and the worker that waits for it run in the
    same process. A chain longer than a lane's share is cut by level.
-5. **Pack longest-first.** Every job weighs one; there are no per-job
-   weights. Mark an expensive component `isolated` to keep it off a shared
+5. **Pack longest-first.** By count, or by weight when the plan carries
+   weights (see [Weights](#weights)). Mark an expensive component `isolated` to keep it off a shared
    runner.
+
+## Weights
+
+By default every job weighs one, so a lane of three Next.js builds and a
+lane of three `wrangler deploy`s are the same size to the packer, and the
+whole fan-out waits for the longest lane. Three ways to tell auto mode what
+a job costs, in order of precedence:
+
+1. **`orun plan --weights <file>`**: a committed JSON file of job id to
+   seconds, the reviewed form. `orun plan --write-weights lanes.lock`
+   produces it from history.
+2. **`orun plan --weights history`**: the median duration of each job's
+   successful runs over the last ten sealed executions in this
+   repository's object model.
+3. **`resources.estimatedSeconds`** on the job template, declared once per
+   composition.
+
+With weights, auto mode shares the lane budget by work rather than by job
+count, cuts an oversized chain by weight, places the slice with the longest
+chain of work first, and fills the lane with the least work so far. A job
+without a weight gets the median of those that have one. Every lane then
+carries `estimatedSeconds` (the sum of its jobs' weights) and, when a job
+declared `resources.cpu`, `vcpu` (the most cores one of its jobs needs);
+both are on the lane matrix so a pool can size a runner per lane, and
+`concurrency: auto` divides the runner's cores by `vcpu`.
+`metadata.lanes.weightsFrom` records which source the plan used. A plan
+whose jobs carry no weights is laid out exactly as before.
 
 ## Cycles
 

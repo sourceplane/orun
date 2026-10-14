@@ -313,7 +313,16 @@ Runtime environment variables declared in intent or component env blocks:
 
 ## Execution semantics
 
-Jobs can declare: `runsOn`, `timeout`, `retries`, `labels`, `capabilities`, `steps`.
+Jobs can declare: `runsOn`, `timeout`, `retries`, `resources`, `labels`, `capabilities`, `steps`.
+
+`resources` is what the job needs, for packing [lanes](../concepts/lanes.md#weights) and sizing a lane's concurrency to its runner; it changes nothing about what runs:
+
+```yaml
+resources:
+  cpu: 2                 # cores the job keeps busy (fractions allowed)
+  memory: 4Gi            # informational, for a runner pool
+  estimatedSeconds: 90   # the job's usual duration: its packing weight
+```
 
 Steps can declare: `run` or `use`, `capability`, `phase`, `order`, `scope`, `with`, `env`, `shell`, `working-directory`, `timeout`, `retry`, `onFailure`.
 

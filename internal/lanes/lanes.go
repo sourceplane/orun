@@ -34,6 +34,12 @@ type Options struct {
 	// ("flag" or "env") and is recorded in plan.metadata.lanes.
 	MaxLanes     int
 	MaxLanesFrom string
+	// Weights, when set, are per-job packing weights in seconds (`orun plan
+	// --weights`): they overwrite each job's estimatedSeconds before the
+	// layout; WeightsFrom ("history" or "file") is recorded in
+	// plan.metadata.lanes.
+	Weights     map[string]int
+	WeightsFrom string
 }
 
 // Result reports what Assign decided beyond the plan itself.
@@ -90,6 +96,7 @@ func Assign(plan *model.Plan, opts Options) (Result, error) {
 		meta.MaxLanes, meta.MaxLanesFrom = model.DefaultLaneMaxLanes, "default"
 	}
 	plan.Metadata.Lanes = meta
+	meta.WeightsFrom = applyWeights(plan, opts)
 
 	g := newJobGraph(plan.Jobs)
 	drafts := initialDrafts(plan, cfg, mode, opts.ComponentLanes, g)
@@ -102,6 +109,31 @@ func Assign(plan *model.Plan, opts Options) (Result, error) {
 
 	finalize(plan, g, *drafts, opts.CheckName)
 	return res, nil
+}
+
+// applyWeights stamps the supplied weights onto the jobs and says where the
+// plan's weights come from: file or history when supplied, declared when a
+// template's estimatedSeconds is the only source, "" when every job weighs
+// one (the layout is then the count-based one, byte-identical to before
+// weights existed).
+func applyWeights(plan *model.Plan, opts Options) string {
+	if len(opts.Weights) > 0 {
+		for i := range plan.Jobs {
+			if w, ok := opts.Weights[plan.Jobs[i].ID]; ok && w > 0 {
+				plan.Jobs[i].EstimatedSeconds = w
+			}
+		}
+		if opts.WeightsFrom != "" {
+			return opts.WeightsFrom
+		}
+		return "file"
+	}
+	for _, j := range plan.Jobs {
+		if j.EstimatedSeconds > 0 {
+			return "declared"
+		}
+	}
+	return ""
 }
 
 // EffectiveMode is the mode a plan is laid out in: the first rule whose
@@ -310,6 +342,16 @@ func finalize(plan *model.Plan, g *jobGraph, drafts []*draft, checkName func(mod
 			lane.SplitFrom = d.splitFrom
 			lane.Reason = "cycle"
 		}
+		if g.weighted {
+			for _, j := range d.jobs {
+				lane.EstimatedSeconds += g.weight[j]
+			}
+		}
+		for _, j := range d.jobs {
+			if v := jobVCPU(plan.Jobs[j]); v > lane.VCPU {
+				lane.VCPU = v
+			}
+		}
 		plan.Lanes = append(plan.Lanes, lane)
 	}
 	stampUpstreams(plan, g, drafts)
@@ -372,6 +414,18 @@ func stampUpstreams(plan *model.Plan, g *jobGraph, drafts []*draft) {
 		}
 		sort.Strings(lane.UpstreamJobs)
 	}
+}
+
+// jobVCPU is the whole cores a job declared, 0 when it declared none.
+func jobVCPU(job model.PlanJob) int {
+	if job.Resources == nil || job.Resources.CPU <= 0 {
+		return 0
+	}
+	n := int(job.Resources.CPU)
+	if float64(n) < job.Resources.CPU {
+		n++
+	}
+	return n
 }
 
 const maxNameLen = 80

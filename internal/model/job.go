@@ -22,10 +22,24 @@ type JobRegistry struct {
 	Jobs       []JobSpec `yaml:"jobs" json:"jobs"`
 }
 
+// JobResources is what a job template declares it needs: the cpu it keeps
+// busy, the memory it takes and how long it usually runs. Weights for
+// packing lanes and sizing a lane's concurrency to its runner
+// (specs/orun-runner-efficiency §5.4); none of it changes what runs.
+type JobResources struct {
+	// CPU is the cores the job keeps busy (fractions allowed).
+	CPU float64 `yaml:"cpu,omitempty" json:"cpu,omitempty"`
+	// Memory is informational for a pool, e.g. "4Gi".
+	Memory string `yaml:"memory,omitempty" json:"memory,omitempty"`
+	// EstimatedSeconds is the job's usual duration: its packing weight.
+	EstimatedSeconds int `yaml:"estimatedSeconds,omitempty" json:"estimatedSeconds,omitempty"`
+}
+
 // JobSpec defines a complete job specification with multiple steps
 type JobSpec struct {
 	Name         string                 `yaml:"name" json:"name"`
 	Description  string                 `yaml:"description" json:"description"`
+	Resources    *JobResources          `yaml:"resources,omitempty" json:"resources,omitempty"`
 	RunsOn       string                 `yaml:"runsOn,omitempty" json:"runsOn,omitempty"`
 	Timeout      string                 `yaml:"timeout" json:"timeout"`
 	Retries      int                    `yaml:"retries" json:"retries"`
@@ -231,6 +245,7 @@ type JobInstance struct {
 	Gates                    []PromotionGate
 	Timeout                  string
 	Retries                  int
+	Resources                *JobResources
 	Parameters               map[string]interface{}
 	Env                      map[string]string
 	// OptionalSecretRefs maps env var names to secret:// references that

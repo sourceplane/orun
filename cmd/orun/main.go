@@ -366,6 +366,24 @@ func generatePlan() error {
 	} else if maxLanes > 0 {
 		laneOpts.MaxLanes, laneOpts.MaxLanesFrom = maxLanes, from
 	}
+	if w, from, err := resolveWeights(context.Background(), weightsFlag); err != nil {
+		return err
+	} else if len(w) > 0 {
+		laneOpts.Weights, laneOpts.WeightsFrom = w, from
+	}
+	if writeWeightsFlag != "" {
+		w := laneOpts.Weights
+		if laneOpts.WeightsFrom != "history" {
+			var err error
+			if w, err = weightsFromHistory(context.Background()); err != nil {
+				return err
+			}
+		}
+		if err := writeWeights(writeWeightsFlag, w); err != nil {
+			return fmt.Errorf("--write-weights: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "✓ wrote %d job weight(s) from history to %s\n", len(w), writeWeightsFlag)
+	}
 	var laneResult lanes.Result
 	plan, err := renderer.RenderPlanWithLanes(intent.Metadata, jobInstances, jobBindings, sorted, func(p *model.Plan) error {
 		r, aerr := lanes.Assign(p, laneOpts)
