@@ -225,6 +225,11 @@ orun run --lane staging/auto-1 --remote-state --exec-id "$EXEC_ID"
   the lane reuse the providers earlier ones downloaded.
 - `--retry --lane` re-opens the lane's failed jobs; completed ones stay
   completed.
+- An upstream in another lane whose runner was reclaimed (its heartbeat is
+  older than two of the server's leases) ends the wait, naming it; rerun its
+  lane with `--retry`. A `SIGTERM` to a lane drains it: running steps stop,
+  the cut jobs are reported failed as interrupted, and `--retry --lane`
+  re-opens them (see [Interrupting a run](../cli/orun-run.md#interrupting-a-run)).
 - On a plan without lanes, `--lane <id>` is `--job <id>`.
 
 ## In GitHub Actions

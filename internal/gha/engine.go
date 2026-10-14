@@ -23,6 +23,7 @@ import (
 	actexpr "github.com/nektos/act/pkg/exprparser"
 	actmodel "github.com/nektos/act/pkg/model"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/procgroup"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -1403,6 +1404,7 @@ func containsPlaceholder(args []string) bool {
 
 func runProcess(ctx context.Context, command string, args []string, workingDir string, env map[string]string) (string, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
+	procgroup.Configure(cmd)
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}

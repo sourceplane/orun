@@ -78,8 +78,14 @@ func selectLane(plan *model.Plan) (int, error) {
 // awaitRemoteUpstreams polls the run's remote state until every upstream has
 // completed. A failed upstream (or one blocked by a failure further up) ends
 // the wait with an error, except on --retry runs, where the upstream's own
-// lane may be re-running it.
-func awaitRemoteUpstreams(ctx context.Context, backend statebackend.Backend, runID string, plan *model.Plan, jobID string, upstreams []string, stdout interface{ Write([]byte) (int, error) }, color bool, retryRun bool) error {
+// lane may be re-running it. A running upstream whose heartbeat is older
+// than staleAfter() has lost its runner (a reclaimed spot instance): the
+// wait ends too, naming it, rather than holding this runner for the
+// upstream timeout; nil staleAfter uses the default.
+func awaitRemoteUpstreams(ctx context.Context, backend statebackend.Backend, runID string, plan *model.Plan, jobID string, upstreams []string, stdout interface{ Write([]byte) (int, error) }, color bool, retryRun bool, staleAfter func() time.Duration) error {
+	if staleAfter == nil {
+		staleAfter = func() time.Duration { return defaultStaleAfter }
+	}
 	deadline := time.Now().Add(laneUpstreamWait)
 	delay := laneUpstreamPoll
 	announced := false
@@ -96,6 +102,8 @@ func awaitRemoteUpstreams(ctx context.Context, backend statebackend.Backend, run
 					return fmt.Errorf("job %s: upstream %s failed", jobID, up)
 				case (js == nil || js.Status == "pending") && !retryRun && isTransitivelyBlocked(state, plan, up):
 					return fmt.Errorf("job %s: upstream %s is blocked by an upstream failure", jobID, up)
+				case js != nil && js.Status == "running" && heartbeatOlderThan(js.HeartbeatAt, staleAfter()):
+					return fmt.Errorf("job %s: upstream %s lost its runner (no heartbeat for %s); rerun its lane with --retry", jobID, up, staleAfter().Round(time.Second))
 				}
 				waiting = append(waiting, up)
 			}
@@ -117,4 +125,17 @@ func awaitRemoteUpstreams(ctx context.Context, backend statebackend.Backend, run
 			delay = laneUpstreamWait
 		}
 	}
+}
+
+// heartbeatOlderThan reports whether a job's last heartbeat is older than
+// max; an unparseable or missing heartbeat is not stale.
+func heartbeatOlderThan(heartbeatAt string, max time.Duration) bool {
+	if heartbeatAt == "" {
+		return false
+	}
+	hb, err := time.Parse(time.RFC3339, heartbeatAt)
+	if err != nil {
+		return false
+	}
+	return time.Since(hb) > max
 }

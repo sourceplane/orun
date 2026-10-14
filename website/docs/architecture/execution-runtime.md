@@ -95,6 +95,26 @@ Execution stays linear but explicit:
 
 Within each phase, `order` and declaration order determine the exact step sequence.
 
+## Interruption
+
+The runner's root context is cancelled by `SIGTERM` or `SIGINT`. Every step
+runs under it (`exec.CommandContext`) in a process group of its own
+(`internal/procgroup`): the cancel kills the whole group, shell and
+children alike, and the wait on the step's output pipes is bounded, so a
+`sleep` or a build server a step started cannot keep the step alive; the
+scheduler admits no further job; each cut job's error is prefixed
+`interrupted:` and reported through `AfterJobTerminal` as failed, which on
+a remote run tells the platform (and any lane waiting on the job) at once.
+Terminal updates and the log drain run under a separate background context
+so they still go out after the cancel. The run returns an error naming how
+many jobs failed or did not run; `orun run` exits 130 or 143.
+
+The lease the server grants on claim and heartbeat (`leaseSeconds`) is
+remembered per run; a waiting job counts a `running` upstream whose
+heartbeat is older than two leases as lost, in both the `--job` claim loop
+and a lane's upstream wait. Before any claim, the legacy five-minute window
+applies.
+
 ## Failure behavior
 
 - `failFast` is read from the plan execution block
