@@ -230,3 +230,51 @@ func TestInterruptContext(t *testing.T) {
 		t.Fatal("exit codes follow the shell's convention")
 	}
 }
+
+// eventBackend is a fakeRunState that can long-poll its event stream, as
+// the native coordination backend can.
+type eventBackend struct {
+	*fakeRunState
+	waits int
+	seq   int
+}
+
+func (e *eventBackend) WaitForRunEvents(_ context.Context, _ string, sinceSeq, waitSeconds int) (int, error) {
+	if waitSeconds == 0 {
+		return e.seq, nil
+	}
+	e.waits++
+	e.seq++
+	return e.seq, nil
+}
+
+// On a backend that long-polls its event stream, an upstream wait is woken
+// by events rather than by a timer; the plan's execution.lanes.upstreamWait
+// bounds it (specs/orun-runner-efficiency §5.7).
+func TestAwaitRemoteUpstreams_EventDrivenAndBoundedByThePlan(t *testing.T) {
+	oldWait, oldPoll := laneUpstreamWait, laneUpstreamPoll
+	laneUpstreamWait, laneUpstreamPoll = 10*time.Second, 2*time.Second // a timer wait would blow the test's budget
+	t.Cleanup(func() { laneUpstreamWait, laneUpstreamPoll = oldWait, oldPoll })
+	plan := &model.Plan{Jobs: []model.PlanJob{{ID: "up"}, {ID: "down", DependsOn: []string{"up"}}}}
+
+	ev := &eventBackend{fakeRunState: &fakeRunState{states: []map[string]string{{"up": "pending"}, {"up": "running"}, {"up": "completed"}}}}
+	start := time.Now()
+	if err := awaitRemoteUpstreams(context.Background(), ev, "run", plan, "down", []string{"up"}, io.Discard, false, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if ev.waits != 2 || ev.calls != 3 {
+		t.Fatalf("two event waits between three state reads: waits=%d reads=%d", ev.waits, ev.calls)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("the wait slept on the timer instead of the events")
+	}
+
+	// The plan's upstreamWait bounds the wait.
+	bounded := &model.Plan{Jobs: plan.Jobs, Metadata: model.PlanMetadata{Lanes: &model.PlanLanesMeta{UpstreamWait: "1ms"}}}
+	stuck := &fakeRunState{states: []map[string]string{{"up": "running"}}}
+	laneUpstreamPoll = time.Millisecond
+	err := awaitRemoteUpstreams(context.Background(), stuck, "run", bounded, "down", []string{"up"}, io.Discard, false, false, nil)
+	if err == nil || !strings.Contains(err.Error(), "timeout (1ms)") {
+		t.Fatalf("want the plan's bound in the timeout: %v", err)
+	}
+}

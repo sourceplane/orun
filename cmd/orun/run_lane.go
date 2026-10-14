@@ -75,20 +75,34 @@ func selectLane(plan *model.Plan) (int, error) {
 	return 0, fmt.Errorf("lane %q not found in plan (lanes: %s)", id, strings.Join(ids, ", "))
 }
 
-// awaitRemoteUpstreams polls the run's remote state until every upstream has
-// completed. A failed upstream (or one blocked by a failure further up) ends
-// the wait with an error, except on --retry runs, where the upstream's own
-// lane may be re-running it. A running upstream whose heartbeat is older
+// awaitRemoteUpstreams waits on the run's remote state until every upstream
+// has completed. A failed upstream (or one blocked by a failure further up)
+// ends the wait with an error, except on --retry runs, where the upstream's
+// own lane may be re-running it. A running upstream whose heartbeat is older
 // than staleAfter() has lost its runner (a reclaimed spot instance): the
 // wait ends too, naming it, rather than holding this runner for the
-// upstream timeout; nil staleAfter uses the default.
+// upstream timeout; nil staleAfter uses the default. The wait is bounded by
+// the plan's execution.lanes.upstreamWait, else laneUpstreamWait.
+//
+// A backend that can long-poll its event stream (runEventWaiter) is woken
+// by the next event instead of polled on a timer: the job starts within
+// moments of its upstream finishing, and a waiting runner costs the server
+// one open request rather than one state read per interval
+// (specs/orun-runner-efficiency §5.7).
 func awaitRemoteUpstreams(ctx context.Context, backend statebackend.Backend, runID string, plan *model.Plan, jobID string, upstreams []string, stdout interface{ Write([]byte) (int, error) }, color bool, retryRun bool, staleAfter func() time.Duration) error {
 	if staleAfter == nil {
 		staleAfter = func() time.Duration { return defaultStaleAfter }
 	}
-	deadline := time.Now().Add(laneUpstreamWait)
+	wait := laneUpstreamWait
+	if plan != nil && plan.Metadata.Lanes != nil {
+		if d, err := time.ParseDuration(strings.TrimSpace(plan.Metadata.Lanes.UpstreamWait)); err == nil && d > 0 {
+			wait = d
+		}
+	}
+	deadline := time.Now().Add(wait)
 	delay := laneUpstreamPoll
 	announced := false
+	events := newEventWait(ctx, backend, runID)
 	for {
 		state, _, err := backend.LoadRunState(ctx, runID)
 		if err == nil && state != nil {
@@ -116,15 +130,68 @@ func awaitRemoteUpstreams(ctx context.Context, backend statebackend.Backend, run
 			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("job %s: upstream wait timeout (%s) exceeded", jobID, laneUpstreamWait)
+			return fmt.Errorf("job %s: upstream wait timeout (%s) exceeded", jobID, wait)
+		}
+		if events.wait(ctx, delay) {
+			continue
 		}
 		if err := sleepOrDone(ctx, delay); err != nil {
 			return err
 		}
-		if delay = nextBackoff(delay, 15*time.Second); delay > laneUpstreamWait {
-			delay = laneUpstreamWait
+		if delay = nextBackoff(delay, 15*time.Second); delay > wait {
+			delay = wait
 		}
 	}
+}
+
+// eventWait is the event-driven half of a remote wait: on a backend that
+// long-polls its event stream it blocks until the next event (or the
+// long-poll lapses), and reports whether it did; on any other backend it
+// reports false and the caller sleeps as before.
+type eventWait struct {
+	waiter runEventWaiter
+	runID  string
+	seq    int
+}
+
+// eventLongPollSeconds is how long one event wait blocks before the caller
+// re-reads state regardless: well under the server's cap, and the interval
+// at which a lost heartbeat is noticed.
+const eventLongPollSeconds = 15
+
+func newEventWait(ctx context.Context, backend statebackend.Backend, runID string) *eventWait {
+	w, ok := backend.(runEventWaiter)
+	if !ok || w == nil {
+		return &eventWait{}
+	}
+	e := &eventWait{waiter: w, runID: runID}
+	if head, err := w.WaitForRunEvents(ctx, runID, 0, 0); err == nil {
+		e.seq = head
+	}
+	return e
+}
+
+func (e *eventWait) wait(ctx context.Context, max time.Duration) bool {
+	if e == nil || e.waiter == nil {
+		return false
+	}
+	secs := eventLongPollSeconds
+	if max > 0 && max < time.Duration(secs)*time.Second {
+		secs = int(max / time.Second)
+		if secs < 1 {
+			secs = 1
+		}
+	}
+	head, err := e.waiter.WaitForRunEvents(ctx, e.runID, e.seq, secs)
+	if err != nil {
+		if ctx.Err() != nil {
+			return false
+		}
+		e.waiter = nil // fall back to polling for the rest of this wait
+		return false
+	}
+	e.seq = head
+	return true
 }
 
 // heartbeatOlderThan reports whether a job's last heartbeat is older than

@@ -37,11 +37,26 @@ type Intent struct {
 // orun binary's digest and a declared pin is a load-time error.
 type IntentExecution struct {
 	State IntentExecutionState `yaml:"state,omitempty" json:"state,omitempty"`
+	// Defaults are run-time bounds every job inherits unless it sets its own
+	// (specs/orun-runner-efficiency §5.7).
+	Defaults *IntentExecutionDefaults `yaml:"defaults,omitempty" json:"defaults,omitempty"`
 	// Lanes groups plan jobs into the units a runner takes. Nil (the
 	// default) leaves every job its own lane and the plan byte-identical to
 	// a lane-unaware one (specs/orun-lanes §3.1, §4.6).
 	Lanes *IntentLanes `yaml:"lanes,omitempty" json:"lanes,omitempty"`
 }
+
+// IntentExecutionDefaults is execution.defaults in intent.yaml.
+type IntentExecutionDefaults struct {
+	// Timeout bounds every step whose job and step set none (a Go duration,
+	// e.g. 45m). The runner's own default is 60m: no step holds a runner for
+	// the CI limit.
+	Timeout string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+}
+
+// DefaultStepTimeout bounds a step when neither it, its job, nor
+// execution.defaults.timeout does.
+const DefaultStepTimeout = "60m"
 
 // Lane modes (specs/orun-lanes §3).
 const (
@@ -129,6 +144,9 @@ type IntentLanes struct {
 	Concurrency LaneConcurrency `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
 	// OnCycle is split (default) | reject.
 	OnCycle string `yaml:"onCycle,omitempty" json:"onCycle,omitempty"`
+	// UpstreamWait bounds how long a lane job waits for an upstream in
+	// another lane through remote state (a Go duration; default 60m).
+	UpstreamWait string `yaml:"upstreamWait,omitempty" json:"upstreamWait,omitempty"`
 	// Groups are named lanes a component joins with spec.lane.
 	Groups map[string]LaneGroup `yaml:"groups,omitempty" json:"groups,omitempty"`
 	// Rules switch the mode by trigger; the first whose triggerRef is active

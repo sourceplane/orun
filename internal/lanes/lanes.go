@@ -82,7 +82,7 @@ func Assign(plan *model.Plan, opts Options) (Result, error) {
 	// The lane budget: an override for this plan, else the intent's, else
 	// the default; recorded with its provenance so a plan reader sees why
 	// the plan has the lanes it has.
-	meta := &model.PlanLanesMeta{Mode: mode, MaxLanes: cfg.MaxLanes, MaxLanesFrom: "intent"}
+	meta := &model.PlanLanesMeta{Mode: mode, MaxLanes: cfg.MaxLanes, MaxLanesFrom: "intent", UpstreamWait: cfg.UpstreamWait}
 	switch {
 	case opts.MaxLanes > 0:
 		c := *cfg

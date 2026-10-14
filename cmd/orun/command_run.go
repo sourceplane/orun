@@ -336,6 +336,13 @@ func runPlan() error {
 		runEnv,
 	)
 	r.PlanID = planID
+	// Every step is bounded: by its own timeout, its job's, the plan's
+	// execution.timeout, else 60m — no step holds a runner for the CI limit
+	// (specs/orun-runner-efficiency §5.7).
+	r.DefaultTimeout = plan.Execution.Timeout
+	if strings.TrimSpace(r.DefaultTimeout) == "" {
+		r.DefaultTimeout = model.DefaultStepTimeout
+	}
 	// A SIGTERM (a spot runner's interruption notice, a cancelled CI job) or
 	// a Ctrl-C drains the run: running steps are stopped, no further job is
 	// admitted, the jobs it cut are reported failed as interrupted so a
@@ -1038,12 +1045,17 @@ func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID
 		initialDelay = 2 * time.Second
 	}
 	poll := initialDelay
+	events := newEventWait(ctx, backend, runID)
 	for {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("job %s: dependency wait timeout exceeded while polling /runnable", jobID)
 		}
-		if err := sleepOrDone(ctx, poll); err != nil {
-			return err
+		// Woken by the run's next event where the backend can say so, else
+		// by the timer (specs/orun-runner-efficiency §5.7).
+		if !events.wait(ctx, poll) {
+			if err := sleepOrDone(ctx, poll); err != nil {
+				return err
+			}
 		}
 		jobs, err := backend.RunnableJobs(ctx, runID)
 		if err != nil {

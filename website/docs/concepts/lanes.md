@@ -34,6 +34,7 @@ execution:
     maxLanes: 16        # auto mode's budget (default 16; `orun plan --max-lanes` overrides it)
     concurrency: 4      # jobs in flight inside a lane (default 4), or auto: the runner's cores
     onCycle: split      # split (default) | reject
+    upstreamWait: 60m   # how long a lane job waits for an upstream in another lane (default 60m)
     groups:
       fleet:
         concurrency: 8

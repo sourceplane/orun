@@ -398,6 +398,9 @@ func generatePlan() error {
 	}
 	plan.Spec.CompositionSources = compositionRegistry.Sources
 	plan.Metadata.Selection = planSelection
+	if d := intent.Execution.Defaults; d != nil && strings.TrimSpace(d.Timeout) != "" {
+		plan.Execution.Timeout = strings.TrimSpace(d.Timeout)
+	}
 
 	// --- M5A: always resolve TriggerOccurrence and write a PlanRevision.
 	// The new pipeline replaces the legacy `state.SavePlan` call below.

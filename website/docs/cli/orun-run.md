@@ -180,6 +180,22 @@ Debug how `--changed` resolved its git refs:
 orun run --changed --explain
 ```
 
+### Timeouts
+
+Every step is bounded: by its own `timeout`, else its job's, else the
+intent's `execution.defaults.timeout` (carried on the plan as
+`execution.timeout`), else 60 minutes. A step that outlives its bound fails
+its job; the run goes on with jobs that do not depend on it. Set
+`execution.defaults.timeout` for a platform whose longest step (a large
+`terraform apply`, a full rebuild) needs more than an hour, and a job
+template's `timeout` for the one job that does.
+
+A lane job's wait for an upstream in another lane is bounded by
+`execution.lanes.upstreamWait` (default 60 minutes). On Orunbase the wait
+is event-driven: the job is woken by the run's next event and starts within
+moments of its upstream finishing; elsewhere it polls, backing off to 15
+seconds.
+
 ### Interrupting a run
 
 `SIGTERM` (a spot runner's interruption notice forwarded by the pool, a

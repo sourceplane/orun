@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/sourceplane/orun/internal/model"
 )
@@ -18,6 +20,19 @@ var laneGroupNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 func ValidateLanes(intent *model.Intent) []error {
 	var errs []error
 	lanes := intent.Execution.Lanes
+
+	// execution.defaults rides along: every place lanes are validated is a
+	// place the intent's run-time bounds must hold too.
+	if d := intent.Execution.Defaults; d != nil && strings.TrimSpace(d.Timeout) != "" {
+		if v, err := time.ParseDuration(strings.TrimSpace(d.Timeout)); err != nil || v <= 0 {
+			errs = append(errs, fmt.Errorf("execution.defaults.timeout %q is not a positive duration (e.g. 45m)", d.Timeout))
+		}
+	}
+	if lanes != nil && strings.TrimSpace(lanes.UpstreamWait) != "" {
+		if v, err := time.ParseDuration(strings.TrimSpace(lanes.UpstreamWait)); err != nil || v <= 0 {
+			errs = append(errs, fmt.Errorf("execution.lanes.upstreamWait %q is not a positive duration (e.g. 90m)", lanes.UpstreamWait))
+		}
+	}
 
 	groups := map[string]struct{}{}
 	if lanes != nil {
