@@ -507,6 +507,7 @@ type viewServer struct {
 	reads      []string // "state" / "log from=N wait=W" / "object" / "frontier"
 	appended   bool
 	noState    bool // an older server: no state read (404)
+	renewals   bool // a progress-woken wait lapses with one renewal on the page
 }
 
 func newViewServer(t *testing.T) (*viewServer, *httptest.Server) {
@@ -543,6 +544,9 @@ func newViewServer(t *testing.T) (*viewServer, *httptest.Server) {
 			} else {
 				_, _ = w.Write([]byte(state5))
 			}
+		case strings.HasSuffix(r.URL.Path, "/log") && q.Get("wake") == "progress" && vs.renewals:
+			vs.reads = append(vs.reads, "log from="+q.Get("from")+" wait="+q.Get("wait")+" wake=progress")
+			_, _ = w.Write([]byte(`{"events":[{"seq":7,"kind":"state.job.lease_renewed","runId":"R","jobId":"b","actor":{"id":"r2","type":"workflow"},"at":"2026-01-01T00:02:20Z","payload":{"runnerId":"r2","leaseEpoch":1,"leaseExpiresAt":"2026-01-01T00:03:20Z"}}],"head":{"seq":7,"progressSeq":6}}`))
 		case strings.HasSuffix(r.URL.Path, "/log"):
 			from, _ := strconv.Atoi(q.Get("from"))
 			vs.reads = append(vs.reads, "log from="+q.Get("from")+" wait="+q.Get("wait"))
@@ -744,5 +748,51 @@ func TestCoordBackendRunView_SeededPlanSkipsThePlanObject(t *testing.T) {
 	}
 	if got := vs.served(); got[len(got)-1] != "state" {
 		t.Fatalf("the first read is the one state read: %v", got)
+	}
+}
+
+// A progress wait asks the server to hold through lease renewals; a lapse
+// that carries only a renewal is reported as no progress, with the cursor
+// moved past it and the renewal folded onto the view
+// (specs/orun-sync-efficiency F3, SE3).
+func TestCoordBackendRunView_ProgressWaitSleepsThroughRenewals(t *testing.T) {
+	vs, srv := newViewServer(t)
+	b := viewBackend(srv)
+	ctx := context.Background()
+	if _, _, err := b.LoadRunState(ctx, "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	// b is claimed by the wake at seq 6 (progress); then its runner renews.
+	if head, progressed, err := b.WaitForRunProgress(ctx, "run-1", 5, 15); err != nil || head != 6 || !progressed {
+		t.Fatalf("the claim is progress: head=%d progressed=%v err=%v", head, progressed, err)
+	}
+	vs.renewals = true
+	head, progressed, err := b.WaitForRunProgress(ctx, "run-1", 6, 15)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if head != 7 || progressed {
+		t.Fatalf("a renewal-only lapse: head=%d progressed=%v; want the cursor past the renewal and no progress", head, progressed)
+	}
+	if got := vs.served(); got[len(got)-1] != "log from=6 wait=15 wake=progress" {
+		t.Fatalf("the wait must ask for a progress wake: %v", got)
+	}
+	st, _, err := b.LoadRunState(ctx, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Jobs["b"].HeartbeatAt != "2026-01-01T00:03:20Z" {
+		t.Fatalf("the renewal on the page was not folded onto the view: %+v", st.Jobs["b"])
+	}
+	if got := vs.served(); len(got) != 4 {
+		t.Fatalf("the state read after the wait cost nothing: %v", got)
+	}
+	// A new waiter continues from the view's seq, past the renewal.
+	vs.renewals = false
+	if _, _, err := b.WaitForRunProgress(ctx, "run-1", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := vs.served(); got[len(got)-1] != "log from=7 wait=" {
+		t.Fatalf("the head read must continue from the view: %v", got)
 	}
 }

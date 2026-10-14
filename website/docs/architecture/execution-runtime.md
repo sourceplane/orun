@@ -108,8 +108,11 @@ The view is first filled by the server's own fold in one read
 read). Each long-poll's events are folded onto it, so a wake costs the one
 long-poll and the state and frontier reads that follow it ask the server
 nothing; a view that has not been synced for a while reads only the events
-past its last sequence number. While nothing happens the long-polls
-lengthen 2, 4, 8, 15 seconds. On a backend without the stream it polls with
+past its last sequence number. The runner's waits ask the platform to hold
+through lease renewals (`wake=progress`; `runProgressWaiter`), so a job
+waiting on its upstreams is woken by their progress, not by every heartbeat
+in the run. While nothing happens the long-polls lengthen 2, 4, 8, 15
+seconds. On a backend without the stream it polls with
 the 2 s → 15 s backoff as before. The lane wait is bounded by the plan's
 `metadata.lanes.upstreamWait` (the intent's `execution.lanes.upstreamWait`),
 else 60 minutes.
