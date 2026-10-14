@@ -60,6 +60,23 @@ Resolution, in order: the first `rules` entry whose trigger fired picks the
 mode; a component's `lane` annotation (`isolated` or a group) wins over the
 mode for that component; everything else follows the mode.
 
+### Size a lane to its runner and its pool
+
+Jobs in one lane share the runner's CPUs and memory. `concurrency` above the
+runner's core count makes each job slower and gives a timing-sensitive test a
+reason to fail. On a 2-vCPU runner, orun-cloud's 128-job full verify measured:
+
+| Layout | One job's time in the lane vs alone (median / p90) |
+|---|---|
+| `maxLanes: 16`, `concurrency: 4` | 1.83× / 2.78×, and two tests with a 10 s timeout failed |
+| `maxLanes: 56`, `concurrency: 2` | 1.20× / 1.57× |
+
+Set `concurrency` to about the runner's core count. Set `maxLanes` to about
+the number of runners your pool starts at once: a plan of that many jobs or
+fewer keeps one job per runner, and a larger one fits in a single wave instead
+of queueing behind it. Mark a component `isolated` when its jobs must not
+share a runner (a browser suite, a build that needs the whole machine).
+
 ## Auto mode
 
 Auto mode asks one question: is the plan big enough that runner setup and
@@ -122,7 +139,16 @@ orun run --lane staging/auto-1 --remote-state --exec-id "$EXEC_ID"
 - An upstream in another lane is awaited through remote state before the job
   takes a slot. With local state it must already be completed, under the same
   `--exec-id`; otherwise the run refuses and names the lane to run first.
-- A failed job stops only the lane jobs that depend on it.
+- A failed job stops only the lane jobs that depend on it; every other job
+  in the lane still runs. The plan's `execution.failFast` does not apply
+  inside a lane.
+- A job that does not run because an upstream failed stays pending on the
+  platform. A job in another lane waiting on it stops as soon as it sees the
+  failure above it, rather than waiting out the 60-minute upstream limit.
+- Each job in flight gets its own Terraform plugin cache
+  (`TF_PLUGIN_CACHE_DIR`), because `terraform init` is not safe against a
+  second `init` writing the same cache. The caches persist, so later jobs in
+  the lane reuse the providers earlier ones downloaded.
 - `--retry --lane` re-opens the lane's failed jobs; completed ones stay
   completed.
 - On a plan without lanes, `--lane <id>` is `--job <id>`.

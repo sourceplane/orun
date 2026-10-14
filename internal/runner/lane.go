@@ -96,12 +96,17 @@ func dedupe(s []string) []string {
 }
 
 // runLane runs the lane's jobs, each as soon as its upstreams finish, at most
-// concurrency at a time. A failed job stops the lane jobs that depend on it;
-// the rest continue unless failFast.
+// concurrency at a time. A failed job stops the lane jobs that depend on it
+// and nothing else (specs/orun-lanes §8). The plan's execution.failFast is not
+// read here: every rendered plan sets it, and honouring it cancelled every
+// unstarted job of the lane, dependent or not (orun#735). Because a job is
+// only ever left unrun below a failed upstream, a dependent in another lane
+// sees it as blocked and stops waiting (awaitRemoteUpstreams), rather than
+// waiting out the upstream timeout for a job nobody will run (orun#737).
 //
 // A lane of more than one job also reports each job on its own (§9): a check
 // run per job through r.Checks, and a row per job in the step summary.
-func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, baseExecContext executor.ExecContext, persistState, failFast bool, summary *runSummary, concurrency int) error {
+func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, baseExecContext executor.ExecContext, persistState bool, summary *runSummary, concurrency int) error {
 	if r.DryRun || concurrency < 1 {
 		concurrency = 1
 	}
@@ -128,11 +133,6 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 	sem := make(chan struct{}, concurrency)
 	var mu sync.Mutex
 	var firstErr error
-	stopped := func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return failFast && firstErr != nil
-	}
 	fail := func(err error) {
 		mu.Lock()
 		if firstErr == nil {
@@ -194,14 +194,8 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 				}
 			}
 
-			if stopped() {
-				return
-			}
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			if stopped() {
-				return
-			}
 
 			if r.Hooks != nil && r.Hooks.BeforeJob != nil {
 				skip, err := r.Hooks.BeforeJob(j.ID)
@@ -225,7 +219,7 @@ func (r *Runner) runLane(jobs []model.PlanJob, execState *execmodel.ExecState, b
 				checks.Start(j.ID, laneCheckName(j))
 			}
 			started := time.Now()
-			failed := r.executeJob(j, jobState, execState, baseExecContext, persistState, failFast, summary)
+			failed := r.executeJob(j, jobState, execState, baseExecContext, persistState, false, summary)
 			rec.duration = time.Since(started)
 			if failed {
 				rec.status = laneFailed

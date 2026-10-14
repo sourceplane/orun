@@ -97,6 +97,15 @@ func TestAwaitRemoteUpstreams(t *testing.T) {
 		t.Fatalf("retry run must wait out a failed upstream: %v", err)
 	}
 
+	// orun#737: a lane leaves a job unrun only below a failed upstream, so the
+	// job stays pending on the platform. A dependent in another lane must see
+	// it as blocked on the first poll, not wait out the upstream timeout.
+	chain := &model.Plan{Jobs: []model.PlanJob{{ID: "root"}, {ID: "up", DependsOn: []string{"root"}}, {ID: "down", DependsOn: []string{"up"}}}}
+	blocked := &fakeRunState{states: []map[string]string{{"root": "failed", "up": "pending"}}}
+	if err := awaitRemoteUpstreams(ctx, blocked, "run", chain, "down", []string{"up"}, io.Discard, false, false); err == nil || !strings.Contains(err.Error(), "blocked by an upstream failure") || blocked.calls != 1 {
+		t.Fatalf("want the blocked upstream on the first poll: %v (%d polls)", err, blocked.calls)
+	}
+
 	stuck := &fakeRunState{states: []map[string]string{{"up": "running"}}}
 	if err := awaitRemoteUpstreams(ctx, stuck, "run", plan, "down", []string{"up"}, io.Discard, false, false); err == nil || !strings.Contains(err.Error(), "timeout") {
 		t.Fatalf("want a timeout: %v", err)
