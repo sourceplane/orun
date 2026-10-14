@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sourceplane/orun/internal/model"
@@ -492,5 +495,174 @@ func TestCoordBackendLoadRunStateFoldsRetriedJob(t *testing.T) {
 	}
 	if meta.JobDone != 1 || meta.JobFailed != 0 {
 		t.Fatalf("counts: done=%d failed=%d, want 1/0", meta.JobDone, meta.JobFailed)
+	}
+}
+
+// viewServer is a stand-in for the native log and object routes that counts
+// what it serves: the run's events from `from`, a claim of job b appended
+// while a long-poll holds, and the plan object.
+type viewServer struct {
+	planDigest string
+	mu         sync.Mutex
+	reads      []string // "log from=N wait=W" / "object" / "frontier"
+	appended   bool
+}
+
+func newViewServer(t *testing.T) (*viewServer, *httptest.Server) {
+	t.Helper()
+	vs := &viewServer{planDigest: "sha256:" + strings.Repeat("b", 64)}
+	events := []string{
+		`{"seq":1,"kind":"state.run.created","runId":"R","actor":{"id":"u1","type":"user"},"at":"2026-01-01T00:00:00Z","payload":{"planDigest":"` + vs.planDigest + `","sourceHash":"sha256:s"}}`,
+		`{"seq":2,"kind":"state.job.ready","runId":"R","jobId":"a","actor":{"id":"sys","type":"system"},"at":"2026-01-01T00:00:10Z","payload":{"attempt":1}}`,
+		`{"seq":3,"kind":"state.job.claimed","runId":"R","jobId":"a","actor":{"id":"r1","type":"workflow"},"at":"2026-01-01T00:01:00Z","payload":{"runnerId":"r1","leaseEpoch":1,"leaseExpiresAt":"2026-01-01T00:02:00Z","attempt":1}}`,
+		`{"seq":4,"kind":"state.job.succeeded","runId":"R","jobId":"a","actor":{"id":"r1","type":"workflow"},"at":"2026-01-01T00:01:30Z","payload":{"runnerId":"r1","leaseEpoch":1,"resultDigest":"sha256:ra"}}`,
+		`{"seq":5,"kind":"state.job.ready","runId":"R","jobId":"b","actor":{"id":"sys","type":"system"},"at":"2026-01-01T00:01:31Z","payload":{"attempt":1}}`,
+	}
+	claimB := `{"seq":6,"kind":"state.job.claimed","runId":"R","jobId":"b","actor":{"id":"r2","type":"workflow"},"at":"2026-01-01T00:02:00Z","payload":{"runnerId":"r2","leaseEpoch":1,"leaseExpiresAt":"2026-01-01T00:03:00Z","attempt":1}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		q := r.URL.Query()
+		vs.mu.Lock()
+		defer vs.mu.Unlock()
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/log"):
+			from, _ := strconv.Atoi(q.Get("from"))
+			vs.reads = append(vs.reads, "log from="+q.Get("from")+" wait="+q.Get("wait"))
+			all := events
+			if q.Get("wait") != "" || vs.appended {
+				vs.appended = true
+				all = append(all, claimB)
+			}
+			var page []string
+			for i, e := range all {
+				if i+1 > from {
+					page = append(page, e)
+				}
+			}
+			_, _ = w.Write([]byte(`{"events":[` + strings.Join(page, ",") + `],"head":{"seq":` + strconv.Itoa(len(all)) + `}}`))
+		case strings.Contains(r.URL.Path, "/objects/missing"):
+			vs.reads = append(vs.reads, "missing")
+			_, _ = w.Write([]byte(`{"data":{"missing":[]}}`))
+		case strings.Contains(r.URL.Path, "/objects/"):
+			vs.reads = append(vs.reads, "object")
+			_, _ = w.Write([]byte(`{"version":"sourceplane.io/v1","jobs":[{"jobId":"a","deps":[]},{"jobId":"b","deps":["a"]}]}`))
+		case strings.HasSuffix(r.URL.Path, "/frontier"):
+			vs.reads = append(vs.reads, "frontier")
+			_, _ = w.Write([]byte(`{"jobs":["server-says"]}`))
+		case strings.HasSuffix(r.URL.Path, "/runs") && r.Method == http.MethodPost:
+			vs.reads = append(vs.reads, "create")
+			_, _ = w.Write([]byte(`{"data":{"run":{"runId":"R","status":"running","planDigest":"` + vs.planDigest + `","createdAt":"2026-01-01T00:00:00Z","jobCounts":{"queued":2}}}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return vs, srv
+}
+
+func viewBackend(srv *httptest.Server) *CoordBackend {
+	coord := &CoordClient{HTTP: srv.Client(), BaseURL: srv.URL + "/v1/organizations/o/projects/p/state"}
+	inner := NewRemoteStateBackend(
+		remotestate.NewClientWithScope(srv.URL, "test", stubToken{}, remotestate.Scope{OrgID: "o", ProjectID: "p"}), "r1")
+	return NewCoordBackend(coord, inner, "r1")
+}
+
+func (vs *viewServer) served() []string {
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+	return append([]string(nil), vs.reads...)
+}
+
+// A wake costs the long-poll alone: the events it returns are folded onto
+// the view, and the state and frontier reads a waiter makes right after it
+// ask the server nothing (specs/orun-sync-efficiency P1).
+func TestCoordBackendRunView_WakeCostsOneRequest(t *testing.T) {
+	vs, srv := newViewServer(t)
+	b := viewBackend(srv)
+	ctx := context.Background()
+
+	st, _, err := b.LoadRunState(ctx, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Jobs["b"].Status != "pending" {
+		t.Fatalf("b before the wake: %+v", st.Jobs["b"])
+	}
+	if got := vs.served(); !reflect.DeepEqual(got, []string{"log from=0 wait=", "object"}) {
+		t.Fatalf("the first read is the whole log and the plan, once: %v", got)
+	}
+
+	head, err := b.WaitForRunEvents(ctx, "run-1", 5, 15)
+	if err != nil || head != 6 {
+		t.Fatalf("wait: head=%d err=%v", head, err)
+	}
+	st, _, err = b.LoadRunState(ctx, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Jobs["b"].Status != "running" || st.Jobs["b"].StartedAt != "2026-01-01T00:02:00Z" {
+		t.Fatalf("the long-poll's event was not folded onto the view: %+v", st.Jobs["b"])
+	}
+	frontier, err := b.RunnableJobs(ctx, "run-1")
+	if err != nil || len(frontier) != 0 {
+		t.Fatalf("frontier from the view (b is claimed): %v %v", frontier, err)
+	}
+	if got := vs.served(); !reflect.DeepEqual(got, []string{"log from=0 wait=", "object", "log from=5 wait=15"}) {
+		t.Fatalf("after the wake, the state and frontier reads cost nothing: %v", got)
+	}
+
+	// The head read of a new waiter continues from the view, not from 0.
+	if _, err := b.WaitForRunEvents(ctx, "run-1", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := vs.served(); got[len(got)-1] != "log from=6 wait=" {
+		t.Fatalf("the head read re-read the log from 0: %v", got)
+	}
+}
+
+// A view that has not been synced for a while reads only the events past
+// its last seq, never the whole log or the plan again.
+func TestCoordBackendRunView_StaleViewReadsTheDelta(t *testing.T) {
+	old := viewFreshFor
+	viewFreshFor = 0
+	t.Cleanup(func() { viewFreshFor = old })
+	vs, srv := newViewServer(t)
+	b := viewBackend(srv)
+	ctx := context.Background()
+	if _, _, err := b.LoadRunState(ctx, "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := b.LoadRunState(ctx, "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.RunnableJobs(ctx, "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := vs.served(); !reflect.DeepEqual(got, []string{"log from=0 wait=", "object", "log from=5 wait=", "log from=5 wait="}) {
+		t.Fatalf("a stale view reads the delta only: %v", got)
+	}
+}
+
+// The process that created or joined the run with its own plan never
+// fetches the plan object: InitRun seeds the view's dependency graph.
+func TestCoordBackendRunView_SeededPlanSkipsThePlanObject(t *testing.T) {
+	vs, srv := newViewServer(t)
+	b := viewBackend(srv)
+	ctx := context.Background()
+	plan := &model.Plan{Jobs: []model.PlanJob{{ID: "a"}, {ID: "b", DependsOn: []string{"a"}}}}
+	if _, err := b.InitRun(ctx, plan, InitRunOptions{RunID: "run-1"}); err != nil {
+		t.Fatal(err)
+	}
+	st, _, err := b.LoadRunState(ctx, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Jobs) != 2 || st.Jobs["b"].Status != "pending" {
+		t.Fatalf("state from the seeded plan: %+v", st.Jobs)
+	}
+	for _, r := range vs.served() {
+		if r == "object" {
+			t.Fatalf("the plan object was fetched although this process holds the plan: %v", vs.served())
+		}
 	}
 }

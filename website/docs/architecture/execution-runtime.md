@@ -100,11 +100,17 @@ Within each phase, `order` and declaration order determine the exact step sequen
 A job that waits on remote state — the `--job` claim loop waiting for its
 dependencies, a lane job waiting for an upstream in another lane — is woken
 by the run's next event when the backend can long-poll its event stream
-(the native coordination backend; `runEventWaiter`), and re-reads state
-only then or every 15 seconds. On a backend without the stream it polls
-with the 2 s → 15 s backoff as before. The lane wait is bounded by the
-plan's `metadata.lanes.upstreamWait` (the intent's
-`execution.lanes.upstreamWait`), else 60 minutes.
+(the native coordination backend; `runEventWaiter`). The process keeps a
+view of the run: the folded state, the plan's dependency graph (seeded from
+the plan it holds, or fetched once) and the timestamps the presenter shows.
+Each long-poll's events are folded onto that view, so a wake costs the one
+long-poll and the state and frontier reads that follow it ask the server
+nothing; a view that has not been synced for a while reads only the events
+past its last sequence number. While nothing happens the long-polls
+lengthen 2, 4, 8, 15 seconds. On a backend without the stream it polls with
+the 2 s → 15 s backoff as before. The lane wait is bounded by the plan's
+`metadata.lanes.upstreamWait` (the intent's `execution.lanes.upstreamWait`),
+else 60 minutes.
 
 Every step runs under a timeout: its own, else its job's, else the plan's
 `execution.timeout`, else 60 minutes (`model.DefaultStepTimeout`), so no
