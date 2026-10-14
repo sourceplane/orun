@@ -114,6 +114,7 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 					Path:                     compInst.Path,
 					Timeout:                  jobEntry.job.Timeout,
 					Retries:                  jobEntry.job.Retries,
+					Resources:                jobEntry.job.Resources,
 					Labels:                   compInst.Labels,
 					Parameters:               compInst.Parameters,
 					Env:                      compInst.Env,
@@ -290,6 +291,9 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext, com
 		if err := step.ValidateExecForm(); err != nil {
 			return nil, err
 		}
+		if err := step.ValidateScope(); err != nil {
+			return nil, err
+		}
 		if err := step.Approval.Validate(step.Name); err != nil {
 			return nil, err
 		}
@@ -354,6 +358,7 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext, com
 			Name:             step.Name,
 			Phase:            model.NormalizePhase(step.Phase),
 			Order:            step.Order,
+			Scope:            laneScope(step.Scope),
 			Run:              renderedRun,
 			Use:              renderedUse,
 			Workflow:         renderedWorkflow,
@@ -376,8 +381,38 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext, com
 			return nil, err
 		}
 	}
+	if err := validateLaneScopedStepsLead(rendered); err != nil {
+		return nil, err
+	}
 
 	return rendered, nil
+}
+
+// laneScope is the scope a plan step carries: "lane", or nothing for job.
+func laneScope(scope string) string {
+	if model.NormalizeScope(scope) == model.StepScopeLane {
+		return model.StepScopeLane
+	}
+	return ""
+}
+
+// validateLaneScopedStepsLead requires a job's lane-scoped steps to come
+// before its job-scoped ones: they run in the shared tree before the job's
+// private tree is staged, so a job-scoped step cannot precede them.
+func validateLaneScopedStepsLead(steps []model.RenderedStep) error {
+	seenJob := ""
+	for _, s := range steps {
+		if s.Scope == model.StepScopeLane {
+			if seenJob != "" {
+				return fmt.Errorf("step %q: a scope: lane step must come before the job's other steps (after %q)", s.Name, seenJob)
+			}
+			continue
+		}
+		if seenJob == "" {
+			seenJob = s.Name
+		}
+	}
+	return nil
 }
 
 // validateOutputRefs checks every ${{ steps.X.outputs.Y }} reference in the

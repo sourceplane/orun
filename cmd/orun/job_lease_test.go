@@ -69,7 +69,7 @@ func TestHeartbeat_StopsAtTerminal(t *testing.T) {
 				takeovers.Add(1)
 				jobCancel()
 			}
-		})
+		}, nil)
 		close(done)
 	}()
 	l.terminal("a") // the job reported terminal before its first beat

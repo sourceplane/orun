@@ -162,6 +162,9 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | `--component` | Restrict compilation to one or more components (repeatable) |
 | `--view`, `-v` | Render a view such as `dag`, `dag:long`, `dependencies`, `lanes`, or `component=<name>` |
 | `--strict-lanes` | Fail the plan when lanes would need a cycle split (as `execution.lanes.onCycle: reject`) |
+| `--max-lanes` | Override `execution.lanes.maxLanes` for this plan, for example from the runner pool's free capacity (`ORUN_MAX_LANES` does the same; the flag wins). Recorded in `metadata.lanes` |
+| `--weights` | Packing weights for auto-mode lanes: `history` (the median duration of each job over the last ten sealed runs) or a JSON file of job id to seconds. Unset: the templates' `resources.estimatedSeconds`, else every job weighs one. See [Weights](../concepts/lanes.md#weights) |
+| `--write-weights` | Write the weights measured from history to this file, the committed form for `--weights` |
 | `--long` | Show detailed output (step commands, IDs) |
 | `--changed` | Enable change-aware filtering |
 | `--base` | Base git ref for change detection |
@@ -178,7 +181,7 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | `--from-ci` | CI provider for event normalization (e.g. `github`) |
 | `--event-file` | Path to provider event JSON file |
 | `--artifact` | Artifact backend for uploading plan shard from CI (`github`) |
-| `--github-output` | Write `matrix`, `lane-matrix`, `lane-count`, `plan_id`, `exec_id` to `$GITHUB_OUTPUT` (for GitHub Actions matrix) |
+| `--github-output` | Write `matrix`, `lane-matrix`, `lane-count`, `lane-matrix-<k>` per level, `lane-matrix-levels`, `lane-level-count`, `plan_id`, `exec_id` to `$GITHUB_OUTPUT` (for GitHub Actions matrix) |
 
 ### GitHub Actions usage
 
@@ -187,7 +190,7 @@ When run inside GitHub Actions with `--artifact github`, `orun plan`:
 1. Derives an execution ID from `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, and the plan checksum
 2. Writes a plan shard (manifest.json + plan.json + metadata) to a temp directory
 3. Uploads the shard as a GitHub Actions artifact using the embedded `@actions/artifact` helper
-4. With `--github-output`, writes `matrix`, `lane-matrix`, `lane-count`, `plan_id`, and `exec_id` to `$GITHUB_OUTPUT` for downstream matrix jobs. `lane-matrix` has one entry per lane, or one per job on a plan without lanes; run each with `orun run --lane ${{ matrix.lane }}` (see [Lanes](../concepts/lanes.md))
+4. With `--github-output`, writes `matrix`, `lane-matrix`, `lane-count`, `lane-matrix-<k>` for each level `k`, `lane-matrix-levels`, `lane-level-count`, `plan_id`, and `exec_id` to `$GITHUB_OUTPUT` for downstream matrix jobs. `lane-matrix` has one entry per lane, or one per job on a plan without lanes, each with its `level` and `upstreamLanes`; run each with `orun run --lane ${{ matrix.lane }}`. `lane-matrix-<k>` holds the lanes of level `k`, so a workflow can run the levels as chained matrix jobs (see [Lanes](../concepts/lanes.md#level-by-level))
 
 Example:
 ```bash

@@ -37,11 +37,26 @@ type Intent struct {
 // orun binary's digest and a declared pin is a load-time error.
 type IntentExecution struct {
 	State IntentExecutionState `yaml:"state,omitempty" json:"state,omitempty"`
+	// Defaults are run-time bounds every job inherits unless it sets its own
+	// (specs/orun-runner-efficiency §5.7).
+	Defaults *IntentExecutionDefaults `yaml:"defaults,omitempty" json:"defaults,omitempty"`
 	// Lanes groups plan jobs into the units a runner takes. Nil (the
 	// default) leaves every job its own lane and the plan byte-identical to
 	// a lane-unaware one (specs/orun-lanes §3.1, §4.6).
 	Lanes *IntentLanes `yaml:"lanes,omitempty" json:"lanes,omitempty"`
 }
+
+// IntentExecutionDefaults is execution.defaults in intent.yaml.
+type IntentExecutionDefaults struct {
+	// Timeout bounds every step whose job and step set none (a Go duration,
+	// e.g. 45m). The runner's own default is 60m: no step holds a runner for
+	// the CI limit.
+	Timeout string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+}
+
+// DefaultStepTimeout bounds a step when neither it, its job, nor
+// execution.defaults.timeout does.
+const DefaultStepTimeout = "60m"
 
 // Lane modes (specs/orun-lanes §3).
 const (
@@ -60,16 +75,78 @@ const (
 	DefaultLaneConcurrency = 4
 )
 
+// LaneConcurrency is execution.lanes.concurrency, or a group's: the jobs in
+// flight inside one lane. A count, or `auto` (LaneConcurrencyAuto) for the
+// runner's core count, which `orun run --lane` resolves on the machine that
+// runs the lane (specs/orun-runner-efficiency §5.2). Zero is unset.
+type LaneConcurrency int
+
+// LaneConcurrencyAuto is `concurrency: auto`. Only the word maps to it: a
+// negative count written in the intent stays what it is and fails
+// validation, so no number a person could type is mistaken for auto.
+const LaneConcurrencyAuto LaneConcurrency = -1 << 31
+
+// IsAuto reports whether the concurrency is sized to the runner.
+func (c LaneConcurrency) IsAuto() bool { return c == LaneConcurrencyAuto }
+
+func (c LaneConcurrency) MarshalYAML() (any, error) {
+	if c.IsAuto() {
+		return "auto", nil
+	}
+	return int(c), nil
+}
+
+func (c *LaneConcurrency) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.ScalarNode {
+		return fmt.Errorf("concurrency must be a number or \"auto\"")
+	}
+	if value.Value == "auto" {
+		*c = LaneConcurrencyAuto
+		return nil
+	}
+	var n int
+	if err := value.Decode(&n); err != nil {
+		return fmt.Errorf("concurrency must be a number or \"auto\", got %q", value.Value)
+	}
+	*c = LaneConcurrency(n)
+	return nil
+}
+
+func (c LaneConcurrency) MarshalJSON() ([]byte, error) {
+	if c.IsAuto() {
+		return []byte(`"auto"`), nil
+	}
+	return json.Marshal(int(c))
+}
+
+func (c *LaneConcurrency) UnmarshalJSON(b []byte) error {
+	if string(b) == `"auto"` {
+		*c = LaneConcurrencyAuto
+		return nil
+	}
+	var n int
+	if err := json.Unmarshal(b, &n); err != nil {
+		return fmt.Errorf("concurrency must be a number or \"auto\", got %s", b)
+	}
+	*c = LaneConcurrency(n)
+	return nil
+}
+
 // IntentLanes is execution.lanes in intent.yaml.
 type IntentLanes struct {
 	// Mode is job (default) | component | env | auto.
 	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
-	// MaxLanes caps the lanes auto mode emits (default 16).
+	// MaxLanes caps the lanes auto mode emits (default 16). `orun plan
+	// --max-lanes` and ORUN_MAX_LANES override it for one plan.
 	MaxLanes int `yaml:"maxLanes,omitempty" json:"maxLanes,omitempty"`
-	// Concurrency is the jobs in flight inside one lane (default 4).
-	Concurrency int `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
+	// Concurrency is the jobs in flight inside one lane (default 4), or
+	// auto for the runner's core count.
+	Concurrency LaneConcurrency `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
 	// OnCycle is split (default) | reject.
 	OnCycle string `yaml:"onCycle,omitempty" json:"onCycle,omitempty"`
+	// UpstreamWait bounds how long a lane job waits for an upstream in
+	// another lane through remote state (a Go duration; default 60m).
+	UpstreamWait string `yaml:"upstreamWait,omitempty" json:"upstreamWait,omitempty"`
 	// Groups are named lanes a component joins with spec.lane.
 	Groups map[string]LaneGroup `yaml:"groups,omitempty" json:"groups,omitempty"`
 	// Rules switch the mode by trigger; the first whose triggerRef is active
@@ -79,8 +156,9 @@ type IntentLanes struct {
 
 // LaneGroup is one named lane group.
 type LaneGroup struct {
-	// Concurrency overrides execution.lanes.concurrency for this group.
-	Concurrency int `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
+	// Concurrency overrides execution.lanes.concurrency for this group; a
+	// count or auto.
+	Concurrency LaneConcurrency `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
 }
 
 // LaneRule selects a mode when a trigger binding is active.

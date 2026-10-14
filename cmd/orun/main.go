@@ -361,6 +361,29 @@ func generatePlan() error {
 		laneTriggers = triggerResolution.MatchedTriggerNames
 	}
 	laneOpts := lanes.ForIntent(intent, laneTriggers, strictLanes, render.PlanJobCheckName)
+	if maxLanes, from, err := resolveMaxLanes(maxLanesFlag); err != nil {
+		return err
+	} else if maxLanes > 0 {
+		laneOpts.MaxLanes, laneOpts.MaxLanesFrom = maxLanes, from
+	}
+	if w, from, err := resolveWeights(context.Background(), weightsFlag); err != nil {
+		return err
+	} else if len(w) > 0 {
+		laneOpts.Weights, laneOpts.WeightsFrom = w, from
+	}
+	if writeWeightsFlag != "" {
+		w := laneOpts.Weights
+		if laneOpts.WeightsFrom != "history" {
+			var err error
+			if w, err = weightsFromHistory(context.Background()); err != nil {
+				return err
+			}
+		}
+		if err := writeWeights(writeWeightsFlag, w); err != nil {
+			return fmt.Errorf("--write-weights: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "✓ wrote %d job weight(s) from history to %s\n", len(w), writeWeightsFlag)
+	}
 	var laneResult lanes.Result
 	plan, err := renderer.RenderPlanWithLanes(intent.Metadata, jobInstances, jobBindings, sorted, func(p *model.Plan) error {
 		r, aerr := lanes.Assign(p, laneOpts)
@@ -375,6 +398,9 @@ func generatePlan() error {
 	}
 	plan.Spec.CompositionSources = compositionRegistry.Sources
 	plan.Metadata.Selection = planSelection
+	if d := intent.Execution.Defaults; d != nil && strings.TrimSpace(d.Timeout) != "" {
+		plan.Execution.Timeout = strings.TrimSpace(d.Timeout)
+	}
 
 	// --- M5A: always resolve TriggerOccurrence and write a PlanRevision.
 	// The new pipeline replaces the legacy `state.SavePlan` call below.
@@ -721,6 +747,16 @@ func generatePlan() error {
 			laneMatrix, laneCount := githubLaneMatrixJSON(plan)
 			outputLines = append(outputLines, fmt.Sprintf("lane-matrix<<EOF\n%s\nEOF", laneMatrix))
 			outputLines = append(outputLines, fmt.Sprintf("lane-count=%d", laneCount))
+			// Level by level: lane-matrix-<k> per level, the array of them, and
+			// the level count, so a workflow can chain one matrix job per level
+			// with needs: and never provision a runner before its upstream lanes
+			// are done (specs/orun-runner-efficiency §5.1).
+			levels := githubLaneMatrixLevels(plan)
+			for k, m := range levels {
+				outputLines = append(outputLines, fmt.Sprintf("lane-matrix-%d<<EOF\n%s\nEOF", k, m))
+			}
+			outputLines = append(outputLines, fmt.Sprintf("lane-matrix-levels<<EOF\n%s\nEOF", githubLaneMatrixLevelsJSON(plan)))
+			outputLines = append(outputLines, fmt.Sprintf("lane-level-count=%d", len(levels)))
 			outputLines = append(outputLines, fmt.Sprintf("plan_id=%s", planID))
 			outputLines = append(outputLines, fmt.Sprintf("exec_id=%s", execID))
 
@@ -756,6 +792,8 @@ func writeEmptyGithubMatrix() {
 		"matrix<<EOF\n{\"include\":[]}\nEOF",
 		"lane-matrix<<EOF\n{\"include\":[]}\nEOF",
 		"lane-count=0",
+		"lane-matrix-levels<<EOF\n[]\nEOF",
+		"lane-level-count=0",
 		"plan_id=",
 		"exec_id=",
 	}

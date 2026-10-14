@@ -103,12 +103,12 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().BoolVar(&runGHACompat, "gha", false, "Enable GitHub Actions compatibility mode")
 	runCmd.Flags().StringVar(&runExecID, "exec-id", "", "Execution ID (for resume or CI). Auto-generated if not set")
 	runCmd.Flags().IntVar(&runConcurrency, "concurrency", 0, "Override plan concurrency (0 = use plan value)")
-	runCmd.Flags().IntVar(&runComponentConcurrency, "component-concurrency", 1, "Max number of components processed concurrently (0 = unlimited). Default 1 keeps the dashboard component-grouped.")
+	runCmd.Flags().IntVar(&runComponentConcurrency, "component-concurrency", 0, "Max number of components with jobs in flight at once (0 = no cap). Set it to keep a terminal run's output grouped by component.")
 	runCmd.Flags().StringArrayVar(&runComponent, "component", nil, "Filter jobs by component (repeatable)")
 	runCmd.Flags().StringVarP(&runEnv, "env", "e", "", "Filter jobs by environment (comma-separated)")
 	runCmd.Flags().BoolVar(&runAllEnvs, "all-envs", false, "Run all environments explicitly (mutually exclusive with --env)")
 	runCmd.Flags().BoolVar(&runJSON, "json", false, "Output in JSON format")
-	runCmd.Flags().StringVar(&runIsolation, "isolation", "auto", "Per-job workspace isolation: auto (on when concurrency>1), workspace (always on), none (legacy shared tree)")
+	runCmd.Flags().StringVar(&runIsolation, "isolation", "auto", "Per-job workspace isolation: auto (on when concurrency>1), workspace (always on), component (always on; copy only the job's directory, link the rest), none (legacy shared tree)")
 	runCmd.Flags().BoolVar(&runKeepWorkspaces, "keep-workspaces", false, "Don't delete per-job staged workspaces after the run (debug)")
 	runCmd.Flags().BoolVar(&runBackground, "background", false, "Run the plan detached and return immediately. Track via 'orun status --watch'")
 
@@ -336,6 +336,21 @@ func runPlan() error {
 		runEnv,
 	)
 	r.PlanID = planID
+	// Every step is bounded: by its own timeout, its job's, the plan's
+	// execution.timeout, else 60m — no step holds a runner for the CI limit
+	// (specs/orun-runner-efficiency §5.7).
+	r.DefaultTimeout = plan.Execution.Timeout
+	if strings.TrimSpace(r.DefaultTimeout) == "" {
+		r.DefaultTimeout = model.DefaultStepTimeout
+	}
+	// A SIGTERM (a spot runner's interruption notice, a cancelled CI job) or
+	// a Ctrl-C drains the run: running steps are stopped, no further job is
+	// admitted, the jobs it cut are reported failed as interrupted so a
+	// dependent lane stops waiting, and --retry re-opens them
+	// (specs/orun-runner-efficiency §5.6).
+	runCtx, interrupted, stopSignals := interruptContext(os.Stderr)
+	defer stopSignals()
+	r.Context = runCtx
 	if runLaneJobs != nil {
 		r.LaneID, r.LaneJobs = runLaneID, runLaneJobs
 		// One check run per job of a multi-job lane (specs/orun-lanes §9.2).
@@ -343,13 +358,16 @@ func runPlan() error {
 			r.Checks = rep
 		}
 	}
+	if !runner.ValidIsolationMode(strings.ToLower(strings.TrimSpace(runIsolation))) {
+		return fmt.Errorf("--isolation %q is not one of auto|workspace|component|none", runIsolation)
+	}
 	r.Isolation = runner.IsolationMode(strings.ToLower(strings.TrimSpace(runIsolation)))
 	r.KeepWorkspaces = runKeepWorkspaces
 	r.ComponentConcurrency = runComponentConcurrency
 
 	var logPipeline *logpipe.Pipeline
 	if remoteActive {
-		if err := setupRemoteStateHooks(r, plan, planID, execID, backendURL, loadedIntent, &logPipeline); err != nil {
+		if err := setupRemoteStateHooks(runCtx, r, plan, planID, execID, backendURL, loadedIntent, &logPipeline); err != nil {
 			var alreadyDone *jobAlreadyCompleteError
 			if errors.As(err, &alreadyDone) {
 				return nil
@@ -404,6 +422,14 @@ func runPlan() error {
 	}
 
 	runErr := r.Run(plan)
+	if sig := interrupted(); sig != nil {
+		color := ui.ColorEnabledForWriter(os.Stderr)
+		fmt.Fprintf(os.Stderr, "\n%s interrupted by %s: running steps were stopped and the jobs they belonged to reported failed; `orun run --retry` (with the same --exec-id and --job/--lane) re-opens them\n", ui.Yellow(color, "↯"), sig)
+		if runErr == nil {
+			runErr = fmt.Errorf("interrupted by %s", sig)
+		}
+		runErr = &interruptedError{err: runErr, sig: sig}
+	}
 
 	// Seal the run into the content-addressed object graph (the live working
 	// tree seals itself from the runner's terminal state), then print the
@@ -668,8 +694,16 @@ func initRemoteRun(ctx context.Context, plan *model.Plan, execID, backendURL str
 // hooks for per-job claim, heartbeat, log upload, and terminal update. On
 // success it stores the log pipeline (which buffers/spills log uploads, design
 // §7 row 5) through outPipe so the caller can drain + report it after the run.
-func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, backendURL string, intent *model.Intent, outPipe **logpipe.Pipeline) error {
+//
+// waitCtx is the run's signal context: every wait (the claim loop, an
+// upstream wait, the heartbeat) ends with it. Terminal updates and the log
+// drain keep running after it is cancelled: they are what tells the
+// platform the job was cut.
+func setupRemoteStateHooks(waitCtx context.Context, r *runner.Runner, plan *model.Plan, planID, execID, backendURL string, intent *model.Intent, outPipe **logpipe.Pipeline) error {
 	ctx := context.Background()
+	if waitCtx == nil {
+		waitCtx = ctx
+	}
 
 	sess, err := initRemoteRun(ctx, plan, execID, backendURL, intent, r.DryRun)
 	if err != nil {
@@ -688,7 +722,7 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	// and disable the local dependency check. The claim returns the lease
 	// tunables; stash the heartbeat interval for OnJobStart.
 	if r.JobID != "" {
-		interval, err := performRemoteJobClaim(ctx, backend, handle.RunID, plan, r.JobID, runnerID, r.Stdout, r.Color, runRetry)
+		interval, err := performRemoteJobClaim(waitCtx, backend, handle.RunID, plan, r.JobID, runnerID, r.Stdout, r.Color, runRetry, leases)
 		if err != nil {
 			return err
 		}
@@ -744,10 +778,11 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 			// Stash the server-supplied heartbeat interval; OnJobStart starts the
 			// beat once the job begins executing.
 			leases.setInterval(jobID, heartbeatIntervalFromClaim(result))
+			leases.observeLease(result.LeaseSeconds)
 			return false, nil
 		},
 		AwaitUpstream: func(jobID string, upstreams []string) error {
-			return awaitRemoteUpstreams(ctx, backend, handle.RunID, plan, jobID, upstreams, r.Stdout, r.Color, runRetry)
+			return awaitRemoteUpstreams(waitCtx, backend, handle.RunID, plan, jobID, upstreams, r.Stdout, r.Color, runRetry, leases.staleAfter)
 		},
 		OnJobStart: func(jobID string, jobCtx context.Context, jobCancel context.CancelFunc) {
 			// Heartbeat at the server-supplied interval until the job reaches a
@@ -763,7 +798,7 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 				fmt.Fprintf(r.Stderr, "  %s lease lost on %s — another runner has taken it over; stopping\n",
 					ui.Yellow(r.Color, "↻"), jobID)
 				jobCancel()
-			})
+			}, leases.observeLease)
 		},
 		AfterStepLog: func(jobID string, step runner.StepRecord, output string) {
 			// v1 logs are append-only chunks: upload only this step's block. The
@@ -872,10 +907,14 @@ func performRemoteJobClaim(
 	stdout interface{ Write([]byte) (int, error) },
 	color bool,
 	retryRun bool,
+	leases *jobLeases,
 ) (time.Duration, error) {
 	job := findJobByIDInPlan(plan, jobID)
 	if job.ID == "" {
 		return 0, fmt.Errorf("job %q not found in plan", jobID)
+	}
+	if leases == nil {
+		leases = newJobLeases()
 	}
 
 	const (
@@ -909,6 +948,7 @@ func performRemoteJobClaim(
 			return 0, fmt.Errorf("claiming job %s: %w", jobID, err)
 		}
 
+		leases.observeLease(result.LeaseSeconds)
 		if result.Claimed {
 			if result.Takeover {
 				fmt.Fprintf(stdout, "  %s taking over job %s from a previous runner\n",
@@ -952,7 +992,7 @@ func performRemoteJobClaim(
 			}
 			fmt.Fprintf(stdout, "  %s waiting for dependencies of %s...\n",
 				ui.Dim(color, "○"), jobID)
-			waitErr := waitForJobRunnable(ctx, backend, runID, jobID, job.DependsOn, plan, delay, deadline, retryRun)
+			waitErr := waitForJobRunnable(ctx, backend, runID, jobID, job.DependsOn, plan, delay, deadline, retryRun, leases.staleAfter)
 			if waitErr != nil && !errors.Is(waitErr, errDepHeartbeatStale) {
 				return 0, waitErr
 			}
@@ -996,19 +1036,26 @@ var errDepHeartbeatStale = errors.New("dependency heartbeat stale")
 // deps lists the job's declared dependencies; on each poll that doesn't find the
 // job, LoadRunState is called to detect upstream failures early and avoid waiting
 // the full depWaitTimeout when a dependency has already failed or is permanently blocked.
-func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID, jobID string, deps []string, plan *model.Plan, initialDelay time.Duration, deadline time.Time, retryRun bool) error {
+func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID, jobID string, deps []string, plan *model.Plan, initialDelay time.Duration, deadline time.Time, retryRun bool, staleAfter func() time.Duration) error {
 	const pollMax = 15 * time.Second
-	const heartbeatTimeout = 5 * time.Minute // matches coordinator HEARTBEAT_TIMEOUT_MS
+	if staleAfter == nil {
+		staleAfter = func() time.Duration { return defaultStaleAfter }
+	}
 	if initialDelay <= 0 {
 		initialDelay = 2 * time.Second
 	}
 	poll := initialDelay
+	events := newEventWait(ctx, backend, runID)
 	for {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("job %s: dependency wait timeout exceeded while polling /runnable", jobID)
 		}
-		if err := sleepOrDone(ctx, poll); err != nil {
-			return err
+		// Woken by the run's next event where the backend can say so, else
+		// by the timer (specs/orun-runner-efficiency §5.7).
+		if !events.wait(ctx, poll) {
+			if err := sleepOrDone(ctx, poll); err != nil {
+				return err
+			}
 		}
 		jobs, err := backend.RunnableJobs(ctx, runID)
 		if err != nil {
@@ -1052,7 +1099,7 @@ func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID
 					// sweep the stale dep on the next claim and return depsBlocked.
 					if js.Status == "running" && js.HeartbeatAt != "" {
 						if hb, hbErr := time.Parse(time.RFC3339, js.HeartbeatAt); hbErr == nil {
-							if time.Since(hb) > heartbeatTimeout {
+							if time.Since(hb) > staleAfter() {
 								return errDepHeartbeatStale
 							}
 						}
@@ -1120,7 +1167,7 @@ const defaultHeartbeatInterval = 20 * time.Second
 // re-queued this job and another runner now owns it — it invokes onLeaseLost
 // (which preempts and cancels the job) and stops. Transient errors are ignored
 // so a brief network blip doesn't abandon a still-owned job.
-func runHeartbeat(jobCtx context.Context, backend statebackend.Backend, runID, jobID, runnerID string, interval time.Duration, onLeaseLost func()) {
+func runHeartbeat(jobCtx context.Context, backend statebackend.Backend, runID, jobID, runnerID string, interval time.Duration, onLeaseLost func(), onLease func(seconds int)) {
 	if interval <= 0 {
 		interval = defaultHeartbeatInterval
 	}
@@ -1132,6 +1179,9 @@ func runHeartbeat(jobCtx context.Context, backend statebackend.Backend, runID, j
 			return
 		case <-ticker.C:
 			res, err := backend.Heartbeat(jobCtx, runID, jobID, runnerID)
+			if res != nil && res.OK && onLease != nil {
+				onLease(res.LeaseSeconds)
+			}
 			if res != nil && res.LeaseLost {
 				if onLeaseLost != nil {
 					onLeaseLost()

@@ -23,9 +23,10 @@ After planning, `orun` switches from compiler behavior to runtime behavior. The 
 | --- | --- |
 | `auto` (default) | Stage a private tree per job when the effective concurrency is greater than 1 |
 | `workspace` | Always stage a private tree per job |
+| `component` | Always stage, but copy only the job's own directory (`job.path`) and link every other top-level entry to the source tree, so the staged tree is the size of the component and one install serves every job. For jobs that write only under their own directory; a job at the tree's root is staged as a whole copy |
 | `none` | Share the source tree across all jobs (the legacy behavior) |
 
-Staging copies the source tree into a job-private directory using copy-on-write where the filesystem allows it — `clonefile(2)` on APFS, the `FICLONE` ioctl on Linux filesystems that support reflinks — and falls back to a byte copy elsewhere. Regenerable trees such as `node_modules`, `.turbo`, `dist`, and `.terraform` are skipped because the job recreates them. Isolation is skipped for `--dry-run` and when `--workdir` pins a directory explicitly; if staging fails the runner warns and falls back to the shared tree. `--keep-workspaces` leaves the staged directories behind for debugging.
+Staging copies the source tree into a job-private directory using copy-on-write where the filesystem allows it — `clonefile(2)` on APFS, the `FICLONE` ioctl on Linux filesystems that support reflinks — and falls back to a byte copy elsewhere. `.git` is never staged: the job's environment gets `GIT_DIR` and `GIT_WORK_TREE` pointing at the source repository, so `git` in the staged tree answers from it. Build outputs and caches such as `.turbo`, `dist`, and `.terraform` are skipped because the job recreates them. `node_modules` is skipped too, unless the job's lane installed it once (a [lane-scoped step](../concepts/lanes.md#share-a-lanes-setup) ran): then the top-level `node_modules` is linked to the source tree's and nested ones are copied with their symlinks intact. Every staged job gets `TURBO_CACHE_DIR` set to one cache per run under `.orun/runs/<exec-id>/cache/turbo`, so the second job of a lane hits what the first built. Isolation is skipped for `--dry-run` and when `--workdir` pins a directory explicitly; if staging fails the runner warns and falls back to the shared tree. `--keep-workspaces` leaves the staged directories behind for debugging.
 
 ## Lifecycle hooks
 
@@ -93,6 +94,41 @@ Execution stays linear but explicit:
 3. `post`
 
 Within each phase, `order` and declaration order determine the exact step sequence.
+
+## Waiting on the platform
+
+A job that waits on remote state — the `--job` claim loop waiting for its
+dependencies, a lane job waiting for an upstream in another lane — is woken
+by the run's next event when the backend can long-poll its event stream
+(the native coordination backend; `runEventWaiter`), and re-reads state
+only then or every 15 seconds. On a backend without the stream it polls
+with the 2 s → 15 s backoff as before. The lane wait is bounded by the
+plan's `metadata.lanes.upstreamWait` (the intent's
+`execution.lanes.upstreamWait`), else 60 minutes.
+
+Every step runs under a timeout: its own, else its job's, else the plan's
+`execution.timeout`, else 60 minutes (`model.DefaultStepTimeout`), so no
+step holds a runner for the CI limit.
+
+## Interruption
+
+The runner's root context is cancelled by `SIGTERM` or `SIGINT`. Every step
+runs under it (`exec.CommandContext`) in a process group of its own
+(`internal/procgroup`): the cancel kills the whole group, shell and
+children alike, and the wait on the step's output pipes is bounded, so a
+`sleep` or a build server a step started cannot keep the step alive; the
+scheduler admits no further job; each cut job's error is prefixed
+`interrupted:` and reported through `AfterJobTerminal` as failed, which on
+a remote run tells the platform (and any lane waiting on the job) at once.
+Terminal updates and the log drain run under a separate background context
+so they still go out after the cancel. The run returns an error naming how
+many jobs failed or did not run; `orun run` exits 130 or 143.
+
+The lease the server grants on claim and heartbeat (`leaseSeconds`) is
+remembered per run; a waiting job counts a `running` upstream whose
+heartbeat is older than two leases as lost, in both the `--job` claim loop
+and a lane's upstream wait. Before any claim, the legacy five-minute window
+applies.
 
 ## Failure behavior
 

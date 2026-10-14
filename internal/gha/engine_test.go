@@ -574,3 +574,57 @@ func TestInstallsTools(t *testing.T) {
 		}
 	}
 }
+
+// orun#736: Terraform's plugin cache is not safe for concurrent `terraform
+// init` (two inits that miss the cache write the same provider at once, and
+// one reads a half-written package: "the cached package … does not match any
+// of the checksums recorded in the dependency lock file"). Jobs alive at the
+// same time get different cache directories; a job on its own keeps the one
+// shared directory, and a finished job's directory goes to the next job.
+func TestEngineGivesConcurrentJobsTheirOwnTerraformPluginCache(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	cacheDir := filepath.Join(workspaceDir, ".cache", "actions")
+	engine := NewEngine(Options{
+		CacheDir:     cacheDir,
+		ToolCacheDir: filepath.Join(workspaceDir, ".cache", "tools"),
+	})
+	execCtx := ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: workspaceDir,
+		WorkDir:      workspaceDir,
+		BaseEnv:      map[string]string{"PATH": os.Getenv("PATH"), "HOME": os.Getenv("HOME")},
+	}
+	if err := engine.Prepare(execCtx); err != nil {
+		t.Fatalf("engine.Prepare() error = %v", err)
+	}
+	pluginCache := func(job model.PlanJob) string {
+		t.Helper()
+		out, err := engine.RunStep(execCtx, job, model.PlanStep{ID: "tf", Run: `printf '%s' "$TF_PLUGIN_CACHE_DIR"`, Shell: "bash"})
+		if err != nil {
+			t.Fatalf("%s: %v", job.ID, err)
+		}
+		if info, statErr := os.Stat(out); statErr != nil || !info.IsDir() {
+			t.Fatalf("%s: TF_PLUGIN_CACHE_DIR %q is not a directory: %v", job.ID, out, statErr)
+		}
+		return out
+	}
+
+	shared := filepath.Join(cacheDir, "shared", "terraform-plugins")
+	jobA, jobB, jobC := model.PlanJob{ID: "job-a"}, model.PlanJob{ID: "job-b"}, model.PlanJob{ID: "job-c"}
+	a := pluginCache(jobA)
+	b := pluginCache(jobB)
+	if a != shared {
+		t.Fatalf("a job on its own keeps the shared cache: got %q, want %q", a, shared)
+	}
+	if b == a {
+		t.Fatalf("two live jobs share one Terraform plugin cache: %q", a)
+	}
+	if _, err := engine.FinalizeJob(execCtx, jobA); err != nil {
+		t.Fatalf("finalize job-a: %v", err)
+	}
+	if c := pluginCache(jobC); c != a {
+		t.Fatalf("job-c should reuse job-a's finished cache %q, got %q", a, c)
+	}
+}

@@ -23,6 +23,7 @@ import (
 	actexpr "github.com/nektos/act/pkg/exprparser"
 	actmodel "github.com/nektos/act/pkg/model"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/procgroup"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -70,6 +71,11 @@ type Engine struct {
 	actionCache   map[string]*resolvedAction
 	actionCacheMu sync.RWMutex
 	actionFetchSF singleflight.Group
+
+	// terraformSlots[i] is true while a live job holds Terraform plugin cache
+	// slot i (terraformPluginCacheDir).
+	terraformSlotsMu sync.Mutex
+	terraformSlots   []bool
 }
 
 type jobState struct {
@@ -92,6 +98,7 @@ type jobState struct {
 	masks           []string
 	summary         strings.Builder
 	basePath        string
+	terraformSlot   int
 
 	actionDirs   map[string]string
 	actionDirsMu sync.Mutex
@@ -211,6 +218,7 @@ func (e *Engine) FinalizeJob(ctx ExecContext, job model.PlanJob) (string, error)
 	}
 	defer e.deleteJobState(job.ID)
 	defer os.RemoveAll(state.tempDir)
+	defer e.releaseTerraformSlot(state.terraformSlot)
 
 	outputs := make([]string, 0, len(state.posts))
 	errs := make([]error, 0)
@@ -241,6 +249,7 @@ func (e *Engine) ensureJobState(ctx ExecContext, job model.PlanJob) (*jobState, 
 	defer e.mu.Unlock()
 	if current := e.jobs[job.ID]; current != nil {
 		_ = os.RemoveAll(state.tempDir)
+		e.releaseTerraformSlot(state.terraformSlot)
 		return current, nil
 	}
 	e.jobs[job.ID] = state
@@ -357,10 +366,20 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 	// node prefix (e.g. /opt/homebrew/lib/node_modules), and parallel jobs
 	// race there with ENOTEMPTY / TAR_ENTRY_ERROR. Mirroring GHA semantics:
 	// each job gets its own HOME-scoped install prefix (GHA achieves this by
-	// fresh per-job VMs); content-addressed caches (npm cache, pnpm store,
-	// terraform plugins) stay shared because concurrent reads + atomic writes
-	// are safe and that matches GHA's warm-runner behavior.
+	// fresh per-job VMs); content-addressed caches (npm cache, pnpm store)
+	// stay shared because concurrent reads + atomic writes are safe and that
+	// matches GHA's warm-runner behavior. The Terraform plugin cache is the
+	// exception: Terraform documents it as unsafe for concurrent `terraform
+	// init`, so each job alive at once holds its own slot (orun#736).
 	sharedCache := filepath.Join(e.cacheDir, "shared")
+	terraformSlot := e.acquireTerraformSlot()
+	keepSlot := false
+	defer func() {
+		if !keepSlot {
+			e.releaseTerraformSlot(terraformSlot)
+		}
+	}()
+	terraformPlugins := terraformPluginCacheDir(sharedCache, terraformSlot)
 	npmGlobal := filepath.Join(homeDir, ".npm-global")
 	pnpmHome := filepath.Join(homeDir, ".local", "share", "pnpm")
 	for _, dir := range []string{
@@ -369,7 +388,7 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 		pnpmHome,
 		filepath.Join(sharedCache, "npm"),
 		filepath.Join(sharedCache, "pnpm-store"),
-		filepath.Join(sharedCache, "terraform-plugins"),
+		terraformPlugins,
 	} {
 		_ = os.MkdirAll(dir, 0o755)
 	}
@@ -380,7 +399,7 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 	globalEnv["PNPM_HOME"] = pnpmHome
 	globalEnv["pnpm_config_store_dir"] = filepath.Join(sharedCache, "pnpm-store")
 	globalEnv["PNPM_CONFIG_STORE_DIR"] = filepath.Join(sharedCache, "pnpm-store")
-	globalEnv["TF_PLUGIN_CACHE_DIR"] = filepath.Join(sharedCache, "terraform-plugins")
+	globalEnv["TF_PLUGIN_CACHE_DIR"] = terraformPlugins
 	// Prepend per-job binary dirs so freshly-installed tools resolve before
 	// any system copy. Actions can still extend PATH per-step via $GITHUB_PATH.
 	npmBin := filepath.Join(npmGlobal, "bin")
@@ -420,6 +439,7 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 		actionNames:     map[string]int{},
 		basePath:        globalEnv["PATH"],
 		actionDirs:      map[string]string{},
+		terraformSlot:   terraformSlot,
 	}
 
 	jobEvaluator := state.evaluator(state.rootScope(state.workDir), globalEnv, githubContext)
@@ -438,7 +458,41 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 		state.basePath = state.globalEnv["PATH"]
 	}
 
+	keepSlot = true
 	return state, nil
+}
+
+// acquireTerraformSlot returns the lowest Terraform plugin cache slot no live
+// job holds. A job running on its own always gets slot 0.
+func (e *Engine) acquireTerraformSlot() int {
+	e.terraformSlotsMu.Lock()
+	defer e.terraformSlotsMu.Unlock()
+	for slot, held := range e.terraformSlots {
+		if !held {
+			e.terraformSlots[slot] = true
+			return slot
+		}
+	}
+	e.terraformSlots = append(e.terraformSlots, true)
+	return len(e.terraformSlots) - 1
+}
+
+func (e *Engine) releaseTerraformSlot(slot int) {
+	e.terraformSlotsMu.Lock()
+	defer e.terraformSlotsMu.Unlock()
+	if slot >= 0 && slot < len(e.terraformSlots) {
+		e.terraformSlots[slot] = false
+	}
+}
+
+// terraformPluginCacheDir is slot 0's shared directory, the one every job used
+// before slots, and a sibling per extra slot. Slots outlive their jobs, so a
+// lane's later jobs find the providers its earlier ones downloaded.
+func terraformPluginCacheDir(sharedCache string, slot int) string {
+	if slot == 0 {
+		return filepath.Join(sharedCache, "terraform-plugins")
+	}
+	return filepath.Join(sharedCache, fmt.Sprintf("terraform-plugins-%d", slot))
 }
 
 func (state *jobState) rootScope(workDir string) *scope {
@@ -1350,6 +1404,7 @@ func containsPlaceholder(args []string) bool {
 
 func runProcess(ctx context.Context, command string, args []string, workingDir string, env map[string]string) (string, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
+	procgroup.Configure(cmd)
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/procgroup"
 )
 
 type localExecutor struct{}
@@ -34,6 +35,7 @@ func (e *localExecutor) RunStep(execCtx ExecContext, job model.PlanJob, step mod
 	}
 
 	cmd := exec.CommandContext(commandCtx, "sh", "-c", step.Run)
+	procgroup.Configure(cmd)
 	cmd.Dir = execCtx.WorkDir
 	cmd.Env = EnvironmentList(execCtx.Env)
 

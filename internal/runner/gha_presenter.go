@@ -301,6 +301,15 @@ func (r *Runner) ghaPrintStepSkipped(job model.PlanJob, stepID string, index, to
 	buf.Println(fmt.Sprintf("  ↷  %02d %s  cached", index, stepID))
 }
 
+// ghaPrintStepShared is printStepShared for the GitHub log.
+func (r *Runner) ghaPrintStepShared(job model.PlanJob, stepID string, index int, owner string) {
+	buf := r.ghaJobOut(job.ID)
+	if buf == nil {
+		return
+	}
+	buf.Println(fmt.Sprintf("  ↷  %02d %s  shared with %s", index, stepID, owner))
+}
+
 // ghaFinishFailedJob closes a job that failed on a path that does not print
 // the job footer (a failed step, finalizer, materialize, output-secret publish
 // or secret resolve). The footer is where the job's buffered GitHub output is

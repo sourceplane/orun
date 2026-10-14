@@ -2,6 +2,7 @@ package runner
 
 import (
 	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,13 +32,15 @@ func TestAfterStateUpdateHookCanSnapshot(t *testing.T) {
 	r := NewRunner(t.TempDir(), false, io.Discard, io.Discard, false, "", false, false,
 		okExecutor{}, executor.RuntimeContext{}, "exec_deadlock", 2, nil, "")
 
-	hookCalls := 0
+	// The hook fires from every job's goroutine at once (jobs of different
+	// components run together), so the count is atomic.
+	var hookCalls atomic.Int32
 	r.Hooks = &RunnerHooks{
 		AfterStateUpdate: func() {
 			// Calls back into the runner under no lock — would deadlock if the
 			// hook fired while updateState held r.stateMu.
 			if snap := r.SnapshotState(); snap != nil {
-				hookCalls++
+				hookCalls.Add(1)
 			}
 		},
 	}
@@ -52,7 +55,7 @@ func TestAfterStateUpdateHookCanSnapshot(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("Run deadlocked: AfterStateUpdate -> SnapshotState under r.stateMu")
 	}
-	if hookCalls == 0 {
+	if hookCalls.Load() == 0 {
 		t.Fatal("AfterStateUpdate never fired with a non-nil snapshot")
 	}
 }

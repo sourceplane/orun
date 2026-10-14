@@ -15,12 +15,36 @@ type jobGraph struct {
 	index map[string]int
 	deps  [][]int
 	level []int
+	// weight is each job's packing weight: its estimatedSeconds, or, when
+	// some jobs carry one and this one does not, the median of those that
+	// do. weighted is false when no job carries one: every job then weighs
+	// one and auto mode packs by count, exactly as before weights existed.
+	weight   []int
+	weighted bool
 }
 
 func newJobGraph(jobs []model.PlanJob) *jobGraph {
-	g := &jobGraph{index: make(map[string]int, len(jobs)), deps: make([][]int, len(jobs)), level: make([]int, len(jobs))}
+	g := &jobGraph{index: make(map[string]int, len(jobs)), deps: make([][]int, len(jobs)), level: make([]int, len(jobs)), weight: make([]int, len(jobs))}
 	for i, job := range jobs {
 		g.index[job.ID] = i
+	}
+	var declared []int
+	for _, job := range jobs {
+		if job.EstimatedSeconds > 0 {
+			declared = append(declared, job.EstimatedSeconds)
+		}
+	}
+	def := 1
+	if len(declared) > 0 {
+		g.weighted = true
+		sort.Ints(declared)
+		def = declared[len(declared)/2]
+	}
+	for i, job := range jobs {
+		g.weight[i] = def
+		if job.EstimatedSeconds > 0 {
+			g.weight[i] = job.EstimatedSeconds
+		}
 	}
 	for i, job := range jobs {
 		for _, dep := range job.DependsOn {

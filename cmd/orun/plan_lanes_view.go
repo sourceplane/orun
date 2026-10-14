@@ -30,9 +30,25 @@ func laneSummary(plan *model.Plan, res lanes.Result) string {
 	}
 	line := strings.Join(parts, " · ")
 	if res.Mode != "" {
-		line += "  (" + res.Mode + ")"
+		line += "  (" + res.Mode
+		if m := plan.Metadata.Lanes; m != nil && (m.MaxLanesFrom == "flag" || m.MaxLanesFrom == "env") {
+			line += fmt.Sprintf(", maxLanes %d from %s", m.MaxLanes, m.MaxLanesFrom)
+		}
+		if m := plan.Metadata.Lanes; m != nil && m.WeightsFrom != "" {
+			line += ", weights " + m.WeightsFrom
+		}
+		line += ")"
 	}
 	return line
+}
+
+// laneConcurrencyLabel renders a plan lane's concurrency: 0 is auto, sized
+// to the runner's cores by `orun run --lane`.
+func laneConcurrencyLabel(n int) string {
+	if n == 0 {
+		return "auto"
+	}
+	return fmt.Sprintf("%d", n)
 }
 
 // renderLanesView is `orun plan --view lanes`: every lane per environment with
@@ -50,7 +66,7 @@ func renderLanesView(plan *model.Plan, res lanes.Result, color bool) string {
 			env = l.Environment
 			fmt.Fprintf(&b, "\n  %s\n", ui.Bold(color, env))
 		}
-		detail := fmt.Sprintf("%s · concurrency %d", l.Source, l.Concurrency)
+		detail := fmt.Sprintf("%s · concurrency %s · level %d", l.Source, laneConcurrencyLabel(l.Concurrency), l.Level)
 		if l.Group != "" {
 			detail += " · group " + l.Group
 		}
@@ -59,6 +75,15 @@ func renderLanesView(plan *model.Plan, res lanes.Result, color bool) string {
 		}
 		if l.SplitFrom != "" {
 			detail += " · split from " + l.SplitFrom
+		}
+		if len(l.UpstreamLanes) > 0 {
+			detail += " · after " + strings.Join(l.UpstreamLanes, ", ")
+		}
+		if l.EstimatedSeconds > 0 {
+			detail += fmt.Sprintf(" · ~%ds", l.EstimatedSeconds)
+		}
+		if l.VCPU > 0 {
+			detail += fmt.Sprintf(" · vcpu %d", l.VCPU)
 		}
 		fmt.Fprintf(&b, "  ├─ %s  %s\n", ui.Bold(color, l.Name), ui.Dim(color, "["+l.ID+"]"))
 		fmt.Fprintf(&b, "  │    %s\n", ui.Dim(color, detail))

@@ -22,10 +22,24 @@ type JobRegistry struct {
 	Jobs       []JobSpec `yaml:"jobs" json:"jobs"`
 }
 
+// JobResources is what a job template declares it needs: the cpu it keeps
+// busy, the memory it takes and how long it usually runs. Weights for
+// packing lanes and sizing a lane's concurrency to its runner
+// (specs/orun-runner-efficiency §5.4); none of it changes what runs.
+type JobResources struct {
+	// CPU is the cores the job keeps busy (fractions allowed).
+	CPU float64 `yaml:"cpu,omitempty" json:"cpu,omitempty"`
+	// Memory is informational for a pool, e.g. "4Gi".
+	Memory string `yaml:"memory,omitempty" json:"memory,omitempty"`
+	// EstimatedSeconds is the job's usual duration: its packing weight.
+	EstimatedSeconds int `yaml:"estimatedSeconds,omitempty" json:"estimatedSeconds,omitempty"`
+}
+
 // JobSpec defines a complete job specification with multiple steps
 type JobSpec struct {
 	Name         string                 `yaml:"name" json:"name"`
 	Description  string                 `yaml:"description" json:"description"`
+	Resources    *JobResources          `yaml:"resources,omitempty" json:"resources,omitempty"`
 	RunsOn       string                 `yaml:"runsOn,omitempty" json:"runsOn,omitempty"`
 	Timeout      string                 `yaml:"timeout" json:"timeout"`
 	Retries      int                    `yaml:"retries" json:"retries"`
@@ -42,8 +56,14 @@ type Step struct {
 	Capability string `yaml:"capability,omitempty" json:"capability,omitempty"`
 	Phase      string `yaml:"phase,omitempty" json:"phase,omitempty"`
 	Order      int    `yaml:"order,omitempty" json:"order,omitempty"`
-	Run        string `yaml:"run,omitempty" json:"run,omitempty"`
-	Use        string `yaml:"use,omitempty" json:"use,omitempty"`
+	// Scope is job (default) or lane. A lane-scoped step is a run step that
+	// every job of a lane would execute identically (an install, a cache
+	// warm): the first job to reach it runs it once in the shared tree, the
+	// others reuse the result (specs/orun-runner-efficiency §5.3). Lane-scoped
+	// steps come first in a job, before its private tree is staged.
+	Scope string `yaml:"scope,omitempty" json:"scope,omitempty"`
+	Run   string `yaml:"run,omitempty" json:"run,omitempty"`
+	Use   string `yaml:"use,omitempty" json:"use,omitempty"`
 	// Workflow names a torkflow workflow file to run as this step — the third
 	// execution vocabulary beside run/use (specs/orun-workflows §3). Exactly one
 	// of Run/Use/Workflow may be set on a step.
@@ -116,6 +136,36 @@ func (s Step) ValidateExecForm() error {
 		return fmt.Errorf("step %q sets %s — a step must use exactly one of run/use/workflow", s.Name, strings.Join(set, " and "))
 	}
 	return nil
+}
+
+// Step scopes.
+const (
+	StepScopeJob  = "job"
+	StepScopeLane = "lane"
+)
+
+// NormalizeScope lower-cases a step scope and defaults empty to job.
+func NormalizeScope(scope string) string {
+	s := strings.ToLower(strings.TrimSpace(scope))
+	if s == "" {
+		return StepScopeJob
+	}
+	return s
+}
+
+// ValidateScope checks a step's scope: job or lane, and lane only on a run
+// step (an action's exported environment stays with the job that ran it).
+func (s Step) ValidateScope() error {
+	switch NormalizeScope(s.Scope) {
+	case StepScopeJob:
+		return nil
+	case StepScopeLane:
+		if strings.TrimSpace(s.Run) == "" {
+			return fmt.Errorf("step %q: scope: lane applies to run steps only (a use or workflow step's effects stay with the job that ran it)", s.Name)
+		}
+		return nil
+	}
+	return fmt.Errorf("step %q: scope %q is not one of job|lane", s.Name, s.Scope)
 }
 
 // NormalizePhase returns a normalized phase string and defaults empty values to "main".
@@ -195,6 +245,7 @@ type JobInstance struct {
 	Gates                    []PromotionGate
 	Timeout                  string
 	Retries                  int
+	Resources                *JobResources
 	Parameters               map[string]interface{}
 	Env                      map[string]string
 	// OptionalSecretRefs maps env var names to secret:// references that
@@ -251,6 +302,7 @@ type RenderedStep struct {
 	Name  string `json:"name"`
 	Phase string `json:"phase,omitempty"`
 	Order int    `json:"order,omitempty"`
+	Scope string `json:"scope,omitempty"`
 	Run   string `json:"run,omitempty"`
 	Use   string `json:"use,omitempty"`
 	// Workflow is the rendered torkflow workflow reference; WorkflowDigest is the

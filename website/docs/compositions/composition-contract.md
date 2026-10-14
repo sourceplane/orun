@@ -313,9 +313,20 @@ Runtime environment variables declared in intent or component env blocks:
 
 ## Execution semantics
 
-Jobs can declare: `runsOn`, `timeout`, `retries`, `labels`, `capabilities`, `steps`.
+Jobs can declare: `runsOn`, `timeout`, `retries`, `resources`, `labels`, `capabilities`, `steps`.
 
-Steps can declare: `run` or `use`, `capability`, `phase`, `order`, `with`, `env`, `shell`, `working-directory`, `timeout`, `retry`, `onFailure`.
+`resources` is what the job needs, for packing [lanes](../concepts/lanes.md#weights) and sizing a lane's concurrency to its runner; it changes nothing about what runs:
+
+```yaml
+resources:
+  cpu: 2                 # cores the job keeps busy (fractions allowed)
+  memory: 4Gi            # informational, for a runner pool
+  estimatedSeconds: 90   # the job's usual duration: its packing weight
+```
+
+Steps can declare: `run` or `use`, `capability`, `phase`, `order`, `scope`, `with`, `env`, `shell`, `working-directory`, `timeout`, `retry`, `onFailure`.
+
+`scope: lane` marks a `run` step that every job of a [lane](../concepts/lanes.md#share-a-lanes-setup) would execute identically — an install, a cache warm. The first job to reach it runs it once in the shared source tree; every other job of the lane whose step is the same after templating (same command, shell, environment and working directory) reuses the result. Lane-scoped steps must come first in a job, before its private tree is staged, and apply to `run` steps only: an action's exported environment stays with the job that ran it.
 
 ## Breaking changes (v2.0.0)
 

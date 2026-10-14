@@ -170,6 +170,61 @@ func TestLane_FailureStopsOnlyDependents(t *testing.T) {
 	}
 }
 
+// failedSignal closes failed once the job it watches has finished, which in
+// runLane is after that job's failure is recorded for the lane.
+type failedSignal struct {
+	fakeChecks
+	watch  string
+	failed chan struct{}
+}
+
+func (f *failedSignal) Finish(jobID, name, conclusion, note string) {
+	f.fakeChecks.Finish(jobID, name, conclusion, note)
+	if jobID == f.watch {
+		close(f.failed)
+	}
+}
+
+// Every rendered plan carries execution.failFast: true (internal/render), and
+// a lane must not read it: one red job cancelled every unstarted job of its
+// lane, 24 of 128 on orun-cloud's full verify (orun#735). z is held in its
+// cross-lane wait until x has failed, so it reaches its slot after the failure
+// whatever the scheduler does.
+func TestLane_PlanFailFastStopsOnlyDependents(t *testing.T) {
+	step := []model.PlanStep{{ID: "run", Name: "run"}}
+	plan := &model.Plan{
+		Execution: model.PlanExecution{Concurrency: 4, FailFast: true},
+		Jobs: []model.PlanJob{
+			{ID: "w", Component: "w", Lane: "M", Steps: step},
+			{ID: "x", Component: "x", Lane: "L", Steps: step},
+			{ID: "y", Component: "y", Lane: "L", DependsOn: []string{"x"}, Steps: step},
+			{ID: "z", Component: "z", Lane: "L", DependsOn: []string{"w"}, Steps: step},
+		},
+		Lanes: []model.PlanLane{
+			{ID: "M", Jobs: []string{"w"}, Concurrency: 1},
+			{ID: "L", Jobs: []string{"x", "y", "z"}, Concurrency: 1},
+		},
+	}
+	ex := &laneExecutor{fail: map[string]bool{"x": true}}
+	r := laneRunner(t, ex, "L", []string{"x", "y", "z"}, 1)
+	signal := &failedSignal{watch: "x", failed: make(chan struct{})}
+	r.Checks = signal
+	r.Hooks = &RunnerHooks{AwaitUpstream: func(string, []string) error {
+		select {
+		case <-signal.failed:
+			return nil
+		case <-time.After(10 * time.Second):
+			return fmt.Errorf("x never finished")
+		}
+	}}
+	if err := r.Run(plan); err == nil {
+		t.Fatal("a failed job must fail the lane")
+	}
+	if got := strings.Join(ex.jobs(), ","); got != "x,z" {
+		t.Fatalf("ran %s: y depends on the failed x, z does not", got)
+	}
+}
+
 func TestLane_RetryRerunsOnlyUnfinishedJobs(t *testing.T) {
 	ex := &laneExecutor{}
 	r := laneRunner(t, ex, "A", []string{"a1", "a2"}, 2)
@@ -323,5 +378,112 @@ func TestLane_GHAPrintsAFailedJobsHeldSteps(t *testing.T) {
 		if !strings.Contains(log, want) {
 			t.Fatalf("failed job's output missing %q:\n%s", want, log)
 		}
+	}
+}
+
+// edgePlan is cirrus-baseline's edge phase in miniature: one lane holds the
+// fleet and the API edge, the console waits on the edge from a lane of its
+// own, and the edge is listed last.
+func edgePlan() *model.Plan {
+	step := []model.PlanStep{{ID: "run", Name: "run"}}
+	return &model.Plan{
+		Jobs: []model.PlanJob{
+			{ID: "w1", Component: "w1", Lane: "F", Steps: step},
+			{ID: "w2", Component: "w2", Lane: "F", Steps: step},
+			{ID: "w3", Component: "w3", Lane: "F", Steps: step},
+			{ID: "edge", Component: "edge", Lane: "F", Steps: step},
+			{ID: "console", Component: "console", Lane: "C", DependsOn: []string{"edge"}, Steps: step},
+		},
+		Lanes: []model.PlanLane{
+			{ID: "F", Jobs: []string{"w1", "w2", "w3", "edge"}, Concurrency: 1},
+			{ID: "C", Jobs: []string{"console"}, Concurrency: 1},
+		},
+	}
+}
+
+// The slot goes to the job another lane waits on, not to the first listed.
+func TestLane_SlotGoesToTheJobOthersWaitOn(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		ex := &laneExecutor{}
+		r := laneRunner(t, ex, "F", []string{"w1", "w2", "w3", "edge"}, 1)
+		if err := r.Run(edgePlan()); err != nil {
+			t.Fatal(err)
+		}
+		if ex.ran[0] != "edge" {
+			t.Fatalf("run %d: ran %v; the edge must take the first slot", i, ex.ran)
+		}
+		if got := strings.Join(ex.ran[1:], ","); got != "w1,w2,w3" {
+			t.Fatalf("run %d: ties must keep plan order, ran %v", i, ex.ran)
+		}
+	}
+}
+
+// Inside a lane the head of the longer chain goes first: at one slot, y1 → y2
+// is two jobs behind y1 and x is one, so y1 runs before x although x is
+// listed first.
+func TestLane_SlotGoesToTheLongerChain(t *testing.T) {
+	step := []model.PlanStep{{ID: "run", Name: "run"}}
+	plan := &model.Plan{
+		Jobs: []model.PlanJob{
+			{ID: "x", Component: "x", Lane: "L", Steps: step},
+			{ID: "y1", Component: "y", Lane: "L", Steps: step},
+			{ID: "y2", Component: "y", Lane: "L", DependsOn: []string{"y1"}, Steps: step},
+		},
+		Lanes: []model.PlanLane{{ID: "L", Jobs: []string{"x", "y1", "y2"}, Concurrency: 1}},
+	}
+	for i := 0; i < 20; i++ {
+		ex := &laneExecutor{}
+		r := laneRunner(t, ex, "L", []string{"x", "y1", "y2"}, 1)
+		if err := r.Run(plan); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(ex.ran, ","); got != "y1,x,y2" && got != "y1,y2,x" {
+			t.Fatalf("run %d: ran %s; y1 must go first", i, got)
+		}
+	}
+}
+
+func TestCriticalPath(t *testing.T) {
+	got := criticalPath(edgePlan().Jobs)
+	want := map[string]int{"w1": 1, "w2": 1, "w3": 1, "edge": 2, "console": 1}
+	for id, n := range want {
+		if got[id] != n {
+			t.Errorf("%s: %d, want %d", id, got[id], n)
+		}
+	}
+}
+
+// Every slot comes back, and no more jobs run at once than there are slots.
+func TestSlotGate_NeverExceedsItsSlots(t *testing.T) {
+	const jobs, slots = 40, 3
+	g := newSlotGate(slots, jobs)
+	var mu sync.Mutex
+	inFlight, peak := 0, 0
+	var wg sync.WaitGroup
+	for i := 0; i < jobs; i++ {
+		tk := g.ticket(i%5, i)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tk.acquire()
+			mu.Lock()
+			inFlight++
+			if inFlight > peak {
+				peak = inFlight
+			}
+			mu.Unlock()
+			time.Sleep(time.Millisecond)
+			mu.Lock()
+			inFlight--
+			mu.Unlock()
+			tk.release()
+		}()
+	}
+	wg.Wait()
+	if peak > slots {
+		t.Fatalf("peak %d > %d slots", peak, slots)
+	}
+	if g.free != slots {
+		t.Fatalf("free %d after all released, want %d", g.free, slots)
 	}
 }
