@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -31,6 +32,27 @@ var (
 	lockTouchInterval   = 5 * time.Second
 	lockStaleAfter      = 60 * time.Second
 )
+
+// How long a resolved ref is trusted on disk before it is resolved again
+// (specs/orun-cache-efficiency CE1). A SHA never changes; a tag such as v4 is
+// moved to each new minor release, a branch on every push. Within a process
+// a ref is resolved once whatever its age, and a resolve that fails keeps
+// serving the entry on disk, with a note, so an offline machine still runs.
+var (
+	refTagTTL    = 24 * time.Hour
+	refBranchTTL = time.Hour
+)
+
+var versionTagPattern = regexp.MustCompile(`^v?\d+(\.\d+){0,3}([-+.][A-Za-z0-9.-]+)?$`)
+
+// refTTL is how long a resolved ref is trusted: a version-shaped tag for
+// refTagTTL, anything else (a branch, a named tag) for refBranchTTL.
+func refTTL(ref string) time.Duration {
+	if versionTagPattern.MatchString(strings.TrimSpace(ref)) {
+		return refTagTTL
+	}
+	return refBranchTTL
+}
 
 type resolvedAction struct {
 	Reference   ActionReference
@@ -113,7 +135,10 @@ func (e *Engine) fetchRemoteAction(ctx context.Context, apiURL string, token str
 				return fmt.Errorf("create temp cache directory: %w", err)
 			}
 
-			archiveURL := strings.TrimRight(apiURL, "/") + "/repos/" + reference.Repository() + "/tarball/" + reference.Ref
+			// By the resolved SHA, never by the tag or branch as written: the
+			// directory named by a SHA holds that commit even if the ref moved
+			// between the resolve and the download.
+			archiveURL := strings.TrimRight(apiURL, "/") + "/repos/" + reference.Repository() + "/tarball/" + resolvedRef
 			if err := e.downloadAndExtractTarball(ctx, archiveURL, token, tempDir); err != nil {
 				_ = os.RemoveAll(tempDir)
 				return err
@@ -181,12 +206,16 @@ func (e *Engine) resolveRemoteRef(ctx context.Context, apiURL string, token stri
 		return sha, nil
 	}
 	e.refCacheMu.RUnlock()
-
-	if sha := e.readRefFromDisk(reference); sha != "" {
+	remember := func(sha string) {
 		e.refCacheMu.Lock()
 		e.refCache[cacheKey] = sha
 		e.refCacheMu.Unlock()
-		return sha, nil
+	}
+
+	entry, onDisk := e.readRefFromDisk(reference)
+	if onDisk && !e.refreshActions && time.Since(entry.resolvedAt) <= refTTL(reference.Ref) {
+		remember(entry.sha)
+		return entry.sha, nil
 	}
 
 	result, err, _ := e.refResolveSF.Do(cacheKey, func() (interface{}, error) {
@@ -199,11 +228,17 @@ func (e *Engine) resolveRemoteRef(ctx context.Context, apiURL string, token stri
 
 		sha, err := e.resolveRemoteRefAPI(ctx, apiURL, token, reference)
 		if err != nil {
+			if onDisk {
+				// Offline, rate-limited, or the API is down: the version this
+				// machine resolved before still runs; say so once per process.
+				e.warnf("could not resolve %s@%s (%v); using the version resolved %s ago",
+					reference.Repository(), reference.Ref, err, time.Since(entry.resolvedAt).Round(time.Minute))
+				remember(entry.sha)
+				return entry.sha, nil
+			}
 			return "", err
 		}
-		e.refCacheMu.Lock()
-		e.refCache[cacheKey] = sha
-		e.refCacheMu.Unlock()
+		remember(sha)
 		e.writeRefToDisk(reference, sha)
 		return sha, nil
 	})
@@ -393,26 +428,43 @@ func (e *Engine) refDiskPath(reference ActionReference) string {
 	return filepath.Join(e.cacheDir, reference.CachePath(), "refs", slug)
 }
 
-func (e *Engine) readRefFromDisk(reference ActionReference) string {
+// refEntry is a resolved ref on disk: the SHA and when it was resolved. An
+// entry written before the time was recorded has a zero resolvedAt, so it is
+// resolved again once and then carries one.
+type refEntry struct {
+	sha        string
+	resolvedAt time.Time
+}
+
+// readRefFromDisk returns the ref's entry, honoured only while the action
+// directory it names is complete (its .ready marker exists).
+func (e *Engine) readRefFromDisk(reference ActionReference) (refEntry, bool) {
 	path := e.refDiskPath(reference)
 	if path == "" {
-		return ""
+		return refEntry{}, false
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return ""
+		return refEntry{}, false
 	}
-	sha := strings.TrimSpace(string(data))
-	if !shaPattern.MatchString(sha) {
-		return ""
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 || !shaPattern.MatchString(fields[0]) {
+		return refEntry{}, false
 	}
-	cacheDir := filepath.Join(e.cacheDir, reference.CachePath(), strings.ToLower(sha))
+	entry := refEntry{sha: strings.ToLower(fields[0])}
+	if len(fields) > 1 {
+		if unix, err := strconv.ParseInt(fields[1], 10, 64); err == nil && unix > 0 {
+			entry.resolvedAt = time.Unix(unix, 0)
+		}
+	}
+	cacheDir := filepath.Join(e.cacheDir, reference.CachePath(), entry.sha)
 	if _, err := os.Stat(filepath.Join(cacheDir, ".ready")); err != nil {
-		return ""
+		return refEntry{}, false
 	}
-	return strings.ToLower(sha)
+	return entry, true
 }
 
+// writeRefToDisk records the SHA a ref resolved to and when.
 func (e *Engine) writeRefToDisk(reference ActionReference, sha string) {
 	path := e.refDiskPath(reference)
 	if path == "" {
@@ -422,10 +474,18 @@ func (e *Engine) writeRefToDisk(reference ActionReference, sha string) {
 		return
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(sha), 0644); err != nil {
+	if err := os.WriteFile(tmp, []byte(fmt.Sprintf("%s %d\n", sha, time.Now().Unix())), 0644); err != nil {
 		return
 	}
 	_ = os.Rename(tmp, path)
+}
+
+// warnf hands a note to the engine's owner (stderr, for orun run); nothing
+// when no sink was given.
+func (e *Engine) warnf(format string, args ...interface{}) {
+	if e.warn != nil {
+		e.warn(fmt.Sprintf(format, args...))
+	}
 }
 
 // withLock runs fn holding the lock file at lockPath, which other orun
