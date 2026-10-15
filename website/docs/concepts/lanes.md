@@ -119,7 +119,9 @@ the job that ran it, so it stays per job (the tool cache is shared, so a
 repeat is a few seconds).
 
 Two more things every staged job gets: `.git` is never copied — `GIT_DIR`
-and `GIT_WORK_TREE` point `git` at the source repository — and
+points `git` at the source repository, `GIT_WORK_TREE` at the staged tree
+and `GIT_INDEX_FILE` at a private copy of the index, so `git ls-files` or
+`git status` in the job answer for its own tree — and
 `TURBO_CACHE_DIR` names one cache per run, so the second job of a lane hits
 what the first built. `orun run --isolation component` goes further for
 jobs that write only under their own directory: it copies just that

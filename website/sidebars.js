@@ -228,9 +228,11 @@ const sidebars = {
       label: 'Release notes',
       items: [
         'release-notes/v2.80.0',
+        'release-notes/v2.79.1',
         'release-notes/v2.79.0',
         'release-notes/v2.78.1',
         'release-notes/v2.78.0',
+        'release-notes/v2.77.3',
         'release-notes/v2.77.2',
         'release-notes/v2.77.1',
         'release-notes/v2.77.0',
