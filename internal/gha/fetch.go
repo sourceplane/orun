@@ -12,10 +12,25 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
 var shaPattern = regexp.MustCompile(`^[a-fA-F0-9]{40}$`)
+
+// The action cache's time bounds (specs/orun-cache-efficiency CE0). A
+// download is bounded by progress, not by a wall-clock total: it fails when
+// no byte has arrived for downloadIdleTimeout, and a slow link that keeps
+// moving completes. A process waiting for another's download of the same
+// action waits actionFetchLockWait, longer than any download the idle bound
+// lets through, and reclaims a lock whose holder stopped refreshing it.
+var (
+	downloadIdleTimeout = 30 * time.Second
+	refResolveTimeout   = 30 * time.Second
+	actionFetchLockWait = 10 * time.Minute
+	lockTouchInterval   = 5 * time.Second
+	lockStaleAfter      = 60 * time.Second
+)
 
 type resolvedAction struct {
 	Reference   ActionReference
@@ -87,7 +102,7 @@ func (e *Engine) fetchRemoteAction(ctx context.Context, apiURL string, token str
 			return nil, fmt.Errorf("create cache parent for %s: %w", reference.Repository(), err)
 		}
 
-		if err := withLock(lockPath, 30*time.Second, func() error {
+		if err := withLock(lockPath, actionFetchLockWait, func() error {
 			if _, err := os.Stat(markerPath); err == nil {
 				return nil
 			}
@@ -199,6 +214,8 @@ func (e *Engine) resolveRemoteRef(ctx context.Context, apiURL string, token stri
 }
 
 func (e *Engine) resolveRemoteRefAPI(ctx context.Context, apiURL string, token string, reference ActionReference) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, refResolveTimeout)
+	defer cancel()
 	url := strings.TrimRight(apiURL, "/") + "/repos/" + reference.Repository() + "/commits/" + reference.Ref
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -234,6 +251,8 @@ func (e *Engine) resolveRemoteRefAPI(ctx context.Context, apiURL string, token s
 }
 
 func (e *Engine) downloadAndExtractTarball(ctx context.Context, archiveURL string, token string, destination string) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
 	if err != nil {
 		return fmt.Errorf("create tarball request: %w", err)
@@ -255,7 +274,56 @@ func (e *Engine) downloadAndExtractTarball(ctx context.Context, archiveURL strin
 		return fmt.Errorf("download tarball: unexpected status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	gzipReader, err := gzip.NewReader(response.Body)
+	// Bounded by progress: the body may take as long as it takes while bytes
+	// keep arriving; a stall of downloadIdleTimeout cancels it.
+	body := newProgressReader(response.Body, downloadIdleTimeout, cancel)
+	defer body.Close()
+	if err := extractTarGzStream(body, destination); err != nil {
+		if body.stalled.Load() {
+			return fmt.Errorf("download tarball: no data received for %s", downloadIdleTimeout)
+		}
+		return err
+	}
+	return nil
+}
+
+// progressReader cancels a download that stops making progress: every read
+// that returns bytes pushes the deadline out by idle; a deadline that passes
+// cancels the request's context and marks the reader stalled, so the caller
+// can report the stall rather than a bare cancellation.
+type progressReader struct {
+	r       io.ReadCloser
+	idle    time.Duration
+	timer   *time.Timer
+	stalled atomic.Bool
+}
+
+func newProgressReader(r io.ReadCloser, idle time.Duration, cancel context.CancelFunc) *progressReader {
+	p := &progressReader{r: r, idle: idle}
+	p.timer = time.AfterFunc(idle, func() {
+		p.stalled.Store(true)
+		cancel()
+	})
+	return p
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	if n > 0 {
+		p.timer.Reset(p.idle)
+	}
+	return n, err
+}
+
+func (p *progressReader) Close() error {
+	p.timer.Stop()
+	return p.r.Close()
+}
+
+// extractTarGzStream extracts a GitHub repository tarball (one top-level
+// directory, dropped) from r into destination.
+func extractTarGzStream(r io.Reader, destination string) error {
+	gzipReader, err := gzip.NewReader(r)
 	if err != nil {
 		return fmt.Errorf("open action tarball: %w", err)
 	}
@@ -360,17 +428,52 @@ func (e *Engine) writeRefToDisk(reference ActionReference, sha string) {
 	_ = os.Rename(tmp, path)
 }
 
+// withLock runs fn holding the lock file at lockPath, which other orun
+// processes on the machine contend for. The holder records its pid and
+// refreshes the file's mtime every lockTouchInterval while fn runs; a waiter
+// that finds a lock untouched for lockStaleAfter knows its holder died
+// (killed mid-download, out of memory, Ctrl-C) and reclaims it, so one crash
+// never blocks every later run on the machine. The reclaim is a rename, so
+// of several waiters only one takes the stale file and the holder that
+// replaces it is never deleted by another.
 func withLock(lockPath string, timeout time.Duration, fn func() error) error {
 	deadline := time.Now().Add(timeout)
 	for {
 		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 		if err == nil {
+			_, _ = fmt.Fprintf(file, "%d %d\n", os.Getpid(), time.Now().Unix())
 			_ = file.Close()
-			defer os.Remove(lockPath)
-			return fn()
+			stop := make(chan struct{})
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				ticker := time.NewTicker(lockTouchInterval)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-stop:
+						return
+					case <-ticker.C:
+						now := time.Now()
+						_ = os.Chtimes(lockPath, now, now)
+					}
+				}
+			}()
+			fnErr := fn()
+			close(stop)
+			<-done
+			_ = os.Remove(lockPath)
+			return fnErr
 		}
 		if !os.IsExist(err) {
 			return fmt.Errorf("acquire lock %s: %w", lockPath, err)
+		}
+		if info, statErr := os.Stat(lockPath); statErr == nil && time.Since(info.ModTime()) > lockStaleAfter {
+			stale := lockPath + ".stale"
+			if os.Rename(lockPath, stale) == nil {
+				_ = os.Remove(stale)
+			}
+			continue
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("timed out waiting for action cache lock %s", lockPath)
