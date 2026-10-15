@@ -74,6 +74,7 @@ Running `orun` with no arguments on an interactive terminal opens the
 | [`orun catalog`](./orun-catalog.md) | Resolve, persist, push, and query the component catalog that drives change detection |
 | [`orun objects`](./orun-objects.md) | Inspect, verify, push, pull, and garbage-collect the content-addressed object graph |
 | [`orun gc`](./orun-gc.md) | Clean up old executions and orphan plans |
+| [`orun cache`](./orun-cache.md) | List, prune and bound the caches orun keeps |
 
 ### Cloud client
 

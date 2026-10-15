@@ -139,6 +139,8 @@ Every job gets a temporary `HOME` of its own (so global installs by `npm install
 
 Each variable is set only when the environment orun inherits does not already name a directory, so a workflow that points a tool elsewhere keeps its choice. Every shared cache is one its tool documents as safe for concurrent use (content-addressed or locked); a tool whose cache is not — Cargo's `CARGO_HOME`, Maven's repository, Cypress's binary cache — keeps the job's own `HOME` and can be kept across jobs as a declared cache instead.
 
+`orun cache ls` lists every one of these with its size and last use, `orun cache prune --older-than 30d` removes the entries not used for a while and `orun cache gc --max-size 10G` keeps the whole of `~/.orun` under a budget, least recently used first ([`orun cache`](../cli/orun-cache.md)).
+
 The tool cache itself is the host runner's when there is one: on a GitHub runner `RUNNER_TOOL_CACHE` already holds Node, Python and Go, and orun uses that directory rather than an empty one of its own. `ORUN_TOOL_CACHE` names another directory explicitly.
 
 The run summary's cache-hit count comes from the tool cache itself: a setup action that added nothing to it found its tool there.

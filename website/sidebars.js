@@ -175,6 +175,7 @@ const sidebars = {
             'cli/orun-catalog',
             'cli/orun-objects',
             'cli/orun-gc',
+            'cli/orun-cache',
           ],
         },
         {

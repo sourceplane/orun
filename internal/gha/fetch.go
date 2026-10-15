@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/sourceplane/orun/internal/cachehome"
 )
 
 var shaPattern = regexp.MustCompile(`^[a-fA-F0-9]{40}$`)
@@ -114,6 +116,7 @@ func (e *Engine) fetchRemoteAction(ctx context.Context, apiURL string, token str
 			if err != nil {
 				return nil, err
 			}
+			cachehome.Touch(cacheDir)
 			e.actionCacheMu.Lock()
 			e.actionCache[actionKey] = loaded
 			e.actionCacheMu.Unlock()
