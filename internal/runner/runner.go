@@ -435,6 +435,10 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	if err != nil {
 		return err
 	}
+	// Deferred so every path out of Run (the lane scheduler returns early for
+	// a whole plan at concurrency > 1) removes the run's staging directory
+	// after the jobs' own cleanups, which run inside the call.
+	defer r.removeRunDir(workspaceDir)
 
 	rootCtx := r.Context
 	if rootCtx == nil {
@@ -640,6 +644,28 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	r.printRunSummary(summary, finalStatus)
 
 	return r.interruptedError(rootCtx, execState, orderedJobs)
+}
+
+// removeRunDir removes the run's staging directory, .orun/runs/<exec-id>,
+// once every job has cleaned up its own tree: what is left is what the jobs'
+// tools wrote beside the trees (the per-run turbo cache), which no later run
+// reads, so a checkout would otherwise keep one such directory per run
+// (specs/orun-cache-efficiency F9). Only a run that covered the whole plan
+// removes it: a --job or --lane process shares the exec id with other
+// processes on the same checkout, whose trees may still be in use.
+// --keep-workspaces keeps it, as it keeps the trees.
+func (r *Runner) removeRunDir(workspaceDir string) {
+	if r.DryRun || r.KeepWorkspaces || r.UseWorkDirOverride || r.ExecID == "" {
+		return
+	}
+	if r.JobID != "" || r.LaneJobs != nil {
+		return
+	}
+	src, err := filepath.Abs(workspaceDir)
+	if err != nil {
+		return
+	}
+	_ = os.RemoveAll(filepath.Join(src, ".orun", "runs", r.ExecID))
 }
 
 // interruptedError is the run's error after its context was cancelled: how
@@ -927,6 +953,15 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 		}
 		stepDuration := time.Since(stepStartedAt)
 		view := analyzeStepOutput(step, output)
+		if observer, ok := r.Executor.(executor.CacheObserver); ok && stepErr == nil {
+			// The tool cache's own verdict beats the action's wording.
+			if hit, observed := observer.LastStepCacheHit(job.ID); observed {
+				view.cacheHits = 0
+				if hit {
+					view.cacheHits = 1
+				}
+			}
+		}
 		jobReport.observeStep(job.ID, stepID, view)
 
 		// Write step log. The outcome is already decided here — `stepErr` is in

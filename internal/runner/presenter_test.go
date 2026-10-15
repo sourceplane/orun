@@ -298,3 +298,21 @@ func TestJobReportObserveStepDone(t *testing.T) {
 		t.Fatalf("slowestStep = %q, want %q", jr.slowestStep, "build")
 	}
 }
+
+func TestAnalyzeStepOutputCountsOnlyMessagesThatMeanAHit(t *testing.T) {
+	t.Parallel()
+
+	helm := analyzeStepOutput(model.PlanStep{Use: "azure/setup-helm@v4"},
+		"Helm tool version 'v4.1.4' has been cached at /x/tool-cache/helm/4.1.4/x64/helm")
+	if helm.cacheHits != 0 {
+		t.Fatalf("setup-helm prints that line after a download too: hits = %d, want 0", helm.cacheHits)
+	}
+	node := analyzeStepOutput(model.PlanStep{Use: "actions/setup-node@v4"}, "Found in cache @ /x/tool-cache/node/20.1.0/x64")
+	if node.cacheHits != 1 {
+		t.Fatalf("setup-node's hit message: hits = %d, want 1", node.cacheHits)
+	}
+	restore := analyzeStepOutput(model.PlanStep{Use: "azure/setup-helm@v4"}, "Restoring 'v4.1.4' from cache")
+	if restore.cacheHits != 1 {
+		t.Fatalf("a restore from cache: hits = %d, want 1", restore.cacheHits)
+	}
+}

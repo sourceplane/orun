@@ -29,6 +29,12 @@ func (e *githubActionsExecutor) Cleanup(ctx ExecContext) error {
 	return e.engine.Cleanup(toGHAContext(ctx))
 }
 
+// LastStepCacheHit is the engine's tool-cache verdict on the job's last step
+// (CacheObserver).
+func (e *githubActionsExecutor) LastStepCacheHit(jobID string) (bool, bool) {
+	return e.engine.LastStepCacheHit(jobID)
+}
+
 func toGHAContext(ctx ExecContext) gha.ExecContext {
 	return gha.ExecContext{
 		Context:      ctx.Context,
