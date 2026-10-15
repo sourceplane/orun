@@ -1,6 +1,7 @@
 package cachehome
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -26,6 +27,9 @@ const (
 	KindShared Kind = "shared"
 	// KindDeclared is a cache a composition step declared: ~/.orun/actions/shared/caches/<name>.
 	KindDeclared Kind = "declared"
+	// KindActionsCache is an entry the engine's native actions/cache saved:
+	// ~/.orun/actions/shared/actions-cache/<entry>, named by its key.
+	KindActionsCache Kind = "actions-cache"
 	// KindCompositions is a composition package at one digest:
 	// ~/.orun/cache/compositions/<digest>.
 	KindCompositions Kind = "compositions"
@@ -37,7 +41,7 @@ const (
 )
 
 // Kinds lists every kind, in the order `orun cache ls` prints them.
-var Kinds = []Kind{KindActions, KindToolCache, KindShared, KindDeclared, KindCompositions, KindRuns, KindResolveMemo}
+var Kinds = []Kind{KindActions, KindToolCache, KindShared, KindDeclared, KindActionsCache, KindCompositions, KindRuns, KindResolveMemo}
 
 // MachineWide reports whether entries of the kind live under the cache home
 // (and count against `orun cache gc`'s budget) rather than in a checkout.
@@ -144,11 +148,19 @@ func Inventory(checkout string) ([]Entry, error) {
 	// Shared stores, less the declared caches (listed on their own); a
 	// Terraform plugin cache slot is in use while a job holds its lock.
 	for _, store := range subdirs(Shared()) {
-		if store == "caches" {
+		if store == "caches" || store == "actions-cache" {
 			continue
 		}
 		path := filepath.Join(Shared(), store)
 		add(KindShared, store, path, strings.HasPrefix(store, "terraform-plugins") && flockHeld(path+".lock"))
+	}
+	actionsCache := filepath.Join(Shared(), "actions-cache")
+	for _, name := range subdirs(actionsCache) {
+		if strings.Contains(name, "-tmp-") {
+			continue
+		}
+		path := filepath.Join(actionsCache, name)
+		add(KindActionsCache, actionsCacheKey(path, name), path, flockHeld(path+".lock"))
 	}
 	for _, name := range subdirs(Declared()) {
 		if strings.Contains(name, ".tmp-") || strings.Contains(name, ".old-") {
@@ -236,7 +248,7 @@ func Remove(e Entry) error {
 		return fmt.Errorf("%s %s is in use", e.Kind, e.Name)
 	}
 	switch e.Kind {
-	case KindDeclared, KindCompositions:
+	case KindDeclared, KindCompositions, KindActionsCache:
 		lock, ok, err := fslock.TryAcquire(e.Path + ".lock")
 		if err == nil && !ok {
 			return fmt.Errorf("%s %s is in use", e.Kind, e.Name)
@@ -269,6 +281,22 @@ func Total(entries []Entry) int64 {
 		n += e.Size
 	}
 	return n
+}
+
+// actionsCacheKey is the key an actions/cache entry was saved under, read
+// from its record; the directory name when the record is unreadable.
+func actionsCacheKey(path, fallback string) string {
+	data, err := os.ReadFile(filepath.Join(path, "meta.json"))
+	if err != nil {
+		return fallback
+	}
+	var meta struct {
+		Key string `json:"key"`
+	}
+	if json.Unmarshal(data, &meta) != nil || meta.Key == "" {
+		return fallback
+	}
+	return meta.Key
 }
 
 func kindIndex(k Kind) int {

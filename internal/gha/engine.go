@@ -244,6 +244,9 @@ type postAction struct {
 	ifExpression string
 	scope        *scope
 	invocation   *actionInvocation
+	// native runs the post step of an action the engine implements itself
+	// (actions/cache's save), in place of a node or docker stage.
+	native func(ExecContext) (string, error)
 }
 
 type stepSpec struct {
@@ -924,6 +927,15 @@ func (e *Engine) executeUsesStep(ctx ExecContext, state *jobState, scope *scope,
 	useEvaluator := state.evaluator(scope, baseEnv, state.githubForScope(scope, state.nextActionName("resolve")))
 	useValue := useEvaluator.Interpolate(spec.Use)
 
+	// actions/cache is run by the engine itself: GitHub's cache service is
+	// not reachable from orun, so the real action restored nothing
+	// (specs/orun-cache-efficiency CE7).
+	if ref, perr := ParseActionReference(useValue); perr == nil {
+		if kind, native := nativeCacheKind(ref); native {
+			return e.executeNativeCacheAction(ctx, state, scope, spec, inheritedEnv, ref, kind)
+		}
+	}
+
 	resolved, err := e.resolveAction(firstNonEmptyContext(ctx.Context), scope.baseActionDir, state.github.APIURL, state.github.Token, useValue)
 	if err != nil {
 		return stepExecutionResult{}, err
@@ -1210,6 +1222,9 @@ func (e *Engine) runPostAction(ctx ExecContext, state *jobState, action *postAct
 	}
 	if !run {
 		return "", nil
+	}
+	if action.native != nil {
+		return action.native(ctx)
 	}
 
 	switch action.invocation.metadata.Runs.Using {

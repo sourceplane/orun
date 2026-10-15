@@ -118,6 +118,28 @@ A tag or branch is resolved again once its entry is older than that, so `uses: o
 
 The download of an action version is guarded by a lock file beside its cache directory, so two jobs or two orun processes never fetch the same version at once. The lock records its holder and is refreshed while the download runs; a lock left by a process that died is reclaimed by the next waiter after a minute. A waiter waits as long as a download can take, and the download itself is bounded by progress — it fails only when no data has arrived for 30 seconds — so a large action on a slow link completes.
 
+### `actions/cache`
+
+GitHub's cache service is not reachable from orun, so a composition step using `actions/cache` restored nothing and warned. The GitHub Actions engine now runs `actions/cache`, `actions/cache/restore` and `actions/cache/save` itself, against a store under `~/.orun/actions/shared/actions-cache/` that every job and every orun process on the machine shares, with the action's own inputs and outputs:
+
+```yaml
+- uses: actions/cache@v4
+  id: deps
+  with:
+    path: |
+      node_modules
+      ~/.cache/ms-playwright
+    key: deps-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+    restore-keys: |
+      deps-${{ runner.os }}-
+- run: pnpm install --frozen-lockfile
+  if: steps.deps.outputs.cache-hit != 'true'
+```
+
+`path` lines are relative to the workspace (a glob matches files and directories, `~` is the job's home, a `!` line excludes); `key` must match exactly for `cache-hit` to be `true`, else the first `restore-keys` prefix with an entry restores the newest one and `cache-matched-key` names it. The main action saves under `key` in its post step when the key was not an exact hit; `actions/cache/save` saves at once; `fail-on-cache-miss` and `lookup-only` behave as documented for the action. A key already saved is never replaced, and a save is held under a lock every orun process respects. `orun cache ls` lists the entries by key, and `prune` and `gc` remove them with the rest.
+
+The `cache:` input of `setup-node` and its siblings still reaches nothing: it calls GitHub's cache client inside the action. Under orun it is unnecessary, since the package stores (`npm`, `pnpm-store`, `yarn`) are shared across jobs already (below).
+
 ### Shared caches
 
 Every job gets a temporary `HOME` of its own (so global installs by `npm install -g` never race between jobs), and the caches that are safe to share are pointed at one directory for the whole machine:

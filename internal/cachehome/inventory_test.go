@@ -35,6 +35,9 @@ func TestInventory_ListsEveryCacheWithSizeAndAge(t *testing.T) {
 	write(t, filepath.Join(root, "actions", "shared", "caches", "next-web", "cache", "x"), "xx")
 	write(t, filepath.Join(root, "cache", "compositions", "0123abcd", "stack.yaml"), "x")
 	write(t, filepath.Join(root, "cache", "compositions", "0123abcd-tmp-1", "stack.yaml"), "x")
+	write(t, filepath.Join(root, "actions", "shared", "actions-cache", "e1", "meta.json"), `{"key":"deps-v1","paths":["ws/node_modules"]}`)
+	write(t, filepath.Join(root, "actions", "shared", "actions-cache", "e1", "tree", "ws", "node_modules", "x"), "xxx")
+	write(t, filepath.Join(root, "actions", "shared", "actions-cache", "e2-tmp-1", "meta.json"), `{"key":"half"}`)
 
 	checkout := t.TempDir()
 	write(t, filepath.Join(checkout, ".orun", "runs", "exec_1", "a", "work", "f"), "run")
@@ -51,19 +54,22 @@ func TestInventory_ListsEveryCacheWithSizeAndAge(t *testing.T) {
 	}
 	for _, want := range []string{
 		"actions:actions/setup-node/abc123", "tool-cache:node/22.1.0", "shared:pnpm-store",
-		"declared:next-web", "compositions:0123abcd", "runs:exec_1", "resolve-memo:k1",
+		"declared:next-web", "compositions:0123abcd", "runs:exec_1", "resolve-memo:k1", "actions-cache:deps-v1",
 	} {
 		if _, ok := got[want]; !ok {
 			t.Errorf("missing %s in %v", want, keys(got))
 		}
 	}
-	for _, unwanted := range []string{"actions:actions/setup-node/def456", "compositions:0123abcd-tmp-1", "resolve-memo:k2.tmp", "shared:caches"} {
+	for _, unwanted := range []string{"actions:actions/setup-node/def456", "compositions:0123abcd-tmp-1", "resolve-memo:k2.tmp", "shared:caches", "shared:actions-cache", "actions-cache:e2-tmp-1"} {
 		if _, ok := got[unwanted]; ok {
 			t.Errorf("%s is not an entry", unwanted)
 		}
 	}
-	if len(got) != 7 {
-		t.Fatalf("7 entries, got %d: %v", len(got), keys(got))
+	if len(got) != 8 {
+		t.Fatalf("8 entries, got %d: %v", len(got), keys(got))
+	}
+	if e := got["actions-cache:deps-v1"]; e.Size != int64(3+len(`{"key":"deps-v1","paths":["ws/node_modules"]}`)) {
+		t.Fatalf("an actions/cache entry is named by its key and sized by its tree and record: %+v", e)
 	}
 	if e := got["shared:pnpm-store"]; e.Size != 4 || e.LastUsed.IsZero() || e.InUse {
 		t.Fatalf("a store's size is its files', aged by mtime, not in use: %+v", e)
