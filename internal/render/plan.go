@@ -250,6 +250,7 @@ func (r *Renderer) convertSteps(steps []model.RenderedStep) []model.PlanStep {
 			Shell:            step.Shell,
 			WorkingDirectory: step.WorkingDirectory,
 			Timeout:          step.Timeout,
+			Caches:           step.Caches,
 			Retry:            step.Retry,
 			Resume:           step.Resume,
 			Approval:         step.Approval,

@@ -128,8 +128,33 @@ Every job gets a temporary `HOME` of its own (so global installs by `npm install
 | `~/.orun/actions/shared/npm` | `npm_config_cache` | npm |
 | `~/.orun/actions/shared/pnpm-store` | `npm_config_store_dir`, `pnpm_config_store_dir`, `PNPM_CONFIG_STORE_DIR` | pnpm |
 | `~/.orun/actions/shared/terraform-plugins[-N]` | `TF_PLUGIN_CACHE_DIR` | Terraform, one directory per job in flight on the machine, each held by a lock file (`terraform init` is not safe against a concurrent one) |
+| `~/.orun/actions/shared/xdg-cache` | `XDG_CACHE_HOME` | every tool that keeps its cache under `$XDG_CACHE_HOME` (pip, uv and Playwright on Linux among them) |
+| `~/.orun/actions/shared/go-build`, `go-mod` | `GOCACHE`, `GOMODCACHE` | Go's build and module caches |
+| `~/.orun/actions/shared/pip`, `uv` | `PIP_CACHE_DIR`, `UV_CACHE_DIR` | pip, uv |
+| `~/.orun/actions/shared/gradle` | `GRADLE_USER_HOME` | Gradle |
+| `~/.orun/actions/shared/ms-playwright` | `PLAYWRIGHT_BROWSERS_PATH` | Playwright's browsers |
+| `~/.orun/actions/shared/yarn`, `deno`, `bun` | `YARN_CACHE_FOLDER`, `DENO_DIR`, `BUN_INSTALL_CACHE_DIR` | Yarn, Deno, Bun |
+| `~/.orun/actions/shared/caches/<name>` | — | the caches steps declare with `caches:` (below) |
+
+Each variable is set only when the environment orun inherits does not already name a directory, so a workflow that points a tool elsewhere keeps its choice. Every shared cache is one its tool documents as safe for concurrent use (content-addressed or locked); a tool whose cache is not — Cargo's `CARGO_HOME`, Maven's repository, Cypress's binary cache — keeps the job's own `HOME` and can be kept across jobs as a declared cache instead.
+
+The tool cache itself is the host runner's when there is one: on a GitHub runner `RUNNER_TOOL_CACHE` already holds Node, Python and Go, and orun uses that directory rather than an empty one of its own. `ORUN_TOOL_CACHE` names another directory explicitly.
 
 The run summary's cache-hit count comes from the tool cache itself: a setup action that added nothing to it found its tool there.
+
+### Declared caches
+
+A composition step may declare `caches:` — directories under the job's working directory that a tool fills (a Next.js build cache, a downloaded browser) and that a freshly staged tree and a per-job `HOME` would otherwise leave cold:
+
+```yaml
+- name: build
+  run: pnpm exec next build
+  caches:
+    - name: next-web
+      path: .next/cache
+```
+
+Before the job's first step runs in its tree, each named cache is copied in from `~/.orun/actions/shared/caches/<name>` unless the tree already holds that path; after the job succeeds, what it left at the path becomes the machine's copy, swapped in whole under a lock so a concurrent reader never sees a half-written cache. A failed job saves nothing. See the [composition contract](../compositions/composition-contract.md#execution-semantics).
 
 
 ## Trigger-aware execution

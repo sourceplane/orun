@@ -867,3 +867,38 @@ console.log('installed');
 		t.Fatalf("want exactly one install across the two processes, got %d: %q", installed, outs)
 	}
 }
+
+func TestEngineSharesToolchainCachesUnlessTheEnvironmentNamesOne(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	cacheDir := filepath.Join(workspaceDir, ".cache", "actions")
+	engine := NewEngine(Options{
+		CacheDir:     cacheDir,
+		ToolCacheDir: filepath.Join(workspaceDir, ".cache", "tools"),
+	})
+	execCtx := ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: workspaceDir,
+		WorkDir:      workspaceDir,
+		BaseEnv:      map[string]string{"PATH": os.Getenv("PATH"), "GOCACHE": "/custom/go-build"},
+	}
+	if err := engine.Prepare(execCtx); err != nil {
+		t.Fatal(err)
+	}
+	out, err := engine.RunStep(execCtx, model.PlanJob{ID: "job"}, model.PlanStep{
+		ID: "env", Shell: "bash",
+		Run: `printf '%s|%s|%s|%s' "$GOCACHE" "$PIP_CACHE_DIR" "$XDG_CACHE_HOME" "$PLAYWRIGHT_BROWSERS_PATH"`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := filepath.Join(cacheDir, "shared")
+	want := "/custom/go-build|" + filepath.Join(shared, "pip") + "|" + filepath.Join(shared, "xdg-cache") + "|" + filepath.Join(shared, "ms-playwright")
+	if out != want {
+		t.Fatalf("toolchain caches = %q, want %q (an inherited value wins, the rest share the machine's)", out, want)
+	}
+	if info, err := os.Stat(filepath.Join(shared, "pip")); err != nil || !info.IsDir() {
+		t.Fatalf("the shared directory is created: %v", err)
+	}
+}

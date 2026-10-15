@@ -167,6 +167,9 @@ type Runner struct {
 	FilterEnv        string
 	Isolation        IsolationMode
 	KeepWorkspaces   bool
+	// DeclaredCacheRoot is where the caches steps declare (`caches:`) are
+	// kept; empty means the machine's (cachehome.Declared).
+	DeclaredCacheRoot string
 	// SkipLocalDepsForJob disables the local dependency-completion check when
 	// running a single --job in remote mode. The remote backend's claim API
 	// already enforces dependency ordering.
@@ -791,6 +794,9 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 		stepID := stepIdentifier(step)
 		if idx == prelude {
 			stage()
+			if !r.DryRun {
+				r.restoreDeclaredCaches(job, jobWorkingDir)
+			}
 		}
 		stepPhase := normalizeStepPhase(step.Phase)
 		if stepPhase != currentPhase {
@@ -1096,6 +1102,11 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				r.Hooks.AfterJobTerminal(job.ID, false, jobState.LastError)
 			}
 		}
+	}
+
+	// What the job left in its declared caches becomes the machine's copy.
+	if !r.DryRun && !jobFailed {
+		r.saveDeclaredCaches(baseExecContext.Context, job, jobWorkingDir)
 	}
 
 	summary.addCacheHits(jobReport.cacheHits)
