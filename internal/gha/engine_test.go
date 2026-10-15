@@ -902,3 +902,112 @@ func TestEngineSharesToolchainCachesUnlessTheEnvironmentNamesOne(t *testing.T) {
 		t.Fatalf("the shared directory is created: %v", err)
 	}
 }
+
+// A lane's setup action runs in one job and its exports are handed to the
+// others (specs/orun-cache-efficiency CE4): what it wrote to GITHUB_ENV,
+// GITHUB_PATH and GITHUB_OUTPUT reaches the importing job's later steps as
+// if the action had run there. An action that installs under the job's own
+// RUNNER_TEMP is not shareable.
+func TestEngineHandsAStepsExportsToAnotherJob(t *testing.T) {
+	workspaceDir := t.TempDir()
+	writeAction := func(name, metadata string) {
+		dir := filepath.Join(workspaceDir, ".github", "actions", name)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "action.yml"), []byte(strings.TrimSpace(metadata)+"\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeAction("setup-tool", `
+name: setup-tool
+outputs:
+  version:
+    value: ${{ steps.install.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - id: install
+      shell: bash
+      run: |
+        echo "TOOL_HOME=$RUNNER_TOOL_CACHE/tool/1.2.3" >> "$GITHUB_ENV"
+        echo "$RUNNER_TOOL_CACHE/tool/1.2.3/bin" >> "$GITHUB_PATH"
+        echo "version=1.2.3" >> "$GITHUB_OUTPUT"
+`)
+	writeAction("setup-private", `
+name: setup-private
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: echo "$RUNNER_TEMP/pnpm" >> "$GITHUB_PATH"
+`)
+
+	engine := NewEngine(Options{
+		CacheDir:     filepath.Join(workspaceDir, ".cache", "actions"),
+		ToolCacheDir: filepath.Join(workspaceDir, ".cache", "tools"),
+	})
+	execCtx := ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: workspaceDir,
+		WorkDir:      workspaceDir,
+		BaseEnv:      map[string]string{"PATH": os.Getenv("PATH"), "HOME": os.Getenv("HOME")},
+	}
+	if err := engine.Prepare(execCtx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = engine.Cleanup(execCtx) })
+
+	owner := model.PlanJob{ID: "owner"}
+	setup := model.PlanStep{ID: "setup", Use: "./.github/actions/setup-tool"}
+	if _, err := engine.RunStep(execCtx, owner, setup); err != nil {
+		t.Fatalf("setup in the owner: %v", err)
+	}
+	exports, shareable := engine.LastStepExports("owner")
+	toolCache := filepath.Join(workspaceDir, ".cache", "tools")
+	if !shareable {
+		t.Fatalf("exports into the tool cache are shareable: %+v", exports)
+	}
+	if exports.Env["TOOL_HOME"] != filepath.Join(toolCache, "tool", "1.2.3") || len(exports.Paths) != 1 || exports.Outputs["version"] != "1.2.3" {
+		t.Fatalf("the step's env, path and outputs: %+v", exports)
+	}
+	if _, ok := exports.Env["HOME"]; ok {
+		t.Fatalf("only what the step changed is exported: %+v", exports.Env)
+	}
+
+	other := model.PlanJob{ID: "other"}
+	if err := engine.ImportStepExports(execCtx, other, setup, exports); err != nil {
+		t.Fatal(err)
+	}
+	output, err := engine.RunStep(execCtx, other, model.PlanStep{
+		ID:    "verify",
+		Shell: "bash",
+		Run:   `printf '%s|%s|%s' "$TOOL_HOME" '${{ steps.setup.outputs.version }}' "$(tr ':' '\n' <<< "$PATH" | head -1)"`,
+	})
+	if err != nil {
+		t.Fatalf("verify in the importing job: %v", err)
+	}
+	want := filepath.Join(toolCache, "tool", "1.2.3") + "|1.2.3|" + filepath.Join(toolCache, "tool", "1.2.3", "bin")
+	if output != want {
+		t.Fatalf("the importing job sees the owner's exports:\n got %q\nwant %q", output, want)
+	}
+	if _, shareableAfterRun := engine.LastStepExports("other"); !shareableAfterRun {
+		t.Fatal("a run step that exported nothing is shareable (nothing to share)")
+	}
+
+	private := model.PlanJob{ID: "private"}
+	if _, err := engine.RunStep(execCtx, private, model.PlanStep{ID: "pnpm", Use: "./.github/actions/setup-private"}); err != nil {
+		t.Fatal(err)
+	}
+	if exports, shareable := engine.LastStepExports("private"); shareable || len(exports.Paths) != 1 {
+		t.Fatalf("a PATH entry under the job's RUNNER_TEMP is the job's alone: %+v shareable=%v", exports, shareable)
+	}
+	for _, job := range []model.PlanJob{owner, other, private} {
+		if _, err := engine.FinalizeJob(execCtx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, shareable := engine.LastStepExports("gone"); shareable {
+		t.Fatal("a job with no state has nothing to share")
+	}
+}

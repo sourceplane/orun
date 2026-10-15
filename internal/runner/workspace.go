@@ -41,9 +41,11 @@ func (s *stagedWorkspace) Cleanup() {
 
 // Env is what a job in the staged tree needs to keep behaving as if it were
 // in the source tree: git answers from the source repository (the tree never
-// carries .git), and the turbo cache is one per run, shared by every job, so
-// the second job of a lane hits what the first built
-// (specs/orun-runner-efficiency §5.3).
+// carries .git), and the turbo cache is one per checkout, shared by every
+// job and every run on it, so the second job of a lane hits what the first
+// built and the next run hits what this one built (turbo's cache is
+// content-addressed and safe under concurrent jobs; specs/orun-cache-efficiency
+// CE4, before it one per run under .orun/runs/<exec>, cold at every run).
 //
 // The work tree git sees is the staged tree itself, with an index of its own.
 // The staged tree lives inside the source tree (.orun/runs/…, ignored), so
@@ -53,7 +55,7 @@ func (s *stagedWorkspace) Cleanup() {
 // private index keeps a job's `git status` from rewriting the index every
 // other job reads; objects and refs still come from the source repository.
 // Without an index to copy (no commit yet), git falls back to the source tree.
-func (s *stagedWorkspace) Env(execID string) map[string]string {
+func (s *stagedWorkspace) Env() map[string]string {
 	if s == nil {
 		return nil
 	}
@@ -67,9 +69,7 @@ func (s *stagedWorkspace) Env(execID string) map[string]string {
 			env["GIT_WORK_TREE"] = s.source
 		}
 	}
-	if execID != "" {
-		env["TURBO_CACHE_DIR"] = filepath.Join(s.source, ".orun", "runs", execID, "cache", "turbo")
-	}
+	env["TURBO_CACHE_DIR"] = filepath.Join(s.source, ".orun", "cache", "turbo")
 	return env
 }
 
@@ -137,8 +137,8 @@ func (p stagePolicy) skipDir(name string) bool {
 // <sourceDir>/.orun/runs/<execID>/<safeJobID>/work and returns the path. The
 // directory layout intentionally lives inside the source repo (per user choice)
 // so tool discovery (workspace-relative configs, package.json hoisting, etc.)
-// keeps working. We auto-add .orun/runs/ to .gitignore so the staged trees
-// never leak into commits.
+// keeps working. We auto-add .orun/runs/ and .orun/cache/ to .gitignore so
+// the staged trees and the checkout's caches never leak into commits.
 //
 // In workspace mode the whole tree is copied, less .git, outputs and (unless
 // the lane shares them) dependencies. In component mode only the job's own
@@ -386,26 +386,38 @@ func safeJobID(id string) string {
 	return cleaned
 }
 
-// ensureOrunGitignore adds a .orun/runs/ ignore line to .gitignore if the
-// repo has one and it's not already there. Idempotent. We deliberately don't
-// create .gitignore if missing — that would surprise users with a brand-new
-// file appearing.
+// orunIgnoredDirs are what orun writes into a checkout while running jobs:
+// the staged trees under .orun/runs/ and the checkout's caches under
+// .orun/cache/ (the turbo cache).
+var orunIgnoredDirs = []string{".orun/runs/", ".orun/cache/"}
+
+// ensureOrunGitignore adds the .orun/runs/ and .orun/cache/ ignore lines to
+// .gitignore if the repo has one and they are not already there. Idempotent.
+// We deliberately don't create .gitignore if missing — that would surprise
+// users with a brand-new file appearing.
 func ensureOrunGitignore(repoRoot string) error {
 	path := filepath.Join(repoRoot, ".gitignore")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	const marker = ".orun/runs/"
+	present := map[string]bool{}
 	for _, line := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(line) == marker || strings.TrimSpace(line) == "/.orun/runs/" {
-			return nil
+		present[strings.TrimPrefix(strings.TrimSpace(line), "/")] = true
+	}
+	var missing []string
+	for _, dir := range orunIgnoredDirs {
+		if !present[dir] {
+			missing = append(missing, dir)
 		}
+	}
+	if len(missing) == 0 {
+		return nil
 	}
 	suffix := ""
 	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
 		suffix = "\n"
 	}
-	appended := suffix + "\n# orun per-job staged workspaces\n" + marker + "\n"
+	appended := suffix + "\n# orun per-job staged workspaces and the checkout's caches\n" + strings.Join(missing, "\n") + "\n"
 	return os.WriteFile(path, append(data, []byte(appended)...), 0o644)
 }
