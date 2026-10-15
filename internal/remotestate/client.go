@@ -223,10 +223,9 @@ type Client struct {
 	httpClient *http.Client
 	// logClient uses a longer timeout for log uploads.
 	logClient *http.Client
-	// extraHeaders ride on every platform request — the work sync's
-	// `X-Orun-Work-Sync: <repo>@<sha>` (saas-work-gitops design §7), which the
-	// platform stamps as the epic's managedBy pointer and honours as the
-	// one writer a managed field accepts.
+	// extraHeaders ride on every platform request; nothing in orun sets one
+	// today (the work sync's `X-Orun-Work-Sync` left with
+	// saas-work-gitops-teardown).
 	extraHeaders map[string]string
 }
 
@@ -1153,6 +1152,3 @@ func (c *Client) SetHeader(name, value string) {
 	}
 	c.extraHeaders[name] = value
 }
-
-// WorkSyncHeader names the header the work sync identifies itself with.
-const WorkSyncHeader = "X-Orun-Work-Sync"

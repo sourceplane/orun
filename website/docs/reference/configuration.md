@@ -40,25 +40,12 @@ environments:
 
 The intent file is where you define environments, discovery roots, groups, selectors, defaults, and optional inline components. Root-level `env` provides global environment variables shared across all environments.
 
-It also declares where the repository keeps its **work** (the epics tree
-and the task contracts) when it keeps them somewhere other than the
-default; see [`orun work`](../cli/orun-work.md):
-
-```yaml
-work:
-  epics: work/epics     # one directory per epic (default specs/epics)
-  tasks: work/tasks     # <KEY>.TaskContract.yaml (default tasks)
-  sync: on-merge        # off (default) | on-merge
-```
-
-Every `orun task` verb and `orun pr check` read the contract from the
-declared `tasks` directory, and a `task-contract` finding prints that path.
-Absent, the section means the layout every repository has had; a directory
-must be repo-relative and `sync` one of the two words, or the intent file
-refuses to load. `sync: on-merge` makes a successful `orun plan` on the
-clean default branch reconcile the tree into Orunbase after the plan — the
-same mechanism as `execution.state.autopushCatalog`, so a repository needs
-no separate job; see [`orun work`](../cli/orun-work.md).
+A `work:` section (orun v2.64 to v2.81) once named where the repository
+kept its epics and task contracts and whether `orun plan` synced them into
+Orunbase. Work is tracked in Orunbase or a connected tracker now
+(saas-work-gitops-teardown): task contracts live in `tasks/` at the
+repository root, epic designs under `specs/epics/`, and a leftover `work:`
+section is ignored with one notice from `orun plan`.
 
 It also declares where compositions come from:
 

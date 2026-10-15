@@ -29,7 +29,6 @@ Running `orun` with no arguments on an interactive terminal opens the
 | [`orun intent`](./orun-intent.md) | Explain and render the effective intent after presets and defaults |
 | [`orun component`](./orun-component.md) | List components or inspect one merged component view |
 | [`orun compositions`](./orun-compositions.md) | List, lock, pull, and package the composition sources an intent declares |
-| [`orun work`](./orun-work.md) | Check and sync the work tree an intent declares (epics and task contracts) |
 
 ### 2 · Package and evolve
 

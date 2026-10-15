@@ -314,12 +314,12 @@ func taskDocRoot() string {
 	return repoRoot
 }
 
-// taskDocDir is the tasks directory intent.yaml declares (`work.tasks`,
-// saas-work-gitops design §1), repo-relative; taskfile.Dir when the
-// repository declares none. Every lookup of a contract document goes
-// through this pair, so the declared layout is honoured everywhere at once.
+// taskDocDir is the tasks directory, repo-relative: taskfile.Dir, always.
+// (A repository could once move it with intent.yaml `work.tasks`; that
+// section left with saas-work-gitops-teardown.) Every lookup of a contract
+// document goes through this pair.
 func taskDocDir() string {
-	return loadIntentForCloudConfig().WorkLayout().Tasks
+	return taskfile.Dir
 }
 
 // taskDocPath is the on-disk path of a key's document; taskDocRel the
