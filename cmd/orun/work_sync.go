@@ -381,6 +381,9 @@ func (s *workSyncer) syncEpic(root string, tree *workfile.Tree, e *workfile.Epic
 	}
 
 	// 5. Tasks: adopt the declared key, attach the contract, place in the milestone.
+	// The epic's tasks are listed once; a key the list does not carry is read
+	// on its own before it is created (specs/orun-sync-efficiency F12).
+	known := s.knownTasks(e.Slug)
 	for i, m := range e.Milestones {
 		for _, key := range m.Tasks {
 			doc := tree.Contracts[key]
@@ -392,7 +395,7 @@ func (s *workSyncer) syncEpic(root string, tree *workfile.Tree, e *workfile.Epic
 			if title == "" {
 				title = firstSentence(doc.Contract.Goal)
 			}
-			task, err := s.client.GetTask(s.ctx, s.org, key)
+			task, err := s.lookupTask(known, key)
 			switch {
 			case err == nil:
 				if task.Milestone == nil || task.Milestone.ID != ids[i] {
@@ -434,7 +437,10 @@ func (s *workSyncer) syncEpic(root string, tree *workfile.Tree, e *workfile.Epic
 		}
 	}
 
-	// 6. Docs: the committed copy of every file the globs name.
+	// 6. Docs: the committed copy of every file the globs name. The epic's
+	// docs are listed once, and a file whose committed sha the platform
+	// already holds at its path is not sent again.
+	pushed := s.knownDocs(e.Slug)
 	seen := map[string]bool{}
 	for _, glob := range e.Docs {
 		matches, _ := filepath.Glob(filepath.Join(root, filepath.FromSlash(e.Dir), filepath.FromSlash(glob)))
@@ -447,6 +453,10 @@ func (s *workSyncer) syncEpic(root string, tree *workfile.Tree, e *workfile.Epic
 			file, _, err := resolveSpecFile(abs)
 			if err != nil {
 				return err
+			}
+			if d, ok := pushed[file.Slug]; ok && d.GitSha == file.Sha && d.Path == file.RelPath {
+				s.say("skip", "doc "+file.Slug, "unchanged")
+				continue
 			}
 			if s.dryRun {
 				s.say("push", "doc "+file.Slug, file.RelPath)
@@ -541,4 +551,45 @@ func shortSHA(sha string) string {
 		return sha[:8]
 	}
 	return sha
+}
+
+// knownTasks is the epic's tasks by key, in one read; nil when the list
+// could not be read, in which case every task is read on its own.
+func (s *workSyncer) knownTasks(epicSlug string) map[string]*remotestate.PublicTask {
+	list, err := s.client.ListTasksWhere(s.ctx, s.org, remotestate.TaskListFilter{Epic: epicSlug})
+	if err != nil || list == nil {
+		return nil
+	}
+	known := make(map[string]*remotestate.PublicTask, len(list.Tasks))
+	for i := range list.Tasks {
+		t := &list.Tasks[i]
+		if t.Key != "" {
+			known[t.Key] = t
+		}
+	}
+	return known
+}
+
+// lookupTask answers from the epic's listed tasks, and reads a key the list
+// did not carry on its own: a task that exists elsewhere is still found, and
+// a missing one still reads as not found.
+func (s *workSyncer) lookupTask(known map[string]*remotestate.PublicTask, key string) (*remotestate.PublicTask, error) {
+	if t, ok := known[key]; ok {
+		return t, nil
+	}
+	return s.client.GetTask(s.ctx, s.org, key)
+}
+
+// knownDocs is the epic's pushed docs by slug, in one read; empty when the
+// list could not be read, in which case every doc is pushed.
+func (s *workSyncer) knownDocs(epicSlug string) map[string]remotestate.EpicDoc {
+	list, err := s.client.ListEpicDocs(s.ctx, s.org, epicSlug)
+	if err != nil || list == nil {
+		return map[string]remotestate.EpicDoc{}
+	}
+	docs := make(map[string]remotestate.EpicDoc, len(list.Docs))
+	for _, d := range list.Docs {
+		docs[d.Slug] = d
+	}
+	return docs
 }

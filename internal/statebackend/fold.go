@@ -114,21 +114,41 @@ func freshJob(jobID string) *JobFoldState {
 // forward-compat). Run phase and the frontier are derived from job phases;
 // RunCompleted/RunFailed are projection signals (no-ops here); RunCanceled is
 // honored.
+// Fold reduces a run's whole event stream into its state.
 func Fold(events []CoordinationEvent, plan CoordinationPlan) RunFoldState {
+	return FoldFrom(nil, events, plan)
+}
+
+// FoldFrom reduces events onto a state already folded: the events after
+// prev.LastSeq, read with GET …/log?from=prev.LastSeq, advance prev to the
+// state the whole stream would fold to (specs/orun-sync-efficiency P1). A nil
+// prev starts from the plan's fresh jobs. Events at or before prev.LastSeq
+// are ignored, so a re-delivered page is harmless. prev is not modified.
+func FoldFrom(prev *RunFoldState, events []CoordinationEvent, plan CoordinationPlan) RunFoldState {
 	jobs := make(map[string]*JobFoldState, len(plan.Jobs))
 	for jobID := range plan.Jobs {
 		jobs[jobID] = freshJob(jobID)
 	}
-
 	var planDigest, sourceHash, runID string
 	lastSeq := 0
 	canceled := false
+	if prev != nil {
+		for jobID, job := range prev.Jobs {
+			copied := *job
+			jobs[jobID] = &copied
+		}
+		planDigest, sourceHash, runID, lastSeq = prev.PlanDigest, prev.SourceHash, prev.RunID, prev.LastSeq
+		canceled = prev.Phase == "canceled"
+	}
 
 	ordered := make([]CoordinationEvent, len(events))
 	copy(ordered, events)
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Seq < ordered[j].Seq })
 
 	for _, e := range ordered {
+		if prev != nil && e.Seq <= prev.LastSeq {
+			continue // already folded
+		}
 		if e.Seq > lastSeq {
 			lastSeq = e.Seq
 		}
@@ -167,10 +187,6 @@ func Fold(events []CoordinationEvent, plan CoordinationPlan) RunFoldState {
 
 		switch e.Kind {
 		case EventJobRetried:
-			// The explicit re-open of a FAILED/TIMED-OUT job (`orun run --retry`,
-			// a CI rerun resuming one execution). Without this a re-run job that
-			// went on to succeed still folds as failed, and a lane waiting on it
-			// under --retry waits until its timeout.
 			if job.Phase == "failed" || job.Phase == "timed_out" {
 				job.Phase = "queued"
 				job.Holder = ""
@@ -226,7 +242,6 @@ func Fold(events []CoordinationEvent, plan CoordinationPlan) RunFoldState {
 			job.LeaseEpoch = 0
 			job.LeaseExpiresAt = ""
 		default:
-			// LogChunk and unknown kinds do not change fold state.
 		}
 	}
 

@@ -1,6 +1,7 @@
 package statebackend
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -332,5 +333,62 @@ func TestFoldRetriedReopensFailedJob(t *testing.T) {
 	s = Fold([]CoordinationEvent{evCreated(1), evClaimed(2, "a"), evSucceeded(3, "a", "sha256:x"), retried}, plan)
 	if s.Jobs["a"].Phase != "succeeded" {
 		t.Fatalf("retried must not re-open a succeeded job: %+v", s.Jobs["a"])
+	}
+}
+
+// FoldFrom over a stream delivered in pages equals Fold over the whole
+// stream, however the pages are cut, and a re-delivered page changes nothing
+// (specs/orun-sync-efficiency P1: a waiter folds the long-poll's events
+// onto the state it keeps instead of re-reading the log from the start).
+func TestFoldFrom_PagedEqualsWhole(t *testing.T) {
+	plan := CoordinationPlan{Jobs: map[string]PlanNode{"a": {}, "b": {Deps: []string{"a"}}, "c": {Deps: []string{"a"}}}}
+	at := func(seq int) string { return fmt.Sprintf("2026-06-20T00:00:%02dZ", seq) }
+	stream := []CoordinationEvent{
+		{Seq: 1, Kind: EventRunCreated, RunID: "r", PlanDigest: "sha256:p", At: at(1)},
+		{Seq: 2, Kind: EventJobReady, RunID: "r", JobID: "a", Attempt: 1, At: at(2)},
+		{Seq: 3, Kind: EventJobClaimed, RunID: "r", JobID: "a", RunnerID: "w1", LeaseEpoch: 1, LeaseExpiresAt: at(63), Attempt: 1, At: at(3)},
+		{Seq: 4, Kind: EventLeaseRenewed, RunID: "r", JobID: "a", RunnerID: "w1", LeaseEpoch: 1, LeaseExpiresAt: at(83), At: at(4)},
+		{Seq: 5, Kind: EventJobSucceeded, RunID: "r", JobID: "a", RunnerID: "w1", LeaseEpoch: 1, ResultDigest: "sha256:ra", At: at(5)},
+		{Seq: 6, Kind: EventJobReady, RunID: "r", JobID: "b", Attempt: 1, At: at(6)},
+		{Seq: 7, Kind: EventJobReady, RunID: "r", JobID: "c", Attempt: 1, At: at(7)},
+		{Seq: 8, Kind: EventJobClaimed, RunID: "r", JobID: "b", RunnerID: "w2", LeaseEpoch: 1, LeaseExpiresAt: at(68), Attempt: 1, At: at(8)},
+		{Seq: 9, Kind: EventLeaseExpired, RunID: "r", JobID: "b", RunnerID: "w2", LeaseEpoch: 1, At: at(9)},
+		{Seq: 10, Kind: EventJobClaimed, RunID: "r", JobID: "b", RunnerID: "w3", LeaseEpoch: 2, LeaseExpiresAt: at(70), Attempt: 2, At: at(10)},
+		{Seq: 11, Kind: EventJobFailed, RunID: "r", JobID: "b", RunnerID: "w3", LeaseEpoch: 2, Reason: "failed", ErrorText: "boom", At: at(11)},
+		{Seq: 12, Kind: EventJobRetried, RunID: "r", JobID: "b", RunnerID: "w4", At: at(12)},
+		{Seq: 13, Kind: EventJobClaimed, RunID: "r", JobID: "b", RunnerID: "w4", LeaseEpoch: 3, LeaseExpiresAt: at(73), Attempt: 3, At: at(13)},
+		{Seq: 14, Kind: EventJobSucceeded, RunID: "r", JobID: "b", RunnerID: "w4", LeaseEpoch: 3, At: at(14)},
+		{Seq: 15, Kind: EventJobClaimed, RunID: "r", JobID: "c", RunnerID: "w5", LeaseEpoch: 1, LeaseExpiresAt: at(75), Attempt: 1, At: at(15)},
+		{Seq: 16, Kind: EventJobSucceeded, RunID: "r", JobID: "c", RunnerID: "w5", LeaseEpoch: 1, At: at(16)},
+		{Seq: 17, Kind: EventRunCompleted, RunID: "r", At: at(17)},
+	}
+	whole := Fold(stream, plan)
+	if whole.Phase != "succeeded" || whole.LastSeq != 17 {
+		t.Fatalf("whole = %s @%d", whole.Phase, whole.LastSeq)
+	}
+	for _, cuts := range [][]int{{3, 9, 14}, {1}, {16}, {5, 5, 11}, {}} {
+		var prev *RunFoldState
+		start := 0
+		for _, cut := range append(cuts, len(stream)) {
+			if cut < start {
+				cut = start
+			}
+			next := FoldFrom(prev, stream[start:cut], plan)
+			prev, start = &next, cut
+		}
+		if !reflect.DeepEqual(*prev, whole) {
+			t.Fatalf("cuts %v: paged fold differs:\n paged %+v\n whole %+v", cuts, *prev, whole)
+		}
+		// A page delivered twice folds to the same state.
+		again := FoldFrom(prev, stream[8:14], plan)
+		if !reflect.DeepEqual(again, whole) {
+			t.Fatalf("cuts %v: a re-delivered page changed the state", cuts)
+		}
+	}
+	// prev is left alone.
+	half := Fold(stream[:8], plan)
+	_ = FoldFrom(&half, stream[8:], plan)
+	if half.Jobs["b"].Phase != "claimed" || half.LastSeq != 8 {
+		t.Fatalf("FoldFrom modified its input: %+v", half)
 	}
 }

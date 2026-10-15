@@ -2,6 +2,8 @@ package model
 
 import (
 	"fmt"
+	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -79,6 +81,10 @@ type Step struct {
 	WorkingDirectory string                       `yaml:"working-directory,omitempty" json:"working-directory,omitempty"`
 	Timeout          string                       `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	Retry            int                          `yaml:"retry,omitempty" json:"retry,omitempty"`
+	// Caches are the directories under the job's working directory this step
+	// fills and orun keeps on the machine between jobs and runs
+	// (specs/orun-cache-efficiency CE3).
+	Caches []CacheDecl `yaml:"caches,omitempty" json:"caches,omitempty"`
 	// Resume opts a workflow step into resume-from-failed-step on retry
 	// (orun-workflows-v2 §8): a retry attempt passes the prior attempt's run
 	// dir and the engine re-executes only non-succeeded steps. Default (false)
@@ -138,6 +144,48 @@ func (s Step) ValidateExecForm() error {
 	return nil
 }
 
+// CacheDecl is a cache a step declares (`caches:`): a directory under the
+// job's working directory that a tool fills (a Next.js build cache, a
+// Playwright download) and that orun keeps on the machine, restored into
+// the tree before the job's steps run there and saved from it after the job
+// succeeds (specs/orun-cache-efficiency CE3).
+type CacheDecl struct {
+	Name string `yaml:"name" json:"name"`
+	Path string `yaml:"path" json:"path"`
+}
+
+var cacheNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// Validate checks a declared cache: a name that can be a directory name and
+// a relative path inside the job's working directory.
+func (c CacheDecl) Validate(stepName string) error {
+	if !cacheNamePattern.MatchString(strings.TrimSpace(c.Name)) {
+		return fmt.Errorf("step %q: cache name %q must be letters, digits, dots, dashes or underscores", stepName, c.Name)
+	}
+	p := strings.TrimSpace(c.Path)
+	if p == "" {
+		return fmt.Errorf("step %q: cache %s has no path", stepName, c.Name)
+	}
+	if filepath.IsAbs(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "\\") {
+		return fmt.Errorf("step %q: cache %s path %q must be relative to the job's working directory", stepName, c.Name, c.Path)
+	}
+	clean := filepath.ToSlash(filepath.Clean(p))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return fmt.Errorf("step %q: cache %s path %q must stay inside the job's working directory", stepName, c.Name, c.Path)
+	}
+	return nil
+}
+
+// ValidateCaches checks every cache the step declares.
+func (s Step) ValidateCaches() error {
+	for _, c := range s.Caches {
+		if err := c.Validate(s.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Step scopes.
 const (
 	StepScopeJob  = "job"
@@ -161,7 +209,7 @@ func (s Step) ValidateScope() error {
 		return nil
 	case StepScopeLane:
 		if strings.TrimSpace(s.Run) == "" {
-			return fmt.Errorf("step %q: scope: lane applies to run steps only (a use or workflow step's effects stay with the job that ran it)", s.Name)
+			return fmt.Errorf("step %q: scope: lane applies to run steps only (the setup actions before one are shared on their own; a workflow step's effects stay with the job that ran it)", s.Name)
 		}
 		return nil
 	}
@@ -317,6 +365,7 @@ type RenderedStep struct {
 	WorkingDirectory string                       `json:"workingDirectory,omitempty"`
 	Timeout          string                       `json:"timeout"`
 	Retry            int                          `json:"retry"`
+	Caches           []CacheDecl                  `json:"caches,omitempty"`
 	Resume           bool                         `json:"resume,omitempty"`
 	Approval         *StepApproval                `json:"approval,omitempty"`
 	OnFailure        string                       `json:"onFailure"`

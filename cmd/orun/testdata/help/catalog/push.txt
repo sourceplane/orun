@@ -14,6 +14,7 @@ Usage:
 Flags:
       --backend-url string   Backend URL (Orun Cloud or self-hosted)
       --environment string   Target a named environment head (default: the project-wide head)
+      --force                Advance the head even when this snapshot was the last one pushed to it
       --org string           Alias of --workspace (legacy spelling)
       --project string       Project id/slug (overrides the cached link)
       --workspace string     Workspace slug/id (overrides the cached link)

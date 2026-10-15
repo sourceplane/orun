@@ -132,11 +132,14 @@ func awaitRemoteUpstreams(ctx context.Context, backend statebackend.Backend, run
 		if time.Now().After(deadline) {
 			return fmt.Errorf("job %s: upstream wait timeout (%s) exceeded", jobID, wait)
 		}
-		if events.wait(ctx, delay) {
-			continue
+		woke, blocked := events.wait(ctx, delay)
+		if woke {
+			continue // news: re-read now, and keep the short interval
 		}
-		if err := sleepOrDone(ctx, delay); err != nil {
-			return err
+		if !blocked {
+			if err := sleepOrDone(ctx, delay); err != nil {
+				return err
+			}
 		}
 		if delay = nextBackoff(delay, 15*time.Second); delay > wait {
 			delay = wait
@@ -145,13 +148,34 @@ func awaitRemoteUpstreams(ctx context.Context, backend statebackend.Backend, run
 }
 
 // eventWait is the event-driven half of a remote wait: on a backend that
-// long-polls its event stream it blocks until the next event (or the
-// long-poll lapses), and reports whether it did; on any other backend it
-// reports false and the caller sleeps as before.
+// long-polls its event stream it blocks until the next event or until the
+// long-poll lapses, and reports which; on any other backend it does not block
+// and the caller sleeps as before.
+//
+// A LAPSED LONG-POLL IS NOT AN EVENT. The first version reported every
+// successful long-poll as a wake, a timeout included. A lane job waiting on
+// another lane's job then re-read the whole run every 2 s for as long as it
+// waited (its backoff never grew, because a wake skips the backoff), and a
+// --job's wait re-read on every timeout: three requests, the whole event log
+// and the plan object each time (specs/orun-sync-efficiency F1). Now a wake
+// is reported only when the head sequence advanced, and a lapse is reported
+// as time already spent, so the caller neither sleeps again nor treats it as
+// news.
 type eventWait struct {
-	waiter runEventWaiter
-	runID  string
-	seq    int
+	waiter   runEventWaiter
+	progress runProgressWaiter // when the backend can sleep through lease renewals
+	runID    string
+	seq      int
+}
+
+// runProgressWaiter is the optional refinement of runEventWaiter: a wait that
+// the server holds through lease renewals and that reports whether anything
+// past the cursor was more than a renewal. The runner's waits use it, so a
+// job waiting on its upstreams is woken by their progress, not by every
+// heartbeat in the run; `status --watch` keeps the plain wait, since it
+// shows the heartbeats.
+type runProgressWaiter interface {
+	WaitForRunProgress(ctx context.Context, runID string, sinceSeq, waitSeconds int) (head int, progressed bool, err error)
 }
 
 // eventLongPollSeconds is how long one event wait blocks before the caller
@@ -165,15 +189,21 @@ func newEventWait(ctx context.Context, backend statebackend.Backend, runID strin
 		return &eventWait{}
 	}
 	e := &eventWait{waiter: w, runID: runID}
+	e.progress, _ = backend.(runProgressWaiter)
 	if head, err := w.WaitForRunEvents(ctx, runID, 0, 0); err == nil {
 		e.seq = head
 	}
 	return e
 }
 
-func (e *eventWait) wait(ctx context.Context, max time.Duration) bool {
+// wait blocks for up to max (at most eventLongPollSeconds) on the run's next
+// event. woke is true when new events arrived; blocked is true when the wait
+// held for its interval, whether or not events came, so the caller does not
+// sleep the same interval again. On a backend that cannot long-poll, or once
+// the long-poll fails, both are false and the caller sleeps as before.
+func (e *eventWait) wait(ctx context.Context, max time.Duration) (woke, blocked bool) {
 	if e == nil || e.waiter == nil {
-		return false
+		return false, false
 	}
 	secs := eventLongPollSeconds
 	if max > 0 && max < time.Duration(secs)*time.Second {
@@ -182,16 +212,34 @@ func (e *eventWait) wait(ctx context.Context, max time.Duration) bool {
 			secs = 1
 		}
 	}
-	head, err := e.waiter.WaitForRunEvents(ctx, e.runID, e.seq, secs)
+	var head int
+	var err error
+	if e.progress != nil {
+		var progressed bool
+		head, progressed, err = e.progress.WaitForRunProgress(ctx, e.runID, e.seq, secs)
+		if err == nil {
+			// The cursor moves past everything the page carried; only
+			// progress is a wake.
+			if head > e.seq {
+				e.seq = head
+			}
+			return progressed, true
+		}
+	} else {
+		head, err = e.waiter.WaitForRunEvents(ctx, e.runID, e.seq, secs)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
-			return false
+			return false, false
 		}
-		e.waiter = nil // fall back to polling for the rest of this wait
-		return false
+		e.waiter, e.progress = nil, nil // fall back to polling for the rest of this wait
+		return false, false
 	}
-	e.seq = head
-	return true
+	woke = head > e.seq
+	if woke {
+		e.seq = head
+	}
+	return woke, true
 }
 
 // heartbeatOlderThan reports whether a job's last heartbeat is older than

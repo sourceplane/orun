@@ -628,3 +628,386 @@ func TestEngineGivesConcurrentJobsTheirOwnTerraformPluginCache(t *testing.T) {
 		t.Fatalf("job-c should reuse job-a's finished cache %q, got %q", a, c)
 	}
 }
+
+// A plan step's `working-directory` is resolved by the runner into the
+// working directory this engine is given; the spec must not carry it a
+// second time, or a relative value is joined twice (`../..` from apps/x ran
+// two directories above the repository on cirrus-baseline#25).
+func TestPlanStepToSpecDoesNotReapplyWorkingDirectory(t *testing.T) {
+	spec := planStepToSpec(model.PlanStep{ID: "install", Run: "pnpm install", WorkingDirectory: "../.."})
+	if spec.WorkingDirectory != "" {
+		t.Fatalf("WorkingDirectory = %q, want empty: the runner resolved it", spec.WorkingDirectory)
+	}
+	if resolveWorkingDirectory("/repo", spec.WorkingDirectory, nil) != "/repo" {
+		t.Fatal("the engine runs the step where the runner put it")
+	}
+}
+
+func TestEngineExportsTheStoreVariablePnpmReads(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	cacheDir := filepath.Join(workspaceDir, ".cache", "actions")
+	engine := NewEngine(Options{
+		CacheDir:     cacheDir,
+		ToolCacheDir: filepath.Join(workspaceDir, ".cache", "tools"),
+	})
+	execCtx := ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: workspaceDir,
+		WorkDir:      workspaceDir,
+		BaseEnv:      map[string]string{"PATH": os.Getenv("PATH")},
+	}
+	if err := engine.Prepare(execCtx); err != nil {
+		t.Fatal(err)
+	}
+	out, err := engine.RunStep(execCtx, model.PlanJob{ID: "job"}, model.PlanStep{
+		ID: "env", Shell: "bash",
+		Run: `printf '%s|%s|%s' "$npm_config_store_dir" "$pnpm_config_store_dir" "$PNPM_CONFIG_STORE_DIR"`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(cacheDir, "shared", "pnpm-store")
+	if out != want+"|"+want+"|"+want {
+		t.Fatalf("store variables = %q, want all three = %q (pnpm 10 reads npm_config_store_dir)", out, want)
+	}
+}
+
+func TestEngineReportsToolCacheHitsFromTheCacheItself(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not on PATH")
+	}
+	workspaceDir := t.TempDir()
+	actionDir := filepath.Join(workspaceDir, ".github", "actions", "setup-tool")
+	if err := os.MkdirAll(actionDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metadata := "name: setup-tool\nruns:\n  using: node20\n  main: index.js\n"
+	// Prints setup-helm's "has been cached at" line on both paths: the output
+	// must not be what decides the hit.
+	script := `
+const fs = require('fs'), path = require('path');
+const dir = path.join(process.env.RUNNER_TOOL_CACHE, 'tool', '1.0.0');
+const done = dir + '.complete';
+if (!fs.existsSync(done)) {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'bin'), 'x');
+  fs.writeFileSync(done, '');
+}
+console.log("Tool tool version '1.0.0' has been cached at " + dir);
+`
+	if err := os.WriteFile(filepath.Join(actionDir, "action.yml"), []byte(metadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(actionDir, "index.js"), []byte(script), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := NewEngine(Options{
+		CacheDir:     filepath.Join(workspaceDir, ".cache", "actions"),
+		ToolCacheDir: filepath.Join(workspaceDir, ".cache", "tools"),
+	})
+	execCtx := ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: workspaceDir,
+		WorkDir:      workspaceDir,
+		BaseEnv:      map[string]string{"PATH": os.Getenv("PATH"), "HOME": os.Getenv("HOME")},
+	}
+	if err := engine.Prepare(execCtx); err != nil {
+		t.Fatal(err)
+	}
+	setup := model.PlanStep{ID: "setup", Use: "./.github/actions/setup-tool"}
+
+	jobA := model.PlanJob{ID: "job-a"}
+	if _, err := engine.RunStep(execCtx, jobA, setup); err != nil {
+		t.Fatal(err)
+	}
+	if hit, observed := engine.LastStepCacheHit("job-a"); !observed || hit {
+		t.Fatalf("first setup: hit=%v observed=%v; the install that filled the cache is a miss", hit, observed)
+	}
+
+	jobB := model.PlanJob{ID: "job-b"}
+	if _, err := engine.RunStep(execCtx, jobB, setup); err != nil {
+		t.Fatal(err)
+	}
+	if hit, observed := engine.LastStepCacheHit("job-b"); !observed || !hit {
+		t.Fatalf("second setup: hit=%v observed=%v; the tool was in the cache", hit, observed)
+	}
+
+	if _, err := engine.RunStep(execCtx, jobB, model.PlanStep{ID: "plain", Run: "true", Shell: "bash"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, observed := engine.LastStepCacheHit("job-b"); observed {
+		t.Fatal("a run step has no tool-cache verdict")
+	}
+	for _, job := range []model.PlanJob{jobA, jobB} {
+		_, _ = engine.FinalizeJob(execCtx, job)
+	}
+}
+
+func TestEngineTerraformSlotsAreExclusiveAcrossEngines(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	cacheDir := filepath.Join(workspaceDir, ".cache", "actions")
+	newEngine := func() *Engine {
+		return NewEngine(Options{CacheDir: cacheDir, ToolCacheDir: filepath.Join(workspaceDir, ".cache", "tools")})
+	}
+	execCtx := ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: workspaceDir,
+		WorkDir:      workspaceDir,
+		BaseEnv:      map[string]string{"PATH": os.Getenv("PATH")},
+	}
+	pluginDir := func(engine *Engine, job string) string {
+		t.Helper()
+		out, err := engine.RunStep(execCtx, model.PlanJob{ID: job}, model.PlanStep{ID: "tf", Run: `printf '%s' "$TF_PLUGIN_CACHE_DIR"`, Shell: "bash"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	shared := filepath.Join(cacheDir, "shared")
+
+	// Two engines stand in for two orun processes on one machine.
+	first, second := newEngine(), newEngine()
+	for _, engine := range []*Engine{first, second} {
+		if err := engine.Prepare(execCtx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := pluginDir(first, "job-a"); got != filepath.Join(shared, "terraform-plugins") {
+		t.Fatalf("the first job on the machine gets slot 0: %s", got)
+	}
+	if got := pluginDir(second, "job-b"); got != filepath.Join(shared, "terraform-plugins-1") {
+		t.Fatalf("a job in another process while slot 0 is held gets slot 1: %s", got)
+	}
+	if _, err := first.FinalizeJob(execCtx, model.PlanJob{ID: "job-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := pluginDir(second, "job-c"); got != filepath.Join(shared, "terraform-plugins") {
+		t.Fatalf("once the first job ended, slot 0 is free for any process: %s", got)
+	}
+	for _, job := range []string{"job-b", "job-c"} {
+		_, _ = second.FinalizeJob(execCtx, model.PlanJob{ID: job})
+	}
+}
+
+func TestEngineSerializesToolInstallersAcrossEngines(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not on PATH")
+	}
+	workspaceDir := t.TempDir()
+	actionDir := filepath.Join(workspaceDir, ".github", "actions", "setup-tool")
+	if err := os.MkdirAll(actionDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metadata := "name: setup-tool\nruns:\n  using: node20\n  main: index.js\n"
+	script := `
+const fs = require('fs'), path = require('path');
+const dir = path.join(process.env.RUNNER_TOOL_CACHE, 'tool', '1.0.0');
+const done = dir + '.complete';
+if (fs.existsSync(done)) { console.log('cached'); process.exit(0); }
+if (fs.existsSync(dir)) { console.error('found a half-written install at ' + dir); process.exit(1); }
+fs.mkdirSync(dir, { recursive: true });
+const until = Date.now() + 150; while (Date.now() < until) {}
+fs.writeFileSync(path.join(dir, 'bin'), 'x');
+fs.writeFileSync(done, '');
+console.log('installed');
+`
+	if err := os.WriteFile(filepath.Join(actionDir, "action.yml"), []byte(metadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(actionDir, "index.js"), []byte(script), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	execCtx := ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: workspaceDir,
+		WorkDir:      workspaceDir,
+		BaseEnv:      map[string]string{"PATH": os.Getenv("PATH"), "HOME": os.Getenv("HOME")},
+	}
+	// Two engines on one tool cache stand in for two orun processes on one
+	// machine: the process-local mutex covers neither; the lock file does.
+	const engines, jobsPerEngine = 2, 2
+	var wg sync.WaitGroup
+	errs := make([]error, engines*jobsPerEngine)
+	outs := make([]string, engines*jobsPerEngine)
+	for i := 0; i < engines; i++ {
+		engine := NewEngine(Options{
+			CacheDir:     filepath.Join(workspaceDir, ".cache", fmt.Sprintf("actions-%d", i)),
+			ToolCacheDir: filepath.Join(workspaceDir, ".cache", "tools"),
+		})
+		if err := engine.Prepare(execCtx); err != nil {
+			t.Fatal(err)
+		}
+		for j := 0; j < jobsPerEngine; j++ {
+			wg.Add(1)
+			go func(engine *Engine, n int) {
+				defer wg.Done()
+				job := model.PlanJob{ID: fmt.Sprintf("job-%d", n)}
+				outs[n], errs[n] = engine.RunStep(execCtx, job, model.PlanStep{ID: "setup", Use: "./.github/actions/setup-tool"})
+				_, _ = engine.FinalizeJob(execCtx, job)
+			}(engine, i*jobsPerEngine+j)
+		}
+	}
+	wg.Wait()
+	installed := 0
+	for n, err := range errs {
+		if err != nil {
+			t.Fatalf("job-%d: %v\n%s", n, err, outs[n])
+		}
+		if strings.Contains(outs[n], "installed") {
+			installed++
+		}
+	}
+	if installed != 1 {
+		t.Fatalf("want exactly one install across the two processes, got %d: %q", installed, outs)
+	}
+}
+
+func TestEngineSharesToolchainCachesUnlessTheEnvironmentNamesOne(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	cacheDir := filepath.Join(workspaceDir, ".cache", "actions")
+	engine := NewEngine(Options{
+		CacheDir:     cacheDir,
+		ToolCacheDir: filepath.Join(workspaceDir, ".cache", "tools"),
+	})
+	execCtx := ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: workspaceDir,
+		WorkDir:      workspaceDir,
+		BaseEnv:      map[string]string{"PATH": os.Getenv("PATH"), "GOCACHE": "/custom/go-build"},
+	}
+	if err := engine.Prepare(execCtx); err != nil {
+		t.Fatal(err)
+	}
+	out, err := engine.RunStep(execCtx, model.PlanJob{ID: "job"}, model.PlanStep{
+		ID: "env", Shell: "bash",
+		Run: `printf '%s|%s|%s|%s' "$GOCACHE" "$PIP_CACHE_DIR" "$XDG_CACHE_HOME" "$PLAYWRIGHT_BROWSERS_PATH"`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := filepath.Join(cacheDir, "shared")
+	want := "/custom/go-build|" + filepath.Join(shared, "pip") + "|" + filepath.Join(shared, "xdg-cache") + "|" + filepath.Join(shared, "ms-playwright")
+	if out != want {
+		t.Fatalf("toolchain caches = %q, want %q (an inherited value wins, the rest share the machine's)", out, want)
+	}
+	if info, err := os.Stat(filepath.Join(shared, "pip")); err != nil || !info.IsDir() {
+		t.Fatalf("the shared directory is created: %v", err)
+	}
+}
+
+// A lane's setup action runs in one job and its exports are handed to the
+// others (specs/orun-cache-efficiency CE4): what it wrote to GITHUB_ENV,
+// GITHUB_PATH and GITHUB_OUTPUT reaches the importing job's later steps as
+// if the action had run there. An action that installs under the job's own
+// RUNNER_TEMP is not shareable.
+func TestEngineHandsAStepsExportsToAnotherJob(t *testing.T) {
+	workspaceDir := t.TempDir()
+	writeAction := func(name, metadata string) {
+		dir := filepath.Join(workspaceDir, ".github", "actions", name)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "action.yml"), []byte(strings.TrimSpace(metadata)+"\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeAction("setup-tool", `
+name: setup-tool
+outputs:
+  version:
+    value: ${{ steps.install.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - id: install
+      shell: bash
+      run: |
+        echo "TOOL_HOME=$RUNNER_TOOL_CACHE/tool/1.2.3" >> "$GITHUB_ENV"
+        echo "$RUNNER_TOOL_CACHE/tool/1.2.3/bin" >> "$GITHUB_PATH"
+        echo "version=1.2.3" >> "$GITHUB_OUTPUT"
+`)
+	writeAction("setup-private", `
+name: setup-private
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: echo "$RUNNER_TEMP/pnpm" >> "$GITHUB_PATH"
+`)
+
+	engine := NewEngine(Options{
+		CacheDir:     filepath.Join(workspaceDir, ".cache", "actions"),
+		ToolCacheDir: filepath.Join(workspaceDir, ".cache", "tools"),
+	})
+	execCtx := ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: workspaceDir,
+		WorkDir:      workspaceDir,
+		BaseEnv:      map[string]string{"PATH": os.Getenv("PATH"), "HOME": os.Getenv("HOME")},
+	}
+	if err := engine.Prepare(execCtx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = engine.Cleanup(execCtx) })
+
+	owner := model.PlanJob{ID: "owner"}
+	setup := model.PlanStep{ID: "setup", Use: "./.github/actions/setup-tool"}
+	if _, err := engine.RunStep(execCtx, owner, setup); err != nil {
+		t.Fatalf("setup in the owner: %v", err)
+	}
+	exports, shareable := engine.LastStepExports("owner")
+	toolCache := filepath.Join(workspaceDir, ".cache", "tools")
+	if !shareable {
+		t.Fatalf("exports into the tool cache are shareable: %+v", exports)
+	}
+	if exports.Env["TOOL_HOME"] != filepath.Join(toolCache, "tool", "1.2.3") || len(exports.Paths) != 1 || exports.Outputs["version"] != "1.2.3" {
+		t.Fatalf("the step's env, path and outputs: %+v", exports)
+	}
+	if _, ok := exports.Env["HOME"]; ok {
+		t.Fatalf("only what the step changed is exported: %+v", exports.Env)
+	}
+
+	other := model.PlanJob{ID: "other"}
+	if err := engine.ImportStepExports(execCtx, other, setup, exports); err != nil {
+		t.Fatal(err)
+	}
+	output, err := engine.RunStep(execCtx, other, model.PlanStep{
+		ID:    "verify",
+		Shell: "bash",
+		Run:   `printf '%s|%s|%s' "$TOOL_HOME" '${{ steps.setup.outputs.version }}' "$(tr ':' '\n' <<< "$PATH" | head -1)"`,
+	})
+	if err != nil {
+		t.Fatalf("verify in the importing job: %v", err)
+	}
+	want := filepath.Join(toolCache, "tool", "1.2.3") + "|1.2.3|" + filepath.Join(toolCache, "tool", "1.2.3", "bin")
+	if output != want {
+		t.Fatalf("the importing job sees the owner's exports:\n got %q\nwant %q", output, want)
+	}
+	if _, shareableAfterRun := engine.LastStepExports("other"); !shareableAfterRun {
+		t.Fatal("a run step that exported nothing is shareable (nothing to share)")
+	}
+
+	private := model.PlanJob{ID: "private"}
+	if _, err := engine.RunStep(execCtx, private, model.PlanStep{ID: "pnpm", Use: "./.github/actions/setup-private"}); err != nil {
+		t.Fatal(err)
+	}
+	if exports, shareable := engine.LastStepExports("private"); shareable || len(exports.Paths) != 1 {
+		t.Fatalf("a PATH entry under the job's RUNNER_TEMP is the job's alone: %+v shareable=%v", exports, shareable)
+	}
+	for _, job := range []model.PlanJob{owner, other, private} {
+		if _, err := engine.FinalizeJob(execCtx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, shareable := engine.LastStepExports("gone"); shareable {
+		t.Fatal("a job with no state has nothing to share")
+	}
+}

@@ -85,3 +85,22 @@ func TestStepExecContextNoTfEnvWithoutProviderOrComponent(t *testing.T) {
 		t.Fatal("TF_HTTP_ADDRESS injected for a componentless job")
 	}
 }
+
+// A step's relative `working-directory` is applied once, by the caller that
+// resolves the step's directory; stepExecContext takes that directory as is.
+// Applied twice, `../..` from apps/x reached the parent of the repository.
+func TestStepExecContextKeepsTheResolvedWorkingDir(t *testing.T) {
+	r := &Runner{}
+	resolved := r.resolveStepWorkingDir("/repo/apps/x", "../..")
+	if resolved != "/repo" {
+		t.Fatalf("resolved = %q, want /repo", resolved)
+	}
+	ctx, cancel, err := r.stepExecContext(executor.ExecContext{}, model.PlanJob{ID: "j", UID: "u"}, model.PlanStep{WorkingDirectory: "../.."}, resolved, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	if ctx.WorkDir != "/repo" {
+		t.Fatalf("WorkDir = %q, want /repo (applied once)", ctx.WorkDir)
+	}
+}

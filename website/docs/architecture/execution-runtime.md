@@ -26,7 +26,7 @@ After planning, `orun` switches from compiler behavior to runtime behavior. The 
 | `component` | Always stage, but copy only the job's own directory (`job.path`) and link every other top-level entry to the source tree, so the staged tree is the size of the component and one install serves every job. For jobs that write only under their own directory; a job at the tree's root is staged as a whole copy |
 | `none` | Share the source tree across all jobs (the legacy behavior) |
 
-Staging copies the source tree into a job-private directory using copy-on-write where the filesystem allows it — `clonefile(2)` on APFS, the `FICLONE` ioctl on Linux filesystems that support reflinks — and falls back to a byte copy elsewhere. `.git` is never staged: the job's environment gets `GIT_DIR` and `GIT_WORK_TREE` pointing at the source repository, so `git` in the staged tree answers from it. Build outputs and caches such as `.turbo`, `dist`, and `.terraform` are skipped because the job recreates them. `node_modules` is skipped too, unless the job's lane installed it once (a [lane-scoped step](../concepts/lanes.md#share-a-lanes-setup) ran): then the top-level `node_modules` is linked to the source tree's and nested ones are copied with their symlinks intact. Every staged job gets `TURBO_CACHE_DIR` set to one cache per run under `.orun/runs/<exec-id>/cache/turbo`, so the second job of a lane hits what the first built. Isolation is skipped for `--dry-run` and when `--workdir` pins a directory explicitly; if staging fails the runner warns and falls back to the shared tree. `--keep-workspaces` leaves the staged directories behind for debugging.
+Staging copies the source tree into a job-private directory using copy-on-write where the filesystem allows it — `clonefile(2)` on APFS, the `FICLONE` ioctl on Linux filesystems that support reflinks — and falls back to a byte copy elsewhere. `.git` is never staged: the job's environment gets `GIT_DIR` (the source repository's git directory, or the one a `.git` file names in a linked worktree), `GIT_WORK_TREE` (the staged tree) and `GIT_INDEX_FILE` (a private copy of the source's index, beside the staged tree), so `git` in the staged tree reads the source's objects and refs, answers for the staged tree (`git ls-files`, `git status .`, `git rev-parse --show-toplevel`), and never writes the index other jobs read. A repository with no index yet falls back to the source tree as the work tree. Build outputs and caches such as `.turbo`, `dist`, and `.terraform` are skipped because the job recreates them. `node_modules` is skipped too, unless the job's lane installed it once (a [lane-scoped step](../concepts/lanes.md#share-a-lanes-setup) ran): then the top-level `node_modules` is linked to the source tree's and nested ones are copied with their symlinks intact. Every staged job gets `TURBO_CACHE_DIR` set to one cache per checkout under `.orun/cache/turbo` (ignored by git, like the staged trees), so the second job of a lane hits what the first built and the next run hits what this one built. Isolation is skipped for `--dry-run` and when `--workdir` pins a directory explicitly; if staging fails the runner warns and falls back to the shared tree. `--keep-workspaces` leaves the staged directories behind for debugging.
 
 ## Lifecycle hooks
 
@@ -100,11 +100,22 @@ Within each phase, `order` and declaration order determine the exact step sequen
 A job that waits on remote state — the `--job` claim loop waiting for its
 dependencies, a lane job waiting for an upstream in another lane — is woken
 by the run's next event when the backend can long-poll its event stream
-(the native coordination backend; `runEventWaiter`), and re-reads state
-only then or every 15 seconds. On a backend without the stream it polls
-with the 2 s → 15 s backoff as before. The lane wait is bounded by the
-plan's `metadata.lanes.upstreamWait` (the intent's
-`execution.lanes.upstreamWait`), else 60 minutes.
+(the native coordination backend; `runEventWaiter`). The process keeps a
+view of the run: the folded state, the plan's dependency graph (seeded from
+the plan it holds, or fetched once) and the timestamps the presenter shows.
+The view is first filled by the server's own fold in one read
+(`GET …/runs/{id}/state`; the whole event log on a platform without that
+read). Each long-poll's events are folded onto it, so a wake costs the one
+long-poll and the state and frontier reads that follow it ask the server
+nothing; a view that has not been synced for a while reads only the events
+past its last sequence number. The runner's waits ask the platform to hold
+through lease renewals (`wake=progress`; `runProgressWaiter`), so a job
+waiting on its upstreams is woken by their progress, not by every heartbeat
+in the run. While nothing happens the long-polls lengthen 2, 4, 8, 15
+seconds. On a backend without the stream it polls with
+the 2 s → 15 s backoff as before. The lane wait is bounded by the plan's
+`metadata.lanes.upstreamWait` (the intent's `execution.lanes.upstreamWait`),
+else 60 minutes.
 
 Every step runs under a timeout: its own, else its job's, else the plan's
 `execution.timeout`, else 60 minutes (`model.DefaultStepTimeout`), so no

@@ -355,7 +355,13 @@ func (r *RemoteStateBackend) ReadJobLog(ctx context.Context, runID string, jobID
 }
 
 func (r *RemoteStateBackend) TailJobLog(ctx context.Context, runID string, jobID string, fromSeq int) (string, int, bool, error) {
-	res, err := r.client.ReadLog(ctx, wireRunID(runID), jobID, fromSeq)
+	return r.TailJobLogWait(ctx, runID, jobID, fromSeq, 0)
+}
+
+// TailJobLogWait is TailJobLog held on the server for up to waitSeconds while
+// nothing new sits past fromSeq and the job still runs (`logs --follow`).
+func (r *RemoteStateBackend) TailJobLogWait(ctx context.Context, runID string, jobID string, fromSeq, waitSeconds int) (string, int, bool, error) {
+	res, err := r.client.ReadLogWait(ctx, wireRunID(runID), jobID, fromSeq, waitSeconds)
 	if err != nil {
 		return "", fromSeq, false, err
 	}

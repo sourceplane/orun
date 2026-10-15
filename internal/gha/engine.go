@@ -22,6 +22,8 @@ import (
 
 	actexpr "github.com/nektos/act/pkg/exprparser"
 	actmodel "github.com/nektos/act/pkg/model"
+	"github.com/sourceplane/orun/internal/cachehome"
+	"github.com/sourceplane/orun/internal/fslock"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/procgroup"
 	"golang.org/x/sync/singleflight"
@@ -38,6 +40,13 @@ type Options struct {
 	CacheDir     string
 	ToolCacheDir string
 	HTTPClient   *http.Client
+	// RefreshActions resolves every tag and branch reference against the
+	// API this run, whatever the on-disk entry's age (orun run
+	// --refresh-actions).
+	RefreshActions bool
+	// Warn receives notes the engine wants a person to see (a ref served
+	// from a stale entry because the API could not be reached).
+	Warn func(message string)
 }
 
 type ExecContext struct {
@@ -64,9 +73,11 @@ type Engine struct {
 	pulledImages map[string]struct{}
 	builtImages  map[string]string
 
-	refCache     map[string]string
-	refCacheMu   sync.RWMutex
-	refResolveSF singleflight.Group
+	refCache       map[string]string
+	refCacheMu     sync.RWMutex
+	refreshActions bool
+	warn           func(string)
+	refResolveSF   singleflight.Group
 
 	actionCache   map[string]*resolvedAction
 	actionCacheMu sync.RWMutex
@@ -98,10 +109,112 @@ type jobState struct {
 	masks           []string
 	summary         strings.Builder
 	basePath        string
-	terraformSlot   int
+	terraformSlot   terraformSlot
 
 	actionDirs   map[string]string
 	actionDirsMu sync.Mutex
+
+	// lastCache is what the tool cache said about the job's last step: set
+	// for a step that installs tools, cleared at every step's start.
+	lastCache   cacheObservation
+	lastCacheMu sync.Mutex
+
+	// lastExports is what the job's last step left for the steps after it,
+	// and whether another job on the machine could take it as its own.
+	lastExports   stepExportRecord
+	lastExportsMu sync.Mutex
+}
+
+// StepExports is what a step left for the steps after it: the environment
+// it exported (GITHUB_ENV), the PATH entries it added (GITHUB_PATH) and its
+// outputs (GITHUB_OUTPUT). The runner hands a setup action's exports from the
+// job that ran it to the other jobs of the lane with the same step
+// (specs/orun-cache-efficiency CE4).
+type StepExports struct {
+	Env     map[string]string
+	Paths   []string
+	Outputs map[string]string
+}
+
+// stepExportRecord is a step's exports with the engine's verdict on sharing
+// them: shareable when no exported value points into the job's own
+// temporary directory (its HOME, its RUNNER_TEMP, its action copies), which
+// another job cannot see and which is removed with the job. setup-node's
+// PATH entry is in the tool cache and shareable; pnpm/action-setup installs
+// under RUNNER_TEMP and is not.
+type stepExportRecord struct {
+	exports   StepExports
+	shareable bool
+}
+
+func (state *jobState) setExports(rec stepExportRecord) {
+	state.lastExportsMu.Lock()
+	state.lastExports = rec
+	state.lastExportsMu.Unlock()
+}
+
+func (state *jobState) stepExports() stepExportRecord {
+	state.lastExportsMu.Lock()
+	defer state.lastExportsMu.Unlock()
+	return state.lastExports
+}
+
+// recordExports computes what the step that just ran left behind, against
+// the environment and PATH entries the job had before it.
+func (state *jobState) recordExports(envBefore map[string]string, pathsBefore int, outputs map[string]string) {
+	rec := stepExportRecord{exports: StepExports{Env: map[string]string{}, Outputs: map[string]string{}}, shareable: true}
+	for key, value := range state.globalEnv {
+		if before, ok := envBefore[key]; ok && before == value {
+			continue
+		}
+		rec.exports.Env[key] = value
+	}
+	if pathsBefore < len(state.extraPath) {
+		rec.exports.Paths = append([]string(nil), state.extraPath[pathsBefore:]...)
+	}
+	for key, value := range outputs {
+		rec.exports.Outputs[key] = value
+	}
+	private := state.tempDir
+	refersToJob := func(value string) bool {
+		return private != "" && strings.Contains(value, private)
+	}
+	for _, value := range rec.exports.Env {
+		if refersToJob(value) {
+			rec.shareable = false
+		}
+	}
+	for _, value := range rec.exports.Paths {
+		if refersToJob(value) {
+			rec.shareable = false
+		}
+	}
+	for _, value := range rec.exports.Outputs {
+		if refersToJob(value) {
+			rec.shareable = false
+		}
+	}
+	state.setExports(rec)
+}
+
+// cacheObservation is the tool cache's verdict on one setup action: observed
+// only for an action that installs tools; hit when it added nothing to the
+// cache, which means the tool it set up was already there.
+type cacheObservation struct {
+	observed bool
+	hit      bool
+}
+
+func (state *jobState) setCacheObservation(obs cacheObservation) {
+	state.lastCacheMu.Lock()
+	state.lastCache = obs
+	state.lastCacheMu.Unlock()
+}
+
+func (state *jobState) cacheObservation() cacheObservation {
+	state.lastCacheMu.Lock()
+	defer state.lastCacheMu.Unlock()
+	return state.lastCache
 }
 
 type scope struct {
@@ -131,6 +244,9 @@ type postAction struct {
 	ifExpression string
 	scope        *scope
 	invocation   *actionInvocation
+	// native runs the post step of an action the engine implements itself
+	// (actions/cache's save), in place of a node or docker stage.
+	native func(ExecContext) (string, error)
 }
 
 type stepSpec struct {
@@ -166,25 +282,35 @@ var actionNamePattern = regexp.MustCompile(`[^A-Za-z0-9_]+`)
 func NewEngine(options Options) *Engine {
 	cacheDir := strings.TrimSpace(options.CacheDir)
 	if cacheDir == "" {
-		cacheDir = defaultRootDir("actions")
+		cacheDir = cachehome.Actions()
 	}
 	toolCacheDir := strings.TrimSpace(options.ToolCacheDir)
 	if toolCacheDir == "" {
-		toolCacheDir = defaultRootDir("tool-cache")
+		// The host runner's tool cache when it has one (a GitHub runner's,
+		// with Node, Python and Go already installed), ORUN_TOOL_CACHE over
+		// it, else orun's own (specs/orun-cache-efficiency F8).
+		toolCacheDir = cachehome.ToolCache()
 	}
 	httpClient := options.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		// No whole-request timeout: a tarball download is bounded by progress
+		// (fetch.go, downloadIdleTimeout) and a ref resolve by its own context;
+		// the transport still bounds the wait for a response's headers.
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.ResponseHeaderTimeout = 30 * time.Second
+		httpClient = &http.Client{Transport: transport}
 	}
 	return &Engine{
-		cacheDir:     cacheDir,
-		toolCacheDir: toolCacheDir,
-		httpClient:   httpClient,
-		jobs:         map[string]*jobState{},
-		pulledImages: map[string]struct{}{},
-		builtImages:  map[string]string{},
-		refCache:     map[string]string{},
-		actionCache:  map[string]*resolvedAction{},
+		cacheDir:       cacheDir,
+		toolCacheDir:   toolCacheDir,
+		httpClient:     httpClient,
+		jobs:           map[string]*jobState{},
+		pulledImages:   map[string]struct{}{},
+		builtImages:    map[string]string{},
+		refCache:       map[string]string{},
+		actionCache:    map[string]*resolvedAction{},
+		refreshActions: options.RefreshActions,
+		warn:           options.Warn,
 	}
 }
 
@@ -206,9 +332,75 @@ func (e *Engine) RunStep(ctx ExecContext, job model.PlanJob, step model.PlanStep
 	if err != nil {
 		return "", err
 	}
+	state.setCacheObservation(cacheObservation{})
+	state.setExports(stepExportRecord{})
 
+	envBefore := copyStringMap(state.globalEnv)
+	pathsBefore := len(state.extraPath)
 	result, err := e.runStep(ctx, state, state.rootScope(ctx.WorkDir), planStepToSpec(step), nil)
+	if err == nil {
+		state.recordExports(envBefore, pathsBefore, result.Outputs)
+	}
 	return strings.TrimRight(result.Output, "\n"), err
+}
+
+// LastStepExports is what the job's last step exported (its environment,
+// PATH entries and outputs) and whether another job may take them as its
+// own: not when a value points into the job's own temporary directory. The
+// runner shares a lane's setup actions this way (specs/orun-cache-efficiency
+// CE4).
+func (e *Engine) LastStepExports(jobID string) (exports StepExports, shareable bool) {
+	state := e.getJobState(jobID)
+	if state == nil {
+		return StepExports{}, false
+	}
+	rec := state.stepExports()
+	return rec.exports, rec.shareable
+}
+
+// ImportStepExports applies another job's step exports to this job as if the
+// step had run here: the environment and PATH entries reach every later
+// step, and the outputs answer `steps.<id>.outputs.*`. The step's own
+// post action, if any, stays with the job that ran it.
+func (e *Engine) ImportStepExports(ctx ExecContext, job model.PlanJob, step model.PlanStep, exports StepExports) error {
+	state, err := e.ensureJobState(ctx, job)
+	if err != nil {
+		return err
+	}
+	state.setCacheObservation(cacheObservation{})
+	state.setExports(stepExportRecord{})
+	for key, value := range exports.Env {
+		state.globalEnv[key] = value
+		if key == "PATH" {
+			state.basePath = value
+		}
+	}
+	state.extraPath = append(state.extraPath, exports.Paths...)
+	result := &actmodel.StepResult{
+		Outputs:    map[string]string{},
+		Outcome:    actmodel.StepStatusSuccess,
+		Conclusion: actmodel.StepStatusSuccess,
+	}
+	for key, value := range exports.Outputs {
+		result.Outputs[key] = value
+	}
+	state.stepResults[specStepID(planStepToSpec(step))] = result
+	return nil
+}
+
+// LastStepCacheHit reports what the tool cache said about the job's last
+// step: observed is true only for a step that installs tools (a setup
+// action); hit means it added nothing to the cache, so the tool it set up was
+// already there. The runner counts cache hits from this rather than from the
+// action's output, whose messages do not mean the same thing across actions
+// (specs/orun-cache-efficiency F11).
+func (e *Engine) LastStepCacheHit(jobID string) (hit bool, observed bool) {
+	state := e.getJobState(jobID)
+	if state == nil {
+		return false, false
+	}
+	obs := state.cacheObservation()
+	return obs.hit, obs.observed
 }
 
 func (e *Engine) FinalizeJob(ctx ExecContext, job model.PlanJob) (string, error) {
@@ -372,14 +564,14 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 	// exception: Terraform documents it as unsafe for concurrent `terraform
 	// init`, so each job alive at once holds its own slot (orun#736).
 	sharedCache := filepath.Join(e.cacheDir, "shared")
-	terraformSlot := e.acquireTerraformSlot()
+	terraformSlot := e.acquireTerraformSlot(sharedCache)
 	keepSlot := false
 	defer func() {
 		if !keepSlot {
 			e.releaseTerraformSlot(terraformSlot)
 		}
 	}()
-	terraformPlugins := terraformPluginCacheDir(sharedCache, terraformSlot)
+	terraformPlugins := terraformPluginCacheDir(sharedCache, terraformSlot.index)
 	npmGlobal := filepath.Join(homeDir, ".npm-global")
 	pnpmHome := filepath.Join(homeDir, ".local", "share", "pnpm")
 	for _, dir := range []string{
@@ -397,9 +589,26 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 	globalEnv["NPM_CONFIG_PREFIX"] = npmGlobal
 	globalEnv["NPM_CONFIG_CACHE"] = filepath.Join(sharedCache, "npm")
 	globalEnv["PNPM_HOME"] = pnpmHome
+	// pnpm reads its settings from npm_config_* variables; the pnpm_config_*
+	// names are kept for the versions that read them. Without the first, pnpm
+	// 10 kept a store under each job's HOME and downloaded every package per
+	// job (specs/orun-cache-efficiency F7).
+	globalEnv["npm_config_store_dir"] = filepath.Join(sharedCache, "pnpm-store")
 	globalEnv["pnpm_config_store_dir"] = filepath.Join(sharedCache, "pnpm-store")
 	globalEnv["PNPM_CONFIG_STORE_DIR"] = filepath.Join(sharedCache, "pnpm-store")
 	globalEnv["TF_PLUGIN_CACHE_DIR"] = terraformPlugins
+	// The caches the per-job HOME would otherwise hide from every job: the
+	// toolchains whose caches are safe under concurrent use share one
+	// directory per machine. A value the environment already carries wins
+	// (specs/orun-cache-efficiency F6).
+	for _, cache := range sharedToolchainCaches {
+		if strings.TrimSpace(globalEnv[cache.key]) != "" {
+			continue
+		}
+		dir := filepath.Join(sharedCache, cache.dir)
+		_ = os.MkdirAll(dir, 0o755)
+		globalEnv[cache.key] = dir
+	}
 	// Prepend per-job binary dirs so freshly-installed tools resolve before
 	// any system copy. Actions can still extend PATH per-step via $GITHUB_PATH.
 	npmBin := filepath.Join(npmGlobal, "bin")
@@ -462,26 +671,59 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 	return state, nil
 }
 
+// terraformSlot is a job's Terraform plugin cache: its index names the
+// directory, and the lock, when the machine's lock files could be taken,
+// holds it against every other orun process on the host for the job's life.
+type terraformSlot struct {
+	index int
+	lock  *fslock.Lock
+}
+
+// maxTerraformSlots bounds the lock files probed before falling back to the
+// in-process slots; no host runs this many jobs at once.
+const maxTerraformSlots = 1024
+
 // acquireTerraformSlot returns the lowest Terraform plugin cache slot no live
-// job holds. A job running on its own always gets slot 0.
-func (e *Engine) acquireTerraformSlot() int {
+// job holds — on the whole machine, not only in this process: slot N is the
+// lock file beside its directory, taken without waiting, so two orun
+// processes on one host (a matrix run, co-hosted lanes) never share a plugin
+// cache under concurrent `terraform init` (specs/orun-cache-efficiency F4).
+// A job running on its own always gets slot 0. Where the lock files cannot
+// be taken (a read-only cache directory) the slots are kept per process, as
+// before.
+func (e *Engine) acquireTerraformSlot(sharedCache string) terraformSlot {
+	if err := os.MkdirAll(sharedCache, 0o755); err == nil {
+		for index := 0; index < maxTerraformSlots; index++ {
+			lock, ok, err := fslock.TryAcquire(terraformPluginCacheDir(sharedCache, index) + ".lock")
+			if err != nil {
+				break
+			}
+			if ok {
+				return terraformSlot{index: index, lock: lock}
+			}
+		}
+	}
 	e.terraformSlotsMu.Lock()
 	defer e.terraformSlotsMu.Unlock()
 	for slot, held := range e.terraformSlots {
 		if !held {
 			e.terraformSlots[slot] = true
-			return slot
+			return terraformSlot{index: slot}
 		}
 	}
 	e.terraformSlots = append(e.terraformSlots, true)
-	return len(e.terraformSlots) - 1
+	return terraformSlot{index: len(e.terraformSlots) - 1}
 }
 
-func (e *Engine) releaseTerraformSlot(slot int) {
+func (e *Engine) releaseTerraformSlot(slot terraformSlot) {
+	if slot.lock != nil {
+		_ = slot.lock.Release()
+		return
+	}
 	e.terraformSlotsMu.Lock()
 	defer e.terraformSlotsMu.Unlock()
-	if slot >= 0 && slot < len(e.terraformSlots) {
-		e.terraformSlots[slot] = false
+	if slot.index >= 0 && slot.index < len(e.terraformSlots) {
+		e.terraformSlots[slot.index] = false
 	}
 }
 
@@ -572,11 +814,18 @@ func (state *jobState) nextActionName(base string) string {
 	return fmt.Sprintf("%s_%d", name, count)
 }
 
-func (e *Engine) runStep(ctx ExecContext, state *jobState, scope *scope, spec stepSpec, inheritedEnv map[string]string) (stepExecutionResult, error) {
+// specStepID is the key a step's result is recorded under for
+// `steps.<id>.outputs.*`: its id, else its name, else what it uses.
+func specStepID(spec stepSpec) string {
 	stepID := firstNonEmpty(strings.TrimSpace(spec.ID), strings.TrimSpace(spec.Name), strings.TrimSpace(spec.Use))
 	if stepID == "" {
 		stepID = "unnamed-step"
 	}
+	return stepID
+}
+
+func (e *Engine) runStep(ctx ExecContext, state *jobState, scope *scope, spec stepSpec, inheritedEnv map[string]string) (stepExecutionResult, error) {
+	stepID := specStepID(spec)
 
 	result := &actmodel.StepResult{
 		Outputs:    map[string]string{},
@@ -678,6 +927,15 @@ func (e *Engine) executeUsesStep(ctx ExecContext, state *jobState, scope *scope,
 	useEvaluator := state.evaluator(scope, baseEnv, state.githubForScope(scope, state.nextActionName("resolve")))
 	useValue := useEvaluator.Interpolate(spec.Use)
 
+	// actions/cache is run by the engine itself: GitHub's cache service is
+	// not reachable from orun, so the real action restored nothing
+	// (specs/orun-cache-efficiency CE7).
+	if ref, perr := ParseActionReference(useValue); perr == nil {
+		if kind, native := nativeCacheKind(ref); native {
+			return e.executeNativeCacheAction(ctx, state, scope, spec, inheritedEnv, ref, kind)
+		}
+	}
+
 	resolved, err := e.resolveAction(firstNonEmptyContext(ctx.Context), scope.baseActionDir, state.github.APIURL, state.github.Token, useValue)
 	if err != nil {
 		return stepExecutionResult{}, err
@@ -724,15 +982,21 @@ func (e *Engine) executeUsesStep(ctx ExecContext, state *jobState, scope *scope,
 
 	switch resolved.Metadata.Runs.Using {
 	case "node12", "node16", "node20", "node24":
-		defer e.lockToolCache(resolved.Reference)()
-		return e.executeNodeAction(ctx, state, actionScope, invocation, sharedEnv)
+		defer e.lockToolCache(firstNonEmptyContext(ctx.Context), resolved.Reference)()
+		before := e.toolCacheSnapshot(resolved.Reference)
+		result, err := e.executeNodeAction(ctx, state, actionScope, invocation, sharedEnv)
+		state.observeToolCache(before, e.toolCacheSnapshot(resolved.Reference))
+		return result, err
 	case "composite":
 		// Not locked: its own uses: steps lock themselves, and holding the lock
 		// across them would deadlock on a setup action nested inside.
 		return e.executeCompositeAction(ctx, state, scope, resolved, invocation, sharedEnv)
 	case "docker":
-		defer e.lockToolCache(resolved.Reference)()
-		return e.executeDockerAction(ctx, state, actionScope, invocation, sharedEnv)
+		defer e.lockToolCache(firstNonEmptyContext(ctx.Context), resolved.Reference)()
+		before := e.toolCacheSnapshot(resolved.Reference)
+		result, err := e.executeDockerAction(ctx, state, actionScope, invocation, sharedEnv)
+		state.observeToolCache(before, e.toolCacheSnapshot(resolved.Reference))
+		return result, err
 	default:
 		return stepExecutionResult{}, fmt.Errorf("unsupported action runtime %q in %s", resolved.Metadata.Runs.Using, resolved.ActionDir)
 	}
@@ -959,6 +1223,9 @@ func (e *Engine) runPostAction(ctx ExecContext, state *jobState, action *postAct
 	if !run {
 		return "", nil
 	}
+	if action.native != nil {
+		return action.native(ctx)
+	}
 
 	switch action.invocation.metadata.Runs.Using {
 	case "node12", "node16", "node20", "node24":
@@ -1174,14 +1441,20 @@ func applyMasks(input string, masks []string) string {
 
 func planStepToSpec(step model.PlanStep) stepSpec {
 	return stepSpec{
-		ID:               step.ID,
-		Name:             step.Name,
-		Run:              step.Run,
-		Use:              step.Use,
-		With:             step.With,
-		Env:              step.Env,
-		Shell:            step.Shell,
-		WorkingDirectory: step.WorkingDirectory,
+		ID:    step.ID,
+		Name:  step.Name,
+		Run:   step.Run,
+		Use:   step.Use,
+		With:  step.With,
+		Env:   step.Env,
+		Shell: step.Shell,
+		// The runner already resolved the plan step's `working-directory`
+		// against the job's directory and handed the result to this engine as
+		// its working directory; applying it here again joined a relative
+		// value twice (`../..` from apps/x ran two directories above the
+		// repository). Composite action steps keep theirs: those are relative
+		// to the action's own scope.
+		WorkingDirectory: "",
 	}
 }
 
@@ -1518,14 +1791,6 @@ func firstNonEmptyContext(ctx context.Context) context.Context {
 	return context.Background()
 }
 
-func defaultRootDir(name string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return filepath.Join(os.TempDir(), "orun", name)
-	}
-	return filepath.Join(home, ".orun", name)
-}
-
 func sanitizePathComponent(value string) string {
 	clean := actionNamePattern.ReplaceAllString(strings.TrimSpace(value), "-")
 	clean = strings.Trim(clean, "-")
@@ -1773,6 +2038,29 @@ func gitOutput(ctx context.Context, dir string, args ...string) string {
 // Engine in the process.
 var toolCacheLocks sync.Map // dir -> *sync.Mutex
 
+// toolCacheLockName is the lock file in a tool cache that every orun process
+// on the machine takes around a setup action.
+const toolCacheLockName = ".orun-setup.lock"
+
+// sharedToolchainCaches are the caches a tool keeps under HOME or
+// XDG_CACHE_HOME, which the per-job HOME would otherwise leave cold for every
+// job and discard with it. Each is documented by its tool as safe for
+// concurrent use (content-addressed or locked), so one directory per machine
+// serves every job; the variable is set only when the environment does not
+// already name a directory.
+var sharedToolchainCaches = []struct{ key, dir string }{
+	{"XDG_CACHE_HOME", "xdg-cache"},
+	{"GOCACHE", "go-build"},
+	{"GOMODCACHE", "go-mod"},
+	{"PIP_CACHE_DIR", "pip"},
+	{"UV_CACHE_DIR", "uv"},
+	{"GRADLE_USER_HOME", "gradle"},
+	{"PLAYWRIGHT_BROWSERS_PATH", "ms-playwright"},
+	{"YARN_CACHE_FOLDER", "yarn"},
+	{"DENO_DIR", "deno"},
+	{"BUN_INSTALL_CACHE_DIR", "bun"},
+}
+
 // lockToolCache serializes tool-installing actions (setup-node, pnpm's
 // action-setup, setup-terraform, …) that share this engine's tool cache, and
 // returns the unlock. Several jobs run in one process when a lane runs them in
@@ -1780,15 +2068,84 @@ var toolCacheLocks sync.Map // dir -> *sync.Mutex
 // the same Node version into it at once, so one job saw a half-written tree
 // (`ENOENT … symlink … bin/npm`) or exec'd a node binary another job was still
 // writing (`text file busy`). Run one at a time, the second finds the first's
-// finished install and reuses it. Other actions are not affected.
-func (e *Engine) lockToolCache(ref ActionReference) func() {
+// finished install and reuses it. The same holds across processes: a matrix
+// run's processes and co-hosted lanes share the directory too, so after the
+// process's own mutex the machine's lock file is taken (fslock), and released
+// with it. Other actions are not affected.
+func (e *Engine) lockToolCache(ctx context.Context, ref ActionReference) func() {
 	if !installsTools(ref) || e.toolCacheDir == "" {
 		return func() {}
 	}
 	value, _ := toolCacheLocks.LoadOrStore(filepath.Clean(e.toolCacheDir), &sync.Mutex{})
 	mu := value.(*sync.Mutex)
 	mu.Lock()
-	return mu.Unlock
+	lock, err := fslock.Acquire(ctx, filepath.Join(e.toolCacheDir, toolCacheLockName))
+	if err != nil {
+		// A cache that cannot hold a lock file still serializes within the
+		// process, as before.
+		return mu.Unlock
+	}
+	return func() {
+		_ = lock.Release()
+		mu.Unlock()
+	}
+}
+
+// toolCacheSnapshot lists what the tool cache holds, as tool/version[/arch]
+// entries, for an action that installs tools; nil for any other action. A
+// setup action that finds its tool leaves the listing unchanged; one that
+// installs adds to it. Comparing the two is the cache-hit signal the runner
+// shows, independent of what the action prints.
+func (e *Engine) toolCacheSnapshot(ref ActionReference) map[string]struct{} {
+	if !installsTools(ref) || e.toolCacheDir == "" {
+		return nil
+	}
+	entries := map[string]struct{}{}
+	tools, err := os.ReadDir(e.toolCacheDir)
+	if err != nil {
+		return entries
+	}
+	for _, tool := range tools {
+		if !tool.IsDir() {
+			continue
+		}
+		versions, err := os.ReadDir(filepath.Join(e.toolCacheDir, tool.Name()))
+		if err != nil {
+			continue
+		}
+		for _, version := range versions {
+			key := tool.Name() + "/" + version.Name()
+			entries[key] = struct{}{}
+			if !version.IsDir() {
+				continue
+			}
+			arches, err := os.ReadDir(filepath.Join(e.toolCacheDir, tool.Name(), version.Name()))
+			if err != nil {
+				continue
+			}
+			for _, arch := range arches {
+				entries[key+"/"+arch.Name()] = struct{}{}
+			}
+		}
+	}
+	return entries
+}
+
+// observeToolCache records the tool cache's verdict on the step that just
+// ran: nothing for an action that does not install tools; a hit when the
+// listing after it holds nothing the listing before it lacked.
+func (state *jobState) observeToolCache(before, after map[string]struct{}) {
+	if before == nil {
+		return
+	}
+	hit := true
+	for key := range after {
+		if _, ok := before[key]; !ok {
+			hit = false
+			break
+		}
+	}
+	state.setCacheObservation(cacheObservation{observed: true, hit: hit})
 }
 
 // installsTools reports whether an action looks like a tool installer — by the

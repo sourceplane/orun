@@ -309,6 +309,10 @@ type PlanStep struct {
 	WorkingDirectory string                       `json:"working-directory,omitempty" yaml:"working-directory,omitempty"`
 	Timeout          string                       `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	Retry            int                          `json:"retry,omitempty" yaml:"retry,omitempty"`
+	// Caches are the directories under the job's working directory this step
+	// fills and orun keeps on the machine between jobs and runs
+	// (specs/orun-cache-efficiency CE3).
+	Caches []CacheDecl `json:"caches,omitempty" yaml:"caches,omitempty"`
 	// Resume opts a workflow step into resume-from-failed-step on retry
 	// (orun-workflows-v2 §8).
 	Resume bool `json:"resume,omitempty" yaml:"resume,omitempty"`

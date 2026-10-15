@@ -294,6 +294,9 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext, com
 		if err := step.ValidateScope(); err != nil {
 			return nil, err
 		}
+		if err := step.ValidateCaches(); err != nil {
+			return nil, err
+		}
 		if err := step.Approval.Validate(step.Name); err != nil {
 			return nil, err
 		}
@@ -370,6 +373,7 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext, com
 			WorkingDirectory: renderedWorkingDirectory,
 			Timeout:          step.Timeout,
 			Retry:            step.Retry,
+			Caches:           step.Caches,
 			Resume:           step.Resume,
 			Approval:         step.Approval,
 			OnFailure:        step.OnFailure,
@@ -397,8 +401,11 @@ func laneScope(scope string) string {
 }
 
 // validateLaneScopedStepsLead requires a job's lane-scoped steps to come
-// before its job-scoped ones: they run in the shared tree before the job's
-// private tree is staged, so a job-scoped step cannot precede them.
+// before its job-scoped run steps: they run in the shared tree before the
+// job's private tree is staged, so a job-scoped run step cannot precede
+// them. A `use:` step (an action such as setup-node) may: it touches the
+// tool cache and exports its environment, not the tree, and an install
+// needs the node and pnpm it set up.
 func validateLaneScopedStepsLead(steps []model.RenderedStep) error {
 	seenJob := ""
 	for _, s := range steps {
@@ -408,7 +415,7 @@ func validateLaneScopedStepsLead(steps []model.RenderedStep) error {
 			}
 			continue
 		}
-		if seenJob == "" {
+		if seenJob == "" && s.Use == "" {
 			seenJob = s.Name
 		}
 	}

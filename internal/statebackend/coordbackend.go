@@ -2,9 +2,14 @@ package statebackend
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
@@ -23,17 +28,24 @@ const objectKindJobResult = "job-result"
 func isHermetic(job model.PlanJob) bool { return job.Labels[HermeticLabel] == "true" }
 
 // jobInputHashFor derives the memo key for a job from the inputs the contract
-// admits (C5): the resolved steps and the declared env-var KEYS (never values).
-// It excludes wall-clock, secrets, and runner identity, so it is stable across
-// runs of the same job. (Input-artifact digests and the composition-lock digest
-// are not yet threaded through the plan; this is a deterministic subset, and the
-// server treats the hash as an opaque key.)
+// admits (C5): the resolved steps, the declared env-var KEYS (never values),
+// the composition lock the plan was compiled against and the digest of the
+// source tree the job runs in. It excludes wall-clock, secrets, and runner
+// identity, so it is stable across runs of the same job and moves when its
+// source or its compositions do (specs/orun-cache-efficiency F1: keyed on the
+// steps and env keys alone, a hermetic job was served its previous result
+// after its component changed). The server treats the hash as an opaque key.
+// Declared input-artifact digests are not yet threaded through the plan.
 //
 // Secret references join as "KEY=secret://…" entries: the reference (and any
 // @version pin) is content and belongs in the input set, while the resolved
 // VALUE never does — bare env keys never contain '=', so the two entry shapes
 // cannot collide.
-func jobInputHashFor(job model.PlanJob) string {
+//
+// The source digest comes from the function SetSourceDigest installed; when
+// none is installed, or it fails (no checkout to hash), there is no key: the
+// job runs unmemoized rather than keyed on too little.
+func (b *CoordBackend) jobInputHashFor(job model.PlanJob) (string, error) {
 	envKeys := make([]string, 0, len(job.Env)+len(job.SecretRefs))
 	for k := range job.Env {
 		envKeys = append(envKeys, k)
@@ -42,7 +54,57 @@ func jobInputHashFor(job model.PlanJob) string {
 		envKeys = append(envKeys, sr.AsEnv+"="+sr.Ref)
 	}
 	sort.Strings(envKeys)
-	return JobInputHash(JobInputHashInput{Steps: job.Steps, EnvKeys: envKeys})
+	if b.sourceDigest == nil {
+		return "", fmt.Errorf("no source digest for the checkout")
+	}
+	source, err := b.sourceDigest(job)
+	if err != nil {
+		return "", fmt.Errorf("source digest of %q: %w", job.Path, err)
+	}
+	if source == "" {
+		return "", fmt.Errorf("source digest of %q is empty", job.Path)
+	}
+	b.mu.Lock()
+	lock := b.lockDigest
+	b.mu.Unlock()
+	return JobInputHash(JobInputHashInput{Steps: job.Steps, EnvKeys: envKeys, CompositionLockDigest: lock, SourceDigest: source}), nil
+}
+
+// CompositionLockDigest is "sha256:<hex>" over the composition sources the
+// plan was compiled against (name, kind, ref, path and resolved digest, in
+// name order), "" for a plan that records none. It is the lock half of the
+// memo key: a job's steps may read the same after a composition package
+// changed under it.
+func CompositionLockDigest(plan *model.Plan) string {
+	if plan == nil || len(plan.Spec.CompositionSources) == 0 {
+		return ""
+	}
+	sources := append([]model.ResolvedCompositionSource(nil), plan.Spec.CompositionSources...)
+	sort.Slice(sources, func(i, j int) bool { return sources[i].Name < sources[j].Name })
+	entries := make([]any, 0, len(sources))
+	for _, src := range sources {
+		entries = append(entries, map[string]any{
+			"name": src.Name, "kind": src.Kind, "ref": src.Ref, "path": src.Path, "resolvedDigest": src.ResolvedDigest,
+		})
+	}
+	sum := sha256.Sum256([]byte(canonicalJSON(entries)))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// SetSourceDigest installs the function the memo key takes a job's source
+// digest from (sourcedigest.Digest over the checkout and the job's path).
+func (b *CoordBackend) SetSourceDigest(fn func(job model.PlanJob) (string, error)) {
+	b.mu.Lock()
+	b.sourceDigest = fn
+	b.mu.Unlock()
+}
+
+// SetMemoWarn installs where a note about a hermetic job that could not be
+// keyed goes (stderr, for orun run).
+func (b *CoordBackend) SetMemoWarn(fn func(string)) {
+	b.mu.Lock()
+	b.memoWarn = fn
+	b.mu.Unlock()
 }
 
 // CoordBackend implements Backend over the native v2 coordination wire
@@ -67,10 +129,49 @@ type CoordBackend struct {
 	mu     sync.Mutex
 	leases map[string]int    // jobID -> leaseEpoch
 	hashes map[string]string // jobID -> jobInputHash (set when a hermetic job is claimed)
+	// sourceDigest and lockDigest are the source and composition-lock halves
+	// of the memo key (CE6); memoWarn is where an unkeyed hermetic job is noted.
+	sourceDigest func(job model.PlanJob) (string, error)
+	lockDigest   string
+	memoWarn     func(string)
 	// retryJobs marks jobs whose claim should carry retry=true (the --retry
 	// re-open of a failed job when resuming one execution across CI reruns).
 	retryJobs map[string]bool
+
+	viewMu sync.Mutex
+	views  map[string]*runView // wire run id -> what this process knows of the run
 }
+
+// runView is what this process knows of a run between reads: the folded
+// state, the plan's dependency graph, and the timestamps the presenter shows,
+// advanced by the events each long-poll or delta read returns. A waiting job
+// used to re-read the whole event log and re-download the plan object on
+// every wake, discarding the very events its long-poll had just returned;
+// with the view a wake costs the long-poll alone and a read made just after
+// it costs nothing (specs/orun-sync-efficiency P1).
+type runView struct {
+	plan       CoordinationPlan
+	havePlan   bool
+	fold       RunFoldState
+	started    bool // fold holds the run's state (its events have been folded)
+	times      map[string]*jobTimes
+	runStarted string
+	runFinish  string
+	user       string
+	syncedAt   time.Time
+	// noStateRead remembers a server with no state read for this run (an
+	// older server, or a run its shard does not back): the first sync reads
+	// the log instead, and is not asked again.
+	noStateRead bool
+}
+
+type jobTimes struct{ started, finished string }
+
+// viewFreshFor is how long after a read or a long-poll the view answers a
+// state or frontier read without asking the server again: long enough to
+// cover the reads a wake makes in a row, short enough that a caller polling
+// on a timer still sees the server within its interval.
+var viewFreshFor = 2 * time.Second // a variable so tests can age a view
 
 var _ Backend = (*CoordBackend)(nil)
 
@@ -85,14 +186,189 @@ func (b *CoordBackend) MarkRetry(jobID string) {
 // NewCoordBackend wires the native coordination client over an inner backend
 // (used for InitRun, logs, and read-model loads).
 func NewCoordBackend(coord *CoordClient, inner *RemoteStateBackend, runnerID string) *CoordBackend {
-	return &CoordBackend{coord: coord, inner: inner, runnerID: runnerID, leases: map[string]int{}, hashes: map[string]string{}, retryJobs: map[string]bool{}}
+	return &CoordBackend{coord: coord, inner: inner, runnerID: runnerID, leases: map[string]int{}, hashes: map[string]string{}, retryJobs: map[string]bool{}, views: map[string]*runView{}}
 }
 
 // InitRun creates/joins the run via the inner backend. When the server runs the
 // DO coordination backend, that create seeds the per-run shard, so the native
 // verbs below operate on a DO-backed run.
 func (b *CoordBackend) InitRun(ctx context.Context, plan *model.Plan, opts InitRunOptions) (*RunHandle, error) {
-	return b.inner.InitRun(ctx, plan, opts)
+	h, err := b.inner.InitRun(ctx, plan, opts)
+	if err != nil {
+		return nil, err
+	}
+	b.mu.Lock()
+	b.lockDigest = CompositionLockDigest(plan)
+	b.mu.Unlock()
+	// The plan this process holds seeds the run's view, so its reads never
+	// need the plan object.
+	if plan != nil {
+		cp := CoordinationPlan{Jobs: make(map[string]PlanNode, len(plan.Jobs))}
+		for _, j := range plan.Jobs {
+			cp.Jobs[j.ID] = PlanNode{Deps: append([]string(nil), j.DependsOn...)}
+		}
+		b.viewMu.Lock()
+		v := b.viewLocked(wireRunID(h.RunID))
+		if !v.havePlan {
+			v.plan, v.havePlan = cp, true
+		}
+		b.viewMu.Unlock()
+	}
+	return h, nil
+}
+
+// viewLocked returns the run's view, creating an empty one. viewMu held.
+func (b *CoordBackend) viewLocked(wire string) *runView {
+	v := b.views[wire]
+	if v == nil {
+		v = &runView{plan: CoordinationPlan{Jobs: map[string]PlanNode{}}, times: map[string]*jobTimes{}}
+		b.views[wire] = v
+	}
+	return v
+}
+
+// absorbLocked folds events onto the view (those past its last seq) and
+// records the timestamps the presenter shows. viewMu held.
+func (v *runView) absorbLocked(events []CoordinationEvent) {
+	if v.started {
+		v.fold = FoldFrom(&v.fold, events, v.plan)
+	} else {
+		v.fold = Fold(events, v.plan)
+		v.started = true
+	}
+	for _, e := range events {
+		switch e.Kind {
+		case EventRunCreated:
+			v.runStarted, v.user = e.At, e.Actor.ID
+		case EventRunCompleted, EventRunFailed, EventRunCanceled:
+			v.runFinish = e.At
+		case EventJobClaimed:
+			if t := v.at(e.JobID); t.started == "" {
+				t.started = e.At
+			}
+		case EventJobSucceeded, EventJobFailed, EventJobMemoized:
+			v.at(e.JobID).finished = e.At
+		}
+	}
+	v.syncedAt = time.Now()
+}
+
+func (v *runView) at(jobID string) *jobTimes {
+	t := v.times[jobID]
+	if t == nil {
+		t = &jobTimes{}
+		v.times[jobID] = t
+	}
+	return t
+}
+
+// planDigestOf is the plan digest the run's created event names, "" when
+// the events do not include it.
+func planDigestOf(events []CoordinationEvent) string {
+	for _, e := range events {
+		if e.Kind == EventRunCreated && e.PlanDigest != "" {
+			return e.PlanDigest
+		}
+	}
+	return ""
+}
+
+// ensurePlanLocked fetches the plan object the run was created from when
+// this process did not seed the view from its own plan: once per run, not
+// once per read. viewMu held.
+func (b *CoordBackend) ensurePlanLocked(ctx context.Context, v *runView, planDigest string) bool {
+	if v.havePlan {
+		return true
+	}
+	if b.inner == nil || planDigest == "" {
+		return false
+	}
+	blob, err := b.inner.GetObject(ctx, planDigest)
+	if err != nil || blob == nil {
+		return false
+	}
+	var bp remotestate.BackendPlan
+	if json.Unmarshal(blob, &bp) != nil {
+		return false
+	}
+	cp := CoordinationPlan{Jobs: make(map[string]PlanNode, len(bp.Jobs))}
+	for _, j := range bp.Jobs {
+		cp.Jobs[j.JobID] = PlanNode{Deps: j.Deps}
+	}
+	v.plan, v.havePlan = cp, true
+	return true
+}
+
+// adoptLocked makes the server's fold the view's state: the first read of a
+// run is the one state read instead of its whole log. The timings beside the
+// fold are the presenter's timestamps; a fold the server built before it
+// recorded them leaves them unset. viewMu held.
+func (v *runView) adoptLocked(st *RunStateRead) {
+	v.fold = st.Fold
+	if v.fold.Jobs == nil {
+		v.fold.Jobs = map[string]*JobFoldState{}
+	}
+	v.started = true
+	if st.Timings != nil {
+		v.runStarted, v.runFinish = st.Timings.StartedAt, st.Timings.FinishedAt
+		for id, jt := range st.Timings.Jobs {
+			t := v.at(id)
+			t.started, t.finished = jt.StartedAt, jt.FinishedAt
+		}
+	}
+	v.syncedAt = time.Now()
+}
+
+// primeLocked gives a view with nothing yet the run's state: the server's
+// fold in one read when it has one for the run (and the plan object once,
+// when this process did not seed the plan), else the log it was given. It
+// reports whether the view holds the run's state afterwards. viewMu held.
+func (b *CoordBackend) primeLocked(ctx context.Context, wire string, v *runView, log func() ([]CoordinationEvent, error)) bool {
+	if !v.noStateRead {
+		st, err := b.coord.ReadState(ctx, wire)
+		switch {
+		case err == nil:
+			if !b.ensurePlanLocked(ctx, v, st.Fold.PlanDigest) {
+				return false
+			}
+			v.adoptLocked(st)
+			return true
+		case errors.Is(err, ErrStateReadUnsupported):
+			v.noStateRead = true
+		}
+	}
+	if log == nil {
+		return false
+	}
+	events, err := log()
+	if err != nil || len(events) == 0 || !b.ensurePlanLocked(ctx, v, planDigestOf(events)) {
+		return false
+	}
+	v.absorbLocked(events)
+	return true
+}
+
+// syncView brings the run's view up to the server: the server's fold in one
+// read when the view has nothing yet (the whole log on a server without the
+// state read), else only the events past its last seq, and nothing at all
+// within viewFreshFor of the last sync. It reports whether the view holds
+// the run's state afterwards.
+func (b *CoordBackend) syncView(ctx context.Context, wire string) (*runView, bool) {
+	b.viewMu.Lock()
+	defer b.viewMu.Unlock()
+	v := b.viewLocked(wire)
+	if v.started && time.Since(v.syncedAt) < viewFreshFor {
+		return v, true
+	}
+	if !v.started {
+		return v, b.primeLocked(ctx, wire, v, func() ([]CoordinationEvent, error) { return b.coord.ReadLog(ctx, wire, 0, 0) })
+	}
+	events, err := b.coord.ReadLog(ctx, wire, v.fold.LastSeq, 0)
+	if err != nil {
+		return v, true
+	}
+	v.absorbLocked(events)
+	return v, true
 }
 
 // ClaimJob posts a §3 :claim and maps the native outcome onto the ClaimResult
@@ -108,11 +384,16 @@ func (b *CoordBackend) ClaimJob(ctx context.Context, runID string, job model.Pla
 	if isHermetic(job) {
 		// Memoizable: send the input-hash KEY so the server can resolve a prior
 		// result (the digest is the server's to choose, never the client's), and
-		// remember it for the result push at completion.
-		h := jobInputHashFor(job)
-		b.setHash(job.ID, h)
-		req.Hermetic = true
-		req.JobInputHash = h
+		// remember it for the result push at completion. A job whose key cannot
+		// be computed runs unmemoized: a key over too little served a stale
+		// result (F1).
+		if h, err := b.jobInputHashFor(job); err == nil {
+			b.setHash(job.ID, h)
+			req.Hermetic = true
+			req.JobInputHash = h
+		} else if b.memoWarn != nil {
+			b.memoWarn(fmt.Sprintf("job %s: not memoized this run: %v", job.ID, err))
+		}
 	}
 	out, err := b.coord.Claim(ctx, wireRunID(runID), job.ID, req)
 	if err != nil {
@@ -143,7 +424,17 @@ func (b *CoordBackend) ClaimJob(ctx context.Context, runID string, job model.Pla
 			// Held by another runner: report it as running so the caller waits/skips.
 			res.CurrentStatus = "running"
 		case "run_terminal", "terminal":
-			res.CurrentStatus = b.inner.ClassifyTerminal(ctx, runID, job.ID)
+			// The coordinator's own record of the job decides, not the read
+			// model: a read model behind the coordinator once turned a job
+			// whose result was never recorded into "already failed on another
+			// runner" (orun#748). The read model stays the fallback for a
+			// server without the state read.
+			if phase, ok := b.jobPhase(ctx, runID, job.ID); ok {
+				res.CurrentStatus = statusOfPhase(phase)
+				res.TerminalPhase = phase
+			} else {
+				res.CurrentStatus = b.inner.ClassifyTerminal(ctx, runID, job.ID)
+			}
 		}
 	}
 	return res, nil
@@ -163,7 +454,11 @@ func (b *CoordBackend) Heartbeat(ctx context.Context, runID, jobID, runnerID str
 
 // UpdateJob reports the terminal transition via :complete. A lost lease means
 // another runner already drove the job terminal — the append is superseded, not
-// an error (at-least-once execution; steps are idempotent).
+// an error (at-least-once execution; steps are idempotent) — when the
+// coordinator holds a result for the job. When it holds none (the lease lapsed
+// and the job went back to the queue, or is held by nobody), this runner's
+// result is lost: that is ErrResultNotRecorded, and the caller must say so
+// rather than report the job green (orun#748).
 func (b *CoordBackend) UpdateJob(ctx context.Context, runID, jobID, runnerID string, status JobStatus, errText string) error {
 	if runnerID == "" {
 		runnerID = b.runnerID
@@ -192,23 +487,97 @@ func (b *CoordBackend) UpdateJob(ctx context.Context, runID, jobID, runnerID str
 			// simply won't be memoized for the next run.
 		}
 	}
-	if _, err := b.coord.Complete(ctx, wireRunID(runID), jobID, req); err != nil {
+	leaseLost, err := b.coord.Complete(ctx, wireRunID(runID), jobID, req)
+	if err != nil {
 		return err
 	}
-	return nil
+	if !leaseLost {
+		return nil
+	}
+	job, ok := b.jobState(ctx, runID, jobID)
+	if ok && jobTerminal(job.Phase) {
+		return nil // superseded: the coordinator already holds a result
+	}
+	if ok && job.Phase == "claimed" && job.Holder != "" && job.Holder != runnerID {
+		return nil // superseded: another runner took the job over and will record it
+	}
+	phase := "unknown"
+	if ok {
+		phase = job.Phase
+	}
+	return fmt.Errorf("%w: %s: the lease was lost before :complete and the coordinator holds the job as %s", ErrResultNotRecorded, jobID, phase)
 }
 
-// RunnableJobs reads the run's runnable frontier from the event-sourced fold.
+// ErrResultNotRecorded is a terminal result the coordinator refused because
+// this runner's lease was gone, for a job it holds no result for.
+var ErrResultNotRecorded = errors.New("result not recorded on the server")
+
+// jobPhase reads the job's phase from the coordinator's own record of the run
+// (its state read), or reports false when the server cannot say; jobState
+// reads the whole record.
+func (b *CoordBackend) jobPhase(ctx context.Context, runID, jobID string) (string, bool) {
+	j, ok := b.jobState(ctx, runID, jobID)
+	if !ok {
+		return "", false
+	}
+	return j.Phase, true
+}
+
+func (b *CoordBackend) jobState(ctx context.Context, runID, jobID string) (*JobFoldState, bool) {
+	st, err := b.coord.ReadState(ctx, wireRunID(runID))
+	if err != nil || st == nil {
+		return nil, false
+	}
+	j, ok := st.Fold.Jobs[jobID]
+	if !ok || j == nil || j.Phase == "" {
+		return nil, false
+	}
+	return j, true
+}
+
+// statusOfPhase maps a coordinator job phase onto the ClaimResult status the
+// runner branches on: a result, a failure, or no result at all.
+func statusOfPhase(phase string) string {
+	switch phase {
+	case "succeeded", "memoized":
+		return "success"
+	case "failed", "timed_out", "canceled":
+		return "failed"
+	default:
+		return "unrecorded"
+	}
+}
+
+// RunnableJobs is the run's frontier: from the view when this process holds
+// the run's state (synced first unless it just was), else the server's
+// projection.
 func (b *CoordBackend) RunnableJobs(ctx context.Context, runID string) ([]string, error) {
-	return b.coord.Frontier(ctx, wireRunID(runID))
+	wire := wireRunID(runID)
+	if v, ok := b.syncView(ctx, wire); ok {
+		b.viewMu.Lock()
+		defer b.viewMu.Unlock()
+		return append([]string(nil), v.fold.Frontier...), nil
+	}
+	return b.coord.Frontier(ctx, wire)
 }
 
-// WaitForRunEvents long-polls the run's event stream for any event past sinceSeq,
-// returning the new head seq (or sinceSeq unchanged when the wait lapses with no
-// new event). It powers an event-driven `status --watch` — the watcher blocks
-// here instead of re-polling on a fixed interval.
+// WaitForRunEvents long-polls the run's event stream for any event past
+// sinceSeq, returning the new head seq (or sinceSeq unchanged when the wait
+// lapses with no new event), and folds what arrives onto the view, so the
+// state and frontier reads that follow a wake cost nothing. It powers the
+// event-driven waits and `status --watch`. A sinceSeq of 0 with no wait is
+// the head read; when the view holds the run already it starts from the
+// view's last seq instead of re-reading the whole log.
 func (b *CoordBackend) WaitForRunEvents(ctx context.Context, runID string, sinceSeq, waitSeconds int) (int, error) {
-	events, err := b.coord.ReadLog(ctx, wireRunID(runID), sinceSeq, waitSeconds)
+	wire := wireRunID(runID)
+	b.viewMu.Lock()
+	v := b.viewLocked(wire)
+	if sinceSeq == 0 && v.started {
+		sinceSeq = v.fold.LastSeq
+	}
+	b.viewMu.Unlock()
+
+	events, err := b.coord.ReadLog(ctx, wire, sinceSeq, waitSeconds)
 	if err != nil {
 		return sinceSeq, err
 	}
@@ -218,7 +587,60 @@ func (b *CoordBackend) WaitForRunEvents(ctx context.Context, runID string, since
 			head = e.Seq
 		}
 	}
+
+	b.viewMu.Lock()
+	defer b.viewMu.Unlock()
+	switch {
+	case v.started && sinceSeq <= v.fold.LastSeq:
+		// Contiguous with, or overlapping, what the view holds: it advances
+		// with the long-poll (FoldFrom ignores the events it already folded).
+		v.absorbLocked(events)
+	case !v.started && sinceSeq == 0 && len(events) > 0:
+		_ = b.primeLocked(ctx, wire, v, func() ([]CoordinationEvent, error) { return events, nil })
+	}
+	// A page the view has not seen the start of leaves it alone; the next
+	// state read continues from the view's own seq.
 	return head, nil
+}
+
+// WaitForRunProgress is WaitForRunEvents for a waiter that cares about
+// progress alone: it asks the server to hold through lease renewals
+// (`wake=progress`), folds everything the page carries onto the view, and
+// reports the stream head with whether any event past sinceSeq was more than
+// a renewal. A runner waiting on its upstreams is woken when one of them
+// changes, not every 20 s per running job (specs/orun-sync-efficiency F3).
+func (b *CoordBackend) WaitForRunProgress(ctx context.Context, runID string, sinceSeq, waitSeconds int) (head int, progressed bool, err error) {
+	wire := wireRunID(runID)
+	b.viewMu.Lock()
+	v := b.viewLocked(wire)
+	if sinceSeq == 0 && v.started {
+		sinceSeq = v.fold.LastSeq
+	}
+	b.viewMu.Unlock()
+
+	events, _, err := b.coord.ReadLogWait(ctx, wire, sinceSeq, waitSeconds, true)
+	if err != nil {
+		return sinceSeq, false, err
+	}
+	head = sinceSeq
+	for _, e := range events {
+		if e.Seq > head {
+			head = e.Seq
+		}
+		if e.Seq > sinceSeq && e.Kind != EventLeaseRenewed {
+			progressed = true
+		}
+	}
+
+	b.viewMu.Lock()
+	defer b.viewMu.Unlock()
+	switch {
+	case v.started && sinceSeq <= v.fold.LastSeq:
+		v.absorbLocked(events)
+	case !v.started && sinceSeq == 0 && len(events) > 0:
+		_ = b.primeLocked(ctx, wire, v, func() ([]CoordinationEvent, error) { return events, nil })
+	}
+	return head, progressed, nil
 }
 
 // ── Delegated to the inner backend (native surface does not yet own these) ──
@@ -227,68 +649,47 @@ func (b *CoordBackend) AppendStepLog(ctx context.Context, runID, jobID, content 
 	return b.inner.AppendStepLog(ctx, runID, jobID, content, step)
 }
 
-// LoadRunState reads run state from the authoritative native event log: it folds
-// the run's `…/log` stream (the same reduction the server runs) into ExecState +
-// ExecMetadata. The fold needs the job DAG, which events don't carry, so the plan
-// object is fetched by its planDigest and parsed for deps. A run with no native
-// events (e.g. a legacy/OP2-only run) falls back to the inner backend.
+// LoadRunState is the run's state from the view, synced to the server first
+// unless it just was: the whole log on the first read, only the events past
+// the view's last seq after that, and the plan object once per run (never
+// when this process seeded the view from its own plan). A run with no
+// native events (created before the coordination plane) falls back to the
+// inner backend's read model.
 func (b *CoordBackend) LoadRunState(ctx context.Context, runID string) (*execmodel.ExecState, *execmodel.ExecMetadata, error) {
-	events, err := b.coord.ReadLog(ctx, wireRunID(runID), 0, 0)
-	if err != nil || len(events) == 0 {
+	v, ok := b.syncView(ctx, wireRunID(runID))
+	if !ok {
 		return b.inner.LoadRunState(ctx, runID)
 	}
-
-	// Recover the job DAG from the plan object referenced by RunCreated.
-	plan := CoordinationPlan{Jobs: map[string]PlanNode{}}
-	for _, e := range events {
-		if e.Kind == EventRunCreated && e.PlanDigest != "" {
-			if blob, gErr := b.inner.GetObject(ctx, e.PlanDigest); gErr == nil && blob != nil {
-				var bp remotestate.BackendPlan
-				if json.Unmarshal(blob, &bp) == nil {
-					for _, j := range bp.Jobs {
-						plan.Jobs[j.JobID] = PlanNode{Deps: j.Deps}
-					}
-				}
-			}
-			break
-		}
-	}
-
-	fold := Fold(events, plan)
-	st, meta := foldToExec(runID, fold, events)
+	b.viewMu.Lock()
+	defer b.viewMu.Unlock()
+	st, meta := v.toExec(runID)
 	return st, meta, nil
 }
 
-// foldToExec maps an authoritative fold into the presenter's ExecState/
-// ExecMetadata. Per-job and run timestamps are recovered from event `At` stamps
-// (the fold tracks phase, not time); Trigger is absent from the event log.
+// foldToExec maps an authoritative fold and its event stream into the
+// presenter's ExecState/ExecMetadata.
 func foldToExec(runID string, fold RunFoldState, events []CoordinationEvent) (*execmodel.ExecState, *execmodel.ExecMetadata) {
-	type times struct{ started, finished string }
-	jobTimes := map[string]*times{}
-	at := func(id string) *times {
-		t := jobTimes[id]
-		if t == nil {
-			t = &times{}
-			jobTimes[id] = t
-		}
-		return t
-	}
-	var runStarted, runFinished, user string
+	v := &runView{fold: fold, started: true, times: map[string]*jobTimes{}}
 	for _, e := range events {
 		switch e.Kind {
 		case EventRunCreated:
-			runStarted, user = e.At, e.Actor.ID
+			v.runStarted, v.user = e.At, e.Actor.ID
 		case EventRunCompleted, EventRunFailed, EventRunCanceled:
-			runFinished = e.At
+			v.runFinish = e.At
 		case EventJobClaimed:
-			if t := at(e.JobID); t.started == "" {
+			if t := v.at(e.JobID); t.started == "" {
 				t.started = e.At
 			}
 		case EventJobSucceeded, EventJobFailed, EventJobMemoized:
-			at(e.JobID).finished = e.At
+			v.at(e.JobID).finished = e.At
 		}
 	}
+	return v.toExec(runID)
+}
 
+// toExec maps the view into the presenter's ExecState/ExecMetadata.
+func (v *runView) toExec(runID string) (*execmodel.ExecState, *execmodel.ExecMetadata) {
+	fold := v.fold
 	st := &execmodel.ExecState{ExecID: runID, PlanChecksum: fold.PlanDigest, Jobs: make(map[string]*execmodel.JobState, len(fold.Jobs))}
 	done, failed := 0, 0
 	for id, j := range fold.Jobs {
@@ -297,10 +698,9 @@ func foldToExec(runID string, fold RunFoldState, events []CoordinationEvent) (*e
 			phase = "succeeded" // a memoized job reads as completed
 		}
 		js := &execmodel.JobState{Status: remotestate.BackendJobStatusToLocal(phase), Steps: map[string]string{}, LastError: j.ErrorText}
-		if t := jobTimes[id]; t != nil {
+		if t := v.times[id]; t != nil {
 			js.StartedAt, js.FinishedAt = t.started, t.finished
 		}
-		// The lease expiry is the liveness/heartbeat proxy (mirrors the OP2 path).
 		js.HeartbeatAt = j.LeaseExpiresAt
 		st.Jobs[id] = js
 		switch j.Phase {
@@ -314,10 +714,10 @@ func foldToExec(runID string, fold RunFoldState, events []CoordinationEvent) (*e
 	meta := &execmodel.ExecMetadata{
 		ExecID:     runID,
 		PlanID:     fold.PlanDigest,
-		StartedAt:  runStarted,
-		FinishedAt: runFinished,
+		StartedAt:  v.runStarted,
+		FinishedAt: v.runFinish,
 		Status:     localRunStatus(fold.Phase),
-		User:       user,
+		User:       v.user,
 		JobTotal:   len(fold.Jobs),
 		JobDone:    done,
 		JobFailed:  failed,
@@ -331,6 +731,11 @@ func (b *CoordBackend) ReadJobLog(ctx context.Context, runID, jobID string) (str
 
 func (b *CoordBackend) TailJobLog(ctx context.Context, runID, jobID string, fromSeq int) (string, int, bool, error) {
 	return b.inner.TailJobLog(ctx, runID, jobID, fromSeq)
+}
+
+// TailJobLogWait is the held tail read (`logs --follow`), delegated.
+func (b *CoordBackend) TailJobLogWait(ctx context.Context, runID, jobID string, fromSeq, waitSeconds int) (string, int, bool, error) {
+	return b.inner.TailJobLogWait(ctx, runID, jobID, fromSeq, waitSeconds)
 }
 
 func (b *CoordBackend) Close(ctx context.Context) error { return b.inner.Close(ctx) }

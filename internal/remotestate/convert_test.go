@@ -2,7 +2,9 @@ package remotestate
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/sourceplane/orun/internal/model"
 )
@@ -47,5 +49,32 @@ func TestConvertPlan_CarriesIndexRunsOnAndLabels(t *testing.T) {
 	}
 	if _, ok := m["labels"]; !ok {
 		t.Fatalf("labels missing in %s", raw)
+	}
+}
+
+// The plan blob is content-addressed: converting the same plan twice, at
+// different times, gives the same bytes and digest, so the processes of one
+// run upload it once between them (specs/orun-sync-efficiency F4). A blob an
+// older client wrote, with its timestamp, still decodes.
+func TestConvertPlan_DigestIsStable(t *testing.T) {
+	plan := &model.Plan{Jobs: []model.PlanJob{{ID: "a", Component: "c", Steps: []model.PlanStep{{ID: "s", Run: "echo"}}}}}
+	b1, d1, err := PlanBlob(ConvertPlan(plan))
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	b2, d2, err := PlanBlob(ConvertPlan(plan))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d1 != d2 || string(b1) != string(b2) {
+		t.Fatalf("the digest changed with the clock: %s vs %s", d1, d2)
+	}
+	if strings.Contains(string(b1), "createdAt") {
+		t.Fatalf("the blob carries a timestamp: %s", b1)
+	}
+	var old BackendPlan
+	if err := json.Unmarshal([]byte(`{"checksum":"x","version":"sourceplane.io/v1","jobs":[],"createdAt":"2026-01-01T00:00:00Z"}`), &old); err != nil || old.CreatedAt == "" {
+		t.Fatalf("an older blob with createdAt must still decode: %v %+v", err, old)
 	}
 }

@@ -2,7 +2,6 @@ package remotestate
 
 import (
 	"strings"
-	"time"
 
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/model"
@@ -10,10 +9,14 @@ import (
 
 // BackendPlan is the plan format expected by the orun-backend CreateRun API.
 type BackendPlan struct {
-	Checksum  string           `json:"checksum"`
-	Version   string           `json:"version"`
-	Jobs      []BackendPlanJob `json:"jobs"`
-	CreatedAt string           `json:"createdAt"`
+	Checksum string           `json:"checksum"`
+	Version  string           `json:"version"`
+	Jobs     []BackendPlanJob `json:"jobs"`
+	// CreatedAt is read from blobs older clients wrote and never set: the
+	// blob is content-addressed, and a timestamp in it made every process of
+	// a run upload the same plan again under a new digest
+	// (specs/orun-sync-efficiency F4). The run record carries the time.
+	CreatedAt string `json:"createdAt,omitempty"`
 }
 
 // BackendPlanJob is a job entry in BackendPlan.
@@ -42,10 +45,9 @@ type BackendPlanStep struct {
 func ConvertPlan(plan *model.Plan) *BackendPlan {
 	planID := execmodel.PlanChecksumShort(plan)
 	bp := &BackendPlan{
-		Checksum:  planID,
-		Version:   "sourceplane.io/v1",
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		Jobs:      make([]BackendPlanJob, 0, len(plan.Jobs)),
+		Checksum: planID,
+		Version:  "sourceplane.io/v1",
+		Jobs:     make([]BackendPlanJob, 0, len(plan.Jobs)),
 	}
 	for _, job := range plan.Jobs {
 		deps := job.DependsOn

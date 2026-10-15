@@ -175,6 +175,7 @@ const sidebars = {
             'cli/orun-catalog',
             'cli/orun-objects',
             'cli/orun-gc',
+            'cli/orun-cache',
           ],
         },
         {
@@ -227,9 +228,14 @@ const sidebars = {
       type: 'category',
       label: 'Release notes',
       items: [
-        'release-notes/v2.78.2',
+        'release-notes/v2.81.1',
+        'release-notes/v2.81.0',
+        'release-notes/v2.80.1',
+        'release-notes/v2.79.1',
+        'release-notes/v2.79.0',
         'release-notes/v2.78.1',
         'release-notes/v2.78.0',
+        'release-notes/v2.77.3',
         'release-notes/v2.77.2',
         'release-notes/v2.77.1',
         'release-notes/v2.77.0',

@@ -107,18 +107,29 @@ The first job of the lane to reach it runs it once in the shared source
 tree; every other job whose step is the same after templating (same
 command, shell, environment and working directory) waits for that run and
 reuses it, recorded as `shared with <job>`. Lane-scoped steps come first in
-a job, before its private tree is staged, and the staged tree then keeps the
+a job, before its private tree is staged — only the `use:` steps that set
+them up (`setup-node`, `setup-pnpm`) may precede them, since an action
+touches the tool cache and exports its environment, not the tree — and the
+staged tree then keeps the
 installed dependencies: the top-level `node_modules` is linked to the source
 tree's, nested ones are copied with their symlinks intact. Jobs of different
 compositions in one lane each run their own install once. A lane-scoped step
-is a `run` step: an action such as `setup-node` exports its environment to
-the job that ran it, so it stays per job (the tool cache is shared, so a
-repeat is a few seconds).
+is a `run` step; the setup actions before it are shared on their own, under
+the GitHub Actions runner: the first job runs `setup-node`, and what it
+exported — its `PATH` entries, environment and outputs, all in the shared
+tool cache — is applied to every other job of the lane with the same action
+and inputs, recorded as `shared with <job>` too. An action that installs into
+the job's own temporary directory (`pnpm/action-setup` puts pnpm under
+`RUNNER_TEMP`) runs in every job, since its install goes with the job that
+ran it.
 
 Two more things every staged job gets: `.git` is never copied — `GIT_DIR`
-and `GIT_WORK_TREE` point `git` at the source repository — and
-`TURBO_CACHE_DIR` names one cache per run, so the second job of a lane hits
-what the first built. `orun run --isolation component` goes further for
+points `git` at the source repository, `GIT_WORK_TREE` at the staged tree
+and `GIT_INDEX_FILE` at a private copy of the index, so `git ls-files` or
+`git status` in the job answer for its own tree — and
+`TURBO_CACHE_DIR` names one cache per checkout (`.orun/cache/turbo`), so the
+second job of a lane hits what the first built, and the next run hits what
+this one built. `orun run --isolation component` goes further for
 jobs that write only under their own directory: it copies just that
 directory and links everything else to the source tree.
 
@@ -223,7 +234,9 @@ orun run --lane staging/auto-1 --remote-state --exec-id "$EXEC_ID"
 - Each job in flight gets its own Terraform plugin cache
   (`TF_PLUGIN_CACHE_DIR`), because `terraform init` is not safe against a
   second `init` writing the same cache. The caches persist, so later jobs in
-  the lane reuse the providers earlier ones downloaded.
+  the lane reuse the providers earlier ones downloaded. Each cache is held
+  by a lock file while its job runs, so the jobs of other orun processes on
+  the same machine (a matrix run, co-hosted lanes) take their own.
 - `--retry --lane` re-opens the lane's failed jobs; completed ones stay
   completed.
 - An upstream in another lane whose runner was reclaimed (its heartbeat is

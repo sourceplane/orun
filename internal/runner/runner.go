@@ -167,6 +167,9 @@ type Runner struct {
 	FilterEnv        string
 	Isolation        IsolationMode
 	KeepWorkspaces   bool
+	// DeclaredCacheRoot is where the caches steps declare (`caches:`) are
+	// kept; empty means the machine's (cachehome.Declared).
+	DeclaredCacheRoot string
 	// SkipLocalDepsForJob disables the local dependency-completion check when
 	// running a single --job in remote mode. The remote backend's claim API
 	// already enforces dependency ordering.
@@ -182,6 +185,12 @@ type Runner struct {
 	ghaHoldSteps bool
 	// Hooks wires external lifecycle callbacks (remote state, log upload, etc.).
 	Hooks *RunnerHooks
+
+	// memoized records the jobs the BeforeJob hook adopted from a prior
+	// result (a memoized hit, by result digest), so the run reports them as
+	// memoized rather than resumed (specs/orun-cache-efficiency CE6).
+	memoized   map[string]string
+	memoizedMu sync.Mutex
 	// DefaultTimeout bounds a step whose job and step set none: the plan's
 	// execution.timeout, else model.DefaultStepTimeout. Empty disables the
 	// bound (tests). Set by cmd/orun from the plan.
@@ -263,6 +272,9 @@ type finishedJobEntry struct {
 	success  bool
 	duration time.Duration
 	resumed  bool
+	// label replaces "cached" on a resumed entry: "memoized <digest>" for a
+	// job the backend served from a prior result.
+	label string
 }
 
 // inGHA reports whether output should be rendered for the GitHub Actions log
@@ -292,6 +304,7 @@ type runSummary struct {
 	startedAt time.Time
 	completed int
 	resumed   int
+	memoized  int
 	failed    int
 	waiting   int
 	cacheHits int
@@ -303,6 +316,7 @@ type runSummarySnapshot struct {
 	duration  time.Duration
 	completed int
 	resumed   int
+	memoized  int
 	failed    int
 	waiting   int
 	cacheHits int
@@ -326,6 +340,14 @@ func (s *runSummary) addResumed() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.resumed++
+}
+
+// addMemoized counts a job the backend served from a prior result: not run
+// here, not resumed from this execution's own state.
+func (s *runSummary) addMemoized() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.memoized++
 }
 
 func (s *runSummary) addFailed() {
@@ -378,6 +400,7 @@ func (s *runSummary) snapshot() runSummarySnapshot {
 		duration:  time.Since(s.startedAt),
 		completed: s.completed,
 		resumed:   s.resumed,
+		memoized:  s.memoized,
 		failed:    s.failed,
 		waiting:   s.waiting,
 		cacheHits: s.cacheHits,
@@ -435,6 +458,10 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	if err != nil {
 		return err
 	}
+	// Deferred so every path out of Run (the lane scheduler returns early for
+	// a whole plan at concurrency > 1) removes the run's staging directory
+	// after the jobs' own cleanups, which run inside the call.
+	defer r.removeRunDir(workspaceDir)
 
 	rootCtx := r.Context
 	if rootCtx == nil {
@@ -612,8 +639,13 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 			}
 			if skip {
 				jobState.Status = "completed"
-				summary.addResumed()
-				r.printJobResumed(job)
+				if digest, memoized := r.memoizedDigest(job.ID); memoized {
+					summary.addMemoized()
+					r.printJobMemoized(job, digest)
+				} else {
+					summary.addResumed()
+					r.printJobResumed(job)
+				}
 				continue
 			}
 		}
@@ -640,6 +672,28 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	r.printRunSummary(summary, finalStatus)
 
 	return r.interruptedError(rootCtx, execState, orderedJobs)
+}
+
+// removeRunDir removes the run's staging directory, .orun/runs/<exec-id>,
+// once every job has cleaned up its own tree: what is left is what the jobs'
+// tools wrote beside the trees (the per-run turbo cache), which no later run
+// reads, so a checkout would otherwise keep one such directory per run
+// (specs/orun-cache-efficiency F9). Only a run that covered the whole plan
+// removes it: a --job or --lane process shares the exec id with other
+// processes on the same checkout, whose trees may still be in use.
+// --keep-workspaces keeps it, as it keeps the trees.
+func (r *Runner) removeRunDir(workspaceDir string) {
+	if r.DryRun || r.KeepWorkspaces || r.UseWorkDirOverride || r.ExecID == "" {
+		return
+	}
+	if r.JobID != "" || r.LaneJobs != nil {
+		return
+	}
+	src, err := filepath.Abs(workspaceDir)
+	if err != nil {
+		return
+	}
+	_ = os.RemoveAll(filepath.Join(src, ".orun", "runs", r.ExecID))
 }
 
 // interruptedError is the run's error after its context was cancelled: how
@@ -751,7 +805,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 		baseExecContext.WorkspaceDir = stagedRoot
 		baseExecContext.WorkDir = stagedRoot
 		// A new map: BaseEnv is shared by every job of the run.
-		baseExecContext.BaseEnv = executor.MergeEnvironment(baseExecContext.BaseEnv, ws.Env(r.ExecID))
+		baseExecContext.BaseEnv = executor.MergeEnvironment(baseExecContext.BaseEnv, ws.Env())
 		baseExecContext.Env = executor.MergeEnvironment(baseExecContext.BaseEnv)
 		jobWorkingDir = resolveWorkingDirAt(stagedRoot, job.Path)
 	}
@@ -765,6 +819,9 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 		stepID := stepIdentifier(step)
 		if idx == prelude {
 			stage()
+			if !r.DryRun {
+				r.restoreDeclaredCaches(job, jobWorkingDir)
+			}
 		}
 		stepPhase := normalizeStepPhase(step.Phase)
 		if stepPhase != currentPhase {
@@ -814,13 +871,30 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 
 		// A lane-scoped step: the first job to reach it runs it (below, in the
 		// shared tree); every other job with the same step waits for that run
-		// and reuses its result.
+		// and reuses its result. A setup action in the prelude is shared the
+		// same way when the executor can hand its exports across jobs: a
+		// waiter imports what the owner's action exported, or runs the action
+		// itself when the exports are the owner's alone.
 		var laneRun *laneSetupRun
-		if idx < prelude && r.laneSetup != nil {
+		sharer, canShareExports := r.Executor.(executor.ExportSharer)
+		sharedSetupAction := idx < prelude && step.Use != "" && step.Scope != model.StepScopeLane && canShareExports
+		if idx < prelude && r.laneSetup != nil && (step.Scope == model.StepScopeLane || sharedSetupAction) {
 			key := laneStepKey(step, workingDir, executor.MergeEnvironment(executor.JobEnvironment(job.Env), executor.JobEnvironment(step.Env)))
 			run, own := r.laneSetup.claim(key, job.ID)
-			if !own {
+			if own {
+				laneRun = run
+			} else {
 				<-run.done
+			}
+			// The owner's exports point into its own temporary directory:
+			// this job runs the action for itself, after the owner's run.
+			privateExports := !own && run.err == nil && sharedSetupAction && !run.shareable
+			if !own && !privateExports {
+				if run.err == nil && sharedSetupAction {
+					if importErr := r.importStepExports(sharer, baseExecContext, job, step, workingDir, jobSecretEnv, run.exports); importErr != nil {
+						run = &laneSetupRun{owner: run.owner, done: run.done, err: fmt.Errorf("import its exports: %w", importErr)}
+					}
+				}
 				if run.err != nil {
 					r.updateState(persistState, execState, func() {
 						jobState.Steps[stepID] = "failed"
@@ -849,7 +923,6 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				jobReport.observeStepDone(stepID, true, true, 0)
 				continue
 			}
-			laneRun = run
 		}
 
 		var output string
@@ -923,10 +996,22 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 			}
 		}
 		if laneRun != nil {
+			if sharedSetupAction && stepErr == nil {
+				laneRun.exports, laneRun.shareable = sharer.LastStepExports(job.ID)
+			}
 			laneRun.settle(output, stepErr)
 		}
 		stepDuration := time.Since(stepStartedAt)
 		view := analyzeStepOutput(step, output)
+		if observer, ok := r.Executor.(executor.CacheObserver); ok && stepErr == nil {
+			// The tool cache's own verdict beats the action's wording.
+			if hit, observed := observer.LastStepCacheHit(job.ID); observed {
+				view.cacheHits = 0
+				if hit {
+					view.cacheHits = 1
+				}
+			}
+		}
 		jobReport.observeStep(job.ID, stepID, view)
 
 		// Write step log. The outcome is already decided here — `stepErr` is in
@@ -1061,6 +1146,11 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				r.Hooks.AfterJobTerminal(job.ID, false, jobState.LastError)
 			}
 		}
+	}
+
+	// What the job left in its declared caches becomes the machine's copy.
+	if !r.DryRun && !jobFailed {
+		r.saveDeclaredCaches(baseExecContext.Context, job, jobWorkingDir)
 	}
 
 	summary.addCacheHits(jobReport.cacheHits)
@@ -1467,17 +1557,59 @@ func (r *Runner) stagingMode() IsolationMode {
 	return IsolationWorkspace
 }
 
-// leadingLaneSteps counts the job's leading lane-scoped steps; the planner
-// guarantees no lane-scoped step follows a job-scoped one.
+// leadingLaneSteps is the length of the job's prelude: the steps that run in
+// the shared tree before the job's private tree is staged. It ends at the
+// last leading lane-scoped step; the `use:` steps before it (setup-node,
+// setup-pnpm) belong to the prelude too, since the install they set up for
+// runs there, and an action touches the tool cache, not the tree (they are
+// shared across the lane's jobs when the executor can hand their exports
+// over; see laneSetup). The
+// planner guarantees no lane-scoped step follows a job-scoped run step. A
+// job with no lane-scoped step has no prelude: it is staged before its
+// first step, as before.
 func leadingLaneSteps(job model.PlanJob) int {
 	n := 0
-	for _, s := range job.Steps {
-		if s.Scope != model.StepScopeLane {
-			break
+	for i, s := range job.Steps {
+		switch {
+		case s.Scope == model.StepScopeLane:
+			n = i + 1
+		case s.Use != "":
+			continue
+		default:
+			return n
 		}
-		n++
 	}
 	return n
+}
+
+// importStepExports applies the exports of a setup action another job ran to
+// this job, through the executor, under the step's own exec context.
+func (r *Runner) importStepExports(sharer executor.ExportSharer, baseExecContext executor.ExecContext, job model.PlanJob, step model.PlanStep, workingDir string, jobSecretEnv map[string]string, exports executor.StepExports) error {
+	execContext, cancel, err := r.stepExecContext(baseExecContext, job, step, workingDir, jobSecretEnv)
+	if err != nil {
+		cancel()
+		return err
+	}
+	defer cancel()
+	return sharer.ImportStepExports(execContext, job, step, exports)
+}
+
+// MarkMemoized records that the backend served the job from a prior result
+// with this digest; the BeforeJob hook calls it before skipping the job.
+func (r *Runner) MarkMemoized(jobID, digest string) {
+	r.memoizedMu.Lock()
+	defer r.memoizedMu.Unlock()
+	if r.memoized == nil {
+		r.memoized = map[string]string{}
+	}
+	r.memoized[jobID] = digest
+}
+
+func (r *Runner) memoizedDigest(jobID string) (string, bool) {
+	r.memoizedMu.Lock()
+	defer r.memoizedMu.Unlock()
+	digest, ok := r.memoized[jobID]
+	return digest, ok
 }
 
 // resolveWorkingDirAt computes a job's working directory anchored at the given
@@ -1763,7 +1895,13 @@ func (r *Runner) stepExecContext(base executor.ExecContext, job model.PlanJob, s
 	}
 	execContext.StepEnv = executor.JobEnvironment(step.Env)
 	execContext.SecretEnv = secretEnv
-	execContext.WorkDir = r.resolveStepWorkingDir(workingDir, step.WorkingDirectory)
+	// workingDir is the step's directory, already resolved by the caller
+	// against the job's directory (the only place a step's
+	// `working-directory` is applied). Applying it here again joined a
+	// relative value twice: `../..` from apps/x reached the parent of the
+	// repository, and the first composition to use one failed with "No
+	// package.json found in /home".
+	execContext.WorkDir = workingDir
 	// Secret env is the highest-precedence layer and lives only in this
 	// context (never in job.Env, the plan, or persisted state).
 	execContext.Env = executor.MergeEnvironment(execContext.BaseEnv, execContext.JobEnv, execContext.StepEnv, secretEnv)
