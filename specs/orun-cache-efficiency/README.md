@@ -141,8 +141,9 @@ with the same `(run, shell, dir, env)` key wait and reuse its result
 `TURBO_CACHE_DIR=<source>/.orun/runs/<exec>/cache/turbo`: one cache per run,
 so the second job of a lane hits what the first built (`stagedWorkspace.Env`).
 
-**Git.** `GIT_DIR` and `GIT_WORK_TREE` point the staged tree at the source
-repository instead of copying `.git`.
+**Git.** `GIT_DIR` points the staged tree at the source repository instead
+of copying `.git`; `GIT_WORK_TREE` is the staged tree and `GIT_INDEX_FILE` a
+private copy of the index (orun#757).
 
 ### 2.3 Compositions (`internal/composition`)
 
