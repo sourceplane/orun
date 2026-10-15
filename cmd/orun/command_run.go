@@ -23,6 +23,7 @@ import (
 	"github.com/sourceplane/orun/internal/remotestate/logpipe"
 	"github.com/sourceplane/orun/internal/runner"
 	"github.com/sourceplane/orun/internal/sourcectx"
+	"github.com/sourceplane/orun/internal/sourcedigest"
 	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
@@ -641,6 +642,17 @@ func initRemoteRun(ctx context.Context, plan *model.Plan, execID, backendURL str
 	if !strings.EqualFold(os.Getenv("ORUN_COORDINATION"), "legacy") {
 		coord := &statebackend.CoordClient{HTTP: client.CoordinationHTTPClient(), BaseURL: client.ScopedStateBaseURL(), TokenSource: tokenSrc}
 		cb := statebackend.NewCoordBackend(coord, remoteBackend, runnerID)
+		// The memo key of a hermetic job covers the source tree its steps run
+		// against, digested from the checkout at claim time; a job whose tree
+		// cannot be digested runs unmemoized, with a note
+		// (specs/orun-cache-efficiency CE6).
+		checkout := runWorkDir
+		cb.SetSourceDigest(func(job model.PlanJob) (string, error) {
+			return sourcedigest.Digest(checkout, job.Path)
+		})
+		cb.SetMemoWarn(func(msg string) {
+			fmt.Fprintf(os.Stderr, "  %s %s\n", ui.Yellow(ui.ColorEnabledForWriter(os.Stderr), "!"), msg)
+		})
 		// --retry re-opens the selected job when it already FAILED in this
 		// execution (a CI rerun resuming the same exec-id); the claim carries
 		// retry=true and the server's JOB_RETRIED re-open does the rest.
@@ -787,6 +799,7 @@ func setupRemoteStateHooks(waitCtx context.Context, r *runner.Runner, plan *mode
 					line += " (" + d + ")"
 				}
 				fmt.Fprintln(r.Stderr, line)
+				r.MarkMemoized(jobID, result.ResultDigest)
 				return true, nil
 			}
 			if !result.Claimed {

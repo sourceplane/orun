@@ -3,6 +3,7 @@ package statebackend
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -191,10 +192,12 @@ func TestCoordBackendMemoizationProducer(t *testing.T) {
 	inner := NewRemoteStateBackend(
 		remotestate.NewClientWithScope(srv.URL, "test", stubToken{}, remotestate.Scope{OrgID: "o", ProjectID: "p"}), "r1")
 	b := NewCoordBackend(coord, inner, "r1")
+	b.SetSourceDigest(func(job model.PlanJob) (string, error) { return "sha256:src-" + job.Path, nil })
 	ctx := context.Background()
 
 	job := model.PlanJob{
 		ID:     "h",
+		Path:   "apps/web",
 		Labels: map[string]string{HermeticLabel: "true"},
 		Steps:  []model.PlanStep{{ID: "s1", Run: "echo hi"}},
 		Env:    map[string]any{"FOO": "bar"},
@@ -208,8 +211,8 @@ func TestCoordBackendMemoizationProducer(t *testing.T) {
 		t.Fatalf("claim did not carry hermetic: %+v", claimBody)
 	}
 	hash, _ := claimBody["jobInputHash"].(string)
-	if hash != jobInputHashFor(job) || hash == "" {
-		t.Fatalf("claim jobInputHash %q != recomputed %q", hash, jobInputHashFor(job))
+	if want, _ := b.jobInputHashFor(job); hash != want || hash == "" {
+		t.Fatalf("claim jobInputHash %q != recomputed %q", hash, want)
 	}
 
 	if err := b.UpdateJob(ctx, "run-1", "h", "r1", JobStatusSuccess, ""); err != nil {
@@ -794,5 +797,69 @@ func TestCoordBackendRunView_ProgressWaitSleepsThroughRenewals(t *testing.T) {
 	}
 	if got := vs.served(); got[len(got)-1] != "log from=7 wait=" {
 		t.Fatalf("the head read must continue from the view: %v", got)
+	}
+}
+
+// The memo key moves with the job's source tree and the plan's composition
+// lock, and a hermetic job whose source cannot be digested is claimed without
+// a key: it runs instead of adopting a result keyed on too little
+// (specs/orun-cache-efficiency F1).
+func TestCoordBackendMemoKeyCoversSourceAndLock(t *testing.T) {
+	coord := &CoordClient{HTTP: http.DefaultClient, BaseURL: "http://unused.invalid"}
+	b := NewCoordBackend(coord, nil, "r1")
+	job := model.PlanJob{ID: "h", Path: "apps/web", Labels: map[string]string{HermeticLabel: "true"}, Steps: []model.PlanStep{{ID: "s1", Run: "build"}}}
+
+	if _, err := b.jobInputHashFor(job); err == nil {
+		t.Fatal("no source digest function: no key")
+	}
+	digest := "sha256:aaaa"
+	b.SetSourceDigest(func(model.PlanJob) (string, error) { return digest, nil })
+	first, err := b.jobInputHashFor(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest = "sha256:bbbb"
+	second, _ := b.jobInputHashFor(job)
+	if first == second {
+		t.Fatal("a changed source tree is a different key")
+	}
+	b.lockDigest = CompositionLockDigest(&model.Plan{Spec: model.PlanSpec{CompositionSources: []model.ResolvedCompositionSource{{Name: "core", Kind: "oci", Ref: "oci://r/core:v1", ResolvedDigest: "sha256:c1"}}}})
+	third, _ := b.jobInputHashFor(job)
+	if third == second || b.lockDigest == "" {
+		t.Fatal("a changed composition lock is a different key")
+	}
+	if CompositionLockDigest(&model.Plan{}) != "" {
+		t.Fatal("a plan without composition sources has no lock digest")
+	}
+	a := CompositionLockDigest(&model.Plan{Spec: model.PlanSpec{CompositionSources: []model.ResolvedCompositionSource{{Name: "b", ResolvedDigest: "2"}, {Name: "a", ResolvedDigest: "1"}}}})
+	z := CompositionLockDigest(&model.Plan{Spec: model.PlanSpec{CompositionSources: []model.ResolvedCompositionSource{{Name: "a", ResolvedDigest: "1"}, {Name: "b", ResolvedDigest: "2"}}}})
+	if a != z {
+		t.Fatal("the lock digest does not depend on source order")
+	}
+
+	// An undigestable source: the claim carries no memo key and a note is given.
+	var claimBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewDecoder(r.Body).Decode(&claimBody)
+		_, _ = w.Write([]byte(`{"claimed":true,"leaseEpoch":1,"leaseExpiresAt":"t","attempt":1,"leaseSeconds":60,"heartbeatIntervalSeconds":20}`))
+	}))
+	defer srv.Close()
+	b = NewCoordBackend(&CoordClient{HTTP: srv.Client(), BaseURL: srv.URL + "/v1/organizations/o/projects/p/state"}, nil, "r1")
+	b.SetSourceDigest(func(model.PlanJob) (string, error) { return "", errors.New("no checkout") })
+	var note string
+	b.SetMemoWarn(func(s string) { note = s })
+	res, err := b.ClaimJob(context.Background(), "run-1", job, "r1")
+	if err != nil || !res.Claimed {
+		t.Fatalf("claim: %+v %v", res, err)
+	}
+	if _, ok := claimBody["jobInputHash"]; ok || claimBody["hermetic"] == true {
+		t.Fatalf("an unkeyable hermetic job is claimed without a memo key: %+v", claimBody)
+	}
+	if !strings.Contains(note, "not memoized") || !strings.Contains(note, "no checkout") {
+		t.Fatalf("the note says why: %q", note)
+	}
+	if b.hash("h") != "" {
+		t.Fatal("no key is remembered for the completion")
 	}
 }

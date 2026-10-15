@@ -185,6 +185,12 @@ type Runner struct {
 	ghaHoldSteps bool
 	// Hooks wires external lifecycle callbacks (remote state, log upload, etc.).
 	Hooks *RunnerHooks
+
+	// memoized records the jobs the BeforeJob hook adopted from a prior
+	// result (a memoized hit, by result digest), so the run reports them as
+	// memoized rather than resumed (specs/orun-cache-efficiency CE6).
+	memoized   map[string]string
+	memoizedMu sync.Mutex
 	// DefaultTimeout bounds a step whose job and step set none: the plan's
 	// execution.timeout, else model.DefaultStepTimeout. Empty disables the
 	// bound (tests). Set by cmd/orun from the plan.
@@ -266,6 +272,9 @@ type finishedJobEntry struct {
 	success  bool
 	duration time.Duration
 	resumed  bool
+	// label replaces "cached" on a resumed entry: "memoized <digest>" for a
+	// job the backend served from a prior result.
+	label string
 }
 
 // inGHA reports whether output should be rendered for the GitHub Actions log
@@ -295,6 +304,7 @@ type runSummary struct {
 	startedAt time.Time
 	completed int
 	resumed   int
+	memoized  int
 	failed    int
 	waiting   int
 	cacheHits int
@@ -306,6 +316,7 @@ type runSummarySnapshot struct {
 	duration  time.Duration
 	completed int
 	resumed   int
+	memoized  int
 	failed    int
 	waiting   int
 	cacheHits int
@@ -329,6 +340,14 @@ func (s *runSummary) addResumed() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.resumed++
+}
+
+// addMemoized counts a job the backend served from a prior result: not run
+// here, not resumed from this execution's own state.
+func (s *runSummary) addMemoized() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.memoized++
 }
 
 func (s *runSummary) addFailed() {
@@ -381,6 +400,7 @@ func (s *runSummary) snapshot() runSummarySnapshot {
 		duration:  time.Since(s.startedAt),
 		completed: s.completed,
 		resumed:   s.resumed,
+		memoized:  s.memoized,
 		failed:    s.failed,
 		waiting:   s.waiting,
 		cacheHits: s.cacheHits,
@@ -619,8 +639,13 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 			}
 			if skip {
 				jobState.Status = "completed"
-				summary.addResumed()
-				r.printJobResumed(job)
+				if digest, memoized := r.memoizedDigest(job.ID); memoized {
+					summary.addMemoized()
+					r.printJobMemoized(job, digest)
+				} else {
+					summary.addResumed()
+					r.printJobResumed(job)
+				}
 				continue
 			}
 		}
@@ -1567,6 +1592,24 @@ func (r *Runner) importStepExports(sharer executor.ExportSharer, baseExecContext
 	}
 	defer cancel()
 	return sharer.ImportStepExports(execContext, job, step, exports)
+}
+
+// MarkMemoized records that the backend served the job from a prior result
+// with this digest; the BeforeJob hook calls it before skipping the job.
+func (r *Runner) MarkMemoized(jobID, digest string) {
+	r.memoizedMu.Lock()
+	defer r.memoizedMu.Unlock()
+	if r.memoized == nil {
+		r.memoized = map[string]string{}
+	}
+	r.memoized[jobID] = digest
+}
+
+func (r *Runner) memoizedDigest(jobID string) (string, bool) {
+	r.memoizedMu.Lock()
+	defer r.memoizedMu.Unlock()
+	digest, ok := r.memoized[jobID]
+	return digest, ok
 }
 
 // resolveWorkingDirAt computes a job's working directory anchored at the given

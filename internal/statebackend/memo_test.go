@@ -76,3 +76,25 @@ func TestMemoizationHit(t *testing.T) {
 		t.Fatal("hermetic hit must return the existing result")
 	}
 }
+
+// The source digest joins the canonical form when present (CE6), after
+// inputDigests in key order; an input without it keeps the earlier form, so
+// the cross-language golden above is unchanged.
+const canonicalGoldenWithSource = `{"compositionLockDigest":"sha256:lock","envKeys":["A","B"],` +
+	`"inputDigests":["sha256:x","sha256:y"],"sourceDigest":"sha256:src","steps":[{"name":"b","run":"build"}]}`
+
+func TestCanonicalizeJobInputWithSourceDigest(t *testing.T) {
+	in := baseInput()
+	in.SourceDigest = "sha256:src"
+	if got := CanonicalizeJobInput(in); got != canonicalGoldenWithSource {
+		t.Fatalf("canonical form with a source digest:\n got: %s\nwant: %s", got, canonicalGoldenWithSource)
+	}
+	if JobInputHash(in) == JobInputHash(baseInput()) {
+		t.Fatal("the source digest changes the key")
+	}
+	other := in
+	other.SourceDigest = "sha256:other"
+	if JobInputHash(other) == JobInputHash(in) {
+		t.Fatal("a different source tree is a different key")
+	}
+}
