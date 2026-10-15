@@ -24,6 +24,7 @@ orun cache gc [--max-size 10G] [--dry-run]
 | `tool-cache` | `~/.orun/tool-cache/<tool>/<version>` (or the host runner's tool cache) | one version of a tool a setup action installed |
 | `shared` | `~/.orun/actions/shared/<store>` | a store every job shares: `npm`, `pnpm-store`, `terraform-plugins`, `go-build`, … |
 | `declared` | `~/.orun/actions/shared/caches/<name>` | a cache a composition step declared with `caches:` |
+| `actions-cache` | `~/.orun/actions/shared/actions-cache/<entry>` | an entry `actions/cache` saved, listed by its key |
 | `compositions` | `~/.orun/cache/compositions/<digest>` | a composition package pulled from an archive or an OCI registry (a `dir` source is read in place and never cached) |
 | `runs` | `<checkout>/.orun/runs/<exec-id>` | a run's staging directory |
 | `resolve-memo` | `<checkout>/.orun/objectmodel/cache/resolve/<key>` | one memoized catalog resolve |
@@ -34,9 +35,10 @@ holds a `.orun` directory.
 An entry's *last use* is the stamp orun writes beside it on a hit (an action
 loaded from the cache, a composition served from it, a declared cache
 restored), else the entry's own modification time. An entry a running orun
-process holds — an action being fetched, a declared cache being saved, a
-Terraform plugin cache a job has, a composition being filled, any tool
-version while an installer runs — is marked `in use` and never removed.
+process holds — an action being fetched, a declared cache or an
+`actions/cache` entry being saved, a Terraform plugin cache a job has, a
+composition being filled, any tool version while an installer runs — is
+marked `in use` and never removed.
 
 ## ls
 
