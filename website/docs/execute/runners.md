@@ -124,10 +124,10 @@ Every job gets a temporary `HOME` of its own (so global installs by `npm install
 
 | Directory | Exported as | Shared by |
 | --- | --- | --- |
-| `~/.orun/tool-cache` | `RUNNER_TOOL_CACHE` | every setup action (`setup-node`, `setup-terraform`, `setup-helm`); installers run one at a time per process |
+| `~/.orun/tool-cache` | `RUNNER_TOOL_CACHE` | every setup action (`setup-node`, `setup-terraform`, `setup-helm`); installers run one at a time per machine, under a lock file every orun process respects |
 | `~/.orun/actions/shared/npm` | `npm_config_cache` | npm |
 | `~/.orun/actions/shared/pnpm-store` | `npm_config_store_dir`, `pnpm_config_store_dir`, `PNPM_CONFIG_STORE_DIR` | pnpm |
-| `~/.orun/actions/shared/terraform-plugins[-N]` | `TF_PLUGIN_CACHE_DIR` | Terraform, one directory per job in flight (`terraform init` is not safe against a concurrent one) |
+| `~/.orun/actions/shared/terraform-plugins[-N]` | `TF_PLUGIN_CACHE_DIR` | Terraform, one directory per job in flight on the machine, each held by a lock file (`terraform init` is not safe against a concurrent one) |
 
 The run summary's cache-hit count comes from the tool cache itself: a setup action that added nothing to it found its tool there.
 
