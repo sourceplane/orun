@@ -100,8 +100,7 @@ exists, and the contract's dependencies with their states.
 
 ## `attach` and `check`
 
-`<tasks>` is the directory intent.yaml declares under `work.tasks`, `tasks`
-when it declares none — see [configuration](../reference/configuration.md#intent-file).
+`<tasks>` is `tasks/` at the repository root.
 
 `attach <key>` seals `<tasks>/<KEY>.TaskContract.yaml` locally (sha256 over
 canonical JSON), uploads it, and the server refuses a mismatch. `check

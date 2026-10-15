@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -45,9 +47,7 @@ var planCmd = &cobra.Command{
 		// Never fails the plan; a no-op unless enabled + on the clean default
 		// branch + the catalog changed since the last publish.
 		maybeAutoPushCatalog(cmd.Context())
-		// Same shape for the declared work tree (intent work.sync: on-merge):
-		// the merge's plan is the sync; no separate job.
-		maybeAutoSyncWork(cmd.Context())
+		noticeRetiredWorkSection()
 		return nil
 	},
 }
@@ -63,6 +63,17 @@ func pushCatalogAfterPlan(ctx context.Context) error {
 		return err
 	}
 	return pushResolvedCatalog(ctx, backendURL, "", "", "")
+}
+
+// noticeRetiredWorkSection says, once per plan, that a `work:` section in
+// intent.yaml no longer means anything: saas-work-gitops-teardown removed the
+// declared work tree and its merge-time sync from orun and from Orunbase.
+// A repository that still carries the section plans exactly as before — the
+// notice is the only thing the section buys, so its author removes it.
+func noticeRetiredWorkSection() {
+	if intent := loadIntentForCloudConfig(); intent != nil && intent.Work != nil {
+		fmt.Fprintln(os.Stderr, "notice: intent.yaml declares a work: section; orun no longer reads a work tree or syncs one (saas-work-gitops-teardown) — remove the section")
+	}
 }
 
 func registerPlanCommand(root *cobra.Command) {

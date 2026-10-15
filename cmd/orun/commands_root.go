@@ -307,7 +307,6 @@ func init() {
 	registerSkillsCommand(rootCmd)
 	registerTaskCommand(rootCmd)
 	registerSpecCommand(rootCmd)
-	registerWorkCommand(rootCmd)
 	registerPrCommand(rootCmd)
 	registerBaselineCommand(rootCmd)
 	registerMcpCommand(rootCmd)

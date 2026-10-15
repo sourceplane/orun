@@ -503,14 +503,15 @@ func TestTaskCheckWithoutDocument(t *testing.T) {
 	}
 }
 
-// saas-work-gitops WG-1: with `work.tasks` declared in intent.yaml, the
-// contract lookup reads the declared directory — and nothing else changes.
-func TestTaskCreateReadsDeclaredTasksDir(t *testing.T) {
+// saas-work-gitops-teardown: a `work.tasks` line left in intent.yaml moves
+// nothing — the contract lookup reads `tasks/` at the root, and the retired
+// section neither breaks the load nor redirects it.
+func TestTaskCreateIgnoresRetiredWorkSection(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "work", "tasks"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "tasks"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "work", "tasks", "ENG-1.TaskContract.yaml"), []byte(testTaskDoc), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "tasks", "ENG-1.TaskContract.yaml"), []byte(testTaskDoc), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "intent.yaml"), []byte("apiVersion: orun.io/v1\nkind: Intent\nmetadata:\n  name: t\nwork:\n  tasks: work/tasks\n"), 0o644); err != nil {
@@ -536,9 +537,9 @@ func TestTaskCreateReadsDeclaredTasksDir(t *testing.T) {
 		t.Fatalf("task create: %v\n%s", err, out)
 	}
 	if !attached || strings.Contains(out, "no contract document") {
-		t.Fatalf("declared tasks dir not read:\n%s", out)
+		t.Fatalf("tasks/ not read:\n%s", out)
 	}
-	if got := taskDocRel("ENG-1"); got != "work/tasks/ENG-1.TaskContract.yaml" {
+	if got := taskDocRel("ENG-1"); got != "tasks/ENG-1.TaskContract.yaml" {
 		t.Fatalf("taskDocRel = %q", got)
 	}
 }
