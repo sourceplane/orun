@@ -72,6 +72,11 @@ type ClaimResult struct {
 	CurrentStatus string // backend job status when not claimed
 	DepsWaiting   bool
 	DepsBlocked   bool
+	// TerminalPhase is the coordinator's own phase for a job whose claim was
+	// refused because the job or its run is terminal (succeeded, failed,
+	// queued, claimed, ...), when the server could say. CurrentStatus is
+	// "unrecorded" when that phase holds no result.
+	TerminalPhase string
 
 	// Cached is true when the claim resolved a memoized result: the job's inputs
 	// matched a prior run, so the runner adopts the result and skips execution.

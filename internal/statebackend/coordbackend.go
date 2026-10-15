@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -351,7 +352,17 @@ func (b *CoordBackend) ClaimJob(ctx context.Context, runID string, job model.Pla
 			// Held by another runner: report it as running so the caller waits/skips.
 			res.CurrentStatus = "running"
 		case "run_terminal", "terminal":
-			res.CurrentStatus = b.inner.ClassifyTerminal(ctx, runID, job.ID)
+			// The coordinator's own record of the job decides, not the read
+			// model: a read model behind the coordinator once turned a job
+			// whose result was never recorded into "already failed on another
+			// runner" (orun#748). The read model stays the fallback for a
+			// server without the state read.
+			if phase, ok := b.jobPhase(ctx, runID, job.ID); ok {
+				res.CurrentStatus = statusOfPhase(phase)
+				res.TerminalPhase = phase
+			} else {
+				res.CurrentStatus = b.inner.ClassifyTerminal(ctx, runID, job.ID)
+			}
 		}
 	}
 	return res, nil
@@ -371,7 +382,11 @@ func (b *CoordBackend) Heartbeat(ctx context.Context, runID, jobID, runnerID str
 
 // UpdateJob reports the terminal transition via :complete. A lost lease means
 // another runner already drove the job terminal — the append is superseded, not
-// an error (at-least-once execution; steps are idempotent).
+// an error (at-least-once execution; steps are idempotent) — when the
+// coordinator holds a result for the job. When it holds none (the lease lapsed
+// and the job went back to the queue, or is held by nobody), this runner's
+// result is lost: that is ErrResultNotRecorded, and the caller must say so
+// rather than report the job green (orun#748).
 func (b *CoordBackend) UpdateJob(ctx context.Context, runID, jobID, runnerID string, status JobStatus, errText string) error {
 	if runnerID == "" {
 		runnerID = b.runnerID
@@ -400,10 +415,65 @@ func (b *CoordBackend) UpdateJob(ctx context.Context, runID, jobID, runnerID str
 			// simply won't be memoized for the next run.
 		}
 	}
-	if _, err := b.coord.Complete(ctx, wireRunID(runID), jobID, req); err != nil {
+	leaseLost, err := b.coord.Complete(ctx, wireRunID(runID), jobID, req)
+	if err != nil {
 		return err
 	}
-	return nil
+	if !leaseLost {
+		return nil
+	}
+	job, ok := b.jobState(ctx, runID, jobID)
+	if ok && jobTerminal(job.Phase) {
+		return nil // superseded: the coordinator already holds a result
+	}
+	if ok && job.Phase == "claimed" && job.Holder != "" && job.Holder != runnerID {
+		return nil // superseded: another runner took the job over and will record it
+	}
+	phase := "unknown"
+	if ok {
+		phase = job.Phase
+	}
+	return fmt.Errorf("%w: %s: the lease was lost before :complete and the coordinator holds the job as %s", ErrResultNotRecorded, jobID, phase)
+}
+
+// ErrResultNotRecorded is a terminal result the coordinator refused because
+// this runner's lease was gone, for a job it holds no result for.
+var ErrResultNotRecorded = errors.New("result not recorded on the server")
+
+// jobPhase reads the job's phase from the coordinator's own record of the run
+// (its state read), or reports false when the server cannot say; jobState
+// reads the whole record.
+func (b *CoordBackend) jobPhase(ctx context.Context, runID, jobID string) (string, bool) {
+	j, ok := b.jobState(ctx, runID, jobID)
+	if !ok {
+		return "", false
+	}
+	return j.Phase, true
+}
+
+func (b *CoordBackend) jobState(ctx context.Context, runID, jobID string) (*JobFoldState, bool) {
+	st, err := b.coord.ReadState(ctx, wireRunID(runID))
+	if err != nil || st == nil {
+		return nil, false
+	}
+	j, ok := st.Fold.Jobs[jobID]
+	if !ok || j == nil || j.Phase == "" {
+		return nil, false
+	}
+	return j, true
+}
+
+// statusOfPhase maps a coordinator job phase onto the ClaimResult status the
+// runner branches on: a result, a failure, or no result at all.
+func statusOfPhase(phase string) string {
+	switch phase {
+	case "succeeded", "memoized":
+		return "success"
+	case "failed", "timed_out", "canceled":
+		return "failed"
+	default:
+		return "unrecorded"
+	}
 }
 
 // RunnableJobs is the run's frontier: from the view when this process holds
