@@ -52,6 +52,7 @@ var (
 	runJSON                 bool
 	runIsolation            string
 	runKeepWorkspaces       bool
+	runRefreshActions       bool
 	runBackground           bool
 	// Remote state flags
 	runRemoteState bool
@@ -110,6 +111,7 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().BoolVar(&runJSON, "json", false, "Output in JSON format")
 	runCmd.Flags().StringVar(&runIsolation, "isolation", "auto", "Per-job workspace isolation: auto (on when concurrency>1), workspace (always on), component (always on; copy only the job's directory, link the rest), none (legacy shared tree)")
 	runCmd.Flags().BoolVar(&runKeepWorkspaces, "keep-workspaces", false, "Don't delete per-job staged workspaces after the run (debug)")
+	runCmd.Flags().BoolVar(&runRefreshActions, "refresh-actions", false, "Resolve every action's tag or branch against GitHub this run, instead of trusting the version resolved earlier (or set ORUN_REFRESH_ACTIONS=1)")
 	runCmd.Flags().BoolVar(&runBackground, "background", false, "Run the plan detached and return immediately. Track via 'orun status --watch'")
 
 	runCmd.Flags().BoolVar(&runRemoteState, "remote-state", false, "Use the Orun Cloud backend for distributed run coordination (sets ORUN_REMOTE_STATE=true)")
@@ -228,6 +230,9 @@ func runPlan() error {
 		runnerName = "github-actions"
 	}
 	runtime := runtimeContextForRunner(runnerName)
+	if runRefreshActions {
+		_ = os.Setenv("ORUN_REFRESH_ACTIONS", "1")
+	}
 	selectedExecutor, err := executor.Get(runnerName)
 	if err != nil {
 		return err

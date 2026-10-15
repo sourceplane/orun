@@ -38,6 +38,13 @@ type Options struct {
 	CacheDir     string
 	ToolCacheDir string
 	HTTPClient   *http.Client
+	// RefreshActions resolves every tag and branch reference against the
+	// API this run, whatever the on-disk entry's age (orun run
+	// --refresh-actions).
+	RefreshActions bool
+	// Warn receives notes the engine wants a person to see (a ref served
+	// from a stale entry because the API could not be reached).
+	Warn func(message string)
 }
 
 type ExecContext struct {
@@ -64,9 +71,11 @@ type Engine struct {
 	pulledImages map[string]struct{}
 	builtImages  map[string]string
 
-	refCache     map[string]string
-	refCacheMu   sync.RWMutex
-	refResolveSF singleflight.Group
+	refCache       map[string]string
+	refCacheMu     sync.RWMutex
+	refreshActions bool
+	warn           func(string)
+	refResolveSF   singleflight.Group
 
 	actionCache   map[string]*resolvedAction
 	actionCacheMu sync.RWMutex
@@ -207,14 +216,16 @@ func NewEngine(options Options) *Engine {
 		httpClient = &http.Client{Transport: transport}
 	}
 	return &Engine{
-		cacheDir:     cacheDir,
-		toolCacheDir: toolCacheDir,
-		httpClient:   httpClient,
-		jobs:         map[string]*jobState{},
-		pulledImages: map[string]struct{}{},
-		builtImages:  map[string]string{},
-		refCache:     map[string]string{},
-		actionCache:  map[string]*resolvedAction{},
+		cacheDir:       cacheDir,
+		toolCacheDir:   toolCacheDir,
+		httpClient:     httpClient,
+		jobs:           map[string]*jobState{},
+		pulledImages:   map[string]struct{}{},
+		builtImages:    map[string]string{},
+		refCache:       map[string]string{},
+		actionCache:    map[string]*resolvedAction{},
+		refreshActions: options.RefreshActions,
+		warn:           options.Warn,
 	}
 }
 

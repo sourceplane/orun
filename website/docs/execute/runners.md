@@ -109,10 +109,12 @@ Resolving a non-SHA action reference (e.g., `v4`) to a commit SHA requires a Git
 | Tier | Scope | What it stores |
 | --- | --- | --- |
 | In-memory | Current process | `repo@ref` → SHA map, deduplicated via singleflight |
-| On-disk | Persistent across runs | SHA written to `~/.orun/actions/<repo>/refs/<ref>` |
+| On-disk | Persistent across runs | SHA and the time it was resolved, written to `~/.orun/actions/<repo>/refs/<ref>`; trusted for 24 hours for a version tag (`v4`), one hour for a branch |
 | API | Fallback | GitHub REST API `/repos/<owner>/<repo>/commits/<ref>` |
 
 This ensures that `--concurrency 4` with many jobs using the same action versions never triggers API rate limits, even with large platform repositories containing dozens of concurrent jobs.
+
+A tag or branch is resolved again once its entry is older than that, so `uses: org/action@main` follows the branch within the hour and `@v4` picks up a new minor release within the day; within one process a reference is resolved once. `orun run --refresh-actions` (or `ORUN_REFRESH_ACTIONS=1`) resolves every tag and branch this run. A resolve that fails — offline, rate-limited — keeps the version on disk and says so. The tarball is always fetched by the resolved commit, never by the tag or branch as written, so the cache directory named by a SHA holds that commit.
 
 The download of an action version is guarded by a lock file beside its cache directory, so two jobs or two orun processes never fetch the same version at once. The lock records its holder and is refreshed while the download runs; a lock left by a process that died is reclaimed by the next waiter after a minute. A waiter waits as long as a download can take, and the download itself is bounded by progress — it fails only when no data has arrived for 30 seconds — so a large action on a slow link completes.
 

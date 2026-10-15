@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"fmt"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -220,5 +222,223 @@ func TestDownloadTarballFailsWhenTheBodyStalls(t *testing.T) {
 	err := engine.downloadAndExtractTarball(context.Background(), server.URL+"/tarball/v1", "", t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "no data received for") {
 		t.Fatalf("download error = %v, want the stall named", err)
+	}
+}
+
+// refServer stands in for the GitHub API for one repository, o/r:
+// /repos/o/r/commits/<ref> answers the configured SHA (or fails on demand),
+// /repos/o/r/tarball/<sha> the tarball, and any other tarball path 404, so a
+// download by the ref as written is caught.
+type refServer struct {
+	*httptest.Server
+	sha      string
+	tarball  []byte
+	resolves atomic.Int32
+	fail     atomic.Bool
+	mu       sync.Mutex
+	tarballs []string
+}
+
+func newRefServer(t *testing.T, sha string, tarball []byte) *refServer {
+	t.Helper()
+	rs := &refServer{sha: sha, tarball: tarball}
+	rs.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/repos/o/r/commits/"):
+			rs.resolves.Add(1)
+			if rs.fail.Load() {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write([]byte(`{"sha":"` + rs.sha + `"}`))
+		case strings.HasPrefix(r.URL.Path, "/repos/o/r/tarball/"):
+			ref := strings.TrimPrefix(r.URL.Path, "/repos/o/r/tarball/")
+			rs.mu.Lock()
+			rs.tarballs = append(rs.tarballs, ref)
+			rs.mu.Unlock()
+			if ref != rs.sha {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_, _ = w.Write(rs.tarball)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(rs.Close)
+	return rs
+}
+
+func (rs *refServer) tarballRefs() []string {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	return append([]string(nil), rs.tarballs...)
+}
+
+const testSHA = "0123456789abcdef0123456789abcdef01234567"
+
+func mustRef(t *testing.T, raw string) ActionReference {
+	t.Helper()
+	ref, err := ParseActionReference(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ref
+}
+
+func markActionReady(t *testing.T, cacheDir, sha string) {
+	t.Helper()
+	dir := filepath.Join(cacheDir, "o", "r", sha)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".ready"), []byte(sha), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeRefFile(t *testing.T, cacheDir, slug, sha string, resolvedAt time.Time) {
+	t.Helper()
+	path := filepath.Join(cacheDir, "o", "r", "refs", slug)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(fmt.Sprintf("%s %d\n", sha, resolvedAt.Unix())), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFetchRemoteActionDownloadsByTheResolvedSHA(t *testing.T) {
+	server := newRefServer(t, testSHA, actionTarball(t))
+	cacheDir := t.TempDir()
+	engine := NewEngine(Options{CacheDir: cacheDir, HTTPClient: server.Client()})
+
+	resolved, err := engine.fetchRemoteAction(context.Background(), server.URL, "", mustRef(t, "o/r@v1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.ResolvedRef != testSHA {
+		t.Fatalf("resolved ref = %q", resolved.ResolvedRef)
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, "o", "r", testSHA, ".ready")); err != nil {
+		t.Fatalf("the action is cached under its SHA: %v", err)
+	}
+	if refs := server.tarballRefs(); len(refs) != 1 || refs[0] != testSHA {
+		t.Fatalf("tarball fetched by %v, want by the resolved SHA only", refs)
+	}
+	data, err := os.ReadFile(filepath.Join(cacheDir, "o", "r", "refs", "v1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) != 2 || fields[0] != testSHA {
+		t.Fatalf("ref entry = %q, want the SHA and the time it was resolved", data)
+	}
+}
+
+func TestResolveRemoteRefTrustsTheDiskEntryWithinItsTTL(t *testing.T) {
+	server := newRefServer(t, testSHA, actionTarball(t))
+	cacheDir := t.TempDir()
+	first := NewEngine(Options{CacheDir: cacheDir, HTTPClient: server.Client()})
+	if _, err := first.fetchRemoteAction(context.Background(), server.URL, "", mustRef(t, "o/r@v1")); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.resolves.Load(); got != 1 {
+		t.Fatalf("resolves after the first fetch = %d", got)
+	}
+
+	// A new process: nothing in memory, the entry on disk is fresh.
+	second := NewEngine(Options{CacheDir: cacheDir, HTTPClient: server.Client()})
+	sha, err := second.resolveRemoteRef(context.Background(), server.URL, "", mustRef(t, "o/r@v1"))
+	if err != nil || sha != testSHA {
+		t.Fatalf("resolve = %q, %v", sha, err)
+	}
+	if got := server.resolves.Load(); got != 1 {
+		t.Fatalf("a fresh entry is trusted without the API: resolves = %d", got)
+	}
+}
+
+func TestResolveRemoteRefResolvesAgainPastTheTTL(t *testing.T) {
+	server := newRefServer(t, testSHA, nil)
+	cacheDir := t.TempDir()
+	markActionReady(t, cacheDir, testSHA)
+	writeRefFile(t, cacheDir, "main", testSHA, time.Now().Add(-2*time.Hour))
+
+	engine := NewEngine(Options{CacheDir: cacheDir, HTTPClient: server.Client()})
+	sha, err := engine.resolveRemoteRef(context.Background(), server.URL, "", mustRef(t, "o/r@main"))
+	if err != nil || sha != testSHA {
+		t.Fatalf("resolve = %q, %v", sha, err)
+	}
+	if got := server.resolves.Load(); got != 1 {
+		t.Fatalf("a branch entry two hours old is resolved again: resolves = %d", got)
+	}
+	data, _ := os.ReadFile(filepath.Join(cacheDir, "o", "r", "refs", "main"))
+	fields := strings.Fields(string(data))
+	if len(fields) != 2 {
+		t.Fatalf("ref entry = %q", data)
+	}
+	if at, _ := strconv.ParseInt(fields[1], 10, 64); time.Since(time.Unix(at, 0)) > time.Minute {
+		t.Fatalf("the entry's time was not refreshed: %s", data)
+	}
+
+	// The same entry, a tag: two hours is within a tag's day.
+	writeRefFile(t, cacheDir, "v1", testSHA, time.Now().Add(-2*time.Hour))
+	if _, err := engine.resolveRemoteRef(context.Background(), server.URL, "", mustRef(t, "o/r@v1")); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.resolves.Load(); got != 1 {
+		t.Fatalf("a tag entry two hours old is trusted: resolves = %d", got)
+	}
+}
+
+func TestResolveRemoteRefKeepsAStaleEntryWhenTheAPIFails(t *testing.T) {
+	server := newRefServer(t, testSHA, nil)
+	server.fail.Store(true)
+	cacheDir := t.TempDir()
+	markActionReady(t, cacheDir, testSHA)
+	writeRefFile(t, cacheDir, "main", testSHA, time.Now().Add(-3*time.Hour))
+
+	var warned []string
+	engine := NewEngine(Options{CacheDir: cacheDir, HTTPClient: server.Client(), Warn: func(m string) { warned = append(warned, m) }})
+	sha, err := engine.resolveRemoteRef(context.Background(), server.URL, "", mustRef(t, "o/r@main"))
+	if err != nil || sha != testSHA {
+		t.Fatalf("resolve = %q, %v; the entry on disk still serves when the API fails", sha, err)
+	}
+	if len(warned) != 1 || !strings.Contains(warned[0], "could not resolve o/r@main") {
+		t.Fatalf("warnings = %q", warned)
+	}
+
+	// Without an entry on disk the failure is the caller's.
+	if _, err := engine.resolveRemoteRef(context.Background(), server.URL, "", mustRef(t, "o/r@other")); err == nil {
+		t.Fatal("a ref never resolved cannot be served from disk")
+	}
+}
+
+func TestRefreshActionsResolvesAFreshEntryAgain(t *testing.T) {
+	server := newRefServer(t, testSHA, nil)
+	cacheDir := t.TempDir()
+	markActionReady(t, cacheDir, testSHA)
+	writeRefFile(t, cacheDir, "v1", testSHA, time.Now())
+
+	engine := NewEngine(Options{CacheDir: cacheDir, HTTPClient: server.Client(), RefreshActions: true})
+	if _, err := engine.resolveRemoteRef(context.Background(), server.URL, "", mustRef(t, "o/r@v1")); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.resolves.Load(); got != 1 {
+		t.Fatalf("--refresh-actions resolves a fresh entry again: resolves = %d", got)
+	}
+}
+
+func TestRefTTL(t *testing.T) {
+	t.Parallel()
+	for _, tag := range []string{"v4", "v4.1", "v4.1.0", "1.2.3", "v2.0.0-rc.1"} {
+		if refTTL(tag) != refTagTTL {
+			t.Errorf("%q: a version tag keeps for %s", tag, refTagTTL)
+		}
+	}
+	for _, branch := range []string{"main", "master", "release", "feature/x", "latest"} {
+		if refTTL(branch) != refBranchTTL {
+			t.Errorf("%q: a branch keeps for %s", branch, refBranchTTL)
+		}
 	}
 }
