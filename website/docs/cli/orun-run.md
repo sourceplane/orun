@@ -122,6 +122,31 @@ The practical recipe: give each CI job lane `--job <id> --retry`, and
 stand, failed jobs re-open and re-run in dependency order. (Applies to the
 native coordination path; `ORUN_COORDINATION=legacy` keeps the old behavior.)
 
+### A result the server never recorded
+
+A job's result reaches the platform with `:complete`. When that call fails
+(the platform throttles or is down), orun retries it for up to three
+minutes, renewing the job's lease between attempts. If the result still
+does not land, orun prints
+`✕ result for <job> not recorded on the server: <error>` and the run exits
+non-zero (`N job result(s) could not be recorded on the server`), even when
+every job passed here. The server would otherwise show the job running or
+queued under a green check.
+
+A `:complete` refused because the lease was lost is not an error when the
+platform already holds a result for the job, or when another runner holds
+the job now. In both cases the job's result comes from elsewhere. When the
+platform holds neither, the result is lost, and the run says so as above.
+
+A heartbeat that fails is printed once per job
+(`⚠ heartbeat for <job> is failing (<error>) — the lease may lapse before
+the job ends`), and the job keeps running.
+
+On a rerun, a claim refused because the job is finished is classified from
+the platform's own record of the run (`GET …/runs/{id}/state`), not its read
+model. A job that passed is skipped as passed, never reported as
+`already failed on another runner`.
+
 Override the working directory for every job:
 
 ```bash
