@@ -15,9 +15,14 @@ import (
 
 var (
 	restoreFromCachePattern = regexp.MustCompile(`(?i)^Restoring ['"]?([^'"]+)['"]? from cache$`)
-	toolCachedPattern       = regexp.MustCompile(`(?i)^([A-Za-z0-9._ -]+) tool version '([^']+)' has been cached at .+$`)
-	toolDownloadPattern     = regexp.MustCompile(`(?i)^Downloading ['"]?([^'"]+)['"]? from .+$`)
-	urlPattern              = regexp.MustCompile(`https?://[^\s]+`)
+	// foundInCachePattern is what the actions/setup-* family prints when the
+	// tool cache already holds the version asked for.
+	foundInCachePattern = regexp.MustCompile(`(?i)^Found in cache @ .+$`)
+	// toolCachedPattern names the tool and version a setup action installed
+	// or found; setup-helm prints it on both paths, so it is not a hit signal.
+	toolCachedPattern   = regexp.MustCompile(`(?i)^([A-Za-z0-9._ -]+) tool version '([^']+)' has been cached at .+$`)
+	toolDownloadPattern = regexp.MustCompile(`(?i)^Downloading ['"]?([^'"]+)['"]? from .+$`)
+	urlPattern          = regexp.MustCompile(`https?://[^\s]+`)
 )
 
 type stepOutputView struct {
@@ -671,9 +676,12 @@ func analyzeStepOutput(step model.PlanStep, output string) stepOutputView {
 		return view
 	}
 
+	// From the output alone, a hit is a message that only a hit prints. An
+	// executor that watches its tool cache overrides this (the runner asks it
+	// after the step) with what the cache itself said.
 	cacheHit := false
 	for _, line := range lines {
-		if restoreFromCachePattern.MatchString(line) || toolCachedPattern.MatchString(line) {
+		if restoreFromCachePattern.MatchString(line) || foundInCachePattern.MatchString(line) {
 			cacheHit = true
 			break
 		}
@@ -706,7 +714,7 @@ func summarizeUseOutput(lines []string) []string {
 			installed = fmt.Sprintf("Installed %s %s", strings.ToLower(strings.TrimSpace(match[1])), match[2])
 			continue
 		}
-		if restoreFromCachePattern.MatchString(line) {
+		if restoreFromCachePattern.MatchString(line) || foundInCachePattern.MatchString(line) {
 			cached = "Cached locally"
 			continue
 		}

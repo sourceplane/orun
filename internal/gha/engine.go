@@ -38,6 +38,13 @@ type Options struct {
 	CacheDir     string
 	ToolCacheDir string
 	HTTPClient   *http.Client
+	// RefreshActions resolves every tag and branch reference against the
+	// API this run, whatever the on-disk entry's age (orun run
+	// --refresh-actions).
+	RefreshActions bool
+	// Warn receives notes the engine wants a person to see (a ref served
+	// from a stale entry because the API could not be reached).
+	Warn func(message string)
 }
 
 type ExecContext struct {
@@ -64,9 +71,11 @@ type Engine struct {
 	pulledImages map[string]struct{}
 	builtImages  map[string]string
 
-	refCache     map[string]string
-	refCacheMu   sync.RWMutex
-	refResolveSF singleflight.Group
+	refCache       map[string]string
+	refCacheMu     sync.RWMutex
+	refreshActions bool
+	warn           func(string)
+	refResolveSF   singleflight.Group
 
 	actionCache   map[string]*resolvedAction
 	actionCacheMu sync.RWMutex
@@ -102,6 +111,31 @@ type jobState struct {
 
 	actionDirs   map[string]string
 	actionDirsMu sync.Mutex
+
+	// lastCache is what the tool cache said about the job's last step: set
+	// for a step that installs tools, cleared at every step's start.
+	lastCache   cacheObservation
+	lastCacheMu sync.Mutex
+}
+
+// cacheObservation is the tool cache's verdict on one setup action: observed
+// only for an action that installs tools; hit when it added nothing to the
+// cache, which means the tool it set up was already there.
+type cacheObservation struct {
+	observed bool
+	hit      bool
+}
+
+func (state *jobState) setCacheObservation(obs cacheObservation) {
+	state.lastCacheMu.Lock()
+	state.lastCache = obs
+	state.lastCacheMu.Unlock()
+}
+
+func (state *jobState) cacheObservation() cacheObservation {
+	state.lastCacheMu.Lock()
+	defer state.lastCacheMu.Unlock()
+	return state.lastCache
 }
 
 type scope struct {
@@ -174,17 +208,24 @@ func NewEngine(options Options) *Engine {
 	}
 	httpClient := options.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		// No whole-request timeout: a tarball download is bounded by progress
+		// (fetch.go, downloadIdleTimeout) and a ref resolve by its own context;
+		// the transport still bounds the wait for a response's headers.
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.ResponseHeaderTimeout = 30 * time.Second
+		httpClient = &http.Client{Transport: transport}
 	}
 	return &Engine{
-		cacheDir:     cacheDir,
-		toolCacheDir: toolCacheDir,
-		httpClient:   httpClient,
-		jobs:         map[string]*jobState{},
-		pulledImages: map[string]struct{}{},
-		builtImages:  map[string]string{},
-		refCache:     map[string]string{},
-		actionCache:  map[string]*resolvedAction{},
+		cacheDir:       cacheDir,
+		toolCacheDir:   toolCacheDir,
+		httpClient:     httpClient,
+		jobs:           map[string]*jobState{},
+		pulledImages:   map[string]struct{}{},
+		builtImages:    map[string]string{},
+		refCache:       map[string]string{},
+		actionCache:    map[string]*resolvedAction{},
+		refreshActions: options.RefreshActions,
+		warn:           options.Warn,
 	}
 }
 
@@ -206,9 +247,25 @@ func (e *Engine) RunStep(ctx ExecContext, job model.PlanJob, step model.PlanStep
 	if err != nil {
 		return "", err
 	}
+	state.setCacheObservation(cacheObservation{})
 
 	result, err := e.runStep(ctx, state, state.rootScope(ctx.WorkDir), planStepToSpec(step), nil)
 	return strings.TrimRight(result.Output, "\n"), err
+}
+
+// LastStepCacheHit reports what the tool cache said about the job's last
+// step: observed is true only for a step that installs tools (a setup
+// action); hit means it added nothing to the cache, so the tool it set up was
+// already there. The runner counts cache hits from this rather than from the
+// action's output, whose messages do not mean the same thing across actions
+// (specs/orun-cache-efficiency F11).
+func (e *Engine) LastStepCacheHit(jobID string) (hit bool, observed bool) {
+	state := e.getJobState(jobID)
+	if state == nil {
+		return false, false
+	}
+	obs := state.cacheObservation()
+	return obs.hit, obs.observed
 }
 
 func (e *Engine) FinalizeJob(ctx ExecContext, job model.PlanJob) (string, error) {
@@ -397,6 +454,11 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 	globalEnv["NPM_CONFIG_PREFIX"] = npmGlobal
 	globalEnv["NPM_CONFIG_CACHE"] = filepath.Join(sharedCache, "npm")
 	globalEnv["PNPM_HOME"] = pnpmHome
+	// pnpm reads its settings from npm_config_* variables; the pnpm_config_*
+	// names are kept for the versions that read them. Without the first, pnpm
+	// 10 kept a store under each job's HOME and downloaded every package per
+	// job (specs/orun-cache-efficiency F7).
+	globalEnv["npm_config_store_dir"] = filepath.Join(sharedCache, "pnpm-store")
 	globalEnv["pnpm_config_store_dir"] = filepath.Join(sharedCache, "pnpm-store")
 	globalEnv["PNPM_CONFIG_STORE_DIR"] = filepath.Join(sharedCache, "pnpm-store")
 	globalEnv["TF_PLUGIN_CACHE_DIR"] = terraformPlugins
@@ -725,14 +787,20 @@ func (e *Engine) executeUsesStep(ctx ExecContext, state *jobState, scope *scope,
 	switch resolved.Metadata.Runs.Using {
 	case "node12", "node16", "node20", "node24":
 		defer e.lockToolCache(resolved.Reference)()
-		return e.executeNodeAction(ctx, state, actionScope, invocation, sharedEnv)
+		before := e.toolCacheSnapshot(resolved.Reference)
+		result, err := e.executeNodeAction(ctx, state, actionScope, invocation, sharedEnv)
+		state.observeToolCache(before, e.toolCacheSnapshot(resolved.Reference))
+		return result, err
 	case "composite":
 		// Not locked: its own uses: steps lock themselves, and holding the lock
 		// across them would deadlock on a setup action nested inside.
 		return e.executeCompositeAction(ctx, state, scope, resolved, invocation, sharedEnv)
 	case "docker":
 		defer e.lockToolCache(resolved.Reference)()
-		return e.executeDockerAction(ctx, state, actionScope, invocation, sharedEnv)
+		before := e.toolCacheSnapshot(resolved.Reference)
+		result, err := e.executeDockerAction(ctx, state, actionScope, invocation, sharedEnv)
+		state.observeToolCache(before, e.toolCacheSnapshot(resolved.Reference))
+		return result, err
 	default:
 		return stepExecutionResult{}, fmt.Errorf("unsupported action runtime %q in %s", resolved.Metadata.Runs.Using, resolved.ActionDir)
 	}
@@ -1174,13 +1242,13 @@ func applyMasks(input string, masks []string) string {
 
 func planStepToSpec(step model.PlanStep) stepSpec {
 	return stepSpec{
-		ID:               step.ID,
-		Name:             step.Name,
-		Run:              step.Run,
-		Use:              step.Use,
-		With:             step.With,
-		Env:              step.Env,
-		Shell:            step.Shell,
+		ID:    step.ID,
+		Name:  step.Name,
+		Run:   step.Run,
+		Use:   step.Use,
+		With:  step.With,
+		Env:   step.Env,
+		Shell: step.Shell,
 		// The runner already resolved the plan step's `working-directory`
 		// against the job's directory and handed the result to this engine as
 		// its working directory; applying it here again joined a relative
@@ -1795,6 +1863,63 @@ func (e *Engine) lockToolCache(ref ActionReference) func() {
 	mu := value.(*sync.Mutex)
 	mu.Lock()
 	return mu.Unlock
+}
+
+// toolCacheSnapshot lists what the tool cache holds, as tool/version[/arch]
+// entries, for an action that installs tools; nil for any other action. A
+// setup action that finds its tool leaves the listing unchanged; one that
+// installs adds to it. Comparing the two is the cache-hit signal the runner
+// shows, independent of what the action prints.
+func (e *Engine) toolCacheSnapshot(ref ActionReference) map[string]struct{} {
+	if !installsTools(ref) || e.toolCacheDir == "" {
+		return nil
+	}
+	entries := map[string]struct{}{}
+	tools, err := os.ReadDir(e.toolCacheDir)
+	if err != nil {
+		return entries
+	}
+	for _, tool := range tools {
+		if !tool.IsDir() {
+			continue
+		}
+		versions, err := os.ReadDir(filepath.Join(e.toolCacheDir, tool.Name()))
+		if err != nil {
+			continue
+		}
+		for _, version := range versions {
+			key := tool.Name() + "/" + version.Name()
+			entries[key] = struct{}{}
+			if !version.IsDir() {
+				continue
+			}
+			arches, err := os.ReadDir(filepath.Join(e.toolCacheDir, tool.Name(), version.Name()))
+			if err != nil {
+				continue
+			}
+			for _, arch := range arches {
+				entries[key+"/"+arch.Name()] = struct{}{}
+			}
+		}
+	}
+	return entries
+}
+
+// observeToolCache records the tool cache's verdict on the step that just
+// ran: nothing for an action that does not install tools; a hit when the
+// listing after it holds nothing the listing before it lacked.
+func (state *jobState) observeToolCache(before, after map[string]struct{}) {
+	if before == nil {
+		return
+	}
+	hit := true
+	for key := range after {
+		if _, ok := before[key]; !ok {
+			hit = false
+			break
+		}
+	}
+	state.setCacheObservation(cacheObservation{observed: true, hit: hit})
 }
 
 // installsTools reports whether an action looks like a tool installer — by the

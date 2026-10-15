@@ -2,6 +2,7 @@ package executor
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -15,7 +16,11 @@ var factories = map[string]factory{
 		return &dockerExecutor{pulledImages: map[string]struct{}{}}
 	},
 	"github-actions": func() Executor {
-		return &githubActionsExecutor{engine: gha.NewEngine(gha.Options{})}
+		refresh := strings.TrimSpace(os.Getenv("ORUN_REFRESH_ACTIONS"))
+		return &githubActionsExecutor{engine: gha.NewEngine(gha.Options{
+			RefreshActions: refresh == "1" || strings.EqualFold(refresh, "true"),
+			Warn:           func(message string) { fmt.Fprintln(os.Stderr, "warning: "+message) },
+		})}
 	},
 	"local": func() Executor {
 		return &localExecutor{}

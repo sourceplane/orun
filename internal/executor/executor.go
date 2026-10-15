@@ -54,6 +54,14 @@ type JobFinalizer interface {
 	FinalizeJob(ctx ExecContext, job model.PlanJob) (output string, err error)
 }
 
+// CacheObserver is implemented by executors that can tell whether the step
+// they just ran for a job was served from a cache they control (the tool
+// cache, for a setup action). hit is meaningful only when observed is true;
+// a step the executor has no cache verdict for reports observed false.
+type CacheObserver interface {
+	LastStepCacheHit(jobID string) (hit bool, observed bool)
+}
+
 func NormalizeRunnerName(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
