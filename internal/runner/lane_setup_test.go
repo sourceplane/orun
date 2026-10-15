@@ -145,4 +145,15 @@ func TestLeadingLaneSteps(t *testing.T) {
 	if n := leadingLaneSteps(job); n != 2 {
 		t.Fatalf("leading lane steps = %d", n)
 	}
+	// Setup actions before the install are part of the prelude; the prelude
+	// ends at the last leading lane-scoped step.
+	withActions := model.PlanJob{Steps: []model.PlanStep{{ID: "node", Use: "actions/setup-node@v6"}, {ID: "pnpm", Use: "pnpm/action-setup@v4"}, {ID: "install", Scope: "lane"}, {ID: "build"}, {ID: "deploy"}}}
+	if n := leadingLaneSteps(withActions); n != 3 {
+		t.Fatalf("prelude with setup actions = %d, want 3", n)
+	}
+	// Actions alone, no lane step: no prelude — the job is staged first.
+	actionsOnly := model.PlanJob{Steps: []model.PlanStep{{ID: "node", Use: "actions/setup-node@v6"}, {ID: "build"}}}
+	if n := leadingLaneSteps(actionsOnly); n != 0 {
+		t.Fatalf("prelude without a lane step = %d, want 0", n)
+	}
 }

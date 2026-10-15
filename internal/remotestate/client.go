@@ -25,10 +25,13 @@ const (
 	resolveReadTimeout = 120 * time.Second
 	resolveMaxAttempts = 3
 	logUploadTimeout   = 60 * time.Second
-	connectTimeout     = 5 * time.Second
-	maxRetryAttempts   = 3
-	retryBaseDelay     = 2 * time.Second
-	retryMaxDelay      = 10 * time.Second
+	// coordinationTimeout bounds a coordination verb or a long-poll read: the
+	// server holds a long-poll for at most 25 s.
+	coordinationTimeout = 45 * time.Second
+	connectTimeout      = 5 * time.Second
+	maxRetryAttempts    = 3
+	retryBaseDelay      = 2 * time.Second
+	retryMaxDelay       = 10 * time.Second
 
 	// objectWriteRetryAttempts caps attempts for raw object-plane writes (blob
 	// PUTs, multipart parts). Set higher than maxRetryAttempts because a catalog
@@ -106,6 +109,11 @@ type APIError struct {
 	// callers honor it over the default exponential backoff.
 	RetryAfter time.Duration `json:"-"`
 }
+
+// RetryAfterHint is the server's Retry-After for a rate-limited answer, 0
+// when it sent none: what a retrying caller that does not know this type
+// (the log pipeline) waits before asking again.
+func (e *APIError) RetryAfterHint() time.Duration { return e.RetryAfter }
 
 func (e *APIError) Error() string {
 	parts := e.Message
@@ -270,6 +278,14 @@ func NewClientWithScope(baseURL, version string, tokenSrc TokenSource, scope Sco
 
 // Scope returns the org/project scope this client is bound to.
 func (c *Client) Scope() Scope { return c.scope }
+
+// CoordinationHTTPClient is the HTTP client for the coordination verbs and
+// long-polls: this client's keep-alive transport (one pool for every request
+// a run makes, instead of http.DefaultClient's two idle connections and no
+// timeout) under a timeout that outlasts the server's longest hold.
+func (c *Client) CoordinationHTTPClient() *http.Client {
+	return &http.Client{Transport: c.httpClient.Transport, Timeout: coordinationTimeout}
+}
 
 // ScopedStateBaseURL returns the absolute base URL of this client's scoped state
 // plane: {baseURL}/v1/organizations/{org}/projects/{proj}/state. Adapters that
@@ -650,12 +666,34 @@ func (c *Client) AppendLog(ctx context.Context, runID, jobID, runnerID, content 
 // assembled content from fromSeq onward plus the live-tail cursor (nextSeq) and
 // whether the job is complete (no more chunks coming).
 func (c *Client) ReadLog(ctx context.Context, runID, jobID string, fromSeq int) (*ReadLogResult, error) {
+	return c.ReadLogWait(ctx, runID, jobID, fromSeq, 0)
+}
+
+// ReadLogWait is ReadLog with `?wait=<seconds>`: the server holds the read
+// while nothing sits past fromSeq and the job still runs, so a live tail
+// costs one request per wait instead of one per poll (specs/orun-sync-
+// efficiency P6). A server without the parameter answers at once. The held
+// read goes on the longer-timeout log client and is not retried.
+func (c *Client) ReadLogWait(ctx context.Context, runID, jobID string, fromSeq, waitSeconds int) (*ReadLogResult, error) {
 	path := c.statePath("/runs/" + urlSegment(runID) + "/logs/" + urlSegment(jobID))
+	q := url.Values{}
 	if fromSeq > 0 {
-		path += "?fromSeq=" + strconv.Itoa(fromSeq)
+		q.Set("fromSeq", strconv.Itoa(fromSeq))
+	}
+	if waitSeconds > 0 {
+		q.Set("wait", strconv.Itoa(waitSeconds))
+	}
+	if len(q) > 0 {
+		path += "?" + q.Encode()
 	}
 	var resp ReadLogResult
-	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+	var err error
+	if waitSeconds > 0 {
+		err = c.doJSONWith(ctx, c.logClient, http.MethodGet, path, nil, &resp)
+	} else {
+		err = c.doJSON(ctx, http.MethodGet, path, nil, &resp, true)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("read log %s: %w", jobID, err)
 	}
 	return &resp, nil

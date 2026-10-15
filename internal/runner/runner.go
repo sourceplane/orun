@@ -816,7 +816,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 		// shared tree); every other job with the same step waits for that run
 		// and reuses its result.
 		var laneRun *laneSetupRun
-		if idx < prelude && r.laneSetup != nil {
+		if idx < prelude && step.Scope == model.StepScopeLane && r.laneSetup != nil {
 			key := laneStepKey(step, workingDir, executor.MergeEnvironment(executor.JobEnvironment(job.Env), executor.JobEnvironment(step.Env)))
 			run, own := r.laneSetup.claim(key, job.ID)
 			if !own {
@@ -1467,15 +1467,25 @@ func (r *Runner) stagingMode() IsolationMode {
 	return IsolationWorkspace
 }
 
-// leadingLaneSteps counts the job's leading lane-scoped steps; the planner
-// guarantees no lane-scoped step follows a job-scoped one.
+// leadingLaneSteps is the length of the job's prelude: the steps that run in
+// the shared tree before the job's private tree is staged. It ends at the
+// last leading lane-scoped step; the `use:` steps before it (setup-node,
+// setup-pnpm) belong to the prelude too, since the install they set up for
+// runs there, and an action touches the tool cache, not the tree. The
+// planner guarantees no lane-scoped step follows a job-scoped run step. A
+// job with no lane-scoped step has no prelude: it is staged before its
+// first step, as before.
 func leadingLaneSteps(job model.PlanJob) int {
 	n := 0
-	for _, s := range job.Steps {
-		if s.Scope != model.StepScopeLane {
-			break
+	for i, s := range job.Steps {
+		switch {
+		case s.Scope == model.StepScopeLane:
+			n = i + 1
+		case s.Use != "":
+			continue
+		default:
+			return n
 		}
-		n++
 	}
 	return n
 }
@@ -1763,7 +1773,13 @@ func (r *Runner) stepExecContext(base executor.ExecContext, job model.PlanJob, s
 	}
 	execContext.StepEnv = executor.JobEnvironment(step.Env)
 	execContext.SecretEnv = secretEnv
-	execContext.WorkDir = r.resolveStepWorkingDir(workingDir, step.WorkingDirectory)
+	// workingDir is the step's directory, already resolved by the caller
+	// against the job's directory (the only place a step's
+	// `working-directory` is applied). Applying it here again joined a
+	// relative value twice: `../..` from apps/x reached the parent of the
+	// repository, and the first composition to use one failed with "No
+	// package.json found in /home".
+	execContext.WorkDir = workingDir
 	// Secret env is the highest-precedence layer and lives only in this
 	// context (never in job.Env, the plan, or persisted state).
 	execContext.Env = executor.MergeEnvironment(execContext.BaseEnv, execContext.JobEnv, execContext.StepEnv, secretEnv)

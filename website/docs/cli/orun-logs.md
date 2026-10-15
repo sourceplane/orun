@@ -89,7 +89,7 @@ on the renderer); pass `--raw` to print every line.
 | `--raw` | Show full raw logs instead of compact 8-line excerpts |
 | `--remote-state` | Fetch logs from orun-backend instead of local state |
 | `--backend-url` | orun-backend URL for remote state (or set `ORUN_BACKEND_URL`) |
-| `--follow` | Live-tail a job's log (requires `--remote-state` and `--job`); polls until the job completes |
+| `--follow` | Live-tail a job's log (requires `--remote-state` and `--job`); waits for new output until the job completes |
 | `--all` | Stream logs across all executions (best-effort) |
 
 ## Remote logs
@@ -106,8 +106,11 @@ orun logs \
 
 Omit `--job` to fetch logs for all jobs in the run.
 
-Add `--follow` to live-tail a single job's log as it runs. The CLI polls the
-backend from a sequence cursor and streams new lines until the job completes:
+Add `--follow` to live-tail a single job's log as it runs. The CLI reads
+from a sequence cursor and streams new lines until the job completes; on
+Orun Cloud each read is held on the server until new output lands (up to
+15 seconds), so the tail costs one request per wait instead of one every
+1.5 seconds. On a backend without the held read it polls as before:
 
 ```bash
 orun logs \

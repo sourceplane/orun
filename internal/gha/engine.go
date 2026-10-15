@@ -1181,7 +1181,13 @@ func planStepToSpec(step model.PlanStep) stepSpec {
 		With:             step.With,
 		Env:              step.Env,
 		Shell:            step.Shell,
-		WorkingDirectory: step.WorkingDirectory,
+		// The runner already resolved the plan step's `working-directory`
+		// against the job's directory and handed the result to this engine as
+		// its working directory; applying it here again joined a relative
+		// value twice (`../..` from apps/x ran two directories above the
+		// repository). Composite action steps keep theirs: those are relative
+		// to the action's own scope.
+		WorkingDirectory: "",
 	}
 }
 

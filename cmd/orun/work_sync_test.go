@@ -23,7 +23,10 @@ type fakePlatform struct {
 	milestones []map[string]any
 	tasks      map[string]map[string]any
 	docs       map[string]string
-	writes     []string // "METHOD path idem header"
+	docShas    map[string]string // doc path -> the git sha the push carried
+	docPaths   map[string]string // doc path -> the repo path the push carried
+	writes     []string          // "METHOD path idem header"
+	reads      []string          // "METHOD path?query" of the task and doc reads
 	// stampsOnly counts the empty PATCHes: the sync's stamp, no field.
 	stampsOnly int
 	// authoredElsewhere refuses the epic create the way a workspace that
@@ -45,6 +48,22 @@ func (p *fakePlatform) handler() http.HandlerFunc {
 			_ = json.NewDecoder(r.Body).Decode(&body)
 		}
 		switch {
+		case r.Method == "GET" && path == "":
+			// The epic's tasks in one read.
+			p.reads = append(p.reads, "GET "+r.URL.Path+"?"+r.URL.RawQuery)
+			tasks := []map[string]any{}
+			for _, tk := range p.tasks {
+				tasks = append(tasks, tk)
+			}
+			envelope(p.t, w, 200, map[string]any{"tasks": tasks})
+		case r.Method == "GET" && path == "/epics/saas-work-gitops/docs":
+			p.reads = append(p.reads, "GET "+r.URL.Path)
+			docs := []map[string]any{}
+			for docPath, content := range p.docs {
+				slug := docPath[strings.LastIndex(docPath, "/")+1:]
+				docs = append(docs, map[string]any{"slug": slug, "path": p.docPaths[docPath], "gitSha": p.docShas[docPath], "contentHash": "sha256:doc", "sizeBytes": len(content)})
+			}
+			envelope(p.t, w, 200, map[string]any{"docs": docs})
 		case r.Method == "GET" && path == "/epics/saas-work-gitops":
 			if p.epic == nil {
 				envelope(p.t, w, 404, map[string]any{"error": "not_found"})
@@ -85,6 +104,7 @@ func (p *fakePlatform) handler() http.HandlerFunc {
 			p.record(r)
 			envelope(p.t, w, 200, map[string]any{"milestone": map[string]any{"id": strings.TrimPrefix(path, "/milestones/")}})
 		case r.Method == "GET" && strings.HasPrefix(path, "/") && !strings.Contains(path, "/epics") && !strings.Contains(path, "/milestones"):
+			p.reads = append(p.reads, "GET "+r.URL.Path)
 			key := strings.TrimPrefix(path, "/")
 			if tk, ok := p.tasks[key]; ok {
 				envelope(p.t, w, 200, map[string]any{"task": tk})
@@ -106,6 +126,11 @@ func (p *fakePlatform) handler() http.HandlerFunc {
 			content := body["content"].(string)
 			updated := p.docs[path] != content
 			p.docs[path] = content
+			if p.docShas == nil {
+				p.docShas, p.docPaths = map[string]string{}, map[string]string{}
+			}
+			p.docShas[path], _ = body["sha"].(string)
+			p.docPaths[path], _ = body["path"].(string)
 			envelope(p.t, w, 200, map[string]any{"updated": updated, "contentHash": "sha256:doc"})
 		default:
 			p.t.Errorf("unexpected call %s %s", r.Method, r.URL.Path)
@@ -191,21 +216,27 @@ func TestWorkSyncCreatesThenIsIdempotent(t *testing.T) {
 		t.Errorf("state not applied:\n%s", out)
 	}
 
-	// second run: nothing to write. Docs are re-sent (the server is the
-	// content-hash idempotency, and answers updated=false); every other
-	// write is a comparison here first.
+	// second run: nothing to write, and the comparisons are one read of the
+	// epic's tasks and one of its docs, not one per task and a push per doc
+	// (specs/orun-sync-efficiency F12).
 	before := len(p.writes)
+	readsBefore := len(p.reads)
 	out, err = runTaskCmd(t, newWorkSyncCommand(), srv.URL, "--repo", "sourceplane/t")
 	if err != nil {
 		t.Fatalf("second sync: %v\n%s", err, out)
 	}
-	for _, w := range p.writes[before:] {
-		if !strings.Contains(w, "/docs/") {
-			t.Errorf("second run wrote: %s", w)
-		}
+	if len(p.writes) != before {
+		t.Errorf("second run wrote: %v", p.writes[before:])
 	}
 	if !strings.Contains(out, "0 write(s)") || !strings.Contains(out, "skip           doc design — unchanged") {
 		t.Fatalf("second run:\n%s", out)
+	}
+	reads := strings.Join(p.reads[readsBefore:], "\n")
+	if strings.Count(reads, "GET /v1/organizations/org_x/tasks?epic=saas-work-gitops") != 1 || strings.Count(reads, "GET /v1/organizations/org_x/tasks/epics/saas-work-gitops/docs") != 1 {
+		t.Errorf("the epic's tasks and docs are listed once each:\n%s", reads)
+	}
+	if strings.Contains(reads, "GET /v1/organizations/org_x/tasks/WG-") {
+		t.Errorf("a listed task was read on its own:\n%s", reads)
 	}
 }
 

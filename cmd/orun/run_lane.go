@@ -162,9 +162,20 @@ func awaitRemoteUpstreams(ctx context.Context, backend statebackend.Backend, run
 // as time already spent, so the caller neither sleeps again nor treats it as
 // news.
 type eventWait struct {
-	waiter runEventWaiter
-	runID  string
-	seq    int
+	waiter   runEventWaiter
+	progress runProgressWaiter // when the backend can sleep through lease renewals
+	runID    string
+	seq      int
+}
+
+// runProgressWaiter is the optional refinement of runEventWaiter: a wait that
+// the server holds through lease renewals and that reports whether anything
+// past the cursor was more than a renewal. The runner's waits use it, so a
+// job waiting on its upstreams is woken by their progress, not by every
+// heartbeat in the run; `status --watch` keeps the plain wait, since it
+// shows the heartbeats.
+type runProgressWaiter interface {
+	WaitForRunProgress(ctx context.Context, runID string, sinceSeq, waitSeconds int) (head int, progressed bool, err error)
 }
 
 // eventLongPollSeconds is how long one event wait blocks before the caller
@@ -178,6 +189,7 @@ func newEventWait(ctx context.Context, backend statebackend.Backend, runID strin
 		return &eventWait{}
 	}
 	e := &eventWait{waiter: w, runID: runID}
+	e.progress, _ = backend.(runProgressWaiter)
 	if head, err := w.WaitForRunEvents(ctx, runID, 0, 0); err == nil {
 		e.seq = head
 	}
@@ -200,12 +212,27 @@ func (e *eventWait) wait(ctx context.Context, max time.Duration) (woke, blocked 
 			secs = 1
 		}
 	}
-	head, err := e.waiter.WaitForRunEvents(ctx, e.runID, e.seq, secs)
+	var head int
+	var err error
+	if e.progress != nil {
+		var progressed bool
+		head, progressed, err = e.progress.WaitForRunProgress(ctx, e.runID, e.seq, secs)
+		if err == nil {
+			// The cursor moves past everything the page carried; only
+			// progress is a wake.
+			if head > e.seq {
+				e.seq = head
+			}
+			return progressed, true
+		}
+	} else {
+		head, err = e.waiter.WaitForRunEvents(ctx, e.runID, e.seq, secs)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return false, false
 		}
-		e.waiter = nil // fall back to polling for the rest of this wait
+		e.waiter, e.progress = nil, nil // fall back to polling for the rest of this wait
 		return false, false
 	}
 	woke = head > e.seq

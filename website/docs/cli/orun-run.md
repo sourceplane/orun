@@ -193,8 +193,10 @@ template's `timeout` for the one job that does.
 A lane job's wait for an upstream in another lane is bounded by
 `execution.lanes.upstreamWait` (default 60 minutes). On Orunbase the wait
 is event-driven: the job is woken by the run's next event and starts within
-moments of its upstream finishing; elsewhere it polls, backing off to 15
-seconds.
+moments of its upstream finishing, and the events the wake returns are
+folded onto the state the process keeps, so a waiting job costs the
+platform one long-poll per wake (lengthening to one per 15 seconds while
+nothing happens); elsewhere it polls, backing off to 15 seconds.
 
 ### Interrupting a run
 
