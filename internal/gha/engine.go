@@ -22,6 +22,7 @@ import (
 
 	actexpr "github.com/nektos/act/pkg/exprparser"
 	actmodel "github.com/nektos/act/pkg/model"
+	"github.com/sourceplane/orun/internal/fslock"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/procgroup"
 	"golang.org/x/sync/singleflight"
@@ -107,7 +108,7 @@ type jobState struct {
 	masks           []string
 	summary         strings.Builder
 	basePath        string
-	terraformSlot   int
+	terraformSlot   terraformSlot
 
 	actionDirs   map[string]string
 	actionDirsMu sync.Mutex
@@ -429,14 +430,14 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 	// exception: Terraform documents it as unsafe for concurrent `terraform
 	// init`, so each job alive at once holds its own slot (orun#736).
 	sharedCache := filepath.Join(e.cacheDir, "shared")
-	terraformSlot := e.acquireTerraformSlot()
+	terraformSlot := e.acquireTerraformSlot(sharedCache)
 	keepSlot := false
 	defer func() {
 		if !keepSlot {
 			e.releaseTerraformSlot(terraformSlot)
 		}
 	}()
-	terraformPlugins := terraformPluginCacheDir(sharedCache, terraformSlot)
+	terraformPlugins := terraformPluginCacheDir(sharedCache, terraformSlot.index)
 	npmGlobal := filepath.Join(homeDir, ".npm-global")
 	pnpmHome := filepath.Join(homeDir, ".local", "share", "pnpm")
 	for _, dir := range []string{
@@ -524,26 +525,59 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 	return state, nil
 }
 
+// terraformSlot is a job's Terraform plugin cache: its index names the
+// directory, and the lock, when the machine's lock files could be taken,
+// holds it against every other orun process on the host for the job's life.
+type terraformSlot struct {
+	index int
+	lock  *fslock.Lock
+}
+
+// maxTerraformSlots bounds the lock files probed before falling back to the
+// in-process slots; no host runs this many jobs at once.
+const maxTerraformSlots = 1024
+
 // acquireTerraformSlot returns the lowest Terraform plugin cache slot no live
-// job holds. A job running on its own always gets slot 0.
-func (e *Engine) acquireTerraformSlot() int {
+// job holds — on the whole machine, not only in this process: slot N is the
+// lock file beside its directory, taken without waiting, so two orun
+// processes on one host (a matrix run, co-hosted lanes) never share a plugin
+// cache under concurrent `terraform init` (specs/orun-cache-efficiency F4).
+// A job running on its own always gets slot 0. Where the lock files cannot
+// be taken (a read-only cache directory) the slots are kept per process, as
+// before.
+func (e *Engine) acquireTerraformSlot(sharedCache string) terraformSlot {
+	if err := os.MkdirAll(sharedCache, 0o755); err == nil {
+		for index := 0; index < maxTerraformSlots; index++ {
+			lock, ok, err := fslock.TryAcquire(terraformPluginCacheDir(sharedCache, index) + ".lock")
+			if err != nil {
+				break
+			}
+			if ok {
+				return terraformSlot{index: index, lock: lock}
+			}
+		}
+	}
 	e.terraformSlotsMu.Lock()
 	defer e.terraformSlotsMu.Unlock()
 	for slot, held := range e.terraformSlots {
 		if !held {
 			e.terraformSlots[slot] = true
-			return slot
+			return terraformSlot{index: slot}
 		}
 	}
 	e.terraformSlots = append(e.terraformSlots, true)
-	return len(e.terraformSlots) - 1
+	return terraformSlot{index: len(e.terraformSlots) - 1}
 }
 
-func (e *Engine) releaseTerraformSlot(slot int) {
+func (e *Engine) releaseTerraformSlot(slot terraformSlot) {
+	if slot.lock != nil {
+		_ = slot.lock.Release()
+		return
+	}
 	e.terraformSlotsMu.Lock()
 	defer e.terraformSlotsMu.Unlock()
-	if slot >= 0 && slot < len(e.terraformSlots) {
-		e.terraformSlots[slot] = false
+	if slot.index >= 0 && slot.index < len(e.terraformSlots) {
+		e.terraformSlots[slot.index] = false
 	}
 }
 
@@ -786,7 +820,7 @@ func (e *Engine) executeUsesStep(ctx ExecContext, state *jobState, scope *scope,
 
 	switch resolved.Metadata.Runs.Using {
 	case "node12", "node16", "node20", "node24":
-		defer e.lockToolCache(resolved.Reference)()
+		defer e.lockToolCache(firstNonEmptyContext(ctx.Context), resolved.Reference)()
 		before := e.toolCacheSnapshot(resolved.Reference)
 		result, err := e.executeNodeAction(ctx, state, actionScope, invocation, sharedEnv)
 		state.observeToolCache(before, e.toolCacheSnapshot(resolved.Reference))
@@ -796,7 +830,7 @@ func (e *Engine) executeUsesStep(ctx ExecContext, state *jobState, scope *scope,
 		// across them would deadlock on a setup action nested inside.
 		return e.executeCompositeAction(ctx, state, scope, resolved, invocation, sharedEnv)
 	case "docker":
-		defer e.lockToolCache(resolved.Reference)()
+		defer e.lockToolCache(firstNonEmptyContext(ctx.Context), resolved.Reference)()
 		before := e.toolCacheSnapshot(resolved.Reference)
 		result, err := e.executeDockerAction(ctx, state, actionScope, invocation, sharedEnv)
 		state.observeToolCache(before, e.toolCacheSnapshot(resolved.Reference))
@@ -1847,6 +1881,10 @@ func gitOutput(ctx context.Context, dir string, args ...string) string {
 // Engine in the process.
 var toolCacheLocks sync.Map // dir -> *sync.Mutex
 
+// toolCacheLockName is the lock file in a tool cache that every orun process
+// on the machine takes around a setup action.
+const toolCacheLockName = ".orun-setup.lock"
+
 // lockToolCache serializes tool-installing actions (setup-node, pnpm's
 // action-setup, setup-terraform, …) that share this engine's tool cache, and
 // returns the unlock. Several jobs run in one process when a lane runs them in
@@ -1854,15 +1892,27 @@ var toolCacheLocks sync.Map // dir -> *sync.Mutex
 // the same Node version into it at once, so one job saw a half-written tree
 // (`ENOENT … symlink … bin/npm`) or exec'd a node binary another job was still
 // writing (`text file busy`). Run one at a time, the second finds the first's
-// finished install and reuses it. Other actions are not affected.
-func (e *Engine) lockToolCache(ref ActionReference) func() {
+// finished install and reuses it. The same holds across processes: a matrix
+// run's processes and co-hosted lanes share the directory too, so after the
+// process's own mutex the machine's lock file is taken (fslock), and released
+// with it. Other actions are not affected.
+func (e *Engine) lockToolCache(ctx context.Context, ref ActionReference) func() {
 	if !installsTools(ref) || e.toolCacheDir == "" {
 		return func() {}
 	}
 	value, _ := toolCacheLocks.LoadOrStore(filepath.Clean(e.toolCacheDir), &sync.Mutex{})
 	mu := value.(*sync.Mutex)
 	mu.Lock()
-	return mu.Unlock
+	lock, err := fslock.Acquire(ctx, filepath.Join(e.toolCacheDir, toolCacheLockName))
+	if err != nil {
+		// A cache that cannot hold a lock file still serializes within the
+		// process, as before.
+		return mu.Unlock
+	}
+	return func() {
+		_ = lock.Release()
+		mu.Unlock()
+	}
 }
 
 // toolCacheSnapshot lists what the tool cache holds, as tool/version[/arch]

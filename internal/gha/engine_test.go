@@ -745,3 +745,125 @@ console.log("Tool tool version '1.0.0' has been cached at " + dir);
 		_, _ = engine.FinalizeJob(execCtx, job)
 	}
 }
+
+func TestEngineTerraformSlotsAreExclusiveAcrossEngines(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	cacheDir := filepath.Join(workspaceDir, ".cache", "actions")
+	newEngine := func() *Engine {
+		return NewEngine(Options{CacheDir: cacheDir, ToolCacheDir: filepath.Join(workspaceDir, ".cache", "tools")})
+	}
+	execCtx := ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: workspaceDir,
+		WorkDir:      workspaceDir,
+		BaseEnv:      map[string]string{"PATH": os.Getenv("PATH")},
+	}
+	pluginDir := func(engine *Engine, job string) string {
+		t.Helper()
+		out, err := engine.RunStep(execCtx, model.PlanJob{ID: job}, model.PlanStep{ID: "tf", Run: `printf '%s' "$TF_PLUGIN_CACHE_DIR"`, Shell: "bash"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	shared := filepath.Join(cacheDir, "shared")
+
+	// Two engines stand in for two orun processes on one machine.
+	first, second := newEngine(), newEngine()
+	for _, engine := range []*Engine{first, second} {
+		if err := engine.Prepare(execCtx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := pluginDir(first, "job-a"); got != filepath.Join(shared, "terraform-plugins") {
+		t.Fatalf("the first job on the machine gets slot 0: %s", got)
+	}
+	if got := pluginDir(second, "job-b"); got != filepath.Join(shared, "terraform-plugins-1") {
+		t.Fatalf("a job in another process while slot 0 is held gets slot 1: %s", got)
+	}
+	if _, err := first.FinalizeJob(execCtx, model.PlanJob{ID: "job-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := pluginDir(second, "job-c"); got != filepath.Join(shared, "terraform-plugins") {
+		t.Fatalf("once the first job ended, slot 0 is free for any process: %s", got)
+	}
+	for _, job := range []string{"job-b", "job-c"} {
+		_, _ = second.FinalizeJob(execCtx, model.PlanJob{ID: job})
+	}
+}
+
+func TestEngineSerializesToolInstallersAcrossEngines(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not on PATH")
+	}
+	workspaceDir := t.TempDir()
+	actionDir := filepath.Join(workspaceDir, ".github", "actions", "setup-tool")
+	if err := os.MkdirAll(actionDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metadata := "name: setup-tool\nruns:\n  using: node20\n  main: index.js\n"
+	script := `
+const fs = require('fs'), path = require('path');
+const dir = path.join(process.env.RUNNER_TOOL_CACHE, 'tool', '1.0.0');
+const done = dir + '.complete';
+if (fs.existsSync(done)) { console.log('cached'); process.exit(0); }
+if (fs.existsSync(dir)) { console.error('found a half-written install at ' + dir); process.exit(1); }
+fs.mkdirSync(dir, { recursive: true });
+const until = Date.now() + 150; while (Date.now() < until) {}
+fs.writeFileSync(path.join(dir, 'bin'), 'x');
+fs.writeFileSync(done, '');
+console.log('installed');
+`
+	if err := os.WriteFile(filepath.Join(actionDir, "action.yml"), []byte(metadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(actionDir, "index.js"), []byte(script), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	execCtx := ExecContext{
+		Context:      context.Background(),
+		WorkspaceDir: workspaceDir,
+		WorkDir:      workspaceDir,
+		BaseEnv:      map[string]string{"PATH": os.Getenv("PATH"), "HOME": os.Getenv("HOME")},
+	}
+	// Two engines on one tool cache stand in for two orun processes on one
+	// machine: the process-local mutex covers neither; the lock file does.
+	const engines, jobsPerEngine = 2, 2
+	var wg sync.WaitGroup
+	errs := make([]error, engines*jobsPerEngine)
+	outs := make([]string, engines*jobsPerEngine)
+	for i := 0; i < engines; i++ {
+		engine := NewEngine(Options{
+			CacheDir:     filepath.Join(workspaceDir, ".cache", fmt.Sprintf("actions-%d", i)),
+			ToolCacheDir: filepath.Join(workspaceDir, ".cache", "tools"),
+		})
+		if err := engine.Prepare(execCtx); err != nil {
+			t.Fatal(err)
+		}
+		for j := 0; j < jobsPerEngine; j++ {
+			wg.Add(1)
+			go func(engine *Engine, n int) {
+				defer wg.Done()
+				job := model.PlanJob{ID: fmt.Sprintf("job-%d", n)}
+				outs[n], errs[n] = engine.RunStep(execCtx, job, model.PlanStep{ID: "setup", Use: "./.github/actions/setup-tool"})
+				_, _ = engine.FinalizeJob(execCtx, job)
+			}(engine, i*jobsPerEngine+j)
+		}
+	}
+	wg.Wait()
+	installed := 0
+	for n, err := range errs {
+		if err != nil {
+			t.Fatalf("job-%d: %v\n%s", n, err, outs[n])
+		}
+		if strings.Contains(outs[n], "installed") {
+			installed++
+		}
+	}
+	if installed != 1 {
+		t.Fatalf("want exactly one install across the two processes, got %d: %q", installed, outs)
+	}
+}

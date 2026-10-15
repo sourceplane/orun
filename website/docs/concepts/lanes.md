@@ -228,7 +228,9 @@ orun run --lane staging/auto-1 --remote-state --exec-id "$EXEC_ID"
 - Each job in flight gets its own Terraform plugin cache
   (`TF_PLUGIN_CACHE_DIR`), because `terraform init` is not safe against a
   second `init` writing the same cache. The caches persist, so later jobs in
-  the lane reuse the providers earlier ones downloaded.
+  the lane reuse the providers earlier ones downloaded. Each cache is held
+  by a lock file while its job runs, so the jobs of other orun processes on
+  the same machine (a matrix run, co-hosted lanes) take their own.
 - `--retry --lane` re-opens the lane's failed jobs; completed ones stay
   completed.
 - An upstream in another lane whose runner was reclaimed (its heartbeat is
