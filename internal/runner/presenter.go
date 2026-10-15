@@ -457,6 +457,40 @@ func (r *Runner) printJobResumed(job model.PlanJob) {
 	))
 }
 
+// printJobMemoized reports a job the backend served from a prior result: the
+// hook already printed the hit with its digest, so the job line says
+// "memoized" where a resumed one says "cached".
+func (r *Runner) printJobMemoized(job model.PlanJob, digest string) {
+	label := "memoized"
+	if d := strings.TrimPrefix(digest, "sha256:"); d != "" {
+		if len(d) > 12 {
+			d = d[:12]
+		}
+		label += " " + d
+	}
+	if r.inGHA() {
+		if r.gha != nil {
+			r.gha.Print(fmt.Sprintf("⚡ %s  %s", r.ghaJobLabel(job), label))
+		}
+		return
+	}
+	if r.componentJobTotal != nil {
+		r.bufferFinishedEntry(job, finishedJobEntry{
+			job:     job,
+			success: true,
+			resumed: true,
+			label:   label,
+		})
+		return
+	}
+	r.emitGroupHeader(job)
+	r.live.Print(fmt.Sprintf("    %s %s  %s",
+		ui.Cyan(r.Color, "⚡"),
+		ui.Bold(r.Color, r.jobLineLabel(job)),
+		ui.Dim(r.Color, label),
+	))
+}
+
 func (r *Runner) printJobFooter(job model.PlanJob, report *jobReport, success bool, duration time.Duration) {
 	if r.inGHA() {
 		r.ghaPrintJobFooter(job, report, success, duration)
@@ -515,12 +549,16 @@ func (r *Runner) flushFinishedComponent(compKey string, entries []finishedJobEnt
 			connector = "└─"
 		}
 		if entry.resumed {
+			label := entry.label
+			if label == "" {
+				label = "cached"
+			}
 			lines = append(lines, fmt.Sprintf("  %s  %s %s %s  %s",
 				ui.Dim(r.Color, "│"),
 				ui.Dim(r.Color, connector),
 				ui.Cyan(r.Color, "⚡"),
 				ui.Bold(r.Color, r.jobLineLabel(entry.job)),
-				ui.Dim(r.Color, "cached"),
+				ui.Dim(r.Color, label),
 			))
 		} else {
 			rowLabel := r.finishedRowLabel(entry.job, entry.success, entry.duration)
@@ -628,6 +666,9 @@ func (r *Runner) printRunSummary(summary *runSummary, finalStatus string) {
 	}
 	if snap.resumed > 0 {
 		stats = append(stats, fmt.Sprintf("%d cached", snap.resumed))
+	}
+	if snap.memoized > 0 {
+		stats = append(stats, fmt.Sprintf("%d memoized", snap.memoized))
 	}
 	if snap.waiting > 0 {
 		stats = append(stats, fmt.Sprintf("%d waiting", snap.waiting))

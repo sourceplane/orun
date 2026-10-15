@@ -402,8 +402,9 @@ escape hatch back to the old path.
 
 ### Memoized cache hits
 
-When the backend already has a result for a job whose inputs match a prior run,
-the run **adopts that result instead of re-executing**, and surfaces it:
+A job labelled `orun.dev/hermetic: "true"` is memoized: when the backend already
+has a result for the same inputs from a prior run, the run **adopts that result
+instead of re-executing**, and surfaces it:
 
 ```
 ✓ memoized api.prod.build — cache hit, skipped execution (a1b2c3d4e5f6)
@@ -411,7 +412,24 @@ the run **adopts that result instead of re-executing**, and surfaces it:
 
 The digest in parentheses is the resolved result's content hash. A memoized job is
 already terminal, so it's skipped — this line distinguishes it from a job skipped
-because it was filtered out of the run.
+because it was filtered out of the run — and the run summary counts it as
+`N memoized`, apart from the jobs resumed from this execution's own state.
+
+The inputs the key covers are the job's resolved steps, the names of its
+environment variables and secret references (never their values), the
+composition sources the plan was compiled against (name, kind, reference and
+resolved digest), and a content digest of the job's directory in the checkout:
+in a git checkout, every tracked file's index entry plus the content of every
+file changed, added or deleted in the work tree, so an edit counts before it is
+staged and ignored files (build outputs, `node_modules`) do not; outside git,
+every file under the directory less the dependency and output directories a
+job recreates. A job whose directory cannot be digested is claimed without a
+key and runs, with a note on stderr.
+
+A hit restores nothing: the result records that the job succeeded, not what it
+produced. Label a job hermetic only when its dependents consume nothing it
+writes to the tree — a verification, a test, a lint, a plan whose output is a
+published artifact — and not a build whose output the next job reads.
 
 ### Enabling remote state
 

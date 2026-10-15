@@ -2,6 +2,8 @@ package statebackend
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,17 +28,24 @@ const objectKindJobResult = "job-result"
 func isHermetic(job model.PlanJob) bool { return job.Labels[HermeticLabel] == "true" }
 
 // jobInputHashFor derives the memo key for a job from the inputs the contract
-// admits (C5): the resolved steps and the declared env-var KEYS (never values).
-// It excludes wall-clock, secrets, and runner identity, so it is stable across
-// runs of the same job. (Input-artifact digests and the composition-lock digest
-// are not yet threaded through the plan; this is a deterministic subset, and the
-// server treats the hash as an opaque key.)
+// admits (C5): the resolved steps, the declared env-var KEYS (never values),
+// the composition lock the plan was compiled against and the digest of the
+// source tree the job runs in. It excludes wall-clock, secrets, and runner
+// identity, so it is stable across runs of the same job and moves when its
+// source or its compositions do (specs/orun-cache-efficiency F1: keyed on the
+// steps and env keys alone, a hermetic job was served its previous result
+// after its component changed). The server treats the hash as an opaque key.
+// Declared input-artifact digests are not yet threaded through the plan.
 //
 // Secret references join as "KEY=secret://…" entries: the reference (and any
 // @version pin) is content and belongs in the input set, while the resolved
 // VALUE never does — bare env keys never contain '=', so the two entry shapes
 // cannot collide.
-func jobInputHashFor(job model.PlanJob) string {
+//
+// The source digest comes from the function SetSourceDigest installed; when
+// none is installed, or it fails (no checkout to hash), there is no key: the
+// job runs unmemoized rather than keyed on too little.
+func (b *CoordBackend) jobInputHashFor(job model.PlanJob) (string, error) {
 	envKeys := make([]string, 0, len(job.Env)+len(job.SecretRefs))
 	for k := range job.Env {
 		envKeys = append(envKeys, k)
@@ -45,7 +54,57 @@ func jobInputHashFor(job model.PlanJob) string {
 		envKeys = append(envKeys, sr.AsEnv+"="+sr.Ref)
 	}
 	sort.Strings(envKeys)
-	return JobInputHash(JobInputHashInput{Steps: job.Steps, EnvKeys: envKeys})
+	if b.sourceDigest == nil {
+		return "", fmt.Errorf("no source digest for the checkout")
+	}
+	source, err := b.sourceDigest(job)
+	if err != nil {
+		return "", fmt.Errorf("source digest of %q: %w", job.Path, err)
+	}
+	if source == "" {
+		return "", fmt.Errorf("source digest of %q is empty", job.Path)
+	}
+	b.mu.Lock()
+	lock := b.lockDigest
+	b.mu.Unlock()
+	return JobInputHash(JobInputHashInput{Steps: job.Steps, EnvKeys: envKeys, CompositionLockDigest: lock, SourceDigest: source}), nil
+}
+
+// CompositionLockDigest is "sha256:<hex>" over the composition sources the
+// plan was compiled against (name, kind, ref, path and resolved digest, in
+// name order), "" for a plan that records none. It is the lock half of the
+// memo key: a job's steps may read the same after a composition package
+// changed under it.
+func CompositionLockDigest(plan *model.Plan) string {
+	if plan == nil || len(plan.Spec.CompositionSources) == 0 {
+		return ""
+	}
+	sources := append([]model.ResolvedCompositionSource(nil), plan.Spec.CompositionSources...)
+	sort.Slice(sources, func(i, j int) bool { return sources[i].Name < sources[j].Name })
+	entries := make([]any, 0, len(sources))
+	for _, src := range sources {
+		entries = append(entries, map[string]any{
+			"name": src.Name, "kind": src.Kind, "ref": src.Ref, "path": src.Path, "resolvedDigest": src.ResolvedDigest,
+		})
+	}
+	sum := sha256.Sum256([]byte(canonicalJSON(entries)))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// SetSourceDigest installs the function the memo key takes a job's source
+// digest from (sourcedigest.Digest over the checkout and the job's path).
+func (b *CoordBackend) SetSourceDigest(fn func(job model.PlanJob) (string, error)) {
+	b.mu.Lock()
+	b.sourceDigest = fn
+	b.mu.Unlock()
+}
+
+// SetMemoWarn installs where a note about a hermetic job that could not be
+// keyed goes (stderr, for orun run).
+func (b *CoordBackend) SetMemoWarn(fn func(string)) {
+	b.mu.Lock()
+	b.memoWarn = fn
+	b.mu.Unlock()
 }
 
 // CoordBackend implements Backend over the native v2 coordination wire
@@ -70,6 +129,11 @@ type CoordBackend struct {
 	mu     sync.Mutex
 	leases map[string]int    // jobID -> leaseEpoch
 	hashes map[string]string // jobID -> jobInputHash (set when a hermetic job is claimed)
+	// sourceDigest and lockDigest are the source and composition-lock halves
+	// of the memo key (CE6); memoWarn is where an unkeyed hermetic job is noted.
+	sourceDigest func(job model.PlanJob) (string, error)
+	lockDigest   string
+	memoWarn     func(string)
 	// retryJobs marks jobs whose claim should carry retry=true (the --retry
 	// re-open of a failed job when resuming one execution across CI reruns).
 	retryJobs map[string]bool
@@ -133,6 +197,9 @@ func (b *CoordBackend) InitRun(ctx context.Context, plan *model.Plan, opts InitR
 	if err != nil {
 		return nil, err
 	}
+	b.mu.Lock()
+	b.lockDigest = CompositionLockDigest(plan)
+	b.mu.Unlock()
 	// The plan this process holds seeds the run's view, so its reads never
 	// need the plan object.
 	if plan != nil {
@@ -317,11 +384,16 @@ func (b *CoordBackend) ClaimJob(ctx context.Context, runID string, job model.Pla
 	if isHermetic(job) {
 		// Memoizable: send the input-hash KEY so the server can resolve a prior
 		// result (the digest is the server's to choose, never the client's), and
-		// remember it for the result push at completion.
-		h := jobInputHashFor(job)
-		b.setHash(job.ID, h)
-		req.Hermetic = true
-		req.JobInputHash = h
+		// remember it for the result push at completion. A job whose key cannot
+		// be computed runs unmemoized: a key over too little served a stale
+		// result (F1).
+		if h, err := b.jobInputHashFor(job); err == nil {
+			b.setHash(job.ID, h)
+			req.Hermetic = true
+			req.JobInputHash = h
+		} else if b.memoWarn != nil {
+			b.memoWarn(fmt.Sprintf("job %s: not memoized this run: %v", job.ID, err))
+		}
 	}
 	out, err := b.coord.Claim(ctx, wireRunID(runID), job.ID, req)
 	if err != nil {

@@ -24,13 +24,20 @@ type JobResult struct {
 
 // JobInputHashInput is the hermetic input set a jobInputHash is computed over
 // (C5): resolved step definitions, declared input object digests, declared
-// environment-variable KEYS (never values), and the composition-lock digest. It
-// excludes wall-clock, secret values, and runner identity.
+// environment-variable KEYS (never values), the composition-lock digest and
+// the digest of the source tree the steps run against. It excludes
+// wall-clock, secret values, and runner identity.
 type JobInputHashInput struct {
 	Steps                 any
 	InputDigests          []string
 	EnvKeys               []string
 	CompositionLockDigest string
+	// SourceDigest is the content digest of the job's directory in the
+	// checkout (internal/sourcedigest). Without it a job labelled hermetic
+	// was served its previous result after its source changed
+	// (specs/orun-cache-efficiency F1). Omitted from the canonical form when
+	// empty, so the form of the earlier fields is unchanged.
+	SourceDigest string
 }
 
 // CanonicalizeJobInput returns the normative canonical serialization of a job's
@@ -46,6 +53,9 @@ func CanonicalizeJobInput(input JobInputHashInput) string {
 		"inputDigests":          toAnySlice(inputDigests),
 		"envKeys":               toAnySlice(envKeys),
 		"compositionLockDigest": input.CompositionLockDigest,
+	}
+	if input.SourceDigest != "" {
+		obj["sourceDigest"] = input.SourceDigest
 	}
 	return canonicalJSON(obj)
 }

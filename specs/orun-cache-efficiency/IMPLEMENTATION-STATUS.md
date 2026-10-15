@@ -7,8 +7,8 @@
 | **CE2** | ✅ #772 | `flock` across processes for the tool cache and the Terraform plugin-cache slots |
 | **CE3** | ✅ #774 | the host's `RUNNER_TOOL_CACHE` inherited, `ORUN_TOOL_CACHE`; a shared cache home and the common toolchains' cache variables; `caches:` declared on composition steps |
 | **CE4** | ✅ #775 | the turbo cache per checkout (`.orun/cache/turbo`); setup actions once per lane |
-| **CE5** | ⏳ | `dir` composition sources loaded in place; locked archive and OCI fills; `orun cache ls / prune / gc` with a size budget over every cache |
-| **CE6** | ⏳ | the memo key over the source digest, the composition lock and the input digests; outputs carried in the result and restored on a hit; hits surfaced |
+| **CE5** | ✅ #776 | `dir` composition sources loaded in place; locked archive and OCI fills; `orun cache ls / prune / gc` with a size budget over every cache |
+| **CE6** | ⏳ | the memo key over the source digest and the composition lock; hits counted in the summary; a hit restores nothing, documented (outputs in the result and their restoration stay out of scope: the platform's result object carries none) |
 | **CE7** | ⏳ | native `actions/cache` restore and save (optional) |
 
 The findings each milestone answers, and the measurements behind them, are in
