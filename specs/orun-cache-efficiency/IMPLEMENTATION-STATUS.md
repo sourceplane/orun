@@ -9,7 +9,9 @@
 | **CE4** | ✅ #775 | the turbo cache per checkout (`.orun/cache/turbo`); setup actions once per lane |
 | **CE5** | ✅ #776 | `dir` composition sources loaded in place; locked archive and OCI fills; `orun cache ls / prune / gc` with a size budget over every cache |
 | **CE6** | ✅ #777 | the memo key over the source digest and the composition lock; hits counted in the summary; a hit restores nothing, documented (outputs in the result and their restoration stay out of scope: the platform's result object carries none) |
-| **CE7** | ⏳ | native `actions/cache`, `actions/cache/restore` and `actions/cache/save` against a store under the shared cache directory, listed by `orun cache`; a remote backing by the platform's object store stays a follow-up |
+| **CE7** | ✅ #778 | native `actions/cache`, `actions/cache/restore` and `actions/cache/save` against a store under the shared cache directory, listed by `orun cache`; a remote backing by the platform's object store stays a follow-up |
 
 The findings each milestone answers, and the measurements behind them, are in
-[README.md](README.md) §4 and §3.
+[README.md](README.md) §4 and §3. The series ships as v2.81.0 (v2.80.1, cut
+mid-series by another change, already carried CE0 and CE1); its release
+notes are `website/docs/release-notes/v2.81.0.md`.
