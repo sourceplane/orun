@@ -22,6 +22,7 @@ import (
 
 	actexpr "github.com/nektos/act/pkg/exprparser"
 	actmodel "github.com/nektos/act/pkg/model"
+	"github.com/sourceplane/orun/internal/cachehome"
 	"github.com/sourceplane/orun/internal/fslock"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/procgroup"
@@ -201,11 +202,14 @@ var actionNamePattern = regexp.MustCompile(`[^A-Za-z0-9_]+`)
 func NewEngine(options Options) *Engine {
 	cacheDir := strings.TrimSpace(options.CacheDir)
 	if cacheDir == "" {
-		cacheDir = defaultRootDir("actions")
+		cacheDir = cachehome.Actions()
 	}
 	toolCacheDir := strings.TrimSpace(options.ToolCacheDir)
 	if toolCacheDir == "" {
-		toolCacheDir = defaultRootDir("tool-cache")
+		// The host runner's tool cache when it has one (a GitHub runner's,
+		// with Node, Python and Go already installed), ORUN_TOOL_CACHE over
+		// it, else orun's own (specs/orun-cache-efficiency F8).
+		toolCacheDir = cachehome.ToolCache()
 	}
 	httpClient := options.HTTPClient
 	if httpClient == nil {
@@ -463,6 +467,18 @@ func (e *Engine) newJobState(ctx ExecContext, job model.PlanJob) (*jobState, err
 	globalEnv["pnpm_config_store_dir"] = filepath.Join(sharedCache, "pnpm-store")
 	globalEnv["PNPM_CONFIG_STORE_DIR"] = filepath.Join(sharedCache, "pnpm-store")
 	globalEnv["TF_PLUGIN_CACHE_DIR"] = terraformPlugins
+	// The caches the per-job HOME would otherwise hide from every job: the
+	// toolchains whose caches are safe under concurrent use share one
+	// directory per machine. A value the environment already carries wins
+	// (specs/orun-cache-efficiency F6).
+	for _, cache := range sharedToolchainCaches {
+		if strings.TrimSpace(globalEnv[cache.key]) != "" {
+			continue
+		}
+		dir := filepath.Join(sharedCache, cache.dir)
+		_ = os.MkdirAll(dir, 0o755)
+		globalEnv[cache.key] = dir
+	}
 	// Prepend per-job binary dirs so freshly-installed tools resolve before
 	// any system copy. Actions can still extend PATH per-step via $GITHUB_PATH.
 	npmBin := filepath.Join(npmGlobal, "bin")
@@ -1626,14 +1642,6 @@ func firstNonEmptyContext(ctx context.Context) context.Context {
 	return context.Background()
 }
 
-func defaultRootDir(name string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return filepath.Join(os.TempDir(), "orun", name)
-	}
-	return filepath.Join(home, ".orun", name)
-}
-
 func sanitizePathComponent(value string) string {
 	clean := actionNamePattern.ReplaceAllString(strings.TrimSpace(value), "-")
 	clean = strings.Trim(clean, "-")
@@ -1884,6 +1892,25 @@ var toolCacheLocks sync.Map // dir -> *sync.Mutex
 // toolCacheLockName is the lock file in a tool cache that every orun process
 // on the machine takes around a setup action.
 const toolCacheLockName = ".orun-setup.lock"
+
+// sharedToolchainCaches are the caches a tool keeps under HOME or
+// XDG_CACHE_HOME, which the per-job HOME would otherwise leave cold for every
+// job and discard with it. Each is documented by its tool as safe for
+// concurrent use (content-addressed or locked), so one directory per machine
+// serves every job; the variable is set only when the environment does not
+// already name a directory.
+var sharedToolchainCaches = []struct{ key, dir string }{
+	{"XDG_CACHE_HOME", "xdg-cache"},
+	{"GOCACHE", "go-build"},
+	{"GOMODCACHE", "go-mod"},
+	{"PIP_CACHE_DIR", "pip"},
+	{"UV_CACHE_DIR", "uv"},
+	{"GRADLE_USER_HOME", "gradle"},
+	{"PLAYWRIGHT_BROWSERS_PATH", "ms-playwright"},
+	{"YARN_CACHE_FOLDER", "yarn"},
+	{"DENO_DIR", "deno"},
+	{"BUN_INSTALL_CACHE_DIR", "bun"},
+}
 
 // lockToolCache serializes tool-installing actions (setup-node, pnpm's
 // action-setup, setup-terraform, …) that share this engine's tool cache, and

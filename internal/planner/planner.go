@@ -294,6 +294,9 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext, com
 		if err := step.ValidateScope(); err != nil {
 			return nil, err
 		}
+		if err := step.ValidateCaches(); err != nil {
+			return nil, err
+		}
 		if err := step.Approval.Validate(step.Name); err != nil {
 			return nil, err
 		}
@@ -370,6 +373,7 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext, com
 			WorkingDirectory: renderedWorkingDirectory,
 			Timeout:          step.Timeout,
 			Retry:            step.Retry,
+			Caches:           step.Caches,
 			Resume:           step.Resume,
 			Approval:         step.Approval,
 			OnFailure:        step.OnFailure,
