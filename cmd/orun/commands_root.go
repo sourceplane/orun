@@ -293,6 +293,7 @@ func init() {
 	registerGetCommand(rootCmd)
 	registerDescribeCommand(rootCmd)
 	registerGCCommand(rootCmd)
+	registerCacheCommand(rootCmd)
 	registerPublishCommand(rootCmd)
 	registerFetchCommand(rootCmd)
 	registerIntentCommand(rootCmd)

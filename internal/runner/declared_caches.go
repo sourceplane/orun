@@ -63,6 +63,7 @@ func (r *Runner) restoreDeclaredCaches(job model.PlanJob, workDir string) {
 			fmt.Fprintf(r.Stderr, "warning: cache %s: restore into %s failed: %v\n", c.Name, c.Path, err)
 			continue
 		}
+		cachehome.Touch(src)
 		if r.Verbose {
 			fmt.Fprintf(r.Stdout, "  %s cache %s restored into %s\n", ui.Dim(r.Color, "↺"), c.Name, c.Path)
 		}
