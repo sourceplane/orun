@@ -780,7 +780,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 		baseExecContext.WorkspaceDir = stagedRoot
 		baseExecContext.WorkDir = stagedRoot
 		// A new map: BaseEnv is shared by every job of the run.
-		baseExecContext.BaseEnv = executor.MergeEnvironment(baseExecContext.BaseEnv, ws.Env(r.ExecID))
+		baseExecContext.BaseEnv = executor.MergeEnvironment(baseExecContext.BaseEnv, ws.Env())
 		baseExecContext.Env = executor.MergeEnvironment(baseExecContext.BaseEnv)
 		jobWorkingDir = resolveWorkingDirAt(stagedRoot, job.Path)
 	}
@@ -846,13 +846,30 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 
 		// A lane-scoped step: the first job to reach it runs it (below, in the
 		// shared tree); every other job with the same step waits for that run
-		// and reuses its result.
+		// and reuses its result. A setup action in the prelude is shared the
+		// same way when the executor can hand its exports across jobs: a
+		// waiter imports what the owner's action exported, or runs the action
+		// itself when the exports are the owner's alone.
 		var laneRun *laneSetupRun
-		if idx < prelude && step.Scope == model.StepScopeLane && r.laneSetup != nil {
+		sharer, canShareExports := r.Executor.(executor.ExportSharer)
+		sharedSetupAction := idx < prelude && step.Use != "" && step.Scope != model.StepScopeLane && canShareExports
+		if idx < prelude && r.laneSetup != nil && (step.Scope == model.StepScopeLane || sharedSetupAction) {
 			key := laneStepKey(step, workingDir, executor.MergeEnvironment(executor.JobEnvironment(job.Env), executor.JobEnvironment(step.Env)))
 			run, own := r.laneSetup.claim(key, job.ID)
-			if !own {
+			if own {
+				laneRun = run
+			} else {
 				<-run.done
+			}
+			// The owner's exports point into its own temporary directory:
+			// this job runs the action for itself, after the owner's run.
+			privateExports := !own && run.err == nil && sharedSetupAction && !run.shareable
+			if !own && !privateExports {
+				if run.err == nil && sharedSetupAction {
+					if importErr := r.importStepExports(sharer, baseExecContext, job, step, workingDir, jobSecretEnv, run.exports); importErr != nil {
+						run = &laneSetupRun{owner: run.owner, done: run.done, err: fmt.Errorf("import its exports: %w", importErr)}
+					}
+				}
 				if run.err != nil {
 					r.updateState(persistState, execState, func() {
 						jobState.Steps[stepID] = "failed"
@@ -881,7 +898,6 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				jobReport.observeStepDone(stepID, true, true, 0)
 				continue
 			}
-			laneRun = run
 		}
 
 		var output string
@@ -955,6 +971,9 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 			}
 		}
 		if laneRun != nil {
+			if sharedSetupAction && stepErr == nil {
+				laneRun.exports, laneRun.shareable = sharer.LastStepExports(job.ID)
+			}
 			laneRun.settle(output, stepErr)
 		}
 		stepDuration := time.Since(stepStartedAt)
@@ -1517,7 +1536,9 @@ func (r *Runner) stagingMode() IsolationMode {
 // the shared tree before the job's private tree is staged. It ends at the
 // last leading lane-scoped step; the `use:` steps before it (setup-node,
 // setup-pnpm) belong to the prelude too, since the install they set up for
-// runs there, and an action touches the tool cache, not the tree. The
+// runs there, and an action touches the tool cache, not the tree (they are
+// shared across the lane's jobs when the executor can hand their exports
+// over; see laneSetup). The
 // planner guarantees no lane-scoped step follows a job-scoped run step. A
 // job with no lane-scoped step has no prelude: it is staged before its
 // first step, as before.
@@ -1534,6 +1555,18 @@ func leadingLaneSteps(job model.PlanJob) int {
 		}
 	}
 	return n
+}
+
+// importStepExports applies the exports of a setup action another job ran to
+// this job, through the executor, under the step's own exec context.
+func (r *Runner) importStepExports(sharer executor.ExportSharer, baseExecContext executor.ExecContext, job model.PlanJob, step model.PlanStep, workingDir string, jobSecretEnv map[string]string, exports executor.StepExports) error {
+	execContext, cancel, err := r.stepExecContext(baseExecContext, job, step, workingDir, jobSecretEnv)
+	if err != nil {
+		cancel()
+		return err
+	}
+	defer cancel()
+	return sharer.ImportStepExports(execContext, job, step, exports)
 }
 
 // resolveWorkingDirAt computes a job's working directory anchored at the given

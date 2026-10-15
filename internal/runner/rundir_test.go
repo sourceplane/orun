@@ -11,8 +11,9 @@ import (
 )
 
 // cacheWritingExecutor behaves like a tool that writes a cache beside the
-// staged trees (turbo under .orun/runs/<exec>/cache), which a job's own
-// cleanup never removes.
+// staged trees (under .orun/runs/<exec>/cache, where the turbo cache was
+// before it moved to the checkout's .orun/cache), which a job's own cleanup
+// never removes.
 type cacheWritingExecutor struct{}
 
 func (*cacheWritingExecutor) Name() string                       { return "cache-writing" }

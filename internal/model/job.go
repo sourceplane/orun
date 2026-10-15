@@ -209,7 +209,7 @@ func (s Step) ValidateScope() error {
 		return nil
 	case StepScopeLane:
 		if strings.TrimSpace(s.Run) == "" {
-			return fmt.Errorf("step %q: scope: lane applies to run steps only (a use or workflow step's effects stay with the job that ran it)", s.Name)
+			return fmt.Errorf("step %q: scope: lane applies to run steps only (the setup actions before one are shared on their own; a workflow step's effects stay with the job that ran it)", s.Name)
 		}
 		return nil
 	}

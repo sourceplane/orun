@@ -62,6 +62,26 @@ type CacheObserver interface {
 	LastStepCacheHit(jobID string) (hit bool, observed bool)
 }
 
+// StepExports is what a step left for the steps after it: the environment
+// it exported, the PATH entries it added and its outputs.
+type StepExports struct {
+	Env     map[string]string
+	Paths   []string
+	Outputs map[string]string
+}
+
+// ExportSharer is an executor that can hand one job's step exports to
+// another job, so a lane's setup actions run once: the first job runs
+// `setup-node`, and what it exported is applied to every other job of the
+// lane with the same step (specs/orun-cache-efficiency CE4). LastStepExports
+// reports the job's last step's exports and whether another job may take
+// them (not when a value points into the job's own temporary directory);
+// ImportStepExports applies them to a job as if the step had run there.
+type ExportSharer interface {
+	LastStepExports(jobID string) (exports StepExports, shareable bool)
+	ImportStepExports(ctx ExecContext, job model.PlanJob, step model.PlanStep, exports StepExports) error
+}
+
 func NormalizeRunnerName(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }

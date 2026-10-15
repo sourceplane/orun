@@ -73,15 +73,46 @@ func TestStage_WorkspaceNeverCopiesGitAndPointsGitAtTheSource(t *testing.T) {
 	if exists(filepath.Join(root, "node_modules")) || exists(filepath.Join(root, "apps/web/node_modules")) || exists(filepath.Join(root, "apps/web/dist")) {
 		t.Fatal("without a lane install, dependencies and outputs are skipped as before")
 	}
-	env := ws.Env("exec1")
+	env := ws.Env()
 	// This .git has no index (no commit yet), so git falls back to the
 	// source tree as its work tree; a real repository gets the staged tree
 	// and a private index (TestStage_GitInTheStagedTree*).
 	if env["GIT_DIR"] != filepath.Join(src, ".git") || env["GIT_WORK_TREE"] != src || env["GIT_INDEX_FILE"] != "" {
 		t.Fatalf("git must answer from the source repository: %v", env)
 	}
-	if env["TURBO_CACHE_DIR"] != filepath.Join(src, ".orun", "runs", "exec1", "cache", "turbo") {
-		t.Fatalf("one turbo cache per run: %v", env)
+	if env["TURBO_CACHE_DIR"] != filepath.Join(src, ".orun", "cache", "turbo") {
+		t.Fatalf("one turbo cache per checkout, shared by every job and run: %v", env)
+	}
+	ignore, err := os.ReadFile(filepath.Join(src, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ignore), "\n.orun/runs/\n") || !strings.Contains(string(ignore), "\n.orun/cache/\n") {
+		t.Fatalf("staging ignores the staged trees and the checkout's caches: %q", ignore)
+	}
+}
+
+func TestEnsureOrunGitignore_AddsWhatIsMissingOnce(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".gitignore")
+	if err := os.WriteFile(path, []byte("node_modules\n/.orun/runs/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := ensureOrunGitignore(root); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "node_modules\n/.orun/runs/\n\n# orun per-job staged workspaces and the checkout's caches\n.orun/cache/\n"
+	if string(got) != want {
+		t.Fatalf("a checkout that already ignores the staged trees gets the cache line, once:\n%q\nwant\n%q", got, want)
+	}
+	if err := ensureOrunGitignore(filepath.Join(root, "missing")); err == nil {
+		t.Fatal("no .gitignore is never created")
 	}
 }
 
@@ -220,7 +251,7 @@ func TestStage_GitInTheStagedTreeAnswersForTheStagedTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := ws.Path()
-	env := ws.Env("exec1")
+	env := ws.Env()
 	if env["GIT_DIR"] != filepath.Join(src, ".git") || env["GIT_WORK_TREE"] != root {
 		t.Fatalf("git's work tree is the staged tree, its objects the source's: %v", env)
 	}
@@ -273,7 +304,7 @@ func TestStage_GitInTheStagedTreeComponentMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ws.Cleanup()
-	env := ws.Env("exec1")
+	env := ws.Env()
 	if got := gitIn(t, filepath.Join(ws.Path(), "apps/web"), env, "ls-files"); got != "package.json\nsrc/index.ts" {
 		t.Fatalf("ls-files in the job's private directory, got %q", got)
 	}
@@ -293,7 +324,7 @@ func TestStage_GitInTheStagedTreeOfALinkedWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ws.Cleanup()
-	env := ws.Env("exec1")
+	env := ws.Env()
 	if !strings.HasPrefix(mustEval(t, env["GIT_DIR"]), mustEval(t, filepath.Join(repo, ".git", "worktrees"))) {
 		t.Fatalf("GIT_DIR is the worktree's git directory: %v", env)
 	}

@@ -114,16 +114,22 @@ staged tree then keeps the
 installed dependencies: the top-level `node_modules` is linked to the source
 tree's, nested ones are copied with their symlinks intact. Jobs of different
 compositions in one lane each run their own install once. A lane-scoped step
-is a `run` step: an action such as `setup-node` exports its environment to
-the job that ran it, so it stays per job (the tool cache is shared, so a
-repeat is a few seconds).
+is a `run` step; the setup actions before it are shared on their own, under
+the GitHub Actions runner: the first job runs `setup-node`, and what it
+exported — its `PATH` entries, environment and outputs, all in the shared
+tool cache — is applied to every other job of the lane with the same action
+and inputs, recorded as `shared with <job>` too. An action that installs into
+the job's own temporary directory (`pnpm/action-setup` puts pnpm under
+`RUNNER_TEMP`) runs in every job, since its install goes with the job that
+ran it.
 
 Two more things every staged job gets: `.git` is never copied — `GIT_DIR`
 points `git` at the source repository, `GIT_WORK_TREE` at the staged tree
 and `GIT_INDEX_FILE` at a private copy of the index, so `git ls-files` or
 `git status` in the job answer for its own tree — and
-`TURBO_CACHE_DIR` names one cache per run, so the second job of a lane hits
-what the first built. `orun run --isolation component` goes further for
+`TURBO_CACHE_DIR` names one cache per checkout (`.orun/cache/turbo`), so the
+second job of a lane hits what the first built, and the next run hits what
+this one built. `orun run --isolation component` goes further for
 jobs that write only under their own directory: it copies just that
 directory and links everything else to the source tree.
 

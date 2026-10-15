@@ -118,6 +118,83 @@ type jobState struct {
 	// for a step that installs tools, cleared at every step's start.
 	lastCache   cacheObservation
 	lastCacheMu sync.Mutex
+
+	// lastExports is what the job's last step left for the steps after it,
+	// and whether another job on the machine could take it as its own.
+	lastExports   stepExportRecord
+	lastExportsMu sync.Mutex
+}
+
+// StepExports is what a step left for the steps after it: the environment
+// it exported (GITHUB_ENV), the PATH entries it added (GITHUB_PATH) and its
+// outputs (GITHUB_OUTPUT). The runner hands a setup action's exports from the
+// job that ran it to the other jobs of the lane with the same step
+// (specs/orun-cache-efficiency CE4).
+type StepExports struct {
+	Env     map[string]string
+	Paths   []string
+	Outputs map[string]string
+}
+
+// stepExportRecord is a step's exports with the engine's verdict on sharing
+// them: shareable when no exported value points into the job's own
+// temporary directory (its HOME, its RUNNER_TEMP, its action copies), which
+// another job cannot see and which is removed with the job. setup-node's
+// PATH entry is in the tool cache and shareable; pnpm/action-setup installs
+// under RUNNER_TEMP and is not.
+type stepExportRecord struct {
+	exports   StepExports
+	shareable bool
+}
+
+func (state *jobState) setExports(rec stepExportRecord) {
+	state.lastExportsMu.Lock()
+	state.lastExports = rec
+	state.lastExportsMu.Unlock()
+}
+
+func (state *jobState) stepExports() stepExportRecord {
+	state.lastExportsMu.Lock()
+	defer state.lastExportsMu.Unlock()
+	return state.lastExports
+}
+
+// recordExports computes what the step that just ran left behind, against
+// the environment and PATH entries the job had before it.
+func (state *jobState) recordExports(envBefore map[string]string, pathsBefore int, outputs map[string]string) {
+	rec := stepExportRecord{exports: StepExports{Env: map[string]string{}, Outputs: map[string]string{}}, shareable: true}
+	for key, value := range state.globalEnv {
+		if before, ok := envBefore[key]; ok && before == value {
+			continue
+		}
+		rec.exports.Env[key] = value
+	}
+	if pathsBefore < len(state.extraPath) {
+		rec.exports.Paths = append([]string(nil), state.extraPath[pathsBefore:]...)
+	}
+	for key, value := range outputs {
+		rec.exports.Outputs[key] = value
+	}
+	private := state.tempDir
+	refersToJob := func(value string) bool {
+		return private != "" && strings.Contains(value, private)
+	}
+	for _, value := range rec.exports.Env {
+		if refersToJob(value) {
+			rec.shareable = false
+		}
+	}
+	for _, value := range rec.exports.Paths {
+		if refersToJob(value) {
+			rec.shareable = false
+		}
+	}
+	for _, value := range rec.exports.Outputs {
+		if refersToJob(value) {
+			rec.shareable = false
+		}
+	}
+	state.setExports(rec)
 }
 
 // cacheObservation is the tool cache's verdict on one setup action: observed
@@ -253,9 +330,59 @@ func (e *Engine) RunStep(ctx ExecContext, job model.PlanJob, step model.PlanStep
 		return "", err
 	}
 	state.setCacheObservation(cacheObservation{})
+	state.setExports(stepExportRecord{})
 
+	envBefore := copyStringMap(state.globalEnv)
+	pathsBefore := len(state.extraPath)
 	result, err := e.runStep(ctx, state, state.rootScope(ctx.WorkDir), planStepToSpec(step), nil)
+	if err == nil {
+		state.recordExports(envBefore, pathsBefore, result.Outputs)
+	}
 	return strings.TrimRight(result.Output, "\n"), err
+}
+
+// LastStepExports is what the job's last step exported (its environment,
+// PATH entries and outputs) and whether another job may take them as its
+// own: not when a value points into the job's own temporary directory. The
+// runner shares a lane's setup actions this way (specs/orun-cache-efficiency
+// CE4).
+func (e *Engine) LastStepExports(jobID string) (exports StepExports, shareable bool) {
+	state := e.getJobState(jobID)
+	if state == nil {
+		return StepExports{}, false
+	}
+	rec := state.stepExports()
+	return rec.exports, rec.shareable
+}
+
+// ImportStepExports applies another job's step exports to this job as if the
+// step had run here: the environment and PATH entries reach every later
+// step, and the outputs answer `steps.<id>.outputs.*`. The step's own
+// post action, if any, stays with the job that ran it.
+func (e *Engine) ImportStepExports(ctx ExecContext, job model.PlanJob, step model.PlanStep, exports StepExports) error {
+	state, err := e.ensureJobState(ctx, job)
+	if err != nil {
+		return err
+	}
+	state.setCacheObservation(cacheObservation{})
+	state.setExports(stepExportRecord{})
+	for key, value := range exports.Env {
+		state.globalEnv[key] = value
+		if key == "PATH" {
+			state.basePath = value
+		}
+	}
+	state.extraPath = append(state.extraPath, exports.Paths...)
+	result := &actmodel.StepResult{
+		Outputs:    map[string]string{},
+		Outcome:    actmodel.StepStatusSuccess,
+		Conclusion: actmodel.StepStatusSuccess,
+	}
+	for key, value := range exports.Outputs {
+		result.Outputs[key] = value
+	}
+	state.stepResults[specStepID(planStepToSpec(step))] = result
+	return nil
 }
 
 // LastStepCacheHit reports what the tool cache said about the job's last
@@ -684,11 +811,18 @@ func (state *jobState) nextActionName(base string) string {
 	return fmt.Sprintf("%s_%d", name, count)
 }
 
-func (e *Engine) runStep(ctx ExecContext, state *jobState, scope *scope, spec stepSpec, inheritedEnv map[string]string) (stepExecutionResult, error) {
+// specStepID is the key a step's result is recorded under for
+// `steps.<id>.outputs.*`: its id, else its name, else what it uses.
+func specStepID(spec stepSpec) string {
 	stepID := firstNonEmpty(strings.TrimSpace(spec.ID), strings.TrimSpace(spec.Name), strings.TrimSpace(spec.Use))
 	if stepID == "" {
 		stepID = "unnamed-step"
 	}
+	return stepID
+}
+
+func (e *Engine) runStep(ctx ExecContext, state *jobState, scope *scope, spec stepSpec, inheritedEnv map[string]string) (stepExecutionResult, error) {
+	stepID := specStepID(spec)
 
 	result := &actmodel.StepResult{
 		Outputs:    map[string]string{},

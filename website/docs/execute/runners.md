@@ -135,6 +135,7 @@ Every job gets a temporary `HOME` of its own (so global installs by `npm install
 | `~/.orun/actions/shared/ms-playwright` | `PLAYWRIGHT_BROWSERS_PATH` | Playwright's browsers |
 | `~/.orun/actions/shared/yarn`, `deno`, `bun` | `YARN_CACHE_FOLDER`, `DENO_DIR`, `BUN_INSTALL_CACHE_DIR` | Yarn, Deno, Bun |
 | `~/.orun/actions/shared/caches/<name>` | — | the caches steps declare with `caches:` (below) |
+| `<checkout>/.orun/cache/turbo` | `TURBO_CACHE_DIR` | turbo, for every job and every run on the checkout (a staged job's) |
 
 Each variable is set only when the environment orun inherits does not already name a directory, so a workflow that points a tool elsewhere keeps its choice. Every shared cache is one its tool documents as safe for concurrent use (content-addressed or locked); a tool whose cache is not — Cargo's `CARGO_HOME`, Maven's repository, Cypress's binary cache — keeps the job's own `HOME` and can be kept across jobs as a declared cache instead.
 
