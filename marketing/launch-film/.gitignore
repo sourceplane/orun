@@ -1,0 +1,10 @@
+node_modules/
+project/index.html
+project/vendor/
+renders/
+snapshots/
+voice/
+models/
+venv/
+*.wav
+timeline.json

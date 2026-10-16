@@ -1,0 +1,647 @@
+{
+ "01-hook": {
+  "duration": 4.1,
+  "words": [
+   {
+    "w": "The",
+    "start": 0.0,
+    "end": 0.12
+   },
+   {
+    "w": "best",
+    "start": 0.12,
+    "end": 0.36
+   },
+   {
+    "w": "engineering",
+    "start": 0.36,
+    "end": 0.78
+   },
+   {
+    "w": "teams",
+    "start": 0.78,
+    "end": 1.32
+   },
+   {
+    "w": "don't",
+    "start": 1.32,
+    "end": 1.76
+   },
+   {
+    "w": "ship",
+    "start": 1.76,
+    "end": 1.94
+   },
+   {
+    "w": "faster",
+    "start": 1.94,
+    "end": 2.46
+   },
+   {
+    "w": "because",
+    "start": 2.46,
+    "end": 2.98
+   },
+   {
+    "w": "they",
+    "start": 2.98,
+    "end": 3.18
+   },
+   {
+    "w": "type",
+    "start": 3.18,
+    "end": 3.44
+   },
+   {
+    "w": "faster.",
+    "start": 3.44,
+    "end": 3.82
+   }
+  ]
+ },
+ "02-platform": {
+  "duration": 4.69,
+  "words": [
+   {
+    "w": "They",
+    "start": 0.0,
+    "end": 0.18
+   },
+   {
+    "w": "ship",
+    "start": 0.18,
+    "end": 0.4
+   },
+   {
+    "w": "on",
+    "start": 0.4,
+    "end": 0.54
+   },
+   {
+    "w": "a",
+    "start": 0.54,
+    "end": 0.64
+   },
+   {
+    "w": "platform,",
+    "start": 0.64,
+    "end": 1.08
+   },
+   {
+    "w": "years",
+    "start": 1.66,
+    "end": 1.96
+   },
+   {
+    "w": "of",
+    "start": 1.96,
+    "end": 2.14
+   },
+   {
+    "w": "discipline",
+    "start": 2.14,
+    "end": 2.58
+   },
+   {
+    "w": "that",
+    "start": 2.58,
+    "end": 3.04
+   },
+   {
+    "w": "most",
+    "start": 3.04,
+    "end": 3.22
+   },
+   {
+    "w": "teams",
+    "start": 3.22,
+    "end": 3.54
+   },
+   {
+    "w": "never",
+    "start": 3.54,
+    "end": 3.88
+   },
+   {
+    "w": "get",
+    "start": 3.88,
+    "end": 4.08
+   },
+   {
+    "w": "to",
+    "start": 4.08,
+    "end": 4.24
+   },
+   {
+    "w": "build.",
+    "start": 4.24,
+    "end": 4.44
+   }
+  ]
+ },
+ "03-intent": {
+  "duration": 6.02,
+  "words": [
+   {
+    "w": "O",
+    "start": 0.0,
+    "end": 0.18
+   },
+   {
+    "w": "-Run",
+    "start": 0.18,
+    "end": 0.38
+   },
+   {
+    "w": "turns",
+    "start": 0.38,
+    "end": 0.76
+   },
+   {
+    "w": "that",
+    "start": 0.76,
+    "end": 1.0
+   },
+   {
+    "w": "discipline",
+    "start": 1.0,
+    "end": 1.4
+   },
+   {
+    "w": "into",
+    "start": 1.4,
+    "end": 1.7
+   },
+   {
+    "w": "intent,",
+    "start": 1.7,
+    "end": 2.1
+   },
+   {
+    "w": "what",
+    "start": 2.62,
+    "end": 2.7
+   },
+   {
+    "w": "exists,",
+    "start": 2.7,
+    "end": 3.12
+   },
+   {
+    "w": "where",
+    "start": 3.5,
+    "end": 3.72
+   },
+   {
+    "w": "it",
+    "start": 3.72,
+    "end": 3.86
+   },
+   {
+    "w": "ships,",
+    "start": 3.86,
+    "end": 4.14
+   },
+   {
+    "w": "and",
+    "start": 4.56,
+    "end": 4.72
+   },
+   {
+    "w": "the",
+    "start": 4.72,
+    "end": 4.84
+   },
+   {
+    "w": "rules",
+    "start": 4.84,
+    "end": 5.08
+   },
+   {
+    "w": "it",
+    "start": 5.08,
+    "end": 5.28
+   },
+   {
+    "w": "lives",
+    "start": 5.28,
+    "end": 5.48
+   },
+   {
+    "w": "by.",
+    "start": 5.48,
+    "end": 5.8
+   }
+  ]
+ },
+ "04-compile": {
+  "duration": 6.34,
+  "words": [
+   {
+    "w": "One",
+    "start": 0.0,
+    "end": 0.24
+   },
+   {
+    "w": "open",
+    "start": 0.24,
+    "end": 0.58
+   },
+   {
+    "w": "source",
+    "start": 0.58,
+    "end": 0.8
+   },
+   {
+    "w": "binary",
+    "start": 0.8,
+    "end": 1.28
+   },
+   {
+    "w": "compiles",
+    "start": 1.28,
+    "end": 1.82
+   },
+   {
+    "w": "it",
+    "start": 1.82,
+    "end": 1.94
+   },
+   {
+    "w": "into",
+    "start": 1.94,
+    "end": 2.12
+   },
+   {
+    "w": "a",
+    "start": 2.12,
+    "end": 2.26
+   },
+   {
+    "w": "single",
+    "start": 2.26,
+    "end": 2.5
+   },
+   {
+    "w": "plan.",
+    "start": 2.5,
+    "end": 2.9
+   },
+   {
+    "w": "Same",
+    "start": 3.52,
+    "end": 3.8
+   },
+   {
+    "w": "inputs,",
+    "start": 3.8,
+    "end": 4.24
+   },
+   {
+    "w": "same",
+    "start": 4.66,
+    "end": 4.82
+   },
+   {
+    "w": "plan,",
+    "start": 4.82,
+    "end": 5.24
+   },
+   {
+    "w": "every",
+    "start": 5.52,
+    "end": 5.8
+   },
+   {
+    "w": "time.",
+    "start": 5.8,
+    "end": 6.12
+   }
+  ]
+ },
+ "05-policy": {
+  "duration": 6.76,
+  "words": [
+   {
+    "w": "Policy",
+    "start": 0.0,
+    "end": 0.34
+   },
+   {
+    "w": "runs",
+    "start": 0.34,
+    "end": 0.8
+   },
+   {
+    "w": "at",
+    "start": 0.8,
+    "end": 1.02
+   },
+   {
+    "w": "compile",
+    "start": 1.02,
+    "end": 1.4
+   },
+   {
+    "w": "time,",
+    "start": 1.4,
+    "end": 1.9
+   },
+   {
+    "w": "so",
+    "start": 2.32,
+    "end": 2.56
+   },
+   {
+    "w": "when",
+    "start": 2.56,
+    "end": 2.72
+   },
+   {
+    "w": "an",
+    "start": 2.72,
+    "end": 2.84
+   },
+   {
+    "w": "agent",
+    "start": 2.84,
+    "end": 3.14
+   },
+   {
+    "w": "breaks",
+    "start": 3.14,
+    "end": 3.38
+   },
+   {
+    "w": "a",
+    "start": 3.38,
+    "end": 3.58
+   },
+   {
+    "w": "rule,",
+    "start": 3.58,
+    "end": 3.88
+   },
+   {
+    "w": "it",
+    "start": 4.18,
+    "end": 4.26
+   },
+   {
+    "w": "fails",
+    "start": 4.26,
+    "end": 4.6
+   },
+   {
+    "w": "in",
+    "start": 4.6,
+    "end": 4.86
+   },
+   {
+    "w": "the",
+    "start": 4.86,
+    "end": 4.96
+   },
+   {
+    "w": "plan,",
+    "start": 4.96,
+    "end": 5.28
+   },
+   {
+    "w": "not",
+    "start": 5.7,
+    "end": 6.0
+   },
+   {
+    "w": "in",
+    "start": 6.0,
+    "end": 6.14
+   },
+   {
+    "w": "production.",
+    "start": 6.14,
+    "end": 6.46
+   }
+  ]
+ },
+ "06-baseline": {
+  "duration": 3.41,
+  "words": [
+   {
+    "w": "Want",
+    "start": 0.0,
+    "end": 0.18
+   },
+   {
+    "w": "the",
+    "start": 0.18,
+    "end": 0.32
+   },
+   {
+    "w": "whole",
+    "start": 0.32,
+    "end": 0.5
+   },
+   {
+    "w": "platform?",
+    "start": 0.5,
+    "end": 1.0
+   },
+   {
+    "w": "Pick",
+    "start": 1.42,
+    "end": 1.48
+   },
+   {
+    "w": "a",
+    "start": 1.48,
+    "end": 1.62
+   },
+   {
+    "w": "baseline.",
+    "start": 1.62,
+    "end": 1.96
+   },
+   {
+    "w": "Connect",
+    "start": 2.6,
+    "end": 2.62
+   },
+   {
+    "w": "your",
+    "start": 2.62,
+    "end": 2.86
+   },
+   {
+    "w": "cloud.",
+    "start": 2.86,
+    "end": 3.12
+   }
+  ]
+ },
+ "07-live": {
+  "duration": 6.78,
+  "words": [
+   {
+    "w": "About",
+    "start": 0.0,
+    "end": 0.24
+   },
+   {
+    "w": "an",
+    "start": 0.24,
+    "end": 0.38
+   },
+   {
+    "w": "hour",
+    "start": 0.38,
+    "end": 0.54
+   },
+   {
+    "w": "later,",
+    "start": 0.54,
+    "end": 0.9
+   },
+   {
+    "w": "44",
+    "start": 1.36,
+    "end": 1.7
+   },
+   {
+    "w": "components,",
+    "start": 1.7,
+    "end": 2.24
+   },
+   {
+    "w": "12",
+    "start": 2.64,
+    "end": 2.74
+   },
+   {
+    "w": "bounded",
+    "start": 2.74,
+    "end": 3.12
+   },
+   {
+    "w": "contexts,",
+    "start": 3.12,
+    "end": 3.62
+   },
+   {
+    "w": "3",
+    "start": 3.96,
+    "end": 4.1
+   },
+   {
+    "w": "environments,",
+    "start": 4.1,
+    "end": 4.76
+   },
+   {
+    "w": "live",
+    "start": 5.4,
+    "end": 5.74
+   },
+   {
+    "w": "in",
+    "start": 5.74,
+    "end": 6.12
+   },
+   {
+    "w": "your",
+    "start": 6.12,
+    "end": 6.22
+   },
+   {
+    "w": "repo.",
+    "start": 6.22,
+    "end": 6.46
+   }
+  ]
+ },
+ "08-converge": {
+  "duration": 3.8,
+  "words": [
+   {
+    "w": "Then",
+    "start": 0.0,
+    "end": 0.16
+   },
+   {
+    "w": "every",
+    "start": 0.16,
+    "end": 0.5
+   },
+   {
+    "w": "commit",
+    "start": 0.5,
+    "end": 0.8
+   },
+   {
+    "w": "converges,",
+    "start": 0.8,
+    "end": 1.5
+   },
+   {
+    "w": "41",
+    "start": 1.9,
+    "end": 2.22
+   },
+   {
+    "w": "jobs",
+    "start": 2.22,
+    "end": 2.88
+   },
+   {
+    "w": "all",
+    "start": 2.88,
+    "end": 3.24
+   },
+   {
+    "w": "green.",
+    "start": 3.24,
+    "end": 3.56
+   }
+  ]
+ },
+ "09-end": {
+  "duration": 3.33,
+  "words": [
+   {
+    "w": "O",
+    "start": 0.0,
+    "end": 0.18
+   },
+   {
+    "w": "-Run,",
+    "start": 0.18,
+    "end": 0.42
+   },
+   {
+    "w": "platform",
+    "start": 0.76,
+    "end": 1.0
+   },
+   {
+    "w": "discipline",
+    "start": 1.0,
+    "end": 1.46
+   },
+   {
+    "w": "compiled,",
+    "start": 1.46,
+    "end": 2.0
+   },
+   {
+    "w": "open",
+    "start": 2.48,
+    "end": 2.68
+   },
+   {
+    "w": "source.",
+    "start": 2.68,
+    "end": 3.02
+   }
+  ]
+ }
+}
