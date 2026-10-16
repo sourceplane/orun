@@ -30,6 +30,7 @@ orun new upgrade --out <dir> [--blueprint <newer>] [--apply]
 | `--phase <name>` | Place only this phase. |
 | `--until <name>` | Place every phase through this one. |
 | `--resume` | Place every phase not already derived as done. |
+| `--redo <phase>` | With `--resume`, place this phase again even though its files are in place: its hooks run again. Repeatable. For retrying a phase that landed and then failed to converge. |
 | `--status` | Derive and print each phase's state without writing anything. `--json` for machines. |
 | `--progress auto\|plain\|verbose\|json` | Progress rendering. Default `auto`, which ends with a summary: files placed, the repository gate's result (components, environments, and jobs the scaffolded intent plans to), and where the provenance lock is. `verbose` also lists every phase, batch, and file. |
 
