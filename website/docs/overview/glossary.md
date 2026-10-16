@@ -73,7 +73,7 @@ discipline as code. Terms link to the page that explains them in depth.
 | **Component instance** | One cell of the environment × component matrix, with fully merged inputs and resolved policies. → [Plan DAG](../concepts/plan-dag.md) |
 | **Job instance** | An executable DAG node (`component.environment.job`) with rendered steps and job-level dependency edges. → [Plan DAG](../concepts/plan-dag.md) |
 | **Plan (plan DAG)** | The immutable compiled artifact (`plan.json`): every job, step, edge, and merged input made explicit. The artifact of record. → [Plan DAG](../concepts/plan-dag.md) |
-| **Composition lock** | `.orun/compositions.lock.yaml`: a record of the digest each composition source resolved to, written by `orun plan` and `orun compositions lock`. orun does not read it back; the enforced pin is a source `digest:`. → [Versioning and locking](../concepts/versioning-and-locking.md) |
+| **Composition lock** | `.orun/compositions.lock.yaml`: a record of the digest each composition source resolved to, written by `orun plan` and `orun compositions lock`, read by the service catalog and by `orun compositions lock --check`. The enforced pin is a source `digest:`, which `orun compositions lock --write-intent` writes into `intent.yaml`. → [Versioning and locking](../concepts/versioning-and-locking.md) |
 | **Scope** | Which components/environments a plan covers: `full`, `changed`, or explicit `--component`/`--env`/`--all-envs` selection. → [Change detection](../concepts/change-detection.md) |
 | **Change detection** | The engine classifying which components a file change affects, powering `--changed` and `orun catalog affected`. → [Change detection](../concepts/change-detection.md) |
 
