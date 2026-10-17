@@ -57,6 +57,11 @@ func resolveNamedTrigger(intent *model.Intent, triggerName, explicitEnv string) 
 		return nil, nil, fmt.Errorf("trigger binding %q matched, but no environment references it in activation.triggerRefs", triggerName)
 	}
 
+	if binding.Plan.Scope == model.PlanScopeSelected && explicitEnv == "" {
+		// No event to read the selection from: the flags are the selection.
+		return nil, nil, fmt.Errorf("trigger %s plans a selected scope: name the environment with --env and the components with --component", triggerName)
+	}
+
 	if explicitEnv != "" {
 		filtered := intersectEnvs(activated, explicitEnv)
 		if len(filtered) == 0 {
@@ -72,6 +77,7 @@ func resolveNamedTrigger(intent *model.Intent, triggerName, explicitEnv string) 
 		PlanScope:           binding.Plan.Scope,
 		Base:                binding.Plan.Base,
 		Head:                binding.Plan.Head,
+		AutoPushDisabled:    autoPushDisabled(intent, []string{triggerName}),
 	}
 
 	return activated, resolution, nil
@@ -110,6 +116,17 @@ func resolveEventFile(intent *model.Intent, event *model.NormalizedEvent, explic
 		return nil, nil, fmt.Errorf("trigger binding %q matched, but no environment references it in activation.triggerRefs", strings.Join(matchedNames, ", "))
 	}
 
+	// A selected plan's environments are the event's, each of which must be
+	// one the matched bindings activate.
+	var selectedComponents, selectedEnvs []string
+	if scope == model.PlanScopeSelected {
+		selectedComponents, selectedEnvs, err = resolveSelection(intent, matchedNames, event, activated)
+		if err != nil {
+			return nil, nil, err
+		}
+		activated = append([]string(nil), selectedEnvs...)
+	}
+
 	if explicitEnv != "" {
 		filtered := intersectEnvs(activated, explicitEnv)
 		if len(filtered) == 0 {
@@ -124,11 +141,14 @@ func resolveEventFile(intent *model.Intent, event *model.NormalizedEvent, explic
 	base, head := resolveBaseHead(intent, matchedNames, event)
 
 	resolution := &model.TriggerResolution{
-		MatchedTriggerNames: matchedNames,
-		ActiveEnvironments:  activated,
-		PlanScope:           scope,
-		Base:                base,
-		Head:                head,
+		MatchedTriggerNames:  matchedNames,
+		ActiveEnvironments:   activated,
+		PlanScope:            scope,
+		Base:                 base,
+		Head:                 head,
+		SelectedComponents:   selectedComponents,
+		SelectedEnvironments: selectedEnvs,
+		AutoPushDisabled:     autoPushDisabled(intent, matchedNames),
 	}
 
 	return activated, resolution, nil
