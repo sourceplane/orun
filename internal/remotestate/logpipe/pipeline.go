@@ -127,6 +127,14 @@ type Pipeline struct {
 	inFlight     int
 	draining     bool // the serial recovery drain is running
 	closing      bool
+	// retryTimer re-tries a failed upload once the backoff (or a server's
+	// Retry-After) is over, so waiting chunks do not wait for the next
+	// Append (saas-live-runs LR8): a step's last chunk would otherwise sit
+	// until the job's next step, or the run's end.
+	retryTimer *time.Timer
+	// ctx is the context uploads started by the retry timer run under: the
+	// first Append's.
+	ctx context.Context
 }
 
 // New returns a Pipeline wrapping up. up must be non-nil.
@@ -155,14 +163,18 @@ func New(up Uploader, opts Options) *Pipeline {
 func queueKey(runID, jobID string) string { return runID + "\x00" + jobID }
 
 // Append queues content for (runID, jobID) and returns; the upload happens
-// on the job's worker. Empty content is a no-op. It never returns an error —
-// delivery failures are absorbed and reported by Close.
+// on the job's worker. Empty content is a no-op, except for a step's start
+// or end: the event is the point (saas-live-runs LR8). It never returns an
+// error — delivery failures are absorbed and reported by Close.
 func (p *Pipeline) Append(ctx context.Context, runID, jobID, content string, step *statebackend.LogStep) {
-	if content == "" {
+	if content == "" && (step == nil || step.Event == statebackend.LogStepChunk) {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.ctx == nil {
+		p.ctx = ctx
+	}
 
 	p.seq++
 	q := p.queues[queueKey(runID, jobID)]
@@ -180,12 +192,20 @@ func (p *Pipeline) Append(ctx context.Context, runID, jobID, content string, ste
 // kickLocked starts whatever may run now: the serial recovery drain when the
 // spill file holds entries, else a worker per job with chunks waiting, up to
 // the in-flight bound. Nothing starts within the backoff of a failure (the
-// next Append or Close tries again), nor once Close began. mu held.
+// retry timer, the next Append or Close tries again), nor once Close began.
+// mu held.
 func (p *Pipeline) kickLocked(ctx context.Context) {
+	p.kick(ctx, false)
+}
+
+// kick is kickLocked; now ignores the failure backoff (not a server's
+// Retry-After), for the retry timer and a Drain that cannot wait it out.
+// mu held.
+func (p *Pipeline) kick(ctx context.Context, now bool) {
 	if p.closing || p.draining {
 		return
 	}
-	if p.everFailed && p.now().Sub(p.lastFailAt) < p.backoff {
+	if !now && p.everFailed && p.now().Sub(p.lastFailAt) < p.backoff {
 		return
 	}
 	if !p.retryNotBef.IsZero() && p.now().Before(p.retryNotBef) {
@@ -308,6 +328,10 @@ func (p *Pipeline) noteSpillDrainLocked(sent, sentBytes int, done bool) {
 func (p *Pipeline) Close(ctx context.Context) Report {
 	p.mu.Lock()
 	p.closing = true
+	if p.retryTimer != nil {
+		p.retryTimer.Stop()
+		p.retryTimer = nil
+	}
 	for p.inFlight > 0 || p.draining {
 		p.idle.Wait()
 	}
@@ -483,16 +507,93 @@ func (p *Pipeline) flushSpill(ctx context.Context) (sent, sentBytes int, done bo
 }
 
 // markFailedLocked records the failure for the backoff, and a server's
-// Retry-After when the error carries one. mu held.
+// Retry-After when the error carries one, and arms the retry timer. mu held.
 func (p *Pipeline) markFailedLocked(err error) {
 	p.everFailed = true
 	p.lastFailAt = p.now()
+	p.retryNotBef = time.Time{}
 	var ra retryAfterer
 	if errors.As(err, &ra) {
 		if wait := ra.RetryAfterHint(); wait > 0 {
 			p.retryNotBef = p.now().Add(wait)
-			return
 		}
 	}
-	p.retryNotBef = time.Time{}
+	p.armRetryLocked()
+}
+
+// armRetryLocked schedules one retry for when the backoff (or Retry-After)
+// is over. A retry that fails again re-arms it; Close stops it. mu held.
+func (p *Pipeline) armRetryLocked() {
+	if p.retryTimer != nil || p.closing {
+		return
+	}
+	delay := p.backoff
+	if !p.retryNotBef.IsZero() {
+		if d := p.retryNotBef.Sub(p.now()); d > delay {
+			delay = d
+		}
+	}
+	p.retryTimer = time.AfterFunc(delay, func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		p.retryTimer = nil
+		if p.closing {
+			return
+		}
+		ctx := p.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		p.kick(ctx, true)
+	})
+}
+
+// Drain waits, at most timeout, until every chunk queued for (runID, jobID)
+// has been uploaded, and reports whether it was. A job drains its log before
+// it reports :complete (saas-live-runs LR8): the server seals a finished
+// job's log, and a reader that sees the job finished stops reading it, so a
+// chunk that lands after either is a chunk nobody sees. It tries at once,
+// whatever the backoff; after that a failed upload is retried by the retry
+// timer. A server's Retry-After is still honoured.
+func (p *Pipeline) Drain(ctx context.Context, runID, jobID string, timeout time.Duration) bool {
+	if timeout <= 0 {
+		return false
+	}
+	deadline := time.Now().Add(timeout)
+	wake := time.AfterFunc(timeout, func() {
+		p.mu.Lock()
+		p.idle.Broadcast()
+		p.mu.Unlock()
+	})
+	defer wake.Stop()
+	stopWatch := make(chan struct{})
+	defer close(stopWatch)
+	go func() {
+		select {
+		case <-ctx.Done():
+			p.mu.Lock()
+			p.idle.Broadcast()
+			p.mu.Unlock()
+		case <-stopWatch:
+		}
+	}()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	key := queueKey(runID, jobID)
+	kicked := false
+	for {
+		q := p.queues[key]
+		if (q == nil || (len(q.entries) == 0 && !q.running)) && p.spilledCount == 0 && !p.draining {
+			return true
+		}
+		if p.closing || ctx.Err() != nil || !time.Now().Before(deadline) {
+			return false
+		}
+		if !kicked {
+			p.kick(ctx, true)
+			kicked = true
+		}
+		p.idle.Wait()
+	}
 }

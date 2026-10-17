@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -773,6 +774,9 @@ func setupRemoteStateHooks(waitCtx context.Context, r *runner.Runner, plan *mode
 	if outPipe != nil {
 		*outPipe = logPipeline
 	}
+	// saas-live-runs LR8: each step reaches the log as it starts, while it
+	// runs and when it ends, masked by the run's redactor.
+	stepLogs := newRemoteStepLogs(ctx, logPipeline, handle.RunID, r.Redactor)
 
 	r.Hooks = &runner.RunnerHooks{
 		BeforeJob: func(jobID string) (bool, error) {
@@ -844,32 +848,26 @@ func setupRemoteStateHooks(waitCtx context.Context, r *runner.Runner, plan *mode
 				jobCancel()
 			}, leases.observeLease)
 		},
+		OnStepStart: func(jobID, stepID string, index, total int) {
+			// index is 1-based here; the log's step coordinate is 0-based.
+			stepLogs.start(jobID, stepID, index-1)
+		},
+		StepOutput: func(jobID string, step runner.StepRecord) io.Writer {
+			return stepLogs.writer(jobID, step)
+		},
 		AfterStepLog: func(jobID string, step runner.StepRecord, output string) {
-			// v1 logs are append-only chunks: upload only this step's block. The
-			// old cumulative upload would re-append every prior step on each call
-			// and corrupt the assembled log.
-			chunk := "=== " + step.ID + " ===\n" + output
-			if !strings.HasSuffix(chunk, "\n") {
-				chunk += "\n"
-			}
-			// The step coordinate rides the chunk (orun-cloud saas-step-logs).
-			// This block IS the step's whole output, so it carries the step's
-			// terminal event — one append per step, no extra request, and the
-			// server needs nothing else to draw the step that broke.
-			//
-			// The banner above stays: `orun logs` and anyone reading the raw
-			// stream still has only the text, and dropping it would take the
-			// step boundaries away from every reader that is not the console.
-			coord := &statebackend.LogStep{
-				StepID:   step.ID,
-				Index:    step.Index,
-				Event:    statebackend.LogStepEnd,
-				Status:   step.Status,
-				ExitCode: step.ExitCode,
-			}
-			// Buffered, non-blocking: the pipeline absorbs transport errors
-			// (spill + retry); undelivered chunks are reported at run end.
-			logPipeline.Append(ctx, handle.RunID, jobID, chunk, coord)
+			// The step's `end` event, with the outcome and the part of its
+			// output the live stream did not send (all of it when the
+			// executor streams nothing). v1 logs are append-only chunks, so
+			// only this step's text goes, never the job's so far. The banner
+			// went with the step's `start`; it stays because `orun logs` and
+			// any raw reader split the stream on it.
+			stepLogs.end(jobID, step, output)
+		},
+		AfterStepTerminal: func(jobID, stepID, status string) {
+			// A step that ends without AfterStepLog (it printed nothing) still
+			// sends its `end`, so it does not read running until the job ends.
+			stepLogs.terminal(jobID, stepID, status)
 		},
 		AfterJobTerminal: func(jobID string, success bool, errText string) {
 			// Stop the heartbeat BEFORE completing: once :complete lands, the
@@ -887,6 +885,16 @@ func setupRemoteStateHooks(waitCtx context.Context, r *runner.Runner, plan *mode
 			status := statebackend.JobStatusSuccess
 			if !success {
 				status = statebackend.JobStatusFailed
+			}
+			// saas-live-runs LR8: the job's log lands before the job reads
+			// finished. The server seals a finished job's log and a reader
+			// stops tailing it, so a chunk uploaded after :complete is one
+			// nobody sees. Bounded: a backend that cannot take the log does
+			// not hold the result back for long (the pipeline keeps retrying,
+			// and the run's end reports what never landed).
+			stepLogs.closeJob(jobID)
+			if !logPipeline.Drain(ctx, handle.RunID, jobID, jobLogDrainTimeout) {
+				fmt.Fprintf(r.Stderr, "  %s log for %s still uploading as it completes\n", ui.Yellow(r.Color, "⚠"), jobID)
 			}
 			if err := updateJobWithRetry(ctx, backend, handle.RunID, jobID, runnerID, status, errText); err != nil {
 				unrecorded.add(jobID)
