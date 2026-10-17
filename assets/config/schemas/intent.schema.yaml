@@ -271,10 +271,20 @@ properties:
               properties:
                 scope:
                   type: string
-                  description: Plan scope when this trigger fires.
+                  description: Plan scope when this trigger fires — full, changed, or selected (the event's own components and environments).
                   enum:
                     - full
                     - changed
+                    - selected
+                components:
+                  type: string
+                  description: Dot-path into the raw event payload naming a selected plan's components (a comma-separated string or a list of strings), e.g. inputs.component.
+                environments:
+                  type: string
+                  description: Dot-path into the raw event payload naming a selected plan's environments, e.g. inputs.environment.
+                autopush:
+                  type: boolean
+                  description: Set to false to skip the plan-time catalog auto-push for plans this trigger resolves.
                 base:
                   type: string
                   description: Dot-path into the raw event payload for the base revision.

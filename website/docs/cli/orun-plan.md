@@ -148,6 +148,17 @@ Simulate a named trigger locally:
 orun plan --trigger github-pull-request --base main --head HEAD
 ```
 
+A trigger with `plan.scope: selected` (for example one bound to
+`workflow_dispatch`) plans exactly the components and environments its event
+names; `--changed` and `--files` are ignored for that plan. Under `--trigger`
+there is no event, so `--env` and `--component` are the selection:
+
+```bash
+orun plan --trigger github-dispatch --env stage --component api
+```
+
+See [Trigger bindings → Selected plans](../concepts/trigger-bindings.md#selected-plans-an-event-that-names-what-to-plan).
+
 ## Flags
 
 | Flag | Meaning |

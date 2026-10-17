@@ -118,10 +118,15 @@ func objectModelTrigger(trig triggerctx.TriggerOccurrence) nodes.TriggerOccurren
 }
 
 func planScopeMode(trig triggerctx.TriggerOccurrence) string {
-	if trig.PlanScope.Mode != "" {
-		return trig.PlanScope.Mode
+	switch trig.PlanScope.Mode {
+	case "":
+		return "full"
+	case model.PlanScopeSelected:
+		// A selected plan is not diff-based; the revision records it as full
+		// (the object model's revision scope is full | changed).
+		return "full"
 	}
-	return "full"
+	return trig.PlanScope.Mode
 }
 
 func sourceHumanKey(catRes planCatalogResolution) string {

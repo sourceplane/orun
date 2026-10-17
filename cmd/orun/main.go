@@ -30,6 +30,7 @@ import (
 )
 
 func generatePlan() error {
+	planAutoPushDisabled = false
 	if debugMode {
 		fmt.Println("□ Loading intent...")
 	}
@@ -113,6 +114,9 @@ func generatePlan() error {
 	if errs := trigger.ValidateLanes(intent); len(errs) > 0 {
 		return trigger.FormatErrors(errs)
 	}
+	if errs := trigger.ValidatePlanOptions(intent); len(errs) > 0 {
+		return trigger.FormatErrors(errs)
+	}
 
 	// Resolve trigger context and determine active environments
 	triggerCtx, err := buildTriggerContext()
@@ -163,6 +167,27 @@ func generatePlan() error {
 				headRef = triggerResolution.Head
 			}
 		}
+		planAutoPushDisabled = triggerResolution.AutoPushDisabled
+	}
+
+	// A selected scope (orun-manual-triggers §3): the trigger's selection is
+	// the whole plan. There is no diff to read, so --changed and --files do
+	// not apply.
+	selectedScope := triggerResolution != nil && triggerResolution.PlanScope == model.PlanScopeSelected
+	var selectedComponents []string
+	if selectedScope {
+		selectedComponents, err = selectedComponentsFor(triggerResolution, planComponents)
+		if err != nil {
+			return err
+		}
+		if changedOnly {
+			fmt.Fprintln(os.Stderr, "○ --changed ignored: the trigger selects this plan's components")
+			changedOnly = false
+		}
+		if len(changedFiles) > 0 {
+			fmt.Fprintln(os.Stderr, "○ --files ignored: the trigger selects this plan's components")
+			changedFiles = nil
+		}
 	}
 
 	if debugMode {
@@ -175,6 +200,13 @@ func generatePlan() error {
 	instances, err := expander.Expand()
 	if err != nil {
 		return fmt.Errorf("failed to expand intent: %w", err)
+	}
+	if selectedScope {
+		instances, err = selectInstances(instances, selectedComponents, triggerActiveEnvs)
+		if err != nil {
+			return err
+		}
+		planComponents = selectedComponents
 	}
 
 	// Filter by trigger-resolved environments or --env flag
@@ -784,6 +816,9 @@ func validateFiles() error {
 		return trigger.FormatErrors(errs)
 	}
 	if errs := trigger.ValidateLanes(intent); len(errs) > 0 {
+		return trigger.FormatErrors(errs)
+	}
+	if errs := trigger.ValidatePlanOptions(intent); len(errs) > 0 {
 		return trigger.FormatErrors(errs)
 	}
 
