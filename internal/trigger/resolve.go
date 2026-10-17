@@ -78,6 +78,7 @@ func resolveNamedTrigger(intent *model.Intent, triggerName, explicitEnv string) 
 		Base:                binding.Plan.Base,
 		Head:                binding.Plan.Head,
 		AutoPushDisabled:    autoPushDisabled(intent, []string{triggerName}),
+		RequireRuleTriggers: requireRuleTriggers(intent, []string{triggerName}),
 	}
 
 	return activated, resolution, nil
@@ -149,6 +150,7 @@ func resolveEventFile(intent *model.Intent, event *model.NormalizedEvent, explic
 		SelectedComponents:   selectedComponents,
 		SelectedEnvironments: selectedEnvs,
 		AutoPushDisabled:     autoPushDisabled(intent, matchedNames),
+		RequireRuleTriggers:  requireRuleTriggers(intent, matchedNames),
 	}
 
 	return activated, resolution, nil

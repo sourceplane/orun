@@ -285,6 +285,9 @@ properties:
                 autopush:
                   type: boolean
                   description: Set to false to skip the plan-time catalog auto-push for plans this trigger resolves.
+                requireRule:
+                  type: boolean
+                  description: Plan a lane under this trigger only if one of its profileRules names the trigger (the lane opts in; the rule's profile is what it runs). Default false.
                 base:
                   type: string
                   description: Dot-path into the raw event payload for the base revision.

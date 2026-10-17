@@ -39,6 +39,11 @@ type TriggerPlanOptions struct {
 	// this binding resolved. Unset leaves execution.state.autopushCatalog in
 	// charge.
 	AutoPush *bool `yaml:"autopush,omitempty" json:"autopush,omitempty"`
+	// RequireRule plans a lane under this binding only if one of its
+	// profileRules names the binding (orun-manual-triggers §4): the lane opts
+	// in, and the rule's profile is what it runs. Default false: a lane with
+	// no matching rule runs its default profile, as under every binding.
+	RequireRule bool `yaml:"requireRule,omitempty" json:"requireRule,omitempty"`
 }
 
 // PlanScopeSelected is the plan scope whose selection comes from the trigger
@@ -88,4 +93,6 @@ type TriggerResolution struct {
 	SelectedEnvironments []string
 	// AutoPushDisabled is true when a matched binding sets plan.autopush: false.
 	AutoPushDisabled bool
+	// RequireRuleTriggers are the matched bindings that set plan.requireRule.
+	RequireRuleTriggers []string
 }

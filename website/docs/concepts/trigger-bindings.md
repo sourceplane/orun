@@ -199,6 +199,37 @@ orun plan --from-ci github --event-file "$GITHUB_EVENT_PATH" --changed --output 
 - The plan records the trigger's scope as `selected`; the object model records
   the revision as `full`.
 
+### Opt-in lanes: `requireRule`
+
+With `plan.requireRule: true`, a lane (one component in one environment) is
+planned under the binding only if one of its `profileRules` names the binding.
+The lane opts in, and the rule's profile is what it runs — `deploy` in stage,
+`verify` in dev ([Profile rules → Opting a lane in](./profile-rules.md#opting-a-lane-in-to-a-trigger)).
+
+```yaml
+github-dispatch:
+  on: { provider: github, event: workflow_dispatch, branches: [main] }
+  plan:
+    scope: selected
+    components: inputs.component
+    environments: inputs.environment
+    requireRule: true
+```
+
+- Under `scope: selected` it is strict: every selected lane must have opted in,
+  or the plan fails naming each lane that did not and the fix
+  (`not enabled for github-dispatch: web.stage — add a profileRule with
+  when.triggerRef: github-dispatch to the lane's subscription`).
+- Under another scope it drops the lanes that did not opt in, and fails only
+  when none is left.
+- Unset (the default) keeps today's behaviour: a lane with no rule naming the
+  binding runs its default profile.
+- The catalog records each opted-in lane as
+  `spec.environments.<env>.manual: { trigger, profile }` (the first
+  `requireRule` binding by name, with its rule's profile). A component that
+  opts nothing in keeps its manifest hash. Inline intent components do not
+  carry profile rules into the catalog, so they get no `manual` field.
+
 ## CLI usage
 
 ### Named trigger simulation (local development)

@@ -251,3 +251,169 @@ func TestSelectedScopeE2E_DispatchEventPlansTheSelection(t *testing.T) {
 		})
 	}
 }
+
+func TestRequireRuleFilter(t *testing.T) {
+	a := &model.ComponentInstance{ComponentName: "svc-a", ProfileRuleTriggerRef: "github-dispatch"}
+	b := &model.ComponentInstance{ComponentName: "svc-b"}
+	c := &model.ComponentInstance{ComponentName: "svc-c", ProfileRuleTriggerRef: "github-push-main"}
+	in := map[string][]*model.ComponentInstance{"stage": {a, b, c}}
+
+	if got, err := requireRuleFilter(in, nil, true); err != nil || len(got["stage"]) != 3 {
+		t.Fatalf("no requireRule binding: unchanged, got %v %v", got, err)
+	}
+	got, err := requireRuleFilter(in, []string{"github-dispatch"}, false)
+	if err != nil || len(got["stage"]) != 1 || got["stage"][0] != a {
+		t.Fatalf("non-strict keeps only the opted-in lane, got %v %v", got, err)
+	}
+	if _, err := requireRuleFilter(in, []string{"github-dispatch"}, true); err == nil ||
+		!strings.Contains(err.Error(), "not enabled for github-dispatch: svc-b.stage, svc-c.stage") ||
+		!strings.Contains(err.Error(), "when.triggerRef: github-dispatch") {
+		t.Fatalf("strict names every lane that did not opt in and the fix, got %v", err)
+	}
+	none := map[string][]*model.ComponentInstance{"stage": {b}}
+	if _, err := requireRuleFilter(none, []string{"github-dispatch"}, false); err == nil || !strings.Contains(err.Error(), "no lane is enabled") {
+		t.Fatalf("nothing left fails, got %v", err)
+	}
+}
+
+// TestRequireRuleE2E plans dispatch and push events against an intent whose
+// dispatch binding sets requireRule: svc-a opts dev (verify) and stage
+// (deploy) in, svc-b opts nothing in.
+func TestRequireRuleE2E(t *testing.T) {
+	dir := withTempIntentRoot(t)
+	seedCatalogRunWorkspace(t, dir)
+	mustWriteFile(t, filepath.Join(dir, "intent.yaml"), `apiVersion: orun.io/v1alpha1
+kind: Intent
+metadata:
+  name: require-rule-demo
+discovery:
+  roots:
+    - runtime
+compositions:
+  sources:
+    - name: core
+      kind: dir
+      path: ./core
+automation:
+  triggerBindings:
+    github-push-main:
+      on: { provider: github, event: push, branches: [main] }
+    github-dispatch:
+      on: { provider: github, event: workflow_dispatch, branches: [main] }
+      plan:
+        scope: selected
+        components: inputs.component
+        environments: inputs.environment
+        autopush: false
+        requireRule: true
+environments:
+  dev:
+    activation: { triggerRefs: [github-push-main, github-dispatch] }
+  stage:
+    activation: { triggerRefs: [github-push-main, github-dispatch] }
+components:
+  - name: svc-a
+    type: noop
+    path: .
+    subscribe:
+      environments:
+        - name: dev
+          profile: verify
+          profileRules:
+            - profile: verify
+              when: { triggerRef: github-dispatch }
+        - name: stage
+          profile: verify
+          profileRules:
+            - profile: deploy
+              when: { triggerRef: github-push-main }
+            - profile: deploy
+              when: { triggerRef: github-dispatch }
+    parameters: {}
+  - name: svc-b
+    type: noop
+    path: .
+    subscribe: { environments: [{ name: dev }, { name: stage }] }
+    parameters: {}
+`)
+	resetCatalogFlags(t)
+	resetCatalogRunE2EGlobals(t)
+	prevTrigger, prevFromCI, prevEvent := triggerName, fromCI, eventFile
+	t.Cleanup(func() { triggerName, fromCI, eventFile = prevTrigger, prevFromCI, prevEvent })
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	intentFile = filepath.Join(dir, "intent.yaml")
+	intentRoot = dir
+	outputFormat = "json"
+
+	plan := func(t *testing.T, event string, payload map[string]any) (*model.Plan, error) {
+		t.Helper()
+		t.Setenv("GITHUB_EVENT_NAME", event)
+		raw, _ := json.Marshal(payload)
+		evPath := filepath.Join(dir, "event.json")
+		mustWriteFile(t, evPath, string(raw))
+		planPath := filepath.Join(dir, "plan.json")
+		_ = os.Remove(planPath)
+		triggerName, fromCI, eventFile = "", "github", evPath
+		environment, allEnvs, planComponents, changedOnly, changedFiles = "", false, nil, false, nil
+		outputFile = planPath
+		var genErr error
+		_ = captureStdout(t, func() error { genErr = generatePlan(); return nil })
+		if genErr != nil {
+			return nil, genErr
+		}
+		body, err := os.ReadFile(planPath)
+		if err != nil {
+			t.Fatalf("read plan: %v", err)
+		}
+		var p model.Plan
+		if err := json.Unmarshal(body, &p); err != nil {
+			t.Fatalf("decode plan: %v", err)
+		}
+		return &p, nil
+	}
+	dispatch := func(component, env string) map[string]any {
+		return map[string]any{"ref": "refs/heads/main", "inputs": map[string]any{"component": component, "environment": env}}
+	}
+
+	t.Run("an opted-in lane runs its rule's profile", func(t *testing.T) {
+		p, err := plan(t, "workflow_dispatch", dispatch("svc-a", "stage"))
+		if err != nil {
+			t.Fatalf("plan: %v", err)
+		}
+		if len(p.Jobs) != 1 || !strings.HasPrefix(p.Jobs[0].ID, "svc-a.stage.") || p.Jobs[0].ProfileRuleTriggerRef != "github-dispatch" {
+			t.Fatalf("jobs = %+v, want svc-a.stage chosen by the github-dispatch rule", p.Jobs)
+		}
+	})
+	t.Run("a dev check opted in", func(t *testing.T) {
+		p, err := plan(t, "workflow_dispatch", dispatch("svc-a", "dev"))
+		if err != nil {
+			t.Fatalf("plan: %v", err)
+		}
+		if len(p.Jobs) != 1 || !strings.HasPrefix(p.Jobs[0].ID, "svc-a.dev.") {
+			t.Fatalf("jobs = %+v, want svc-a.dev", p.Jobs)
+		}
+	})
+	t.Run("a lane that did not opt in is refused", func(t *testing.T) {
+		if _, err := plan(t, "workflow_dispatch", dispatch("svc-b", "dev")); err == nil || !strings.Contains(err.Error(), "not enabled for github-dispatch: svc-b.dev") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("one refused lane fails the whole selection", func(t *testing.T) {
+		if _, err := plan(t, "workflow_dispatch", dispatch("svc-a,svc-b", "stage")); err == nil || !strings.Contains(err.Error(), "svc-b.stage") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("a push plans every lane, as before", func(t *testing.T) {
+		p, err := plan(t, "push", map[string]any{"ref": "refs/heads/main", "before": "", "after": ""})
+		if err != nil {
+			t.Fatalf("plan: %v", err)
+		}
+		if len(p.Jobs) != 4 {
+			t.Fatalf("push planned %d jobs, want all 4 lanes (requireRule belongs to the dispatch binding)", len(p.Jobs))
+		}
+	})
+}

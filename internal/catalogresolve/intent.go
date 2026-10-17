@@ -3,6 +3,7 @@ package catalogresolve
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 
@@ -44,6 +45,37 @@ type intentFile struct {
 	// so it materializes as an Environment entity even before a component
 	// deploys to it.
 	Environments map[string]*intentEnvironment `yaml:"environments"`
+	// Automation is read for one fact: which trigger bindings set
+	// plan.requireRule, so a component environment whose profile rule names
+	// one carries `manual` (orun-manual-triggers §6).
+	Automation *intentAutomation `yaml:"automation"`
+}
+
+// intentAutomation mirrors the slice of `automation` the catalog reads.
+type intentAutomation struct {
+	TriggerBindings map[string]intentTriggerBinding `yaml:"triggerBindings"`
+}
+
+type intentTriggerBinding struct {
+	Plan struct {
+		RequireRule bool `yaml:"requireRule"`
+	} `yaml:"plan"`
+}
+
+// manualTriggers returns the trigger bindings that set plan.requireRule, by
+// name; nil when the intent declares none.
+func manualTriggers(intent *intentFile) []string {
+	if intent == nil || intent.Automation == nil {
+		return nil
+	}
+	var out []string
+	for name, b := range intent.Automation.TriggerBindings {
+		if b.Plan.RequireRule {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // intentEnvironment mirrors the catalog-relevant keys of one

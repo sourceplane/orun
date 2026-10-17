@@ -111,3 +111,40 @@ func selectInstances(instances map[string][]*model.ComponentInstance, components
 	}
 	return selected, nil
 }
+
+// requireRuleFilter keeps, under a binding with plan.requireRule, only the
+// lanes that a profile rule naming such a binding chose — the lane opted in,
+// and the rule's profile is what it runs (orun-manual-triggers §4). A
+// selected plan is strict: one selected lane that did not opt in fails the
+// plan, naming every such lane and the fix. Any other scope drops those
+// lanes, and fails only when none is left.
+func requireRuleFilter(instances map[string][]*model.ComponentInstance, triggers []string, strict bool) (map[string][]*model.ComponentInstance, error) {
+	if len(triggers) == 0 {
+		return instances, nil
+	}
+	allowed := make(map[string]struct{}, len(triggers))
+	for _, t := range triggers {
+		allowed[t] = struct{}{}
+	}
+	kept := make(map[string][]*model.ComponentInstance, len(instances))
+	var refused []string
+	for env, insts := range instances {
+		for _, inst := range insts {
+			if _, ok := allowed[inst.ProfileRuleTriggerRef]; ok {
+				kept[env] = append(kept[env], inst)
+				continue
+			}
+			refused = append(refused, inst.ComponentName+"."+env)
+		}
+	}
+	sort.Strings(refused)
+	names := strings.Join(triggers, ", ")
+	fix := fmt.Sprintf("add a profileRule with when.triggerRef: %s to the lane's subscription", triggers[0])
+	if strict && len(refused) > 0 {
+		return nil, fmt.Errorf("not enabled for %s: %s — %s", names, strings.Join(refused, ", "), fix)
+	}
+	if len(kept) == 0 {
+		return nil, fmt.Errorf("no lane is enabled for %s — %s", names, fix)
+	}
+	return kept, nil
+}
