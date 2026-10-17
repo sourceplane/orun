@@ -101,6 +101,41 @@ The DAG view also annotates this:
 │     └─ apply
 ```
 
+## Opting a lane in to a trigger
+
+A trigger binding with `plan.requireRule: true` plans a lane only if one of the
+lane's profile rules names that trigger. The rule is both the switch and the
+behaviour: it says the lane may run under the trigger, and which profile it runs.
+A lane with no such rule is never planned by that trigger, whatever its default
+profile is.
+
+```yaml
+# a person may run the dev check and deploy to stage; prod deploys on merge only
+subscribe:
+  environments:
+    - name: dev
+      profile: verify
+      profileRules:
+        - profile: verify
+          when: { triggerRef: github-dispatch }
+    - name: stage
+      profile: verify
+      profileRules:
+        - profile: deploy
+          when: { triggerRef: github-push-main }
+        - profile: deploy
+          when: { triggerRef: github-dispatch }
+    - name: prod
+      profile: verify
+      profileRules:
+        - profile: deploy
+          when: { triggerRef: github-push-main }
+```
+
+The catalog records each opted-in lane as `spec.environments.<env>.manual:
+{ trigger, profile }`, so a backend can offer a manual run only where a lane
+opted in. See [Trigger bindings → Opt-in lanes](./trigger-bindings.md#opt-in-lanes-requirerule).
+
 ## Validation rules
 
 | Rule | Reason |

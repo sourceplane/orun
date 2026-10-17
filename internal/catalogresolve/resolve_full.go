@@ -53,6 +53,7 @@ func Resolve(ctx context.Context, opts Options) (*ResolvedCatalog, []ValidationI
 	for i := range dr.Manifests {
 		manifests = append(manifests, authoredToManifest(dr.Manifests[i], namespace, repo))
 	}
+	applyManualLanes(dr.Manifests, manifests, manualTriggers(intent))
 
 	// Stage 6 — inference. Per-manifest, errors are collected as
 	// ErrInferenceFailed and (in default mode) NOT promoted to issues;

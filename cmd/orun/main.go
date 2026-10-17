@@ -208,6 +208,14 @@ func generatePlan() error {
 		}
 		planComponents = selectedComponents
 	}
+	// Opt-in lanes (orun-manual-triggers §4): under a requireRule binding a
+	// lane is planned only if a profile rule naming it chose the lane.
+	if triggerResolution != nil && len(triggerResolution.RequireRuleTriggers) > 0 {
+		instances, err = requireRuleFilter(instances, triggerResolution.RequireRuleTriggers, selectedScope)
+		if err != nil {
+			return err
+		}
+	}
 
 	// Filter by trigger-resolved environments or --env flag
 	if len(triggerActiveEnvs) > 0 {

@@ -238,3 +238,42 @@ func resolveRepo(opts Options) string {
 	}
 	return filepath.Base(opts.WorkspaceRoot)
 }
+
+// applyManualLanes sets spec.environments.<env>.manual on each manifest whose
+// subscription to <env> has a profile rule naming one of the requireRule
+// triggers (orun-manual-triggers §6): the first such trigger by name, with
+// that rule's profile. Only the legacy `subscribe` form carries profile
+// rules; an environment the manifest does not list is left alone.
+func applyManualLanes(authored []AuthoredManifest, manifests []*catalogmodel.ComponentManifest, triggers []string) {
+	if len(triggers) == 0 {
+		return
+	}
+	for i := range authored {
+		sub := authored[i].Component.Spec.Subscribe
+		cm := manifests[i]
+		if sub == nil || cm == nil || cm.Spec.Environments == nil {
+			continue
+		}
+		for _, e := range sub.Environments {
+			env, ok := cm.Spec.Environments[e.Name]
+			if !ok {
+				continue
+			}
+			if m := manualFor(e.ProfileRules, triggers); m != nil {
+				env.Manual = m
+				cm.Spec.Environments[e.Name] = env
+			}
+		}
+	}
+}
+
+func manualFor(rules []catalogmodel.ComponentYAMLProfileRule, triggers []string) *catalogmodel.ComponentManual {
+	for _, t := range triggers {
+		for _, r := range rules {
+			if r.When.TriggerRef == t && r.Profile != "" {
+				return &catalogmodel.ComponentManual{Trigger: t, Profile: r.Profile}
+			}
+		}
+	}
+	return nil
+}

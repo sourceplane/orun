@@ -130,3 +130,16 @@ func autoPushDisabled(intent *model.Intent, matchedNames []string) bool {
 	}
 	return false
 }
+
+// requireRuleTriggers returns the matched bindings that set plan.requireRule,
+// by name.
+func requireRuleTriggers(intent *model.Intent, matchedNames []string) []string {
+	var out []string
+	for _, name := range matchedNames {
+		if intent.Automation.TriggerBindings[name].Plan.RequireRule {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
