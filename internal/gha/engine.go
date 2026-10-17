@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -25,6 +26,7 @@ import (
 	"github.com/sourceplane/orun/internal/cachehome"
 	"github.com/sourceplane/orun/internal/fslock"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/outtee"
 	"github.com/sourceplane/orun/internal/procgroup"
 	"golang.org/x/sync/singleflight"
 )
@@ -904,7 +906,9 @@ func (e *Engine) executeRunStep(ctx ExecContext, state *jobState, scope *scope, 
 	}
 	defer cleanup()
 
-	rawOutput, runErr := runProcess(firstNonEmptyContext(ctx.Context), command, arguments, workingDirectory, commandEnv)
+	live := liveCommands(ctx.Context, state.masks)
+	rawOutput, runErr := runProcessTee(firstNonEmptyContext(ctx.Context), live.sink(), command, arguments, workingDirectory, commandEnv)
+	live.Close()
 	legacy := processWorkflowCommands(rawOutput, state.masks)
 	state.masks = append(state.masks, legacy.Masks...)
 	fileCommands, err := files.Parse()
@@ -1046,7 +1050,9 @@ func (e *Engine) runNodeStage(ctx ExecContext, state *jobState, scope *scope, in
 	}
 
 	entryPath := filepath.Join(invocation.actionDir, filepath.FromSlash(entry))
-	rawOutput, runErr := runProcess(firstNonEmptyContext(ctx.Context), nodePath, []string{entryPath}, invocation.actionDir, env)
+	live := liveCommands(ctx.Context, state.masks)
+	rawOutput, runErr := runProcessTee(firstNonEmptyContext(ctx.Context), live.sink(), nodePath, []string{entryPath}, invocation.actionDir, env)
+	live.Close()
 	legacy := processWorkflowCommands(rawOutput, state.masks)
 	state.masks = append(state.masks, legacy.Masks...)
 	fileCommands, err := files.Parse()
@@ -1191,7 +1197,9 @@ func (e *Engine) runDockerContainer(ctx ExecContext, state *jobState, githubCont
 	command = append(command, image)
 	command = append(command, args...)
 
-	rawOutput, runErr := runProcess(firstNonEmptyContext(ctx.Context), dockerPath, command, state.workspaceDir, nil)
+	live := liveCommands(ctx.Context, state.masks)
+	rawOutput, runErr := runProcessTee(firstNonEmptyContext(ctx.Context), live.sink(), dockerPath, command, state.workspaceDir, nil)
+	live.Close()
 	legacy := processWorkflowCommands(rawOutput, state.masks)
 	state.masks = append(state.masks, legacy.Masks...)
 	fileCommands, err := files.Parse()
@@ -1338,63 +1346,79 @@ func (state *jobState) applyCommandEnv(values map[string]string) {
 	}
 }
 
-func processWorkflowCommands(output string, existingMasks []string) workflowCommandResult {
-	result := workflowCommandResult{
+func newWorkflowCommandResult() workflowCommandResult {
+	return workflowCommandResult{
 		Env:     map[string]string{},
 		Outputs: map[string]string{},
 		State:   map[string]string{},
 		Paths:   []string{},
 		Masks:   []string{},
 	}
+}
+
+func processWorkflowCommands(output string, existingMasks []string) workflowCommandResult {
+	result := newWorkflowCommandResult()
 	masks := append([]string{}, existingMasks...)
 	lines := strings.Split(output, "\n")
 	sanitized := make([]string, 0, len(lines))
 	for _, line := range lines {
-		name, properties, arg, ok := parseWorkflowCommand(line)
-		if ok {
-			rendered := ""
-			switch strings.ToLower(name) {
-			case "add-mask":
-				if arg != "" {
-					result.Masks = append(result.Masks, arg)
-					masks = append(masks, arg)
-				}
-			case "set-output":
-				if outputName := properties["name"]; outputName != "" {
-					result.Outputs[outputName] = arg
-				}
-			case "save-state":
-				if stateName := properties["name"]; stateName != "" {
-					result.State[stateName] = arg
-				}
-			case "add-path":
-				if arg != "" {
-					result.Paths = append(result.Paths, arg)
-				}
-			case "set-env":
-				if envName := properties["name"]; envName != "" {
-					result.Env[envName] = arg
-				}
-			case "notice", "warning", "error":
-				if arg != "" {
-					rendered = fmt.Sprintf("%s: %s", strings.ToLower(name), arg)
-				}
-			case "group", "endgroup", "debug", "echo":
-				// Suppress workflow-command noise from compact console output.
-			default:
-				if arg != "" {
-					rendered = arg
-				}
-			}
-			if rendered != "" {
-				sanitized = append(sanitized, applyMasks(rendered, masks))
-			}
-			continue
+		if out, keep := sanitizeWorkflowLine(line, &masks, &result); keep {
+			sanitized = append(sanitized, out)
 		}
-		sanitized = append(sanitized, applyMasks(line, masks))
 	}
 	result.Output = strings.Join(sanitized, "\n")
 	return result
+}
+
+// sanitizeWorkflowLine is one line of a step's output as the step's log
+// shows it: a workflow command applied to result (and to masks, which then
+// mask every later line) and rendered or dropped, any other line masked.
+// keep is false for a line the log does not show. processWorkflowCommands
+// and the live stream (commandStream, saas-live-runs LR8) share it, so a
+// step's live log and its recorded log are the same text.
+func sanitizeWorkflowLine(line string, masks *[]string, result *workflowCommandResult) (string, bool) {
+	name, properties, arg, ok := parseWorkflowCommand(line)
+	if !ok {
+		return applyMasks(line, *masks), true
+	}
+	rendered := ""
+	switch strings.ToLower(name) {
+	case "add-mask":
+		if arg != "" {
+			result.Masks = append(result.Masks, arg)
+			*masks = append(*masks, arg)
+		}
+	case "set-output":
+		if outputName := properties["name"]; outputName != "" {
+			result.Outputs[outputName] = arg
+		}
+	case "save-state":
+		if stateName := properties["name"]; stateName != "" {
+			result.State[stateName] = arg
+		}
+	case "add-path":
+		if arg != "" {
+			result.Paths = append(result.Paths, arg)
+		}
+	case "set-env":
+		if envName := properties["name"]; envName != "" {
+			result.Env[envName] = arg
+		}
+	case "notice", "warning", "error":
+		if arg != "" {
+			rendered = fmt.Sprintf("%s: %s", strings.ToLower(name), arg)
+		}
+	case "group", "endgroup", "debug", "echo":
+		// Suppress workflow-command noise from compact console output.
+	default:
+		if arg != "" {
+			rendered = arg
+		}
+	}
+	if rendered == "" {
+		return "", false
+	}
+	return applyMasks(rendered, *masks), true
 }
 
 func parseWorkflowCommand(line string) (string, map[string]string, string, bool) {
@@ -1676,6 +1700,12 @@ func containsPlaceholder(args []string) bool {
 }
 
 func runProcess(ctx context.Context, command string, args []string, workingDir string, env map[string]string) (string, error) {
+	return runProcessTee(ctx, nil, command, args, workingDir, env)
+}
+
+// runProcessTee is runProcess with the output also written to live as it
+// arrives (nil: none). The returned output is the same either way.
+func runProcessTee(ctx context.Context, live io.Writer, command string, args []string, workingDir string, env map[string]string) (string, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
 	procgroup.Configure(cmd)
 	if workingDir != "" {
@@ -1685,8 +1715,12 @@ func runProcess(ctx context.Context, command string, args []string, workingDir s
 		cmd.Env = environmentList(env)
 	}
 	var buffer bytes.Buffer
-	cmd.Stdout = &buffer
-	cmd.Stderr = &buffer
+	var capture io.Writer = &buffer
+	if live != nil {
+		capture = outtee.Tee(&buffer, live)
+	}
+	cmd.Stdout = capture
+	cmd.Stderr = capture
 	err := cmd.Run()
 	return strings.TrimRight(buffer.String(), "\n"), err
 }

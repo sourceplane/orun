@@ -17,6 +17,7 @@ import (
 	"github.com/sourceplane/orun/internal/executor"
 	"github.com/sourceplane/orun/internal/materialize"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/outtee"
 	"github.com/sourceplane/orun/internal/redact"
 	"github.com/sourceplane/orun/internal/secretref"
 	"github.com/sourceplane/orun/internal/ui"
@@ -102,6 +103,14 @@ type RunnerHooks struct {
 	// events instead of re-reading the working tree (specs/orun-tui-v2 §8).
 	// Synchronous; implementations must be fast and non-blocking.
 	OnStepStart func(jobID, stepID string, index, total int)
+	// StepOutput is asked, as a step begins executing, for a writer that
+	// reads the step's output as it arrives (saas-live-runs LR8): a remote
+	// log streams it while the step runs. A nil hook or a nil writer streams
+	// nothing. What AfterStepLog receives is unchanged. The executor writes
+	// from its own goroutines, so the writer must be safe for that; secrets
+	// are NOT masked on the way in — the writer redacts before anything
+	// leaves it.
+	StepOutput func(jobID string, step StepRecord) io.Writer
 	// AfterStepTerminal is called when a step reaches a terminal state.
 	// Status is the step-state vocabulary the runner already persists:
 	// "completed" or "failed" (dry-run and resume-skipped steps complete
@@ -925,6 +934,11 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 			}
 		}
 
+		var stepOut io.Writer
+		if r.Hooks != nil && r.Hooks.StepOutput != nil {
+			stepOut = r.Hooks.StepOutput(job.ID, StepRecord{ID: stepID, Index: idx, Total: len(job.Steps)})
+		}
+
 		var output string
 		var stepErr error
 		var ghaOutput strings.Builder // accumulates per-attempt output for GHA
@@ -954,6 +968,9 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				cancel()
 				stepErr = execErr
 				break
+			}
+			if stepOut != nil {
+				execContext.Context = outtee.With(execContext.Context, stepOut)
 			}
 
 			if strings.TrimSpace(step.Workflow) != "" {

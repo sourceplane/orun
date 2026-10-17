@@ -226,7 +226,9 @@ func (r *RemoteStateBackend) UpdateJob(ctx context.Context, runID string, jobID 
 }
 
 func (r *RemoteStateBackend) AppendStepLog(ctx context.Context, runID string, jobID string, content string, step *LogStep) error {
-	if content == "" {
+	// Empty content is nothing to send, except a step's start or end: the
+	// event is the point (saas-live-runs LR8).
+	if content == "" && (step == nil || step.Event == LogStepChunk) {
 		return nil
 	}
 	ulid := wireRunID(runID)
