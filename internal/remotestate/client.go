@@ -482,8 +482,36 @@ type AppendLogStep struct {
 	ExitCode *int `json:"exitCode,omitempty"`
 }
 
+// AppendLogEntry is one chunk of a batched append (orun-cloud saas-live-runs
+// LR8b): stored by the server as its own chunk, with its own seq and step
+// coordinate, exactly as a single append would store it.
+type AppendLogEntry struct {
+	Content string         `json:"content"`
+	Step    *AppendLogStep `json:"step,omitempty"`
+}
+
+// appendLogsRequest is the batched body. It carries no `content`: the server
+// takes one or the other.
+type appendLogsRequest struct {
+	RunnerID string           `json:"runnerId"`
+	Entries  []AppendLogEntry `json:"entries"`
+}
+
+// MaxAppendLogEntries is the most entries one batched append may carry; the
+// server also holds a batch to 1 MiB of content in all.
+const MaxAppendLogEntries = 64
+
+// ErrBatchedAppendUnsupported is a batched append the server did not take as
+// one: a server from before saas-live-runs LR8b requires `content` and answers
+// 422, and one that answers without `count` cannot say what it stored. The
+// caller sends the chunks one by one instead.
+var ErrBatchedAppendUnsupported = errors.New("the server does not take batched log appends")
+
 type appendLogResponse struct {
 	Seq int `json:"seq"`
+	// Count is how many of a batched append's entries were stored, from the
+	// first (LR8b). Absent on a single append.
+	Count *int `json:"count,omitempty"`
 	// StepRejected names the step fields the server could not read. The chunk
 	// still landed — the server stores the bytes and drops only the coordinate,
 	// because losing a runner's log over an optional field is the wrong trade.
@@ -659,6 +687,39 @@ func (c *Client) AppendLog(ctx context.Context, runID, jobID, runnerID, content 
 		return 0, fmt.Errorf("append log %s: %w", jobID, err)
 	}
 	return resp.Seq, nil
+}
+
+// AppendLogs calls POST …/state/runs/{runID}/logs/{jobID} with a job's queued
+// chunks, in order, in one request (orun-cloud saas-live-runs LR8b): at most
+// MaxAppendLogEntries, and at most 1 MiB of content in all. It returns how many
+// the server stored, from the first; fewer than were sent comes with an error
+// and the rest are the caller's to send again. A server that does not take a
+// batch answers ErrBatchedAppendUnsupported, wrapped.
+func (c *Client) AppendLogs(ctx context.Context, runID, jobID, runnerID string, entries []AppendLogEntry) (int, error) {
+	path := c.statePath("/runs/" + urlSegment(runID) + "/logs/" + urlSegment(jobID))
+	var resp appendLogResponse
+	if err := c.doJSONWith(ctx, c.logClient, http.MethodPost, path,
+		appendLogsRequest{RunnerID: runnerID, Entries: entries}, &resp); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && (apiErr.Status == http.StatusUnprocessableEntity || apiErr.Status == http.StatusBadRequest) {
+			return 0, fmt.Errorf("append logs %s: %w (%v)", jobID, ErrBatchedAppendUnsupported, err)
+		}
+		return 0, fmt.Errorf("append logs %s: %w", jobID, err)
+	}
+	if resp.Count == nil {
+		return 0, fmt.Errorf("append logs %s: %w (no count in the answer)", jobID, ErrBatchedAppendUnsupported)
+	}
+	n := *resp.Count
+	if n < 0 {
+		n = 0
+	}
+	if n > len(entries) {
+		n = len(entries)
+	}
+	if n < len(entries) {
+		return n, fmt.Errorf("append logs %s: the server stored %d of %d chunks", jobID, n, len(entries))
+	}
+	return n, nil
 }
 
 // ReadLog calls GET …/state/runs/{runID}/logs/{jobID}?fromSeq= and returns the

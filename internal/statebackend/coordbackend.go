@@ -649,6 +649,19 @@ func (b *CoordBackend) AppendStepLog(ctx context.Context, runID, jobID, content 
 	return b.inner.AppendStepLog(ctx, runID, jobID, content, step)
 }
 
+// Both backends `orun run` builds take a job's queued log chunks in one call;
+// the run command finds that by type assertion, so a backend that lost it
+// would silently fall back to one request per chunk (saas-live-runs LR8b).
+var (
+	_ BatchLogAppender = (*RemoteStateBackend)(nil)
+	_ BatchLogAppender = (*CoordBackend)(nil)
+)
+
+// AppendStepLogs is the inner backend's batched append (saas-live-runs LR8b).
+func (b *CoordBackend) AppendStepLogs(ctx context.Context, runID, jobID string, chunks []LogChunk) (int, error) {
+	return b.inner.AppendStepLogs(ctx, runID, jobID, chunks)
+}
+
 // LoadRunState is the run's state from the view, synced to the server first
 // unless it just was: the whole log on the first read, only the events past
 // the view's last seq after that, and the plan object once per run (never
