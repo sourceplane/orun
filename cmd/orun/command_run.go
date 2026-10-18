@@ -770,7 +770,13 @@ func setupRemoteStateHooks(waitCtx context.Context, r *runner.Runner, plan *mode
 	// the runner (design §7 row 5): chunks accumulate in memory, overflow to a
 	// spill file, and re-drain (oldest-first) on recovery. Undelivered chunks at
 	// run end are surfaced by the caller as a non-zero exit.
-	logPipeline := logpipe.New(backend.AppendStepLog, logpipe.Options{SpillPath: logSpillPath(execID)})
+	pipeOpts := logpipe.Options{SpillPath: logSpillPath(execID)}
+	// saas-live-runs LR8b: a job's queued chunks go in one request, so its log
+	// keeps pace with a step that reports every couple of seconds.
+	if batcher, ok := backend.(statebackend.BatchLogAppender); ok {
+		pipeOpts.Batch = batcher.AppendStepLogs
+	}
+	logPipeline := logpipe.New(backend.AppendStepLog, pipeOpts)
 	if outPipe != nil {
 		*outPipe = logPipeline
 	}

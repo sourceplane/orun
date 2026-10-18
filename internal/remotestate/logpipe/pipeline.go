@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -33,6 +34,12 @@ import (
 // backend's AppendStepLog; logpipe adds the buffering/spill/retry around it.
 type Uploader func(ctx context.Context, runID, jobID, content string, step *statebackend.LogStep) error
 
+// BatchUploader sends a job's queued chunks in one call and returns how many,
+// from the first, it stored (saas-live-runs LR8b): the backend's
+// AppendStepLogs. Fewer than it was given comes with the error that stopped
+// it; the pipeline keeps the rest queued.
+type BatchUploader func(ctx context.Context, runID, jobID string, chunks []statebackend.LogChunk) (int, error)
+
 // Defaults.
 const (
 	defaultMaxMemBytes  = 256 * 1024 // spill to disk once pending memory exceeds this
@@ -41,6 +48,11 @@ const (
 	// maxRetryAfterWait bounds how long a worker honours a server's Retry-After
 	// on the spot before leaving the chunk to the backoff path.
 	maxRetryAfterWait = 10 * time.Second
+	// A batch (LR8b) is at most what one batched append may carry: the server
+	// takes 64 entries and 1 MiB of content; the backend splits further if a
+	// chunk alone is bigger.
+	maxBatchEntries = 64
+	maxBatchBytes   = 768 * 1024
 )
 
 // Options configures a Pipeline. The zero value is usable (memory-only, default
@@ -60,6 +72,13 @@ type Options struct {
 	MaxInFlight int
 	// Now is injectable for tests; defaults to time.Now.
 	Now func() time.Time
+	// Batch, when set, sends a job's queued chunks in one call (saas-live-runs
+	// LR8b). A streaming step queues a start, a chunk every couple of seconds
+	// and an end; one request each falls behind the job, so a job's worker
+	// sends whatever is queued for it as one batch, and the final flush and
+	// the spill drain send one batch per job. Nil keeps one Uploader call per
+	// chunk.
+	Batch BatchUploader
 }
 
 // Report is the outcome at Close. Undrained > 0 means logs could not be
@@ -108,6 +127,7 @@ type jobQueue struct {
 // backoff, no per-job worker runs; the serial recovery drain goes first.
 type Pipeline struct {
 	up          Uploader
+	batch       BatchUploader
 	maxMem      int
 	spill       string
 	backoff     time.Duration
@@ -155,7 +175,7 @@ func New(up Uploader, opts Options) *Pipeline {
 	if now == nil {
 		now = time.Now
 	}
-	p := &Pipeline{up: up, maxMem: maxMem, spill: opts.SpillPath, backoff: backoff, maxInFlight: inFlight, now: now, queues: map[string]*jobQueue{}}
+	p := &Pipeline{up: up, batch: opts.Batch, maxMem: maxMem, spill: opts.SpillPath, backoff: backoff, maxInFlight: inFlight, now: now, queues: map[string]*jobQueue{}}
 	p.idle = sync.NewCond(&p.mu)
 	return p
 }
@@ -230,7 +250,9 @@ func (p *Pipeline) kick(ctx context.Context, now bool) {
 }
 
 // work uploads one job's chunks in order until its queue is empty or an
-// upload fails; a failure leaves the rest queued for the backoff path.
+// upload fails; a failure leaves the rest queued for the backoff path. With a
+// BatchUploader, whatever is queued when the worker looks goes as one batch
+// (LR8b), so a job that fell behind catches up in a round trip or two.
 func (p *Pipeline) work(ctx context.Context, key string) {
 	defer func() {
 		p.mu.Lock()
@@ -247,24 +269,86 @@ func (p *Pipeline) work(ctx context.Context, key string) {
 			p.mu.Unlock()
 			return
 		}
-		e := q.entries[0]
+		batch := p.takeBatch(q.entries)
 		p.mu.Unlock()
 
-		if err := p.upload(ctx, e); err != nil {
-			p.mu.Lock()
+		n, err := p.uploadSome(ctx, batch)
+		p.mu.Lock()
+		p.dropSentLocked(q, batch[:n])
+		if err != nil {
 			p.markFailedLocked(err)
 			p.mu.Unlock()
 			return
 		}
-		p.mu.Lock()
-		if len(q.entries) > 0 && q.entries[0].n == e.n {
-			q.entries = q.entries[1:]
-			p.pendingBytes -= e.size()
-			if p.pendingBytes < 0 {
-				p.pendingBytes = 0
-			}
-		}
 		p.mu.Unlock()
+	}
+}
+
+// takeBatch is the leading entries of a job's queue one call sends: all of
+// them, up to the batch bounds, with a BatchUploader; else the first.
+func (p *Pipeline) takeBatch(entries []entry) []entry {
+	if p.batch == nil || len(entries) == 1 {
+		return append([]entry(nil), entries[0])
+	}
+	n, size := 0, 0
+	for n < len(entries) && n < maxBatchEntries {
+		c := len(entries[n].Content)
+		if n > 0 && size+c > maxBatchBytes {
+			break
+		}
+		size += c
+		n++
+	}
+	return append([]entry(nil), entries[:n]...)
+}
+
+// uploadSome sends one job's entries — one Uploader call for a single entry,
+// one BatchUploader call for several — and returns how many, from the first,
+// were stored. A server's Retry-After is honoured on the spot once, as for a
+// single upload.
+func (p *Pipeline) uploadSome(ctx context.Context, batch []entry) (int, error) {
+	if len(batch) == 1 || p.batch == nil {
+		if err := p.upload(ctx, batch[0]); err != nil {
+			return 0, err
+		}
+		return 1, nil
+	}
+	chunks := make([]statebackend.LogChunk, len(batch))
+	for i, e := range batch {
+		chunks[i] = statebackend.LogChunk{Content: e.Content, Step: e.Step}
+	}
+	runID, jobID := batch[0].RunID, batch[0].JobID
+	n, err := p.batch(ctx, runID, jobID, chunks)
+	if err != nil && n == 0 && waitRetryAfter(ctx, err) {
+		n, err = p.batch(ctx, runID, jobID, chunks)
+	}
+	if n < 0 {
+		n = 0
+	}
+	if n > len(batch) {
+		n = len(batch)
+	}
+	if err == nil && n < len(batch) {
+		// Short of what it was given and no reason why: the rest waits for the
+		// backoff like any failure, rather than a worker asking again at once.
+		err = fmt.Errorf("log batch for %s: %d of %d chunks stored", jobID, n, len(batch))
+	}
+	return n, err
+}
+
+// dropSentLocked removes the entries just stored from the front of their
+// job's queue. Only that job's worker (or Close, with no worker running)
+// takes from the front, so they are still there. mu held.
+func (p *Pipeline) dropSentLocked(q *jobQueue, sent []entry) {
+	for _, e := range sent {
+		if len(q.entries) == 0 || q.entries[0].n != e.n {
+			return
+		}
+		q.entries = q.entries[1:]
+		p.pendingBytes -= e.size()
+	}
+	if p.pendingBytes < 0 {
+		p.pendingBytes = 0
 	}
 }
 
@@ -282,18 +366,29 @@ func (p *Pipeline) upload(ctx context.Context, e entry) error {
 	if err == nil {
 		return nil
 	}
-	var ra retryAfterer
-	if errors.As(err, &ra) {
-		if wait := ra.RetryAfterHint(); wait > 0 && wait <= maxRetryAfterWait {
-			select {
-			case <-ctx.Done():
-				return err
-			case <-time.After(wait):
-			}
-			return p.up(ctx, e.RunID, e.JobID, e.Content, e.Step)
-		}
+	if waitRetryAfter(ctx, err) {
+		return p.up(ctx, e.RunID, e.JobID, e.Content, e.Step)
 	}
 	return err
+}
+
+// waitRetryAfter waits out a short Retry-After the error carries and reports
+// whether the caller should try again now.
+func waitRetryAfter(ctx context.Context, err error) bool {
+	var ra retryAfterer
+	if !errors.As(err, &ra) {
+		return false
+	}
+	wait := ra.RetryAfterHint()
+	if wait <= 0 || wait > maxRetryAfterWait {
+		return false
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(wait):
+		return true
+	}
 }
 
 // recover is the serial drain after a spill: the spill file oldest-first,
@@ -439,30 +534,43 @@ func (p *Pipeline) flushLocked(ctx context.Context) error {
 			return err
 		}
 	}
-	for _, e := range p.pendingInOrderLocked() {
-		if err := p.up(ctx, e.RunID, e.JobID, e.Content, e.Step); err != nil {
-			p.markFailedLocked(err)
-			return err
+	// Each job's queue in order, the jobs in the order they first queued; with
+	// a BatchUploader, a job's queue goes as one batch (LR8b).
+	for _, q := range p.queuesInOrderLocked() {
+		for len(q.entries) > 0 {
+			batch := p.takeBatch(q.entries)
+			n, err := p.uploadSome(ctx, batch)
+			p.dropSentLocked(q, batch[:n])
+			if err != nil {
+				p.markFailedLocked(err)
+				return err
+			}
 		}
-		q := p.queues[queueKey(e.RunID, e.JobID)]
-		if len(q.entries) > 0 && q.entries[0].n == e.n {
-			q.entries = q.entries[1:]
-		}
-		p.pendingBytes -= e.size()
-	}
-	if p.pendingBytes < 0 {
-		p.pendingBytes = 0
 	}
 	return nil
 }
 
-// flushSpill uploads spilled entries oldest-first; on a mid-file failure it
-// rewrites the spill file with the unsent remainder so nothing is lost or
-// reordered. On full success it removes the file. It reports what it sent
-// and whether the file is gone; the caller accounts it under mu (which this
-// never takes, so it runs with or without the lock). Nothing else writes the
-// spill file while it runs: Append does not spill during a drain, and Close
-// waits for it.
+// queuesInOrderLocked is every job queue holding entries, ordered by its
+// oldest entry. mu held.
+func (p *Pipeline) queuesInOrderLocked() []*jobQueue {
+	var qs []*jobQueue
+	for _, q := range p.queues {
+		if len(q.entries) > 0 {
+			qs = append(qs, q)
+		}
+	}
+	sort.Slice(qs, func(i, j int) bool { return qs[i].entries[0].n < qs[j].entries[0].n })
+	return qs
+}
+
+// flushSpill uploads spilled entries, each job's in order (the jobs in the
+// order they first appear), a job's as batches with a BatchUploader (LR8b). On
+// a failure it rewrites the spill file with what was not sent, in its order,
+// so nothing is lost or reordered within a job. On full success it removes the
+// file. It reports what it sent and whether the file is gone; the caller
+// accounts it under mu (which this never takes, so it runs with or without the
+// lock). Nothing else writes the spill file while it runs: Append does not
+// spill during a drain, and Close waits for it.
 func (p *Pipeline) flushSpill(ctx context.Context) (sent, sentBytes int, done bool, err error) {
 	data, err := os.ReadFile(p.spill)
 	if err != nil {
@@ -472,29 +580,61 @@ func (p *Pipeline) flushSpill(ctx context.Context) (sent, sentBytes int, done bo
 		return 0, 0, false, err
 	}
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	consumed := 0 // lines past, whether sent, blank or unparseable
-	var uploadErr error
-	for _, line := range lines {
+	type spilled struct {
+		line int
+		e    entry
+	}
+	var order []string
+	byJob := map[string][]spilled{}
+	parsed := make([]bool, len(lines))
+	for i, line := range lines {
 		if line == "" {
-			consumed++
 			continue
 		}
 		var e entry
 		if json.Unmarshal([]byte(line), &e) != nil {
-			consumed++ // unparseable line: drop it rather than wedge the pipe
-			continue
+			continue // unparseable line: drop it rather than wedge the pipe
 		}
-		if err := p.upload(ctx, e); err != nil {
-			uploadErr = err
-			break
+		parsed[i] = true
+		key := queueKey(e.RunID, e.JobID)
+		if _, seen := byJob[key]; !seen {
+			order = append(order, key)
 		}
-		consumed++
-		sent++
-		sentBytes += e.size()
+		byJob[key] = append(byJob[key], spilled{line: i, e: e})
+	}
+	isSent := make([]bool, len(lines))
+	var uploadErr error
+jobs:
+	for _, key := range order {
+		items := byJob[key]
+		for len(items) > 0 {
+			entries := make([]entry, len(items))
+			for k, it := range items {
+				entries[k] = it.e
+			}
+			batch := p.takeBatch(entries)
+			n, upErr := p.uploadSome(ctx, batch)
+			for k := 0; k < n; k++ {
+				isSent[items[k].line] = true
+				sent++
+				sentBytes += items[k].e.size()
+			}
+			items = items[n:]
+			if upErr != nil {
+				uploadErr = upErr
+				break jobs
+			}
+		}
 	}
 	if uploadErr != nil {
-		// Persist the unsent remainder back to the spill file.
-		remainder := strings.Join(lines[consumed:], "\n")
+		// Persist the unsent remainder back to the spill file, in file order.
+		var rest []string
+		for i, line := range lines {
+			if parsed[i] && !isSent[i] {
+				rest = append(rest, line)
+			}
+		}
+		remainder := strings.Join(rest, "\n")
 		if remainder != "" {
 			remainder += "\n"
 		}
