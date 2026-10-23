@@ -29,6 +29,9 @@ type ActionInput struct {
 	Dir     string
 	BaseDir string
 	Params  map[string]any
+	// Progress receives what the action has so far while it runs (see
+	// actions.Input.Report). Nil means nobody is listening.
+	Progress func(outputs map[string]string)
 }
 
 // ActionRunner executes a registered action by id and returns its outputs.
@@ -40,7 +43,7 @@ type ActionRunner interface {
 type registryRunner struct{}
 
 func (registryRunner) Run(ctx context.Context, id string, in ActionInput) (map[string]string, error) {
-	res, err := actions.Run(ctx, id, actions.Input{Dir: in.Dir, BaseDir: in.BaseDir, Params: in.Params})
+	res, err := actions.Run(ctx, id, actions.Input{Dir: in.Dir, BaseDir: in.BaseDir, Params: in.Params, Progress: in.Progress})
 	if err != nil {
 		return res.Outputs, err
 	}

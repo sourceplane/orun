@@ -28,6 +28,8 @@ func init() {
 				Description: "owner is an organization; consulted only when GitHub cannot say whether owner is an organization or a user"},
 		},
 		Outputs: []string{"fullName", "cloneUrl", "created", "remote"},
+		Did:     repoDid,
+		Facts:   repoFacts,
 	}, runRepoEnsure)
 
 	register(Spec{
@@ -51,6 +53,8 @@ func init() {
 				Description: "how many times a failed run may be re-opened before it is called a regression"},
 		},
 		Outputs: []string{"runId", "conclusion", "url", "resumes", "failedLanes", "failedCount"},
+		Did:     runDid,
+		Facts:   runFacts,
 	}, runRunWatch)
 }
 
@@ -201,6 +205,9 @@ func watchOn(ctx context.Context, c watcher, in Input, sleep func(time.Duration)
 			"runId": fmt.Sprint(current.ID), "conclusion": current.Conclusion,
 			"url": current.HTMLURL, "resumes": fmt.Sprint(resumes),
 		}
+		// Found, and where it stands: a reader can open the run while it is
+		// still deploying, not only once the watch is over.
+		in.Report(out)
 		if current.Status == "completed" {
 			switch current.Conclusion {
 			case "success":

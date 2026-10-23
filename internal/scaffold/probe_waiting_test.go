@@ -112,8 +112,14 @@ func TestTheSweepAsksAProbeOnceAndDoesNotWait(t *testing.T) {
 	if len(c.waits) == 0 || c.waits[0] != 0 {
 		t.Fatalf("the sweep before the first event waited %v — a wait nobody can see", c.waits)
 	}
-	if len(c.saidThen[0]) != 0 {
-		t.Fatalf("the sweep is meant to run before anything is said, but %d event(s) preceded it", len(c.saidThen[0]))
+	// Only the run's own start may precede it (saas-build-panel BV3): the
+	// sweep runs before any phase has said anything.
+	said := c.saidThen[0]
+	if len(said) > 0 && said[0].Phase == "" && said[0].Step == "" && said[0].State == EventStarted {
+		said = said[1:]
+	}
+	if len(said) != 0 {
+		t.Fatalf("the sweep is meant to run before any phase says anything, but %d event(s) preceded it: %+v", len(said), said)
 	}
 }
 

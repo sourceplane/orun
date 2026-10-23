@@ -55,10 +55,25 @@ func newHookLocator(data []byte) *hookLocator {
 	if phases := mapValue(root, "phases"); phases != nil && phases.Kind == yaml.SequenceNode {
 		for pi, phase := range phases.Content {
 			hooks := mapValue(phase, "hooks")
-			if hooks == nil || hooks.Kind != yaml.SequenceNode {
+			if hooks == nil {
 				continue
 			}
-			for hi, hook := range hooks.Content {
+			// The bare list (`post`), or the slot mapping. Indexed in the
+			// order PhaseHooks.All walks — pre, post, await — which is the
+			// index validation names, so a hook in `pre:` or `await:` gets
+			// its line like one in a bare list.
+			var list []*yaml.Node
+			switch hooks.Kind {
+			case yaml.SequenceNode:
+				list = hooks.Content
+			case yaml.MappingNode:
+				for _, slot := range []string{"pre", "post", "await"} {
+					if seq := mapValue(hooks, slot); seq != nil && seq.Kind == yaml.SequenceNode {
+						list = append(list, seq.Content...)
+					}
+				}
+			}
+			for hi, hook := range list {
 				loc.nodes[fmt.Sprintf("phases[%d].hooks[%d]", pi, hi)] = hook
 			}
 		}

@@ -63,6 +63,10 @@ func init() {
 				Description: "milestone only: what finishing it means"},
 		),
 		Outputs: []string{"id", "key", "existed"},
+		// The epic is a fact and a line; a milestone or a task is
+		// bookkeeping, found on the epic, and says nothing.
+		Did:   epicDid,
+		Facts: epicFacts,
 	}, runTaskEnsure)
 
 	register(Spec{
