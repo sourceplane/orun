@@ -34,8 +34,16 @@ type hookRunner struct {
 	// completes. A phase's hooks are its long part — a landing waits on CI, a
 	// watch on a convergence run — and a build that reported nothing until
 	// all of them had finished left its page on one line for an hour.
-	onStart func(h Hook)
-	onDone  func(h Hook)
+	//
+	// onProgress is told what an action has so far while it runs (a landing
+	// has opened its pull request), and onFail what it had when it failed or
+	// parked — so the facts a failing hook made reach the stream BEFORE the
+	// failure does (`facts.go`). params are the hook's rendered `with:`;
+	// argv hooks have neither params nor outputs.
+	onStart    func(h Hook)
+	onProgress func(h Hook, params map[string]any, out map[string]string)
+	onDone     func(h Hook, params map[string]any, out map[string]string)
+	onFail     func(h Hook, params map[string]any, out map[string]string, err error)
 	// inputs are the blueprint's collected input values, SECRET-FREE — a
 	// secret field reads as the literal "<secret>". A hook that needs a
 	// credential gets it from the platform at resolve time (the brokered
@@ -60,7 +68,7 @@ func (hr *hookRunner) run(ctx context.Context, hooks []Hook) ([]string, error) {
 				return ran, err
 			}
 			if hr.onDone != nil {
-				hr.onDone(h)
+				hr.onDone(h, nil, nil)
 			}
 		}
 		ran = append(ran, h.ID)
@@ -93,8 +101,15 @@ func (hr *hookRunner) runAction(ctx context.Context, h Hook) error {
 	if hr.onStart != nil {
 		hr.onStart(h)
 	}
-	out, err := hr.actions.Run(ctx, h.Uses, ActionInput{Dir: hr.outDir, BaseDir: hr.baseDir, Params: params})
+	in := ActionInput{Dir: hr.outDir, BaseDir: hr.baseDir, Params: params}
+	if hr.onProgress != nil {
+		in.Progress = func(out map[string]string) { hr.onProgress(h, params, out) }
+	}
+	out, err := hr.actions.Run(ctx, h.Uses, in)
 	if err != nil {
+		if hr.onFail != nil {
+			hr.onFail(h, params, out, err)
+		}
 		return &HookError{ID: h.ID, Uses: h.Uses, Outputs: out, Err: err}
 	}
 	if hr.outputs == nil {
@@ -102,7 +117,7 @@ func (hr *hookRunner) runAction(ctx context.Context, h Hook) error {
 	}
 	hr.outputs[h.ID] = out
 	if hr.onDone != nil {
-		hr.onDone(h)
+		hr.onDone(h, params, out)
 	}
 	return nil
 }
@@ -137,6 +152,9 @@ func (hr *hookRunner) resolveWith(h Hook) (map[string]any, error) {
 // the literal text `{{ .inputs.repoName }}` into an HTTP request and report it
 // as a failed probe.
 //
+// A MAPPING carries them value by value — a probe's labelled target,
+// `{url: "https://{{ .inputs.reponame }}-console-stage…", env: stage}`.
+//
 // Anything else passes through untouched: only text can carry an expression,
 // and a number that looked like one would be a different bug.
 func (hr *hookRunner) renderValue(where string, value any, scope map[string]any) (any, error) {
@@ -158,6 +176,16 @@ func (hr *hookRunner) renderValue(where string, value any, scope map[string]any)
 				return nil, err
 			}
 			out[i] = r
+		}
+		return out, nil
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, item := range v {
+			r, err := hr.renderValue(where+"."+k, item, scope)
+			if err != nil {
+				return nil, err
+			}
+			out[k] = r
 		}
 		return out, nil
 	default:
@@ -300,10 +328,17 @@ func failureMeta(base map[string]string, err error) (map[string]string, string) 
 	if he.Uses != "" {
 		meta["uses"] = he.Uses
 	}
-	for from, to := range map[string]string{
+	// An output's name is the action's; the meta key says what it IS. A
+	// landing's `url` is its pull request, and calling it `runUrl` put a
+	// pull request behind a reader's "the deploy that failed" link.
+	names := map[string]string{
 		"runId": "runId", "url": "runUrl", "conclusion": "conclusion", "resumes": "resumes",
 		"failedLanes": "failedLanes", "failedCount": "failedCount",
-	} {
+	}
+	if he.Uses == "orun.pr/land@v1" {
+		names = map[string]string{"url": "prUrl", "number": "prNumber"}
+	}
+	for from, to := range names {
 		if v := strings.TrimSpace(he.Outputs[from]); v != "" {
 			meta[to] = v
 		}

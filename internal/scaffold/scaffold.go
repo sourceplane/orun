@@ -88,7 +88,7 @@ type Result struct {
 // modules → place each (template/copy/consume) → gate → write → provenance →
 // hooks. It fails closed: any parse/containment/secret/gate/order failure is an
 // error and no partial tree is presented as success.
-func Run(ctx context.Context, opts Options) (*Result, error) {
+func Run(ctx context.Context, opts Options) (_ *Result, err error) {
 	if opts.Store == nil {
 		return nil, fmt.Errorf("scaffold: object store is required for provenance")
 	}
@@ -96,6 +96,16 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	if err != nil {
 		return nil, notFoundErr("%v", err)
 	}
+	// THE RUN SAYS WHEN IT STARTS AND WHEN IT IS OVER (orun-cloud
+	// saas-build-panel BV3): a run-level `started` first, and a run-level
+	// `done` or `failed` — `phase: ""` and no step — last. A platform that
+	// holds a repository for a build gives it back on that end, and a build
+	// that never said it ended held the repository until its lease ran out.
+	// A PARKED run says nothing: it is waiting, not over, and `--resume`
+	// continues it.
+	em := newEmitter(opts.Events, runIDOf(opts))
+	em.emit(ctx, Event{State: EventStarted, Narration: generatedNarration(bp.Metadata.Name, EventStarted)})
+	defer func() { em.endRun(ctx, bp.Metadata.Name, err) }()
 	values, err := CollectInputs(bp.Inputs, opts.Inputs)
 	if err != nil {
 		return nil, err
@@ -244,7 +254,6 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	// preInstantiate hooks first, then per-phase hooks in phase order, each
 	// phase placed between its pre and post hooks, then the run-level
 	// postInstantiate hooks.
-	em := newEmitter(opts.Events, runIDOf(opts))
 	// Every phase the blueprint declares but this run is not placing is
 	// reported once, so a feed shows the whole shape rather than only the part
 	// that moved.
@@ -289,9 +298,16 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		// so a reader sees the shape of the work while phase one is still on
 		// its way. It runs on a resume too; what it does is idempotent by
 		// identity, so a resumed build finds what the first run made.
+		//
+		// Its steps are reported like a phase's, under `phase: ""`: the epic
+		// it opens is the first thing a reader sees the build make.
 		hr.phase = Phase{}
+		reportSteps(ctx, em, hr, "", func() map[string]any {
+			return narrationScope("", "", hr.inputs, nil, hr.outputs)
+		})
 		preRan, preErr := hr.run(ctx, bp.Hooks.PreInstantiate)
 		if preErr != nil {
+			em.emit(ctx, runStepFailed(preErr))
 			return nil, preErr
 		}
 		hooksRun = append(hooksRun, preRan...)
@@ -315,22 +331,10 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			em.emit(ctx, Event{Phase: phase.Name, State: EventStarted,
 				Narration: narrate(EventStarted, startMeta),
 				Meta:      startMeta})
-			// SAY EACH STEP AS IT HAPPENS. An action with an operator line
-			// (Spec.Doing) is announced as it starts, and a hook's authored
-			// line is emitted the moment that hook completes — "The first
-			// commit is merged into main" while the phase is still converging,
-			// not after it.
-			hr.onStart = func(h Hook) {
-				if spec, ok := actions.Lookup(h.Uses); ok && spec.Doing != "" {
-					em.emit(ctx, Event{Phase: phase.Name, Step: h.ID, State: EventRunning, Narration: spec.Doing})
-				}
-			}
-			hr.onDone = func(h Hook) {
-				scope := narrationScope(phase.Name, title, hr.inputs, startMeta, hr.outputs)
-				if line := hookNarration(phase.Name, h, scope); line != "" {
-					em.emit(ctx, Event{Phase: phase.Name, Step: h.ID, State: EventDone, Narration: line})
-				}
-			}
+			// SAY EACH STEP AS IT HAPPENS (`reportSteps`).
+			reportSteps(ctx, em, hr, phase.Name, func() map[string]any {
+				return narrationScope(phase.Name, title, hr.inputs, startMeta, hr.outputs)
+			})
 			// A waiting event names what it waits on, in the detail and — as
 			// `.meta.waitingOn` — in the line, so the headline says it too.
 			waitingFor := func(step, reason string) Event {
@@ -350,7 +354,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			if deferredProbes[phase.Name] {
 				perr := checkProbes(ctx, plan, opts, phase, runner, false)
 				if pe, waiting := actions.IsPending(perr); waiting {
-					em.emit(ctx, waitingFor(pe.ID, pe.Reason))
+					em.emit(ctx, waitingFor(pendingStep(perr, pe), pe.Reason))
 					perr = checkProbes(ctx, plan, opts, phase, runner, true)
 					if perr == nil {
 						// Came good while waiting. Said, too: the page drew this
@@ -362,7 +366,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 				}
 				if perr != nil {
 					if pe, waiting := actions.IsPending(perr); waiting {
-						parked := &ParkedError{Phase: phase.Name, Hook: pe.ID, Reason: pe.Reason, RetryAfter: pe.RetryAfter}
+						parked := &ParkedError{Phase: phase.Name, Hook: pendingStep(perr, pe), Reason: pe.Reason, RetryAfter: pe.RetryAfter}
 						em.emit(ctx, waitingFor(pe.ID, pe.Reason))
 						writeRunState(opts.OutDir, parked)
 						return nil, parked
@@ -378,8 +382,11 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 				func() error { return place(phaseFiles) }, phase.Hooks.Post)
 			hooksRun = append(hooksRun, ran...)
 			if pe, waiting := actions.IsPending(herr); waiting {
-				parked := &ParkedError{Phase: phase.Name, Hook: pe.ID, Reason: pe.Reason, RetryAfter: pe.RetryAfter}
-				em.emit(ctx, waitingFor(pe.ID, pe.Reason))
+				// The HOOK waits, not the action: `converge`, which a reader
+				// finds in the blueprint, not `orun.run/watch@v1`, which
+				// three hooks in it use.
+				parked := &ParkedError{Phase: phase.Name, Hook: pendingStep(herr, pe), Reason: pe.Reason, RetryAfter: pe.RetryAfter}
+				em.emit(ctx, waitingFor(parked.Hook, pe.Reason))
 				writeRunState(opts.OutDir, parked)
 				return nil, parked
 			}
@@ -422,9 +429,12 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		// there renders empty rather than silently carrying the last phase.
 		hr.phase = Phase{}
 		hr.resetOutputs()
-		hr.onStart, hr.onDone = nil, nil
+		reportSteps(ctx, em, hr, "", func() map[string]any {
+			return narrationScope("", "", hr.inputs, nil, hr.outputs)
+		})
 		ran, herr := hr.run(ctx, bp.Hooks.PostInstantiate)
 		if herr != nil {
+			em.emit(ctx, runStepFailed(herr))
 			return nil, herr
 		}
 		hooksRun = append(hooksRun, ran...)

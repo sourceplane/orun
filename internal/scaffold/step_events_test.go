@@ -123,17 +123,26 @@ func TestAQuickActionSaysNothingAsItStarts(t *testing.T) {
 	}
 }
 
-// Every authored line once, and global hooks under no phase.
+// Every authored line once, and global hooks under no phase: a run-level
+// hook is reported (saas-build-panel BV3), but never as the last phase's.
 func TestEachLineOnceAndGlobalHooksUnderNoPhase(t *testing.T) {
 	_, evs := runSteps(t)
-	merged := 0
+	merged, tail := 0, 0
 	for _, e := range evs {
 		if e.Narration == "PR 3 is merged." {
 			merged++
 		}
 		if e.Step == "tail" || e.Step == "head" {
-			t.Fatalf("a run-level hook was reported under phase %q", e.Phase)
+			if e.Phase != "" {
+				t.Fatalf("a run-level hook was reported under phase %q", e.Phase)
+			}
+			if e.Step == "tail" {
+				tail++
+			}
 		}
+	}
+	if tail == 0 {
+		t.Fatal("the postInstantiate watch was never announced")
 	}
 	if merged != 1 {
 		t.Fatalf("the landing's line was said %d times", merged)

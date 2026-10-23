@@ -46,6 +46,12 @@ type progressSink struct {
 }
 
 func (p *progressSink) Emit(_ context.Context, e scaffold.Event) {
+	if p.mode != progressJSON && runOwnEvent(e) {
+		// The run's own start and end are for a platform holding something
+		// for the build (a repository's lease); a terminal already says
+		// what it is building and how it ended.
+		return
+	}
 	switch p.mode {
 	case progressJSON:
 		enc := json.NewEncoder(p.out)
@@ -54,6 +60,15 @@ func (p *progressSink) Emit(_ context.Context, e scaffold.Event) {
 	case progressPlain:
 		if e.Narration != "" {
 			fmt.Fprintln(p.out, e.Narration)
+		}
+		return
+	}
+
+	// A fact is a record, not a transition: it has no narration, and its
+	// row sits under the line of the step that made it.
+	if e.State == scaffold.EventFact {
+		if row := factRow(e); row != "" {
+			fmt.Fprintf(p.out, "    %s\n", row)
 		}
 		return
 	}
@@ -96,4 +111,71 @@ func factLine(e scaffold.Event) string {
 		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+// factRow is one fact the build made, as a terminal shows it: the
+// repository, the epic, each pull request and where it stands, each address
+// that answered. A fact marked unpinned (a health check, a convergence run)
+// is the build's own record and is not shown.
+func factRow(e scaffold.Event) string {
+	m := e.Meta
+	if m["pin"] == "false" {
+		return ""
+	}
+	value := strings.TrimSpace(m["value"])
+	label := strings.TrimSpace(m["label"])
+	with := func(s string) string {
+		if label != "" {
+			return s + " — " + label
+		}
+		return s
+	}
+	switch m["kind"] {
+	case "repo":
+		if value == "" {
+			return ""
+		}
+		return "repository github.com/" + value
+	case "epic":
+		if value == "" {
+			return ""
+		}
+		return with("epic " + value)
+	case "pr":
+		words := map[string]string{
+			"opening": "opening", "checks": "checks running", "failing": "checks failing",
+			"open": "open", "merged": "merged", "closed": "closed",
+		}[m["status"]]
+		if value == "" {
+			value = "pull request"
+		} else {
+			value = "pull request " + value
+		}
+		if words != "" {
+			value += " · " + words
+		}
+		return with(value)
+	case "url":
+		if value == "" || m["status"] == "unreachable" {
+			return ""
+		}
+		if env := strings.TrimSpace(m["env"]); env != "" {
+			return with(env + " " + value)
+		}
+		return with(value)
+	}
+	return ""
+}
+
+// runOwnEvent reports whether e is the run's own start or end: no phase, no
+// step, started, done or failed.
+func runOwnEvent(e scaffold.Event) bool {
+	if e.Phase != "" || e.Step != "" {
+		return false
+	}
+	switch e.State {
+	case scaffold.EventStarted, scaffold.EventDone, scaffold.EventFailed:
+		return true
+	}
+	return false
 }

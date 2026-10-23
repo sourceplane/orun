@@ -42,6 +42,11 @@ const (
 	EventFailed  EventState = "failed"
 	EventWaiting EventState = "waiting"
 	EventSkipped EventState = "skipped"
+	// EventFact is not a transition. It is a record of something the build
+	// made — the repository, a pull request, a live address — carried in
+	// Meta, with no narration (orun-cloud saas-build-panel BV3; `facts.go`).
+	// A consumer asking where a phase stands reads past it.
+	EventFact EventState = "fact"
 )
 
 // Event is one thing the engine did.
@@ -80,6 +85,9 @@ type emitter struct {
 	runID string
 	seq   int
 	now   func() time.Time
+	// facts is the last word sent per fact key, so a fact is sent only when
+	// it changed (`facts.go`).
+	facts map[string]string
 }
 
 func newEmitter(sink EventSink, runID string) *emitter {
@@ -90,13 +98,18 @@ func (e *emitter) emit(ctx context.Context, ev Event) {
 	if e == nil || e.sink == nil {
 		return
 	}
+	// The sink is called UNDER the lock. Seq is the ordering key, and an
+	// action now reports progress while it runs: two events stamped 4 and 5
+	// on two goroutines could otherwise reach the sink as 5 then 4. Every
+	// sink in this tree only records or queues, so holding the lock across
+	// the call costs nothing and keeps delivery in seq order.
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.seq++
 	ev.Schema = EventSchema
 	ev.RunID = e.runID
 	ev.Seq = e.seq
 	ev.At = e.now().UTC().Format(time.RFC3339)
-	e.mu.Unlock()
 	e.sink.Emit(ctx, ev)
 }
 

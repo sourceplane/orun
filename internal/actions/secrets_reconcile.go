@@ -49,6 +49,7 @@ func init() {
 				Description: "which connection to mint from when the provider has several: its id, display name or account login; empty uses the first active one"},
 		),
 		Outputs: []string{"created", "kept", "connection"},
+		Did:     reconcileDid,
 	}, runIntegrationsReconcile)
 }
 
