@@ -54,7 +54,9 @@ type LandRequest struct {
 	// wait at all — the caller has decided the convergence it watches later is
 	// the real gate.
 	CheckTimeout time.Duration
-	// PollInterval between check polls. Default 15s.
+	// PollInterval between check polls. Zero means the default schedule:
+	// every 5s for a wait's first three minutes (and again after a re-run),
+	// every 15s after that (pollGap).
 	PollInterval time.Duration
 	// CIGrace is how long to wait for any CI to register before concluding
 	// the repository has none. Default 2m, never longer than CheckTimeout.
@@ -187,11 +189,10 @@ func (p *Pen) Land(ctx context.Context, req LandRequest) (*LandResult, error) {
 // only a failure that outlasts the budget refuses the landing. The product's
 // own CI passes `--retry` on a re-run attempt, so the lane re-opens its job.
 func (p *Pen) waitForChecks(ctx context.Context, owner, repo, sha, token string, req LandRequest) (int, int, error) {
-	interval := req.PollInterval
-	if interval <= 0 {
-		interval = 15 * time.Second
-	}
 	start := time.Now()
+	// quickSince is when the current stretch of CI began: the wait's start,
+	// or the last re-run, whose fresh attempt is young CI again.
+	quickSince := start
 	deadline := start.Add(req.CheckTimeout)
 	grace := req.CIGrace
 	if grace <= 0 {
@@ -201,6 +202,10 @@ func (p *Pen) waitForChecks(ctx context.Context, owner, repo, sha, token string,
 		grace = req.CheckTimeout
 	}
 	wait := func(seen int) (int, int, error) {
+		interval := req.PollInterval
+		if interval <= 0 {
+			interval = pollGap(time.Since(quickSince))
+		}
 		select {
 		case <-ctx.Done():
 			return seen, 0, ctx.Err()
@@ -280,6 +285,7 @@ func (p *Pen) waitForChecks(ctx context.Context, owner, repo, sha, token string,
 					reruns++
 					attemptFloor = floor
 					deadline = time.Now().Add(req.CheckTimeout)
+					quickSince = time.Now()
 					if seen, r, werr := wait(len(runs)); werr != nil {
 						return seen, r, werr
 					}
@@ -303,6 +309,28 @@ func (p *Pen) waitForChecks(ctx context.Context, owner, repo, sha, token string,
 			return seen, r, werr
 		}
 	}
+}
+
+// The check-wait's schedule. A bootstrap landing's CI is a `plan` that is
+// green well inside a minute, and at a fixed 15s the merge came up to 15s
+// after it — on every landing of every build. So the wait reads every 5s
+// while CI is young, and every 15s once it has run past three minutes: a
+// product's full CI can take most of an hour, and a quick poll for all of it
+// would spend three times the GitHub requests on a wait nobody is watching
+// closely. A re-run starts the quick stretch again.
+const (
+	quickPollGap    = 5 * time.Second
+	quickPollWindow = 3 * time.Minute
+	slowPollGap     = 15 * time.Second
+)
+
+// pollGap is the pause before the next read, given how long the current
+// stretch of CI has been running.
+func pollGap(elapsed time.Duration) time.Duration {
+	if elapsed < quickPollWindow {
+		return quickPollGap
+	}
+	return slowPollGap
 }
 
 // rerunFailedRuns asks GitHub to re-run the failed jobs of every completed,

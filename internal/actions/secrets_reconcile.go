@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/sourceplane/orun/internal/configsurface"
 )
@@ -31,6 +32,17 @@ import (
 //
 // Re-running a phase must not rotate a credential the rest of the product is
 // already using. An existing key is left exactly as it is.
+//
+// # Several templates, one hook
+//
+// A product usually needs secrets minted under more than one template (a
+// deploy token, a database token, the account id), and `keys` + `template`
+// take one template per hook — so a baseline wrote one hook per template, and
+// each one read the connections and the secrets again before its create, one
+// after another. `secrets: [{key, template}, …]` declares them together: the
+// connections and the existing secrets are read once, and the missing keys are
+// created side by side. `keys` + `template` stay as they were, and their keys
+// are created side by side too.
 func init() {
 	register(Spec{
 		ID:      "orun.integrations/reconcile@v1",
@@ -39,10 +51,12 @@ func init() {
 		Params: append(orgParams(),
 			Param{Name: "provider", Type: ParamString, Required: true,
 				Description: "the connected provider the secrets are minted from"},
-			Param{Name: "keys", Type: ParamStringList, Required: true,
-				Description: "secret keys to ensure"},
-			Param{Name: "template", Type: ParamString, Required: true,
-				Description: "the broker scope template each key is minted under"},
+			Param{Name: "keys", Type: ParamStringList,
+				Description: "secret keys to ensure, all minted under `template`"},
+			Param{Name: "template", Type: ParamString,
+				Description: "the broker scope template each of `keys` is minted under"},
+			Param{Name: "secrets", Type: ParamObjectList,
+				Description: "secrets to ensure, each `{key, template}` — several templates in one hook; the missing ones are created side by side"},
 			Param{Name: "project", Type: ParamString,
 				Description: "project scope; empty uses the workspace scope"},
 			Param{Name: "connection", Type: ParamString,
@@ -50,7 +64,70 @@ func init() {
 		),
 		Outputs: []string{"created", "kept", "connection"},
 		Did:     reconcileDid,
+		Check:   checkReconcileWith,
 	}, runIntegrationsReconcile)
+}
+
+// wantedSecret is one key a reconcile ensures, and the template it is minted
+// under.
+type wantedSecret struct {
+	Key      string
+	Template string
+}
+
+// checkReconcileWith takes one of the two forms, never both: `secrets`, or
+// `keys` with their `template`.
+func checkReconcileWith(with map[string]any) error {
+	hasSecrets := with["secrets"] != nil
+	hasKeys := with["keys"] != nil
+	switch {
+	case hasSecrets && (hasKeys || with["template"] != nil):
+		return fmt.Errorf("takes \"secrets\" or \"keys\" with \"template\", not both")
+	case hasSecrets:
+		items, _ := with["secrets"].([]any)
+		for i, item := range items {
+			m, _ := item.(map[string]any)
+			key, _ := m["key"].(string)
+			template, _ := m["template"].(string)
+			if strings.TrimSpace(key) == "" || strings.TrimSpace(template) == "" {
+				return fmt.Errorf("parameter \"secrets\" item %d needs both \"key\" and \"template\"", i)
+			}
+		}
+		return nil
+	case hasKeys && with["template"] == nil:
+		return fmt.Errorf("requires parameter \"template\" with \"keys\" (the broker scope template they are minted under)")
+	case !hasKeys:
+		return fmt.Errorf("requires parameter \"secrets\" (each {key, template}) or \"keys\" with \"template\"")
+	}
+	return nil
+}
+
+// wantedSecrets is the hook's secrets in declaration order, from either form,
+// each key once (the first declaration wins).
+func wantedSecrets(in Input) []wantedSecret {
+	var out []wantedSecret
+	seen := map[string]bool{}
+	add := func(key, template string) {
+		key, template = strings.TrimSpace(key), strings.TrimSpace(template)
+		if key == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, wantedSecret{Key: key, Template: template})
+	}
+	if items, ok := in.Params["secrets"].([]any); ok {
+		for _, item := range items {
+			m, _ := item.(map[string]any)
+			key, _ := m["key"].(string)
+			template, _ := m["template"].(string)
+			add(key, template)
+		}
+	}
+	template := StringParam(in, "template")
+	for _, key := range StringListParam(in, "keys") {
+		add(key, template)
+	}
+	return out
 }
 
 func runIntegrationsReconcile(ctx context.Context, in Input) (Result, error) {
@@ -58,13 +135,20 @@ func runIntegrationsReconcile(ctx context.Context, in Input) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return reconcileOn(ctx, client, org, in)
+	// The run memo (run_memo.go): a phase's secrets hooks read the same
+	// connections and the same secrets one after another.
+	return reconcileOn(ctx, memoSecretsPlane{secretsPlane: client, memo: buildMemo}, org, in)
+}
+
+// connectionsRefresher reads the connections from the platform rather than
+// from the run memo — what a reconcile reads again before it waits for one.
+type connectionsRefresher interface {
+	RefreshConnections(ctx context.Context, org string) ([]configsurface.Connection, error)
 }
 
 func reconcileOn(ctx context.Context, c secretsPlane, org string, in Input) (Result, error) {
 	provider := strings.ToLower(strings.TrimSpace(StringParam(in, "provider")))
-	template := StringParam(in, "template")
-	keys := StringListParam(in, "keys")
+	wanted := wantedSecrets(in)
 	scope := secretScope(org, in)
 
 	conns, err := c.ListConnections(ctx, org)
@@ -83,37 +167,24 @@ func reconcileOn(ctx context.Context, c secretsPlane, org string, in Input) (Res
 	if ref == "" {
 		ref = boundConnectionFromEnv(provider)
 	}
-	var connectionID string
-	if ref != "" {
-		// MCX-D7: a pinned connection. A name two connections share is
-		// refused rather than guessed; a name nothing matches yet is a wait,
-		// like a provider not connected yet.
-		matched := matchConnectionRef(conns, provider, ref)
-		if len(matched) > 1 {
-			return Result{}, fmt.Errorf("connection %q matches %d %s connections in workspace %s; pin one by id: %s",
-				ref, len(matched), provider, org, connectionCandidates(conns, provider))
-		}
-		if len(matched) == 0 {
-			return Result{Outputs: map[string]string{"created": "", "kept": "", "connection": ""},
-				Pending: &Pending{Reason: fmt.Sprintf("no active %s connection %q in workspace %s (active: %s)",
-					provider, ref, org, connectionCandidates(conns, provider))}}, nil
-		}
-		connectionID = matched[0].ID
-	} else {
-		// Unpinned: the first active connection of the provider, exactly as
-		// before references existed.
-		for _, conn := range conns {
-			if strings.EqualFold(conn.Provider, provider) && strings.EqualFold(conn.Status, "active") {
-				connectionID = conn.ID
-				break
+	connectionID, wait, err := chooseConnection(conns, provider, ref, org)
+	if err != nil {
+		return Result{}, err
+	}
+	// A wait is decided on a fresh read: the connections may be the run's
+	// remembered answer, and a person may have connected the provider since.
+	if wait != nil {
+		if r, ok := c.(connectionsRefresher); ok {
+			if conns, err = r.RefreshConnections(ctx, org); err != nil {
+				return Result{}, fmt.Errorf("reading connections for %s: %w", org, err)
+			}
+			if connectionID, wait, err = chooseConnection(conns, provider, ref, org); err != nil {
+				return Result{}, err
 			}
 		}
 	}
-	if connectionID == "" {
-		// Not connected yet is a wait, not a failure — the same reasoning as
-		// doctor/check. A consent a person has not clicked is not a broken build.
-		return Result{Outputs: map[string]string{"created": "", "kept": "", "connection": ""},
-			Pending: &Pending{Reason: fmt.Sprintf("%s is not connected in workspace %s", provider, org)}}, nil
+	if wait != nil {
+		return Result{Outputs: map[string]string{"created": "", "kept": "", "connection": ""}, Pending: wait}, nil
 	}
 
 	existing, _, err := c.ListSecrets(ctx, scope, true)
@@ -125,34 +196,89 @@ func reconcileOn(ctx context.Context, c secretsPlane, org string, in Input) (Res
 		have[s.SecretKey] = true
 	}
 
-	var created, kept []string
-	for _, key := range keys {
-		key = strings.TrimSpace(key)
-		if key == "" {
+	var kept []string
+	var missing []wantedSecret
+	for _, w := range wanted {
+		if have[w.Key] {
+			kept = append(kept, w.Key)
 			continue
 		}
-		if have[key] {
-			kept = append(kept, key)
-			continue
-		}
-		if _, err := c.CreateSecret(ctx, scope, configsurface.CreateSecretRequest{
-			SecretKey: key,
-			Binding:   &configsurface.SecretBrokerBinding{ConnectionID: connectionID, Template: template},
-		}); err != nil {
-			// Resource-hiding masks authorization as not-found: when the READS
-			// above worked and the WRITE does not, the credential is almost
-			// certainly below the admin floor. Say so, because the raw error
-			// sends people hunting for a missing scope.
-			return Result{Outputs: map[string]string{
-					"created": strings.Join(created, ","), "kept": strings.Join(kept, ","), "connection": connectionID,
-				}}, fmt.Errorf(
-					"creating %s failed. The reads above succeeded, so if this is a not-found, this credential's role is below ADMIN — brokered secret creation requires an admin-role key. Underlying error: %w", key, err)
-		}
-		created = append(created, key)
+		missing = append(missing, w)
 	}
+	created, failedKey, err := createSecrets(ctx, c, scope, connectionID, missing)
 	sort.Strings(created)
 	sort.Strings(kept)
-	return Result{Outputs: map[string]string{
+	outputs := map[string]string{
 		"created": strings.Join(created, ","), "kept": strings.Join(kept, ","), "connection": connectionID,
-	}}, nil
+	}
+	if err != nil {
+		// Resource-hiding masks authorization as not-found: when the READS
+		// above worked and the WRITE does not, the credential is almost
+		// certainly below the admin floor. Say so, because the raw error
+		// sends people hunting for a missing scope.
+		return Result{Outputs: outputs}, fmt.Errorf(
+			"creating %s failed. The reads above succeeded, so if this is a not-found, this credential's role is below ADMIN — brokered secret creation requires an admin-role key. Underlying error: %w", failedKey, err)
+	}
+	return Result{Outputs: outputs}, nil
+}
+
+// chooseConnection is the connection a reconcile mints from: the pinned or
+// bound one (`ref`) when there is one, else the provider's first active
+// connection. No match is a wait, not a failure — a consent a person has not
+// clicked is not a broken build — and a ref two connections share is refused
+// rather than guessed.
+func chooseConnection(conns []configsurface.Connection, provider, ref, org string) (string, *Pending, error) {
+	if ref != "" {
+		// MCX-D7: a pinned connection.
+		matched := matchConnectionRef(conns, provider, ref)
+		if len(matched) > 1 {
+			return "", nil, fmt.Errorf("connection %q matches %d %s connections in workspace %s; pin one by id: %s",
+				ref, len(matched), provider, org, connectionCandidates(conns, provider))
+		}
+		if len(matched) == 0 {
+			return "", &Pending{Reason: fmt.Sprintf("no active %s connection %q in workspace %s (active: %s)",
+				provider, ref, org, connectionCandidates(conns, provider))}, nil
+		}
+		return matched[0].ID, nil, nil
+	}
+	// Unpinned: the first active connection of the provider, exactly as
+	// before references existed.
+	for _, conn := range conns {
+		if strings.EqualFold(conn.Provider, provider) && strings.EqualFold(conn.Status, "active") {
+			return conn.ID, nil, nil
+		}
+	}
+	return "", &Pending{Reason: fmt.Sprintf("%s is not connected in workspace %s", provider, org)}, nil
+}
+
+// createSecrets creates every missing secret side by side: each create is its
+// own round trip to the platform, and nothing about one waits on another. It
+// reports the keys created and, when any create failed, the first failure in
+// declaration order — the others still ran, and a re-run keeps what they made.
+func createSecrets(ctx context.Context, c secretsPlane, scope configsurface.Scope, connectionID string, missing []wantedSecret) ([]string, string, error) {
+	errs := make([]error, len(missing))
+	var wg sync.WaitGroup
+	for i, w := range missing {
+		wg.Add(1)
+		go func(i int, w wantedSecret) {
+			defer wg.Done()
+			_, errs[i] = c.CreateSecret(ctx, scope, configsurface.CreateSecretRequest{
+				SecretKey: w.Key,
+				Binding:   &configsurface.SecretBrokerBinding{ConnectionID: connectionID, Template: w.Template},
+			})
+		}(i, w)
+	}
+	wg.Wait()
+	var created []string
+	failedKey, firstErr := "", error(nil)
+	for i, w := range missing {
+		if errs[i] != nil {
+			if firstErr == nil {
+				failedKey, firstErr = w.Key, errs[i]
+			}
+			continue
+		}
+		created = append(created, w.Key)
+	}
+	return created, failedKey, firstErr
 }

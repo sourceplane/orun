@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,6 +39,16 @@ type fakeConfig struct {
 	// failed every console build.
 	projects   map[string][]string
 	projectErr error
+	// mu guards created: a reconcile creates its missing secrets side by side.
+	mu sync.Mutex
+	// createFails fails the create of one key; inFlight and maxInFlight count
+	// creates running at once, and createDelay holds each open so they can
+	// overlap.
+	createFails map[string]error
+	inFlight    int
+	maxInFlight int
+	createDelay time.Duration
+	secretLists int
 }
 
 func (f *fakeConfig) workspaceProjects() map[string][]string {
@@ -89,6 +100,7 @@ func (f *fakeConfig) ListConnections(context.Context, string) ([]configsurface.C
 }
 
 func (f *fakeConfig) ListSecrets(_ context.Context, scope configsurface.Scope, _ bool) ([]configsurface.SecretMeta, json.RawMessage, error) {
+	f.secretLists++
 	f.lastScope = scope
 	f.scopes = append(f.scopes, scope)
 	if f.secretErr != nil {
@@ -104,9 +116,22 @@ func (f *fakeConfig) ListSecrets(_ context.Context, scope configsurface.Scope, _
 }
 
 func (f *fakeConfig) CreateSecret(_ context.Context, scope configsurface.Scope, req configsurface.CreateSecretRequest) (*configsurface.SecretMeta, error) {
+	f.mu.Lock()
 	f.lastScope = scope
+	f.inFlight++
+	if f.inFlight > f.maxInFlight {
+		f.maxInFlight = f.inFlight
+	}
+	f.mu.Unlock()
+	time.Sleep(f.createDelay)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.inFlight--
 	if f.createErr != nil {
 		return nil, f.createErr
+	}
+	if err := f.createFails[req.SecretKey]; err != nil {
+		return nil, err
 	}
 	f.created = append(f.created, req)
 	return &configsurface.SecretMeta{SecretKey: req.SecretKey}, nil
