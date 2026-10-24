@@ -44,6 +44,11 @@ A `digest:` works for `dir` and `archive` sources too: orun hashes the content a
 Use a digest wherever a silent change would be unacceptable, such as for anything that
 gates production.
 
+You do not have to copy digests by hand. `orun compositions lock --write-intent` resolves
+every source and writes its digest into the matching `digest:` field, leaving the rest of
+`intent.yaml` (comments included) as it was. Review and commit the change like any other
+pin.
+
 ## What every plan records
 
 Whatever the pin strength, every plan records the exact digest each source resolved to,
@@ -52,15 +57,18 @@ diff in a pull request shows when a golden path changed underneath a repository,
 no file in the repository did.
 
 `orun plan` and `orun compositions lock` also write the same record to
-`.orun/compositions.lock.yaml`. orun does not read that file back, and `.orun/` is
-normally not committed, so treat it as a local record, not a pin. The pin is the
+`.orun/compositions.lock.yaml`. The service catalog reads it to link component types to
+the composition that backs them, and `orun compositions lock --check` compares a fresh
+resolution against it, failing when a source without a `digest:` has drifted. `.orun/`
+is normally not committed, so the lock alone is a local record, not a pin: the pin is the
 `digest:` in `intent.yaml`.
 
 ## Upgrading a standard
 
 An upgrade is a pull request that changes a reference:
 
-1. Change the source's `ref` (and its `digest:`, if pinned) to the new version.
+1. Change the source's `ref` to the new version. If it is pinned, run
+   `orun compositions lock --write-intent` to move the `digest:` with it.
 2. Run `orun intent explain` to see which inherited rules changed, if the Stack publishes
    [presets](./intent-presets.md).
 3. Run `orun plan` and review the plan diff: every rendered step, default, and edge the new
