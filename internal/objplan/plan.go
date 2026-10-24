@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/sourceplane/orun/internal/catalogresolve"
 	"github.com/sourceplane/orun/internal/nodes"
@@ -57,7 +58,10 @@ type Input struct {
 	RevisionScope    nodes.RevisionScope
 	JobCount         int
 	LegacyChecksum   string
-	Trigger          nodes.TriggerOccurrence
+	// PlanName is the optional `orun plan --name`; when set the revision is
+	// also published under revisions/by-name/<name>.
+	PlanName string
+	Trigger  nodes.TriggerOccurrence
 }
 
 // RefreshResult carries the ids written by RefreshCatalog.
@@ -164,7 +168,11 @@ func Plan(ctx context.Context, w *nodewriter.Writer, store objectstore.ObjectSto
 	if rev.Scope.Mode == "" {
 		rev.Scope.Mode = "full"
 	}
-	revID, reused, err := w.WriteRevision(ctx, rev, in.PlanBytes, RevisionRefs(in.LegacyChecksum)...)
+	revRefs := RevisionRefs(in.LegacyChecksum)
+	if name := strings.TrimSpace(in.PlanName); name != "" {
+		revRefs = append(revRefs, RevisionNameRef(name))
+	}
+	revID, reused, err := w.WriteRevision(ctx, rev, in.PlanBytes, revRefs...)
 	if err != nil {
 		return res, fmt.Errorf("objplan: write revision: %w", err)
 	}

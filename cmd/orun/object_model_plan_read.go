@@ -20,9 +20,13 @@ import (
 // object_model_plan_read.go resolves and lists plans from the content-addressed
 // revision graph (each PlanRevision tree carries the compiled plan.json), so
 // `orun get`/`describe`/`run` can read plans without the legacy plan store.
-// Plans are published under refs/revisions/latest and revisions/by-hash/<sum>.
+// Plans are published under refs/revisions/latest and revisions/by-hash/<sum>,
+// plus revisions/by-name/<name> when planned with `orun plan --name`.
 
-const revByHashPrefix = "revisions/by-hash/"
+const (
+	revByHashPrefix = "revisions/by-hash/"
+	revByNamePrefix = "revisions/by-name/"
+)
 
 // openObjectStores opens the object + ref stores when the object graph is
 // present on disk, returning the object-model root. ok=false ⇒ this workspace
@@ -43,8 +47,9 @@ func openObjectStores() (store *objectstore.LocalStore, refs *refstore.LocalRefS
 	return s, r, rt, true
 }
 
-// objResolveRevisionRef resolves a plan ref (latest/""/<hash>/<hash-prefix>) to a
-// revision tree id.
+// objResolveRevisionRef resolves a plan ref (latest/""/<hash>/<name>/
+// <hash-prefix>/<revision key>) to a revision tree id. An exact checksum wins
+// over a plan name, and a plan name wins over a checksum prefix.
 func objResolveRevisionRef(store *objectstore.LocalStore, refs *refstore.LocalRefStore, ref string) (objectstore.ObjectID, bool) {
 	ctx := context.Background()
 	ref = strings.TrimSpace(ref)
@@ -56,6 +61,10 @@ func objResolveRevisionRef(store *objectstore.LocalStore, refs *refstore.LocalRe
 	}
 	// Exact by-hash.
 	if r, err := refs.Read(ctx, revByHashPrefix+sanitizeRevSeg(ref)); err == nil {
+		return objectstore.ObjectID(r.Target), true
+	}
+	// Exact plan name (`orun plan --name <name>`).
+	if r, err := refs.Read(ctx, revByNamePrefix+sanitizeRevSeg(ref)); err == nil {
 		return objectstore.ObjectID(r.Target), true
 	}
 	// Prefix scan over by-hash refs (a checksum prefix).

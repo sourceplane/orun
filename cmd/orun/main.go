@@ -596,7 +596,7 @@ func generatePlan() error {
 
 	// Write the content-addressed object graph. Best-effort and isolated under
 	// .orun/objectmodel/.
-	writeObjectModelPlan(absStoreRoot, plan, planBytes, planHash, revKey, trig, catRes)
+	writeObjectModelPlan(absStoreRoot, plan, planBytes, planHash, revKey, planName, trig, catRes)
 
 	// On-success summary block (cli-surface.md §1.1). Printed before the
 	// "components × envs → jobs" detail line so existing tooling that scans for
@@ -684,9 +684,17 @@ func generatePlan() error {
 	}
 	fmt.Println()
 
-	// Actionable hint
-	if numJobs > 0 && planID != "" {
-		fmt.Printf("  %s orun run %s\n\n", ui.Dim(color, "→"), planID)
+	// Actionable hint. A named plan also runs by its name (revisions/by-name);
+	// the sanitized form is the one the ref is stored under and is shell-safe.
+	namedRef := strings.TrimSpace(planName)
+	if numJobs > 0 && (planID != "" || namedRef != "") {
+		if planID != "" {
+			fmt.Printf("  %s orun run %s\n", ui.Dim(color, "→"), planID)
+		}
+		if namedRef != "" {
+			fmt.Printf("  %s orun run %s\n", ui.Dim(color, "→"), sanitizeRevSeg(namedRef))
+		}
+		fmt.Println()
 	}
 
 	// Handle --view flag

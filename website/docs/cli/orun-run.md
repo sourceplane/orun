@@ -18,7 +18,7 @@ orun run [component|planhash]
 The optional positional argument controls what gets run:
 
 - **component name** — generates a fresh plan scoped to that component and runs it immediately
-- **plan revision** — `latest`, a revision key, or a checksum prefix: runs that compiled plan from the object model
+- **plan revision** — `latest`, a checksum or checksum prefix, a name given to `orun plan --name`, or a revision key: runs that compiled plan from the object model
 - _(omitted)_ — generates a fresh plan from the current intent and runs it
 
 Every execution is recorded as an immutable node in the object model under its
@@ -352,12 +352,15 @@ The positional argument is resolved in this order:
 | Argument | Resolves to |
 | --- | --- |
 | _(omitted)_ | Generates a fresh plan from `intent.yaml`, then runs it |
-| `latest` or `rev-<key>` | That plan revision in the object model |
-| `a1b2c3` | The plan whose checksum starts with `a1b2c3` |
+| `latest` | The most recently generated plan |
+| `sha256-9dd5…` (full plan hash) | The plan with that exact hash |
+| `release-candidate` | The newest plan generated with `orun plan --name release-candidate` |
+| `275f4d8820bf` or `a1b2c3` | The plan whose checksum starts with that hex — including the 12-character plan id `orun plan` prints |
+| `rev-<key>` | The plan revision with that revision key |
 | `./plan.json` | Explicit file path (when it exists on disk) |
 | `network-foundation` | Generates a fresh plan scoped to that component, then runs it (when it does not resolve to a plan revision) |
 
-A name given to `orun plan --name` is not a run reference; run a plan by its checksum or `latest`.
+An exact plan hash wins over a plan name, and a plan name wins over a checksum prefix. A name that matches no plan falls through to the component row.
 
 The legacy `--plan` flag accepts the same values and is still supported, but the positional form is preferred.
 

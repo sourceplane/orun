@@ -91,6 +91,9 @@ func TestSourceAndCatalogRefs(t *testing.T) {
 	if len(byHash) != 2 || byHash[1] != "revisions/by-hash/sha256-abc" {
 		t.Fatalf("revision by-hash refs = %v", byHash)
 	}
+	if got := RevisionNameRef("qs named"); got != "revisions/by-name/qs-named" {
+		t.Fatalf("revision by-name ref = %q", got)
+	}
 }
 
 func TestSanitizeRefSeg(t *testing.T) {

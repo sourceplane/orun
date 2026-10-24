@@ -83,6 +83,12 @@ func RevisionRefs(legacyChecksum string) []string {
 	return refs
 }
 
+// RevisionNameRef returns the ref a revision is additionally published under
+// when `orun plan --name <name>` names it: revisions/by-name/<name>. Like
+// revisions/latest it moves on every plan with that name, so `orun run <name>`
+// always runs the newest plan carrying it.
+func RevisionNameRef(name string) string { return "revisions/by-name/" + sanitizeRefSeg(name) }
+
 // TriggerRefs returns the ref names a trigger event is published under, keyed by
 // the trigger name.
 func TriggerRefs(triggerName string) []string {

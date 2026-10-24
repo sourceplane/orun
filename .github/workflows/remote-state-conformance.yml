@@ -92,9 +92,13 @@ jobs:
         id: plan
         working-directory: examples/remote-state-matrix
         run: |
-          orun plan --name remote-state-e2e --all
-          plan_id="$(orun get plans -o json \
-            | jq -r '.[] | select(.Name == "remote-state-e2e") | .Checksum')"
+          # The plan is published under its name, so later jobs run it as
+          # `orun run remote-state-e2e`. The -o copy only supplies the checksum
+          # that keeps run_id unique.
+          orun plan --name remote-state-e2e --all -o "${RUNNER_TEMP}/remote-state-e2e.json"
+          plan_id="$(jq -r '.metadata.checksum // empty | sub("^sha256-"; "") | .[0:12]' \
+            "${RUNNER_TEMP}/remote-state-e2e.json")"
+          test -n "${plan_id}"
           run_id="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${plan_id}"
           echo "plan_id=${plan_id}" >> "${GITHUB_OUTPUT}"
           echo "run_id=${run_id}"   >> "${GITHUB_OUTPUT}"
@@ -103,7 +107,7 @@ jobs:
         id: matrix
         working-directory: examples/remote-state-matrix
         run: |
-          jobs="$(orun get jobs --plan '${{ steps.plan.outputs.plan_id }}' --all -o json \
+          jobs="$(orun get jobs --plan remote-state-e2e --all -o json \
             | jq -c '[.[] | {job: .id, env: .environment, component: .component}]')"
           first_job="$(printf '%s' "${jobs}" | jq -r '.[0].job')"
           # Append a duplicate entry — proves idempotent claim / already-complete behavior.
@@ -117,7 +121,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: orun-remote-state-plan
-          path: examples/remote-state-matrix/.orun/plans/
+          path: examples/remote-state-matrix/.orun/objectmodel/
+          include-hidden-files: true
           if-no-files-found: error
 
   run-one-job-per-runner:
@@ -148,12 +153,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: orun-remote-state-plan
-          path: examples/remote-state-matrix/.orun/plans/
+          path: examples/remote-state-matrix/.orun/objectmodel/
 
       - name: Run selected job through remote state
         working-directory: examples/remote-state-matrix
         run: |
-          orun run '${{ needs.plan.outputs.plan_id }}' \
+          orun run remote-state-e2e \
             --job '${{ matrix.job }}' \
             --remote-state \
             --backend-url "${ORUN_BACKEND_URL}" \
@@ -188,12 +193,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: orun-remote-state-plan
-          path: examples/remote-state-matrix/.orun/plans/
+          path: examples/remote-state-matrix/.orun/objectmodel/
 
       - name: Run environment slice through remote state
         working-directory: examples/remote-state-matrix
         run: |
-          orun run '${{ needs.plan.outputs.plan_id }}' \
+          orun run remote-state-e2e \
             --env '${{ matrix.env_name }}' \
             --remote-state \
             --backend-url "${ORUN_BACKEND_URL}" \
@@ -222,7 +227,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: orun-remote-state-plan
-          path: examples/remote-state-matrix/.orun/plans/
+          path: examples/remote-state-matrix/.orun/objectmodel/
 
       - name: Verify remote status
         working-directory: examples/remote-state-matrix
@@ -258,14 +263,7 @@ jobs:
           echo "${status_json}" | jq .
 
           # Get the expected job IDs from the compiled plan.
-          expected_jobs="$(orun get jobs \
-            --plan "${ORUN_EXEC_ID#*-}" \
-            --all -o json 2>/dev/null \
-            | jq -r '.[].id' || \
-          orun get plans -o json \
-            | jq -r '.[] | select(.Name == "remote-state-e2e") | .Checksum' \
-            | head -1 \
-            | xargs -I{} orun get jobs --plan {} --all -o json \
+          expected_jobs="$(orun get jobs --plan remote-state-e2e --all -o json \
             | jq -r '.[].id')"
 
           any_fail=0

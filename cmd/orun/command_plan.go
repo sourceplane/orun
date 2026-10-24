@@ -85,7 +85,7 @@ func registerPlanCommand(root *cobra.Command) {
 	planCmd.Flags().StringVarP(&environment, "env", "e", "", "Filter by environment (comma-separated)")
 	planCmd.Flags().BoolVar(&allEnvs, "all-envs", false, "Plan all environments explicitly (mutually exclusive with --env)")
 	planCmd.Flags().StringArrayVar(&planComponents, "component", nil, "Filter by component (repeatable)")
-	planCmd.Flags().StringVar(&planName, "name", "", "Name shown in the plan summary (run a plan by its checksum or \"latest\")")
+	planCmd.Flags().StringVar(&planName, "name", "", "Name the plan so \"orun run <name>\" runs it")
 	planCmd.Flags().StringVarP(&viewPlan, "view", "v", "", "View plan (dag/dag:long/dependencies/lanes/component=NAME)")
 	planCmd.Flags().BoolVar(&strictLanes, "strict-lanes", false, "Fail the plan when lanes form a cycle instead of splitting them (execution.lanes.onCycle: reject)")
 	planCmd.Flags().StringVar(&weightsFlag, "weights", "", "Packing weights for auto-mode lanes: 'history' (the median duration of each job over the last sealed runs) or a JSON file of job id to seconds (as --write-weights writes). Unset: the templates' estimatedSeconds, else every job weighs one")
