@@ -108,7 +108,7 @@ func (o *OIDCTokenSource) Token(ctx context.Context) (string, error) {
 		return ghJWT, nil
 	}
 
-	exch, err := o.exchange(ctx, ghJWT)
+	exch, err := retryTransient(ctx, o.retryWaits(), func() (*oidcExchangeResponse, error) { return o.exchangeOnce(ctx, ghJWT) })
 	if err != nil {
 		return "", err
 	}
@@ -140,9 +140,11 @@ type oidcExchangeResponse struct {
 	ProjectID   string `json:"projectId"`
 }
 
-// exchange POSTs the GitHub OIDC token to /v1/auth/oidc/exchange and returns the
-// minted workflow token + resolved scope.
-func (o *OIDCTokenSource) exchange(ctx context.Context, ghJWT string) (*oidcExchangeResponse, error) {
+// exchangeOnce POSTs the GitHub OIDC token to /v1/auth/oidc/exchange and
+// returns the minted workflow token + resolved scope. A request that got no
+// answer, or a 429/5xx, is errRetryable and Token retries it (v2.86.3): a lane
+// whose exchange timed out failed before it claimed a job.
+func (o *OIDCTokenSource) exchangeOnce(ctx context.Context, ghJWT string) (*oidcExchangeResponse, error) {
 	body, _ := json.Marshal(struct {
 		Token string `json:"token"`
 		Org   string `json:"org,omitempty"`
@@ -158,15 +160,24 @@ func (o *OIDCTokenSource) exchange(ctx context.Context, ghJWT string) (*oidcExch
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("requesting OIDC exchange: %w", err)
+		err = fmt.Errorf("requesting OIDC exchange: %w", err)
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		return nil, errRetryable{err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		data, _ := io.ReadAll(resp.Body)
 		if apiErr := decodeErrorEnvelope(data, resp.StatusCode); apiErr != nil {
-			return nil, fmt.Errorf("OIDC exchange rejected: %w", apiErr)
+			err = fmt.Errorf("OIDC exchange rejected: %w", apiErr)
+		} else {
+			err = fmt.Errorf("OIDC exchange returned status %d", resp.StatusCode)
 		}
-		return nil, fmt.Errorf("OIDC exchange returned status %d", resp.StatusCode)
+		if retryableStatus(resp.StatusCode) {
+			return nil, errRetryable{err}
+		}
+		return nil, err
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -182,43 +193,59 @@ func (o *OIDCTokenSource) exchange(ctx context.Context, ghJWT string) (*oidcExch
 	return &out, nil
 }
 
-// defaultTokenRetryWaits: up to four attempts at GitHub's token endpoint,
-// 1 s, 2 s and 4 s apart. On a spot runner the endpoint has gone more than the
-// client's 10 s without answering once (orun-cloud saas-live-runs LR13), and a
+// defaultTokenRetryWaits: up to four attempts at each of the two requests that
+// get a CI run its credentials (GitHub's token endpoint, then Orunbase's
+// exchange), 1 s, 2 s and 4 s apart. On a spot runner each has gone more than
+// the client's 10 s without answering (orun-cloud saas-live-runs LR13), and a
 // lane that gives up there fails before it claims a job.
 var defaultTokenRetryWaits = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
 
-// errTokenRetryable marks a token request failure worth another attempt: no
-// answer (a timeout, a reset connection) or GitHub answering 429 or 5xx.
-type errTokenRetryable struct{ err error }
+// errRetryable marks a request failure worth another attempt: no answer (a
+// timeout, a reset connection) or a 429 or 5xx.
+type errRetryable struct{ err error }
 
-func (e errTokenRetryable) Error() string { return e.err.Error() }
-func (e errTokenRetryable) Unwrap() error { return e.err }
+func (e errRetryable) Error() string { return e.err.Error() }
+func (e errRetryable) Unwrap() error { return e.err }
+
+func retryableStatus(code int) bool {
+	return code == http.StatusTooManyRequests || code >= 500
+}
+
+func (o *OIDCTokenSource) retryWaits() []time.Duration {
+	if o.tokenRetryWaits != nil {
+		return o.tokenRetryWaits
+	}
+	return defaultTokenRetryWaits
+}
+
+// retryTransient calls once until it succeeds, fails with an error that is not
+// errRetryable, or has been tried len(waits)+1 times, pausing waits[i] before
+// attempt i+2. An error after retries names the attempts; the pauses end when
+// ctx does.
+func retryTransient[T any](ctx context.Context, waits []time.Duration, once func() (T, error)) (T, error) {
+	for attempt := 0; ; attempt++ {
+		out, err := once()
+		var retryable errRetryable
+		if err == nil || !errors.As(err, &retryable) || attempt >= len(waits) {
+			if err != nil && attempt > 0 {
+				return out, fmt.Errorf("%w (after %d attempts)", err, attempt+1)
+			}
+			return out, err
+		}
+		select {
+		case <-ctx.Done():
+			return out, fmt.Errorf("%w (gave up retrying: %v)", err, ctx.Err())
+		case <-time.After(waits[attempt]):
+		}
+	}
+}
 
 // githubOIDCToken fetches a fresh OIDC token from the GitHub Actions token
 // endpoint for the configured audience, retrying a request that got no answer
 // or a 429/5xx. A missing environment, a malformed answer or any other status
-// fails at once: retrying cannot change them.
+// fail at once: retrying cannot change them.
 func (o *OIDCTokenSource) githubOIDCToken(ctx context.Context) (string, error) {
-	waits := o.tokenRetryWaits
-	if waits == nil {
-		waits = defaultTokenRetryWaits
-	}
-	for attempt := 0; ; attempt++ {
-		token, err := o.githubOIDCTokenOnce(ctx)
-		var retryable errTokenRetryable
-		if err == nil || !errors.As(err, &retryable) || attempt >= len(waits) {
-			if err != nil && attempt > 0 {
-				return "", fmt.Errorf("%w (after %d attempts)", err, attempt+1)
-			}
-			return token, err
-		}
-		select {
-		case <-ctx.Done():
-			return "", fmt.Errorf("%w (gave up retrying: %v)", err, ctx.Err())
-		case <-time.After(waits[attempt]):
-		}
-	}
+	return retryTransient(ctx, o.retryWaits(), func() (string, error) { return o.githubOIDCTokenOnce(ctx) })
 }
 
 // githubOIDCTokenOnce is one request to the GitHub Actions token endpoint.
@@ -252,14 +279,14 @@ func (o *OIDCTokenSource) githubOIDCTokenOnce(ctx context.Context) (string, erro
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("requesting OIDC token: %w", err)
 		}
-		return "", errTokenRetryable{fmt.Errorf("requesting OIDC token: %w", err)}
+		return "", errRetryable{fmt.Errorf("requesting OIDC token: %w", err)}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		err := fmt.Errorf("OIDC token request returned status %d", resp.StatusCode)
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-			return "", errTokenRetryable{err}
+		if retryableStatus(resp.StatusCode) {
+			return "", errRetryable{err}
 		}
 		return "", err
 	}
