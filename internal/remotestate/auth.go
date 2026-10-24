@@ -55,6 +55,9 @@ type OIDCTokenSource struct {
 	// sent to disambiguate a repo linked across multiple orgs.
 	Org        string
 	httpClient *http.Client
+	// tokenRetryWaits are the pauses between attempts at GitHub's token
+	// endpoint (nil: defaultTokenRetryWaits). Tests shorten them.
+	tokenRetryWaits []time.Duration
 
 	mu        sync.Mutex
 	token     string
@@ -179,9 +182,47 @@ func (o *OIDCTokenSource) exchange(ctx context.Context, ghJWT string) (*oidcExch
 	return &out, nil
 }
 
+// defaultTokenRetryWaits: up to four attempts at GitHub's token endpoint,
+// 1 s, 2 s and 4 s apart. On a spot runner the endpoint has gone more than the
+// client's 10 s without answering once (orun-cloud saas-live-runs LR13), and a
+// lane that gives up there fails before it claims a job.
+var defaultTokenRetryWaits = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+
+// errTokenRetryable marks a token request failure worth another attempt: no
+// answer (a timeout, a reset connection) or GitHub answering 429 or 5xx.
+type errTokenRetryable struct{ err error }
+
+func (e errTokenRetryable) Error() string { return e.err.Error() }
+func (e errTokenRetryable) Unwrap() error { return e.err }
+
 // githubOIDCToken fetches a fresh OIDC token from the GitHub Actions token
-// endpoint for the configured audience.
+// endpoint for the configured audience, retrying a request that got no answer
+// or a 429/5xx. A missing environment, a malformed answer or any other status
+// fails at once: retrying cannot change them.
 func (o *OIDCTokenSource) githubOIDCToken(ctx context.Context) (string, error) {
+	waits := o.tokenRetryWaits
+	if waits == nil {
+		waits = defaultTokenRetryWaits
+	}
+	for attempt := 0; ; attempt++ {
+		token, err := o.githubOIDCTokenOnce(ctx)
+		var retryable errTokenRetryable
+		if err == nil || !errors.As(err, &retryable) || attempt >= len(waits) {
+			if err != nil && attempt > 0 {
+				return "", fmt.Errorf("%w (after %d attempts)", err, attempt+1)
+			}
+			return token, err
+		}
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("%w (gave up retrying: %v)", err, ctx.Err())
+		case <-time.After(waits[attempt]):
+		}
+	}
+}
+
+// githubOIDCTokenOnce is one request to the GitHub Actions token endpoint.
+func (o *OIDCTokenSource) githubOIDCTokenOnce(ctx context.Context) (string, error) {
 	requestURL := os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL")
 	requestToken := os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
 	if requestURL == "" || requestToken == "" {
@@ -208,12 +249,19 @@ func (o *OIDCTokenSource) githubOIDCToken(ctx context.Context) (string, error) {
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("requesting OIDC token: %w", err)
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("requesting OIDC token: %w", err)
+		}
+		return "", errTokenRetryable{fmt.Errorf("requesting OIDC token: %w", err)}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("OIDC token request returned status %d", resp.StatusCode)
+		err := fmt.Errorf("OIDC token request returned status %d", resp.StatusCode)
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			return "", errTokenRetryable{err}
+		}
+		return "", err
 	}
 
 	var result struct {
