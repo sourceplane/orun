@@ -594,3 +594,23 @@ func TestLandStillNamesTheFailureWhenTheRerunIsRefused(t *testing.T) {
 		t.Fatalf("a refused re-run counted: %+v", res)
 	}
 }
+
+// A bootstrap landing's CI is young CI: read every 5s so the merge follows
+// the green within seconds, then every 15s once a wait has gone long.
+func TestPollGapIsQuickWhileCIIsYoung(t *testing.T) {
+	cases := []struct {
+		elapsed time.Duration
+		want    time.Duration
+	}{
+		{0, 5 * time.Second},
+		{30 * time.Second, 5 * time.Second},
+		{3*time.Minute - time.Second, 5 * time.Second},
+		{3 * time.Minute, 15 * time.Second},
+		{40 * time.Minute, 15 * time.Second},
+	}
+	for _, c := range cases {
+		if got := pollGap(c.elapsed); got != c.want {
+			t.Errorf("pollGap(%s) = %s, want %s", c.elapsed, got, c.want)
+		}
+	}
+}

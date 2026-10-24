@@ -98,7 +98,10 @@ func runTaskEnsure(ctx context.Context, in Input) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return ensureOn(ctx, client, org, in)
+	// The run memo (run_memo.go): a bootstrap's epic, milestone and task hooks
+	// re-read the same epic and the same task list, and re-send a contract the
+	// run already attached.
+	return ensureOn(ctx, memoTaskPlane{taskPlane: client, memo: buildMemo}, org, in)
 }
 
 func ensureOn(ctx context.Context, client taskPlane, org string, in Input) (Result, error) {
