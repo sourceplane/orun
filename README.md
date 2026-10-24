@@ -47,8 +47,27 @@ intent.
   intent, rules          schemas, plan.json    shell · docker · gha   catalog · cockpit
 ```
 
+## See it work
+
+<p align="center">
+  <img src="assets/orun-demo.svg" alt="orun new builds acme-shop from a SaaS baseline and verifies it; cd acme-shop; orun plan shows staging and production lanes for the api and web services; orun run executes all four jobs locally with live progress." width="100%">
+</p>
+
+A product built from a baseline, planned, and run, in thirty seconds:
+`orun new` places the baseline's golden paths and services and checks that
+the result plans; `orun plan` shows what will run in each environment and in
+what order; `orun run` executes it. Every command is real. Try it yourself:
+the baseline is [`examples/saas-baseline`](examples/saas-baseline/).
+
+```bash
+cd examples
+orun new --blueprint saas-baseline/blueprint.yaml --out acme-shop --set name=acme-shop
+cd acme-shop && orun plan
+```
+
 ## Table of contents
 
+- [See it work](#see-it-work)
 - [Why orun](#why-orun)
 - [What you get](#what-you-get)
 - [Installation](#installation)

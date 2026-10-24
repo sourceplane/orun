@@ -1,0 +1,17 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ComponentSchema
+metadata:
+  name: node-service-component
+spec:
+  type: node-service
+  schema:
+    $schema: http://json-schema.org/draft-07/schema#
+    type: object
+    required: [name, type, inputs]
+    properties:
+      inputs:
+        type: object
+        required: [port]
+        properties:
+          port: { type: integer }
+        additionalProperties: false

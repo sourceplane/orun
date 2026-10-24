@@ -24,3 +24,17 @@ Run the sample from the repository root:
 ```
 
 The last command exercises a real packaged composition that installs Terraform through `hashicorp/setup-terraform` and then validates the local stack from the embedded example repo.
+
+## saas-baseline: build, plan, and run a product
+
+[`saas-baseline/`](saas-baseline/) is the baseline from the main README's
+recording. It is self-contained and separate from the sample above. Build a
+product from it, then plan and run it locally:
+
+```bash
+cd examples
+orun new --blueprint saas-baseline/blueprint.yaml --out acme-shop --set name=acme-shop
+cd acme-shop && orun plan
+```
+
+See [`saas-baseline/README.md`](saas-baseline/README.md).

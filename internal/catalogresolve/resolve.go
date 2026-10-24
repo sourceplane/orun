@@ -56,7 +56,6 @@ func DiscoverAndLoad(ctx context.Context, opts Options) (DiscoveryResult, error)
 	}
 
 	var (
-		excludes []string
 		defaults *intentCatalogDefaults
 		intentOK string
 	)
@@ -64,13 +63,14 @@ func DiscoverAndLoad(ctx context.Context, opts Options) (DiscoveryResult, error)
 		intentOK = intentRel
 		if intent.Catalog != nil {
 			defaults = intent.Catalog.Defaults
-			if intent.Catalog.Discovery != nil {
-				excludes = intent.Catalog.Discovery.Exclude
-			}
 		}
 	}
 
-	rels, err := discover(ctx, root, excludes)
+	scope, err := discoveryScopeFor(root, intentAbs, intentRel, intent)
+	if err != nil {
+		return DiscoveryResult{}, err
+	}
+	rels, err := discover(ctx, root, scope)
 	if err != nil {
 		return DiscoveryResult{}, err
 	}

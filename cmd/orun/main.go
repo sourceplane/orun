@@ -15,6 +15,7 @@ import (
 	"github.com/sourceplane/orun/internal/expand"
 	"github.com/sourceplane/orun/internal/git"
 	"github.com/sourceplane/orun/internal/loader"
+	"github.com/sourceplane/orun/internal/lanes"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/normalize"
 	"github.com/sourceplane/orun/internal/objrun"
@@ -29,6 +30,7 @@ import (
 )
 
 func generatePlan() error {
+	planAutoPushDisabled = false
 	if debugMode {
 		fmt.Println("□ Loading intent...")
 	}
@@ -109,6 +111,12 @@ func generatePlan() error {
 	if errs := trigger.ValidateDependencyRules(intent); len(errs) > 0 {
 		return trigger.FormatErrors(errs)
 	}
+	if errs := trigger.ValidateLanes(intent); len(errs) > 0 {
+		return trigger.FormatErrors(errs)
+	}
+	if errs := trigger.ValidatePlanOptions(intent); len(errs) > 0 {
+		return trigger.FormatErrors(errs)
+	}
 
 	// Resolve trigger context and determine active environments
 	triggerCtx, err := buildTriggerContext()
@@ -137,7 +145,7 @@ func generatePlan() error {
 			// rather than failing the pipeline.
 			if triggerCtx.Mode == "event-file" && errors.Is(err, trigger.ErrNoTriggerMatch) {
 				fmt.Fprintf(os.Stderr, "○ %v — nothing to plan\n", err)
-				writeEmptyGithubMatrix()
+				emitGithubOutput(nil, "", "")
 				return nil
 			}
 			return err
@@ -159,6 +167,27 @@ func generatePlan() error {
 				headRef = triggerResolution.Head
 			}
 		}
+		planAutoPushDisabled = triggerResolution.AutoPushDisabled
+	}
+
+	// A selected scope (orun-manual-triggers §3): the trigger's selection is
+	// the whole plan. There is no diff to read, so --changed and --files do
+	// not apply.
+	selectedScope := triggerResolution != nil && triggerResolution.PlanScope == model.PlanScopeSelected
+	var selectedComponents []string
+	if selectedScope {
+		selectedComponents, err = selectedComponentsFor(triggerResolution, planComponents)
+		if err != nil {
+			return err
+		}
+		if changedOnly {
+			fmt.Fprintln(os.Stderr, "○ --changed ignored: the trigger selects this plan's components")
+			changedOnly = false
+		}
+		if len(changedFiles) > 0 {
+			fmt.Fprintln(os.Stderr, "○ --files ignored: the trigger selects this plan's components")
+			changedFiles = nil
+		}
 	}
 
 	if debugMode {
@@ -171,6 +200,21 @@ func generatePlan() error {
 	instances, err := expander.Expand()
 	if err != nil {
 		return fmt.Errorf("failed to expand intent: %w", err)
+	}
+	if selectedScope {
+		instances, err = selectInstances(instances, selectedComponents, triggerActiveEnvs)
+		if err != nil {
+			return err
+		}
+		planComponents = selectedComponents
+	}
+	// Opt-in lanes (orun-manual-triggers §4): under a requireRule binding a
+	// lane is planned only if a profile rule naming it chose the lane.
+	if triggerResolution != nil && len(triggerResolution.RequireRuleTriggers) > 0 {
+		instances, err = requireRuleFilter(instances, triggerResolution.RequireRuleTriggers, selectedScope)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Filter by trigger-resolved environments or --env flag
@@ -352,9 +396,51 @@ func generatePlan() error {
 	}
 
 	renderer := render.NewRenderer()
-	plan := renderer.RenderPlanWithOrder(intent.Metadata, jobInstances, jobBindings, sorted)
+	var laneTriggers []string
+	if triggerResolution != nil {
+		laneTriggers = triggerResolution.MatchedTriggerNames
+	}
+	laneOpts := lanes.ForIntent(intent, laneTriggers, strictLanes, render.PlanJobCheckName)
+	if maxLanes, from, err := resolveMaxLanes(maxLanesFlag); err != nil {
+		return err
+	} else if maxLanes > 0 {
+		laneOpts.MaxLanes, laneOpts.MaxLanesFrom = maxLanes, from
+	}
+	if w, from, err := resolveWeights(context.Background(), weightsFlag); err != nil {
+		return err
+	} else if len(w) > 0 {
+		laneOpts.Weights, laneOpts.WeightsFrom = w, from
+	}
+	if writeWeightsFlag != "" {
+		w := laneOpts.Weights
+		if laneOpts.WeightsFrom != "history" {
+			var err error
+			if w, err = weightsFromHistory(context.Background()); err != nil {
+				return err
+			}
+		}
+		if err := writeWeights(writeWeightsFlag, w); err != nil {
+			return fmt.Errorf("--write-weights: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "✓ wrote %d job weight(s) from history to %s\n", len(w), writeWeightsFlag)
+	}
+	var laneResult lanes.Result
+	plan, err := renderer.RenderPlanWithLanes(intent.Metadata, jobInstances, jobBindings, sorted, func(p *model.Plan) error {
+		r, aerr := lanes.Assign(p, laneOpts)
+		laneResult = r
+		return aerr
+	})
+	if err != nil {
+		return err
+	}
+	for _, repair := range laneResult.Repairs {
+		fmt.Fprintf(os.Stderr, "%s lanes: %s\n", ui.Yellow(ui.ColorEnabledForWriter(os.Stderr), "⚠"), repair)
+	}
 	plan.Spec.CompositionSources = compositionRegistry.Sources
 	plan.Metadata.Selection = planSelection
+	if d := intent.Execution.Defaults; d != nil && strings.TrimSpace(d.Timeout) != "" {
+		plan.Execution.Timeout = strings.TrimSpace(d.Timeout)
+	}
 
 	// --- M5A: always resolve TriggerOccurrence and write a PlanRevision.
 	// The new pipeline replaces the legacy `state.SavePlan` call below.
@@ -526,16 +612,6 @@ func generatePlan() error {
 	if headRev == "" {
 		headRev = "no-head"
 	}
-	fmt.Println()
-	fmt.Println(ui.Green(color, "✓") + " Plan revision created")
-	fmt.Println()
-	fmt.Printf("  Revision: %s\n", revKey)
-	fmt.Printf("  Trigger:  %s / %s / %s\n", trig.TriggerName, triggerScope, headRev)
-	fmt.Printf("  Jobs:     %d\n", len(plan.Jobs))
-	if outputFile != "" {
-		fmt.Printf("  Output:   %s\n", outputFile)
-	}
-
 	// Modern compact summary — derive component count from filtered instances
 	compSet := make(map[string]struct{})
 	for _, envInsts := range instances {
@@ -552,16 +628,31 @@ func generatePlan() error {
 	numComponents := len(compNames)
 	numEnvs := len(instances)
 	numJobs := len(plan.Jobs)
+	lastPlanCounts = planCounts{components: numComponents, envs: numEnvs, jobs: numJobs, id: planID}
 
-	fmt.Printf("\n  %s %d components %s %d envs %s %s\n",
-		ui.Dim(color, "│"),
-		numComponents,
-		ui.Dim(color, "×"),
-		numEnvs,
-		ui.Dim(color, "→"),
-		ui.Bold(color, fmt.Sprintf("%d jobs", numJobs)),
-	)
-	if numComponents > 0 {
+	// The headline: the plan id and what it compiles to.
+	//
+	//	✓ Plan 1017ce094baa  ·  2 components × 2 envs → 4 jobs
+	fmt.Println()
+	fmt.Printf("%s %s %s  %s  %d components %s %d envs %s %s\n",
+		ui.Green(color, "✓"), ui.Bold(color, "Plan"), ui.Bold(color, planID), ui.Dim(color, "·"),
+		numComponents, ui.Dim(color, "×"), numEnvs, ui.Dim(color, "→"),
+		ui.Bold(color, fmt.Sprintf("%d jobs", numJobs)))
+
+	// On a terminal, a small plan is shown lane by lane: what runs where, with
+	// which profile and steps, and what waits on what. Large plans keep the
+	// compact summary; --view dag is the full graph.
+	lanes := viewPlan == "" && numJobs > 0 && numJobs <= maxLaneJobs && ui.IsInteractiveWriter(os.Stdout)
+	if lanes {
+		fmt.Println()
+		renderPlanLanes(os.Stdout, plan, color)
+	}
+
+	field := func(label, value string) {
+		fmt.Printf("  %s  %s\n", ui.Dim(color, fmt.Sprintf("%-10s", label)), value)
+	}
+	fmt.Println()
+	if !lanes && numComponents > 0 {
 		const maxShow = 4
 		displayed := compNames
 		if len(displayed) > maxShow {
@@ -571,28 +662,39 @@ func generatePlan() error {
 		if len(compNames) > maxShow {
 			label += fmt.Sprintf(" (+%d more)", len(compNames)-maxShow)
 		}
-		fmt.Printf("  %s components: %s\n", ui.Dim(color, "│"), label)
+		field("components", label)
 	}
+	field("revision", revKey)
+	triggerLine := trig.TriggerName + " · " + triggerScope
+	if trig.Source.HeadRevision != "" {
+		triggerLine += " · " + headRev
+	}
+	field("trigger", triggerLine)
 	if changedOnly {
-		fmt.Printf("  %s mode: %s\n", ui.Dim(color, "│"), ui.Cyan(color, "changed-only"))
+		field("mode", ui.Cyan(color, "changed-only"))
+	}
+	if line := laneSummary(plan, laneResult); line != "" {
+		field("lanes", line)
 	}
 	if planName != "" {
-		fmt.Printf("  %s name: %s\n", ui.Dim(color, "│"), planName)
+		field("name", planName)
 	}
-	fmt.Printf("  %s plan: %s\n", ui.Dim(color, "│"), ui.Dim(color, planID))
 	if outputFile != "" {
-		fmt.Printf("  %s file: %s\n", ui.Dim(color, "│"), outputFile)
+		field("output", outputFile)
 	}
 	fmt.Println()
 
-	// Actionable hint
-	if numJobs > 0 {
+	// Actionable hint. A named plan also runs by its name (revisions/by-name);
+	// the sanitized form is the one the ref is stored under and is shell-safe.
+	namedRef := strings.TrimSpace(planName)
+	if numJobs > 0 && (planID != "" || namedRef != "") {
 		if planID != "" {
 			fmt.Printf("  %s orun run %s\n", ui.Dim(color, "→"), planID)
 		}
-		if planName != "" {
-			fmt.Printf("  %s orun run %s\n", ui.Dim(color, "→"), planName)
+		if namedRef != "" {
+			fmt.Printf("  %s orun run %s\n", ui.Dim(color, "→"), sanitizeRevSeg(namedRef))
 		}
+		fmt.Println()
 	}
 
 	// Handle --view flag
@@ -609,6 +711,8 @@ func generatePlan() error {
 			output = viewer.ViewDAG()
 		case viewPlan == "dependencies":
 			output = viewer.ViewDependencies()
+		case viewPlan == "lanes":
+			output = renderLanesView(plan, laneResult, ui.ColorEnabledForWriter(os.Stdout))
 		case strings.HasPrefix(viewPlan, "component="):
 			componentName := strings.TrimPrefix(viewPlan, "component=")
 			output = viewer.ViewByComponent(componentName)
@@ -620,6 +724,11 @@ func generatePlan() error {
 		fmt.Println("\n" + output)
 	}
 
+	// The execution id a plan made in GitHub Actions carries, shared by the
+	// plan shard --artifact github uploads and the exec_id --github-output
+	// hands to the run jobs.
+	execID := githubExecID(planID)
+
 	// Artifact upload for CI: write plan shard and upload via --artifact flag
 	if artifactBackend == "github" && os.Getenv("GITHUB_ACTIONS") == "true" && plan != nil {
 		runID := os.Getenv("GITHUB_RUN_ID")
@@ -627,11 +736,6 @@ func generatePlan() error {
 		if runAttempt == "" {
 			runAttempt = "1"
 		}
-		shortSHA := planID
-		if len(shortSHA) > 12 {
-			shortSHA = shortSHA[:12]
-		}
-		execID := runbundle.ExecID(runID, runAttempt, shortSHA)
 
 		// Create shard source metadata
 		source := runbundle.ShardSource{
@@ -680,59 +784,13 @@ func generatePlan() error {
 				}
 			}
 		}
-
-		// --github-output: write matrix, plan_id, exec_id to $GITHUB_OUTPUT
-		if githubOutput && os.Getenv("GITHUB_OUTPUT") != "" {
-			outputPath := os.Getenv("GITHUB_OUTPUT")
-			var outputLines []string
-
-			matrixJSON := githubMatrixJSON(plan)
-			outputLines = append(outputLines, fmt.Sprintf("matrix<<EOF\n%s\nEOF", matrixJSON))
-			outputLines = append(outputLines, fmt.Sprintf("plan_id=%s", planID))
-			outputLines = append(outputLines, fmt.Sprintf("exec_id=%s", execID))
-
-			f, err := os.OpenFile(outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "⚠ warning: failed to open %s: %v\n", outputPath, err)
-			} else {
-				_, err = f.WriteString(strings.Join(outputLines, "\n") + "\n")
-				f.Close()
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "⚠ warning: failed to write %s: %v\n", outputPath, err)
-				}
-			}
-		}
 	}
+
+	// --github-output needs no artifact backend: a workflow whose run jobs
+	// take the plan from the platform passes none (concepts/lanes.md).
+	emitGithubOutput(plan, planID, execID)
 
 	return nil
-}
-
-// writeEmptyGithubMatrix writes an empty job matrix to $GITHUB_OUTPUT when
-// --github-output is set, so a no-op plan (no trigger matched) still produces a
-// well-formed `matrix` output. The workflow's execute job guards on
-// matrix != '{"include":[]}', so an empty matrix cleanly skips downstream jobs.
-func writeEmptyGithubMatrix() {
-	if !githubOutput {
-		return
-	}
-	outputPath := os.Getenv("GITHUB_OUTPUT")
-	if outputPath == "" {
-		return
-	}
-	lines := []string{
-		"matrix<<EOF\n{\"include\":[]}\nEOF",
-		"plan_id=",
-		"exec_id=",
-	}
-	f, err := os.OpenFile(outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "⚠ warning: failed to open %s: %v\n", outputPath, err)
-		return
-	}
-	defer f.Close()
-	if _, err := f.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
-		fmt.Fprintf(os.Stderr, "⚠ warning: failed to write %s: %v\n", outputPath, err)
-	}
 }
 
 // computePlanHashForRevision returns the canonical "sha256:<hex>" digest of
@@ -771,6 +829,12 @@ func validateFiles() error {
 		return trigger.FormatErrors(errs)
 	}
 	if errs := trigger.ValidateDependencyRules(intent); len(errs) > 0 {
+		return trigger.FormatErrors(errs)
+	}
+	if errs := trigger.ValidateLanes(intent); len(errs) > 0 {
+		return trigger.FormatErrors(errs)
+	}
+	if errs := trigger.ValidatePlanOptions(intent); len(errs) > 0 {
 		return trigger.FormatErrors(errs)
 	}
 

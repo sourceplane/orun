@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/sourceplane/orun/internal/catalogresolve"
 	"github.com/sourceplane/orun/internal/git"
 )
 
@@ -200,5 +202,54 @@ func TestSelectChanged_NoRefresh_WarnsWhenStale(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "orun catalog refresh") {
 		t.Errorf("expected a stale warning naming `orun catalog refresh`, got %q", buf.String())
+	}
+}
+
+// TestSelectChanged_ColdStore_DuplicateComponentName: two manifests that
+// declare the same metadata.name must fail the --changed path with an error
+// that names both files. Before, the tolerant catalog write skipped the
+// catalog on the resolve error and a cold store (no .orun/ yet) then failed on
+// the missing catalogs/current ref with "objectstore: object not found".
+func TestSelectChanged_ColdStore_DuplicateComponentName(t *testing.T) {
+	dir := withTempIntentRoot(t)
+	seedNoGitWorkspace(t, dir) // svc-a + svc-b, no git, no .orun/ yet
+	writeTestComponent(t, dir, "variations/blue/overlay/svc-a/component.yaml", "svc-a", "")
+	resetCatalogFlags(t)
+	withIntentImpact(t, "watch")
+
+	if _, err := os.Stat(filepath.Join(dir, ".orun")); !os.IsNotExist(err) {
+		t.Fatalf("precondition: the store must be cold, stat .orun = %v", err)
+	}
+
+	var buf bytes.Buffer
+	_, err := selectChanged(context.Background(), git.ChangeOptions{Files: []string{"svc-a/handler.go"}}, false, &buf)
+	if err == nil {
+		t.Fatal("expected the duplicate component name to fail --changed")
+	}
+	var dup *catalogresolve.ErrDuplicateComponent
+	if !errors.As(err, &dup) {
+		t.Fatalf("err = %T %v, want *catalogresolve.ErrDuplicateComponent", err, err)
+	}
+	msg := err.Error()
+	for _, want := range []string{"svc-a/component.yaml", "variations/blue/overlay/svc-a/component.yaml", `"svc-a"`} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error should name %q, got %q", want, msg)
+		}
+	}
+	if strings.Contains(msg, "object not found") {
+		t.Errorf("the missing-ref symptom must not surface: %q", msg)
+	}
+
+	// Scoping discovery to the planner's roots hides the overlay copy, and the
+	// same cold store then builds the catalog and selects svc-a.
+	if err := os.WriteFile(filepath.Join(dir, "intent.yaml"), []byte("apiVersion: orun.io/v1alpha1\nkind: Intent\nmetadata:\n  name: demo\ndiscovery:\n  roots: [svc-a, svc-b]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sel, err := selectChanged(context.Background(), git.ChangeOptions{Files: []string{"svc-a/handler.go"}}, false, &buf)
+	if err != nil {
+		t.Fatalf("selectChanged with discovery.roots: %v", err)
+	}
+	if !sel["svc-a"] {
+		t.Errorf("svc-a should be selected, got %v", sel)
 	}
 }

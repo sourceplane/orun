@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/sourceplane/orun/internal/objectstore/refstore"
 	"os"
 	"strings"
 
@@ -57,7 +58,46 @@ named environment head instead of the project-wide head.`,
 	cmd.Flags().StringVar(&catalogPushOrg, "org", "", "Alias of --workspace (legacy spelling)")
 	cmd.Flags().StringVar(&catalogPushProject, "project", "", "Project id/slug (overrides the cached link)")
 	cmd.Flags().StringVar(&catalogPushEnvironment, "environment", "", "Target a named environment head (default: the project-wide head)")
+	cmd.Flags().BoolVar(&catalogPushForce, "force", false, "Advance the head even when this snapshot was the last one pushed to it")
 	parent.AddCommand(cmd)
+}
+
+// catalogPushForce re-advances a head this client already advanced to the
+// same snapshot.
+var catalogPushForce bool
+
+// catalogPushedRef is the local ref that remembers the snapshot this client
+// last advanced a head to: the project-wide head, or a named environment's.
+func catalogPushedRef(environment string) string {
+	if env := strings.TrimSpace(environment); env != "" {
+		return "catalogs/pushed/" + env
+	}
+	return "catalogs/pushed/project"
+}
+
+// headAlreadyPushed reports whether this client last advanced the scope's
+// head to digest: pushing it again would add a history row and trigger the
+// org-global projection for a snapshot the platform already holds
+// (specs/orun-sync-efficiency F12).
+func headAlreadyPushed(ctx context.Context, refs refstore.RefStore, environment, digest string) bool {
+	if refs == nil {
+		return false
+	}
+	ref, err := refs.Read(ctx, catalogPushedRef(environment))
+	return err == nil && ref.Target == digest
+}
+
+// rememberPushedHead records the digest a head was advanced to; best-effort.
+func rememberPushedHead(ctx context.Context, refs refstore.RefStore, environment, digest string) {
+	if refs == nil {
+		return
+	}
+	name := catalogPushedRef(environment)
+	old := ""
+	if ref, err := refs.Read(ctx, name); err == nil {
+		old = ref.Target
+	}
+	_ = refs.Update(ctx, name, old, digest)
 }
 
 // validateToken eagerly resolves a session/static token before any request.
@@ -182,14 +222,23 @@ func pushResolvedCatalog(ctx context.Context, backendURL, orgFlag, projectFlag, 
 		return fmt.Errorf("sync catalog objects: %w", err)
 	}
 
-	// Step 2 — advance the catalog head (the org-global projection trigger).
+	color := ui.ColorEnabledForWriter(os.Stdout)
+
+	// Step 2 — advance the catalog head (the org-global projection trigger),
+	// unless this client already advanced this head to this snapshot.
+	if !catalogPushForce && headAlreadyPushed(ctx, refs, environment, rootDigest) {
+		fmt.Printf("%s catalog %s already pushed\n", ui.Green(color, "✓"), rootDigest)
+		fmt.Printf("  objects: %d in closure, %d uploaded, %d already present\n", res.Closure, res.Copied, res.Skipped)
+		fmt.Printf("  head unchanged since the last push (--force advances it again)\n")
+		return nil
+	}
 	commit, _, _ := gitProvenanceForRun(ctx, storeDir())
 	head, previous, err := client.AdvanceCatalogHead(ctx, rootDigest, environment, commit)
 	if err != nil {
 		return err
 	}
+	rememberPushedHead(ctx, refs, environment, head.Digest)
 
-	color := ui.ColorEnabledForWriter(os.Stdout)
 	fmt.Printf("%s pushed catalog %s\n", ui.Green(color, "✓"), rootDigest)
 	fmt.Printf("  objects: %d in closure, %d uploaded, %d already present\n", res.Closure, res.Copied, res.Skipped)
 	scopeLabel := "project-wide head"

@@ -134,6 +134,18 @@ type CompositionRef struct {
 type ComponentEnvironment struct {
 	Profile string `json:"profile"`
 	Active  bool   `json:"active"`
+	// Manual says this component may be run in this environment by a person:
+	// its subscription has a profile rule naming a trigger binding with
+	// plan.requireRule (orun-manual-triggers §6). Absent otherwise, so the
+	// manifest hash of a component that opts nothing in is unchanged.
+	Manual *ComponentManual `json:"manual,omitempty"`
+}
+
+// ComponentManual is what a manual run of one component environment does:
+// the requireRule trigger that allows it and the profile its rule selects.
+type ComponentManual struct {
+	Trigger string `json:"trigger"`
+	Profile string `json:"profile"`
 }
 
 // ComponentDependencies lists the cross-component, API, and resource edges

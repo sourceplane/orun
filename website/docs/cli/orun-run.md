@@ -122,6 +122,31 @@ The practical recipe: give each CI job lane `--job <id> --retry`, and
 stand, failed jobs re-open and re-run in dependency order. (Applies to the
 native coordination path; `ORUN_COORDINATION=legacy` keeps the old behavior.)
 
+### A result the server never recorded
+
+A job's result reaches the platform with `:complete`. When that call fails
+(the platform throttles or is down), orun retries it for up to three
+minutes, renewing the job's lease between attempts. If the result still
+does not land, orun prints
+`✕ result for <job> not recorded on the server: <error>` and the run exits
+non-zero (`N job result(s) could not be recorded on the server`), even when
+every job passed here. The server would otherwise show the job running or
+queued under a green check.
+
+A `:complete` refused because the lease was lost is not an error when the
+platform already holds a result for the job, or when another runner holds
+the job now. In both cases the job's result comes from elsewhere. When the
+platform holds neither, the result is lost, and the run says so as above.
+
+A heartbeat that fails is printed once per job
+(`⚠ heartbeat for <job> is failing (<error>) — the lease may lapse before
+the job ends`), and the job keeps running.
+
+On a rerun, a claim refused because the job is finished is classified from
+the platform's own record of the run (`GET …/runs/{id}/state`), not its read
+model. A job that passed is skipped as passed, never reported as
+`already failed on another runner`.
+
 Override the working directory for every job:
 
 ```bash
@@ -147,9 +172,9 @@ Override plan concurrency:
 orun run --concurrency 4
 ```
 
-When `--concurrency` is greater than 1, result lines carry inline component and environment labels (e.g., `platform-shared·production/verify-turbo-package`) so each line is self-describing without group headers.
+When `--concurrency` is greater than 1, every job starts as soon as its upstreams finish, and a free slot goes to the ready job with the longest chain of dependents behind it (the scheduler a [lane](../concepts/lanes.md) uses). Result lines carry inline component and environment labels (e.g., `platform-shared·production/verify-turbo-package`) so each line is self-describing without group headers.
 
-Process up to 3 components concurrently while keeping the dashboard grouped:
+Keep a terminal run's output grouped by component by capping how many components have jobs in flight at once:
 
 ```bash
 orun run --concurrency 8 --component-concurrency 3
@@ -180,6 +205,44 @@ Debug how `--changed` resolved its git refs:
 orun run --changed --explain
 ```
 
+### Timeouts
+
+Every step is bounded: by its own `timeout`, else its job's, else the
+intent's `execution.defaults.timeout` (carried on the plan as
+`execution.timeout`), else 60 minutes. A step that outlives its bound fails
+its job; the run goes on with jobs that do not depend on it. Set
+`execution.defaults.timeout` for a platform whose longest step (a large
+`terraform apply`, a full rebuild) needs more than an hour, and a job
+template's `timeout` for the one job that does.
+
+A lane job's wait for an upstream in another lane is bounded by
+`execution.lanes.upstreamWait` (default 60 minutes). On Orunbase the wait
+is event-driven: the job is woken by the run's next event and starts within
+moments of its upstream finishing, and the events the wake returns are
+folded onto the state the process keeps, so a waiting job costs the
+platform one long-poll per wake (lengthening to one per 15 seconds while
+nothing happens); elsewhere it polls, backing off to 15 seconds.
+
+### Interrupting a run
+
+`SIGTERM` (a spot runner's interruption notice forwarded by the pool, a
+cancelled CI job) or `SIGINT` (Ctrl-C) drains the run: running steps are
+stopped, no further job is admitted, and every job that was cut is reported
+`failed` with an `interrupted` error — to the platform too, so a lane
+waiting on one of them stops waiting at once instead of waiting out the
+upstream timeout. The run exits with the shell's code for the signal (130
+for `SIGINT`, 143 for `SIGTERM`); a second signal exits immediately.
+`orun run --retry` with the same `--exec-id` and `--job`/`--lane` re-opens
+the cut jobs; a job is re-run from its first step, since the staged tree its
+earlier steps built no longer exists on the runner that picks it up.
+
+A runner that disappears without a signal (a reclaimed instance) stops
+heartbeating. A job waiting on one of its jobs treats a `running` upstream
+whose heartbeat is older than two of the server's leases as having lost its
+runner and ends its wait naming it, rather than holding its own runner;
+before any claim has told the run the lease length, the legacy five minutes
+apply.
+
 ## Flags
 
 ### Execution flags
@@ -190,18 +253,19 @@ orun run --changed --explain
 | `--verbose` | Expand full step logs instead of the compact summary view |
 | `--workdir` | Override the working directory for all jobs |
 | `--job` | Run only one job ID (matches plan job ID or prefix) |
-| `--retry` | Clear existing state for `--job` before running. On remote state, also re-opens the job's failed remote claim and waits out failed upstream dependencies — see [Resume-aware CI reruns](#resume-aware-ci-reruns) |
+| `--lane` | Run every job of one lane in this process (`plan.lanes`, see [Lanes](../concepts/lanes.md)); on a plan without lanes it is `--job`. Mutually exclusive with `--job` |
+| `--retry` | With `--lane`, re-opens the lane's failed jobs and leaves completed ones completed. Clear existing state for `--job` before running. On remote state, also re-opens the job's failed remote claim and waits out failed upstream dependencies — see [Resume-aware CI reruns](#resume-aware-ci-reruns) |
 | `--runner` | Execution backend: `local`, `docker`, or `github-actions` |
 | `--gha` | Shortcut for `--runner github-actions` |
 | `--exec-id` | Execution ID for resume or CI tracing (auto-generated if not set) |
-| `--concurrency` | Override plan concurrency (0 uses the plan's value) |
-| `--component-concurrency` | Max components processed concurrently (default 1; 0 = unlimited). Default 1 keeps the dashboard component-grouped |
+| `--concurrency` | Override plan concurrency (0 uses the plan's value). Above 1, jobs run on the lane scheduler: each starts as soon as its upstreams finish |
+| `--component-concurrency` | Max components with jobs in flight at once (default 0 = no cap). A job of a new component waits, holding no slot, until a component drains; set it to keep a terminal run's output grouped by component |
 | `--component` | Filter jobs to a specific component (repeatable) |
 | `--env`, `-e` | Filter jobs to specific environments (comma-separated) |
 | `--all-envs` | Run all environments explicitly (mutually exclusive with `--env`) |
 | `--all` | Disable CWD-based component scoping; run all jobs |
 | `--json` | Output execution summary in JSON format |
-| `--isolation` | Per-job workspace isolation: `auto` (on when concurrency > 1), `workspace` (always on), or `none` (legacy shared tree). Default: `auto` |
+| `--isolation` | Per-job workspace isolation: `auto` (on when concurrency > 1), `workspace` (always on), `component` (always on; copies only the job's directory and links the rest, see [execution runtime](../architecture/execution-runtime.md#per-job-workspace-isolation)), or `none` (legacy shared tree). Default: `auto` |
 | `--keep-workspaces` | Preserve per-job staged workspaces after the run for debugging |
 | `--background` | Run the plan detached and return immediately. Track progress with `orun status --watch` |
 | `--artifact` | Artifact backend for uploading job shard from CI (`github`) |
@@ -289,14 +353,14 @@ The positional argument is resolved in this order:
 | --- | --- |
 | _(omitted)_ | Generates a fresh plan from `intent.yaml`, then runs it |
 | `latest` | The most recently generated plan |
-| `275f4d8820bf` | The plan with that exact checksum |
+| `sha256-9dd5…` (full plan hash) | The plan with that exact hash |
 | `release-candidate` | The newest plan generated with `orun plan --name release-candidate` |
-| `a1b2c3` | The plan whose checksum starts with `a1b2c3` |
+| `275f4d8820bf` or `a1b2c3` | The plan whose checksum starts with that hex — including the 12-character plan id `orun plan` prints |
 | `rev-<key>` | The plan revision with that revision key |
 | `./plan.json` | Explicit file path (when it exists on disk) |
 | `network-foundation` | Generates a fresh plan scoped to that component, then runs it (when it does not resolve to a plan revision) |
 
-An exact checksum wins over a plan name, and a plan name wins over a checksum prefix. A name that matches no plan falls through to the component row.
+An exact plan hash wins over a plan name, and a plan name wins over a checksum prefix. A name that matches no plan falls through to the component row.
 
 The legacy `--plan` flag accepts the same values and is still supported, but the positional form is preferred.
 
@@ -341,8 +405,9 @@ escape hatch back to the old path.
 
 ### Memoized cache hits
 
-When the backend already has a result for a job whose inputs match a prior run,
-the run **adopts that result instead of re-executing**, and surfaces it:
+A job labelled `orun.dev/hermetic: "true"` is memoized: when the backend already
+has a result for the same inputs from a prior run, the run **adopts that result
+instead of re-executing**, and surfaces it:
 
 ```
 ✓ memoized api.prod.build — cache hit, skipped execution (a1b2c3d4e5f6)
@@ -350,7 +415,24 @@ the run **adopts that result instead of re-executing**, and surfaces it:
 
 The digest in parentheses is the resolved result's content hash. A memoized job is
 already terminal, so it's skipped — this line distinguishes it from a job skipped
-because it was filtered out of the run.
+because it was filtered out of the run — and the run summary counts it as
+`N memoized`, apart from the jobs resumed from this execution's own state.
+
+The inputs the key covers are the job's resolved steps, the names of its
+environment variables and secret references (never their values), the
+composition sources the plan was compiled against (name, kind, reference and
+resolved digest), and a content digest of the job's directory in the checkout:
+in a git checkout, every tracked file's index entry plus the content of every
+file changed, added or deleted in the work tree, so an edit counts before it is
+staged and ignored files (build outputs, `node_modules`) do not; outside git,
+every file under the directory less the dependency and output directories a
+job recreates. A job whose directory cannot be digested is claimed without a
+key and runs, with a note on stderr.
+
+A hit restores nothing: the result records that the job succeeded, not what it
+produced. Label a job hermetic only when its dependents consume nothing it
+writes to the tree — a verification, a test, a lint, a plan whose output is a
+published artifact — and not a build whose output the next job reads.
 
 ### Enabling remote state
 

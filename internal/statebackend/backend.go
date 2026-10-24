@@ -36,6 +36,24 @@ const (
 	LogStepEnd   = "end"
 )
 
+// LogChunk is one queued chunk of a job's log: what AppendStepLog takes, as a
+// value (saas-live-runs LR8b).
+type LogChunk struct {
+	Content string
+	Step    *LogStep
+}
+
+// BatchLogAppender is a backend that can store a job's queued log chunks in
+// one call (saas-live-runs LR8b). A streaming step sends a start, a chunk
+// every couple of seconds and an end; one request each falls behind the job.
+//
+// AppendStepLogs stores chunks in order and returns how many, from the first,
+// were stored. Fewer than len(chunks) comes with the error that stopped it;
+// the rest are the caller's to send again.
+type BatchLogAppender interface {
+	AppendStepLogs(ctx context.Context, runID, jobID string, chunks []LogChunk) (int, error)
+}
+
 // JobStatus mirrors the backend API terminal status values.
 type JobStatus string
 
@@ -72,6 +90,11 @@ type ClaimResult struct {
 	CurrentStatus string // backend job status when not claimed
 	DepsWaiting   bool
 	DepsBlocked   bool
+	// TerminalPhase is the coordinator's own phase for a job whose claim was
+	// refused because the job or its run is terminal (succeeded, failed,
+	// queued, claimed, ...), when the server could say. CurrentStatus is
+	// "unrecorded" when that phase holds no result.
+	TerminalPhase string
 
 	// Cached is true when the claim resolved a memoized result: the job's inputs
 	// matched a prior run, so the runner adopts the result and skips execution.

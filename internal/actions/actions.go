@@ -50,6 +50,9 @@ const (
 	ParamBool       ParamType = "bool"
 	ParamInt        ParamType = "int"
 	ParamStringList ParamType = "stringList"
+	// ParamObjectList is a list of mappings whose values are strings or
+	// booleans — a probe's labelled targets, `{url, env, label, pin}`.
+	ParamObjectList ParamType = "objectList"
 )
 
 // Param is one declared parameter of an action.
@@ -77,6 +80,17 @@ type Spec struct {
 	// Outputs names the keys Result.Outputs may carry. Declared so a blueprint
 	// referencing an output can be checked before anything runs.
 	Outputs []string
+	// Did is the line a finished step leaves when its hook authored none
+	// (`facts.go`). Nil says nothing — bookkeeping, like a quick action's
+	// missing Doing.
+	Did DidFunc
+	// Facts are what the action made, for a reader to keep in view
+	// (`facts.go`). Nil files none.
+	Facts FactsFunc
+	// Check validates a hook's `with:` block as a whole, after each
+	// parameter has been checked on its own — for a rule no single parameter
+	// can state ("urls or targets"). Nil means none.
+	Check func(with map[string]any) error
 }
 
 // Param returns the named parameter's declaration.
@@ -125,6 +139,9 @@ type Input struct {
 	// Params are the resolved parameters: declared defaults applied, and every
 	// template expression already rendered.
 	Params map[string]any
+	// Progress receives what the action has so far while it is still
+	// running (see Report). Nil means nobody is listening.
+	Progress func(outputs map[string]string)
 }
 
 // PathParam resolves a path parameter the way a baseline's author means it:
@@ -240,6 +257,11 @@ func Validate(id string, with map[string]any) error {
 			return fmt.Errorf("action %s requires parameter %q (%s)", id, p.Name, p.Description)
 		}
 	}
+	if spec.Check != nil {
+		if err := spec.Check(with); err != nil {
+			return fmt.Errorf("action %s: %w", id, err)
+		}
+	}
 	return nil
 }
 
@@ -304,6 +326,24 @@ func coerceType(p Param, value any) (any, error) {
 		for i, item := range items {
 			if _, ok := item.(string); !ok {
 				return nil, fmt.Errorf("expects a list of strings; item %d is %T", i, item)
+			}
+		}
+	case ParamObjectList:
+		items, ok := value.([]any)
+		if !ok {
+			return nil, fmt.Errorf("expects a list of mappings, got %T", value)
+		}
+		for i, item := range items {
+			m, ok := item.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("expects a list of mappings; item %d is %T", i, item)
+			}
+			for k, v := range m {
+				switch v.(type) {
+				case string, bool:
+				default:
+					return nil, fmt.Errorf("item %d key %q: expects a string or a boolean, got %T", i, k, v)
+				}
 			}
 		}
 	default:

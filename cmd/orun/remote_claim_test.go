@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -90,7 +91,7 @@ func TestPerformRemoteJobClaim_AlreadyComplete(t *testing.T) {
 		Jobs: []model.PlanJob{{ID: "job-1"}},
 	}
 
-	_, err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false, false)
+	_, err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false, false, nil)
 
 	var alreadyDone *jobAlreadyCompleteError
 	if !errors.As(err, &alreadyDone) {
@@ -117,7 +118,7 @@ func TestPerformRemoteJobClaim_OtherClaimErrorsFail(t *testing.T) {
 		Jobs: []model.PlanJob{{ID: "job-1"}},
 	}
 
-	_, err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false, false)
+	_, err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false, false, nil)
 	if err == nil {
 		t.Fatal("expected error for depsBlocked")
 	}
@@ -142,7 +143,7 @@ func TestPerformRemoteJobClaim_DepsWaitingCallsRunnable(t *testing.T) {
 		Jobs: []model.PlanJob{{ID: "job-1"}},
 	}
 
-	_, err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false, false)
+	_, err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false, false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -163,7 +164,7 @@ func TestWaitForJobRunnable_ReturnsWhenJobAppears(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(10 * time.Second)
-	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", nil, nil, time.Millisecond, deadline, false)
+	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", nil, nil, time.Millisecond, deadline, false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -181,7 +182,7 @@ func TestWaitForJobRunnable_ContextCancellation(t *testing.T) {
 	cancel()
 
 	deadline := time.Now().Add(10 * time.Second)
-	err := waitForJobRunnable(ctx, backend, "run-1", "target-job", nil, nil, time.Millisecond, deadline, false)
+	err := waitForJobRunnable(ctx, backend, "run-1", "target-job", nil, nil, time.Millisecond, deadline, false, nil)
 	if err == nil {
 		t.Fatal("expected error on cancelled context")
 	}
@@ -193,7 +194,7 @@ func TestWaitForJobRunnable_DeadlineExceeded(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(-1 * time.Second) // already past
-	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", nil, nil, time.Millisecond, deadline, false)
+	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", nil, nil, time.Millisecond, deadline, false, nil)
 	if err == nil {
 		t.Fatal("expected deadline exceeded error")
 	}
@@ -215,7 +216,7 @@ func TestWaitForJobRunnable_ErrorPropagates(t *testing.T) {
 	backend := &failingRunnableBackend{}
 
 	deadline := time.Now().Add(10 * time.Second)
-	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", nil, nil, time.Millisecond, deadline, false)
+	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", nil, nil, time.Millisecond, deadline, false, nil)
 	if err == nil {
 		t.Fatal("expected error from failing backend")
 	}
@@ -236,7 +237,7 @@ func TestWaitForJobRunnable_DepsFailedDuringPoll(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(10 * time.Second)
-	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", []string{"dep-1"}, nil, time.Millisecond, deadline, false)
+	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", []string{"dep-1"}, nil, time.Millisecond, deadline, false, nil)
 	if err == nil {
 		t.Fatal("expected error when dependency failed during poll")
 	}
@@ -268,7 +269,7 @@ func TestPerformRemoteJobClaim_DepsWaiting_DepFailsDuringPoll(t *testing.T) {
 		},
 	}
 
-	_, err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false, false)
+	_, err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false, false, nil)
 	if err == nil {
 		t.Fatal("expected error when dependency fails during polling")
 	}
@@ -287,7 +288,7 @@ func TestRunHeartbeat_LeaseLostPreemptsAndStops(t *testing.T) {
 	go func() {
 		runHeartbeat(jobCtx, backend, "run-1", "job-1", "runner-1", 5*time.Millisecond, func() {
 			atomic.StoreInt32(&preempted, 1)
-		})
+		}, nil)
 		close(done)
 	}()
 
@@ -311,7 +312,7 @@ func TestRunHeartbeat_StopsWhenJobContextCancelled(t *testing.T) {
 	go func() {
 		runHeartbeat(jobCtx, backend, "r", "j", "runner", 5*time.Millisecond, func() {
 			atomic.StoreInt32(&called, 1)
-		})
+		}, nil)
 		close(done)
 	}()
 	time.Sleep(25 * time.Millisecond)
@@ -386,7 +387,7 @@ func TestWaitForJobRunnable_RetryRun_DepFailedKeepsWaiting(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(10 * time.Second)
-	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", []string{"dep-1"}, nil, time.Millisecond, deadline, true)
+	err := waitForJobRunnable(context.Background(), backend, "run-1", "target-job", []string{"dep-1"}, nil, time.Millisecond, deadline, true, nil)
 	if err != nil {
 		t.Fatalf("retry run must ride out a failed dep, got: %v", err)
 	}
@@ -410,11 +411,48 @@ func TestPerformRemoteJobClaim_RetryRun_DepsBlockedRetriesUntilClaim(t *testing.
 		Jobs: []model.PlanJob{{ID: "job-1"}},
 	}
 
-	_, err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false, true)
+	_, err := performRemoteJobClaim(context.Background(), backend, "run-1", plan, "job-1", "runner-1", io.Discard, false, true, nil)
 	if err != nil {
 		t.Fatalf("retry run must ride out DepsBlocked, got: %v", err)
 	}
 	if backend.claimCalls < 3 {
 		t.Fatalf("expected at least 3 claim attempts, got %d", backend.claimCalls)
+	}
+}
+
+// quietClaimBackend is a fakeBackend whose long-poll lapses with no events
+// (as a run with nothing happening does), recording what each asked for.
+type quietClaimBackend struct {
+	*fakeBackend
+	asked []int
+}
+
+func (q *quietClaimBackend) WaitForRunEvents(_ context.Context, _ string, sinceSeq, waitSeconds int) (int, error) {
+	if waitSeconds == 0 {
+		return sinceSeq, nil
+	}
+	q.asked = append(q.asked, waitSeconds)
+	time.Sleep(time.Duration(waitSeconds) * time.Millisecond)
+	return sinceSeq, nil
+}
+
+// A --job waiting on its dependencies long-polls the run's events; when the
+// long-poll lapses it does not also sleep the same interval, and it backs
+// off 2, 4, 8, 15 s (specs/orun-sync-efficiency F1).
+func TestWaitForJobRunnable_QuietRunBacksOffWithoutSleepingTwice(t *testing.T) {
+	q := &quietClaimBackend{fakeBackend: &fakeBackend{runnableJobs: [][]string{{"other"}}}}
+	start := time.Now()
+	err := waitForJobRunnable(context.Background(), q, "run-1", "target-job", nil, nil, 2*time.Second, time.Now().Add(80*time.Millisecond), false, nil)
+	if err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("want the deadline: %v", err)
+	}
+	if el := time.Since(start); el > time.Second {
+		t.Fatalf("the loop slept 2 s on a timer after a 2 s long-poll: %v", el)
+	}
+	if len(q.asked) < 4 || q.asked[0] != 2 || q.asked[1] != 4 || q.asked[2] != 8 || q.asked[3] != 15 {
+		t.Fatalf("the long-polls must lengthen 2, 4, 8, 15: %v", q.asked)
+	}
+	if q.runnableCalls != len(q.asked) {
+		t.Fatalf("one frontier read per long-poll: reads=%d long-polls=%d", q.runnableCalls, len(q.asked))
 	}
 }

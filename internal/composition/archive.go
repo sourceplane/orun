@@ -101,60 +101,6 @@ func writeDirectoryHash(hasher hash.Hash, root string) error {
 	return nil
 }
 
-func copyDir(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("symlinks are not supported in composition packages: %s", path)
-		}
-
-		relPath, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		targetPath := filepath.Join(dst, relPath)
-
-		if entry.IsDir() {
-			return os.MkdirAll(targetPath, 0o755)
-		}
-
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-			return err
-		}
-
-		in, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer in.Close()
-
-		out, err := os.Create(targetPath)
-		if err != nil {
-			return err
-		}
-		if _, err := io.Copy(out, in); err != nil {
-			out.Close()
-			return err
-		}
-		if err := out.Close(); err != nil {
-			return err
-		}
-
-		mode := info.Mode().Perm()
-		if mode == 0 {
-			mode = 0o644
-		}
-		return os.Chmod(targetPath, mode)
-	})
-}
-
 func extractTarGz(archivePath, dst string) error {
 	file, err := os.Open(archivePath)
 	if err != nil {

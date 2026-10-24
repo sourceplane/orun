@@ -15,9 +15,14 @@ import (
 
 var (
 	restoreFromCachePattern = regexp.MustCompile(`(?i)^Restoring ['"]?([^'"]+)['"]? from cache$`)
-	toolCachedPattern       = regexp.MustCompile(`(?i)^([A-Za-z0-9._ -]+) tool version '([^']+)' has been cached at .+$`)
-	toolDownloadPattern     = regexp.MustCompile(`(?i)^Downloading ['"]?([^'"]+)['"]? from .+$`)
-	urlPattern              = regexp.MustCompile(`https?://[^\s]+`)
+	// foundInCachePattern is what the actions/setup-* family prints when the
+	// tool cache already holds the version asked for.
+	foundInCachePattern = regexp.MustCompile(`(?i)^Found in cache @ .+$`)
+	// toolCachedPattern names the tool and version a setup action installed
+	// or found; setup-helm prints it on both paths, so it is not a hit signal.
+	toolCachedPattern   = regexp.MustCompile(`(?i)^([A-Za-z0-9._ -]+) tool version '([^']+)' has been cached at .+$`)
+	toolDownloadPattern = regexp.MustCompile(`(?i)^Downloading ['"]?([^'"]+)['"]? from .+$`)
+	urlPattern          = regexp.MustCompile(`https?://[^\s]+`)
 )
 
 type stepOutputView struct {
@@ -286,6 +291,17 @@ func (r *Runner) printStepSkipped(stepID string, index, total int) {
 	})
 }
 
+// printStepShared reports a lane-scoped step this job did not run: another
+// job of the lane ran it once for every job (lane_setup.go).
+func (r *Runner) printStepShared(stepID string, index, total int, owner string) {
+	if r.inGHA() || !r.Verbose {
+		return
+	}
+	r.withPrintLock(func() {
+		fmt.Fprintf(r.Stdout, "  %s %s (%d/%d) shared with %s\n", ui.Yellow(r.Color, "↷"), stepID, index, total, owner)
+	})
+}
+
 // updateLiveStep updates the spinner row label for an in-flight job.
 func (r *Runner) updateLiveStep(job model.PlanJob, stepID string, stepIndex, stepTotal int) {
 	if r.live == nil {
@@ -441,6 +457,40 @@ func (r *Runner) printJobResumed(job model.PlanJob) {
 	))
 }
 
+// printJobMemoized reports a job the backend served from a prior result: the
+// hook already printed the hit with its digest, so the job line says
+// "memoized" where a resumed one says "cached".
+func (r *Runner) printJobMemoized(job model.PlanJob, digest string) {
+	label := "memoized"
+	if d := strings.TrimPrefix(digest, "sha256:"); d != "" {
+		if len(d) > 12 {
+			d = d[:12]
+		}
+		label += " " + d
+	}
+	if r.inGHA() {
+		if r.gha != nil {
+			r.gha.Print(fmt.Sprintf("⚡ %s  %s", r.ghaJobLabel(job), label))
+		}
+		return
+	}
+	if r.componentJobTotal != nil {
+		r.bufferFinishedEntry(job, finishedJobEntry{
+			job:     job,
+			success: true,
+			resumed: true,
+			label:   label,
+		})
+		return
+	}
+	r.emitGroupHeader(job)
+	r.live.Print(fmt.Sprintf("    %s %s  %s",
+		ui.Cyan(r.Color, "⚡"),
+		ui.Bold(r.Color, r.jobLineLabel(job)),
+		ui.Dim(r.Color, label),
+	))
+}
+
 func (r *Runner) printJobFooter(job model.PlanJob, report *jobReport, success bool, duration time.Duration) {
 	if r.inGHA() {
 		r.ghaPrintJobFooter(job, report, success, duration)
@@ -499,12 +549,16 @@ func (r *Runner) flushFinishedComponent(compKey string, entries []finishedJobEnt
 			connector = "└─"
 		}
 		if entry.resumed {
+			label := entry.label
+			if label == "" {
+				label = "cached"
+			}
 			lines = append(lines, fmt.Sprintf("  %s  %s %s %s  %s",
 				ui.Dim(r.Color, "│"),
 				ui.Dim(r.Color, connector),
 				ui.Cyan(r.Color, "⚡"),
 				ui.Bold(r.Color, r.jobLineLabel(entry.job)),
-				ui.Dim(r.Color, "cached"),
+				ui.Dim(r.Color, label),
 			))
 		} else {
 			rowLabel := r.finishedRowLabel(entry.job, entry.success, entry.duration)
@@ -613,6 +667,9 @@ func (r *Runner) printRunSummary(summary *runSummary, finalStatus string) {
 	if snap.resumed > 0 {
 		stats = append(stats, fmt.Sprintf("%d cached", snap.resumed))
 	}
+	if snap.memoized > 0 {
+		stats = append(stats, fmt.Sprintf("%d memoized", snap.memoized))
+	}
 	if snap.waiting > 0 {
 		stats = append(stats, fmt.Sprintf("%d waiting", snap.waiting))
 	}
@@ -660,9 +717,12 @@ func analyzeStepOutput(step model.PlanStep, output string) stepOutputView {
 		return view
 	}
 
+	// From the output alone, a hit is a message that only a hit prints. An
+	// executor that watches its tool cache overrides this (the runner asks it
+	// after the step) with what the cache itself said.
 	cacheHit := false
 	for _, line := range lines {
-		if restoreFromCachePattern.MatchString(line) || toolCachedPattern.MatchString(line) {
+		if restoreFromCachePattern.MatchString(line) || foundInCachePattern.MatchString(line) {
 			cacheHit = true
 			break
 		}
@@ -695,7 +755,7 @@ func summarizeUseOutput(lines []string) []string {
 			installed = fmt.Sprintf("Installed %s %s", strings.ToLower(strings.TrimSpace(match[1])), match[2])
 			continue
 		}
-		if restoreFromCachePattern.MatchString(line) {
+		if restoreFromCachePattern.MatchString(line) || foundInCachePattern.MatchString(line) {
 			cached = "Cached locally"
 			continue
 		}

@@ -313,9 +313,32 @@ Runtime environment variables declared in intent or component env blocks:
 
 ## Execution semantics
 
-Jobs can declare: `runsOn`, `timeout`, `retries`, `labels`, `capabilities`, `steps`.
+Jobs can declare: `runsOn`, `timeout`, `retries`, `resources`, `labels`, `capabilities`, `steps`.
 
-Steps can declare: `run` or `use`, `capability`, `phase`, `order`, `with`, `env`, `shell`, `working-directory`, `timeout`, `retry`, `onFailure`.
+`resources` is what the job needs, for packing [lanes](../concepts/lanes.md#weights) and sizing a lane's concurrency to its runner; it changes nothing about what runs:
+
+```yaml
+resources:
+  cpu: 2                 # cores the job keeps busy (fractions allowed)
+  memory: 4Gi            # informational, for a runner pool
+  estimatedSeconds: 90   # the job's usual duration: its packing weight
+```
+
+Steps can declare: `run` or `use`, `capability`, `phase`, `order`, `scope`, `with`, `env`, `shell`, `working-directory`, `timeout`, `retry`, `caches`, `onFailure`.
+
+`scope: lane` marks a `run` step that every job of a [lane](../concepts/lanes.md#share-a-lanes-setup) would execute identically — an install, a cache warm. The first job to reach it runs it once in the shared source tree; every other job of the lane whose step is the same after templating (same command, shell, environment and working directory) reuses the result. Lane-scoped steps must come first in a job, before its private tree is staged, and apply to `run` steps only: an action's exported environment stays with the job that ran it.
+
+`caches` names the directories under the job's working directory a step fills and orun keeps on the machine between jobs and runs — a framework's build cache, a browser download — which a freshly staged tree and a per-job `HOME` would otherwise leave cold every time:
+
+```yaml
+- name: build
+  run: pnpm exec next build
+  caches:
+    - name: next-web
+      path: .next/cache
+```
+
+Before the job's first step runs in its tree, each named cache is copied in from the machine's copy (`~/.orun/actions/shared/caches/<name>`) unless the tree already holds that path; after the job succeeds, what it left at the path becomes the machine's copy, swapped in whole under a lock. A failed job saves nothing. The name is a directory name (letters, digits, dots, dashes, underscores); the path is relative to the job's working directory and stays inside it.
 
 ## Breaking changes (v2.0.0)
 

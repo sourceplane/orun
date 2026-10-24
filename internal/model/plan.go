@@ -8,13 +8,49 @@ type Plan struct {
 	Execution  PlanExecution `json:"execution,omitempty" yaml:"execution,omitempty"`
 	Spec       PlanSpec      `json:"spec,omitempty" yaml:"spec,omitempty"`
 	Jobs       []PlanJob     `json:"jobs" yaml:"jobs"`
+	// Lanes partitions Jobs into the units a runner takes. Present only when
+	// the intent declares execution.lanes, so a lane-unaware plan stays
+	// byte-identical (specs/orun-lanes §2, §4.6).
+	Lanes []PlanLane `json:"lanes,omitempty" yaml:"lanes,omitempty"`
+}
+
+// PlanLane is one lane: jobs of one environment that one runner executes in
+// one `orun run --lane` process (specs/orun-lanes §2).
+type PlanLane struct {
+	ID          string   `json:"id" yaml:"id"`
+	Name        string   `json:"name" yaml:"name"`
+	Index       int      `json:"index" yaml:"index"`
+	Environment string   `json:"environment" yaml:"environment"`
+	Jobs        []string `json:"jobs" yaml:"jobs"`
+	Concurrency int      `json:"concurrency" yaml:"concurrency"`
+	RunsOn      string   `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`
+	// Source is job | component | env | group | isolated | auto.
+	Source string `json:"source" yaml:"source"`
+	Group  string `json:"group,omitempty" yaml:"group,omitempty"`
+	// SplitFrom and Reason record a cycle repair (specs/orun-lanes §7).
+	SplitFrom string `json:"splitFrom,omitempty" yaml:"splitFrom,omitempty"`
+	Reason    string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	// Level is the lane's depth in the lane graph: 0 for a lane no other
+	// lane's job feeds, else one more than the deepest lane it waits on. A
+	// workflow that runs the lanes level by level never provisions a runner
+	// before its upstream lanes are done (specs/orun-runner-efficiency §5.1).
+	Level int `json:"level" yaml:"level"`
+	// UpstreamLanes are the lanes this lane's jobs wait on, and UpstreamJobs
+	// the jobs in them, both sorted; what a pool gates a runner on.
+	UpstreamLanes []string `json:"upstreamLanes,omitempty" yaml:"upstreamLanes,omitempty"`
+	UpstreamJobs  []string `json:"upstreamJobs,omitempty" yaml:"upstreamJobs,omitempty"`
+	// EstimatedSeconds is the sum of the lane's job weights when the plan
+	// carries weights; VCPU the most cores one of its jobs declared. What a
+	// pool sizes a runner by (specs/orun-runner-efficiency §5.4).
+	EstimatedSeconds int `json:"estimatedSeconds,omitempty" yaml:"estimatedSeconds,omitempty"`
+	VCPU             int `json:"vcpu,omitempty" yaml:"vcpu,omitempty"`
 }
 
 // PlanMetadata captures immutable plan generation details.
 type PlanMetadata struct {
-	Name        string            `json:"name" yaml:"name"`
-	Description string            `json:"description,omitempty" yaml:"description,omitempty"`
-	Namespace   string            `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	Name        string `json:"name" yaml:"name"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	Namespace   string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
 	// GeneratedAt is volatile and not stamped by the renderer (plans are
 	// byte-identical for identical inputs). It is kept for reading older
 	// plans and is excluded from checksum and planHash.
@@ -31,6 +67,28 @@ type PlanMetadata struct {
 	// intent auto-discovery fails (e.g. in GHA where the intent lives in a
 	// subdirectory of GITHUB_WORKSPACE).
 	WorkDir string `json:"workDir,omitempty" yaml:"workDir,omitempty"`
+	// Lanes records how the plan's lanes were laid out; absent when the
+	// intent sets no execution.lanes (the plan then has no lanes either).
+	Lanes *PlanLanesMeta `json:"lanes,omitempty" yaml:"lanes,omitempty"`
+}
+
+// PlanLanesMeta is metadata.lanes: the effective mode and the lane budget
+// auto mode was given, with where the budget came from — the intent's
+// maxLanes, its default, or an override (`orun plan --max-lanes`,
+// ORUN_MAX_LANES) that a plan reader would otherwise not see
+// (specs/orun-runner-efficiency §5.2).
+type PlanLanesMeta struct {
+	Mode     string `json:"mode" yaml:"mode"`
+	MaxLanes int    `json:"maxLanes" yaml:"maxLanes"`
+	// MaxLanesFrom is intent | default | flag | env.
+	MaxLanesFrom string `json:"maxLanesFrom" yaml:"maxLanesFrom"`
+	// WeightsFrom says where the packing weights came from — declared (the
+	// templates' estimatedSeconds), history, or file — and is absent when
+	// every job weighs one.
+	WeightsFrom string `json:"weightsFrom,omitempty" yaml:"weightsFrom,omitempty"`
+	// UpstreamWait is execution.lanes.upstreamWait when set: how long a lane
+	// job waits for an upstream in another lane.
+	UpstreamWait string `json:"upstreamWait,omitempty" yaml:"upstreamWait,omitempty"`
 }
 
 // PlanTrigger records which trigger bindings activated the plan. Type / Name
@@ -119,6 +177,9 @@ type PlanExecution struct {
 	Concurrency int    `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
 	FailFast    bool   `json:"failFast" yaml:"failFast"`
 	StateFile   string `json:"stateFile,omitempty" yaml:"stateFile,omitempty"`
+	// Timeout is execution.defaults.timeout: the bound on every step whose
+	// job and step set none; absent, the runner applies its 60m default.
+	Timeout string `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 }
 
 // PlanSpec holds specification about the plan and its bindings
@@ -139,25 +200,33 @@ type ResolvedCompositionSource struct {
 
 // PlanJob is the execution unit in the final plan
 type PlanJob struct {
-	ID                       string                 `json:"id" yaml:"id"`
-	UID                      string                 `json:"uid,omitempty" yaml:"uid,omitempty"`
-	DisplayName              string                 `json:"displayName,omitempty" yaml:"displayName,omitempty"`
-	CheckName                string                 `json:"checkName,omitempty" yaml:"checkName,omitempty"`
-	Name                     string                 `json:"name" yaml:"name"`
-	Component                string                 `json:"component" yaml:"component"`
-	Environment              string                 `json:"environment" yaml:"environment"`
-	Composition              string                 `json:"composition,omitempty" yaml:"composition,omitempty"`
-	Profile                  string                 `json:"profile,omitempty" yaml:"profile,omitempty"`
-	ProfileSource            string                 `json:"profileSource,omitempty" yaml:"profileSource,omitempty"`
-	ProfileRuleTriggerRef    string                 `json:"profileRuleTriggerRef,omitempty" yaml:"profileRuleTriggerRef,omitempty"`
-	JobRegistry              string                 `json:"jobRegistry,omitempty" yaml:"jobRegistry,omitempty"` // Name of the JobRegistry used
-	Job                      string                 `json:"job,omitempty" yaml:"job,omitempty"`                 // Specific job from registry
-	RunsOn                   string                 `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`
+	ID                    string `json:"id" yaml:"id"`
+	UID                   string `json:"uid,omitempty" yaml:"uid,omitempty"`
+	DisplayName           string `json:"displayName,omitempty" yaml:"displayName,omitempty"`
+	CheckName             string `json:"checkName,omitempty" yaml:"checkName,omitempty"`
+	Name                  string `json:"name" yaml:"name"`
+	Component             string `json:"component" yaml:"component"`
+	Environment           string `json:"environment" yaml:"environment"`
+	Composition           string `json:"composition,omitempty" yaml:"composition,omitempty"`
+	Profile               string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	ProfileSource         string `json:"profileSource,omitempty" yaml:"profileSource,omitempty"`
+	ProfileRuleTriggerRef string `json:"profileRuleTriggerRef,omitempty" yaml:"profileRuleTriggerRef,omitempty"`
+	JobRegistry           string `json:"jobRegistry,omitempty" yaml:"jobRegistry,omitempty"` // Name of the JobRegistry used
+	Job                   string `json:"job,omitempty" yaml:"job,omitempty"`                 // Specific job from registry
+	RunsOn                string `json:"runsOn,omitempty" yaml:"runsOn,omitempty"`
+	// Resources is what the job's template declared it needs; EstimatedSeconds
+	// is the job's effective packing weight — the declared estimate, or the
+	// one `orun plan --weights` supplied (specs/orun-runner-efficiency §5.4).
+	Resources        *JobResources `json:"resources,omitempty" yaml:"resources,omitempty"`
+	EstimatedSeconds int           `json:"estimatedSeconds,omitempty" yaml:"estimatedSeconds,omitempty"`
 	// Index is the job's position in Jobs: a stable, dense 0-based number for
 	// one plan. CI composes a per-job runner label from it
 	// (ghr-orun-job:<run>-<index>), so a runner launched for a lane can take
 	// only that lane; the platform maps the label back through the plan.
 	Index int `json:"index" yaml:"index"`
+	// Lane is the id of the lane this job runs in; empty on a lane-unaware
+	// plan (specs/orun-lanes §2).
+	Lane                     string                 `json:"lane,omitempty" yaml:"lane,omitempty"`
 	Path                     string                 `json:"path,omitempty" yaml:"path,omitempty"` // Working directory for job execution
 	Steps                    []PlanStep             `json:"steps" yaml:"steps"`
 	DependsOn                []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
@@ -217,6 +286,10 @@ type PlanStep struct {
 	Name  string `json:"name,omitempty" yaml:"name,omitempty"`
 	Phase string `json:"phase,omitempty" yaml:"phase,omitempty"`
 	Order int    `json:"order,omitempty" yaml:"order,omitempty"`
+	// Scope is lane for a run step the first job of a lane runs once in the
+	// shared tree for every job that shares it (specs/orun-runner-efficiency
+	// §5.3); absent is job.
+	Scope string `json:"scope,omitempty" yaml:"scope,omitempty"`
 	Run   string `json:"run,omitempty" yaml:"run,omitempty"`
 	Use   string `json:"use,omitempty" yaml:"use,omitempty"`
 	// Workflow is the workflow file this step runs (the third execution
@@ -236,6 +309,10 @@ type PlanStep struct {
 	WorkingDirectory string                       `json:"working-directory,omitempty" yaml:"working-directory,omitempty"`
 	Timeout          string                       `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	Retry            int                          `json:"retry,omitempty" yaml:"retry,omitempty"`
+	// Caches are the directories under the job's working directory this step
+	// fills and orun keeps on the machine between jobs and runs
+	// (specs/orun-cache-efficiency CE3).
+	Caches []CacheDecl `json:"caches,omitempty" yaml:"caches,omitempty"`
 	// Resume opts a workflow step into resume-from-failed-step on retry
 	// (orun-workflows-v2 §8).
 	Resume bool `json:"resume,omitempty" yaml:"resume,omitempty"`

@@ -130,7 +130,6 @@ The `orun` binary is one Go module. Cobra command wiring, flag definitions, and 
 | --- | --- |
 | `internal/contract` | The agent runtime's task contract — goal, blast-radius ceiling, done-when list, and gates |
 | `internal/taskfile` | Reads authored `tasks/<KEY>.TaskContract.yaml` documents |
-| `internal/workfile` | Reads and judges the work tree an intent declares (one `epic.yaml` per epic, task contracts beside it) for `orun work check` and `orun work sync` |
 | `internal/taskobj` | Seals tasks into the object graph under `refs/tasks/<key>` and reads them back |
 
 ## Test fixtures and conformance

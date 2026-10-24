@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -10,6 +12,10 @@ var (
 	planName             string
 	planComponents       []string
 	planLong             bool
+	strictLanes          bool
+	maxLanesFlag         int
+	weightsFlag          string
+	writeWeightsFlag     string
 	artifactBackend      string
 	githubOutput         bool
 	planNoCatalogRefresh bool
@@ -40,10 +46,8 @@ var planCmd = &cobra.Command{
 		// Config-driven best-effort auto-sync (execution.state.autopushCatalog).
 		// Never fails the plan; a no-op unless enabled + on the clean default
 		// branch + the catalog changed since the last publish.
-		maybeAutoPushCatalog(cmd.Context())
-		// Same shape for the declared work tree (intent work.sync: on-merge):
-		// the merge's plan is the sync; no separate job.
-		maybeAutoSyncWork(cmd.Context())
+		autoPushAfterPlan(cmd.Context())
+		noticeRetiredWorkSection()
 		return nil
 	},
 }
@@ -61,6 +65,17 @@ func pushCatalogAfterPlan(ctx context.Context) error {
 	return pushResolvedCatalog(ctx, backendURL, "", "", "")
 }
 
+// noticeRetiredWorkSection says, once per plan, that a `work:` section in
+// intent.yaml no longer means anything: saas-work-gitops-teardown removed the
+// declared work tree and its merge-time sync from orun and from Orunbase.
+// A repository that still carries the section plans exactly as before — the
+// notice is the only thing the section buys, so its author removes it.
+func noticeRetiredWorkSection() {
+	if intent := loadIntentForCloudConfig(); intent != nil && intent.Work != nil {
+		fmt.Fprintln(os.Stderr, "notice: intent.yaml declares a work: section; orun no longer reads a work tree or syncs one (saas-work-gitops-teardown) — remove the section")
+	}
+}
+
 func registerPlanCommand(root *cobra.Command) {
 	root.AddCommand(planCmd)
 
@@ -71,7 +86,11 @@ func registerPlanCommand(root *cobra.Command) {
 	planCmd.Flags().BoolVar(&allEnvs, "all-envs", false, "Plan all environments explicitly (mutually exclusive with --env)")
 	planCmd.Flags().StringArrayVar(&planComponents, "component", nil, "Filter by component (repeatable)")
 	planCmd.Flags().StringVar(&planName, "name", "", "Name the plan so \"orun run <name>\" runs it")
-	planCmd.Flags().StringVarP(&viewPlan, "view", "v", "", "View plan (dag/dag:long/dependencies/component=NAME)")
+	planCmd.Flags().StringVarP(&viewPlan, "view", "v", "", "View plan (dag/dag:long/dependencies/lanes/component=NAME)")
+	planCmd.Flags().BoolVar(&strictLanes, "strict-lanes", false, "Fail the plan when lanes form a cycle instead of splitting them (execution.lanes.onCycle: reject)")
+	planCmd.Flags().StringVar(&weightsFlag, "weights", "", "Packing weights for auto-mode lanes: 'history' (the median duration of each job over the last sealed runs) or a JSON file of job id to seconds (as --write-weights writes). Unset: the templates' estimatedSeconds, else every job weighs one")
+	planCmd.Flags().StringVar(&writeWeightsFlag, "write-weights", "", "Write the weights measured from history to this file (a committed weights file for --weights)")
+	planCmd.Flags().IntVar(&maxLanesFlag, "max-lanes", 0, "Override execution.lanes.maxLanes for this plan, e.g. from the runner pool's free capacity (or set ORUN_MAX_LANES; 0 = the intent's value)")
 	planCmd.Flags().BoolVar(&planLong, "long", false, "Show detailed output (step commands, IDs)")
 	planCmd.Flags().BoolVar(&changedOnly, "changed", false, "Show only changed components (requires git)")
 	planCmd.Flags().StringVar(&baseBranch, "base", "", "Base ref for changed detection (default: main)")
@@ -85,7 +104,7 @@ func registerPlanCommand(root *cobra.Command) {
 	planCmd.Flags().StringVar(&fromCI, "from-ci", "", "CI provider for event normalization (e.g. github)")
 	planCmd.Flags().StringVar(&eventFile, "event-file", "", "Path to provider event JSON file")
 	planCmd.Flags().StringVar(&artifactBackend, "artifact", "", "Artifact backend for upload (e.g. github)")
-	planCmd.Flags().BoolVar(&githubOutput, "github-output", false, "Write matrix/plan_id/exec_id to $GITHUB_OUTPUT")
+	planCmd.Flags().BoolVar(&githubOutput, "github-output", false, "Append matrix, lane-matrix (and one per level), lane-count, plan_id and exec_id to $GITHUB_OUTPUT; needs no --artifact")
 
 	planCmd.Flags().BoolVar(&planNoCatalogRefresh, "no-catalog-refresh", false, "Skip catalog refresh; plan proceeds without catalog context")
 	planCmd.Flags().BoolVar(&planPushCatalog, "push-catalog", false, "After planning, sync the resolved catalog snapshot to the configured backend and advance the head")

@@ -63,12 +63,17 @@ The server derives the job set from the `plan` object — **no jobs array is sen
 GET …/state/runs/{runId}                 → projected snapshot { run, jobCounts }   // delayed, cacheable
 GET …/state/runs/{runId}/log?from={seq}  → { "events":[ {seq,kind,jobId?,actor,at,...} ], "next":N, "open":true }
 GET …/state/runs/{runId}/frontier        → { "jobs":[ jobId… ] }                   // projection of the fold
+GET …/state/runs/{runId}/state           → RunFoldState (§8.2: jobs, frontier, lastSeq, timings)  // the fold itself: a client's first read
 GET …/state/runs?environment=&status=&cursor=   → paginated list (projection)
 ```
 
 `GET …/log` supports `Accept: text/event-stream` (SSE) and long-poll
 (`?wait=30s`) for live tail. **It replaces** status-polling, runnable-polling, and
-per-job status: the client folds one stream.
+per-job status: the client folds one stream. With `&wake=progress` a held
+long-poll is woken by progress alone (any event but `state.job.lease_renewed`)
+and otherwise lapses; the page still carries every event past `from`,
+renewals included, and `head.progressSeq` names the newest event that is not
+a renewal, so a waiter advances its cursor past what did not wake it.
 
 ## 3. Coordination = conditional appends
 

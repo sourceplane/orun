@@ -817,3 +817,57 @@ func TestDeriveEntitiesAppliesEnrichments(t *testing.T) {
 		t.Errorf("enriched doc commit lost: %v", ref)
 	}
 }
+
+func TestDeriveEntitiesMaterializesDeclaredEnvironments(t *testing.T) {
+	t.Parallel()
+	manifests := []ComponentManifest{
+		{Identity: ComponentIdentity{ComponentKey: "ns/repo/api", Name: "api"},
+			Relations: []EntityRelation{
+				{Type: "deployedTo", To: "ns/repo/prod", ToKind: EntityKindEnvironment},
+			}},
+	}
+	primary := map[string]any{"title": "prod", "url": "https://app.example", "role": "primary"}
+	enr := []EntityEnrichment{
+		// Declared AND deployed to: one entity, enriched.
+		{Kind: EntityKindEnvironment, Name: "prod", Declared: true, EntityKey: "ns/repo/prod",
+			Links: []map[string]any{primary}, Spec: map[string]any{"url": "https://app.example", "order": 1}},
+		// Declared, nothing deploys to it yet: still materializes.
+		{Kind: EntityKindEnvironment, Name: "stage", Declared: true, EntityKey: "ns/repo/stage",
+			Spec: map[string]any{"order": 0}},
+		// Not declared, not referenced: never created.
+		{Kind: EntityKindEnvironment, Name: "phantom", Spec: map[string]any{"order": 0}},
+	}
+	out := deriveEntities(manifests, enr)
+	envs := map[string]Entity{}
+	for _, e := range out {
+		if e.Kind == EntityKindEnvironment {
+			envs[e.Identity.Name] = e
+		}
+	}
+	if _, ok := envs["phantom"]; ok {
+		t.Fatal("an undeclared, unreferenced environment must not materialize")
+	}
+	prod, ok := envs["prod"]
+	if !ok {
+		t.Fatal("prod missing")
+	}
+	if prod.Identity.EntityKey != "ns/repo/prod" || prod.Spec["memberCount"] != 1 {
+		t.Errorf("prod = %+v (declared and derived must be one entity)", prod)
+	}
+	if prod.Spec["url"] != "https://app.example" || prod.Spec["order"] != 1 {
+		t.Errorf("prod spec = %v", prod.Spec)
+	}
+	if len(prod.Links) != 1 || prod.Links[0]["role"] != "primary" {
+		t.Errorf("prod links = %v", prod.Links)
+	}
+	stage, ok := envs["stage"]
+	if !ok {
+		t.Fatal("declared stage must materialize without a deployer")
+	}
+	if stage.Identity.EntityKey != "ns/repo/stage" || stage.Spec["order"] != 0 {
+		t.Errorf("stage = %+v", stage)
+	}
+	if _, has := stage.Spec["memberCount"]; has {
+		t.Errorf("stage has no members: %v", stage.Spec)
+	}
+}

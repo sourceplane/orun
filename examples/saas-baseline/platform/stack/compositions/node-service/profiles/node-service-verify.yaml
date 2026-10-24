@@ -1,0 +1,8 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: ExecutionProfile
+metadata:
+  name: node-service-verify
+spec:
+  jobs:
+    ship:
+      includeCapabilities: [node-service.test, node-service.build]

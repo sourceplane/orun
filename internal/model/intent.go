@@ -3,7 +3,6 @@ package model
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -21,10 +20,13 @@ type Intent struct {
 	Environments map[string]Environment `yaml:"environments" json:"environments"`
 	Components   []Component            `yaml:"components" json:"components"`
 	Execution    IntentExecution        `yaml:"execution,omitempty" json:"execution,omitempty"`
-	// Work names where the repository declares its work: the epics tree and
-	// the task contracts (orun-cloud saas-work-gitops WG-1). Absent means
-	// today's layout; see IntentWork.
-	Work *IntentWork       `yaml:"work,omitempty" json:"work,omitempty"`
+	// Work is the retired `work:` section (orun-cloud saas-work-gitops; removed
+	// by saas-work-gitops-teardown): where a repository once declared its
+	// epics and task contracts and whether `orun plan` synced the tree into
+	// Orunbase. It is read only so that a repository still carrying the
+	// section loads and plans as before, with one notice from `orun plan`;
+	// nothing reads its fields. Contracts live in `tasks/` (taskfile.Dir).
+	Work map[string]any    `yaml:"work,omitempty" json:"-"`
 	Env  map[string]string `yaml:"env,omitempty" json:"env,omitempty"`
 	// SecretEnv maps env var names to secret:// references (never values —
 	// the planner rejects literals; specs/orun-secrets/data-model.md §2.1).
@@ -37,6 +39,152 @@ type Intent struct {
 // orun binary's digest and a declared pin is a load-time error.
 type IntentExecution struct {
 	State IntentExecutionState `yaml:"state,omitempty" json:"state,omitempty"`
+	// Defaults are run-time bounds every job inherits unless it sets its own
+	// (specs/orun-runner-efficiency §5.7).
+	Defaults *IntentExecutionDefaults `yaml:"defaults,omitempty" json:"defaults,omitempty"`
+	// Lanes groups plan jobs into the units a runner takes. Nil (the
+	// default) leaves every job its own lane and the plan byte-identical to
+	// a lane-unaware one (specs/orun-lanes §3.1, §4.6).
+	Lanes *IntentLanes `yaml:"lanes,omitempty" json:"lanes,omitempty"`
+}
+
+// IntentExecutionDefaults is execution.defaults in intent.yaml.
+type IntentExecutionDefaults struct {
+	// Timeout bounds every step whose job and step set none (a Go duration,
+	// e.g. 45m). The runner's own default is 60m: no step holds a runner for
+	// the CI limit.
+	Timeout string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+}
+
+// DefaultStepTimeout bounds a step when neither it, its job, nor
+// execution.defaults.timeout does.
+const DefaultStepTimeout = "60m"
+
+// Lane modes (specs/orun-lanes §3).
+const (
+	LaneModeJob       = "job"
+	LaneModeComponent = "component"
+	LaneModeEnv       = "env"
+	LaneModeAuto      = "auto"
+	// LaneIsolated is the component annotation that keeps a component's jobs
+	// on runners of their own; not a mode.
+	LaneIsolated = "isolated"
+	// Cycle policies between lanes (specs/orun-lanes §7).
+	LaneOnCycleSplit  = "split"
+	LaneOnCycleReject = "reject"
+	// Defaults applied when a field is unset.
+	DefaultLaneMaxLanes    = 16
+	DefaultLaneConcurrency = 4
+)
+
+// LaneConcurrency is execution.lanes.concurrency, or a group's: the jobs in
+// flight inside one lane. A count, or `auto` (LaneConcurrencyAuto) for the
+// runner's core count, which `orun run --lane` resolves on the machine that
+// runs the lane (specs/orun-runner-efficiency §5.2). Zero is unset.
+type LaneConcurrency int
+
+// LaneConcurrencyAuto is `concurrency: auto`. Only the word maps to it: a
+// negative count written in the intent stays what it is and fails
+// validation, so no number a person could type is mistaken for auto.
+const LaneConcurrencyAuto LaneConcurrency = -1 << 31
+
+// IsAuto reports whether the concurrency is sized to the runner.
+func (c LaneConcurrency) IsAuto() bool { return c == LaneConcurrencyAuto }
+
+func (c LaneConcurrency) MarshalYAML() (any, error) {
+	if c.IsAuto() {
+		return "auto", nil
+	}
+	return int(c), nil
+}
+
+func (c *LaneConcurrency) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.ScalarNode {
+		return fmt.Errorf("concurrency must be a number or \"auto\"")
+	}
+	if value.Value == "auto" {
+		*c = LaneConcurrencyAuto
+		return nil
+	}
+	var n int
+	if err := value.Decode(&n); err != nil {
+		return fmt.Errorf("concurrency must be a number or \"auto\", got %q", value.Value)
+	}
+	*c = LaneConcurrency(n)
+	return nil
+}
+
+func (c LaneConcurrency) MarshalJSON() ([]byte, error) {
+	if c.IsAuto() {
+		return []byte(`"auto"`), nil
+	}
+	return json.Marshal(int(c))
+}
+
+func (c *LaneConcurrency) UnmarshalJSON(b []byte) error {
+	if string(b) == `"auto"` {
+		*c = LaneConcurrencyAuto
+		return nil
+	}
+	var n int
+	if err := json.Unmarshal(b, &n); err != nil {
+		return fmt.Errorf("concurrency must be a number or \"auto\", got %s", b)
+	}
+	*c = LaneConcurrency(n)
+	return nil
+}
+
+// IntentLanes is execution.lanes in intent.yaml.
+type IntentLanes struct {
+	// Mode is job (default) | component | env | auto.
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	// MaxLanes caps the lanes auto mode emits (default 16). `orun plan
+	// --max-lanes` and ORUN_MAX_LANES override it for one plan.
+	MaxLanes int `yaml:"maxLanes,omitempty" json:"maxLanes,omitempty"`
+	// Concurrency is the jobs in flight inside one lane (default 4), or
+	// auto for the runner's core count.
+	Concurrency LaneConcurrency `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
+	// OnCycle is split (default) | reject.
+	OnCycle string `yaml:"onCycle,omitempty" json:"onCycle,omitempty"`
+	// UpstreamWait bounds how long a lane job waits for an upstream in
+	// another lane through remote state (a Go duration; default 60m).
+	UpstreamWait string `yaml:"upstreamWait,omitempty" json:"upstreamWait,omitempty"`
+	// Groups are named lanes a component joins with spec.lane.
+	Groups map[string]LaneGroup `yaml:"groups,omitempty" json:"groups,omitempty"`
+	// Rules switch the mode by trigger; the first whose triggerRef is active
+	// wins.
+	Rules []LaneRule `yaml:"rules,omitempty" json:"rules,omitempty"`
+}
+
+// LaneGroup is one named lane group.
+type LaneGroup struct {
+	// Concurrency overrides execution.lanes.concurrency for this group; a
+	// count or auto.
+	Concurrency LaneConcurrency `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
+}
+
+// LaneRule selects a mode when a trigger binding is active.
+type LaneRule struct {
+	Mode string          `yaml:"mode" json:"mode"`
+	When ProfileRuleWhen `yaml:"when" json:"when"`
+}
+
+// IsValidLaneMode reports whether mode is a lane mode (empty means default).
+func IsValidLaneMode(mode string) bool {
+	switch mode {
+	case "", LaneModeJob, LaneModeComponent, LaneModeEnv, LaneModeAuto:
+		return true
+	}
+	return false
+}
+
+// IsReservedLaneName reports whether name cannot be a group name.
+func IsReservedLaneName(name string) bool {
+	switch name {
+	case LaneModeJob, LaneModeAuto, LaneIsolated:
+		return true
+	}
+	return false
 }
 
 // IntentExecutionState configures where execution state is stored.
@@ -97,9 +245,33 @@ type Group struct {
 	ParameterDefaults map[string]map[string]interface{} `yaml:"parameterDefaults" json:"parameterDefaults"`
 }
 
+// EnvironmentLink is one door into a running environment beyond its front
+// door: an API host, an admin console, a status page. Surfaced on the
+// environment's catalog entity after the front door (url) — the Overview's
+// product head and `orun catalog describe environment:<name>` show them.
+type EnvironmentLink struct {
+	Title string `yaml:"title" json:"title"`
+	URL   string `yaml:"url" json:"url"`
+	Icon  string `yaml:"icon,omitempty" json:"icon,omitempty"`
+}
+
 // Environment defines environment runtime contexts
 type Environment struct {
-	Path              string                            `yaml:"path" json:"path"`
+	Path string `yaml:"path" json:"path"`
+	// Description is a one-line "what is this environment" for the catalog
+	// entity the environment materializes as (fill-empty; a
+	// catalog.entities enrichment for the same environment no longer needs
+	// to carry one).
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+	// URL is the environment's front door — the absolute http(s) address a
+	// person opens to reach the product running in this environment. It
+	// rides the catalog snapshot as the environment entity's primary link
+	// (links[0], role=primary) and spec.url, so the Orunbase Overview can
+	// show one door per environment next to the product's description. A
+	// relative or non-http(s) value is a resolve error.
+	URL string `yaml:"url,omitempty" json:"url,omitempty"`
+	// Links are further doors (API, admin, status page), after the URL.
+	Links             []EnvironmentLink                 `yaml:"links,omitempty" json:"links,omitempty"`
 	Activation        EnvironmentActivation             `yaml:"activation,omitempty" json:"activation,omitempty"`
 	Promotion         EnvironmentPromotion              `yaml:"promotion,omitempty" json:"promotion,omitempty"`
 	Selectors         EnvironmentSelectors              `yaml:"selectors" json:"selectors"`
@@ -195,11 +367,15 @@ type Component struct {
 	// wire-now-seed-later shape for runtime secrets a component CAN consume
 	// before anyone has stored them. Same leak guard; a key may not appear
 	// in env, secretEnv, and optionalSecretEnv at once.
-	OptionalSecretEnv         map[string]string `yaml:"optionalSecretEnv,omitempty" json:"optionalSecretEnv,omitempty"`
-	Change                    ComponentChange   `yaml:"change,omitempty" json:"change,omitempty"`
-	ResolvedComposition       string            `yaml:"-" json:"-"`
-	ResolvedCompositionSource string            `yaml:"-" json:"-"`
-	SourcePath                string            `yaml:"-" json:"-"`
+	OptionalSecretEnv map[string]string `yaml:"optionalSecretEnv,omitempty" json:"optionalSecretEnv,omitempty"`
+	Change            ComponentChange   `yaml:"change,omitempty" json:"change,omitempty"`
+	// Lane places this component's jobs: the name of a group declared in
+	// execution.lanes.groups, or LaneIsolated so they never share a runner.
+	// Empty leaves them to execution.lanes.mode (specs/orun-lanes §3.2).
+	Lane                      string `yaml:"lane,omitempty" json:"lane,omitempty"`
+	ResolvedComposition       string `yaml:"-" json:"-"`
+	ResolvedCompositionSource string `yaml:"-" json:"-"`
+	SourcePath                string `yaml:"-" json:"-"`
 }
 
 // ComponentSubscribe declares which environments a component participates in.
@@ -438,97 +614,4 @@ type ResolvedDependency struct {
 	// ModeRuleTriggerRef records the matched triggerRef when ModeSource is
 	// "edge-rule".
 	ModeRuleTriggerRef string
-}
-
-// IntentWork is the `work:` section of intent.yaml (orun-cloud
-// saas-work-gitops, design §1): where the epics live (one directory per
-// epic, named by its slug, holding epic.yaml, the design docs and the status
-// file), where the task contracts live (`<KEY>.TaskContract.yaml`), and
-// whether `orun work sync` reconciles the tree into the platform on the
-// default branch. Every field is optional; Layout applies the defaults.
-type IntentWork struct {
-	// Epics is the epics directory, repo-relative. Default "specs/epics".
-	Epics string `yaml:"epics,omitempty" json:"epics,omitempty"`
-	// Tasks is the task-contracts directory, repo-relative. Default "tasks".
-	Tasks string `yaml:"tasks,omitempty" json:"tasks,omitempty"`
-	// Sync is "off" (default) or "on-merge".
-	Sync string `yaml:"sync,omitempty" json:"sync,omitempty"`
-}
-
-// The defaults a repository with no `work:` section has always had.
-const (
-	DefaultWorkEpicsDir = "specs/epics"
-	DefaultWorkTasksDir = "tasks"
-	WorkSyncOff         = "off"
-	WorkSyncOnMerge     = "on-merge"
-)
-
-// WorkLayout is the resolved `work:` section: every field set, slashes
-// forward, no leading "./" or trailing "/".
-type WorkLayout struct {
-	Epics string
-	Tasks string
-	Sync  string
-}
-
-// DefaultWorkLayout is the layout of a repository that declares nothing.
-func DefaultWorkLayout() WorkLayout {
-	return WorkLayout{Epics: DefaultWorkEpicsDir, Tasks: DefaultWorkTasksDir, Sync: WorkSyncOff}
-}
-
-// Declared reports whether the repository has a `work:` section at all —
-// the rules that only make sense for a declared tree (work-manifest) are
-// silent otherwise.
-func (w WorkLayout) Declared() bool { return w != DefaultWorkLayout() }
-
-// WorkLayout resolves the section with its defaults. A nil intent is the
-// default layout, so callers need no nil check.
-func (i *Intent) WorkLayout() WorkLayout {
-	l := DefaultWorkLayout()
-	if i == nil || i.Work == nil {
-		return l
-	}
-	if s := cleanWorkDir(i.Work.Epics); s != "" {
-		l.Epics = s
-	}
-	if s := cleanWorkDir(i.Work.Tasks); s != "" {
-		l.Tasks = s
-	}
-	if s := strings.ToLower(strings.TrimSpace(i.Work.Sync)); s != "" {
-		l.Sync = s
-	}
-	return l
-}
-
-// ValidateWork refuses a `work:` section that names an absolute path, an
-// escape from the repository, or an unknown sync mode. Called by the
-// loader; a repository with no section always validates.
-func (i *Intent) ValidateWork() error {
-	if i == nil || i.Work == nil {
-		return nil
-	}
-	for _, f := range []struct{ name, value string }{{"epics", i.Work.Epics}, {"tasks", i.Work.Tasks}} {
-		v := cleanWorkDir(f.value)
-		if f.value != "" && v == "" || strings.HasPrefix(v, "/") || v == ".." || strings.HasPrefix(v, "../") {
-			return fmt.Errorf("intent.yaml work.%s: %q must be a repo-relative directory", f.name, f.value)
-		}
-	}
-	switch s := strings.ToLower(strings.TrimSpace(i.Work.Sync)); s {
-	case "", WorkSyncOff, WorkSyncOnMerge:
-		return nil
-	default:
-		return fmt.Errorf("intent.yaml work.sync: %q is not one of off, on-merge", i.Work.Sync)
-	}
-}
-
-// cleanWorkDir normalizes a declared directory: forward slashes, no "./",
-// no trailing slash. "" for an empty or dot-only value.
-func cleanWorkDir(s string) string {
-	s = strings.TrimSpace(strings.ReplaceAll(s, "\\", "/"))
-	s = strings.TrimPrefix(s, "./")
-	s = strings.TrimSuffix(s, "/")
-	if s == "." {
-		return ""
-	}
-	return s
 }

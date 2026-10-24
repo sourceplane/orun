@@ -1,6 +1,8 @@
-# A task contract template. Unbound to a key on purpose: `orun task create
-# --contract` seals and attaches it to the key the allocator issues; then
-# rename it to tasks/<KEY>.TaskContract.yaml and `orun task attach <KEY>`.
+# A task contract template. Name it tasks/<KEY>.TaskContract.yaml with the
+# task's key — the tracker's issue key, or the one you chose in the epic's
+# cluster code — and attach it: `task_create` with the contract inline (or
+# `orun task create --contract`) for a task you mint, `orun task attach` for
+# one the tracker minted. The file is the contract; it declares no task.
 #
 # `affects` is the ceiling on what the diff may touch (`orun task check --base
 # main` compares). `gates: []` DECLARES that merge alone finishes the task; list

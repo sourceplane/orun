@@ -2,6 +2,7 @@ package catalogresolve
 
 import (
 	"context"
+	"os"
 	"path"
 	"path/filepath"
 	"sort"
@@ -52,6 +53,7 @@ func Resolve(ctx context.Context, opts Options) (*ResolvedCatalog, []ValidationI
 	for i := range dr.Manifests {
 		manifests = append(manifests, authoredToManifest(dr.Manifests[i], namespace, repo))
 	}
+	applyManualLanes(dr.Manifests, manifests, manualTriggers(intent))
 
 	// Stage 6 — inference. Per-manifest, errors are collected as
 	// ErrInferenceFailed and (in default mode) NOT promoted to issues;
@@ -172,9 +174,28 @@ func Resolve(ctx context.Context, opts Options) (*ResolvedCatalog, []ValidationI
 	}
 
 	if firstErr := firstError(issues); firstErr != nil {
-		return rc, issues, *firstErr
+		return rc, issues, resolveAbortError(*firstErr, manifests)
 	}
 	return rc, issues, nil
+}
+
+// resolveAbortError is the error Resolve aborts with for the first
+// error-severity issue. A duplicate componentKey becomes the typed
+// *ErrDuplicateComponent, which names every offending manifest in its
+// message; every other issue is returned as-is.
+func resolveAbortError(issue ValidationIssue, manifests []*catalogmodel.ComponentManifest) error {
+	if issue.Code != "component.key.duplicate" {
+		return issue
+	}
+	key, _ := issue.Detail["componentKey"].(string)
+	name := ""
+	for _, cm := range manifests {
+		if cm != nil && cm.Identity.ComponentKey == key {
+			name = cm.Identity.Name
+			break
+		}
+	}
+	return duplicateComponentError(issue, name)
 }
 
 // loadIntentForResolve re-reads the intent file using the same
@@ -191,6 +212,10 @@ func loadIntentForResolve(opts Options) (*intentFile, error) {
 	return intent, nil
 }
 
+// defaultRepoOverview is the repo-root file that stands in for
+// repo.docs.overview when none is declared.
+const defaultRepoOverview = "README.md"
+
 // repoDeclFromIntent resolves the top-level `repo:` block into a
 // RepoDeclaration, or nil when the intent declares none. The entity key is
 // repo-local (<namespace>/<repo>/<name>); no cloud project id is available at
@@ -199,10 +224,20 @@ func loadIntentForResolve(opts Options) (*intentFile, error) {
 // CD1) resolves through docCtx: bytes read at the pinned commit, dirty paths
 // refused, caps enforced — declared paths are repo-root-relative here.
 func repoDeclFromIntent(intent *intentFile, namespace, repo string, docCtx *docResolveContext) *RepoDeclaration {
-	if intent == nil || intent.Repo == nil {
+	if intent == nil {
 		return nil
 	}
 	rb := intent.Repo
+	if rb == nil {
+		// No `repo:` block: the repo still self-describes from metadata
+		// when it says anything (a description), so the Overview's product
+		// head fills in for repos that never wrote the block. A bare
+		// metadata.name alone declares nothing.
+		if intent.Metadata == nil || intent.Metadata.Description == "" {
+			return nil
+		}
+		rb = &intentRepoBlock{}
+	}
 	name := repo
 	if intent.Metadata != nil && intent.Metadata.Name != "" {
 		name = intent.Metadata.Name
@@ -220,6 +255,14 @@ func repoDeclFromIntent(intent *intentFile, namespace, repo string, docCtx *docR
 	if rb.Docs != nil {
 		overview = rb.Docs.Overview
 		pages = rb.Docs.Pages
+	}
+	// No declared overview: a README.md at the repo root is the overview by
+	// convention — the front page every git host already shows. Read through
+	// the same doc context (pinned commit, size cap, dirty-tree refusal).
+	if overview == "" && docCtx != nil && docCtx.root != "" {
+		if st, err := os.Stat(filepath.Join(docCtx.root, defaultRepoOverview)); err == nil && !st.IsDir() {
+			overview = defaultRepoOverview
+		}
 	}
 	links := make([]RepoLink, 0, len(rb.Links))
 	for _, l := range rb.Links {

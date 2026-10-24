@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/sourceplane/orun/internal/execmodel"
@@ -21,6 +22,12 @@ const logChunkSafeBytes = 900 * 1024
 type RemoteStateBackend struct {
 	client   *remotestate.Client
 	runnerID string
+
+	// saas-live-runs LR8b. batchOK: the server has taken a batched log append;
+	// noBatch: it refused one before ever taking one (a server from before
+	// LR8b), so this process sends chunks one by one.
+	batchOK atomic.Bool
+	noBatch atomic.Bool
 }
 
 // NewRemoteStateBackend creates a RemoteStateBackend with the given HTTP client
@@ -226,7 +233,9 @@ func (r *RemoteStateBackend) UpdateJob(ctx context.Context, runID string, jobID 
 }
 
 func (r *RemoteStateBackend) AppendStepLog(ctx context.Context, runID string, jobID string, content string, step *LogStep) error {
-	if content == "" {
+	// Empty content is nothing to send, except a step's start or end: the
+	// event is the point (saas-live-runs LR8).
+	if content == "" && (step == nil || step.Event == LogStepChunk) {
 		return nil
 	}
 	ulid := wireRunID(runID)
@@ -235,28 +244,121 @@ func (r *RemoteStateBackend) AppendStepLog(ctx context.Context, runID string, jo
 		// A step's output can outgrow one chunk. Only the LAST piece carries the
 		// step's terminal event and its outcome; the rest are `chunk`, so the
 		// server sees exactly one `end` per step rather than one per megabyte.
-		var wire *remotestate.AppendLogStep
-		if step != nil {
-			last := i == len(chunks)-1
-			w := remotestate.AppendLogStep{
-				StepID: step.StepID,
-				Index:  step.Index,
-				Event:  step.Event,
-			}
-			if !last && step.Event == LogStepEnd {
-				w.Event = LogStepChunk
-			}
-			if w.Event == LogStepEnd {
-				w.Status = step.Status
-				w.ExitCode = step.ExitCode
-			}
-			wire = &w
-		}
+		wire := wireStep(step, i == len(chunks)-1)
 		if _, err := r.client.AppendLog(ctx, ulid, jobID, r.runnerID, chunk, wire); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// AppendStepLogs stores a job's queued chunks with as few requests as the
+// server's limits allow (saas-live-runs LR8b): at most
+// remotestate.MaxAppendLogEntries entries and logChunkSafeBytes of content per
+// request. A chunk larger than one request is split as AppendStepLog splits it.
+// A server that does not take batches gets the chunks one by one, and so does
+// every later call of this process once a server has refused a batch before
+// taking one.
+func (r *RemoteStateBackend) AppendStepLogs(ctx context.Context, runID, jobID string, chunks []LogChunk) (int, error) {
+	if r.noBatch.Load() {
+		return r.appendEach(ctx, runID, jobID, chunks)
+	}
+	ulid := wireRunID(runID)
+	done := 0 // chunks stored, from the first
+	var (
+		batch  []remotestate.AppendLogEntry
+		closes []int // per entry: the chunks stored once it is (0: a piece mid-chunk)
+		size   int
+	)
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		n, err := r.client.AppendLogs(ctx, ulid, jobID, r.runnerID, batch)
+		for k := 0; k < n && k < len(closes); k++ {
+			if closes[k] > 0 {
+				done = closes[k]
+			}
+		}
+		if n > 0 {
+			r.batchOK.Store(true)
+		}
+		batch, closes, size = nil, nil, 0
+		return err
+	}
+	for i, c := range chunks {
+		// Empty content is nothing to send, except a step's start or end.
+		if c.Content == "" && (c.Step == nil || c.Step.Event == LogStepChunk) {
+			if len(closes) > 0 {
+				closes[len(closes)-1] = i + 1
+			} else {
+				done = i + 1
+			}
+			continue
+		}
+		pieces := chunkUTF8(c.Content, logChunkSafeBytes)
+		for j, piece := range pieces {
+			if len(batch) == remotestate.MaxAppendLogEntries || (len(batch) > 0 && size+len(piece) > logChunkSafeBytes) {
+				if err := flush(); err != nil {
+					return r.afterBatchError(ctx, runID, jobID, chunks, done, err)
+				}
+			}
+			last := j == len(pieces)-1
+			batch = append(batch, remotestate.AppendLogEntry{Content: piece, Step: wireStep(c.Step, last)})
+			size += len(piece)
+			if last {
+				closes = append(closes, i+1)
+			} else {
+				closes = append(closes, 0)
+			}
+		}
+	}
+	if err := flush(); err != nil {
+		return r.afterBatchError(ctx, runID, jobID, chunks, done, err)
+	}
+	return len(chunks), nil
+}
+
+// afterBatchError decides what a failed batch means. A server that does not
+// take batches gets the chunks not yet stored one by one; it is remembered as
+// such when it never took one. Any other error is the caller's to retry.
+func (r *RemoteStateBackend) afterBatchError(ctx context.Context, runID, jobID string, chunks []LogChunk, done int, err error) (int, error) {
+	if !errors.Is(err, remotestate.ErrBatchedAppendUnsupported) {
+		return done, err
+	}
+	if !r.batchOK.Load() {
+		r.noBatch.Store(true)
+	}
+	n, eachErr := r.appendEach(ctx, runID, jobID, chunks[done:])
+	return done + n, eachErr
+}
+
+// appendEach is one AppendStepLog per chunk, in order.
+func (r *RemoteStateBackend) appendEach(ctx context.Context, runID, jobID string, chunks []LogChunk) (int, error) {
+	for i, c := range chunks {
+		if err := r.AppendStepLog(ctx, runID, jobID, c.Content, c.Step); err != nil {
+			return i, err
+		}
+	}
+	return len(chunks), nil
+}
+
+// wireStep maps a step coordinate onto the wire for one piece of a chunk. Only
+// the LAST piece of a step's end carries the end and its outcome; the rest are
+// `chunk`, so the server sees exactly one `end` per step.
+func wireStep(step *LogStep, last bool) *remotestate.AppendLogStep {
+	if step == nil {
+		return nil
+	}
+	w := remotestate.AppendLogStep{StepID: step.StepID, Index: step.Index, Event: step.Event}
+	if !last && step.Event == LogStepEnd {
+		w.Event = LogStepChunk
+	}
+	if w.Event == LogStepEnd {
+		w.Status = step.Status
+		w.ExitCode = step.ExitCode
+	}
+	return &w
 }
 
 func (r *RemoteStateBackend) RunnableJobs(ctx context.Context, runID string) ([]string, error) {
@@ -355,7 +457,13 @@ func (r *RemoteStateBackend) ReadJobLog(ctx context.Context, runID string, jobID
 }
 
 func (r *RemoteStateBackend) TailJobLog(ctx context.Context, runID string, jobID string, fromSeq int) (string, int, bool, error) {
-	res, err := r.client.ReadLog(ctx, wireRunID(runID), jobID, fromSeq)
+	return r.TailJobLogWait(ctx, runID, jobID, fromSeq, 0)
+}
+
+// TailJobLogWait is TailJobLog held on the server for up to waitSeconds while
+// nothing new sits past fromSeq and the job still runs (`logs --follow`).
+func (r *RemoteStateBackend) TailJobLogWait(ctx context.Context, runID string, jobID string, fromSeq, waitSeconds int) (string, int, bool, error) {
+	res, err := r.client.ReadLogWait(ctx, wireRunID(runID), jobID, fromSeq, waitSeconds)
 	if err != nil {
 		return "", fromSeq, false, err
 	}

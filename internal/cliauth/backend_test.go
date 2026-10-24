@@ -3,6 +3,8 @@ package cliauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -235,5 +237,153 @@ func TestCreateLink_Errors(t *testing.T) {
 				t.Errorf("DetailReason() = %q, want %q", apiErr.DetailReason(), tc.wantReason)
 			}
 		})
+	}
+}
+
+// ── accounts ─────────────────────────────────────────────────────────────────
+
+// decodeBody reads the JSON request body into m (nil on failure).
+func decodeBody(r *http.Request) map[string]interface{} {
+	var m map[string]interface{}
+	_ = json.NewDecoder(r.Body).Decode(&m)
+	return m
+}
+
+func TestCreateOrgInAccount_SendsAccountIDOnlyWhenNamed(t *testing.T) {
+	var bodies []map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/organizations" {
+			http.Error(w, "unexpected request", 400)
+			return
+		}
+		bodies = append(bodies, decodeBody(r))
+		writeData(w, 201, map[string]interface{}{"organization": map[string]interface{}{
+			"id": "org_1", "workspaceRef": "ws_NEW", "slug": "acme", "name": "Acme", "accountId": "ws_ACME",
+		}})
+	}))
+	defer srv.Close()
+
+	c := NewBackendClient(srv.URL, "test")
+	org, err := c.CreateOrgInAccount(context.Background(), "tok", "Acme", "acme", "ws_ACME")
+	if err != nil {
+		t.Fatalf("CreateOrgInAccount() error: %v", err)
+	}
+	if org.AccountID != "ws_ACME" || org.WorkspaceRef != "ws_NEW" || org.Role != "owner" {
+		t.Errorf("org = %+v, want accountId/workspaceRef/owner role from the response", org)
+	}
+	if _, err := c.CreateOrg(context.Background(), "tok", "Acme", ""); err != nil {
+		t.Fatalf("CreateOrg() error: %v", err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("requests = %d, want 2", len(bodies))
+	}
+	if got := bodies[0]["accountId"]; got != "ws_ACME" {
+		t.Errorf("accountId = %v, want ws_ACME in the create body", got)
+	}
+	if got := bodies[0]["slug"]; got != "acme" {
+		t.Errorf("slug = %v, want acme", got)
+	}
+	if _, present := bodies[1]["accountId"]; present {
+		t.Errorf("accountId must be omitted when no account is named: %v", bodies[1])
+	}
+	if _, present := bodies[1]["slug"]; present {
+		t.Errorf("slug must be omitted when empty: %v", bodies[1])
+	}
+}
+
+func TestOrgPayload_ReadsNestedAccount(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeData(w, 200, map[string]interface{}{"organizations": []map[string]interface{}{
+			{"id": "org_1", "workspaceRef": "ws_1", "slug": "one", "account": map[string]string{"id": "ws_ACME", "slug": "acme"}},
+			{"id": "org_2", "workspaceRef": "ws_2", "slug": "two", "accountId": "ws_LAB"},
+			{"id": "org_3", "workspaceRef": "ws_3", "slug": "three"},
+		}})
+	}))
+	defer srv.Close()
+	orgs, err := NewBackendClient(srv.URL, "test").ListMyOrgs(context.Background(), "tok")
+	if err != nil {
+		t.Fatalf("ListMyOrgs() error: %v", err)
+	}
+	if len(orgs) != 3 {
+		t.Fatalf("orgs = %d, want 3", len(orgs))
+	}
+	if orgs[0].AccountID != "ws_ACME" || orgs[0].AccountSlug != "acme" {
+		t.Errorf("nested account not read: %+v", orgs[0])
+	}
+	if orgs[1].AccountID != "ws_LAB" || orgs[1].AccountSlug != "" {
+		t.Errorf("flat accountId not read: %+v", orgs[1])
+	}
+	if orgs[2].AccountID != "" {
+		t.Errorf("no account must stay empty: %+v", orgs[2])
+	}
+}
+
+func TestListMyAccounts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/accounts" {
+			http.Error(w, "unexpected request", 400)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer tok" {
+			http.Error(w, "missing auth", 401)
+			return
+		}
+		writeData(w, 200, map[string]interface{}{"accounts": []map[string]interface{}{
+			{"id": "ws_ACME", "slug": "acme", "name": "Acme Inc", "role": "owner"},
+			{"id": "ws_LAB", "slug": "lab", "isOwner": true},
+			{"id": "ws_GUEST", "slug": "guest", "role": "member"},
+			{"slug": "no-id"},
+		}})
+	}))
+	defer srv.Close()
+	accounts, err := NewBackendClient(srv.URL, "test").ListMyAccounts(context.Background(), "tok")
+	if err != nil {
+		t.Fatalf("ListMyAccounts() error: %v", err)
+	}
+	if len(accounts) != 3 {
+		t.Fatalf("accounts = %+v, want 3 (the id-less row dropped)", accounts)
+	}
+	if accounts[0].Role != "owner" || accounts[0].Label() != "acme" {
+		t.Errorf("accounts[0] = %+v", accounts[0])
+	}
+	if accounts[1].Role != "owner" {
+		t.Errorf("isOwner must read as the owner role: %+v", accounts[1])
+	}
+	if !accounts[0].Matches("ACME") || !accounts[0].Matches("ws_acme") || accounts[0].Matches("lab") {
+		t.Errorf("Matches should accept slug or id case-insensitively")
+	}
+}
+
+func TestNeedsAccountChoice(t *testing.T) {
+	msg := "You own more than one account. Name the account this workspace belongs to (accountId)."
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"platform refusal", &APIError{Status: 412, Code: "precondition_failed", Message: msg}, true},
+		{"wrapped", fmt.Errorf("create workspace: %w", &APIError{Status: 412, Code: "precondition_failed", Message: msg}), true},
+		{"412 for another reason", &APIError{Status: 412, Code: "precondition_failed", Message: "limit"}, false},
+		{"409 slug taken", &APIError{Status: 409, Code: "conflict", Message: msg}, false},
+		{"plain error", errors.New(msg), false},
+	}
+	for _, tc := range cases {
+		if got := NeedsAccountChoice(tc.err); got != tc.want {
+			t.Errorf("%s: NeedsAccountChoice = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestAccountsFromErrorDetails(t *testing.T) {
+	err := &APIError{Status: 412, Details: json.RawMessage(`{"accounts":[{"id":"ws_A","slug":"a"}],"accountIds":["ws_B",""]}`)}
+	got := AccountsFromErrorDetails(err)
+	if len(got) != 2 || got[0].ID != "ws_A" || got[0].Slug != "a" || got[1].ID != "ws_B" {
+		t.Errorf("AccountsFromErrorDetails = %+v", got)
+	}
+	if got := AccountsFromErrorDetails(&APIError{Status: 412}); len(got) != 0 {
+		t.Errorf("no details must yield nothing: %+v", got)
+	}
+	if got := AccountsFromErrorDetails(errors.New("x")); len(got) != 0 {
+		t.Errorf("non-API error must yield nothing: %+v", got)
 	}
 }

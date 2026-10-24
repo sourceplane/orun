@@ -29,6 +29,25 @@ func (e *githubActionsExecutor) Cleanup(ctx ExecContext) error {
 	return e.engine.Cleanup(toGHAContext(ctx))
 }
 
+// LastStepCacheHit is the engine's tool-cache verdict on the job's last step
+// (CacheObserver).
+func (e *githubActionsExecutor) LastStepCacheHit(jobID string) (bool, bool) {
+	return e.engine.LastStepCacheHit(jobID)
+}
+
+// LastStepExports is what the job's last step exported and whether another
+// job may take it (ExportSharer).
+func (e *githubActionsExecutor) LastStepExports(jobID string) (StepExports, bool) {
+	exports, shareable := e.engine.LastStepExports(jobID)
+	return StepExports{Env: exports.Env, Paths: exports.Paths, Outputs: exports.Outputs}, shareable
+}
+
+// ImportStepExports applies another job's step exports to this job
+// (ExportSharer).
+func (e *githubActionsExecutor) ImportStepExports(ctx ExecContext, job model.PlanJob, step model.PlanStep, exports StepExports) error {
+	return e.engine.ImportStepExports(toGHAContext(ctx), job, step, gha.StepExports{Env: exports.Env, Paths: exports.Paths, Outputs: exports.Outputs})
+}
+
 func toGHAContext(ctx ExecContext) gha.ExecContext {
 	return gha.ExecContext{
 		Context:      ctx.Context,

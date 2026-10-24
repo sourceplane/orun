@@ -2,7 +2,9 @@
 // component-catalog resolution pipeline (resolution-pipeline.md §1):
 //
 //  1. discover  — walk the workspace for component.yaml / .yml files,
-//     honouring intent.yaml `catalog.discovery.exclude`.
+//     scoped to the planner's intent.yaml `discovery.roots` (whole
+//     workspace when unset or when the intent inherits presets) and
+//     pruned by `catalog.discovery.exclude`.
 //  2. load      — YAML-decode each authored manifest and JSON-Schema
 //     validate it against the embedded
 //     internal/catalogmodel.ComponentYAMLSchema artifact.

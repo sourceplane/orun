@@ -89,7 +89,7 @@ on the renderer); pass `--raw` to print every line.
 | `--raw` | Show full raw logs instead of compact 8-line excerpts |
 | `--remote-state` | Fetch logs from orun-backend instead of local state |
 | `--backend-url` | orun-backend URL for remote state (or set `ORUN_BACKEND_URL`) |
-| `--follow` | Live-tail a job's log (requires `--remote-state` and `--job`); polls until the job completes |
+| `--follow` | Live-tail a job's log (requires `--remote-state` and `--job`); waits for new output until the job completes |
 | `--all` | Stream logs across all executions (best-effort) |
 
 ## Remote logs
@@ -106,8 +106,11 @@ orun logs \
 
 Omit `--job` to fetch logs for all jobs in the run.
 
-Add `--follow` to live-tail a single job's log as it runs. The CLI polls the
-backend from a sequence cursor and streams new lines until the job completes:
+Add `--follow` to live-tail a single job's log as it runs. The CLI reads
+from a sequence cursor and streams new lines until the job completes; on
+Orun Cloud each read is held on the server until new output lands (up to
+15 seconds), so the tail costs one request per wait instead of one every
+1.5 seconds. On a backend without the held read it polls as before:
 
 ```bash
 orun logs \
@@ -125,4 +128,10 @@ Outside GitHub Actions, remote logs use the local Orun CLI session from `orun au
 
 During local execution each step's raw output is stored as its own content-addressed log blob in the object model under `.orun/objectmodel/`, attached to that step's node. Per-step storage makes it easy to diff, archive, or forward logs from individual steps; `orun logs` reads them back through the object reader.
 
-When running with `--remote-state`, logs are streamed to the backend during execution and retrieved via the backend API.
+When running with `--remote-state`, logs are streamed to the backend during execution and retrieved via the backend API. Each step reaches the log three ways (v2.83.0):
+
+- **as it starts** — the step's `=== <step> ===` banner goes out with the step's `start` event, so Orunbase shows the step running at once;
+- **while it runs** — its output streams every 2 seconds, or as soon as 64 KiB of it waits, with secrets masked before anything leaves the runner (a value is never sent in two halves);
+- **when it ends** — the rest of its output goes out with the step's `end` event and its outcome, even for a step that printed nothing.
+
+A job waits (up to 15 seconds) for its log to land before it reports its result, so a finished job's log is whole. An upload that fails is retried every couple of seconds in the background, and anything that never lands is reported when the run ends.

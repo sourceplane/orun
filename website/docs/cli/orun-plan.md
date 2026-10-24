@@ -149,6 +149,17 @@ Simulate a named trigger locally:
 orun plan --trigger github-pull-request --base main --head HEAD
 ```
 
+A trigger with `plan.scope: selected` (for example one bound to
+`workflow_dispatch`) plans exactly the components and environments its event
+names; `--changed` and `--files` are ignored for that plan. Under `--trigger`
+there is no event, so `--env` and `--component` are the selection:
+
+```bash
+orun plan --trigger github-dispatch --env stage --component api
+```
+
+See [Trigger bindings → Selected plans](../concepts/trigger-bindings.md#selected-plans-an-event-that-names-what-to-plan).
+
 ## Flags
 
 | Flag | Meaning |
@@ -161,7 +172,11 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | `--env`, `-e` | Restrict compilation to specific environments (comma-separated) |
 | `--all-envs` | Compile all environments explicitly (mutually exclusive with `--env`) |
 | `--component` | Restrict compilation to one or more components (repeatable) |
-| `--view`, `-v` | Render a view such as `dag`, `dag:long`, `dependencies`, or `component=<name>` |
+| `--view`, `-v` | Render a view such as `dag`, `dag:long`, `dependencies`, `lanes`, or `component=<name>` |
+| `--strict-lanes` | Fail the plan when lanes would need a cycle split (as `execution.lanes.onCycle: reject`) |
+| `--max-lanes` | Override `execution.lanes.maxLanes` for this plan, for example from the runner pool's free capacity (`ORUN_MAX_LANES` does the same; the flag wins). Recorded in `metadata.lanes` |
+| `--weights` | Packing weights for auto-mode lanes: `history` (the median duration of each job over the last ten sealed runs) or a JSON file of job id to seconds. Unset: the templates' `resources.estimatedSeconds`, else every job weighs one. See [Weights](../concepts/lanes.md#weights) |
+| `--write-weights` | Write the weights measured from history to this file, the committed form for `--weights` |
 | `--long` | Show detailed output (step commands, IDs) |
 | `--changed` | Enable change-aware filtering |
 | `--base` | Base git ref for change detection |
@@ -178,18 +193,35 @@ orun plan --trigger github-pull-request --base main --head HEAD
 | `--from-ci` | CI provider for event normalization (e.g. `github`) |
 | `--event-file` | Path to provider event JSON file |
 | `--artifact` | Artifact backend for uploading plan shard from CI (`github`) |
-| `--github-output` | Write `matrix`, `plan_id`, `exec_id` to `$GITHUB_OUTPUT` (for GitHub Actions matrix) |
+| `--github-output` | Write `matrix`, `lane-matrix`, `lane-count`, `lane-matrix-<k>` per level, `lane-matrix-levels`, `lane-level-count`, `plan_id`, `exec_id` to `$GITHUB_OUTPUT` (for GitHub Actions matrix) |
 
 ### GitHub Actions usage
 
-When run inside GitHub Actions with `--artifact github`, `orun plan`:
+`--github-output` appends the step outputs a workflow fans out on to the file
+`$GITHUB_OUTPUT` names: `matrix`, `lane-matrix`, `lane-count`,
+`lane-matrix-<k>` for each level `k`, `lane-matrix-levels`,
+`lane-level-count`, `plan_id` and `exec_id`. `lane-matrix` has one entry per
+lane, or one per job on a plan without lanes, each with its `level` and
+`upstreamLanes`; run each with `orun run --lane ${{ matrix.lane }}`.
+`lane-matrix-<k>` holds the lanes of level `k`, so a workflow can run the
+levels as chained matrix jobs (see
+[Lanes](../concepts/lanes.md#level-by-level)). `exec_id` is derived from
+`GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT` and the plan checksum.
 
-1. Derives an execution ID from `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, and the plan checksum
-2. Writes a plan shard (manifest.json + plan.json + metadata) to a temp directory
-3. Uploads the shard as a GitHub Actions artifact using the embedded `@actions/artifact` helper
-4. With `--github-output`, writes `matrix`, `plan_id`, and `exec_id` to `$GITHUB_OUTPUT` for downstream matrix jobs
+The outputs need nothing but `$GITHUB_OUTPUT`: a workflow whose run jobs take
+the plan from the platform (`orun run --remote-state`) passes no `--artifact`.
+When `$GITHUB_OUTPUT` is not set, the plan succeeds and warns that nothing was
+written.
 
-Example:
+```bash
+orun plan --from-ci github --event-file "$GITHUB_EVENT_PATH" --github-output
+```
+
+With `--artifact github`, `orun plan` also writes a plan shard (manifest.json +
+plan.json + metadata) to a temp directory and uploads it as a GitHub Actions
+artifact named by the same `exec_id`, using the embedded `@actions/artifact`
+helper, for run jobs that download the plan with `orun run --artifact github`:
+
 ```bash
 orun plan \
   --from-ci github \

@@ -1,0 +1,17 @@
+apiVersion: sourceplane.io/v1
+kind: Intent
+metadata:
+  name: {{ .name }}
+compositions:
+  sources:
+    - name: acme-golden-paths
+      kind: dir
+      path: ./stack
+discovery:
+  roots: [apps/]
+environments:
+  staging: {}
+  production:
+    promotion:
+      dependsOn:
+        - environment: staging

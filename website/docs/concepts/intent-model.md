@@ -60,12 +60,17 @@ groups:                    # defaults per domain
 
 environments:              # where components ship, and under which rules
   staging:
+    url: https://stage.example.com      # the environment's front door
     activation:
       triggerRefs: [github-push-main]
     parameterDefaults:
       "*":
         lane: verify
   production:
+    description: Where customers are.
+    url: https://app.example.com
+    links:                              # further doors, after the url
+      - { title: API, url: https://api.example.com }
     selectors:
       domains: [platform-foundation, commerce]
     activation:
@@ -88,10 +93,10 @@ automation:                # which CI events activate which environments
 |---|---|---|
 | `compositions.sources` | The golden paths this repository uses: a directory, an archive, or an OCI Stack, pinned by its reference | [Stacks](./stacks.md) |
 | `extends` | Presets inherited from a Stack. The repository's own values always win; `orun intent explain` shows where each field came from | [Intent presets](./intent-presets.md) |
-| `discovery.roots` | Directories scanned recursively for `component.yaml`, relative to the intent file. The intent file also marks the workspace root | [Context discovery](./context-discovery.md) |
+| `discovery.roots` | Directories scanned recursively for `component.yaml`, relative to the intent file. The planner and the catalog (so `--changed` too) scan the same roots; unset means the whole workspace. The intent file also marks the workspace root | [Context discovery](./context-discovery.md), [where the catalog looks](./service-catalog.md#where-the-catalog-looks) |
 | `env` | Platform-wide environment variables, the lowest-precedence user-declared layer | [Runtime environment](./runtime-environment.md) |
 | `groups` | Defaults shared by every component in a domain. A group is keyed by domain name: a component with `domain: platform-foundation` takes the `platform-foundation` group's defaults | [Merge model](#merge-model) |
-| `environments` | Each target environment: which components it selects (by name or domain), its parameter defaults, `env`, activation, promotion order, and default dependency mode | [Environment promotion](./environment-promotion.md), [dependency rules](./dependency-rules.md) |
+| `environments` | Each target environment: which components it selects (by name or domain), its parameter defaults, `env`, activation, promotion order, and default dependency mode. `description`, `url` (the environment's front door, an absolute http(s) address) and `links` describe the environment for the catalog: every environment named here is an `Environment` entity in the snapshot, with the `url` as its primary link and its promotion depth as `spec.order`, which the Orunbase Overview shows beside the product's description | [Environment promotion](./environment-promotion.md), [dependency rules](./dependency-rules.md) |
 | `automation.triggerBindings` | Which CI events activate which environments, and how much of the repository each plans | [Trigger bindings](./trigger-bindings.md) |
 | `components` | Optional inline components, for teams that want some declarations central | |
 

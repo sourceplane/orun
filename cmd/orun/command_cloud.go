@@ -86,19 +86,28 @@ GitHub PAT or OAuth token is required.`,
 		Use:   "workspace",
 		Short: "Manage Orun Cloud workspaces",
 	}
-	var wsCreateSlug string
+	var wsCreateSlug, wsCreateAccount string
 	wsCreateCmd := &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create a new workspace (org) owned by the current session",
 		Long: `Create a new Orun Cloud workspace. Prints its ws_… id and slug — the id is
 what the bootstrap flows take as --set workspace=…. Authenticates from the
-CLI session or ORUN_TOKEN (headless).`,
+CLI session or ORUN_TOKEN (headless).
+
+A login that owns more than one account must name the account the workspace
+belongs to with --account <ws_…|slug>; without it the platform refuses and
+the CLI lists the accounts to choose from.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCloudWorkspaceCreate(cmd.Context(), args[0], wsCreateSlug)
+			return runCloudWorkspaceCreate(cmd.Context(), workspaceCreateOpts{
+				Name:        args[0],
+				Slug:        wsCreateSlug,
+				Account:     wsCreateAccount,
+				CommandPath: cmd.CommandPath(),
+			})
 		},
 	}
-	wsCreateCmd.Flags().StringVar(&wsCreateSlug, "slug", "", "Workspace slug (default: derived from the name by the server)")
+	addWorkspaceCreateFlags(wsCreateCmd, &wsCreateSlug, &wsCreateAccount)
 	workspaceCmd.AddCommand(wsCreateCmd)
 	cloudCmd.AddCommand(linkCmd, unlinkCmd, statusCmd, openCmd, workspaceCmd)
 	registerCloudCheck(cloudCmd)
@@ -373,6 +382,20 @@ type orgChoice struct {
 	// primary identifier users see and pass (WID2).
 	WorkspaceRef string
 	Role         string
+	// AccountID/AccountSlug name the account the workspace belongs to, when
+	// the backend reports it (empty otherwise; `workspace list` then shows no
+	// account column).
+	AccountID   string
+	AccountSlug string
+}
+
+// accountLabel is the owning account as shown in a column: its slug when
+// known, else its id, else "" (unknown).
+func (o orgChoice) accountLabel() string {
+	if s := strings.TrimSpace(o.AccountSlug); s != "" {
+		return s
+	}
+	return strings.TrimSpace(o.AccountID)
 }
 
 // primaryID is the identifier to persist and print: the ws_… Workspace ID when
@@ -427,7 +450,14 @@ func sessionOrgs() []orgChoice {
 				if orgs, lErr := client.ListMyOrgs(context.Background(), token); lErr == nil {
 					out := make([]orgChoice, 0, len(orgs))
 					for _, o := range orgs {
-						out = append(out, orgChoice{ID: o.ID, Slug: o.Slug, Label: orgChoiceLabel(o.Slug, o.ID), WorkspaceRef: o.WorkspaceRef})
+						out = append(out, orgChoice{
+							ID:           o.ID,
+							Slug:         o.Slug,
+							Label:        orgChoiceLabel(o.Slug, o.ID),
+							WorkspaceRef: o.WorkspaceRef,
+							AccountID:    o.AccountID,
+							AccountSlug:  o.AccountSlug,
+						})
 					}
 					return out
 				}
@@ -446,6 +476,8 @@ func sessionOrgs() []orgChoice {
 			Label:        orgChoiceLabel(o.Slug, o.ID),
 			WorkspaceRef: o.WorkspaceRef,
 			Role:         o.Role,
+			AccountID:    o.AccountID,
+			AccountSlug:  o.AccountSlug,
 		})
 	}
 	return out
@@ -690,10 +722,17 @@ func linkProjectLabel(link *cliauth.RepoLink) string {
 	return link.ProjectID
 }
 
+// addWorkspaceCreateFlags registers the flags both spellings of `workspace
+// create` share (`orun workspace create`, `orun cloud workspace create`).
+func addWorkspaceCreateFlags(cmd *cobra.Command, slug, account *string) {
+	cmd.Flags().StringVar(slug, "slug", "", "Workspace slug (default: derived from the name by the server)")
+	cmd.Flags().StringVar(account, "account", "", "Account the workspace belongs to, by ws_… id or slug (required when this login owns more than one account)")
+}
+
 // runCloudWorkspaceCreate creates a workspace (org) and prints its identity.
 // The endpoint and client method are the ones the personal-org materializer
 // already uses (UO2) — this is the explicit, named-workspace spelling.
-func runCloudWorkspaceCreate(ctx context.Context, name, slug string) error {
+func runCloudWorkspaceCreate(ctx context.Context, opts workspaceCreateOpts) error {
 	backendURL, err := requireBackendURL(loadIntentForCloudConfig(), cloudBackendURL)
 	if err != nil {
 		return err
@@ -703,9 +742,21 @@ func runCloudWorkspaceCreate(ctx context.Context, name, slug string) error {
 		return err
 	}
 	client := cliauth.NewBackendClient(backendURL, version)
-	org, err := client.CreateOrg(ctx, token, name, slug)
+	accountID, accountSlug, err := resolveAccountArg(ctx, client, token, opts.Account)
 	if err != nil {
+		return err
+	}
+	org, err := client.CreateOrgInAccount(ctx, token, opts.Name, opts.Slug, accountID)
+	if err != nil {
+		if cliauth.NeedsAccountChoice(err) && accountID == "" {
+			return errWorkspaceNeedsAccount(ctx, client, token, err, opts)
+		}
 		return fmt.Errorf("create workspace: %w", err)
+	}
+	if org.AccountSlug == "" && accountSlug != "" && strings.EqualFold(org.AccountID, accountID) {
+		// The create response names the account by id only; the listing that
+		// resolved --account knows its slug, so print both.
+		org.AccountSlug = accountSlug
 	}
 	// The ws_… Workspace ID is the PRIMARY interface everywhere a workspace
 	// is named (flows, secret refs, console URLs); the org_… public id is an
@@ -719,6 +770,9 @@ func runCloudWorkspaceCreate(ctx context.Context, name, slug string) error {
 	fmt.Printf("%s workspace created\n", ui.Green(color, "✓"))
 	fmt.Printf("  id:   %s\n", primary)
 	fmt.Printf("  slug: %s\n", org.Slug)
+	if account := accountDisplay(org.AccountID, org.AccountSlug); account != "" {
+		fmt.Printf("  account: %s\n", account)
+	}
 	fmt.Printf("  next: connect integrations (`orun integrations <provider> connect --org %s`)\n", primary)
 	return nil
 }

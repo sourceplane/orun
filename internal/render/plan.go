@@ -49,6 +49,24 @@ func (r *Renderer) RenderPlan(metadata model.Metadata, jobInstances map[string]*
 
 // RenderPlanWithOrder creates a plan from job instances using a caller-specified order.
 func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map[string]*model.JobInstance, jobBindings map[string]string, jobOrder []string) *model.Plan {
+	plan, _ := r.RenderPlanWithLanes(metadata, jobInstances, jobBindings, jobOrder, nil)
+	return plan
+}
+
+// LaneAssigner partitions a rendered plan's jobs into lanes (internal/lanes).
+// It runs before the checksum, so the lane layout is part of the plan's
+// identity; a plan it leaves without lanes is byte-identical to one rendered
+// without an assigner.
+type LaneAssigner func(plan *model.Plan) error
+
+// PlanJobCheckName is the check title of a plan job — `component · env ·
+// Display name` — the name GitHub shows for it (and a job-mode lane's name).
+func PlanJobCheckName(job model.PlanJob) string {
+	return jobCheckName(job.Component, job.Environment, jobDisplayNameFromKey(job.Name))
+}
+
+// RenderPlanWithLanes is RenderPlanWithOrder plus a lane assignment step.
+func (r *Renderer) RenderPlanWithLanes(metadata model.Metadata, jobInstances map[string]*model.JobInstance, jobBindings map[string]string, jobOrder []string, assign LaneAssigner) (*model.Plan, error) {
 	plan := &model.Plan{
 		APIVersion: planAPIVersion,
 		Kind:       "Plan",
@@ -103,6 +121,8 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 			DependsOn:                job.DependsOn,
 			Timeout:                  job.Timeout,
 			Retries:                  job.Retries,
+			Resources:                job.Resources,
+			EstimatedSeconds:         declaredEstimate(job.Resources),
 			Env:                      buildPlanJobEnv(job),
 			SecretRefs:               buildPlanJobSecretRefs(job),
 			Materialize:              buildPlanJobMaterialize(job),
@@ -127,10 +147,16 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 		plan.Jobs = append(plan.Jobs, planJob)
 	}
 
+	if assign != nil {
+		if err := assign(plan); err != nil {
+			return nil, err
+		}
+	}
+
 	r.attachChecksum(plan)
 	r.fillJobIdentity(plan)
 
-	return plan
+	return plan, nil
 }
 
 func buildPlanJobEnv(job *model.JobInstance) map[string]interface{} {
@@ -191,6 +217,15 @@ func buildPlanJobMaterialize(job *model.JobInstance) *model.PlanMaterialize {
 	}
 }
 
+// declaredEstimate is a template's estimatedSeconds, the job's packing weight
+// until `orun plan --weights` supplies one.
+func declaredEstimate(res *model.JobResources) int {
+	if res == nil || res.EstimatedSeconds <= 0 {
+		return 0
+	}
+	return res.EstimatedSeconds
+}
+
 // convertSteps converts rendered steps to plan steps
 func (r *Renderer) convertSteps(steps []model.RenderedStep) []model.PlanStep {
 	planSteps := make([]model.PlanStep, len(steps))
@@ -204,6 +239,7 @@ func (r *Renderer) convertSteps(steps []model.RenderedStep) []model.PlanStep {
 			Name:             step.Name,
 			Phase:            step.Phase,
 			Order:            step.Order,
+			Scope:            step.Scope,
 			Run:              step.Run,
 			Use:              step.Use,
 			Workflow:         step.Workflow,
@@ -214,6 +250,7 @@ func (r *Renderer) convertSteps(steps []model.RenderedStep) []model.PlanStep {
 			Shell:            step.Shell,
 			WorkingDirectory: step.WorkingDirectory,
 			Timeout:          step.Timeout,
+			Caches:           step.Caches,
 			Retry:            step.Retry,
 			Resume:           step.Resume,
 			Approval:         step.Approval,

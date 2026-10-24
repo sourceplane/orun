@@ -17,6 +17,8 @@ import (
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/santhosh-tekuri/jsonschema/v5"
+	"github.com/sourceplane/orun/internal/cachehome"
+	"github.com/sourceplane/orun/internal/fslock"
 	"github.com/sourceplane/orun/internal/model"
 	"gopkg.in/yaml.v3"
 	"oras.land/oras-go/v2/registry/remote"
@@ -603,7 +605,7 @@ func resolveSourcePackage(baseDir string, source model.CompositionSource, index 
 	case "archive":
 		return resolveArchiveSource(baseDir, source, index)
 	case "oci":
-		return resolveOCISource(source, index)
+		return resolveOCISource(baseDir, source, index)
 	default:
 		return nil, fmt.Errorf("unsupported composition source kind %q", source.Kind)
 	}
@@ -627,11 +629,11 @@ func resolveDirectorySource(baseDir string, source model.CompositionSource, inde
 		return nil, fmt.Errorf("composition source %s digest mismatch: expected %s, got %s", source.Name, source.Digest, digest)
 	}
 
-	cacheDir, err := ensureCachedDirectory(absPath, digest)
-	if err != nil {
-		return nil, fmt.Errorf("failed to cache composition source %s: %w", source.Name, err)
-	}
-	return loadPackageSource(cacheDir, source, digest, index)
+	// Loaded in place: the digest validates the source and feeds the lock,
+	// and the package is read where it is. Copying it into the cache gave a
+	// new full copy per edit and nothing ever removed one
+	// (specs/orun-cache-efficiency F5).
+	return loadPackageSource(absPath, source, digest, index)
 }
 
 func resolveArchiveSource(baseDir string, source model.CompositionSource, index int) (*sourcePackage, error) {
@@ -659,10 +661,24 @@ func resolveArchiveSource(baseDir string, source model.CompositionSource, index 
 	return loadPackageSource(cacheDir, source, digest, index)
 }
 
-func resolveOCISource(source model.CompositionSource, index int) (*sourcePackage, error) {
+func resolveOCISource(baseDir string, source model.CompositionSource, index int) (*sourcePackage, error) {
 	remoteRef := normalizeOCIRef(source.Ref)
 	if remoteRef == "" {
 		return nil, fmt.Errorf("composition source %s ref cannot be empty", source.Name)
+	}
+
+	// A source the lockfile pins is taken at its locked digest: from the
+	// cache when it holds it, else pulled by digest; the tag is not resolved
+	// against the registry on every plan (specs/orun-sync-efficiency F12).
+	// An explicit `digest:` on the source that disagrees with the lock keeps
+	// the resolving path, where the mismatch is reported.
+	if pinned := lockedOCIDigest(baseDir, source); pinned != "" && (source.Digest == "" || source.Digest == pinned) {
+		if dir, ok := cachedOCIDir(pinned); ok {
+			return loadPackageSource(dir, source, pinned, index)
+		}
+		if cacheDir, err := ensureCachedOCI(refAtDigest(remoteRef, pinned), pinned); err == nil {
+			return loadPackageSource(cacheDir, source, pinned, index)
+		}
 	}
 
 	resolvedDigest, err := resolveOCIDigest(remoteRef)
@@ -911,6 +927,7 @@ func loadJobTemplateFromDir(compositionDir, name, jobName string) (*model.JobSpe
 				RunsOn:       doc.Spec.RunsOn,
 				Timeout:      doc.Spec.Timeout,
 				Retries:      doc.Spec.Retries,
+				Resources:    doc.Spec.Resources,
 				Steps:        doc.Spec.Steps,
 				Inputs:       doc.Spec.Inputs,
 				Labels:       doc.Spec.Labels,
@@ -1160,27 +1177,50 @@ func resolveRelativePath(baseDir, path string) string {
 }
 
 func cacheRoot() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to determine user home directory: %w", err)
-	}
-	root := filepath.Join(homeDir, ".orun", "cache", "compositions")
+	root := cachehome.Compositions()
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return "", err
 	}
 	return root, nil
 }
 
-func ensureCachedDirectory(srcDir, digest string) (string, error) {
-	root, err := cacheRoot()
-	if err != nil {
-		return "", err
-	}
-	cacheDir := filepath.Join(root, strings.TrimPrefix(digest, "sha256:"))
+// cachedEntryHit reports whether the cache directory holds a package: either
+// manifest filename marks it.
+func cachedEntryHit(cacheDir string) bool {
 	if _, err := os.Stat(filepath.Join(cacheDir, "stack.yaml")); err == nil {
-		return cacheDir, nil
+		return true
 	}
 	if _, err := os.Stat(filepath.Join(cacheDir, "orun.yaml")); err == nil {
+		return true
+	}
+	return false
+}
+
+// compositionFillLockWait bounds the wait for another process's fill of the
+// same entry: a pull or an extraction, not a download of an action.
+var compositionFillLockWait = 10 * time.Minute
+
+// fillCacheEntry returns the cache directory for a digest, filling it
+// through fill when it holds no package. The fill is held under a lock every
+// orun process respects, built beside the entry and renamed into place, and
+// never replaces an entry that passes the hit test: before CE5 two processes
+// resolving the same new digest each deleted the other's live entry
+// (specs/orun-cache-efficiency F5). A hit, found or just filled, is stamped
+// as used for `orun cache`.
+func fillCacheEntry(root, cacheDir string, fill func(tempDir string) error) (string, error) {
+	if cachedEntryHit(cacheDir) {
+		cachehome.Touch(cacheDir)
+		return cacheDir, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), compositionFillLockWait)
+	defer cancel()
+	lock, err := fslock.Acquire(ctx, cacheDir+".lock")
+	if err != nil {
+		return "", fmt.Errorf("wait for the composition cache lock %s: %w", cacheDir+".lock", err)
+	}
+	defer lock.Release()
+	if cachedEntryHit(cacheDir) { // filled while this process waited
+		cachehome.Touch(cacheDir)
 		return cacheDir, nil
 	}
 
@@ -1189,16 +1229,18 @@ func ensureCachedDirectory(srcDir, digest string) (string, error) {
 		return "", err
 	}
 	defer os.RemoveAll(tempDir)
-
-	if err := copyDir(srcDir, tempDir); err != nil {
+	if err := fill(tempDir); err != nil {
 		return "", err
 	}
+	// Only a leftover that failed the hit test is removed here: a passing
+	// entry returned above, under the lock.
 	if err := os.RemoveAll(cacheDir); err != nil {
 		return "", err
 	}
 	if err := os.Rename(tempDir, cacheDir); err != nil {
 		return "", err
 	}
+	cachehome.Touch(cacheDir)
 	return cacheDir, nil
 }
 
@@ -1208,29 +1250,55 @@ func ensureCachedArchive(archivePath, digest string) (string, error) {
 		return "", err
 	}
 	cacheDir := filepath.Join(root, strings.TrimPrefix(digest, "sha256:"))
-	if _, err := os.Stat(filepath.Join(cacheDir, "stack.yaml")); err == nil {
-		return cacheDir, nil
-	}
-	if _, err := os.Stat(filepath.Join(cacheDir, "orun.yaml")); err == nil {
-		return cacheDir, nil
-	}
+	return fillCacheEntry(root, cacheDir, func(tempDir string) error {
+		return extractTarGz(archivePath, tempDir)
+	})
+}
 
-	tempDir, err := os.MkdirTemp(root, filepath.Base(cacheDir)+"-tmp-")
+// lockedOCIDigest is the digest the lockfile beside the intent recorded for
+// this source (same name, kind and ref), "" when there is no lock or no
+// matching entry.
+func lockedOCIDigest(baseDir string, source model.CompositionSource) string {
+	if strings.TrimSpace(baseDir) == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(baseDir, filepath.FromSlash(lockFilePath)))
 	if err != nil {
-		return "", err
+		return ""
 	}
-	defer os.RemoveAll(tempDir)
+	var lock model.CompositionLock
+	if yaml.Unmarshal(data, &lock) != nil {
+		return ""
+	}
+	for _, entry := range lock.Sources {
+		if entry.Name == source.Name && entry.Kind == "oci" && normalizeOCIRef(entry.Ref) == normalizeOCIRef(source.Ref) {
+			if d := strings.TrimSpace(entry.ResolvedDigest); strings.HasPrefix(d, "sha256:") {
+				return d
+			}
+		}
+	}
+	return ""
+}
 
-	if err := extractTarGz(archivePath, tempDir); err != nil {
-		return "", err
+// refAtDigest is the reference pinned to a digest: repo@sha256:…, whatever
+// tag or digest the reference carried.
+func refAtDigest(remoteRef, digest string) string {
+	return stripRefTagOrDigest(remoteRef) + "@" + digest
+}
+
+// cachedOCIDir is the cache directory holding a pulled composition at this
+// digest, when it holds one (either manifest filename marks the hit).
+func cachedOCIDir(digest string) (string, bool) {
+	root, err := cacheRoot()
+	if err != nil {
+		return "", false
 	}
-	if err := os.RemoveAll(cacheDir); err != nil {
-		return "", err
+	cacheDir := filepath.Join(root, strings.TrimPrefix(digest, "sha256:"))
+	if cachedEntryHit(cacheDir) {
+		cachehome.Touch(cacheDir)
+		return cacheDir, true
 	}
-	if err := os.Rename(tempDir, cacheDir); err != nil {
-		return "", err
-	}
-	return cacheDir, nil
+	return cacheDir, false
 }
 
 func ensureCachedOCI(remoteRef, digest string) (string, error) {
@@ -1239,31 +1307,12 @@ func ensureCachedOCI(remoteRef, digest string) (string, error) {
 		return "", err
 	}
 	cacheDir := filepath.Join(root, strings.TrimPrefix(digest, "sha256:"))
-	// Check for either manifest filename as a cache-hit indicator.
-	if _, err := os.Stat(filepath.Join(cacheDir, "stack.yaml")); err == nil {
-		return cacheDir, nil
-	}
-	if _, err := os.Stat(filepath.Join(cacheDir, "orun.yaml")); err == nil {
-		return cacheDir, nil
-	}
-
-	tempDir, err := os.MkdirTemp(root, filepath.Base(cacheDir)+"-tmp-")
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(tempDir)
-
-	if err := fetchAndExtractOCICompositionsLayer(remoteRef, tempDir); err != nil {
-		return "", fmt.Errorf("failed to pull OCI compositions layer: %w", err)
-	}
-
-	if err := os.RemoveAll(cacheDir); err != nil {
-		return "", err
-	}
-	if err := os.Rename(tempDir, cacheDir); err != nil {
-		return "", err
-	}
-	return cacheDir, nil
+	return fillCacheEntry(root, cacheDir, func(tempDir string) error {
+		if err := fetchAndExtractOCICompositionsLayer(remoteRef, tempDir); err != nil {
+			return fmt.Errorf("failed to pull OCI compositions layer: %w", err)
+		}
+		return nil
+	})
 }
 
 // newOCIRepository creates a remote.Repository for the given ref. It reads

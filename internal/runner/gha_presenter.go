@@ -248,6 +248,9 @@ func (r *Runner) ghaEmitStep(job model.PlanJob, stepID string, index int, output
 		icon = "✕"
 	}
 	title := fmt.Sprintf("%s  %02d %s  %s", icon, index, stepID, formatStepDuration(duration))
+	if r.ghaHoldSteps {
+		title = r.ghaJobLabel(job) + " › " + title
+	}
 	if success && summary != "" {
 		title += "  ·  " + summary
 	} else if !success {
@@ -274,7 +277,9 @@ func (r *Runner) ghaEmitStep(job model.PlanJob, stepID string, index int, output
 		msg := summarizeExecError(err)
 		buf.Annotation("error", fmt.Sprintf("%s › %s: %s", r.ghaJobLabel(job), stepID, msg), nil)
 	}
-	r.gha.FlushStep(job.ID)
+	if !r.ghaHoldSteps {
+		r.gha.FlushStep(job.ID)
+	}
 }
 
 // ghaPrintStepDryRun emits a single visible line for a dry-run step
@@ -294,6 +299,28 @@ func (r *Runner) ghaPrintStepSkipped(job model.PlanJob, stepID string, index, to
 		return
 	}
 	buf.Println(fmt.Sprintf("  ↷  %02d %s  cached", index, stepID))
+}
+
+// ghaPrintStepShared is printStepShared for the GitHub log.
+func (r *Runner) ghaPrintStepShared(job model.PlanJob, stepID string, index int, owner string) {
+	buf := r.ghaJobOut(job.ID)
+	if buf == nil {
+		return
+	}
+	buf.Println(fmt.Sprintf("  ↷  %02d %s  shared with %s", index, stepID, owner))
+}
+
+// ghaFinishFailedJob closes a job that failed on a path that does not print
+// the job footer (a failed step, finalizer, materialize, output-secret publish
+// or secret resolve). The footer is where the job's buffered GitHub output is
+// flushed, so without it a lane holding step groups (several jobs in flight)
+// dropped the failed job's whole log, its failing step included. Outside
+// GitHub Actions nothing is buffered and nothing changes.
+func (r *Runner) ghaFinishFailedJob(job model.PlanJob, report *jobReport, duration time.Duration) {
+	if !r.inGHA() {
+		return
+	}
+	r.ghaPrintJobFooter(job, report, false, duration)
 }
 
 func (r *Runner) ghaPrintJobFooter(job model.PlanJob, report *jobReport, success bool, duration time.Duration) {

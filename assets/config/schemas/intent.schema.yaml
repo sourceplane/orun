@@ -117,6 +117,31 @@ properties:
     additionalProperties:
       type: object
       properties:
+        description:
+          type: string
+          description: One line on what this environment is, carried onto its catalog entity.
+        url:
+          type: string
+          pattern: "^https?://"
+          description: The environment's front door — the absolute http(s) address a person opens to reach the product running here. Becomes the environment entity's primary link in the catalog, shown on the Orunbase Overview.
+        links:
+          type: array
+          description: Further doors into the environment (API, admin, status page), shown after the url.
+          items:
+            type: object
+            required:
+              - title
+              - url
+            properties:
+              title:
+                type: string
+                minLength: 1
+              url:
+                type: string
+                pattern: "^https?://"
+              icon:
+                type: string
+            additionalProperties: false
         activation:
           type: object
           properties:
@@ -246,10 +271,23 @@ properties:
               properties:
                 scope:
                   type: string
-                  description: Plan scope when this trigger fires.
+                  description: Plan scope when this trigger fires — full, changed, or selected (the event's own components and environments).
                   enum:
                     - full
                     - changed
+                    - selected
+                components:
+                  type: string
+                  description: Dot-path into the raw event payload naming a selected plan's components (a comma-separated string or a list of strings), e.g. inputs.component.
+                environments:
+                  type: string
+                  description: Dot-path into the raw event payload naming a selected plan's environments, e.g. inputs.environment.
+                autopush:
+                  type: boolean
+                  description: Set to false to skip the plan-time catalog auto-push for plans this trigger resolves.
+                requireRule:
+                  type: boolean
+                  description: Plan a lane under this trigger only if one of its profileRules names the trigger (the lane opts in; the rule's profile is what it runs). Default false.
                 base:
                   type: string
                   description: Dot-path into the raw event payload for the base revision.

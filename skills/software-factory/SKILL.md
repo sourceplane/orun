@@ -1,19 +1,24 @@
 ---
 name: software-factory
-description: Turn a product idea into a live multi-tenant SaaS on Orunbase with the orun CLI, then build features on top of it. Given the idea and its details, author a grand epic (README, design, implementation plan, risks, as-built status), create the workspace, bootstrap a baseline (cirrus or lumen), register the epic, milestones and tasks in Orunbase, push the design documents, and land every change through the provenance pen (orun/<KEY>-<slug> branches, Orun-Task trailers, one task per PR). Use when asked to "start a product", "bootstrap from a baseline", "build X on cirrus/lumen", "create a workspace and build", or "set up the epic for" a new product.
+title: Software factory
+description: "Turn a product idea into a live multi-tenant SaaS on Orunbase, then build features on top of it. Given the idea and its details, author a grand epic (README, design, implementation plan, risks, as-built status), create the workspace, bootstrap a baseline (cirrus or lumen), mint the epic in the workspace's tracker or in Orunbase, land its doc set as the first pull request, and land every change through the provenance pen (orun/<KEY>-<slug> branches, Orun-Task trailers, one task per PR) with git and gh. Use when asked to \"start a product\", \"bootstrap from a baseline\", \"build X on cirrus/lumen\", \"create a workspace and build\", or \"set up the epic for\" a new product."
+appliesTo: [bootstrapper, initiative-owner, orchestrator]
 ---
-
 # Software factory
 
-You are running the flow described in `SOFTWAREFACTORY.md` at the root of the
-`orun` repository (https://github.com/sourceplane/orun/blob/main/SOFTWAREFACTORY.md).
-Read it before the first run in a session: this skill is the checklist, that
-file carries the reasoning, the phase timings, and the traps.
+You are running the flow described in `references/software-factory.md`,
+beside this file (`skill_get software-factory --file
+references/software-factory.md` if you only have the registry). Read it
+before the first run in a session: this skill is the checklist, that file
+carries the reasoning, the phase timings, and the traps.
 
-The two products: **`orun`** is the open-source CLI you drive. **Orunbase**
-is the hosted control plane it talks to (workspaces, provider connections,
-secrets, the baseline registry, the task plane); `app.orunbase.com` is its
-console, and a free account is enough. A **baseline** is a complete product
+The two products: **Orunbase** is the hosted control plane (workspaces,
+provider connections, secrets, the baseline registry, the work plane);
+`app.orunbase.com` is its console, and a free account is enough. **`orun`**
+is the open-source CLI: the baseline bootstrap (steps 3 and 4) runs it, so
+this flow is one of the few that needs the binary signed in — `orun-cli`
+says how, and is the only place that does. Everything after the bootstrap
+is `git`, `gh` and the MCP tools. A **baseline** is a complete product
 repository the platform rebuilds under the user's name.
 
 The output is not a plan. It is a workspace with a live product on `stage`
@@ -48,8 +53,8 @@ line at every decision, failure, and fix.
 ## 1. Preflight
 
 ```bash
-orun version                              # v2.58.15 or later
-orun auth status                          # live check; `orun auth login` if it fails
+orun version                              # v2.70.0 or later
+orun auth status                          # not signed in → `orun-cli` §Sign in (device flow); come back here
 gh auth status && gh api "orgs/<org>/memberships/$(gh api user -q .login)" -q .state
 node --version; pnpm --version; python3 --version
 command -v orun >/dev/null || echo "put orun on PATH: the baseline's hooks call it through bash -c"
@@ -70,7 +75,7 @@ Stop and tell the user if any row fails. Everything downstream depends on it.
 
 Write `specs/epics/<reponame>-<slug>/` **in a scratch directory** now; it
 moves into the product repository after the bootstrap. Start from the
-templates beside this file (`templates/` beside this file) and follow them exactly:
+templates in `templates/` beside this file and follow them exactly:
 
 - `README.md`: bold one-paragraph thesis; the **Status** table (`Draft`,
   the cluster code and milestone range, the owning components, "Builds on:
@@ -87,6 +92,11 @@ templates beside this file (`templates/` beside this file) and follow them exact
 - `risks-and-open-questions.md`: `## <CODE>-A — <title> (RISK|RESOLVED|ACCEPTED|SETTLED)`.
 - `IMPLEMENTATION-STATUS.md`: "As-built ≠ intent." and an empty
   `Milestone | State | PR` table.
+- `tasks/<CODE>-1.TaskContract.yaml` from `templates/TaskContract.yaml`:
+  the spec's own contract (goal, `affects` covering the epic directory and
+  the tasks directory, `doneWhen`, `gates: []`). The epic, its milestones
+  and this task are minted in step 5; the files are their design and
+  contract, never their declaration.
 
 Show the user the milestone table and stop for a yes before spending money
 on a build. This is the one blocking question in the skill.
@@ -111,6 +121,10 @@ orun baseline check <baseline> --workspace <slug>
 Refuse to continue past a red `check`; connect what it names.
 
 ## 4. Bootstrap the baseline
+
+If the user resolved the bootstrap in the console and handed you a `bst_…`
+id, load `baselining` instead of this step: `orun baseline new --from` fills
+the values file below from the record, and nothing is typed twice.
 
 ```bash
 cat > "$NOTES_DIR/values.yaml" <<EOV
@@ -150,90 +164,83 @@ for env in stage prod; do curl -fsS "https://<reponame>-api-edge-$env.<subdomain
 Delete the token file. Record the repo URL, the workspace id, the live URLs,
 and the phase timings in the notes.
 
-## 5. Register the epic and its milestones in Orunbase
+## 5. Mint the epic where the workspace creates work
 
 From inside the product repository; the build linked it, so the workspace
-resolves.
+resolves. The repository never mints work (`initiative-lifecycle`): the
+epic, its milestones and its first task are created in the tracker or in
+Orunbase, and the files from step 2 are their design and contract.
+
+- **Orunbase** (a fresh workspace with no tracker connected): `epic_create`
+  with the slug `<reponame>-<slug>`, the name and the summary;
+  `milestone_create` for each milestone in order with its `exitCriteria`;
+  `task_create` with the `<CODE>-1` contract inline and `adoptKey: <CODE>-1`
+  under the first milestone. With the binary: `orun task epic create`,
+  `orun task milestone create`, `orun task create --contract` (`orun-cli`).
+- **The tracker** (Linear connected and chosen under Settings → Work): a
+  Linear project with the same milestones and an issue for the spec; it
+  arrives in Orunbase within seconds, and the issue key is the task key —
+  use it in place of `<CODE>-1` below.
+
+## 6. Land the spec as the first task
+
+The spec is milestone `<CODE>0` and task `<CODE>-1`. The PR carries the
+doc set and the contract; its review is the design's adoption, and its
+merge is the task's landing.
 
 ```bash
-cd <checkout-dir>/<reponame>
-orun task epic show infra-baselining                  # the baseline's own epic; leave it alone
-orun task epic create --slug <reponame>-<slug> --name "<Title> (<CODE>)" \
-  --description "<the thesis in one paragraph, ending with what done looks like>" \
-  --owner me --target-date <YYYY-MM-DD>
-orun task milestone create --epic <reponame>-<slug> --name "<CODE>0 — the spec" \
-  --exit-criteria "doc set merged and pushed"
-orun task milestone create --epic <reponame>-<slug> --name "<CODE>1 — <name>" \
-  --exit-criteria "<done when line>" --exit-criteria "<done when line>"
-orun task epic show <reponame>-<slug>                 # capture every mls_… id in the notes
-```
-
-`epic create` is idempotent by slug; `milestone create` is not, so `show`
-before you `create` when resuming.
-
-## 6. Land the spec as the first task, and push it
-
-Everything from here follows the pen. Once per clone:
-
-```bash
-orun githooks install
-```
-
-The spec is milestone `<CODE>0` and task `<CODE>-1`. `templates/TaskContract.yaml`
-is the shape.
-
-```bash
-cp <skill>/templates/TaskContract.yaml tasks/spec.TaskContract.yaml     # fill goal/affects/doneWhen
-orun task create --prefix <CODE> --title "The spec" --milestone <mls_CODE0> --assignee me \
-  --brief "Author and land the epic's doc set." --contract tasks/spec.TaskContract.yaml   # → <CODE>-1
 git checkout -b orun/<CODE>-1-the-spec
-mkdir -p specs/epics && cp -r <scratch>/specs/epics/<reponame>-<slug> specs/epics/
-git mv tasks/spec.TaskContract.yaml tasks/<CODE>-1.TaskContract.yaml && orun task attach <CODE>-1
-git add specs tasks && git commit -s -m "<CODE>0: the <Product> epic doc set"   # hook stamps Orun-Task: <CODE>-1
-orun pr check <CODE>-1
-orun pr open --task <CODE>-1 --epic <reponame>-<slug> --title "<CODE>0: the spec" \
-  --body-file <(printf 'The epic doc set: thesis, design, plan, risks, as-built status.\n')
-orun pr land --number <n>
-orun spec push specs/epics/<reponame>-<slug>/*.md --epic <reponame>-<slug>        # from main, as committed
-orun spec list --epic <reponame>-<slug>
+mkdir -p specs/epics tasks
+cp -r <scratch>/specs/epics/<reponame>-<slug> specs/epics/
+cp <scratch>/tasks/<CODE>-1.TaskContract.yaml tasks/
+git add specs tasks && git commit --trailer "Orun-Task: <CODE>-1" -m "<CODE>0: the <Product> epic doc set"
+git push -u origin orun/<CODE>-1-the-spec
+gh pr create --title "<CODE>0: the spec" --body-file body.md    # body ends with the manifest block — `pr-provenance`
+gh pr checks --watch && gh pr merge --squash --delete-branch
 ```
 
-Set the README status to `In progress` and add the PR to
-`IMPLEMENTATION-STATUS.md` in the next landing.
+After the merge, `task_get <reponame>-<slug>` shows the epic with its
+milestones, and `task_get <CODE>-1` reads `done`. Set the README status to
+`In progress` and add the PR to `IMPLEMENTATION-STATUS.md` in the next
+landing.
 
 ## 7. Build each milestone on top of the baseline
 
-Repeat per milestone, one task per landing. Keep each PR inside its
-contract's `affects` ceiling; `orun task check --base main` tells you before
-the platform does.
+Repeat per milestone, one task per landing (`task-branch-pr` is the full
+loop). Keep each PR inside its contract's `affects` ceiling.
 
 ```bash
-orun task create --prefix <CODE> --title "<name>" --milestone <mls_CODEn> --assignee me \
-  --brief "<what done looks like>" --contract tasks/<CODE>n-<slug>.TaskContract.yaml   # → <CODE>-k
+# create: task_create under the milestone with the contract inline and adoptKey <CODE>-k
+#         (or an issue in the tracker, whose key you then use), and the contract file
+cp templates/TaskContract.yaml tasks/<CODE>-k.TaskContract.yaml       # goal / affects / doneWhen / gates
 git checkout -b orun/<CODE>-k-<slug>
-git mv tasks/<CODE>n-<slug>.TaskContract.yaml tasks/<CODE>-k.TaskContract.yaml && orun task attach <CODE>-k
 # implement inside the baseline's bounded contexts: a migration in packages/db, routes in the owning
 # worker, wire types in packages/contracts, the surface in apps/web-console-next, tests beside them
 pnpm -r --filter "<changed packages>" test
-orun task check <CODE>-k --base main
-orun plan --changed --base main --view dag
-git commit -s -m "<CODE>n: <what changed, as a sentence>"
-orun pr check <CODE>-k && orun pr open --task <CODE>-k --epic <reponame>-<slug> --title "<CODE>n: <name>"
-orun pr land --number <n>
-orun status --remote-state && orun logs --failed                                   # the merge converged
+git commit --trailer "Orun-Task: <CODE>-k" -m "<CODE>n: <what changed, as a sentence>"
+git push -u origin orun/<CODE>-k-<slug>
+gh pr create --title "<CODE>n: <name>" --body-file body.md
+gh pr checks --watch && gh pr merge --squash --delete-branch
 ```
 
-After each landing: mark the milestone ✅ in `implementation-plan.md`, add
-the PR and any departure from `design.md` to `IMPLEMENTATION-STATUS.md`, push
-the spec docs again, and note it. When every milestone is ✅, set the README
-status to `✅ Shipped` and fill in **Shipped as**.
+After each landing: `task_get <CODE>-k` reads `done`; `runs_list` for the
+workspace shows the merge converged. Mark the milestone ✅ in
+`implementation-plan.md`, add the PR and any departure from `design.md` to
+`IMPLEMENTATION-STATUS.md` (in the PR that lands the milestone's last task;
+no check reminds you), and note it. When every milestone is ✅, a last PR
+sets the README status to `✅ Shipped` and fills in **Shipped as**, and
+you mark the epic completed where it lives — the console or the tracker.
+
+*With the `orun` binary* (`orun-cli`): `orun pr check`, `orun pr open` and
+`orun pr land` replace the `gh` lines; `orun task check --base main`
+compares the diff with the contract before CI does.
 
 ## 8. Report
 
 End with: the workspace (slug, `ws_…`, account), the repository, the live
 URLs for stage and prod, the epic (slug, `EP-n`) with its milestone and task
-keys and their verdicts from `orun task list --epic …`, the spec docs pushed,
-every failure and its fix from the notes file, and what is left.
+keys and their rungs from `task_get`, the docs the merge pushed, every
+failure and its fix from the notes file, and what is left.
 
 ## Guardrails
 
@@ -242,9 +249,9 @@ every failure and its fix from the notes file, and what is left.
 - Never `--run-hooks` without a values file that names `orunWorkspace`; an
   empty one writes a placeholder that fails loudly rather than silently
   cross-tenanting.
-- One task per PR, branch on the grammar, trailer on every commit.
-  `orun pr check` before `orun pr open`, always.
-- Do not merge by hand; `orun pr land` is the landing.
+- One task per PR, branch on the grammar, trailer on every commit, the
+  manifest in the body. The `orun/compliance` check judges every PR the same way.
+- Merge only when every check is green; never around a red one.
 - Do not delete or archive a milestone; mark it ✅.
 - Stop for the user only at the milestone-table review (step 2) and when a
   fix needs a credential you do not have.

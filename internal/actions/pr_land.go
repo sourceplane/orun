@@ -48,6 +48,8 @@ func init() {
 				Description: "squash | merge | rebase"},
 		},
 		Outputs: []string{"branch", "number", "url", "merged", "mergeSha", "landed", "reruns"},
+		Did:     prDid,
+		Facts:   prFacts,
 	}, runPRLand)
 }
 
@@ -78,6 +80,9 @@ func landWith(ctx context.Context, pen *provenance.Pen, in Input) (Result, error
 			"branch": "", "number": "", "url": "", "merged": "false", "mergeSha": "", "landed": "false",
 		}}, nil
 	}
+	// There is something to land: say so before the push, so a reader sees
+	// the pull request's row while it is being opened.
+	in.Report(map[string]string{"stage": "opening"})
 
 	opened, err := pen.Open(ctx, provenance.OpenRequest{
 		TaskKey:    task,
@@ -119,6 +124,8 @@ func landWith(ctx context.Context, pen *provenance.Pen, in Input) (Result, error
 			"orun.pr/land@v1: branch %s is pushed but no PR was opened (no GitHub credential ambient) — open it at %s",
 			opened.Branch, opened.CompareURL)
 	}
+	// Opened, and waiting on its checks — which can take most of an hour.
+	in.Report(out)
 	// A draft is deliberately not merged: opening one says "not yet".
 	if BoolParam(in, "draft") {
 		return Result{Outputs: out}, nil

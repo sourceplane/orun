@@ -3,6 +3,7 @@ package catalogresolve
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 
@@ -19,14 +20,79 @@ import (
 type intentFile struct {
 	Metadata *intentMetadata     `yaml:"metadata"`
 	Catalog  *intentCatalogBlock `yaml:"catalog"`
+	// Discovery is the top-level planner discovery block. Its roots bound
+	// catalog discovery too (see discoveryRoots): the catalog and the planner
+	// agree on where component manifests live.
+	Discovery *intentRootDiscovery `yaml:"discovery"`
+	// Extends lists the intent presets this file inherits. Presets may
+	// contribute discovery.roots the resolver cannot see (they are merged by
+	// the planner's loader, not here), so a file with presets keeps the
+	// whole-workspace walk. Decoded as a raw node so any authored shape is
+	// tolerated.
+	Extends yaml.Node `yaml:"extends"`
 	// Components are the inline component declarations. The catalog ingests
 	// these alongside discovered component.yaml files so the component set
 	// matches the legacy inline∪discovered set (orun-catalog-state CS5/CS6).
 	Components []inlineComponent `yaml:"components"`
 	// Repo is the optional top-level block that self-describes THIS repo
 	// (saas-workspace-overview WO3). When present, the resolver emits a single
-	// Repo entity; when absent, nothing changes.
+	// Repo entity; when absent, the entity is still emitted from metadata
+	// (name, description) and a root README.md when one exists.
 	Repo *intentRepoBlock `yaml:"repo"`
+	// Environments is the catalog-relevant slice of the declared environments:
+	// a description, the front door (url), further links, and the promotion
+	// chain (for the entity's order). An environment named here is DECLARED,
+	// so it materializes as an Environment entity even before a component
+	// deploys to it.
+	Environments map[string]*intentEnvironment `yaml:"environments"`
+	// Automation is read for one fact: which trigger bindings set
+	// plan.requireRule, so a component environment whose profile rule names
+	// one carries `manual` (orun-manual-triggers §6).
+	Automation *intentAutomation `yaml:"automation"`
+}
+
+// intentAutomation mirrors the slice of `automation` the catalog reads.
+type intentAutomation struct {
+	TriggerBindings map[string]intentTriggerBinding `yaml:"triggerBindings"`
+}
+
+type intentTriggerBinding struct {
+	Plan struct {
+		RequireRule bool `yaml:"requireRule"`
+	} `yaml:"plan"`
+}
+
+// manualTriggers returns the trigger bindings that set plan.requireRule, by
+// name; nil when the intent declares none.
+func manualTriggers(intent *intentFile) []string {
+	if intent == nil || intent.Automation == nil {
+		return nil
+	}
+	var out []string
+	for name, b := range intent.Automation.TriggerBindings {
+		if b.Plan.RequireRule {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// intentEnvironment mirrors the catalog-relevant keys of one
+// `environments.<name>` block (model.Environment carries the rest).
+type intentEnvironment struct {
+	Description string           `yaml:"description"`
+	URL         string           `yaml:"url"`
+	Links       []intentRepoLink `yaml:"links"`
+	Promotion   *intentPromotion `yaml:"promotion"`
+}
+
+type intentPromotion struct {
+	DependsOn []intentPromotionDependency `yaml:"dependsOn"`
+}
+
+type intentPromotionDependency struct {
+	Environment string `yaml:"environment"`
 }
 
 // intentMetadata mirrors intent.yaml's top-level metadata (name/description are
@@ -115,6 +181,38 @@ type intentCatalogDefaults struct {
 
 type intentDiscovery struct {
 	Exclude []string `yaml:"exclude"`
+}
+
+// intentRootDiscovery mirrors the top-level `discovery:` block the planner's
+// loader reads (internal/loader, model.Discovery).
+type intentRootDiscovery struct {
+	Roots []string `yaml:"roots"`
+}
+
+// hasExtends reports whether the intent inherits at least one preset.
+func (f *intentFile) hasExtends() bool {
+	if f == nil {
+		return false
+	}
+	switch f.Extends.Kind {
+	case 0:
+		return false
+	case yaml.SequenceNode:
+		return len(f.Extends.Content) > 0
+	case yaml.ScalarNode:
+		return f.Extends.Tag != "!!null" && f.Extends.Value != ""
+	default:
+		return true
+	}
+}
+
+// discoveryExcludes returns intent.yaml's catalog.discovery.exclude list, or
+// nil when the block is absent.
+func (f *intentFile) discoveryExcludes() []string {
+	if f == nil || f.Catalog == nil || f.Catalog.Discovery == nil {
+		return nil
+	}
+	return f.Catalog.Discovery.Exclude
 }
 
 // loadIntent reads the intent file at absPath, returning a parsed shape.

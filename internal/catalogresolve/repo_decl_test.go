@@ -116,3 +116,51 @@ func TestRepoDeclResolvesDocSet(t *testing.T) {
 		t.Errorf("missing-file doc = %+v", miss.Docs)
 	}
 }
+
+func TestRepoDeclFromMetadataAlone(t *testing.T) {
+	// No repo: block, but metadata says something: the repo self-describes
+	// from it so the Overview's product head fills in without the block.
+	in := &intentFile{Metadata: &intentMetadata{Name: "kartha", Description: "A SaaS starter."}}
+	d := repoDeclFromIntent(in, "default", "kartha-test-1", nil)
+	if d == nil {
+		t.Fatal("metadata.description alone should declare the repo")
+	}
+	if d.EntityKey != "default/kartha-test-1/kartha" || d.DisplayName != "kartha" || d.Description != "A SaaS starter." {
+		t.Errorf("decl = %+v", d)
+	}
+	if d.Overview != "" || len(d.Docs) != 0 {
+		t.Errorf("no doc context, no overview: %+v", d)
+	}
+	// A bare name declares nothing.
+	if repoDeclFromIntent(&intentFile{Metadata: &intentMetadata{Name: "kartha"}}, "default", "r", nil) != nil {
+		t.Error("metadata.name alone should not declare the repo")
+	}
+}
+
+func TestRepoDeclDefaultsOverviewToRootREADME(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "README.md", "# Kartha\n\nThe front page.\n")
+	in := &intentFile{Metadata: &intentMetadata{Name: "kartha", Description: "A SaaS starter."}}
+	d := repoDeclFromIntent(in, "default", "kartha-test-1", newDocResolveContext(dir))
+	if d == nil || d.Overview != "README.md" {
+		t.Fatalf("overview should default to README.md: %+v", d)
+	}
+	if len(d.Docs) != 1 || d.Docs[0].Key != "overview" || !d.Docs[0].Attached() {
+		t.Errorf("README.md should resolve as the attached overview: %+v", d.Docs)
+	}
+	// A declared overview wins over the README.
+	write(t, dir, "docs/overview.md", "# Declared\n")
+	in.Repo = &intentRepoBlock{Docs: &intentRepoDocs{Overview: "docs/overview.md"}}
+	if d2 := repoDeclFromIntent(in, "default", "kartha-test-1", newDocResolveContext(dir)); d2 == nil || d2.Overview != "docs/overview.md" {
+		t.Errorf("declared overview must win: %+v", d2)
+	}
+	// No README, nothing declared: no overview, no error.
+	empty := t.TempDir()
+	if d3 := repoDeclFromIntent(in2(), "default", "r", newDocResolveContext(empty)); d3 == nil || d3.Overview != "" {
+		t.Errorf("no README → no overview: %+v", d3)
+	}
+}
+
+func in2() *intentFile {
+	return &intentFile{Metadata: &intentMetadata{Name: "r", Description: "d"}}
+}

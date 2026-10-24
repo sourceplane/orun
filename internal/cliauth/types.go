@@ -17,6 +17,46 @@ type OrgRef struct {
 	Slug         string `json:"slug,omitempty" yaml:"slug,omitempty"`
 	Name         string `json:"name,omitempty" yaml:"name,omitempty"`
 	Role         string `json:"role,omitempty" yaml:"role,omitempty"`
+	// AccountID is the account the workspace belongs to (the billing and
+	// ownership boundary above a workspace), when the backend reports it;
+	// AccountSlug is its slug when that is known too. Both are empty on
+	// sessions and backends that predate the field.
+	AccountID   string `json:"accountId,omitempty" yaml:"accountId,omitempty"`
+	AccountSlug string `json:"accountSlug,omitempty" yaml:"accountSlug,omitempty"`
+}
+
+// AccountRef identifies an account the actor can see (GET /v1/accounts). ID is
+// what POST /v1/organizations takes as accountId; Role is the actor's role in
+// it ("owner" for the accounts a workspace can be created in).
+type AccountRef struct {
+	ID   string `json:"id" yaml:"id"`
+	Slug string `json:"slug,omitempty" yaml:"slug,omitempty"`
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+	Role string `json:"role,omitempty" yaml:"role,omitempty"`
+}
+
+// Label is the identifier to show and accept for the account: the slug when
+// there is one, else the id.
+func (a AccountRef) Label() string {
+	if s := strings.TrimSpace(a.Slug); s != "" {
+		return s
+	}
+	return strings.TrimSpace(a.ID)
+}
+
+// Matches reports whether a user-typed value names this account — by slug or
+// id, case-insensitively.
+func (a AccountRef) Matches(target string) bool {
+	t := strings.TrimSpace(target)
+	if t == "" {
+		return false
+	}
+	for _, candidate := range []string{a.Slug, a.ID} {
+		if c := strings.TrimSpace(candidate); c != "" && strings.EqualFold(c, t) {
+			return true
+		}
+	}
+	return false
 }
 
 // Credentials are the locally stored Orun CLI session secrets.

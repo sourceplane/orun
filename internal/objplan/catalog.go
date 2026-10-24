@@ -108,11 +108,21 @@ func BuildCatalogNodes(view *catalogresolve.CatalogView, resolverVersion int, ow
 				putNonEmpty(lm, "title", l.Title)
 				putNonEmpty(lm, "url", l.URL)
 				putNonEmpty(lm, "icon", l.Icon)
+				putNonEmpty(lm, "role", l.Role)
 				ne.Links = append(ne.Links, lm)
 			}
 			if docs, pending := docsWire(nil, enr.Overview, enr.Docs); docs != nil {
 				ne.Docs = docs
 				ne.PendingDocs = pending
+			}
+			// A declared environment (its own `environments.<name>` block)
+			// materializes under the repo-local key the deployedTo relations
+			// use, so the declared and the derived entity are one.
+			if enr.Declared {
+				ne.Declared = true
+				ne.EntityKey = catalogmodel.QualifyEntityKey(view.Namespace, view.Repo, enr.Name)
+				ne.Spec = map[string]any{"order": enr.Order}
+				putNonEmpty(ne.Spec, "url", enr.URL)
 			}
 			cat.EntityEnrichments = append(cat.EntityEnrichments, ne)
 		}
@@ -159,6 +169,7 @@ func repoEntity(d *catalogresolve.RepoDeclaration) nodes.Entity {
 			putNonEmpty(lm, "title", l.Title)
 			putNonEmpty(lm, "url", l.URL)
 			putNonEmpty(lm, "icon", l.Icon)
+			putNonEmpty(lm, "role", l.Role)
 			links = append(links, lm)
 		}
 		e.Links = links

@@ -139,6 +139,7 @@ Each trigger binding can set `plan.scope` to control how the plan is scoped:
 | --- | --- |
 | `full` | Plan all components in activated environments |
 | `changed` | Plan only changed components (enables `--changed` mode) |
+| `selected` | Plan exactly the components and environments the event names |
 
 When `scope: changed` is set, the trigger also needs `base` and `head` to determine the diff range. These are dot-paths into the raw event payload:
 
@@ -150,6 +151,84 @@ plan:
 ```
 
 For push events, the standard paths are `before` and `after`.
+
+### Selected plans: an event that names what to plan
+
+A `workflow_dispatch` event — a person or a platform asking for one component in
+one environment — carries its selection in its inputs. `scope: selected` makes
+that selection the whole plan, so the same plan command serves pull requests,
+pushes and dispatches:
+
+```yaml
+automation:
+  triggerBindings:
+    github-dispatch:
+      description: A deploy asked for by a person
+      on:
+        provider: github
+        event: workflow_dispatch
+        branches: [main]
+      plan:
+        scope: selected
+        components: inputs.component     # dot-path: "api, web" or ["api", "web"]
+        environments: inputs.environment # dot-path: "stage"
+        autopush: false                  # no plan-time catalog push for these plans
+```
+
+```bash
+# one command for every event; a dispatch plans its inputs, not a diff
+orun plan --from-ci github --event-file "$GITHUB_EVENT_PATH" --changed --output plan.json
+```
+
+- `components` and `environments` are dot-paths into the event payload, resolved
+  like `base` and `head`. A value is a comma-separated string (items trimmed) or
+  a list of strings. Both are required with `scope: selected` and invalid with
+  any other scope.
+- The selection is exact and never empty. The plan fails, naming the cause, on a
+  missing or empty value, an unknown component, a wildcard in a name, an
+  environment the trigger does not activate, or a component that does not
+  subscribe to a selected environment.
+- `--changed` and `--files` are ignored for a selected plan (orun says so on
+  stderr): the request is the scope.
+- Under `--trigger github-dispatch` there is no event, so the selection comes
+  from `--env` (required) and `--component`:
+  `orun plan --trigger github-dispatch --env stage --component api`.
+- `autopush: false` skips the best-effort catalog push that
+  `execution.state.autopushCatalog` would otherwise make after the plan; it is
+  valid on any binding. `--push-catalog` still pushes.
+- The plan records the trigger's scope as `selected`; the object model records
+  the revision as `full`.
+
+### Opt-in lanes: `requireRule`
+
+With `plan.requireRule: true`, a lane (one component in one environment) is
+planned under the binding only if one of its `profileRules` names the binding.
+The lane opts in, and the rule's profile is what it runs — `deploy` in stage,
+`verify` in dev ([Profile rules → Opting a lane in](./profile-rules.md#opting-a-lane-in-to-a-trigger)).
+
+```yaml
+github-dispatch:
+  on: { provider: github, event: workflow_dispatch, branches: [main] }
+  plan:
+    scope: selected
+    components: inputs.component
+    environments: inputs.environment
+    requireRule: true
+```
+
+- Under `scope: selected` it is strict: every selected lane must have opted in,
+  or the plan fails naming each lane that did not and the fix
+  (`not enabled for github-dispatch: web.stage — add a profileRule with
+  when.triggerRef: github-dispatch to the lane's subscription`).
+- Under another scope it drops the lanes that did not opt in, and fails only
+  when none is left.
+- Unset (the default) keeps today's behaviour: a lane with no rule naming the
+  binding runs its default profile.
+- The catalog records each opted-in lane as
+  `spec.environments.<env>.manual: { trigger, profile }` (the first
+  `requireRule` binding by name, with its rule's profile). A component that
+  opts nothing in keeps its manifest hash. Inline intent components do not
+  carry profile rules into the catalog, so they get no `manual` field.
 
 ## CLI usage
 
@@ -216,7 +295,7 @@ When a trigger is used, the resulting plan includes trigger metadata:
 Static validation (`orun validate`) checks:
 
 - Trigger bindings have required `on.provider` and `on.event` fields
-- `plan.scope` is either `full` or `changed` (if set)
+- `plan.scope` is `full`, `changed` or `selected` (if set); `plan.components` and `plan.environments` are required with `selected` and invalid with any other scope, and each is a dot-path with no empty segment (also checked by `orun plan`)
 - Environment `triggerRefs` point to existing trigger bindings
 - No duplicate refs within an environment
 

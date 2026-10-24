@@ -170,6 +170,36 @@ Live deployments
 This is the catalog's desired/observed split: the envelope says what the
 sources declare; the live plane says what the record shows.
 
+## Where the catalog looks
+
+The catalog is built from the component manifests the planner plans, so the
+two read the same scope from `intent.yaml`:
+
+- **`discovery.roots`** bounds the walk. Each root is a directory relative to
+  the intent file, scanned recursively for `component.yaml` (or
+  `component.yml`). With no roots declared, the whole workspace is scanned. A
+  root outside the workspace is not scanned by the catalog (catalog paths are
+  workspace-relative), and a root that does not exist is an error, as it is
+  for the planner. When the intent inherits presets with `extends:`, presets
+  may contribute roots of their own, so the catalog keeps the whole-workspace
+  scan rather than hiding components the planner plans.
+- **`catalog.discovery.exclude`** prunes directories inside the roots by
+  basename, at any depth, on top of the built-in set (`.git`, `.orun`,
+  `build`, `dist`, `node_modules`, `vendor`). Use it for copies that are not
+  components of their own, such as fixtures or overlay variations.
+
+```yaml
+discovery:
+  roots: [apps/, infra/]
+catalog:
+  discovery:
+    exclude: [fixtures, variations]
+```
+
+Every manifest discovery finds must declare a unique `metadata.name`. Two
+files with the same name are a resolve error that names both files; `orun plan
+--changed`, `orun run --changed`, and `orun catalog refresh` stop on it.
+
 ## Catalog identity and snapshots
 
 A catalog is content-addressed: resolving the same sources yields the same

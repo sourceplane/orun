@@ -57,6 +57,46 @@ properties:
         type: object
         additionalProperties:
           type: string
+  lanes:
+    type: array
+    items:
+      type: object
+      required:
+        - id
+        - name
+        - index
+        - environment
+        - jobs
+        - concurrency
+        - source
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        index:
+          type: integer
+          minimum: 0
+        environment:
+          type: string
+        jobs:
+          type: array
+          items:
+            type: string
+        concurrency:
+          type: integer
+          minimum: 1
+        runsOn:
+          type: string
+        source:
+          type: string
+          enum: [job, component, env, group, isolated, auto]
+        group:
+          type: string
+        splitFrom:
+          type: string
+        reason:
+          type: string
   jobs:
     type: array
     items:
@@ -84,6 +124,8 @@ properties:
         job:
           type: string
         runsOn:
+          type: string
+        lane:
           type: string
         path:
           type: string

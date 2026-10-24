@@ -219,6 +219,16 @@ type Hook struct {
 	// With is the action's parameters, validated at parse time against the
 	// action's declared contract.
 	With map[string]any `yaml:"with,omitempty" json:"with,omitempty"`
+
+	// What this hook's facts look like to a reader (orun-cloud
+	// saas-build-panel BV3; `facts.go`). Label names them ("Console" for an
+	// address, "Workers restore" for a landing); Pin keeps them in view, or
+	// with false keeps them off it (a re-probe in a docs phase); Quiet files
+	// no facts and leaves no generated line — the hook's own `narrate:` still
+	// speaks.
+	Label string `yaml:"label,omitempty" json:"label,omitempty"`
+	Pin   *bool  `yaml:"pin,omitempty" json:"pin,omitempty"`
+	Quiet bool   `yaml:"quiet,omitempty" json:"quiet,omitempty"`
 }
 
 // IsAction reports whether this hook calls a registered orun action.

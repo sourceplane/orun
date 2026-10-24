@@ -109,7 +109,8 @@ type RepoResult struct {
 // An organization and a user take DIFFERENT endpoints, and the difference is
 // not cosmetic: GitHub reads the owner of `POST /user/repos` off the token's
 // own identity, so creating in a personal account works only for that account's
-// own token. Naming the owner explicitly keeps that failure legible.
+// own token. Which endpoint applies is asked of GitHub (createPath); inOrg is
+// only the fallback for when GitHub cannot say.
 func (c *Client) EnsureRepo(ctx context.Context, owner, name string, private bool, inOrg bool) (*RepoResult, error) {
 	if c.token() == "" {
 		return nil, fmt.Errorf("forge: a GitHub credential is required (GITHUB_TOKEN / GH_TOKEN)")
@@ -129,9 +130,9 @@ func (c *Client) EnsureRepo(ctx context.Context, owner, name string, private boo
 		return nil, err
 	}
 
-	path := "/user/repos"
-	if inOrg {
-		path = "/orgs/" + owner + "/repos"
+	path, err := c.createPath(ctx, owner, name, private, inOrg)
+	if err != nil {
+		return nil, err
 	}
 	payload, _ := json.Marshal(map[string]any{"name": name, "private": private})
 	var created struct {
@@ -142,6 +143,75 @@ func (c *Client) EnsureRepo(ctx context.Context, owner, name string, private boo
 		return nil, err
 	}
 	return &RepoResult{FullName: created.FullName, CloneURL: created.CloneURL, Created: true}, nil
+}
+
+// createPath answers which endpoint creates a repository under owner.
+//
+// The owner's kind is read off GitHub rather than trusted from the caller: a
+// blueprint names its owner as one input (`githuborg`) whether that is an
+// organization or someone's personal account, and `POST /orgs/{user}/repos`
+// answers a bare 404 that reads like a typo. A personal account takes
+// `POST /user/repos`, which GitHub places in the TOKEN's own account — so it is
+// used only when the token is that account's, and anything else is refused by
+// name rather than creating the repository somewhere the caller did not ask.
+func (c *Client) createPath(ctx context.Context, owner, name string, private, inOrg bool) (string, error) {
+	var account struct {
+		Login string `json:"login"`
+		Type  string `json:"type"`
+	}
+	status, err := c.do(ctx, http.MethodGet, "/users/"+owner, nil, &account)
+	if err != nil {
+		if status == http.StatusNotFound {
+			return "", fmt.Errorf("forge: GitHub has no organization or user named %q to create %s/%s under", owner, owner, name)
+		}
+		// GitHub could not say; the caller's declaration is what there is.
+		return fallbackPath(owner, inOrg), nil
+	}
+	switch account.Type {
+	case "Organization":
+		return "/orgs/" + owner + "/repos", nil
+	case "User":
+	default:
+		return fallbackPath(owner, inOrg), nil
+	}
+
+	login := account.Login
+	if login == "" {
+		login = owner
+	}
+	visibility := "--public"
+	if private {
+		visibility = "--private"
+	}
+	create := fmt.Sprintf("gh repo create %s/%s %s", login, name, visibility)
+	var me struct {
+		Login string `json:"login"`
+	}
+	_, err = c.do(ctx, http.MethodGet, "/user", nil, &me)
+	if err == nil && strings.EqualFold(me.Login, owner) {
+		return "/user/repos", nil
+	}
+	// An installation token has no user behind it, and so no personal account
+	// for /user/repos to create in; another user's token would create the
+	// repository in THAT user's account.
+	whose := "is " + me.Login + "'s"
+	if err != nil || me.Login == "" {
+		whose = "has no user of its own"
+		if err != nil {
+			whose += " (" + err.Error() + ")"
+		}
+	}
+	return "", fmt.Errorf("forge: %s is a personal GitHub account, and the credential in use %s — "+
+		"GitHub creates a repository in a personal account only for that account's own token; "+
+		"create it first with `%s`, or run with %s's credential",
+		login, whose, create, login)
+}
+
+func fallbackPath(owner string, inOrg bool) string {
+	if inOrg {
+		return "/orgs/" + owner + "/repos"
+	}
+	return "/user/repos"
 }
 
 // Run is one workflow run.

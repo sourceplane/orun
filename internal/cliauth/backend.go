@@ -518,22 +518,67 @@ func (c *BackendClient) ListOrgLinks(ctx context.Context, accessToken, orgID str
 	return all, nil
 }
 
+// orgPayload is the organization object as the platform returns it on the
+// /v1/organizations routes. The owning account arrives either flat (accountId)
+// or nested (account: { id, slug }); both are read so the CLI shows the
+// account whichever shape the backend speaks.
+type orgPayload struct {
+	ID           string `json:"id"`
+	WorkspaceRef string `json:"workspaceRef"`
+	Name         string `json:"name"`
+	Slug         string `json:"slug"`
+	AccountID    string `json:"accountId"`
+	AccountSlug  string `json:"accountSlug"`
+	Account      *struct {
+		ID   string `json:"id"`
+		Slug string `json:"slug"`
+	} `json:"account"`
+}
+
+func (o orgPayload) ref() OrgRef {
+	ref := OrgRef{
+		ID:           o.ID,
+		WorkspaceRef: o.WorkspaceRef,
+		Name:         o.Name,
+		Slug:         o.Slug,
+		AccountID:    strings.TrimSpace(o.AccountID),
+		AccountSlug:  strings.TrimSpace(o.AccountSlug),
+	}
+	if o.Account != nil {
+		if ref.AccountID == "" {
+			ref.AccountID = strings.TrimSpace(o.Account.ID)
+		}
+		if ref.AccountSlug == "" {
+			ref.AccountSlug = strings.TrimSpace(o.Account.Slug)
+		}
+	}
+	return ref
+}
+
 // CreateOrg creates an organization the actor owns (POST /v1/organizations) and
 // returns it as an OrgRef. Used by the zero-org auto-link path (UO2) to
 // materialize a personal org on first login. A 409 (slug already taken)
 // surfaces as an *APIError so the caller can retry with a different slug.
+// The workspace lands in the actor's default account; a login that owns
+// several accounts must name one with CreateOrgInAccount.
 func (c *BackendClient) CreateOrg(ctx context.Context, accessToken, name, slug string) (*OrgRef, error) {
+	return c.CreateOrgInAccount(ctx, accessToken, name, slug, "")
+}
+
+// CreateOrgInAccount is CreateOrg with the owning account named: accountID is
+// sent as the request's accountId when non-empty and omitted otherwise. The
+// platform refuses an unnamed account with 412 precondition_failed when the
+// login owns more than one (see NeedsAccountChoice).
+func (c *BackendClient) CreateOrgInAccount(ctx context.Context, accessToken, name, slug, accountID string) (*OrgRef, error) {
 	body := map[string]string{"name": name}
 	if s := strings.TrimSpace(slug); s != "" {
 		body["slug"] = s
 	}
+	if a := strings.TrimSpace(accountID); a != "" {
+		body["accountId"] = a
+	}
 	var wrapped struct {
-		Organization struct {
-			ID           string `json:"id"`
-			WorkspaceRef string `json:"workspaceRef"`
-			Name         string `json:"name"`
-			Slug         string `json:"slug"`
-		} `json:"organization"`
+		Organization orgPayload `json:"organization"`
 	}
 	if err := c.doJSONData(ctx, http.MethodPost, "/v1/organizations",
 		map[string]string{"Authorization": "Bearer " + accessToken}, body, &wrapped); err != nil {
@@ -542,13 +587,52 @@ func (c *BackendClient) CreateOrg(ctx context.Context, accessToken, name, slug s
 	if strings.TrimSpace(wrapped.Organization.ID) == "" {
 		return nil, &APIError{Code: "INVALID_RESPONSE", Message: "org create returned no organization"}
 	}
-	return &OrgRef{
-		ID:           wrapped.Organization.ID,
-		WorkspaceRef: wrapped.Organization.WorkspaceRef,
-		Slug:         wrapped.Organization.Slug,
-		Name:         wrapped.Organization.Name,
-		Role:         "owner",
-	}, nil
+	ref := wrapped.Organization.ref()
+	ref.Role = "owner"
+	return &ref, nil
+}
+
+// NeedsAccountChoice reports whether err is the platform's refusal to create a
+// workspace for a login that owns more than one account without being told
+// which (412 precondition_failed, "You own more than one account. Name the
+// account this workspace belongs to (accountId)."). The caller then names one
+// with CreateOrgInAccount.
+func NeedsAccountChoice(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusPreconditionFailed {
+		return false
+	}
+	msg := strings.ToLower(apiErr.Message)
+	return strings.Contains(msg, "accountid") || strings.Contains(msg, "more than one account")
+}
+
+// AccountsFromErrorDetails returns the accounts an error envelope names in its
+// details (accounts: [{ id, slug, name }] or accountIds: [...]), when the
+// platform lists the choices alongside the refusal. Empty when it does not.
+func AccountsFromErrorDetails(err error) []AccountRef {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || len(apiErr.Details) == 0 {
+		return nil
+	}
+	var d struct {
+		Accounts   []AccountRef `json:"accounts"`
+		AccountIDs []string     `json:"accountIds"`
+	}
+	if json.Unmarshal(apiErr.Details, &d) != nil {
+		return nil
+	}
+	out := make([]AccountRef, 0, len(d.Accounts)+len(d.AccountIDs))
+	for _, a := range d.Accounts {
+		if strings.TrimSpace(a.ID) != "" {
+			out = append(out, a)
+		}
+	}
+	for _, id := range d.AccountIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			out = append(out, AccountRef{ID: id})
+		}
+	}
+	return out
 }
 
 // BrowserLogin performs the platform browser login (POST /v1/auth/cli/start,
@@ -1106,12 +1190,7 @@ func jwtExpiry(token string) string {
 // their source for workspace listing/selection.
 func (c *BackendClient) ListMyOrgs(ctx context.Context, accessToken string) ([]OrgRef, error) {
 	var wrapped struct {
-		Organizations []struct {
-			ID           string `json:"id"`
-			WorkspaceRef string `json:"workspaceRef"`
-			Name         string `json:"name"`
-			Slug         string `json:"slug"`
-		} `json:"organizations"`
+		Organizations []orgPayload `json:"organizations"`
 	}
 	if err := c.doJSONData(ctx, http.MethodGet, "/v1/organizations",
 		map[string]string{"Authorization": "Bearer " + accessToken}, nil, &wrapped); err != nil {
@@ -1119,7 +1198,37 @@ func (c *BackendClient) ListMyOrgs(ctx context.Context, accessToken string) ([]O
 	}
 	out := make([]OrgRef, 0, len(wrapped.Organizations))
 	for _, o := range wrapped.Organizations {
-		out = append(out, OrgRef{ID: o.ID, WorkspaceRef: o.WorkspaceRef, Name: o.Name, Slug: o.Slug})
+		out = append(out, o.ref())
+	}
+	return out, nil
+}
+
+// ListMyAccounts calls GET /v1/accounts and returns the accounts this token can
+// see, with the actor's role in each. It is how the CLI resolves an account
+// slug to the id POST /v1/organizations takes, and how it lists the choices
+// when the platform asks which account a new workspace belongs to.
+func (c *BackendClient) ListMyAccounts(ctx context.Context, accessToken string) ([]AccountRef, error) {
+	var wrapped struct {
+		Accounts []struct {
+			AccountRef
+			// Older shapes spell ownership as a flag rather than a role.
+			IsOwner bool `json:"isOwner"`
+		} `json:"accounts"`
+	}
+	if err := c.doJSONData(ctx, http.MethodGet, "/v1/accounts",
+		map[string]string{"Authorization": "Bearer " + accessToken}, nil, &wrapped); err != nil {
+		return nil, err
+	}
+	out := make([]AccountRef, 0, len(wrapped.Accounts))
+	for _, a := range wrapped.Accounts {
+		ref := a.AccountRef
+		if strings.TrimSpace(ref.ID) == "" {
+			continue
+		}
+		if strings.TrimSpace(ref.Role) == "" && a.IsOwner {
+			ref.Role = "owner"
+		}
+		out = append(out, ref)
 	}
 	return out, nil
 }
@@ -1130,17 +1239,12 @@ func (c *BackendClient) ListMyOrgs(ctx context.Context, accessToken string) ([]O
 // workspace→slug resolver.
 func (c *BackendClient) GetOrg(ctx context.Context, accessToken, idOrSlug string) (*OrgRef, error) {
 	var wrapped struct {
-		Organization struct {
-			ID           string `json:"id"`
-			WorkspaceRef string `json:"workspaceRef"`
-			Name         string `json:"name"`
-			Slug         string `json:"slug"`
-		} `json:"organization"`
+		Organization orgPayload `json:"organization"`
 	}
 	if err := c.doJSONData(ctx, http.MethodGet, "/v1/organizations/"+url.PathEscape(strings.TrimSpace(idOrSlug)),
 		map[string]string{"Authorization": "Bearer " + accessToken}, nil, &wrapped); err != nil {
 		return nil, err
 	}
-	o := wrapped.Organization
-	return &OrgRef{ID: o.ID, WorkspaceRef: o.WorkspaceRef, Name: o.Name, Slug: o.Slug}, nil
+	ref := wrapped.Organization.ref()
+	return &ref, nil
 }

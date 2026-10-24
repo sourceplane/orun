@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/outtee"
 )
 
 type dockerExecutor struct {
@@ -59,8 +60,11 @@ func (e *dockerExecutor) RunStep(execCtx ExecContext, job model.PlanJob, step mo
 	cmd := exec.CommandContext(commandCtx, "docker", args...)
 
 	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
+	// The step's live sink, when the runner gave one, reads the output as it
+	// arrives (saas-live-runs LR8); the returned output is unchanged.
+	capture := outtee.Capture(commandCtx, &buf)
+	cmd.Stdout = capture
+	cmd.Stderr = capture
 
 	err = cmd.Run()
 	return strings.TrimRight(buf.String(), "\n"), err

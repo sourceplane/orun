@@ -25,10 +25,13 @@ const (
 	resolveReadTimeout = 120 * time.Second
 	resolveMaxAttempts = 3
 	logUploadTimeout   = 60 * time.Second
-	connectTimeout     = 5 * time.Second
-	maxRetryAttempts   = 3
-	retryBaseDelay     = 2 * time.Second
-	retryMaxDelay      = 10 * time.Second
+	// coordinationTimeout bounds a coordination verb or a long-poll read: the
+	// server holds a long-poll for at most 25 s.
+	coordinationTimeout = 45 * time.Second
+	connectTimeout      = 5 * time.Second
+	maxRetryAttempts    = 3
+	retryBaseDelay      = 2 * time.Second
+	retryMaxDelay       = 10 * time.Second
 
 	// objectWriteRetryAttempts caps attempts for raw object-plane writes (blob
 	// PUTs, multipart parts). Set higher than maxRetryAttempts because a catalog
@@ -106,6 +109,11 @@ type APIError struct {
 	// callers honor it over the default exponential backoff.
 	RetryAfter time.Duration `json:"-"`
 }
+
+// RetryAfterHint is the server's Retry-After for a rate-limited answer, 0
+// when it sent none: what a retrying caller that does not know this type
+// (the log pipeline) waits before asking again.
+func (e *APIError) RetryAfterHint() time.Duration { return e.RetryAfter }
 
 func (e *APIError) Error() string {
 	parts := e.Message
@@ -215,10 +223,9 @@ type Client struct {
 	httpClient *http.Client
 	// logClient uses a longer timeout for log uploads.
 	logClient *http.Client
-	// extraHeaders ride on every platform request — the work sync's
-	// `X-Orun-Work-Sync: <repo>@<sha>` (saas-work-gitops design §7), which the
-	// platform stamps as the epic's managedBy pointer and honours as the
-	// one writer a managed field accepts.
+	// extraHeaders ride on every platform request; nothing in orun sets one
+	// today (the work sync's `X-Orun-Work-Sync` left with
+	// saas-work-gitops-teardown).
 	extraHeaders map[string]string
 }
 
@@ -270,6 +277,14 @@ func NewClientWithScope(baseURL, version string, tokenSrc TokenSource, scope Sco
 
 // Scope returns the org/project scope this client is bound to.
 func (c *Client) Scope() Scope { return c.scope }
+
+// CoordinationHTTPClient is the HTTP client for the coordination verbs and
+// long-polls: this client's keep-alive transport (one pool for every request
+// a run makes, instead of http.DefaultClient's two idle connections and no
+// timeout) under a timeout that outlasts the server's longest hold.
+func (c *Client) CoordinationHTTPClient() *http.Client {
+	return &http.Client{Transport: c.httpClient.Transport, Timeout: coordinationTimeout}
+}
 
 // ScopedStateBaseURL returns the absolute base URL of this client's scoped state
 // plane: {baseURL}/v1/organizations/{org}/projects/{proj}/state. Adapters that
@@ -467,8 +482,36 @@ type AppendLogStep struct {
 	ExitCode *int `json:"exitCode,omitempty"`
 }
 
+// AppendLogEntry is one chunk of a batched append (orun-cloud saas-live-runs
+// LR8b): stored by the server as its own chunk, with its own seq and step
+// coordinate, exactly as a single append would store it.
+type AppendLogEntry struct {
+	Content string         `json:"content"`
+	Step    *AppendLogStep `json:"step,omitempty"`
+}
+
+// appendLogsRequest is the batched body. It carries no `content`: the server
+// takes one or the other.
+type appendLogsRequest struct {
+	RunnerID string           `json:"runnerId"`
+	Entries  []AppendLogEntry `json:"entries"`
+}
+
+// MaxAppendLogEntries is the most entries one batched append may carry; the
+// server also holds a batch to 1 MiB of content in all.
+const MaxAppendLogEntries = 64
+
+// ErrBatchedAppendUnsupported is a batched append the server did not take as
+// one: a server from before saas-live-runs LR8b requires `content` and answers
+// 422, and one that answers without `count` cannot say what it stored. The
+// caller sends the chunks one by one instead.
+var ErrBatchedAppendUnsupported = errors.New("the server does not take batched log appends")
+
 type appendLogResponse struct {
 	Seq int `json:"seq"`
+	// Count is how many of a batched append's entries were stored, from the
+	// first (LR8b). Absent on a single append.
+	Count *int `json:"count,omitempty"`
 	// StepRejected names the step fields the server could not read. The chunk
 	// still landed — the server stores the bytes and drops only the coordinate,
 	// because losing a runner's log over an optional field is the wrong trade.
@@ -646,16 +689,71 @@ func (c *Client) AppendLog(ctx context.Context, runID, jobID, runnerID, content 
 	return resp.Seq, nil
 }
 
+// AppendLogs calls POST …/state/runs/{runID}/logs/{jobID} with a job's queued
+// chunks, in order, in one request (orun-cloud saas-live-runs LR8b): at most
+// MaxAppendLogEntries, and at most 1 MiB of content in all. It returns how many
+// the server stored, from the first; fewer than were sent comes with an error
+// and the rest are the caller's to send again. A server that does not take a
+// batch answers ErrBatchedAppendUnsupported, wrapped.
+func (c *Client) AppendLogs(ctx context.Context, runID, jobID, runnerID string, entries []AppendLogEntry) (int, error) {
+	path := c.statePath("/runs/" + urlSegment(runID) + "/logs/" + urlSegment(jobID))
+	var resp appendLogResponse
+	if err := c.doJSONWith(ctx, c.logClient, http.MethodPost, path,
+		appendLogsRequest{RunnerID: runnerID, Entries: entries}, &resp); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && (apiErr.Status == http.StatusUnprocessableEntity || apiErr.Status == http.StatusBadRequest) {
+			return 0, fmt.Errorf("append logs %s: %w (%v)", jobID, ErrBatchedAppendUnsupported, err)
+		}
+		return 0, fmt.Errorf("append logs %s: %w", jobID, err)
+	}
+	if resp.Count == nil {
+		return 0, fmt.Errorf("append logs %s: %w (no count in the answer)", jobID, ErrBatchedAppendUnsupported)
+	}
+	n := *resp.Count
+	if n < 0 {
+		n = 0
+	}
+	if n > len(entries) {
+		n = len(entries)
+	}
+	if n < len(entries) {
+		return n, fmt.Errorf("append logs %s: the server stored %d of %d chunks", jobID, n, len(entries))
+	}
+	return n, nil
+}
+
 // ReadLog calls GET …/state/runs/{runID}/logs/{jobID}?fromSeq= and returns the
 // assembled content from fromSeq onward plus the live-tail cursor (nextSeq) and
 // whether the job is complete (no more chunks coming).
 func (c *Client) ReadLog(ctx context.Context, runID, jobID string, fromSeq int) (*ReadLogResult, error) {
+	return c.ReadLogWait(ctx, runID, jobID, fromSeq, 0)
+}
+
+// ReadLogWait is ReadLog with `?wait=<seconds>`: the server holds the read
+// while nothing sits past fromSeq and the job still runs, so a live tail
+// costs one request per wait instead of one per poll (specs/orun-sync-
+// efficiency P6). A server without the parameter answers at once. The held
+// read goes on the longer-timeout log client and is not retried.
+func (c *Client) ReadLogWait(ctx context.Context, runID, jobID string, fromSeq, waitSeconds int) (*ReadLogResult, error) {
 	path := c.statePath("/runs/" + urlSegment(runID) + "/logs/" + urlSegment(jobID))
+	q := url.Values{}
 	if fromSeq > 0 {
-		path += "?fromSeq=" + strconv.Itoa(fromSeq)
+		q.Set("fromSeq", strconv.Itoa(fromSeq))
+	}
+	if waitSeconds > 0 {
+		q.Set("wait", strconv.Itoa(waitSeconds))
+	}
+	if len(q) > 0 {
+		path += "?" + q.Encode()
 	}
 	var resp ReadLogResult
-	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+	var err error
+	if waitSeconds > 0 {
+		err = c.doJSONWith(ctx, c.logClient, http.MethodGet, path, nil, &resp)
+	} else {
+		err = c.doJSON(ctx, http.MethodGet, path, nil, &resp, true)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("read log %s: %w", jobID, err)
 	}
 	return &resp, nil
@@ -1115,6 +1213,3 @@ func (c *Client) SetHeader(name, value string) {
 	}
 	c.extraHeaders[name] = value
 }
-
-// WorkSyncHeader names the header the work sync identifies itself with.
-const WorkSyncHeader = "X-Orun-Work-Sync"

@@ -271,6 +271,28 @@ func TestResolve_DuplicateComponentKey(t *testing.T) {
 	if !hasDup {
 		t.Errorf("expected component.key.duplicate Error: %v", issuesCodes(issues))
 	}
+
+	// The error channel carries the typed error naming every offending file,
+	// and still unwraps to the issue for Code-based matching.
+	var dup *ErrDuplicateComponent
+	if !errors.As(err, &dup) {
+		t.Fatalf("err = %T %v, want *ErrDuplicateComponent", err, err)
+	}
+	if dup.Key != "ns/r/dup" || dup.Name != "dup" {
+		t.Errorf("Key/Name = %q/%q", dup.Key, dup.Name)
+	}
+	if strings.Join(dup.Paths, ",") != "apps/a/component.yaml,apps/b/component.yaml" {
+		t.Errorf("Paths = %v", dup.Paths)
+	}
+	for _, want := range []string{`duplicate component name "dup"`, "apps/a/component.yaml", "apps/b/component.yaml", "catalog.discovery.exclude"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Error() %q missing %q", err.Error(), want)
+		}
+	}
+	var issue ValidationIssue
+	if !errors.As(err, &issue) || issue.Code != "component.key.duplicate" {
+		t.Errorf("errors.As(ValidationIssue) = %v / %q", errors.As(err, &issue), issue.Code)
+	}
 }
 
 func TestResolve_NameInvalid_StrictPromotes(t *testing.T) {

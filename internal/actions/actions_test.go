@@ -27,7 +27,7 @@ func TestRegistryIDsAreWellFormed(t *testing.T) {
 				t.Errorf("action %q parameter %q has no description", id, p.Name)
 			}
 			switch p.Type {
-			case ParamString, ParamBool, ParamInt, ParamStringList:
+			case ParamString, ParamBool, ParamInt, ParamStringList, ParamObjectList:
 			default:
 				t.Errorf("action %q parameter %q declares unknown type %q", id, p.Name, p.Type)
 			}

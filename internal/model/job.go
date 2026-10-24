@@ -2,6 +2,8 @@ package model
 
 import (
 	"fmt"
+	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -22,10 +24,24 @@ type JobRegistry struct {
 	Jobs       []JobSpec `yaml:"jobs" json:"jobs"`
 }
 
+// JobResources is what a job template declares it needs: the cpu it keeps
+// busy, the memory it takes and how long it usually runs. Weights for
+// packing lanes and sizing a lane's concurrency to its runner
+// (specs/orun-runner-efficiency §5.4); none of it changes what runs.
+type JobResources struct {
+	// CPU is the cores the job keeps busy (fractions allowed).
+	CPU float64 `yaml:"cpu,omitempty" json:"cpu,omitempty"`
+	// Memory is informational for a pool, e.g. "4Gi".
+	Memory string `yaml:"memory,omitempty" json:"memory,omitempty"`
+	// EstimatedSeconds is the job's usual duration: its packing weight.
+	EstimatedSeconds int `yaml:"estimatedSeconds,omitempty" json:"estimatedSeconds,omitempty"`
+}
+
 // JobSpec defines a complete job specification with multiple steps
 type JobSpec struct {
 	Name         string                 `yaml:"name" json:"name"`
 	Description  string                 `yaml:"description" json:"description"`
+	Resources    *JobResources          `yaml:"resources,omitempty" json:"resources,omitempty"`
 	RunsOn       string                 `yaml:"runsOn,omitempty" json:"runsOn,omitempty"`
 	Timeout      string                 `yaml:"timeout" json:"timeout"`
 	Retries      int                    `yaml:"retries" json:"retries"`
@@ -42,8 +58,14 @@ type Step struct {
 	Capability string `yaml:"capability,omitempty" json:"capability,omitempty"`
 	Phase      string `yaml:"phase,omitempty" json:"phase,omitempty"`
 	Order      int    `yaml:"order,omitempty" json:"order,omitempty"`
-	Run        string `yaml:"run,omitempty" json:"run,omitempty"`
-	Use        string `yaml:"use,omitempty" json:"use,omitempty"`
+	// Scope is job (default) or lane. A lane-scoped step is a run step that
+	// every job of a lane would execute identically (an install, a cache
+	// warm): the first job to reach it runs it once in the shared tree, the
+	// others reuse the result (specs/orun-runner-efficiency §5.3). Lane-scoped
+	// steps come first in a job, before its private tree is staged.
+	Scope string `yaml:"scope,omitempty" json:"scope,omitempty"`
+	Run   string `yaml:"run,omitempty" json:"run,omitempty"`
+	Use   string `yaml:"use,omitempty" json:"use,omitempty"`
 	// Workflow names a torkflow workflow file to run as this step — the third
 	// execution vocabulary beside run/use (specs/orun-workflows §3). Exactly one
 	// of Run/Use/Workflow may be set on a step.
@@ -59,6 +81,10 @@ type Step struct {
 	WorkingDirectory string                       `yaml:"working-directory,omitempty" json:"working-directory,omitempty"`
 	Timeout          string                       `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	Retry            int                          `yaml:"retry,omitempty" json:"retry,omitempty"`
+	// Caches are the directories under the job's working directory this step
+	// fills and orun keeps on the machine between jobs and runs
+	// (specs/orun-cache-efficiency CE3).
+	Caches []CacheDecl `yaml:"caches,omitempty" json:"caches,omitempty"`
 	// Resume opts a workflow step into resume-from-failed-step on retry
 	// (orun-workflows-v2 §8): a retry attempt passes the prior attempt's run
 	// dir and the engine re-executes only non-succeeded steps. Default (false)
@@ -116,6 +142,78 @@ func (s Step) ValidateExecForm() error {
 		return fmt.Errorf("step %q sets %s — a step must use exactly one of run/use/workflow", s.Name, strings.Join(set, " and "))
 	}
 	return nil
+}
+
+// CacheDecl is a cache a step declares (`caches:`): a directory under the
+// job's working directory that a tool fills (a Next.js build cache, a
+// Playwright download) and that orun keeps on the machine, restored into
+// the tree before the job's steps run there and saved from it after the job
+// succeeds (specs/orun-cache-efficiency CE3).
+type CacheDecl struct {
+	Name string `yaml:"name" json:"name"`
+	Path string `yaml:"path" json:"path"`
+}
+
+var cacheNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// Validate checks a declared cache: a name that can be a directory name and
+// a relative path inside the job's working directory.
+func (c CacheDecl) Validate(stepName string) error {
+	if !cacheNamePattern.MatchString(strings.TrimSpace(c.Name)) {
+		return fmt.Errorf("step %q: cache name %q must be letters, digits, dots, dashes or underscores", stepName, c.Name)
+	}
+	p := strings.TrimSpace(c.Path)
+	if p == "" {
+		return fmt.Errorf("step %q: cache %s has no path", stepName, c.Name)
+	}
+	if filepath.IsAbs(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "\\") {
+		return fmt.Errorf("step %q: cache %s path %q must be relative to the job's working directory", stepName, c.Name, c.Path)
+	}
+	clean := filepath.ToSlash(filepath.Clean(p))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return fmt.Errorf("step %q: cache %s path %q must stay inside the job's working directory", stepName, c.Name, c.Path)
+	}
+	return nil
+}
+
+// ValidateCaches checks every cache the step declares.
+func (s Step) ValidateCaches() error {
+	for _, c := range s.Caches {
+		if err := c.Validate(s.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Step scopes.
+const (
+	StepScopeJob  = "job"
+	StepScopeLane = "lane"
+)
+
+// NormalizeScope lower-cases a step scope and defaults empty to job.
+func NormalizeScope(scope string) string {
+	s := strings.ToLower(strings.TrimSpace(scope))
+	if s == "" {
+		return StepScopeJob
+	}
+	return s
+}
+
+// ValidateScope checks a step's scope: job or lane, and lane only on a run
+// step (an action's exported environment stays with the job that ran it).
+func (s Step) ValidateScope() error {
+	switch NormalizeScope(s.Scope) {
+	case StepScopeJob:
+		return nil
+	case StepScopeLane:
+		if strings.TrimSpace(s.Run) == "" {
+			return fmt.Errorf("step %q: scope: lane applies to run steps only (the setup actions before one are shared on their own; a workflow step's effects stay with the job that ran it)", s.Name)
+		}
+		return nil
+	}
+	return fmt.Errorf("step %q: scope %q is not one of job|lane", s.Name, s.Scope)
 }
 
 // NormalizePhase returns a normalized phase string and defaults empty values to "main".
@@ -195,6 +293,7 @@ type JobInstance struct {
 	Gates                    []PromotionGate
 	Timeout                  string
 	Retries                  int
+	Resources                *JobResources
 	Parameters               map[string]interface{}
 	Env                      map[string]string
 	// OptionalSecretRefs maps env var names to secret:// references that
@@ -251,6 +350,7 @@ type RenderedStep struct {
 	Name  string `json:"name"`
 	Phase string `json:"phase,omitempty"`
 	Order int    `json:"order,omitempty"`
+	Scope string `json:"scope,omitempty"`
 	Run   string `json:"run,omitempty"`
 	Use   string `json:"use,omitempty"`
 	// Workflow is the rendered torkflow workflow reference; WorkflowDigest is the
@@ -265,6 +365,7 @@ type RenderedStep struct {
 	WorkingDirectory string                       `json:"workingDirectory,omitempty"`
 	Timeout          string                       `json:"timeout"`
 	Retry            int                          `json:"retry"`
+	Caches           []CacheDecl                  `json:"caches,omitempty"`
 	Resume           bool                         `json:"resume,omitempty"`
 	Approval         *StepApproval                `json:"approval,omitempty"`
 	OnFailure        string                       `json:"onFailure"`

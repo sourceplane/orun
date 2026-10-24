@@ -1,0 +1,28 @@
+apiVersion: orun.dev/v1
+kind: Blueprint
+metadata:
+  name: saas-baseline
+inputs:
+  name: { type: string, pattern: "^[a-z][a-z0-9-]*$", required: true }
+sources:
+  - name: baseline
+    kind: dir
+    path: .
+modules:
+  - name: standards       # the golden paths and platform rules
+    mode: copy
+    source: baseline
+    from: platform
+    to: .
+  - name: product         # the intent and the first services
+    mode: template
+    source: baseline
+    from: product
+    to: .
+    bind: [intent.yaml]
+    dependsOn: [standards]
+phases:
+  - name: standards
+    modules: [standards]
+  - name: product
+    modules: [product]

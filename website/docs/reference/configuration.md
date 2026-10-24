@@ -40,25 +40,12 @@ environments:
 
 The intent file is where you define environments, discovery roots, groups, selectors, defaults, and optional inline components. Root-level `env` provides global environment variables shared across all environments.
 
-It also declares where the repository keeps its **work** (the epics tree
-and the task contracts) when it keeps them somewhere other than the
-default; see [`orun work`](../cli/orun-work.md):
-
-```yaml
-work:
-  epics: work/epics     # one directory per epic (default specs/epics)
-  tasks: work/tasks     # <KEY>.TaskContract.yaml (default tasks)
-  sync: on-merge        # off (default) | on-merge
-```
-
-Every `orun task` verb and `orun pr check` read the contract from the
-declared `tasks` directory, and a `task-contract` finding prints that path.
-Absent, the section means the layout every repository has had; a directory
-must be repo-relative and `sync` one of the two words, or the intent file
-refuses to load. `sync: on-merge` makes a successful `orun plan` on the
-clean default branch reconcile the tree into Orunbase after the plan — the
-same mechanism as `execution.state.autopushCatalog`, so a repository needs
-no separate job; see [`orun work`](../cli/orun-work.md).
+A `work:` section (orun v2.64 to v2.81) once named where the repository
+kept its epics and task contracts and whether `orun plan` synced them into
+Orunbase. Work is tracked in Orunbase or a connected tracker now
+(saas-work-gitops-teardown): task contracts live in `tasks/` at the
+repository root, epic designs under `specs/epics/`, and a leftover `work:`
+section is ignored with one notice from `orun plan`.
 
 It also declares where compositions come from:
 
@@ -283,6 +270,23 @@ Declare the workspace in `intent.yaml` under `execution.state`:
 The `ws_…` / slug / `org_…` value is passed opaquely; the platform resolves it server-side.
 
 When `mode: remote` is set, all three commands that read execution state (`run`, `status`, `logs`) automatically use the backend without requiring `--remote-state` on the command line.
+
+## Execution defaults
+
+`execution.defaults` sets run-time bounds every job inherits unless it sets its own:
+
+```yaml
+execution:
+  defaults:
+    timeout: 45m        # bounds every step whose job and step set none (runner default: 60m)
+  lanes:
+    upstreamWait: 90m   # how long a lane job waits for an upstream in another lane (default 60m)
+```
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `defaults.timeout` | Go duration | The bound on every step whose job template and step declare no `timeout`; carried on the plan as `execution.timeout`. Without it the runner applies 60 minutes, so no step holds a runner for the CI limit. See [Timeouts](../cli/orun-run.md#timeouts) |
+| `lanes.upstreamWait` | Go duration | How long a lane job waits for an upstream in another lane through remote state (default 60 minutes); carried as `metadata.lanes.upstreamWait`. See [Lanes](../concepts/lanes.md#run-a-lane) |
 
 ## Related
 

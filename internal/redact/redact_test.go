@@ -83,3 +83,43 @@ func TestLongestPatternWins(t *testing.T) {
 		t.Errorf("longer value should mask whole, got %q", got)
 	}
 }
+
+// saas-live-runs LR8: a stream redacted piece by piece is cut only where no
+// secret spans the cut, so each piece masks exactly as the whole does.
+func TestSafeCutNeverSplitsASecret(t *testing.T) {
+	r := New()
+	r.Add("s3cr3t-token", "-----BEGIN KEY-----\nabcd\n-----END KEY-----")
+	if got := r.MaxLen(); got < len("-----BEGIN KEY-----\nabcd\n-----END KEY-----") {
+		t.Fatalf("MaxLen = %d", got)
+	}
+	s := "line one\nauth s3cr3t-token here\n-----BEGIN KEY-----\nabcd\n-----END KEY-----\ntail\n"
+	whole := r.Filter(s)
+	for at := 0; at <= len(s); at++ {
+		cut := r.SafeCut(s, at)
+		if cut > at {
+			t.Fatalf("SafeCut(%d) = %d moved forward", at, cut)
+		}
+		if got := r.Filter(s[:cut]) + r.Filter(s[cut:]); got != whole {
+			t.Fatalf("cut at %d (asked %d): %q != %q", cut, at, got, whole)
+		}
+	}
+	// Mid-secret asks back off to the secret's start.
+	at := strings.Index(s, "s3cr3t") + 3
+	if got, want := r.SafeCut(s, at), strings.Index(s, "s3cr3t"); got != want {
+		t.Fatalf("SafeCut mid-secret = %d, want %d", got, want)
+	}
+}
+
+func TestSafeCutKeepsRunesWholeAndIsNilSafe(t *testing.T) {
+	var r *Redactor
+	s := "héllo"
+	if got := r.SafeCut(s, 2); got != 1 { // 'é' is bytes 1..2
+		t.Fatalf("SafeCut mid-rune = %d, want 1", got)
+	}
+	if r.MaxLen() != 0 {
+		t.Fatal("nil MaxLen")
+	}
+	if got := New().SafeCut(s, 99); got != len(s) {
+		t.Fatalf("SafeCut past end = %d", got)
+	}
+}
