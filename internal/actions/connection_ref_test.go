@@ -115,3 +115,73 @@ func TestDoctorRequiresNamedConnections(t *testing.T) {
 		t.Fatalf("matched connections should pass; err=%v pending=%v", err, res.Pending)
 	}
 }
+
+// THE BUILD'S BOUND CONNECTION. A console-resolved bootstrap binds one
+// connection per provider, and the facts the build was handed (the workers.dev
+// subdomain) were read from it. An unpinned hook must mint from that same
+// connection, or a product deploys into one account while its files name the
+// other's subdomain.
+
+func TestReconcileWithoutAPinMintsFromTheBuildsBoundConnection(t *testing.T) {
+	t.Setenv(EnvBoundConnections, "github=int_gh,cloudflare=int_labs")
+	f := twoCloudflareAccounts()
+	in := reconcileInput(t, map[string]any{"provider": "cloudflare", "template": "workers-deploy", "keys": []any{"K"}})
+	res, err := reconcileOn(context.Background(), f, "ws_1", in)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if res.Outputs["connection"] != "int_labs" || f.created[0].Binding.ConnectionID != "int_labs" {
+		t.Errorf("an unpinned reconcile must mint from the bound connection, not the first active one: %v", res.Outputs)
+	}
+}
+
+func TestReconcileHooksOwnPinBeatsTheBinding(t *testing.T) {
+	t.Setenv(EnvBoundConnections, "cloudflare=int_labs")
+	f := twoCloudflareAccounts()
+	in := reconcileInput(t, map[string]any{
+		"provider": "cloudflare", "template": "workers-deploy", "keys": []any{"K"}, "connection": "int_prod",
+	})
+	res, err := reconcileOn(context.Background(), f, "ws_1", in)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if res.Outputs["connection"] != "int_prod" {
+		t.Errorf("a hook's explicit pin wins over the build's binding: %v", res.Outputs)
+	}
+}
+
+func TestReconcileWaitsWhenTheBoundConnectionIsNotActive(t *testing.T) {
+	t.Setenv(EnvBoundConnections, "cloudflare=int_old")
+	f := twoCloudflareAccounts()
+	in := reconcileInput(t, map[string]any{"provider": "cloudflare", "template": "workers-deploy", "keys": []any{"K"}})
+	res, err := reconcileOn(context.Background(), f, "ws_1", in)
+	if err != nil {
+		t.Fatalf("a bound connection that is not active is a wait, not a failure: %v", err)
+	}
+	if res.Pending == nil || len(f.created) != 0 {
+		t.Errorf("never fall back to another account than the build is bound to; pending=%+v created=%d", res.Pending, len(f.created))
+	}
+}
+
+func TestReconcileIgnoresABindingForAnotherProvider(t *testing.T) {
+	t.Setenv(EnvBoundConnections, "supabase=int_sb")
+	f := twoCloudflareAccounts()
+	in := reconcileInput(t, map[string]any{"provider": "cloudflare", "template": "workers-deploy", "keys": []any{"K"}})
+	res, err := reconcileOn(context.Background(), f, "ws_1", in)
+	if err != nil || res.Outputs["connection"] != "int_prod" {
+		t.Fatalf("no cloudflare binding keeps the first active connection; err=%v out=%v", err, res.Outputs)
+	}
+}
+
+func TestBoundConnectionsRoundTrip(t *testing.T) {
+	got := BoundConnections(" Cloudflare = int_a ,supabase=int_b,,broken, =int_x,github=")
+	if len(got) != 2 || got["cloudflare"] != "int_a" || got["supabase"] != "int_b" {
+		t.Errorf("parse: %v", got)
+	}
+	if s := FormatBoundConnections(map[string]string{"supabase": "int_b", "Cloudflare": "int_a", "": "x", "github": " "}); s != "cloudflare=int_a,supabase=int_b" {
+		t.Errorf("format: %q", s)
+	}
+	if FormatBoundConnections(nil) != "" {
+		t.Error("no bindings formats to the empty string")
+	}
+}

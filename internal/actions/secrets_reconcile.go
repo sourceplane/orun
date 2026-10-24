@@ -46,7 +46,7 @@ func init() {
 			Param{Name: "project", Type: ParamString,
 				Description: "project scope; empty uses the workspace scope"},
 			Param{Name: "connection", Type: ParamString,
-				Description: "which connection to mint from when the provider has several: its id, display name or account login; empty uses the first active one"},
+				Description: "which connection to mint from when the provider has several: its id, display name or account login; empty uses the connection the build is bound to (ORUN_CONNECTIONS), else the first active one"},
 		),
 		Outputs: []string{"created", "kept", "connection"},
 		Did:     reconcileDid,
@@ -71,8 +71,20 @@ func reconcileOn(ctx context.Context, c secretsPlane, org string, in Input) (Res
 	if err != nil {
 		return Result{}, fmt.Errorf("reading connections for %s: %w", org, err)
 	}
+	// The connection to mint from: the hook's own pin, else the one the BUILD
+	// is bound to. A console-resolved bootstrap binds one connection per
+	// provider, and every fact the build was handed (the Cloudflare account's
+	// workers.dev subdomain baked into the product) was read from it. Minting
+	// from "the first active one" instead put a product's Workers on one
+	// account while its files named another's subdomain, whenever the
+	// workspace could use two Cloudflare accounts. A bound connection is
+	// treated exactly like a pinned one: it must match, and no match waits.
+	ref := strings.TrimSpace(StringParam(in, "connection"))
+	if ref == "" {
+		ref = boundConnectionFromEnv(provider)
+	}
 	var connectionID string
-	if ref := strings.TrimSpace(StringParam(in, "connection")); ref != "" {
+	if ref != "" {
 		// MCX-D7: a pinned connection. A name two connections share is
 		// refused rather than guessed; a name nothing matches yet is a wait,
 		// like a provider not connected yet.

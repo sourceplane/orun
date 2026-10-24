@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/sourceplane/orun/internal/remotestate"
@@ -40,6 +41,57 @@ func workspaceFromEnv() string {
 		return w
 	}
 	return strings.TrimSpace(os.Getenv("ORUN_ORG"))
+}
+
+// EnvBoundConnections names the connection a build is BOUND to for each
+// provider, as `provider=int_…` pairs separated by commas
+// (`cloudflare=int_ab…,supabase=int_cd…`). A console-resolved bootstrap binds
+// one connection per provider; the platform's build box sets this, and
+// `orun baseline new --from` sets it from the bootstrap record.
+const EnvBoundConnections = "ORUN_CONNECTIONS"
+
+// boundConnectionFromEnv is the connection the build is bound to for
+// `provider`, or "" when the build names none. Malformed pairs are skipped:
+// an unparseable binding is no binding, which keeps the pre-binding default.
+func boundConnectionFromEnv(provider string) string {
+	return BoundConnections(os.Getenv(EnvBoundConnections))[strings.ToLower(strings.TrimSpace(provider))]
+}
+
+// BoundConnections parses an ORUN_CONNECTIONS value. Exported so the command
+// layer writes the same shape it reads.
+func BoundConnections(raw string) map[string]string {
+	out := map[string]string{}
+	for _, pair := range strings.Split(raw, ",") {
+		provider, id, ok := strings.Cut(strings.TrimSpace(pair), "=")
+		provider = strings.ToLower(strings.TrimSpace(provider))
+		id = strings.TrimSpace(id)
+		if ok && provider != "" && id != "" {
+			out[provider] = id
+		}
+	}
+	return out
+}
+
+// FormatBoundConnections renders a provider → connection map as an
+// ORUN_CONNECTIONS value, providers sorted so the value is stable.
+func FormatBoundConnections(bound map[string]string) string {
+	providers := make([]string, 0, len(bound))
+	for p, id := range bound {
+		if strings.TrimSpace(p) != "" && strings.TrimSpace(id) != "" {
+			providers = append(providers, strings.ToLower(strings.TrimSpace(p)))
+		}
+	}
+	sort.Strings(providers)
+	parts := make([]string, 0, len(providers))
+	for _, p := range providers {
+		for k, id := range bound {
+			if strings.ToLower(strings.TrimSpace(k)) == p {
+				parts = append(parts, p+"="+strings.TrimSpace(id))
+				break
+			}
+		}
+	}
+	return strings.Join(parts, ",")
 }
 
 // errNoWorkspace names both spellings, and the parameter that beats them, so
