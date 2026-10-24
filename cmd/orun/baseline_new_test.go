@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sourceplane/orun/internal/actions"
 	"github.com/sourceplane/orun/internal/remotestate"
 )
 
@@ -408,5 +409,26 @@ func TestBaselineNewFromNamesOnlyTheTwoDoors(t *testing.T) {
 	err := runBaselineNew(t, "--from", "bst_7K2M9QAZ", "--by", "platform", "--local", "--out", t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "--by") {
 		t.Fatalf("the platform door is the kickoff's own word, not a caller's: %v", err)
+	}
+}
+
+func TestBindHandoffConnectionsExportsTheBuildsBinding(t *testing.T) {
+	t.Setenv(actions.EnvBoundConnections, "")
+	h := handoffFixture()
+	h.Connections = map[string]string{"supabase": "int_sb", "cloudflare": "int_cf"}
+	if err := bindHandoffConnections(h); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv(actions.EnvBoundConnections); got != "cloudflare=int_cf,supabase=int_sb" {
+		t.Errorf("the record's bindings reach the hooks; got %q", got)
+	}
+
+	t.Setenv(actions.EnvBoundConnections, "cloudflare=int_prev")
+	h.Connections = nil
+	if err := bindHandoffConnections(h); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv(actions.EnvBoundConnections); got != "cloudflare=int_prev" {
+		t.Errorf("a record that binds nothing leaves the environment alone; got %q", got)
 	}
 }

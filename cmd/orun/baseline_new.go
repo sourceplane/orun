@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	yaml "gopkg.in/yaml.v3"
 
+	"github.com/sourceplane/orun/internal/actions"
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/scaffold"
 )
@@ -264,6 +265,9 @@ explicit flag still wins, and --set adds. The platform is told which door took i
 				}
 				address, repo, repoLink, sets = applyHandoff(handoff, address, repo, repoLink, sets)
 				scaffoldBootstrapInputs = handoff.Inputs
+				if err := bindHandoffConnections(handoff); err != nil {
+					return fmt.Errorf("orun baseline new --from %s: %w", h, err)
+				}
 				fmt.Fprintf(cmd.ErrOrStderr(), "continuing bootstrap %s: %s for %s\n", handoff.ID, address, handoff.Repo.FullName)
 			} else if strings.TrimSpace(address) == "" {
 				return exitErr(2, "orun baseline new: name a baseline (id or id@tag), or --from bst_… to continue\n"+
@@ -413,6 +417,20 @@ explicit flag still wins, and --set adds. The platform is told which door took i
 	cmd.Flags().StringVar(&progress, "progress", "auto", "Progress rendering: auto | plain | verbose | json")
 	cmd.Flags().BoolVar(&keepWork, "keep-checkout", false, "Keep the baseline checkout instead of removing it (debugging)")
 	return cmd
+}
+
+// bindHandoffConnections exports the connections the bootstrap is BOUND to
+// (one per provider, chosen at Review) as ORUN_CONNECTIONS. The inputs the
+// record carries, the workers.dev subdomain among them, were read from those
+// connections, so the credentials the hooks mint must come from them too:
+// `orun.integrations/reconcile@v1` reads this when a hook pins no connection.
+// A record that binds none leaves the environment as it is.
+func bindHandoffConnections(handoff *remotestate.BootstrapHandoff) error {
+	bound := actions.FormatBoundConnections(handoff.Connections)
+	if bound == "" {
+		return nil
+	}
+	return os.Setenv(actions.EnvBoundConnections, bound)
 }
 
 // applyHandoff fills what the flags would from a resolved bootstrap. Explicit
