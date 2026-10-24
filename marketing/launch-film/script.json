@@ -1,0 +1,11 @@
+[
+ {"id":"01-hook","say":"The best engineering teams don't ship faster because they type faster."},
+ {"id":"02-platform","say":"They ship on a platform. Years of discipline, that most teams never get to build."},
+ {"id":"03-intent","say":"Oh-run turns that discipline into intent. What exists. Where it ships. And the rules it lives by."},
+ {"id":"04-compile","say":"One open-source binary compiles it into a single plan. Same inputs, same plan. Every time."},
+ {"id":"05-policy","say":"Policy runs at compile time. So when an agent breaks a rule, it fails in the plan. Not in production."},
+ {"id":"06-baseline","say":"Want the whole platform? Pick a baseline. Connect your cloud."},
+ {"id":"07-live","say":"About an hour later: forty-four components, twelve bounded contexts, three environments. Live, in your repo."},
+ {"id":"08-converge","say":"Then every commit converges. Forty-one jobs. All green."},
+ {"id":"09-end","say":"Oh-run. Platform discipline, compiled. Open source."}
+]
