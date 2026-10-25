@@ -146,6 +146,15 @@ milestone and task its phases will land under, so the shape of the work is
 visible before any of it starts) and `hooks.postInstantiate` runs after the
 last. Both are run on a resume too, so what they do must be idempotent.
 
+A `preInstantiate` hook marked `background: true`, and every hook after it,
+runs beside the phases instead of before them (orun ≥ v2.88.0). A hook whose
+action works on the task plane (`orun.task/ensure@v1`, `orun.task/rollup@v1`,
+`orun.pr/land@v1`) waits for the background to finish; every other hook runs
+while it is still going. A background hook that fails stops the run at the
+next hook, and the run never ends before the background does. `background` is
+only for `uses:` hooks: a `run:` hook would share the product tree with the
+phase that is writing it.
+
 ## The output gate
 
 At component scale, every generated `component.yaml` must pass both the

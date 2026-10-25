@@ -229,6 +229,11 @@ type Hook struct {
 	Label string `yaml:"label,omitempty" json:"label,omitempty"`
 	Pin   *bool  `yaml:"pin,omitempty" json:"pin,omitempty"`
 	Quiet bool   `yaml:"quiet,omitempty" json:"quiet,omitempty"`
+
+	// Background runs a hooks.preInstantiate hook — and every one after it —
+	// beside the phases instead of before them; a phase's task-plane hooks
+	// wait for it (`background.go`).
+	Background bool `yaml:"background,omitempty" json:"background,omitempty"`
 }
 
 // IsAction reports whether this hook calls a registered orun action.
@@ -506,6 +511,9 @@ func (bp *Blueprint) validateHooks() error {
 		if err := h.validate(); err != nil {
 			return fmt.Errorf("hooks.postInstantiate[%d]: %w", i, err)
 		}
+	}
+	if err := bp.validateBackground(); err != nil {
+		return err
 	}
 	for pi, ph := range bp.Phases {
 		for i, h := range ph.Hooks.All() {

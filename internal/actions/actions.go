@@ -91,6 +91,11 @@ type Spec struct {
 	// parameter has been checked on its own — for a rule no single parameter
 	// can state ("urls or targets"). Nil means none.
 	Check func(with map[string]any) error
+	// TaskPlane: the action reads or writes the task plane — epics,
+	// milestones, tasks, or a pull request bound to one. A hook using it
+	// waits for the run's background hooks, which set that plane up
+	// (scaffold `background.go`).
+	TaskPlane bool
 }
 
 // Param returns the named parameter's declaration.

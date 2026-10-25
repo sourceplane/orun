@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -70,6 +71,12 @@ type LandRequest struct {
 	// the budget is for. Zero never re-runs. Each re-run gets a fresh
 	// CheckTimeout.
 	RerunBudget int
+	// RequiredCheckTimeout is for a landing that does not wait for CI
+	// (CheckTimeout zero — `checks: local` checked the commit before it was
+	// pushed): when the base branch refuses the merge because a status check
+	// is REQUIRED, the PR's checks are waited for this long, as CheckTimeout
+	// would, and the merge is asked for again. Zero refuses as before.
+	RequiredCheckTimeout time.Duration
 }
 
 // LandResult is what the landing did.
@@ -86,6 +93,9 @@ type LandResult struct {
 	MergeSHA string
 	// BranchDeleted: the merged head branch is gone from the remote.
 	BranchDeleted bool
+	// WaitedForRequired: the merge did not wait for CI, the base branch
+	// required a check, and the landing waited for it (RequiredCheckTimeout).
+	WaitedForRequired bool
 }
 
 // checkRun is the subset of a GitHub check run this cares about.
@@ -141,7 +151,21 @@ func (p *Pen) Land(ctx context.Context, req LandRequest) (*LandResult, error) {
 		}
 	}
 
-	mergeSHA, err := p.merge(ctx, owner, repo, req.Number, head, method, token)
+	mergeSHA, err := p.mergeWhenReady(ctx, owner, repo, req.Number, head, method, token)
+	if err != nil && req.CheckTimeout == 0 && req.RequiredCheckTimeout > 0 && RequiresChecks(err) {
+		// The commit was checked before it was pushed, but this repository's
+		// base will not take a merge its own checks have not passed. It is the
+		// owner's rule, so the landing keeps it: wait as a `checks: ci` landing
+		// would, then merge.
+		wait := req
+		wait.CheckTimeout = req.RequiredCheckTimeout
+		seen, reruns, werr := p.waitForChecks(ctx, owner, repo, head, token, wait)
+		out.ChecksSeen, out.Reruns, out.WaitedForRequired = seen, reruns, true
+		if werr != nil {
+			return out, werr
+		}
+		mergeSHA, err = p.mergeWhenReady(ctx, owner, repo, req.Number, head, method, token)
+	}
 	if err != nil {
 		return out, err
 	}
@@ -413,6 +437,57 @@ func (p *Pen) prHead(ctx context.Context, owner, repo string, number int, token 
 	return payload.Head.SHA, payload.Head.Ref, nil
 }
 
+// A MERGE ASKED FOR SECONDS AFTER ITS PULL REQUEST OPENED can be refused for
+// a PR that will merge: GitHub works out whether a pull request is mergeable
+// in the background, and asked before it has, or while the base moves, it
+// answers 405 "not mergeable" or 409 "base branch was modified". A landing
+// that waited for CI never asked that early; one that checked its commit in
+// the box (`checks: local`) always does. So such a refusal is asked again over
+// about ten seconds before it is reported. A refusal that names a rule — a
+// required status check, a required review — is the rule, and is not.
+var mergeRetryGaps = []time.Duration{time.Second, 2 * time.Second, 3 * time.Second, 4 * time.Second}
+
+func (p *Pen) mergeWhenReady(ctx context.Context, owner, repo string, number int, sha, method, token string) (string, error) {
+	for attempt := 0; ; attempt++ {
+		mergeSHA, err := p.merge(ctx, owner, repo, number, sha, method, token)
+		if err == nil || attempt >= len(mergeRetryGaps) || !notMergeableYet(err) {
+			return mergeSHA, err
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(mergeRetryGaps[attempt]):
+		}
+	}
+}
+
+// notMergeableYet is a refusal that may clear by itself.
+func notMergeableYet(err error) bool {
+	var api *APIError
+	if !errors.As(err, &api) {
+		return false
+	}
+	switch api.Status {
+	case http.StatusConflict:
+		return true
+	case http.StatusMethodNotAllowed:
+		return !RequiresChecks(err) && !strings.Contains(strings.ToLower(api.Message), "review")
+	}
+	return false
+}
+
+// RequiresChecks reports a merge the base branch refused because a status
+// check it requires has not passed — branch protection's "Required status
+// check \"plan\" is expected", or a ruleset's "2 of 2 required status checks
+// are expected".
+func RequiresChecks(err error) bool {
+	var api *APIError
+	if !errors.As(err, &api) || api.Status != http.StatusMethodNotAllowed {
+		return false
+	}
+	return strings.Contains(strings.ToLower(api.Message), "status check")
+}
+
 func (p *Pen) merge(ctx context.Context, owner, repo string, number int, sha, method, token string) (string, error) {
 	body, _ := json.Marshal(map[string]any{"merge_method": method, "sha": sha})
 	var payload struct {
@@ -432,6 +507,18 @@ func (p *Pen) merge(ctx context.Context, owner, repo string, number int, sha, me
 		return "", fmt.Errorf("provenance: #%d was not merged: %s", number, msg)
 	}
 	return payload.SHA, nil
+}
+
+// APIError is GitHub refusing a call, with its status and its own message —
+// a landing reads both to tell a rule from a moment (mergeWhenReady).
+type APIError struct {
+	Status  int
+	Path    string
+	Message string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("provenance: GitHub answered %d for %s: %s", e.Status, e.Path, e.Message)
 }
 
 // apiJSON performs one GitHub API call and decodes its body. A non-2xx carries
@@ -492,7 +579,7 @@ func (p *Pen) apiOnce(ctx context.Context, method, path, token string, body []by
 		if detail == "" {
 			detail = truncate(string(raw))
 		}
-		return resp.StatusCode, fmt.Errorf("provenance: GitHub answered %d for %s: %s", resp.StatusCode, path, detail)
+		return resp.StatusCode, &APIError{Status: resp.StatusCode, Path: path, Message: detail}
 	}
 	if out == nil {
 		return resp.StatusCode, nil

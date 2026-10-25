@@ -203,6 +203,10 @@ func prDid(params map[string]any, out map[string]string) string {
 		return fmt.Sprintf("There was nothing to land: %s already has every file.", base)
 	case number == "":
 		return ""
+	case out["merged"] == "true" && out["checked"] == "local":
+		return fmt.Sprintf("Checked here and merged #%s into %s.", number, base)
+	case out["merged"] == "true" && out["checked"] == "local+ci":
+		return fmt.Sprintf("Checked here, waited for the checks %s requires, and merged #%s.", base, number)
 	case out["merged"] == "true":
 		return fmt.Sprintf("Merged #%s into %s.", number, base)
 	default:
