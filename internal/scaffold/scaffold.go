@@ -305,12 +305,24 @@ func Run(ctx context.Context, opts Options) (_ *Result, err error) {
 		reportSteps(ctx, em, hr, "", func() map[string]any {
 			return narrationScope("", "", hr.inputs, nil, hr.outputs)
 		})
-		preRan, preErr := hr.run(ctx, bp.Hooks.PreInstantiate)
+		foreground, inBackground := splitBackground(bp.Hooks.PreInstantiate)
+		preRan, preErr := hr.run(ctx, foreground)
 		if preErr != nil {
 			em.emit(ctx, runStepFailed(preErr))
 			return nil, preErr
 		}
 		hooksRun = append(hooksRun, preRan...)
+		// The rest runs beside the phases (`background.go`): its own runner,
+		// so its outputs and its step reports are its own, and every way out
+		// of this run waits for it.
+		if len(inBackground) > 0 {
+			bhr := &hookRunner{outDir: opts.OutDir, baseDir: opts.SourceBaseDir, actions: runner, inputs: values.nonSecretFields()}
+			reportSteps(ctx, em, bhr, "", func() map[string]any {
+				return narrationScope("", "", bhr.inputs, nil, bhr.outputs)
+			})
+			hr.bg = startBackground(ctx, bhr, inBackground, func(err error) { em.emit(ctx, runStepFailed(err)) })
+			defer hr.bg.settle()
+		}
 		for i, phase := range phases {
 			decl := plan.declOf(phase.Name)
 			title := phaseTitle(decl, phase.Name)
@@ -425,6 +437,15 @@ func Run(ctx context.Context, opts Options) (_ *Result, err error) {
 		}
 		// Nothing is waiting any more.
 		clearRunState(opts.OutDir)
+		// The background has finished before the run says it has: a phase
+		// list with no task-plane hook in it never waited for it. Its failure
+		// was reported as it happened; it is the run's failure too.
+		if err := hr.bg.wait(ctx); err != nil {
+			return nil, err
+		}
+		if hr.bg != nil {
+			hooksRun = append(hooksRun, hr.bg.ran...)
+		}
 		// postInstantiate belongs to no phase, and says so: `{{ .phase.name }}`
 		// there renders empty rather than silently carrying the last phase.
 		hr.phase = Phase{}

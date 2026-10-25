@@ -143,6 +143,13 @@ orun pr land --number 42 --wait=false --merge-method merge
 workflow action makes, so the command and the action cannot describe a
 landing differently.
 
+The action also takes `checks: local` (orun ≥ v2.88.0). Before the commit is
+pushed, it runs `orun validate`, then `orun plan` as the pull request and as
+the merge would plan it, in the tree that holds the commit. It then merges
+without waiting for CI. A commit that fails the check is never pushed. If the
+base branch requires a status check, the landing waits for it as it would by
+default, then merges.
+
 ## Related
 
 - [`orun task`](./orun-task.md) — the task the PR carries

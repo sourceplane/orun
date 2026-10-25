@@ -29,6 +29,10 @@ type landHarness struct {
 	gitCalls     []string
 	mergeCode    int
 	mergeMsg     string
+	// mergeRefusals, when set, refuses only that many merges with mergeCode
+	// and mergeMsg, then merges; mergeTries counts every merge asked for.
+	mergeRefusals int
+	mergeTries    int
 	// resets drops the next N connections to a path suffix without an answer.
 	resets map[string]int
 	merges int
@@ -106,7 +110,8 @@ func (h *landHarness) pen(t *testing.T) *Pen {
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			h.mergeBody = body
-			if h.mergeCode != 0 {
+			h.mergeTries++
+			if h.mergeCode != 0 && (h.mergeRefusals == 0 || h.mergeTries <= h.mergeRefusals) {
 				w.WriteHeader(h.mergeCode)
 				_ = json.NewEncoder(w).Encode(map[string]any{"message": h.mergeMsg})
 				return
@@ -221,6 +226,7 @@ func TestLandTreatsNeutralAndSkippedAsPassing(t *testing.T) {
 }
 
 func TestLandSurfacesGitHubsRefusalMessage(t *testing.T) {
+	fastMerges(t)
 	h := &landHarness{
 		checkSets: [][]checkRun{{}},
 		mergeCode: 405,
@@ -611,6 +617,107 @@ func TestPollGapIsQuickWhileCIIsYoung(t *testing.T) {
 	for _, c := range cases {
 		if got := pollGap(c.elapsed); got != c.want {
 			t.Errorf("pollGap(%s) = %s, want %s", c.elapsed, got, c.want)
+		}
+	}
+}
+
+// ── A merge that does not wait for CI (`checks: local`) ─────────────────────
+
+func fastMerges(t *testing.T) {
+	t.Helper()
+	prev := mergeRetryGaps
+	mergeRetryGaps = []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond, time.Millisecond}
+	t.Cleanup(func() { mergeRetryGaps = prev })
+}
+
+// A commit checked in the box merges at once, without a single check read.
+func TestLandWithoutAWaitMergesWithoutReadingChecks(t *testing.T) {
+	h := &landHarness{checkSets: [][]checkRun{{{Name: "plan", Status: "in_progress"}}}}
+	res, err := h.pen(t).Land(context.Background(), LandRequest{Number: 7, RequiredCheckTimeout: time.Second})
+	if err != nil || !res.Merged {
+		t.Fatalf("land: merged=%v err=%v", res != nil && res.Merged, err)
+	}
+	if h.polls != 0 || h.wpolls != 0 || res.WaitedForRequired {
+		t.Fatalf("read checks %d / workflows %d times (waited=%v), want none", h.polls, h.wpolls, res.WaitedForRequired)
+	}
+}
+
+// Asked for seconds after the PR opened, a merge can be refused while GitHub
+// is still working out that the PR is mergeable. That clears by itself.
+func TestAMergeAskedForEarlyIsAskedAgain(t *testing.T) {
+	fastMerges(t)
+	h := &landHarness{mergeCode: 405, mergeMsg: "Pull Request is not mergeable", mergeRefusals: 2}
+	res, err := h.pen(t).Land(context.Background(), LandRequest{Number: 7})
+	if err != nil || !res.Merged {
+		t.Fatalf("land: %v", err)
+	}
+	if h.mergeTries != 3 {
+		t.Fatalf("merge asked for %d times, want 3 (two refusals, then the merge)", h.mergeTries)
+	}
+	// So is a base that moved under it.
+	h2 := &landHarness{mergeCode: 409, mergeMsg: "Base branch was modified. Review and try the merge again.", mergeRefusals: 1}
+	if res, err := h2.pen(t).Land(context.Background(), LandRequest{Number: 7}); err != nil || !res.Merged {
+		t.Fatalf("a 409 should be asked again: %v", err)
+	}
+}
+
+// A base branch that REQUIRES a check is the owner's rule: a landing that did
+// not wait for CI waits for it then, and merges once it passes.
+func TestARequiredCheckIsWaitedForAndThenMerged(t *testing.T) {
+	fastMerges(t)
+	h := &landHarness{
+		checkSets:     [][]checkRun{{{Name: "plan", Status: "in_progress"}}, {{Name: "plan", Status: "completed", Conclusion: "success"}}},
+		mergeCode:     405,
+		mergeMsg:      `Required status check "plan" is expected.`,
+		mergeRefusals: 1,
+	}
+	r := LandRequest{Number: 7, RequiredCheckTimeout: time.Second, PollInterval: time.Millisecond, CIGrace: 20 * time.Millisecond}
+	res, err := h.pen(t).Land(context.Background(), r)
+	if err != nil || !res.Merged {
+		t.Fatalf("land: %v", err)
+	}
+	if !res.WaitedForRequired || h.polls < 2 {
+		t.Fatalf("waited=%v polls=%d, want the required check waited for to green", res.WaitedForRequired, h.polls)
+	}
+	if h.mergeTries != 2 {
+		t.Fatalf("merge asked for %d times, want 2 (refused for the rule, then merged)", h.mergeTries)
+	}
+}
+
+// Without a fallback wait the rule's refusal is reported, at once and as
+// GitHub said it — and neither it nor a review rule is asked again.
+func TestARuleRefusalIsNotRetried(t *testing.T) {
+	fastMerges(t)
+	for _, msg := range []string{
+		"Repository rule violations found\n\n2 of 2 required status checks are expected.",
+		"At least 1 approving review is required by reviewers with write access.",
+	} {
+		h := &landHarness{mergeCode: 405, mergeMsg: msg}
+		_, err := h.pen(t).Land(context.Background(), LandRequest{Number: 7})
+		if err == nil || !strings.Contains(err.Error(), strings.Split(msg, "\n")[0]) {
+			t.Fatalf("want GitHub's refusal %q, got %v", msg, err)
+		}
+		if h.mergeTries != 1 {
+			t.Fatalf("%q: merge asked for %d times, want once", msg, h.mergeTries)
+		}
+	}
+}
+
+func TestRequiresChecksReadsOnlyARequiredCheckRefusal(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{&APIError{Status: 405, Message: `Required status check "plan" is expected.`}, true},
+		{&APIError{Status: 405, Message: "2 of 2 required status checks are expected."}, true},
+		{&APIError{Status: 405, Message: "Pull Request is not mergeable"}, false},
+		{&APIError{Status: 422, Message: "status check"}, false},
+		{fmt.Errorf("wrapped: %w", &APIError{Status: 405, Message: "Required status check \"x\" is expected."}), true},
+		{fmt.Errorf("connection reset"), false},
+	}
+	for _, c := range cases {
+		if got := RequiresChecks(c.err); got != c.want {
+			t.Errorf("RequiresChecks(%v) = %v, want %v", c.err, got, c.want)
 		}
 	}
 }

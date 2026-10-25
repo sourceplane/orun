@@ -52,6 +52,9 @@ type hookRunner struct {
 	// phase names the phase whose hooks are running, for `{{ .phase.name }}`.
 	// Empty outside a phase (the global postInstantiate list).
 	phase Phase
+	// bg is the run's background hooks, when it has some: a task-plane hook
+	// waits for them, any hook stops if they failed (`background.go`).
+	bg *background
 }
 
 // run executes a list of hooks in order, returning the ids that ran.
@@ -64,6 +67,9 @@ func (hr *hookRunner) run(ctx context.Context, hooks []Hook) ([]string, error) {
 				return ran, err
 			}
 		default:
+			if err := hr.joinFor(ctx, h); err != nil {
+				return ran, err
+			}
 			if err := hr.runArgv(h); err != nil {
 				return ran, err
 			}
@@ -91,6 +97,9 @@ func (hr *hookRunner) resetOutputs() {
 // runAction resolves a hook's parameters — rendering any template expression
 // against the outputs already recorded in this phase — and runs the action.
 func (hr *hookRunner) runAction(ctx context.Context, h Hook) error {
+	if err := hr.joinFor(ctx, h); err != nil {
+		return err
+	}
 	params, err := hr.resolveWith(h)
 	if err != nil {
 		return err

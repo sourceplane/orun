@@ -36,8 +36,9 @@ import (
 
 func init() {
 	register(Spec{
-		ID:      "orun.task/ensure@v1",
-		Summary: "Find-or-create an epic, a milestone or a task, by identity",
+		ID:        "orun.task/ensure@v1",
+		Summary:   "Find-or-create an epic, a milestone or a task, by identity",
+		TaskPlane: true,
 		Params: append(orgParams(),
 			Param{Name: "kind", Type: ParamString, Required: true,
 				Description: "epic | milestone | task"},
@@ -70,8 +71,9 @@ func init() {
 	}, runTaskEnsure)
 
 	register(Spec{
-		ID:      "orun.task/rollup@v1",
-		Summary: "Read an epic's progress — total, done, blocked",
+		ID:        "orun.task/rollup@v1",
+		Summary:   "Read an epic's progress — total, done, blocked",
+		TaskPlane: true,
 		Params: append(orgParams(),
 			Param{Name: "epic", Type: ParamString, Required: true,
 				Description: "the epic (slug, EP-n or epc_…)"},

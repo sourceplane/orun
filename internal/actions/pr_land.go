@@ -3,6 +3,7 @@ package actions
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sourceplane/orun/internal/provenance"
@@ -23,6 +24,9 @@ func init() {
 		ID:      "orun.pr/land@v1",
 		Summary: "Open the task's PR through the provenance pen and merge it once checks settle",
 		Doing:   "Opening the pull request, and merging it once its CI passes.",
+		// A pull request opens FOR a task: the landing waits for the run's
+		// background hooks that make it.
+		TaskPlane: true,
 		Params: []Param{
 			{Name: "task", Type: ParamString, Required: true,
 				Description: "the task key this landing closes — a PR opens FOR a task"},
@@ -40,6 +44,8 @@ func init() {
 				Description: "open as a draft (it is then not merged)"},
 			{Name: "wait", Type: ParamBool, Default: true,
 				Description: "wait for checks before merging; false when a later convergence is the real gate"},
+			{Name: "checks", Type: ParamString, Default: "ci",
+				Description: "what checks the landing before it merges: ci — the PR's CI run, waited for; local — `orun validate`, and `orun plan` as the PR and as the merge would plan it, run here on the commit before it is pushed (under a second), then merged without waiting for CI. A base branch that requires a check is still waited for"},
 			{Name: "checkTimeoutSeconds", Type: ParamInt, Default: 1800,
 				Description: "how long to wait for checks to settle; each re-run gets this again"},
 			{Name: "rerunBudget", Type: ParamInt, Default: 2,
@@ -47,7 +53,7 @@ func init() {
 			{Name: "mergeMethod", Type: ParamString, Default: "squash",
 				Description: "squash | merge | rebase"},
 		},
-		Outputs: []string{"branch", "number", "url", "merged", "mergeSha", "landed", "reruns"},
+		Outputs: []string{"branch", "number", "url", "merged", "mergeSha", "landed", "reruns", "checked", "checkSummary"},
 		Did:     prDid,
 		Facts:   prFacts,
 	}, runPRLand)
@@ -71,6 +77,13 @@ func landWith(ctx context.Context, pen *provenance.Pen, in Input) (Result, error
 	if title == "" {
 		title = task
 	}
+	checks := strings.TrimSpace(StringParam(in, "checks"))
+	if checks == "" {
+		checks = "ci"
+	}
+	if checks != "ci" && checks != "local" {
+		return Result{}, fmt.Errorf("orun.pr/land@v1: checks is %q; it is ci (wait for the PR's CI) or local (check the commit here, then merge)", checks)
+	}
 	prep, err := prepareLanding(ctx, gitDir(in.Dir), StringParam(in, "base"), title, task)
 	if err != nil {
 		return Result{}, err
@@ -78,8 +91,27 @@ func landWith(ctx context.Context, pen *provenance.Pen, in Input) (Result, error
 	if prep.nothing {
 		return Result{Outputs: map[string]string{
 			"branch": "", "number": "", "url": "", "merged": "false", "mergeSha": "", "landed": "false",
+			"checked": "none", "checkSummary": "",
 		}}, nil
 	}
+
+	// `checks: local`: the commit is checked HERE, before it is pushed, so a
+	// tree that does not plan never becomes a pull request (pr_land_check.go).
+	checked, summary := "ci", ""
+	if !BoolParam(in, "wait") {
+		checked = "none"
+	}
+	if checks == "local" {
+		ev, err := landingEventFor(ctx, gitDir(in.Dir), StringParam(in, "base"), task, StringParam(in, "branchSlug"), title)
+		if err != nil {
+			return Result{}, err
+		}
+		if summary, err = localCheck(ctx, in.Dir, ev); err != nil {
+			return Result{Outputs: map[string]string{"landed": "false", "merged": "false", "checked": "local", "checkSummary": ""}}, err
+		}
+		checked = "local"
+	}
+
 	// There is something to land: say so before the push, so a reader sees
 	// the pull request's row while it is being opened.
 	in.Report(map[string]string{"stage": "opening"})
@@ -107,13 +139,15 @@ func landWith(ctx context.Context, pen *provenance.Pen, in Input) (Result, error
 	}
 
 	out := map[string]string{
-		"branch":   opened.Branch,
-		"number":   fmt.Sprint(opened.Number),
-		"url":      opened.URL,
-		"merged":   "false",
-		"mergeSha": "",
-		"landed":   "true",
-		"reruns":   "0",
+		"branch":       opened.Branch,
+		"number":       fmt.Sprint(opened.Number),
+		"url":          opened.URL,
+		"merged":       "false",
+		"mergeSha":     "",
+		"landed":       "true",
+		"reruns":       "0",
+		"checked":      checked,
+		"checkSummary": summary,
 	}
 	// No credential: the pen prepared everything and printed the compare URL.
 	// That is honest for a human at a terminal and useless to an unattended
@@ -131,19 +165,28 @@ func landWith(ctx context.Context, pen *provenance.Pen, in Input) (Result, error
 		return Result{Outputs: out}, nil
 	}
 
-	var timeout time.Duration
+	// A checked commit merges without waiting for CI — unless the base
+	// requires a check, which is then waited for as `checks: ci` waits.
+	var timeout, required time.Duration
 	if BoolParam(in, "wait") {
 		timeout = time.Duration(IntParam(in, "checkTimeoutSeconds")) * time.Second
 	}
+	if checked == "local" {
+		timeout, required = 0, timeout
+	}
 	landed, err := pen.Land(ctx, provenance.LandRequest{
-		Number:       opened.Number,
-		Base:         StringParam(in, "base"),
-		CheckTimeout: timeout,
-		MergeMethod:  StringParam(in, "mergeMethod"),
-		RerunBudget:  IntParam(in, "rerunBudget"),
+		Number:               opened.Number,
+		Base:                 StringParam(in, "base"),
+		CheckTimeout:         timeout,
+		RequiredCheckTimeout: required,
+		MergeMethod:          StringParam(in, "mergeMethod"),
+		RerunBudget:          IntParam(in, "rerunBudget"),
 	})
 	if landed != nil {
 		out["reruns"] = fmt.Sprint(landed.Reruns)
+		if landed.WaitedForRequired {
+			out["checked"] = "local+ci"
+		}
 	}
 	if landed != nil && landed.Merged {
 		out["merged"] = "true"
