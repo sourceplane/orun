@@ -5,6 +5,13 @@ prints the §6/§8 validation result list without persisting a snapshot. Any
 error fails with exit 1; warnings pass with exit 0 unless --strict promotes
 them to errors.
 
+One catalog ref names one entity. A Domain, System, Environment, API,
+Resource, Composition, Repo or agent type whose name resolves to the same
+<namespace>/<repo>/<name> ref as a component (spec.domain: web on the web
+component) is an error here (catalog.entity.ref.collision): the issue names
+both declarations and which one to rename. orun plan only warns about it and
+keeps the Component in the catalog.
+
 Examples:
   orun catalog validate
   orun catalog validate --strict

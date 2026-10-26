@@ -70,6 +70,15 @@ Entity keys follow one grammar across kinds — `<namespace>/<repo>/<name>` for
 component-like entities, `group:<name>` / `user:<name>` for owners — so a
 relation edge always points at exactly one thing.
 
+The kind is not part of the key, so names must not repeat across kinds within
+a repo. A domain named after a component (`spec.domain: web` on the `web`
+component) gives both the key `default/<repo>/web`. When an entity of another
+kind takes a component's key, the catalog keeps the Component and leaves the
+other entity out. `orun plan` warns about it and
+[`orun catalog validate`](../cli/orun-catalog.md#orun-catalog-validate)
+reports it as an error. Rename the domain (or system, environment, …) to
+fix it.
+
 ## The entity envelope
 
 Every entity, authored or derived, resolves into the same `orun.io/v1`

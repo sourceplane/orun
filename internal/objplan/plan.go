@@ -39,6 +39,12 @@ type Options struct {
 	// (which feed the catalog but may be untracked) always misses the memo
 	// instead of serving a stale catalog.
 	InputsDigest string
+	// Warn, when set, receives one line per catalog problem worth a build
+	// log's attention: today, every catalog ref that entities of different
+	// kinds resolve to (nodes.EntityRefCollisions — the Component keeps the
+	// ref). Called on a memo hit too, from the issues the cached catalog
+	// recorded, so a re-plan of an unchanged tree still says it.
+	Warn func(msg string)
 }
 
 // OwnerResolver maps a component's workspace-relative source path to its
@@ -108,7 +114,7 @@ func RefreshCatalog(ctx context.Context, w *nodewriter.Writer, store objectstore
 	if opts.NoCatalog || in.Resolve == nil {
 		return res, nil
 	}
-	catID, err := writeCatalogMemoized(ctx, w, store, memo.WithInputsDigest(opts.InputsDigest), src, srcID, rv, in.Resolve, opts.Strict, opts.OwnerResolver, opts.CompositionResolver)
+	catID, err := writeCatalogMemoized(ctx, w, store, memo.WithInputsDigest(opts.InputsDigest), src, srcID, rv, in.Resolve, opts)
 	if err != nil {
 		var skipped *ErrCatalogSkipped
 		if errors.As(err, &skipped) {
@@ -141,7 +147,7 @@ func Plan(ctx context.Context, w *nodewriter.Writer, store objectstore.ObjectSto
 
 	var catID objectstore.ObjectID
 	if !opts.NoCatalog && in.Resolve != nil {
-		catID, err = writeCatalogMemoized(ctx, w, store, memo.WithInputsDigest(opts.InputsDigest), src, srcID, rv, in.Resolve, opts.Strict, opts.OwnerResolver, opts.CompositionResolver)
+		catID, err = writeCatalogMemoized(ctx, w, store, memo.WithInputsDigest(opts.InputsDigest), src, srcID, rv, in.Resolve, opts)
 		if err != nil {
 			var skipped *ErrCatalogSkipped
 			if !errors.As(err, &skipped) {
@@ -195,9 +201,7 @@ func writeCatalogMemoized(
 	srcID objectstore.ObjectID,
 	resolverVersion int,
 	resolve func() (*catalogresolve.CatalogView, error),
-	strict bool,
-	ownerResolver OwnerResolver,
-	compositionResolver CompositionResolver,
+	opts Options,
 ) (objectstore.ObjectID, error) {
 	catalogRefs := CatalogRefs(src)
 
@@ -207,6 +211,9 @@ func writeCatalogMemoized(
 				if err := w.MoveRefs(ctx, catalogRefs, cached); err != nil {
 					return "", fmt.Errorf("objplan: refresh catalog refs: %w", err)
 				}
+				if opts.Warn != nil {
+					warnCachedCatalogIssues(ctx, store, cached, opts.Warn)
+				}
 				return cached, nil
 			}
 		}
@@ -214,13 +221,18 @@ func writeCatalogMemoized(
 
 	view, err := resolve()
 	if err != nil {
-		if strict {
+		if opts.Strict {
 			return "", fmt.Errorf("objplan: resolve catalog: %w", err)
 		}
 		return "", &ErrCatalogSkipped{Err: err} // tolerant: skip the catalog edge, but say so
 	}
-	cat, manifests, graphs, ownership, fingerprints := BuildCatalogNodes(view, resolverVersion, ownerResolver, compositionResolver)
+	cat, manifests, graphs, ownership, fingerprints := BuildCatalogNodes(view, resolverVersion, opts.OwnerResolver, opts.CompositionResolver)
 	cat.SourceID = string(srcID)
+	if opts.Warn != nil {
+		for _, c := range nodes.EntityRefCollisions(manifests, cat) {
+			opts.Warn(c.Message())
+		}
+	}
 	catID, err := w.WriteCatalog(ctx, cat, manifests, graphs, ownership, fingerprints, catalogRefs...)
 	if err != nil {
 		return "", fmt.Errorf("objplan: write catalog: %w", err)

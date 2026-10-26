@@ -83,6 +83,7 @@ func writeObjectModelPlan(orunDir string, plan *model.Plan, planBytes []byte, pl
 		OwnerResolver:       ownerResolverForCWD(),
 		CompositionResolver: compositionResolverForCWD(),
 		InputsDigest:        inputsDigestForCWD(),
+		Warn:                warnCatalog,
 	})
 	if err != nil {
 		warnObjectModel("%v", err)
@@ -149,4 +150,10 @@ func shortID(id objectstore.ObjectID) string {
 
 func warnObjectModel(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "warning: object-model: "+format+"\n", args...)
+}
+
+// warnCatalog prints a catalog problem the build log should carry (a catalog
+// ref two kinds of entity resolve to). It never fails the command.
+func warnCatalog(msg string) {
+	fmt.Fprintf(os.Stderr, "warning: catalog: %s\n", msg)
 }
