@@ -558,9 +558,18 @@ type ResolvedSecretMeta struct {
 // ResolvedSecrets is the resolve response. Values live only in runner memory,
 // honor TTLSeconds, and are never persisted client-side.
 type ResolvedSecrets struct {
-	Secrets    map[string]string    `json:"secrets"`
-	Resolved   []ResolvedSecretMeta `json:"resolved,omitempty"`
-	TTLSeconds int                  `json:"ttlSeconds"`
+	// Secrets is the flat KEY → value map. One resolve may carry refs for
+	// several environments (orun-cloud SE5-multi), and a KEY served in two of
+	// them appears here ONCE, holding the last environment group's value — so
+	// it cannot answer an environment-pinned ref whose KEY is asked for in
+	// more than one environment. Prefer SecretsByEnv.
+	Secrets map[string]string `json:"secrets"`
+	// SecretsByEnv is the same values grouped by environment slug (the
+	// platform's spelling): slug → KEY → value. Absent from backends that
+	// predate SE5-multi.
+	SecretsByEnv map[string]map[string]string `json:"secretsByEnv,omitempty"`
+	Resolved     []ResolvedSecretMeta         `json:"resolved,omitempty"`
+	TTLSeconds   int                          `json:"ttlSeconds"`
 }
 
 // ── API methods (v1 contract §2) ───────────────────────────────────────────────
