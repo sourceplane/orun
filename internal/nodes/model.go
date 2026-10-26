@@ -29,9 +29,11 @@ type CatalogComponentRef struct {
 }
 
 // CatalogIssue is a non-fatal resolver finding (the tolerant part of
-// tolerant-strict).
+// tolerant-strict). Code is a stable machine-readable identifier (e.g.
+// IssueCodeEntityRefCollision) so a reader can match on it.
 type CatalogIssue struct {
 	Severity  string `json:"severity"` // warning|error
+	Code      string `json:"code,omitempty"`
 	Component string `json:"component,omitempty"`
 	Message   string `json:"message"`
 }

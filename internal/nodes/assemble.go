@@ -182,6 +182,13 @@ func AssembleCatalog(ctx context.Context, s store, cat CatalogSnapshot, manifest
 	if len(cat.DeclaredEntities) > 0 {
 		derived = append(derived, cat.DeclaredEntities...)
 	}
+	// One ref names one entity (refcollide.go): an entity of another kind that
+	// resolves to a component's ref is left out — the Component keeps it — and
+	// every cross-kind collision is recorded on the catalog as a warning.
+	for _, c := range entityRefCollisions(manifests, derived, cat.EntityEnrichments) {
+		cat.Issues = append(cat.Issues, c.Issue())
+	}
+	derived = withheldByComponents(manifests, derived)
 	entitiesTreeID, countsByKind, err := assembleEntities(ctx, s, derived, sink)
 	if err != nil {
 		return "", err

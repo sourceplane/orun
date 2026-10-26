@@ -192,6 +192,33 @@ executions, and resolution provenance. The argument may be a bare name or a
 fully-qualified `namespace/repo/name` key; an ambiguous bare name exits `4`
 with the candidate keys.
 
+## `orun catalog validate`
+
+Re-resolves the workspace and prints the validation issues without persisting
+anything. Any error exits `1`; warnings exit `0` unless `--strict` promotes
+them. `--json` emits the `CatalogValidateResult` envelope.
+
+```bash
+orun catalog validate
+orun catalog validate --strict --json
+```
+
+**One ref names one entity.** A Domain, System, Environment, API, Resource,
+Composition, Repo, or agent type whose name resolves to the same
+`<namespace>/<repo>/<name>` ref as a component is an error
+(`catalog.entity.ref.collision`). The kind is not part of the ref, so
+`spec.domain: web` on the `web` component gives both the same ref, and
+Orunbase keeps only one of them. The issue points at the declaration to rename
+and names both entities:
+
+```text
+error   catalog.entity.ref.collision     apps/web/component.yaml#/spec/domain — catalog ref default/shop/web names 2 entities of different kinds: Component "web" (apps/web/component.yaml) and Domain "web" (spec.domain in apps/web/component.yaml). A ref names one entity, so the catalog keeps the Component and leaves the Domain out. Rename one of them — e.g. the Domain's spec.domain in apps/web/component.yaml
+```
+
+`orun plan` and `orun catalog refresh` do not fail on it. They print the same
+line as a `warning: catalog:` and write the catalog with the Component, leaving
+the other entity out.
+
 ## `orun catalog migrate`
 
 Read-only, advisory lint of the workspace's authored `component.yaml` files

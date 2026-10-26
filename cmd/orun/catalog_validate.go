@@ -14,9 +14,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/sourceplane/orun/internal/catalogresolve"
+	"github.com/sourceplane/orun/internal/nodes"
+	"github.com/sourceplane/orun/internal/objplan"
 	"github.com/sourceplane/orun/internal/sourcectx"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
@@ -50,6 +53,13 @@ validate is read-only: it runs the resolver against the live workspace and
 prints the §6/§8 validation result list without persisting a snapshot. Any
 error fails with exit 1; warnings pass with exit 0 unless --strict promotes
 them to errors.
+
+One catalog ref names one entity. A Domain, System, Environment, API,
+Resource, Composition, Repo or agent type whose name resolves to the same
+<namespace>/<repo>/<name> ref as a component (spec.domain: web on the web
+component) is an error here (catalog.entity.ref.collision): the issue names
+both declarations and which one to rename. orun plan only warns about it and
+keeps the Component in the catalog.
 
 Examples:
   orun catalog validate
@@ -105,7 +115,7 @@ func runCatalogValidate(ctx context.Context) error {
 	shortRepo := shortRepoName(ws.Repo, workspaceRoot)
 	inputs := resolverInputsFromState(ws, srcKey, inputHash, repo, createdAt)
 
-	_, issues, berr := catalogresolve.BuildCatalog(ctx, catalogresolve.Options{
+	view, issues, berr := catalogresolve.BuildCatalog(ctx, catalogresolve.Options{
 		WorkspaceRoot: workspaceRoot,
 		Strict:        catalogStrictFlag,
 		Repo:          shortRepo,
@@ -122,6 +132,12 @@ func runCatalogValidate(ctx context.Context) error {
 		}
 	}
 
+	// One catalog ref names one entity: a Domain, System, Environment, … that
+	// resolves to a component's ref is an error here (a plan only warns and
+	// keeps the Component), because Orunbase keeps one entity per ref.
+	issues = append(issues, entityRefCollisionIssues(view)...)
+	sort.SliceStable(issues, func(a, b int) bool { return issues[a].Severity > issues[b].Severity })
+
 	data := summarizeValidation(issues)
 	if catalogJSONFlag {
 		if werr := writeCatalogEnvelope(kindCatalogValidateResult, data, nil); werr != nil {
@@ -135,6 +151,36 @@ func runCatalogValidate(ctx context.Context) error {
 		return exitErr(1, "catalog validation failed: %d error(s)", data.Errors)
 	}
 	return nil
+}
+
+// entityRefCollisionIssues reports, as errors, every catalog ref that
+// entities of different kinds resolve to in the catalog the view builds (the
+// same collisions `orun plan` warns about — objplan.EntityRefCollisions).
+// Each issue is attributed to the declaration to rename (the non-Component
+// one) and its message names every claim and the fix.
+func entityRefCollisionIssues(view *catalogresolve.CatalogView) []catalogresolve.ValidationIssue {
+	collisions := objplan.EntityRefCollisions(view, ownerResolverForCWD(), compositionResolverForCWD())
+	out := make([]catalogresolve.ValidationIssue, 0, len(collisions))
+	for _, c := range collisions {
+		_, fix := c.Fix()
+		claims := make([]map[string]any, 0, len(c.Claims))
+		for _, cl := range c.Claims {
+			files := make([]string, 0, len(cl.Sources))
+			for _, src := range cl.Sources {
+				files = append(files, src.File)
+			}
+			claims = append(claims, map[string]any{"kind": cl.Kind, "name": cl.Name, "files": files})
+		}
+		out = append(out, catalogresolve.ValidationIssue{
+			File:     fix.File,
+			Pointer:  fix.Pointer,
+			Severity: catalogresolve.SeverityError,
+			Code:     nodes.IssueCodeEntityRefCollision,
+			Message:  c.Message(),
+			Detail:   map[string]any{"entityRef": c.EntityRef, "claims": claims},
+		})
+	}
+	return out
 }
 
 // appendIssueUnique adds vi to issues unless an identical (code, file, pointer)
