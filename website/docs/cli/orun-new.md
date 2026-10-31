@@ -28,8 +28,8 @@ orun new upgrade --out <dir> [--blueprint <newer>] [--apply]
 | `--values <file>` | A YAML file of inputs. |
 | `--run-hooks` | Execute declared hooks after placement, outside the sandbox. Off by default. |
 | `--phase <name>` | Place only this phase. |
-| `--until <name>` | Place every phase through this one. |
-| `--resume` | Place every phase not already derived as done. |
+| `--until <name>` | Place every phase through this one. A run that stops before the last phase may keep a late-bound input's placeholder. |
+| `--resume` | Place every phase not already derived as done. With `--phase` or `--until`, only within that phase or those phases (orun ≥ v2.90.0); `--phase` with `--until` is refused. |
 | `--status` | Derive and print each phase's state without writing anything. `--json` for machines. |
 | `--progress auto\|plain\|verbose\|json` | Progress rendering. Default `auto`, which ends with a summary: files placed, the repository gate's result (components, environments, and jobs the scaffolded intent plans to), and where the provenance lock is. `verbose` also lists every phase, batch, and file. |
 
@@ -68,6 +68,10 @@ inputs:                       # typed prompts, flags, or a console form, one sch
   serviceName: { type: string, pattern: "^[a-z][a-z0-9-]*$", required: true }
   runtime:     { type: enum, values: [node, python], default: node }
   apiToken:    { type: string, secret: true }   # collected without echo, never written
+  subdomain:                  # supplied by a later phase (see "Late-bound inputs")
+    type: string
+    default: your-workers-subdomain
+    lateBound: true
 
 sources:                      # where module content comes from; none means inline
   - name: baseline
@@ -110,7 +114,50 @@ hooks:
 `secret: true` input is held in memory only and never written to a generated
 file; a template that would interpolate one, or a copied file whose bytes
 match one, fails the secret sweep. Secrets are redacted from the provenance
-lock.
+lock. `from: workspace` fills an unset input with the Orun workspace the build
+runs in.
+
+### Late-bound inputs
+
+An input declared `lateBound: true` (orun ≥ v2.90.0) is one the build may not
+have until a later phase runs. A workers.dev subdomain is the usual example: it
+belongs to the Cloudflare account the product deploys into, and an account that
+has not connected one has no subdomain to give yet. orun.work builds such an
+account a code-only app by stopping after the scaffold stage, and runs the live
+stage later.
+
+The input's `default` is the **placeholder** the stopped build writes. The rest
+of the build must replace it and may never keep it:
+
+- A run that `--until` stops **before the build's last phase** may leave the
+  input unset. The placeholder is placed and recorded.
+- **Every other run** must be given a value: a full run, `--resume` with no
+  stop, `--phase` (the platform runs the live stage on its own this way, and
+  orun cannot tell a scaffold phase from a live one), and `--until` the last
+  phase. Without one the run is refused before anything is placed, exit `1`,
+  naming the input and its placeholder. A value you pass explicitly is yours,
+  even when it equals the placeholder.
+- **A resumed run takes a given value** over the one the provenance lock
+  recorded, without the conflict every other input raises, and the lock then
+  records the new value. A recorded placeholder is never recovered as though
+  it were a value; a recorded real value is.
+
+orun does not re-place files an earlier stage already placed: a resume treats
+a placed phase as done even when its files now render differently, because
+re-placing a branded product would undo the branding. So the phase that needs
+the value is also the one that replaces the placeholder wherever the scaffold
+stage wrote it, in its own modules or hooks.
+
+A late-bound input needs a `default` and at least two `phases`, and cannot be
+`secret`: the lock never records a secret, so there would be nothing to
+replace. Each is a parse error.
+
+```bash
+# the scaffold stage: no Cloudflare yet, so no subdomain
+orun new --blueprint repo-blueprint.yaml --out ./acme --set reponame=acme --until 01-scaffold
+# later, the live stage brings it
+orun new --blueprint repo-blueprint.yaml --out ./acme --resume --phase 02-live --set subdomain=acme
+```
 
 **Sources** are pinned by content digest before any module reads them, so a
 scaffold of the same blueprint, sources, and inputs is byte-reproducible.

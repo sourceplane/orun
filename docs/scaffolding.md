@@ -103,6 +103,21 @@ to any generated file — a template that would interpolate a secret, or a `copy
 whose bytes match one, fails the secret sweep. Secrets are also redacted from
 `provenance.lock`.
 
+`from: workspace` fills an unset input with the Orun workspace the build runs
+in. `lateBound: true` marks a value a later phase supplies — a workers.dev
+subdomain read from a Cloudflare connection the account has not made yet
+(orun-cloud saas-orun-work WA5). Its `default` is the placeholder a stopped
+build writes; it needs that `default`, at least two phases, and is never also
+`secret`. The rules (`internal/scaffold/latebound.go`):
+
+- a run `--until` stops before the last phase may leave it unset, and places
+  the placeholder;
+- every other run — full, `--resume` without a stop, `--phase`, `--until` the
+  last phase — that is not given a value is refused before anything is placed;
+- a resumed run takes a given value over the recorded one (no conflict, and the
+  lock records the new value), and a recorded placeholder is not recovered as a
+  value. Every other input still refuses a value that disagrees with the lock.
+
 ### Sources
 
 | `kind` | Resolution |
@@ -150,6 +165,12 @@ dependency edge may point forward across a phase boundary**. With no `phases`,
 everything places in one implicit phase (default behavior). The run-level
 `preInstantiate` hooks run first, then per-phase hooks in phase order, then the
 run-level `postInstantiate` hooks.
+
+`--phase <name>` places one phase and `--until <name>` every phase through one;
+`--resume` places what is not already derived as done, within either window
+when one is given (the bootstrap driver always passes `--resume`, and a
+two-stage build adds `--until` or `--phase`). `--phase` with `--until` is
+refused.
 
 ### Hooks
 

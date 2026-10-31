@@ -101,6 +101,20 @@ type InputSpec struct {
 	// it (InputFrom*). A value that was set — flag, values file, or the tree's
 	// own record — always wins; the fact fills only a gap.
 	From string `yaml:"from,omitempty" json:"from,omitempty"`
+	// LateBound marks a value the build may not have until a later phase runs
+	// (orun-cloud saas-orun-work WA5): a workers.dev subdomain read from a
+	// Cloudflare connection an account has not made yet. Its Default is the
+	// PLACEHOLDER a stopped build writes in its place, and the rest of the
+	// build must replace it — never keep it (latebound.go):
+	//
+	//   - a run `--until` stops before the build's last phase may leave it
+	//     unset, and the placeholder is placed;
+	//   - any other run — a full one, `--phase`, `--until` the last phase —
+	//     that is not given a value is refused before anything is placed;
+	//   - a resumed run takes a given value over the recorded one instead of
+	//     refusing the disagreement, and a recorded placeholder is not
+	//     recovered as though it were a value (RecoverInputs).
+	LateBound bool `yaml:"lateBound,omitempty" json:"lateBound,omitempty"`
 }
 
 // InputFromWorkspace fills an input with the Orun workspace the build runs
@@ -437,9 +451,20 @@ func (bp *Blueprint) validate() error {
 	if len(bp.Modules) == 0 {
 		return fmt.Errorf("blueprint must declare at least one module")
 	}
-	for name, in := range bp.Inputs {
+	// In name order, so a document with two bad inputs is refused the same
+	// way every time.
+	inputNames := make([]string, 0, len(bp.Inputs))
+	for name := range bp.Inputs {
+		inputNames = append(inputNames, name)
+	}
+	sort.Strings(inputNames)
+	for _, name := range inputNames {
+		in := bp.Inputs[name]
 		if in.From != "" && in.From != InputFromWorkspace {
 			return fmt.Errorf("input %q: from must be %q, got %q", name, InputFromWorkspace, in.From)
+		}
+		if err := validateLateBound(name, in, len(bp.Phases)); err != nil {
+			return err
 		}
 	}
 

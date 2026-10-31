@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -304,22 +305,10 @@ explicit flag still wins, and --set adds. The platform is told which door took i
 			}
 			b := view.Blueprint
 
-			// READINESS IS A GATE, not a warning. A bootstrap that starts
-			// without its providers does not fail at the door; it fails thirty
-			// minutes in, having created a repo and half a product, and the
-			// operator reads a Cloudflare error instead of "you never connected
-			// Cloudflare". `baseline check` exists to ask this in advance, and
-			// this asks it again because the answer can change in between.
-			if !b.Readiness.IntegrationsReady {
-				var missing []string
-				for _, p := range b.Readiness.Integrations {
-					if !p.Connected {
-						missing = append(missing, p.Provider)
-					}
-				}
-				return exitErr(1, "orun baseline new: %s cannot be built by this workspace yet — %s %s not connected.\n"+
-					"Connect in the console, then re-run. Nothing has been written.",
-					b.ID, strings.Join(missing, ", "), pluralize(len(missing), "is", "are"))
+			// READINESS IS A GATE, not a warning — for a build that runs to
+			// the end (`localReadinessGate`).
+			if err := localReadinessGate(cmd.ErrOrStderr(), view, until); err != nil {
+				return err
 			}
 
 			if view.PinnedTagStale {
@@ -410,13 +399,68 @@ explicit flag still wins, and --set adds. The platform is told which door took i
 	cmd.Flags().StringArrayVar(&sets, "set", nil, "Set a blueprint input as key=value (repeatable)")
 	cmd.Flags().StringVar(&valuesFile, "values", "", "Path to a YAML values file feeding blueprint inputs")
 	cmd.Flags().BoolVar(&runHooks, "run-hooks", false, "Execute the phases' hooks — the difference between placing files and bootstrapping a product")
-	cmd.Flags().BoolVar(&resume, "resume", false, "Place every phase not already derived as done")
+	cmd.Flags().BoolVar(&resume, "resume", false, "Place every phase not already derived as done (within --phase or --until when one is given)")
 	cmd.Flags().StringArrayVar(&redo, "redo", nil, "With --resume, place this phase again even though its files are in place (repeatable)")
 	cmd.Flags().StringVar(&phase, "phase", "", "Place only this phase")
-	cmd.Flags().StringVar(&until, "until", "", "Place every phase through this one")
+	cmd.Flags().StringVar(&until, "until", "", "Place every phase through this one; a build that stops skips the readiness gate, and may keep a late-bound input's placeholder")
 	cmd.Flags().StringVar(&progress, "progress", "auto", "Progress rendering: auto | plain | verbose | json")
 	cmd.Flags().BoolVar(&keepWork, "keep-checkout", false, "Keep the baseline checkout instead of removing it (debugging)")
 	return cmd
+}
+
+// localReadinessGate decides whether a `--local` build may start with the
+// providers this workspace has connected.
+//
+// READINESS IS A GATE, not a warning. A bootstrap that starts without its
+// providers does not fail at the door; it fails thirty minutes in, having
+// created a repo and half a product, and the operator reads a Cloudflare error
+// instead of "you never connected Cloudflare". `baseline check` exists to ask
+// this in advance, and this asks it again because the answer can change in
+// between.
+//
+// EXCEPT FOR A BUILD THAT STOPS (orun-cloud saas-orun-work WA5). orun.work
+// builds a code-only app for an account with no Cloudflare connection by
+// stopping after the scaffold stage — `--until <phase>`, which the bootstrap
+// driver passes from ORUN_BASELINE_UNTIL — and that stage needs GitHub alone,
+// proven by the repository it lands in, never by a connection row (a managed
+// repository has none). The registry's view carries no stages and reports the
+// readiness of a FULL build, so it cannot say which providers the phases
+// through <phase> use, and asking it here would refuse every code-only app
+// the platform's door has just admitted. So `--until` skips the gate:
+//
+//   - on the platform, the door already checked readiness for exactly the
+//     phases that will run (`until: scaffold` needs none, `until: live` all);
+//   - run by hand, `--until` is the operator's explicit choice of where to
+//     stop, and each phase still asks for what it needs as it starts
+//     (`requires.probe`, e.g. `orun.doctor/check`), so a phase that does need
+//     a missing provider waits or fails naming it — before it creates
+//     anything.
+//
+// What is not connected is still said, so a hand-run stop is not a surprise.
+// `--phase` keeps the gate: it is how the platform runs the live stage on its
+// own, and orun cannot tell a scaffold phase from a live one. Without
+// `--until` the gate is exactly what it always was.
+func localReadinessGate(w io.Writer, view *remotestate.BlueprintView, until string) error {
+	b := view.Blueprint
+	if b.Readiness.IntegrationsReady {
+		return nil
+	}
+	var missing []string
+	for _, p := range b.Readiness.Integrations {
+		if !p.Connected {
+			missing = append(missing, p.Provider)
+		}
+	}
+	if until = strings.TrimSpace(until); until != "" {
+		if len(missing) > 0 {
+			fmt.Fprintf(w, "note: %s %s not connected; building through %s without the readiness gate — a phase that needs %s says so when it starts\n",
+				strings.Join(missing, ", "), pluralize(len(missing), "is", "are"), until, pluralize(len(missing), "it", "them"))
+		}
+		return nil
+	}
+	return exitErr(1, "orun baseline new: %s cannot be built by this workspace yet — %s %s not connected.\n"+
+		"Connect in the console, then re-run. Nothing has been written.",
+		b.ID, strings.Join(missing, ", "), pluralize(len(missing), "is", "are"))
 }
 
 // bindHandoffConnections exports the connections the bootstrap is BOUND to

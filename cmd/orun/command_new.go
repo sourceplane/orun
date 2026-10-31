@@ -89,8 +89,8 @@ func registerNewCommand(root *cobra.Command) {
 	scaffoldNewCmd.Flags().BoolVar(&scaffoldStatus, "status", false, "Derive and print each phase's state without writing anything")
 	scaffoldNewCmd.Flags().BoolVar(&scaffoldJSON, "json", false, "With --status, emit JSON")
 	scaffoldNewCmd.Flags().StringVar(&scaffoldPhase, "phase", "", "Place only this phase")
-	scaffoldNewCmd.Flags().StringVar(&scaffoldUntil, "until", "", "Place every phase through this one")
-	scaffoldNewCmd.Flags().BoolVar(&scaffoldResume, "resume", false, "Place every phase not already derived as done")
+	scaffoldNewCmd.Flags().StringVar(&scaffoldUntil, "until", "", "Place every phase through this one; a run that stops before the last phase may keep a late-bound input's placeholder")
+	scaffoldNewCmd.Flags().BoolVar(&scaffoldResume, "resume", false, "Place every phase not already derived as done (within --phase or --until when one is given)")
 	scaffoldNewCmd.Flags().StringArrayVar(&scaffoldRedo, "redo", nil, "With --resume, place this phase again even though its files are in place (repeatable)")
 	scaffoldNewCmd.Flags().StringVar(&scaffoldProgress, "progress", "auto", "Progress rendering: auto | plain | verbose | json")
 	_ = scaffoldNewCmd.MarkFlagRequired("blueprint")
@@ -126,8 +126,11 @@ func runScaffoldNew(ctx context.Context) error {
 	// Recover what this product was already built with, BEFORE prompting: a
 	// resumed run in a fresh container has no values file and must not ask
 	// again for values the tree already records. A flag that disagrees with
-	// the record is refused rather than applied (BE-O2).
-	inputs, err = scaffold.RecoverInputs(scaffoldOut, inputs)
+	// the record is refused rather than applied (BE-O2) — unless the input is
+	// late-bound, whose value a later stage brings to replace the placeholder
+	// an earlier one recorded (WA5); the engine then refuses a run that would
+	// keep that placeholder past where it may.
+	inputs, err = scaffold.RecoverInputs(scaffoldOut, inputs, bp.Inputs)
 	if err != nil {
 		return err
 	}

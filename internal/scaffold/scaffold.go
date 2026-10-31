@@ -53,7 +53,12 @@ type Options struct {
 	//
 	// Only names one phase to place. Until places every phase through the
 	// named one. Resume places every phase Derive does not already report as
-	// done. At most one may be set.
+	// done — within Only's or Until's window when one is set, which is how the
+	// bootstrap driver restarts a build that stops after its scaffold stage or
+	// runs only its live one. Only and Until together are refused.
+	//
+	// Until also decides whether a late-bound input may keep its placeholder:
+	// only a run Until stops before the build's last phase may (latebound.go).
 	Only   string
 	Until  string
 	Resume bool
@@ -125,6 +130,12 @@ func Run(ctx context.Context, opts Options) (_ *Result, err error) {
 	// that collides with one it was not asked to place is still a collision.
 	selected, narrowed, err := plan.selectPhases(opts)
 	if err != nil {
+		return nil, err
+	}
+	// A LATE-BOUND PLACEHOLDER IS NEVER KEPT by a run that goes past the stop
+	// (latebound.go). Asked here — once the selection is known to name real
+	// phases, before a precondition probes anything or a byte is placed.
+	if err := checkLateBound(bp, opts); err != nil {
 		return nil, err
 	}
 	partial := narrowed && len(selected) != len(plan.phases)
@@ -271,7 +282,10 @@ func Run(ctx context.Context, opts Options) (_ *Result, err error) {
 		decl := plan.declOf(ph.Name)
 		narration := renderNarration("", phaseTitle(decl, ph.Name), EventSkipped, nil)
 		if excluded, _ := plan.skipped(ph.Name, values.Fields); !excluded {
-			if opts.Resume {
+			// A resume that leaves a phase found it in place — unless the phase
+			// is outside the window `--until` or `--phase` drew, which a stopped
+			// build never reached and an earlier run may never have placed.
+			if opts.Resume && plan.inWindow(ph.Name, opts) {
 				narration = fmt.Sprintf("%s is already in place from an earlier run.", ph.Name)
 			} else {
 				narration = fmt.Sprintf("%s is not part of this run.", ph.Name)

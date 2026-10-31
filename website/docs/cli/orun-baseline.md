@@ -89,7 +89,8 @@ orun baseline check cirrus && orun baseline new cirrus --via-platform --repo acm
 Builds a registered baseline, named by id or by a bootstrap's `--from bst_…`.
 Exactly one of `--local` or `--via-platform` must be given; both or neither
 exits `2`. Both paths refuse to start unless
-`check` would pass.
+`check` would pass — except a `--local` build that `--until` stops, which
+skips the gate (see below).
 
 ### `--local`
 
@@ -105,9 +106,9 @@ nobody should repeat.
 | `--set key=value` | A blueprint input. Repeatable; overrides `--values` per key. |
 | `--values <file>` | A YAML file of inputs. |
 | `--run-hooks` | Run each phase's declared hooks after its files are placed. Without it the command places files and stops; with it, it bootstraps a product: repositories, installs, secrets, Terraform, pull requests, deploys. |
-| `--resume` | Place every phase not already derived as done. |
+| `--resume` | Place every phase not already derived as done. With `--phase` or `--until`, only within that window. |
 | `--phase <name>` | Place only this phase. |
-| `--until <name>` | Place every phase through this one. |
+| `--until <name>` | Place every phase through this one. Skips the readiness gate (below). |
 | `--progress auto\|plain\|verbose\|json` | Progress rendering. `json` emits one event per line. |
 | `--keep-checkout` | Keep the temporary checkout and print its path, for debugging. |
 
@@ -120,6 +121,29 @@ orun baseline new cirrus --local --out ./acme-cloud \
 A hook-running local build needs `git`, `gh`, Node.js 20+, `pnpm`, and
 `python3`, an admin session or `ORUN_TOKEN` for the workspace, and the
 providers the baseline requires connected to it.
+
+#### A build that stops: `--until`
+
+From v2.90.0, a `--local` build with `--until <phase>` does not apply the
+readiness gate. This is how Orunbase builds a code-only app for an account
+with no Cloudflare connection: the scaffold stage (place, brand, create the
+repository, land) needs GitHub only, and GitHub is proven by the repository,
+not by a connection. The registry reports the readiness of a full build and
+carries no stages, so it cannot say which providers the phases up to
+`<phase>` use. On the platform, the bootstrap door has already checked
+readiness for the phases that will run. Run by hand, `--until` is your choice
+of where to stop, and each phase still checks the providers it needs when it
+starts (`requires.probe`). The command prints which providers are missing:
+
+```text
+note: cloudflare is not connected; building through 01-scaffold without the readiness gate — a phase that needs it says so when it starts
+```
+
+Without `--until`, including with `--phase`, the gate is unchanged. A build
+that stops ends like any other: the run-level `done` event, exit `0`. Inputs
+the build document declares `lateBound` keep their placeholder only in a run
+that stops before the last phase (see
+[late-bound inputs](./orun-new.md#late-bound-inputs)).
 
 ### `--from bst_…`
 
