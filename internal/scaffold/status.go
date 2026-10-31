@@ -198,13 +198,29 @@ func (s *Status) String() string {
 }
 
 // RecoverInputs reads the inputs a previous run recorded, so a resumed run
-// reuses them instead of asking again.
+// reuses them instead of asking again. specs are the blueprint's declared
+// inputs; nil declares nothing late-bound, which is the rule as it always was.
 //
 // A caller-supplied value that DISAGREES with the record is refused, naming
 // both. It is not an override: half a product rendered with one value and half
 // with another is a silent, expensive failure, and changing an input after the
 // fact is upgrade's operation, not resume's.
-func RecoverInputs(outDir string, given map[string]string) (map[string]string, error) {
+//
+// LATE-BOUND INPUTS ARE THE EXCEPTION (orun-cloud saas-orun-work WA5,
+// latebound.go). A build that stopped after its scaffold stage recorded the
+// placeholder it placed; the run that goes live brings the value the
+// placeholder stood for, and replacing it is the point, not a conflict. So:
+//
+//   - a given value for a late-bound input replaces the recorded one, and the
+//     record the run writes carries the new value;
+//   - a recorded PLACEHOLDER is not recovered. It is what the product was
+//     waiting for, not what it was built with, and recovering it would hand a
+//     live run that forgot the value the very placeholder it must not keep —
+//     as though somebody had supplied it. Left unset, the run falls to the
+//     default, and checkLateBound decides whether that run may keep it;
+//   - a recorded real value is recovered like any other, so a resume of a
+//     live build in a fresh shell does not have to be told it again.
+func RecoverInputs(outDir string, given map[string]string, specs map[string]InputSpec) (map[string]string, error) {
 	prov, err := ReadProvenance(outDir)
 	if err != nil {
 		// No lock is not an error: this may be a first run.
@@ -212,11 +228,14 @@ func RecoverInputs(outDir string, given map[string]string) (map[string]string, e
 	}
 	out := make(map[string]string, len(prov.Inputs)+len(given))
 	for name, value := range prov.Inputs {
+		if isPlaceholder(specs[name], value) {
+			continue
+		}
 		out[name] = fmt.Sprint(value)
 	}
 	var conflicts []string
 	for name, value := range given {
-		if recorded, ok := out[name]; ok && recorded != value {
+		if recorded, ok := out[name]; ok && recorded != value && !specs[name].LateBound {
 			conflicts = append(conflicts, fmt.Sprintf("%s: recorded %q, given %q", name, recorded, value))
 			continue
 		}

@@ -389,3 +389,161 @@ func TestBootstrapPlacesIntoTheOutItsEnvironmentEndsWith(t *testing.T) {
 		t.Fatalf("the child's environment disagrees with its arguments:\n%s", all)
 	}
 }
+
+// ── WHERE A BUILD STOPS (orun-cloud saas-orun-work WA5) ─────────────────────
+//
+// orun.work builds a code-only app by stopping after the scaffold stage, and
+// runs the live stage later on its own. The bootstrap door injects at most one
+// of ORUN_BASELINE_UNTIL / ORUN_BASELINE_PHASE; a driver that ignored them ran
+// the whole build — a deploy for an account that never connected the cloud it
+// deploys to.
+
+func baseEnv() map[string]string {
+	return map[string]string{envBaselineID: "tanstack-start@baseline-v2", envBaselineOut: "/work/product"}
+}
+
+// Absent, the argv is today's, byte for byte: every full build already in
+// flight on the platform keeps the exact command it had.
+func TestBootstrapArgsWithoutAStopAreUnchanged(t *testing.T) {
+	env := baseEnv()
+	get := func(k string) string { return env[k] }
+	args, err := bootstrapArgs(get)
+	if err != nil {
+		t.Fatalf("bootstrapArgs: %v", err)
+	}
+	want := []string{"baseline", "new", "tanstack-start@baseline-v2", "--local", "--out", "/work/product",
+		"--run-hooks", "--resume", "--progress", "json"}
+	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("argv changed:\n got %q\nwant %q", args, want)
+	}
+
+	// Empty and blank values are absent too — an env var the door set to ""
+	// is not a stop.
+	env[envBaselineUntil], env[envBaselinePhase] = "", "   "
+	env[envBaselineVals], env[envBaselineRedo] = "/work/values.json", "02-live"
+	args, err = bootstrapArgs(get)
+	if err != nil {
+		t.Fatalf("bootstrapArgs: %v", err)
+	}
+	want = append(want, "--values", "/work/values.json", "--redo", "02-live")
+	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("argv changed:\n got %q\nwant %q", args, want)
+	}
+}
+
+func TestBootstrapArgsCarryTheStopBesideResume(t *testing.T) {
+	for _, c := range []struct {
+		env, flag, value string
+	}{
+		{envBaselineUntil, "--until", "01-scaffold"},
+		{envBaselinePhase, "--phase", "02-live"},
+	} {
+		env := baseEnv()
+		env[c.env] = "  " + c.value + " "
+		env[envBaselineRedo] = c.value
+		args, err := bootstrapArgs(func(k string) string { return env[k] })
+		if err != nil {
+			t.Fatalf("%s: %v", c.env, err)
+		}
+		joined := strings.Join(args, " ")
+		// Beside, not instead: a scaffold-only build restarted on the same
+		// tree must resume exactly as a full one does, hooks and all.
+		for _, want := range []string{"--run-hooks", "--resume", "--progress json", c.flag + " " + c.value, "--redo " + c.value} {
+			if !strings.Contains(joined, want) {
+				t.Fatalf("%s: missing %q from %q", c.env, want, joined)
+			}
+		}
+		if strings.Count(joined, "--until")+strings.Count(joined, "--phase") != 1 {
+			t.Fatalf("%s: want exactly one selector in %q", c.env, joined)
+		}
+	}
+}
+
+// Both is not a build: "stop after X" and "run only Y" answer one question
+// two ways, and picking one would run a build nobody asked for.
+func TestBootstrapArgsRefuseAStopAndAPhaseTogether(t *testing.T) {
+	env := baseEnv()
+	env[envBaselineUntil], env[envBaselinePhase] = "01-scaffold", "02-live"
+	_, err := bootstrapArgs(func(k string) string { return env[k] })
+	if err == nil {
+		t.Fatal("built a command with both a stop and a phase")
+	}
+	for _, want := range []string{envBaselineUntil, envBaselinePhase, "01-scaffold", "02-live"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal does not name %q: %v", want, err)
+		}
+	}
+}
+
+// Refused BEFORE launch: nothing runs, so nothing is placed, landed or
+// deployed by a build whose shape is contradictory.
+func TestBootstrapRefusesAStopAndAPhaseBeforeLaunching(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "ran")
+	stub := filepath.Join(dir, "orun")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := &Bootstrap{Command: stub, Env: []string{
+		"PATH=" + os.Getenv("PATH"),
+		envBaselineID + "=tanstack-start", envBaselineOut + "=" + dir,
+		envBaselineUntil + "=01-scaffold", envBaselinePhase + "=02-live",
+	}}
+	_, err := d.Launch(context.Background(), Brief{ID: "b1"}, IO{Events: make(chan Event, 8)})
+	if err == nil {
+		t.Fatal("launched a build with both a stop and a phase")
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("the child ran despite the refusal")
+	}
+}
+
+// A STOPPED BUILD FINISHES. Stopping where it was told to is the whole job, so
+// a child that exits 0 after its run-level `done` is `completed` — the state
+// the platform's lease and the build page read — exactly as a full build is.
+func TestAStoppedBuildEndsCompleted(t *testing.T) {
+	stub := filepath.Join(t.TempDir(), "orun")
+	script := `#!/bin/sh
+echo "args: $*"
+echo '{"schema":"bootstrap-event/v1","seq":1,"phase":"","state":"started"}'
+echo '{"schema":"bootstrap-event/v1","seq":2,"phase":"01-scaffold","state":"done"}'
+echo '{"schema":"bootstrap-event/v1","seq":3,"phase":"02-live","state":"skipped","narration":"02-live is not part of this run."}'
+echo '{"schema":"bootstrap-event/v1","seq":4,"phase":"","state":"done","narration":"tanstack-start is complete."}'
+exit 0
+`
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan Event, 64)
+	d := &Bootstrap{Command: stub, Env: []string{
+		"PATH=" + os.Getenv("PATH"),
+		envBaselineID + "=tanstack-start", envBaselineOut + "=/work/product",
+		envBaselineUntil + "=01-scaffold",
+	}}
+	p, err := d.Launch(context.Background(), Brief{ID: "b1"}, IO{
+		Events: events, Steer: make(chan Message), Approve: make(chan Verdict), Interrupt: make(chan struct{}),
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	var got []Event
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for e := range events {
+			got = append(got, e)
+		}
+	}()
+	if err := p.Wait(); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	close(events)
+	<-done
+	if all := textOf(got); !strings.Contains(all, "--until 01-scaffold") || !strings.Contains(all, "--resume") {
+		t.Fatalf("the child was not told where to stop:\n%s", all)
+	}
+	end := last(got)
+	if end.Kind != EventDone || end.Fields["status"] != "completed" {
+		t.Fatalf("a stopped build ended %+v; want done/completed", end)
+	}
+}

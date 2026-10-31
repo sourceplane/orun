@@ -79,6 +79,16 @@ const (
 	// of a stopped build names, since the tree cannot tell a landed phase
 	// from one that landed and failed to converge.
 	envBaselineRedo = "ORUN_BASELINE_REDO"
+	// Where the build stops, or the one phase it runs (orun-cloud
+	// saas-orun-work WA5). The bootstrap door resolves a stage (`scaffold`,
+	// `live`) against the baseline's `spec.stages` and injects the PHASE it
+	// names — at most one of the two, and neither for a full build:
+	//
+	//	ORUN_BASELINE_UNTIL=01-scaffold  a code-only app: place, brand, create
+	//	                                 the repository, land; stop before live
+	//	ORUN_BASELINE_PHASE=02-live      the rest, once a connection exists
+	envBaselineUntil = "ORUN_BASELINE_UNTIL"
+	envBaselinePhase = "ORUN_BASELINE_PHASE"
 )
 
 // bootstrapArgs builds the command from the environment.
@@ -88,6 +98,13 @@ const (
 // without it the second attempt would re-place phases that are already there.
 // `--run-hooks` likewise — a bootstrap that placed files and ran nothing is
 // not a bootstrap.
+//
+// A stop (`--until`) or a single phase (`--phase`) rides BESIDE them, not
+// instead: the engine narrows a resume to the window either names, so a
+// scaffold-only build restarted mid-landing resumes exactly as a full one
+// does. A build stopped by `--until` ends like any other — the engine's
+// run-level `done`, the child exits 0, and this driver reports `completed` —
+// because stopping where it was asked to is finishing.
 func bootstrapArgs(get func(string) string) ([]string, error) {
 	id := strings.TrimSpace(get(envBaselineID))
 	out := strings.TrimSpace(get(envBaselineOut))
@@ -95,6 +112,19 @@ func bootstrapArgs(get func(string) string) ([]string, error) {
 		return nil, fmt.Errorf(
 			"driver bootstrap: %s and %s must be set (the control plane injects them)",
 			envBaselineID, envBaselineOut,
+		)
+	}
+	until := strings.TrimSpace(get(envBaselineUntil))
+	phase := strings.TrimSpace(get(envBaselinePhase))
+	// BOTH IS NOT A BUILD. "Stop after X" and "run only Y" are two answers to
+	// one question, the door never sends both, and a driver that picked one
+	// would run a build nobody asked for — a deploy, perhaps, for an account
+	// that never connected the cloud it deploys to. Refused before launch,
+	// naming both, so the session fails at once and says why.
+	if until != "" && phase != "" {
+		return nil, fmt.Errorf(
+			"driver bootstrap: %s=%s and %s=%s are both set — a build either stops after a phase or runs one phase, not both (the control plane sends at most one)",
+			envBaselineUntil, until, envBaselinePhase, phase,
 		)
 	}
 	args := []string{"baseline", "new", id, "--local", "--out", out,
@@ -106,6 +136,12 @@ func bootstrapArgs(get func(string) string) ([]string, error) {
 		if name = strings.TrimSpace(name); name != "" {
 			args = append(args, "--redo", name)
 		}
+	}
+	if until != "" {
+		args = append(args, "--until", until)
+	}
+	if phase != "" {
+		args = append(args, "--phase", phase)
 	}
 	return args, nil
 }

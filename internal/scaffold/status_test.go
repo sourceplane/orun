@@ -317,12 +317,164 @@ func TestPartialTreeReadsAsPartialNotPending(t *testing.T) {
 	}
 }
 
+// `--phase` and `--until` are two answers to "which phases?"; given both, the
+// engine would have to pick one, and either pick is a build nobody asked for.
 func TestSelectingTwoWaysAtOnceIsRefused(t *testing.T) {
 	o := opts(t, t.TempDir())
 	o.Only = "first"
-	o.Resume = true
-	if _, err := Run(context.Background(), o); err == nil {
-		t.Fatal("--phase and --resume select phases two different ways; that must be refused")
+	o.Until = "second"
+	_, err := Run(context.Background(), o)
+	if err == nil {
+		t.Fatal("--phase and --until select phases two different ways; that must be refused")
+	}
+	if !strings.Contains(err.Error(), "--phase") || !strings.Contains(err.Error(), "--until") {
+		t.Errorf("the refusal must name both selectors; got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(o.OutDir, "a.txt")); statErr == nil {
+		t.Error("a refused selection placed a file")
+	}
+}
+
+// ── --resume COMPOSES WITH A WINDOW (orun-cloud saas-orun-work WA5) ─────────
+//
+// The bootstrap driver always passes --resume, so a runner restarted on the
+// same tree does not re-place what is there. A build that stops after its
+// scaffold stage (--until) or runs only its live one (--phase) is restarted
+// the same way, so --resume narrows whichever window it is given instead of
+// being refused beside it.
+
+func selected(res *Result) string {
+	names := make([]string, 0, len(res.Phases))
+	for _, ph := range res.Phases {
+		names = append(names, ph.Name)
+	}
+	return strings.Join(names, ",")
+}
+
+func TestResumeNarrowsAnUntilWindow(t *testing.T) {
+	dir := t.TempDir()
+	first := opts(t, dir)
+	first.Until = "first"
+	if _, err := Run(context.Background(), first); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	again := opts(t, dir)
+	again.Until, again.Resume = "second", true
+	res, err := Run(context.Background(), again)
+	if err != nil {
+		t.Fatalf("--until second --resume: %v", err)
+	}
+	if got := selected(res); got != "second" {
+		t.Fatalf("placed %q; want only the window's phase not yet in place", got)
+	}
+	st := statusOf(t, opts(t, dir))
+	if stateOf(st, "third") != PhasePending {
+		t.Error("a resume placed past its --until stop")
+	}
+
+	// Restarted on the same tree — the sandbox reclaimed after the stop — the
+	// same command places nothing and still stops where it was told.
+	res, err = Run(context.Background(), again)
+	if err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	if got := selected(res); got != "" {
+		t.Fatalf("a restart re-placed %q", got)
+	}
+	if stateOf(statusOf(t, opts(t, dir)), "third") != PhasePending {
+		t.Error("a restarted stopped build placed past its stop")
+	}
+}
+
+func TestResumeNarrowsAPhaseWindow(t *testing.T) {
+	dir := t.TempDir()
+	first := opts(t, dir)
+	first.Until = "second"
+	if _, err := Run(context.Background(), first); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	// The live stage on its own: the phase the stop left.
+	live := opts(t, dir)
+	live.Only, live.Resume = "third", true
+	res, err := Run(context.Background(), live)
+	if err != nil {
+		t.Fatalf("--phase third --resume: %v", err)
+	}
+	if got := selected(res); got != "third" {
+		t.Fatalf("placed %q; want the one phase", got)
+	}
+	// A phase already in place is not placed again by a resume, even named.
+	done := opts(t, dir)
+	done.Only, done.Resume = "second", true
+	res, err = Run(context.Background(), done)
+	if err != nil {
+		t.Fatalf("--phase second --resume: %v", err)
+	}
+	if got := selected(res); got != "" {
+		t.Fatalf("a resume re-placed %q, which the tree has in place", got)
+	}
+	if !statusOf(t, opts(t, dir)).Done() {
+		t.Error("the product should be complete")
+	}
+}
+
+// A redo is placed whatever the tree says — but never outside the window. A
+// stopped build that redid a phase past its stop would deploy a code-only app.
+func TestARedoOutsideTheWindowIsRefused(t *testing.T) {
+	o := opts(t, t.TempDir())
+	o.Until, o.Resume, o.Redo = "first", true, []string{"third"}
+	_, err := Run(context.Background(), o)
+	if err == nil {
+		t.Fatal("a redo past the --until stop was accepted")
+	}
+	if !strings.Contains(err.Error(), "third") || !strings.Contains(err.Error(), "--until first") {
+		t.Errorf("the refusal must name the phase and the window; got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(o.OutDir, "a.txt")); statErr == nil {
+		t.Error("a refused selection placed a file")
+	}
+}
+
+// A STOPPED BUILD STILL SAYS IT ENDED. The platform gives a repository back on
+// the run-level `done`, and the bootstrap driver reports `completed` when the
+// child exits 0 — so a build that stops where it was told to must end exactly
+// as a full one does: phase "" and no step, last, with nothing after it.
+func TestAStoppedRunEndsWithTheRunLevelDone(t *testing.T) {
+	sink := &CollectingSink{}
+	o := opts(t, t.TempDir())
+	// What the bootstrap driver runs: hooks on, resume on, a stop.
+	o.Until, o.Resume, o.RunHooks, o.Events = "second", true, true, sink
+	if _, err := Run(context.Background(), o); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	events := snapshotEvents(sink)
+	phaseDone := map[string]bool{}
+	for _, e := range events {
+		if e.Step == "" && e.State == EventDone {
+			phaseDone[e.Phase] = true
+		}
+	}
+	if !phaseDone["first"] || !phaseDone["second"] {
+		t.Fatalf("the phases through the stop did not report done: %v", phaseDone)
+	}
+	if len(events) == 0 {
+		t.Fatal("no events")
+	}
+	end := events[len(events)-1]
+	if end.Phase != "" || end.Step != "" || end.State != EventDone {
+		t.Fatalf("the last event is %+v; want the run-level done", end)
+	}
+	var thirdSkipped bool
+	for _, e := range events {
+		if e.Phase == "third" && e.State != EventSkipped {
+			t.Fatalf("the phase past the stop reported %s", e.State)
+		}
+		if e.Phase == "third" && e.State == EventSkipped {
+			thirdSkipped = true
+		}
+	}
+	if !thirdSkipped {
+		t.Error("the phase past the stop was not reported at all")
 	}
 }
 
@@ -373,7 +525,7 @@ func TestRecoverInputsReusesWhatTheProductWasBuiltWith(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 	// A fresh container has no values file at all.
-	got, err := RecoverInputs(out, nil)
+	got, err := RecoverInputs(out, nil, nil)
 	if err != nil {
 		t.Fatalf("recover: %v", err)
 	}
@@ -387,7 +539,7 @@ func TestRecoverInputsRefusesAConflictAndNamesBoth(t *testing.T) {
 	if _, err := Run(context.Background(), opts(t, out)); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	_, err := RecoverInputs(out, map[string]string{"productName": "different"})
+	_, err := RecoverInputs(out, map[string]string{"productName": "different"}, nil)
 	if err == nil {
 		t.Fatal("a disagreeing input must be refused, not applied")
 	}
@@ -398,7 +550,7 @@ func TestRecoverInputsRefusesAConflictAndNamesBoth(t *testing.T) {
 }
 
 func TestRecoverInputsOnAFirstRunIsANoOp(t *testing.T) {
-	got, err := RecoverInputs(t.TempDir(), map[string]string{"productName": "acme"})
+	got, err := RecoverInputs(t.TempDir(), map[string]string{"productName": "acme"}, nil)
 	if err != nil {
 		t.Fatalf("no lock is not an error: %v", err)
 	}

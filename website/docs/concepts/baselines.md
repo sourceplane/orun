@@ -74,7 +74,8 @@ phase and hook, and orun runs it with no model attached. `cirrus`, `lumen`,
 and `multi-tenant-saas` are blueprint-driven: their registry rows declare
 `manifestPath` and nothing else, and the platform sandbox runs
 `orun agent serve --driver bootstrap`, which in turn runs
-`orun baseline new <id>@<tag> --local --run-hooks --resume`.
+`orun baseline new <id>@<tag> --local --run-hooks --resume`, adding `--until`
+or `--phase` for one stage of a two-stage build.
 
 A baseline with a **shell layer** additionally declares a `briefPath` (an
 agent brief) and an `umbrellaPath` (the workflow the brief runs). A row
@@ -102,6 +103,26 @@ tree and the platform and answer which phases are done. That is what makes
 setup it kept. The one thing the tree cannot tell is a phase that landed and
 then failed to deploy, so a retry names it: `--redo <phase>` places it again.
 
+### Two-stage builds
+
+orun.work builds an app in two stages. The **scaffold** stage needs GitHub
+only: the code placed and branded, the repository created, the first pull
+request landed. The **live** stage needs the card's providers: credentials
+reconciled, deployed, probed. An account with no Cloudflare connection gets a
+code-only app by stopping after scaffold, and a later build runs the rest. The
+card's `spec.stages` names the phase each stage ends at; the bootstrap door
+resolves a stage to that phase and the runner receives it as
+`ORUN_BASELINE_UNTIL` (stop after it) or `ORUN_BASELINE_PHASE` (run only it).
+Both compose with `--resume`, so a runner restarted mid-stage resumes like a
+full build.
+
+A value only the live stage can have, such as the workers.dev subdomain of
+the Cloudflare account, is declared `lateBound: true` in the build document.
+The scaffold stage writes its `default` as a placeholder. The live stage must
+supply the value: a resumed run takes it over the recorded placeholder, and any
+run that goes past the stop without it is refused before anything is placed.
+See [late-bound inputs](../cli/orun-new.md#late-bound-inputs).
+
 ## Where a build runs
 
 | | `--via-platform` | `--local` |
@@ -114,7 +135,9 @@ then failed to deploy, so a retry names it: `--redo <phase>` places it again.
 | Concurrency | One build per repository, enforced by a lease | Yours to manage |
 
 Both paths gate on **readiness**: every provider the card requires must be
-connected in the workspace, or nothing starts. Both resolve a stale `@tag`
+connected in the workspace, or nothing starts. A `--local` build that `--until`
+stops skips the gate: the stage it stops after may need none of them, and the
+platform's door has already checked the phases that will run. Both resolve a stale `@tag`
 forward to what the registry publishes now, and say so.
 
 ## Provenance and upgrade

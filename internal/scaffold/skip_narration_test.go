@@ -99,3 +99,35 @@ func TestANarrowedRunSaysTheRestAreNotPartOfIt(t *testing.T) {
 		t.Fatalf("a phase its condition excludes narrated %q", got)
 	}
 }
+
+// A RESUMED BUILD THAT STOPS (`--until`, as the bootstrap driver runs a
+// scaffold-only app) found the phases before its stop in place, and never went
+// to the ones after it. Telling the build page the live stage was "already in
+// place from an earlier run" would say a code-only app had been deployed.
+func TestAResumedStoppedBuildSaysThePhasesPastTheStopAreNotPartOfIt(t *testing.T) {
+	out := t.TempDir()
+	if _, err := Run(context.Background(), Options{
+		Blueprint: []byte(threePhaseBlueprint), OutDir: out,
+		Store: objectstore.NewMemStore(objectstore.AlgoSHA256), Only: "01-scaffold",
+	}); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	// Restarted after the stop: the scaffold is in place, and the rest of the
+	// build is past where it was told to go.
+	lines := skipLines(t, Options{OutDir: out, Resume: true, Until: "01-scaffold"})
+	if got := lines["01-scaffold"]; got != "01-scaffold is already in place from an earlier run." {
+		t.Fatalf("a phase inside the window narrated %q", got)
+	}
+	if got := lines["02-foundation"]; got != "02-foundation is not part of this run." {
+		t.Fatalf("a phase past the stop narrated %q", got)
+	}
+	if got := lines["07-domain"]; got != "The custom domain is not needed for this build." {
+		t.Fatalf("a phase its condition excludes narrated %q", got)
+	}
+
+	// And the live stage on its own: what precedes it is not this run's.
+	lines = skipLines(t, Options{OutDir: out, Resume: true, Only: "02-foundation"})
+	if got := lines["01-scaffold"]; got != "01-scaffold is not part of this run." {
+		t.Fatalf("a phase outside --phase narrated %q", got)
+	}
+}

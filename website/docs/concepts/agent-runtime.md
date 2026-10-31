@@ -116,7 +116,7 @@ registered; `orun agent doctor` reports whether each can run for real.
 |---|---|---|
 | `claude-code` | The Claude Code harness, headless, bidirectional stream-JSON; permission prompts bridge to the approval loop. The default for `serve`. | Yes |
 | `stub` | A deterministic canned transcript for tests and fixtures. The default for `run`. | — |
-| `bootstrap` | A **product build** — no model attached. It runs `orun baseline new <id> --local --out <dir> --run-hooks --resume --progress json` from `ORUN_BASELINE_ID`, `ORUN_BASELINE_OUT`, and `ORUN_BASELINE_VALUES` (plus `--redo` per phase named in `ORUN_BASELINE_REDO`), and narrates the build's progress into the session transcript. | No — a build has no turns; a message typed at it is answered with a line saying so |
+| `bootstrap` | A **product build** — no model attached. It runs `orun baseline new <id> --local --out <dir> --run-hooks --resume --progress json` from `ORUN_BASELINE_ID`, `ORUN_BASELINE_OUT`, and `ORUN_BASELINE_VALUES` (plus `--redo` per phase named in `ORUN_BASELINE_REDO`, and `--until` or `--phase` from `ORUN_BASELINE_UNTIL` or `ORUN_BASELINE_PHASE` for one stage of a two-stage build — never both), and narrates the build's progress into the session transcript. | No — a build has no turns; a message typed at it is answered with a line saying so |
 
 The `bootstrap` driver exists so that a platform [baseline](baselines.md)
 build gets everything `serve` already provides — heartbeat, token rotation,
