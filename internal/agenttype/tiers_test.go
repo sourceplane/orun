@@ -95,3 +95,50 @@ func TestRetiredTypesAreGone(t *testing.T) {
 		}
 	}
 }
+
+// TestImplementerPlatformTools: an implementer works the platform plane, not
+// just the checkout — every read (where its task, its epic and its PR's runs
+// stand), and the writes that shape the work (tasks, epics, milestones,
+// projects, environments). Four writes stay denied by name: inviting people,
+// creating or replaying webhooks (one permission on the server), live flags. Every platform
+// write is decided one way or the other, so a write added to the plane later
+// fails here until someone chooses its lane.
+func TestImplementerPlatformTools(t *testing.T) {
+	t.Chdir(t.TempDir())
+	d, issues := LoadNamed("implementer")
+	if d == nil {
+		t.Fatalf("implementer: %v", issues)
+	}
+	allow, deny := map[string]bool{}, map[string]bool{}
+	for _, n := range d.Tools.Allow {
+		allow[n] = true
+	}
+	for _, n := range d.Tools.Deny {
+		deny[n] = true
+	}
+	reads := map[string]bool{}
+	for _, tool := range (&platformmcp.Provider{ReadOnly: true}).Tools() {
+		reads[tool.Name] = true
+		if !allow[tool.Name] {
+			t.Errorf("implementer: platform read %q is not allowed", tool.Name)
+		}
+	}
+	for _, w := range []string{"task_create", "epic_create", "milestone_create", "project_create", "environment_create"} {
+		if !allow[w] {
+			t.Errorf("implementer: %q should be allowed", w)
+		}
+	}
+	for _, w := range []string{"member_invite", "webhook_create", "webhook_delivery_replay", "flag_set"} {
+		if !deny[w] || allow[w] {
+			t.Errorf("implementer: %q must be denied by name, never allowed", w)
+		}
+	}
+	for _, tool := range (&platformmcp.Provider{}).Tools() {
+		if reads[tool.Name] {
+			continue
+		}
+		if allow[tool.Name] == deny[tool.Name] {
+			t.Errorf("implementer: platform write %q is undecided — allow it or deny it by name", tool.Name)
+		}
+	}
+}
