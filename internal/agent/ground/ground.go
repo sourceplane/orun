@@ -186,6 +186,16 @@ func Ground(ctx context.Context, cfg *Config, opts Options) (string, error) {
 				return "", stageErr(StageCheckout, err)
 			}
 			logf(opts.Log, "orun agent serve: grounding — task branch %s exists, reused\n", opts.Branch)
+		} else if remoteBranchExists(ctx, dir, opts.Branch) {
+			// saas-session-continuity CT3: a branch a previous session pushed
+			// but this box has never seen. A fresh clone holds it only as
+			// origin/<branch>; re-creating it from the ref would start the
+			// task over from the default branch (the first orun.work app
+			// rebuilt a milestone that way). Check it out, tracking origin.
+			if _, err := runGit(ctx, dir, "checkout", "-b", opts.Branch, "--track", "origin/"+opts.Branch); err != nil {
+				return "", stageErr(StageCheckout, err)
+			}
+			logf(opts.Log, "orun agent serve: grounding — task branch %s found on origin, checked out\n", opts.Branch)
 		} else {
 			args := []string{"checkout", "-b", opts.Branch}
 			// The start point must resolve locally; on an empty remote the
@@ -237,6 +247,13 @@ func classifyWorkdir(ctx context.Context, dir, remote string) (resume bool, err 
 // prior boot of this session created it).
 func branchExists(ctx context.Context, dir, branch string) bool {
 	_, err := runGit(ctx, dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	return err == nil
+}
+
+// remoteBranchExists reports whether origin has the branch (as fetched into
+// this clone).
+func remoteBranchExists(ctx context.Context, dir, branch string) bool {
+	_, err := runGit(ctx, dir, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch)
 	return err == nil
 }
 

@@ -177,6 +177,39 @@ func TestGroundResumeReusesBranchWithoutClobbering(t *testing.T) {
 	}
 }
 
+func TestGroundChecksOutABranchThatExistsOnlyOnOrigin(t *testing.T) {
+	// saas-session-continuity CT3: a previous session (on another box) pushed
+	// the task branch. A fresh clone holds it only as origin/<branch>; the
+	// session must start from it, not from the ref.
+	remote := newRemote(t)
+	branch := "orun/ORN-3-home-page"
+	first, err := Ground(context.Background(), &Config{Remote: remote, FullName: "acme/widgets", Ref: "main"}, Options{Branch: branch, WorkdirRoot: t.TempDir()})
+	if err != nil {
+		t.Fatalf("first Ground: %v", err)
+	}
+	mustGit(t, first, "config", "user.email", "agent@example.com")
+	mustGit(t, first, "config", "user.name", "Agent")
+	if err := os.WriteFile(filepath.Join(first, "work.txt"), []byte("pushed work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, first, "add", ".")
+	mustGit(t, first, "commit", "--quiet", "-m", "pushed progress")
+	mustGit(t, first, "push", "--quiet", "origin", branch)
+	want := mustGit(t, first, "rev-parse", "HEAD")
+
+	// A new box: a fresh workdir root, so a fresh clone.
+	dir, err := Ground(context.Background(), &Config{Remote: remote, FullName: "acme/widgets", Ref: "main"}, Options{Branch: branch, WorkdirRoot: t.TempDir()})
+	if err != nil {
+		t.Fatalf("second Ground: %v", err)
+	}
+	if got := mustGit(t, dir, "rev-parse", "HEAD"); got != want {
+		t.Errorf("HEAD = %s, want %s — the pushed branch was re-created from the ref", got, want)
+	}
+	if up := mustGit(t, dir, "rev-parse", "--abbrev-ref", branch+"@{upstream}"); up != "origin/"+branch {
+		t.Errorf("upstream = %q, want origin/%s", up, branch)
+	}
+}
+
 func TestGroundRefusesForeignWorkdir(t *testing.T) {
 	// Grounding must never adopt a directory it does not own.
 	remote := newRemote(t)
