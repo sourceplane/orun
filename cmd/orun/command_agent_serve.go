@@ -4,15 +4,19 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/sourceplane/orun/internal/agent"
 	"github.com/sourceplane/orun/internal/agent/attach"
+	"github.com/sourceplane/orun/internal/agent/continuity"
 	"github.com/sourceplane/orun/internal/agent/driver"
 	"github.com/sourceplane/orun/internal/agent/ground"
 	"github.com/sourceplane/orun/internal/agenttype"
 	"github.com/sourceplane/orun/internal/nodes"
+	"github.com/sourceplane/orun/internal/provenance"
 	"github.com/spf13/cobra"
 )
 
@@ -177,10 +181,7 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 		// The task-keyed branch is a pure function of type+task, so it is
 		// computed here rather than beside RunOptions: grounding needs it to
 		// create the branch, and the loop needs the same string.
-		branch := ""
-		if task != "" {
-			branch = "agent/" + task + "-" + slugify(typeName)
-		}
+		branch := sessionBranch(task, typeName, os.Getenv("ORUN_TASK_BRANCH"))
 
 		// Grounding (GS0): a bound repository becomes a real checkout before
 		// any brief or driver work. It runs AFTER the heartbeat and relay so a
@@ -264,6 +265,7 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 			return err
 		}
 		var mcpConfigPath string
+		var keeper *continuity.Keeper
 		if serveDriver == driver.ClaudeCodeID {
 			setup, mErr := agent.WriteMCPConfig(filepath.Join(".orun", "agent-mcp"),
 				agent.NewToolPolicy(toolPolicy), mcpPolicyToolNames(), nil)
@@ -286,7 +288,38 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 				skillWorkdir = "."
 			}
 			materializeHarnessSkills(ctx, "", "", skillWorkdir, errOut)
-			cc := &driver.ClaudeCode{ExtraArgs: append(setup.HarnessArgs(), harnessModelArgs(typeModel)...)}
+			// saas-session-continuity CT3: continuity. A successor puts its
+			// predecessor's conversation back where Claude Code looks for it
+			// and launches with --resume; every session keeps its own, for the
+			// next. Best-effort: nothing here fails a session. ORUN_RESUME=off
+			// is the switch.
+			contCfg := continuity.Config{
+				BaseURL: relayBase, Token: hb.Token, Log: errOut,
+				Workdir: workdir, ClaudeDir: continuity.ClaudeDirFromEnv(os.Getenv),
+			}
+			resumeSession := ""
+			if workdir != "" && os.Getenv("ORUN_RESUME") != "off" {
+				res, rErr := continuity.Resume(ctx, contCfg)
+				switch {
+				case rErr != nil:
+					fmt.Fprintf(errOut, "orun agent serve: continuity — resume failed, starting fresh (%v)\n", rErr)
+				case res == nil:
+					fmt.Fprintf(errOut, "orun agent serve: continuity — nothing to resume\n")
+				default:
+					resumeSession = res.HarnessSession
+					fmt.Fprintf(errOut, "orun agent serve: continuity — resuming from %s: %d transcript line(s), conversation %q, %d snapshot file(s)%s\n",
+						res.From, res.Lines, res.HarnessSession, res.SnapshotFiles, skippedNote(res.SnapshotSkipped))
+				}
+			}
+			if workdir != "" {
+				keeper = continuity.NewKeeper(contCfg)
+				headSha := ""
+				if out, gErr := exec.CommandContext(ctx, "git", "-C", workdir, "rev-parse", "HEAD").Output(); gErr == nil {
+					headSha = strings.TrimSpace(string(out))
+				}
+				continuity.PutMeta(ctx, contCfg, continuity.Meta{Cwd: workdir, Branch: branch, HeadSha: headSha})
+			}
+			cc := &driver.ClaudeCode{ExtraArgs: append(setup.HarnessArgs(), harnessModelArgs(typeModel)...), ResumeSession: resumeSession}
 			// GS1: seed a token for tools that read GITHUB_TOKEN (gh, API
 			// callers). Compatibility only — orun's own credential helper mints
 			// per operation and never goes stale. THIS one does, at the token's
@@ -337,6 +370,16 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 		if serveDriver == "stub" && runKind == nodes.RunKindInteractive {
 			drv = &driver.Stub{Interactive: true}
 		}
+		observe := srv.Observe
+		keeperCtx, keeperCancel := context.WithCancel(ctx)
+		defer keeperCancel()
+		if keeper != nil {
+			go keeper.Run(keeperCtx)
+			observe = func(e agent.SessionEvent) {
+				srv.Observe(e)
+				keeper.Observe(e.Kind, e.Payload)
+			}
+		}
 		opts := agent.RunOptions{
 			SessionID:     sessionID,
 			Driver:        drv,
@@ -346,7 +389,7 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 			Policy:        agent.NewToolPolicy(toolPolicy),
 			MCPConfigPath: mcpConfigPath,
 			Inputs:        inputs,
-			Observe:       srv.Observe,
+			Observe:       observe,
 			ObserveDelta:  srv.ObserveDelta,
 		}
 		if typeName != "" {
@@ -357,6 +400,11 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 		}
 		fmt.Fprintf(errOut, "orun agent serve: starting agent loop — session %s\n", sessionID)
 		res, err := agent.Run(runCtx, store, opts)
+		if keeper != nil {
+			// The last of the transcript and the work, kept before the box goes.
+			keeperCancel()
+			keeper.Wait(12 * time.Second)
+		}
 		srv.Close("terminal")
 		relaySession.Close() // nil-safe when the relay was unavailable
 		relayCancel()
@@ -506,4 +554,26 @@ func harnessPlatformEnv(getenv func(string) string, tokenFile string) []string {
 		}
 	}
 	return env
+}
+
+// skippedNote says why a snapshot was not applied, for the resume log line.
+func skippedNote(reason string) string {
+	if reason == "" {
+		return ""
+	}
+	return " (snapshot not applied: " + reason + ")"
+}
+
+// sessionBranch is the branch a session grounds on: the platform's task
+// branch (ORUN_TASK_BRANCH, orun/<KEY>-<slug> — the grammar the task plane
+// files pushes under) when it names THIS task (saas-session-continuity CT3),
+// else agent/<task>-<type>; none for a session without a task.
+func sessionBranch(task, typeName, platformBranch string) string {
+	if task == "" {
+		return ""
+	}
+	if tb := strings.TrimSpace(platformBranch); tb != "" && provenance.TaskKeyOfBranch(tb) == task {
+		return tb
+	}
+	return "agent/" + task + "-" + slugify(typeName)
 }

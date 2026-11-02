@@ -270,6 +270,10 @@ func TestClaudeCodeMappingBasic(t *testing.T) {
 	if !ok || cost.Fields["tokens"] != 150 {
 		t.Fatalf("cost = %+v", cost)
 	}
+	// saas-session-continuity CT3: the prompt cache, visible per turn.
+	if cost.Fields["inputTokens"] != 100 || cost.Fields["outputTokens"] != 50 || cost.Fields["cacheReadTokens"] != 4000 || cost.Fields["cacheWriteTokens"] != 300 {
+		t.Fatalf("cost cache split = %+v", cost.Fields)
+	}
 	done, ok := c.first(EventDone)
 	if !ok || done.Fields["status"] != "completed" || done.Fields["harnessSession"] != "cc-sess-1" {
 		t.Fatalf("done = %+v", done)

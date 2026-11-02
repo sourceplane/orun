@@ -254,7 +254,13 @@ func (d *ClaudeCode) readStream(ctx context.Context, r io.Reader, io IO, w *stdi
 		case "result":
 			f := map[string]any{}
 			if m.Usage != nil {
+				// `tokens` keeps its meaning (metering reads it); the split
+				// beside it makes the prompt cache visible.
 				f["tokens"] = m.Usage.InputTokens + m.Usage.OutputTokens
+				f["inputTokens"] = m.Usage.InputTokens
+				f["outputTokens"] = m.Usage.OutputTokens
+				f["cacheReadTokens"] = m.Usage.CacheReadInputTokens
+				f["cacheWriteTokens"] = m.Usage.CacheCreationInputTokens
 			}
 			if m.TotalCostUSD > 0 {
 				f["costUsd"] = m.TotalCostUSD
@@ -475,6 +481,10 @@ type claudeControl struct {
 type claudeUsage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
+	// The prompt cache (saas-session-continuity CT3): what was read from it
+	// and written to it. input_tokens is only the uncached remainder.
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 }
 
 func (m *claudeMsg) contentBlocks() []claudeBlock {
