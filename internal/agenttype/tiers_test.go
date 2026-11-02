@@ -99,8 +99,8 @@ func TestRetiredTypesAreGone(t *testing.T) {
 // TestImplementerPlatformTools: an implementer works the platform plane, not
 // just the checkout — every read (where its task, its epic and its PR's runs
 // stand), and the writes that shape the work (tasks, epics, milestones,
-// projects, environments, a webhook redelivery). Three writes stay denied by
-// name: inviting people, a standing webhook feed, live flags. Every platform
+// projects, environments). Four writes stay denied by name: inviting people,
+// creating or replaying webhooks (one permission on the server), live flags. Every platform
 // write is decided one way or the other, so a write added to the plane later
 // fails here until someone chooses its lane.
 func TestImplementerPlatformTools(t *testing.T) {
@@ -123,12 +123,12 @@ func TestImplementerPlatformTools(t *testing.T) {
 			t.Errorf("implementer: platform read %q is not allowed", tool.Name)
 		}
 	}
-	for _, w := range []string{"task_create", "epic_create", "milestone_create", "project_create", "environment_create", "webhook_delivery_replay"} {
+	for _, w := range []string{"task_create", "epic_create", "milestone_create", "project_create", "environment_create"} {
 		if !allow[w] {
 			t.Errorf("implementer: %q should be allowed", w)
 		}
 	}
-	for _, w := range []string{"member_invite", "webhook_create", "flag_set"} {
+	for _, w := range []string{"member_invite", "webhook_create", "webhook_delivery_replay", "flag_set"} {
 		if !deny[w] || allow[w] {
 			t.Errorf("implementer: %q must be denied by name, never allowed", w)
 		}

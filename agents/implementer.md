@@ -16,12 +16,13 @@ tools:
   #
   # The platform plane (served by this binary's `orun mcp serve`, signed in
   # as the session): every read, and the writes that plan and shape the work
-  # — tasks, epics, milestones, projects, environments, a webhook redelivery.
-  # What the session's role on the server allows is the real boundary; this
-  # list is what the harness may call. Three writes stay denied by name:
-  # who may see the workspace (member_invite), a standing feed of its events
-  # to any URL (webhook_create), and live flags (flag_set — the permission
-  # behind it also rewrites workspace settings). The person does those.
+  # — tasks, epics, milestones, projects, environments. What the session's
+  # role on the server allows is the real boundary; this list is what the
+  # harness may call. Four writes stay denied by name: who may see the
+  # workspace (member_invite), a standing feed of its events to any URL
+  # (webhook_create, and webhook_delivery_replay, whose permission is the
+  # same one), and live flags (flag_set — the permission behind it also
+  # rewrites workspace settings). The person does those.
   # catalog_get_component / catalog_affected are the cockpit's catalog MCP.
   allow: [catalog_get_component, catalog_affected, pr_open, connection_info,
           whoami, workspaces_list, projects_list,
@@ -33,10 +34,10 @@ tools:
           config_read, secrets_list, webhook_deliveries_list,
           skills_list, skill_get,
           task_create, epic_create, milestone_create,
-          project_create, environment_create, webhook_delivery_replay,
+          project_create, environment_create,
           Read, Glob, Grep, LS, TodoWrite, NotebookRead]
   ask: [Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch]
-  deny: [member_invite, webhook_create, flag_set, "*"]
+  deny: [member_invite, webhook_create, webhook_delivery_replay, flag_set, "*"]
 owner: sourceplane/team/platform
 extends: base-orun-literacy
 ---
@@ -88,5 +89,6 @@ where things stand instead of guessing, and say what they showed.
   nothing. Push again after you change it.
 - **Projects and environments**: `project_create` / `environment_create` only
   when the task needs a new deployable or environment.
-- **Not yours**: inviting people, creating webhooks, and setting flags are
-  the person's to do in the console — say what they should do and why.
+- **Not yours**: inviting people, creating or replaying webhooks, and setting
+  flags are the person's to do in the console — say what they should do and
+  why.
