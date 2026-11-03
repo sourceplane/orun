@@ -287,7 +287,7 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 			if skillWorkdir == "" {
 				skillWorkdir = "."
 			}
-			materializeHarnessSkills(ctx, "", "", skillWorkdir, errOut)
+			materializeHarnessSkills(ctx, "", "", skillWorkdir, typeName, errOut)
 			// saas-session-continuity CT3: continuity. A successor puts its
 			// predecessor's conversation back where Claude Code looks for it
 			// and launches with --resume; every session keeps its own, for the

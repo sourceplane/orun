@@ -298,7 +298,13 @@ func fetchAllSkills(ctx context.Context, client *remotestate.Client, org string)
 // and record the pins beside the MCP config for the PR manifest. A cloud
 // miss (not linked, not logged in, offline) is a WARNING, never a failed
 // session: the skills sharpen a run; their absence doesn't brick it.
-func materializeHarnessSkills(ctx context.Context, backendURL, workspace, workdir string, errOut io.Writer) {
+//
+// saas-skill-driven-agents SD1: only the skills whose `appliesTo` names the
+// agent type land (plus the `orunbase` router, and any skill that declares
+// no audience), the pins name exactly those, and the directory is kept out
+// of the checkout's git (`info/exclude`) so a session's `git add -A` never
+// commits the playbooks into the repository it works on.
+func materializeHarnessSkills(ctx context.Context, backendURL, workspace, workdir, agentType string, errOut io.Writer) {
 	client, err := cloudClient(ctx, backendURL, workspace)
 	if err != nil {
 		fmt.Fprintf(errOut, "orun agent: skills not materialized (%v) — continuing without them\n", err)
@@ -309,7 +315,12 @@ func materializeHarnessSkills(ctx context.Context, backendURL, workspace, workdi
 		fmt.Fprintf(errOut, "orun agent: skills not materialized (%v) — continuing without them\n", err)
 		return
 	}
+	all := len(views)
+	views = agent.SkillsFor(agentType, views)
 	skillsDir := filepath.Join(workdir, ".claude", "skills")
+	if err := agent.ExcludeFromGit(skillsDir); err != nil {
+		fmt.Fprintf(errOut, "orun agent: skills not excluded from git (%v)\n", err)
+	}
 	pins, err := agent.MaterializeSkills(skillsDir, views)
 	if err != nil {
 		fmt.Fprintf(errOut, "orun agent: skills not materialized (%v) — continuing without them\n", err)
@@ -318,7 +329,7 @@ func materializeHarnessSkills(ctx context.Context, backendURL, workspace, workdi
 	if err := agent.WriteSkillPins(filepath.Join(".orun", "agent-mcp", "skills.json"), pins); err != nil {
 		fmt.Fprintf(errOut, "orun agent: skill pins not recorded (%v)\n", err)
 	}
-	fmt.Fprintf(errOut, "orun agent: %d skill(s) materialized into %s (pins recorded for the manifest)\n", len(pins), skillsDir)
+	fmt.Fprintf(errOut, "orun agent: %d of %d skill(s) materialized into %s for %s (pins recorded for the manifest)\n", len(pins), all, skillsDir, agentTypeLabel(agentType))
 }
 
 // shortRevision shortens a sha256:<hex> content address to its familiar
@@ -330,4 +341,12 @@ func shortRevision(rev string) string {
 		r = r[:8]
 	}
 	return r
+}
+
+// agentTypeLabel names the audience in the materialize line.
+func agentTypeLabel(agentType string) string {
+	if agentType == "" {
+		return "any agent (no type)"
+	}
+	return agentType
 }

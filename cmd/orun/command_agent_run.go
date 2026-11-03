@@ -165,7 +165,7 @@ over the bytes on disk and recorded on the run.`,
 			// materialize as native skill files; the pins ride skills.json
 			// into the PR manifest. Best-effort: a cloud miss warns, never
 			// bricks the run.
-			materializeHarnessSkills(ctx, "", "", ".", cmd.ErrOrStderr())
+			materializeHarnessSkills(ctx, "", "", ".", runType, cmd.ErrOrStderr())
 		}
 		branch := ""
 		if runTask != "" {

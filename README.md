@@ -221,7 +221,7 @@ upgrades, and registering your own baseline. The model is explained in
 
 Or let an agent do all of it. **[SOFTWAREFACTORY.md](SOFTWAREFACTORY.md)**
 explains how to hand a product idea to Claude Code (or any agent that reads a
-`SKILL.md`) with the [`software-factory` skill](skills/software-factory/SKILL.md)
+`SKILL.md`) with the [`software-factory` skill](https://orunbase.com/skills/software-factory/SKILL.md)
 and get back a live product, an epic with milestones and tasks in the
 workspace, its design documents, and every feature landed as a task-carrying
 pull request.

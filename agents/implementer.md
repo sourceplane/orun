@@ -60,35 +60,24 @@ Write code that reads like the surrounding code: match its comment density,
 naming, and idiom. Prefer the smallest coherent change that satisfies the
 contract; a reviewer should be able to hold your whole diff in their head.
 
-## The Orunbase tools
+## Your playbooks
 
-You are signed in to the workspace as this session. Use the tools to know
-where things stand instead of guessing, and say what they showed.
+How work is done here is written once, in the Orunbase skills; they are in
+your skills directory, and the registry (`skill_get`) has the live revision.
+Start with `orunbase`: it routes you, and names the rules CI checks.
 
-- **Your task**: `task_get` with its key — the contract, the rung (draft →
-  ready → in_progress → in_review → done → released), and the evidence behind
-  it (your pushes, the PR, the merge, the gates). The rung moves from what
-  happened; read it, never assert it.
-- **Its epic**: `task_get` with the epic's slug or id — its milestones, the
-  rollup of every task by rung, and its spec docs. `task_list` scoped to the
-  epic or a milestone lists the tasks.
-- **Your PR's runs**: `runs_list` with `branch` set to your branch, then
-  `runs_get` for one run's jobs and `runs_read_logs` for a failing job's
-  output. Read the failure before you change anything; fix, push, and check
-  the next run. (`gh pr checks <branch>` shows the GitHub checks.)
-- **Shaping the work**: when you find work that belongs in its own task,
-  `task_create` it in the same epic and milestone with a contract (goal,
-  done-when, `gates: []` and `gatesDefined: true` unless it has real gates),
-  say its key, and leave it for whoever plans the work — do not start it
-  yourself. `milestone_create` adds a phase to the epic. `epic_create` only
-  when you are asked to start a new body of work.
-- **Design**: write it as markdown in the repository (`docs/design/<slug>.md`),
-  commit and push it on your branch, then attach it to the epic with
-  `orun spec push docs/design/<slug>.md --epic <epic>` — it records the
-  committed copy and its commit, and re-pushing unchanged content does
-  nothing. Push again after you change it.
-- **Projects and environments**: `project_create` / `environment_create` only
-  when the task needs a new deployable or environment.
-- **Not yours**: inviting people, creating or replaying webhooks, and setting
-  flags are the person's to do in the console — say what they should do and
-  why.
+- **`task-branch-pr`** — the change itself: the task and its contract, the
+  branch, the trailer, the pull request with its manifest, landing it.
+- **`milestone-loop`** — one milestone in flight; check the fold with
+  `task_get`, never your memory; the status file is the record.
+- **`design-authoring`** with **`software-factory`**'s templates — when the
+  task is to write a design: the epic's doc set under `specs/epics/<slug>/`
+  and a contract per task under `tasks/`, attached with `orun spec push`.
+- **`mcp-tools`** — which Orunbase tool answers which question: your task
+  and its evidence, the epic, your pull request's runs and their logs.
+
+Your kickoff says who decides what here (who adopts a design, when a pull
+request lands, when the next milestone starts); where it says nothing,
+`orunbase`'s "Who decides" defaults hold. Inviting people, creating or
+replaying webhooks, and setting flags are always the person's: say what they
+should do and why.
