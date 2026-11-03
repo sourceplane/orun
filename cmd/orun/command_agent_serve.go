@@ -287,7 +287,7 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 			if skillWorkdir == "" {
 				skillWorkdir = "."
 			}
-			materializeHarnessSkills(ctx, "", "", skillWorkdir, typeName, errOut)
+			skillPins := materializeHarnessSkills(ctx, "", "", skillWorkdir, typeName, errOut)
 			// saas-session-continuity CT3: continuity. A successor puts its
 			// predecessor's conversation back where Claude Code looks for it
 			// and launches with --resume; every session keeps its own, for the
@@ -342,6 +342,11 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 			// secret resolves — and the `orun mcp serve` the harness spawns —
 			// all work in-sandbox with zero flags.
 			cc.Env = append(cc.Env, harnessPlatformEnv(os.Getenv, tokenFile)...)
+			// SD4: the PR manifest line, pins and all, for a session that
+			// opens its pull request with gh.
+			if line := sessionManifestEnv(task, sessionID, skillPins); line != "" {
+				cc.Env = append(cc.Env, line)
+			}
 			if workdir != "" {
 				if tok, tErr := mintHarnessGitToken(ctx); tErr == nil {
 					cc.Env = append(cc.Env, "GITHUB_TOKEN="+tok)
