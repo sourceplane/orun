@@ -6,8 +6,9 @@ That is the short version. The longer version is that `orun` already knows
 how to build a whole SaaS from a baseline, how to record work as epics and
 tasks, and how to land every change with its provenance attached. What was
 missing was something that drives all of it from a one-paragraph brief. The
-[`software-factory` skill](skills/software-factory/SKILL.md) is that
-something. It works with Claude Code today and with any agent that reads a
+[`software-factory` skill](https://orunbase.com/skills/software-factory/SKILL.md)
+is that something. It is one of the Orunbase skills, served from the skill
+registry (`orun skills list`) and mirrored at `https://orunbase.com/skills/`. It works with Claude Code today and with any agent that reads a
 `SKILL.md`.
 
 ## What you get
@@ -17,7 +18,7 @@ Cloudflare token). It will:
 
 1. **Write the epic first.** A real one: thesis, design, milestone plan with
    "done when" criteria, risks, and an as-built status file, from the
-   templates in [`skills/software-factory/templates/`](skills/software-factory/templates/).
+   templates the skill carries (`templates/`, written beside its `SKILL.md`).
    It shows you the milestone table and waits. That is the only time it stops.
 2. **Create the workspace** on Orunbase, connect Cloudflare, and confirm the
    baseline is buildable.
@@ -56,13 +57,17 @@ exactly what is missing if something is.
 
 ## Run it
 
-Install the skill where your agent looks for skills. For Claude Code that is
-either your user directory or the repository you are working in:
+Install the Orunbase skills where your agent looks for skills. For Claude
+Code that is either your user directory or the repository you are working in:
 
 ```bash
-git clone https://github.com/sourceplane/orun.git
-cp -r orun/skills/software-factory ~/.claude/skills/        # or ./.claude/skills/ in a project
+orun skills pull --client claude-code              # ~/.claude/skills
+orun skills pull --client claude-code --project    # ./.claude/skills
 ```
+
+`--client` also takes `codex`, `cursor` and `vscode`. Without a login, fetch
+the defaults from the mirror: `https://orunbase.com/skills/index.json` lists
+every file under `https://orunbase.com/skills/<name>/`.
 
 Then give it the brief:
 
@@ -110,7 +115,9 @@ you hit them.
 
 ## Contributing
 
-The skill lives at [`skills/software-factory/`](skills/software-factory/).
-If a run fails on something the fix table does not cover, open a PR that
-adds the row; that is how every row got there. Larger changes to the flow
+The skill lives in the Orunbase skill registry; its source is
+`skills/software-factory/` in the orun-cloud repository, and the registry,
+`orun skills pull` and the mirror all serve that one copy. If a run fails on
+something the fix table does not cover, open a PR there that adds the row;
+that is how every row got there. Larger changes to the flow
 follow [CONTRIBUTING.md](CONTRIBUTING.md).
