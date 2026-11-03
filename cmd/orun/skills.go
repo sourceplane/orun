@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sourceplane/orun/internal/agent"
+	"github.com/sourceplane/orun/internal/provenance"
 	"github.com/sourceplane/orun/internal/remotestate"
 )
 
@@ -304,16 +305,16 @@ func fetchAllSkills(ctx context.Context, client *remotestate.Client, org string)
 // no audience), the pins name exactly those, and the directory is kept out
 // of the checkout's git (`info/exclude`) so a session's `git add -A` never
 // commits the playbooks into the repository it works on.
-func materializeHarnessSkills(ctx context.Context, backendURL, workspace, workdir, agentType string, errOut io.Writer) {
+func materializeHarnessSkills(ctx context.Context, backendURL, workspace, workdir, agentType string, errOut io.Writer) []agent.SkillPin {
 	client, err := cloudClient(ctx, backendURL, workspace)
 	if err != nil {
 		fmt.Fprintf(errOut, "orun agent: skills not materialized (%v) — continuing without them\n", err)
-		return
+		return nil
 	}
 	views, err := fetchAllSkills(ctx, client, client.Scope().OrgID)
 	if err != nil {
 		fmt.Fprintf(errOut, "orun agent: skills not materialized (%v) — continuing without them\n", err)
-		return
+		return nil
 	}
 	all := len(views)
 	views = agent.SkillsFor(agentType, views)
@@ -324,12 +325,13 @@ func materializeHarnessSkills(ctx context.Context, backendURL, workspace, workdi
 	pins, err := agent.MaterializeSkills(skillsDir, views)
 	if err != nil {
 		fmt.Fprintf(errOut, "orun agent: skills not materialized (%v) — continuing without them\n", err)
-		return
+		return nil
 	}
 	if err := agent.WriteSkillPins(filepath.Join(".orun", "agent-mcp", "skills.json"), pins); err != nil {
 		fmt.Fprintf(errOut, "orun agent: skill pins not recorded (%v)\n", err)
 	}
 	fmt.Fprintf(errOut, "orun agent: %d of %d skill(s) materialized into %s for %s (pins recorded for the manifest)\n", len(pins), all, skillsDir, agentTypeLabel(agentType))
+	return pins
 }
 
 // shortRevision shortens a sha256:<hex> content address to its familiar
@@ -349,4 +351,25 @@ func agentTypeLabel(agentType string) string {
 		return "any agent (no type)"
 	}
 	return agentType
+}
+
+// sessionManifestEnv is the PR manifest line a session's pull request carries
+// (saas-skill-driven-agents SD4, design §9.1): the task, the session and the
+// skill revisions this box loaded, rendered exactly as `orun pr open` renders
+// it — handed to the harness as ORUN_MANIFEST, so a session that opens its
+// pull request with gh writes the same block (`--body "…$ORUN_MANIFEST"`).
+// Empty when there is no task: a manifest names one.
+func sessionManifestEnv(task, session string, pins []agent.SkillPin) string {
+	if strings.TrimSpace(task) == "" {
+		return ""
+	}
+	m := provenance.Manifest{Version: provenance.ManifestVersion, Task: task, Session: session}
+	for _, p := range pins {
+		m.Skills = append(m.Skills, provenance.SkillPin{Name: p.Name, Rev: p.Rev})
+	}
+	line, err := provenance.RenderManifest(m)
+	if err != nil {
+		return ""
+	}
+	return "ORUN_MANIFEST=" + line
 }
