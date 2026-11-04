@@ -68,7 +68,7 @@ func hookFacts(phase string, h Hook, params map[string]any, out map[string]strin
 func factMeta(f actions.Fact) map[string]string {
 	meta := map[string]string{"fact": factVersion, "key": f.Key, "kind": f.Kind}
 	for k, v := range map[string]string{
-		"label": f.Label, "value": f.Value, "href": f.Href, "env": f.Env, "status": f.Status,
+		"label": f.Label, "value": f.Value, "href": f.Href, "env": f.Env, "status": f.Status, "sha": f.Sha,
 	} {
 		if v = strings.TrimSpace(v); v != "" {
 			meta[k] = v
@@ -90,7 +90,7 @@ func factMeta(f actions.Fact) map[string]string {
 // factSignature is what "changed" compares.
 func factSignature(meta map[string]string) string {
 	var b strings.Builder
-	for _, k := range []string{"kind", "label", "value", "href", "env", "status", "private", "pin"} {
+	for _, k := range []string{"kind", "label", "value", "href", "env", "status", "sha", "private", "pin"} {
 		b.WriteString(k)
 		b.WriteByte('=')
 		b.WriteString(meta[k])

@@ -101,7 +101,7 @@ func (b *building) Run(_ context.Context, id string, in ActionInput) (map[string
 		if b.parkOn == id {
 			return open, &actions.PendingError{ID: id, Pending: actions.Pending{Reason: "checks still running"}}
 		}
-		return map[string]string{"number": "7", "url": open["url"], "merged": "true", "landed": "true"}, nil
+		return map[string]string{"number": "7", "url": open["url"], "merged": "true", "landed": "true", "mergeSha": "3f2a9c1d"}, nil
 	case "orun.http/probe@v1":
 		var urls []string
 		for _, t := range actions.ProbeTargets(in.Params) {
@@ -213,11 +213,12 @@ func TestAPullRequestIsPinnedFromTheMomentItIsOpened(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	var statuses []string
+	var statuses, shas []string
 	for _, e := range factsOf(evs) {
 		if e.Meta["kind"] != "pr" {
 			continue
 		}
+		shas = append(shas, e.Meta["sha"])
 		if e.Phase != "01-product" || e.Step != "land" || e.Meta["key"] != "pr:01-product/land" || e.Meta["label"] != "Product" || e.Meta["fact"] != "1" {
 			t.Errorf("a pull request fact is the hook's, labelled as the hook says: %+v", e)
 		}
@@ -227,6 +228,11 @@ func TestAPullRequestIsPinnedFromTheMomentItIsOpened(t *testing.T) {
 	// sent only when it changed.
 	if strings.Join(statuses, ",") != "opening,checks,merged" {
 		t.Errorf("the pull request's states: %v", statuses)
+	}
+	// saas-parallel-baselining PB2: once merged, the fact says where the code
+	// landed — and not a moment before.
+	if strings.Join(shas, ",") != ",,3f2a9c1d" {
+		t.Errorf("the merge commit is on the merged fact only: %v", shas)
 	}
 }
 
