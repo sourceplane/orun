@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/sourceplane/orun/internal/agent/ground"
 	"github.com/sourceplane/orun/internal/agenttype"
 	"github.com/sourceplane/orun/internal/nodes"
+	"github.com/sourceplane/orun/internal/preview"
 	"github.com/sourceplane/orun/internal/provenance"
 	"github.com/spf13/cobra"
 )
@@ -54,7 +56,11 @@ binding, and serve clones it before the loop starts:
   ORUN_REPO_REMOTE    the https clone URL (never carries a credential)
   ORUN_REPO_FULL_NAME the owner/repo full name
   ORUN_REPO_REF       the ref to clone at
-Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
+Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.
+
+A grounded session (not a baseline build) also keeps the live preview its
+checkout declares running, once it is there ('orun preview'), and reports each
+change as a preview_changed event. ORUN_PREVIEW=off turns that off.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		errOut := cmd.ErrOrStderr()
@@ -385,6 +391,29 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 				keeper.Observe(e.Kind, e.Payload)
 			}
 		}
+		// saas-parallel-baselining PB-12: the live preview. A coding session
+		// keeps the dev server its checkout declares running and reports each
+		// change as preview_changed; a baseline build never runs one.
+		notices := agent.NewNotices()
+		pv := servePreview(workdir, serveDriver, os.Getenv, notices, errOut)
+		pvCtx, pvCancel := context.WithCancel(ctx)
+		defer pvCancel()
+		stopPreview := func() {}
+		if pv != nil {
+			go pv.Run(pvCtx)
+			stopPreview = func() {
+				pvCancel()
+				pv.Wait(15 * time.Second)
+			}
+			inner := observe
+			observe = func(e agent.SessionEvent) {
+				inner(e)
+				// A turn ended: the agent may have just landed the code.
+				if e.Kind == nodes.SessionEventCostSample {
+					pv.Poke()
+				}
+			}
+		}
 		opts := agent.RunOptions{
 			SessionID:     sessionID,
 			Driver:        drv,
@@ -396,6 +425,8 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 			Inputs:        inputs,
 			Observe:       observe,
 			ObserveDelta:  srv.ObserveDelta,
+			Notices:       notices,
+			BeforeEnd:     stopPreview,
 		}
 		if typeName != "" {
 			if ref, rerr := refs.Read(ctx, agentTypeRef(typeName)); rerr == nil && ref.Target != "" {
@@ -405,6 +436,7 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 		}
 		fmt.Fprintf(errOut, "orun agent serve: starting agent loop — session %s\n", sessionID)
 		res, err := agent.Run(runCtx, store, opts)
+		stopPreview() // a no-op once BeforeEnd ran; else the servers still go
 		if keeper != nil {
 			// The last of the transcript and the work, kept before the box goes.
 			keeperCancel()
@@ -421,6 +453,23 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 		fmt.Fprintf(errOut, "orun agent serve: session %s ended: %s\n", res.SessionID, res.Outcome.Status)
 		return nil
 	},
+}
+
+// servePreview is the session's preview supervisor: on a grounded checkout,
+// except for a baseline build (it runs the repository's checks, not its dev
+// server) and unless ORUN_PREVIEW=off. Each change goes to notices as a
+// preview_changed event. Nil when there is none to run.
+func servePreview(workdir, driverID string, getenv func(string) string, notices *agent.Notices, log io.Writer) *preview.Supervisor {
+	if strings.TrimSpace(workdir) == "" || driverID == (&driver.Bootstrap{}).ID() || getenv("ORUN_PREVIEW") == "off" {
+		return nil
+	}
+	pv := preview.NewSupervisor(workdir, func(e preview.Event) {
+		notices.Post(nodes.SessionEventPreviewChanged, e.Payload())
+	})
+	pv.Logf = func(format string, args ...any) {
+		fmt.Fprintf(log, "orun agent serve: preview — "+format+"\n", args...)
+	}
+	return pv
 }
 
 // orunBinaryPath is this process's own path — what the git credential helper

@@ -315,6 +315,13 @@ degrades to ungrounded. The session token is also written to
 authenticate as the live session with no configuration. With
 `--driver bootstrap`, a grounded session builds **in** its clone.
 
+A grounded session other than a baseline build also keeps the checkout's
+[live preview](./orun-preview.md#in-a-coding-session) running once the
+repository declares one and has the code, restarting it if it exits, and
+reports each change as a `preview_changed` event (`starting`, `ready`,
+`failed` with a `detail`, `stopped` when the session ends). The servers run
+without the box's secrets. `ORUN_PREVIEW=off` turns it off.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -329,4 +336,5 @@ authenticate as the live session with no configuration. With
 - [`orun mcp`](./orun-mcp.md) — the tool surface a type's policy filters
 - [`orun skills`](./orun-skills.md) — the playbooks a session materializes
 - [`orun baseline`](./orun-baseline.md) — what the `bootstrap` driver builds
+- [`orun preview`](./orun-preview.md) — the live preview a session keeps running
 - [`orun task`](./orun-task.md), [`orun pr`](./orun-pr.md)

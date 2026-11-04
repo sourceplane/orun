@@ -149,6 +149,7 @@ const sidebars = {
             'cli/orun-mcp',
             'cli/orun-skills',
             'cli/orun-agent',
+            'cli/orun-preview',
             'cli/orun-task',
             'cli/orun-spec',
             'cli/orun-pr',
@@ -228,6 +229,7 @@ const sidebars = {
       type: 'category',
       label: 'Release notes',
       items: [
+        'release-notes/v2.96.0',
         'release-notes/v2.95.0',
         'release-notes/v2.94.0',
         'release-notes/v2.93.0',

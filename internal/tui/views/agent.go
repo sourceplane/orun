@@ -352,6 +352,8 @@ func (m AgentModel) foldEvent(kind string, payload map[string]any) AgentModel {
 		m.items = append(m.items, convItem{kind: itemNote, text: "artifact", detail: pr})
 	case "cost_sample":
 		m.activity = fmt.Sprintf("· %v tokens", payload["tokens"])
+	case "preview_changed":
+		m.items = append(m.items, convItem{kind: itemNote, text: "preview: " + str("state"), detail: str("detail")})
 	case "state_changed":
 		st := str("state")
 		m.items = append(m.items, convItem{kind: itemNote, text: "state: " + st})

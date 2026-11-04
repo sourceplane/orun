@@ -149,6 +149,12 @@ session loudly; a grounded session never degrades to an ungrounded one.
 When the agent opens its PR, the pen renames the branch onto the
 `orun/<KEY>-<slug>` grammar.
 
+A grounded coding session also runs the repository's **live preview**, the
+dev server its `intent.yaml` and `component.yaml` declare
+([`orun preview`](../cli/orun-preview.md)), from the moment the code is
+there, and reports it as `preview_changed` events, so a person can watch the
+app being built. The server never gets the box's secrets.
+
 ## The MCP as the agent's hands
 
 The runtime writes the driver's MCP config with one server, `orun mcp serve`,

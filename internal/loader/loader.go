@@ -19,6 +19,10 @@ const (
 	componentTreeCacheSource = "discovered"
 	componentInlineSource    = "inline"
 	componentTreeCacheFile   = ".orun/component-tree.yaml"
+	// componentTreeCacheFormat is bumped whenever ComponentTreeComponent
+	// gains a field, so a cache an older orun wrote without it is a miss.
+	// 1: spec.preview.
+	componentTreeCacheFormat = 1
 )
 
 // LoadIntent loads and parses an intent YAML file
@@ -304,6 +308,7 @@ func buildComponentTree(intentPath string, roots []string, inlineEntries, discov
 		Kind:       "ComponentTree",
 		Metadata: model.ComponentTreeMetadata{
 			Intent: normalizeCachePath(intentPath),
+			Format: componentTreeCacheFormat,
 		},
 		Discovery: model.ComponentTreeDiscovery{
 			Roots: append([]string(nil), roots...),
@@ -324,6 +329,9 @@ func loadDiscoveredComponentEntriesFromCache(intentPath, baseDir string, roots, 
 		return nil, false
 	}
 	if normalizeCachePath(tree.Metadata.Intent) != normalizeCachePath(intentPath) {
+		return nil, false
+	}
+	if tree.Metadata.Format != componentTreeCacheFormat {
 		return nil, false
 	}
 

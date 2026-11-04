@@ -132,6 +132,36 @@ spec:
 
 Patterns are relative to the repository root and use doublestar syntax (`*` within a segment, `**` across directories, `?`, `[...]`, `{a,b}`). Absolute paths, `.` or `..` segments, backslashes, and malformed globs are rejected. Path ownership is unchanged; a matching file is an additional direct change that propagates over `dependsOn` `input: true` edges. See [change detection → Input globs](../concepts/change-detection.md#input-globs-specchangeinputs).
 
+### Live preview
+
+A component can say how it runs itself as a dev server, and the intent names
+the one a preview shows. [`orun preview`](../cli/orun-preview.md) runs it, and
+a coding session's `orun agent serve` keeps it running:
+
+```yaml
+# component.yaml
+spec:
+  preview:
+    run: ["pnpm", "--filter", "web", "dev", "--host", "0.0.0.0", "--port", "4173"]
+    port: 4173
+    needs: [api-edge]   # components whose own previews start first
+    path: /             # the page the preview opens; default /
+    env: {}             # optional: plain, non-secret env for the server
+```
+
+```yaml
+# intent.yaml
+preview:
+  component: web
+```
+
+`run` is a non-empty argv list run from the component's directory, `port` an
+integer from 1024 to 65535 the server answers on at `127.0.0.1`, and `path`
+starts with `/`. Each of `needs` must name a component that declares a
+preview, with no cycle, and `preview.component` must name one that does.
+[`orun validate`](../cli/orun-validate.md) checks all of it. The plan engine
+ignores the block.
+
 ## Composition sources
 
 Declare composition sources in the intent and plan directly against that intent:

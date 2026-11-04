@@ -42,6 +42,9 @@ func (ComponentYAMLMetadata) OpenSchema() bool { return true }
 // OpenSchema — see ComponentYAML.OpenSchema.
 func (ComponentYAMLSpec) OpenSchema() bool { return true }
 
+// OpenSchema — see ComponentYAML.OpenSchema.
+func (ComponentYAMLPreview) OpenSchema() bool { return true }
+
 // OpenSchema — see ComponentYAML.OpenSchema. Covers legacy dependency
 // attributes (environment, scope, condition) the catalog does not yet model.
 func (ComponentYAMLDependency) OpenSchema() bool { return true }
@@ -98,6 +101,21 @@ type ComponentYAMLSpec struct {
 	Links        []ComponentYAMLLink `json:"links,omitempty"`
 	Docs         *ComponentYAMLDocs  `json:"docs,omitempty"`
 	Extensions   map[string]any      `json:"extensions,omitempty"`
+	// Preview is how the component runs itself for the live preview
+	// (`orun preview`, saas-parallel-baselining PB-11). Not surfaced in the
+	// resolved manifest. Mirrors internal/model.ComponentPreview.
+	Preview *ComponentYAMLPreview `json:"preview,omitempty"`
+}
+
+// ComponentYAMLPreview is the authored spec.preview block. Every field is
+// optional to the schema so a bad preview never blocks the catalog; the rule
+// table warns instead (component.spec.preview.invalid).
+type ComponentYAMLPreview struct {
+	Run   []string          `json:"run,omitempty"`
+	Port  int               `json:"port,omitempty"`
+	Needs []string          `json:"needs,omitempty"`
+	Path  string            `json:"path,omitempty"`
+	Env   map[string]string `json:"env,omitempty"`
 }
 
 // ComponentYAMLLink is one authored external link (data-model.md §2).

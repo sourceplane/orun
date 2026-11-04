@@ -65,6 +65,7 @@ description: Every ORUN_* variable the CLI reads, grouped by area, with where it
 | `ORUN_REPO_REMOTE` | `internal/agent/ground/ground.go` | The https clone URL that grounds the session in a repository; never carries a credential. Absent, the session boots ungrounded |
 | `ORUN_REPO_FULL_NAME` | `internal/agent/ground/ground.go`, `ground/token.go` | The `owner/repo` full name — the only repository the session may mint a credential for |
 | `ORUN_REPO_REF` | `internal/agent/ground/ground.go` | The branch or tag to clone at |
+| `ORUN_PREVIEW` | `cmd/orun/command_agent_serve.go` | `off` stops a grounded session from running its checkout's [live preview](../cli/orun-preview.md#in-a-coding-session) |
 
 ## Baseline build
 

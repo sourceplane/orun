@@ -269,6 +269,7 @@ func TestSessionEventVocabularyClosed(t *testing.T) {
 		SessionEventMessageAgent, SessionEventToolCall, SessionEventToolResult,
 		SessionEventApprovalRequested, SessionEventApprovalResolved,
 		SessionEventArtifactProduced, SessionEventCostSample, SessionEventError,
+		SessionEventPreviewChanged,
 	} {
 		if !ValidSessionEventKind(k) {
 			t.Fatalf("known kind %q rejected", k)

@@ -143,3 +143,19 @@ func TestRevAdvancesOnFold(t *testing.T) {
 		t.Fatal("input frames must not fold")
 	}
 }
+
+// TestPreviewChangedIsANote: the session's preview is a note; its states
+// never read as the session's own (a stopped preview is not a stopped
+// session).
+func TestPreviewChangedIsANote(t *testing.T) {
+	c := New()
+	c.Fold(attach.LiveFrame(0))
+	c.Fold(attach.EventFrame(1, "preview_changed", "", map[string]any{"state": "failed", "port": 4173, "detail": "web exited"}, ""))
+	c.Fold(attach.EventFrame(2, "preview_changed", "", map[string]any{"state": "stopped", "port": 4173}, ""))
+	if !c.Live || c.State != "" {
+		t.Fatalf("live=%v state=%q: a preview event changed the session", c.Live, c.State)
+	}
+	if got := c.Transcript(); !strings.HasPrefix(got, "note: preview: failed [web exited]\nnote: preview: stopped\n") {
+		t.Fatalf("transcript = %q", got)
+	}
+}

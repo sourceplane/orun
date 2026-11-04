@@ -269,9 +269,31 @@ func renderEventLine(out interface{ Write([]byte) (int, error) }, kind string, p
 		p("  [harness] %s", agentDash(str("phase")))
 	case "cost_sample":
 		p("  [cost] tokens=%v", payload["tokens"])
+	case "preview_changed":
+		p("  [preview] %s", previewLine(payload))
 	case "error":
 		p("  [error] %s", str("text"))
 	}
+}
+
+// previewLine renders a preview_changed payload: state, component, port and
+// path, and why it failed.
+func previewLine(payload map[string]any) string {
+	str := func(k string) string { s, _ := payload[k].(string); return s }
+	line := agentDash(str("state"))
+	if c := str("component"); c != "" {
+		line += " " + c
+	}
+	switch port := payload["port"].(type) {
+	case float64:
+		line += fmt.Sprintf(" :%d%s", int(port), str("path"))
+	case int:
+		line += fmt.Sprintf(" :%d%s", port, str("path"))
+	}
+	if d := str("detail"); d != "" {
+		line += " — " + d
+	}
+	return line
 }
 
 func agentDash(s string) string {

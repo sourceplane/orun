@@ -232,6 +232,13 @@ func commandUsesIntent(cmd *cobra.Command) bool {
 	if cmd == nil {
 		return false
 	}
+	// `orun preview status|logs` share leaf names with catalog commands; the
+	// preview finds its own intent and reads no catalog.
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Name() == "preview" && c.Parent() != nil && !c.Parent().HasParent() {
+			return false
+		}
+	}
 	switch cmd.Name() {
 	case "plan", "run", "validate", "debug", "component", "compositions", "get", "describe", "status", "logs", "intent":
 		return true
@@ -311,5 +318,6 @@ func init() {
 	registerBaselineCommand(rootCmd)
 	registerMcpCommand(rootCmd)
 	registerAgentCommand(rootCmd)
+	registerPreviewCommand(rootCmd)
 	registerGitCredentialCommand(rootCmd)
 }

@@ -167,7 +167,8 @@ silently rewritten.
 
 `state_changed · harness_event · message_user · message_agent · tool_call ·
 tool_result · approval_requested · approval_resolved · artifact_produced ·
-cost_sample · error`. CHECK-enforced (cloud, in `session_events`) and
+cost_sample · error · preview_changed` (the last, the session's live
+preview, from saas-parallel-baselining PB-12). CHECK-enforced (cloud, in `session_events`) and
 schema-enforced (orun, in the segment encoder). Note what is **absent**: no
 `status_asserted`, no `lifecycle_set` — the honesty invariant is enforced at
 the vocabulary level, not by vigilance.

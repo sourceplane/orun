@@ -85,6 +85,39 @@ properties:
                   enum:
                     - stop
                     - continue
+      preview:
+        type: object
+        description: How the component runs itself for the live preview (`orun preview`).
+        required:
+          - run
+          - port
+        properties:
+          run:
+            type: array
+            description: The dev server's argv, run from the component's directory.
+            minItems: 1
+            items:
+              type: string
+          port:
+            type: integer
+            description: Where the server answers on 127.0.0.1.
+            minimum: 1024
+            maximum: 65535
+          needs:
+            type: array
+            description: Components whose own previews start first.
+            items:
+              type: string
+          path:
+            type: string
+            description: The page the preview opens (default /).
+            pattern: ^/
+          env:
+            type: object
+            description: Plain, non-secret env for the server.
+            additionalProperties:
+              type: string
+        additionalProperties: false
       labels:
         type: object
         additionalProperties:
