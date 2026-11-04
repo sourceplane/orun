@@ -48,6 +48,11 @@ type Fact struct {
 	// checks | failing | open | merged | closed · url: answered |
 	// unreachable · run: running | success | failure | …
 	Status string
+	// Sha is the commit a merged pull request landed as (`mergeSha`), so a
+	// reader knows where the build's code is on the base branch — orun.work
+	// starts the plan's first change from it while the build carries on
+	// (saas-parallel-baselining PB2). Empty until it is merged.
+	Sha string
 	// Private is a repository's visibility, when the action knows it.
 	Private *bool
 	// Unpinned keeps the fact off a reader's pinned list — a health URL is
@@ -180,6 +185,7 @@ func prFacts(params map[string]any, out map[string]string, failed bool) []Fact {
 		return nil
 	case out["merged"] == "true":
 		f.Status = "merged"
+		f.Sha = strings.TrimSpace(out["mergeSha"])
 	case failed:
 		f.Status = "failing"
 	default:
