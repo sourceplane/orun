@@ -64,9 +64,6 @@ Thumbs.db
 # Stray .orun/ written by tests that resolve the workspace from cmd/orun's cwd.
 /cmd/orun/.orun/
 /examples/gha-actions/plan.json
-/website/.docusaurus/
-/website/docs-build/
-/website/node_modules/
 /website/.wrangler/
 
 # Local workspace state (content-addressed store, refs, live registries)

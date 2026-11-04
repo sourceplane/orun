@@ -6,31 +6,31 @@ This guide describes the compiler core — intent, compositions, expansion, job
 binding, and the plan — and its algorithms are still accurate. `orun` has
 grown several subsystems around that core that this document does not cover.
 Read them on the documentation site (sources under
-[website/docs](../website/docs)):
+[orun.dev/docs](https://orun.dev/docs/)):
 
 - **Catalog and change detection** — the resolved component catalog and the
   single change-detection engine behind `--changed`:
-  [service catalog](../website/docs/concepts/service-catalog.md),
-  [change detection](../website/docs/concepts/change-detection.md).
+  [service catalog](https://orun.dev/docs/concepts/service-catalog/),
+  [change detection](https://orun.dev/docs/concepts/change-detection/).
 - **Object model** — the content-addressed store every plan, run, and catalog
-  is sealed into: [state model](../website/docs/concepts/state-model.md),
-  [`orun objects`](../website/docs/cli/orun-objects.md).
+  is sealed into: [state model](https://orun.dev/docs/concepts/state-model/),
+  [`orun objects`](https://orun.dev/docs/cli/orun-objects/).
 - **Workflows** — the `workflow:` step form, `kind: Workflow` files, and
-  approval gates: [workflow actions](../website/docs/concepts/workflow-actions.md),
-  [workflow schema](../website/docs/reference/workflow-schema.md).
+  approval gates: [workflow actions](https://orun.dev/docs/concepts/workflow-actions/),
+  [workflow schema](https://orun.dev/docs/reference/workflow-schema/).
 - **Secrets** — `secret://` references, policies, redaction, and
-  `secretOutputs`: [secrets](../website/docs/concepts/secrets.md),
-  [scope references](../website/docs/reference/scope-references.md).
+  `secretOutputs`: [secrets](https://orun.dev/docs/concepts/secrets/),
+  [scope references](https://orun.dev/docs/reference/scope-references/).
 - **Agent runtime** — briefs, drivers, sessions, and the MCP surface:
-  [agent runtime](../website/docs/concepts/agent-runtime.md),
-  [`orun agent`](../website/docs/cli/orun-agent.md).
+  [agent runtime](https://orun.dev/docs/concepts/agent-runtime/),
+  [`orun agent`](https://orun.dev/docs/cli/orun-agent/).
 - **Scaffolding and baselines** — `orun new`, blueprints, and baseline
-  bootstrap: [baselines](../website/docs/concepts/baselines.md),
-  [`orun new`](../website/docs/cli/orun-new.md).
+  bootstrap: [baselines](https://orun.dev/docs/concepts/baselines/),
+  [`orun new`](https://orun.dev/docs/cli/orun-new/).
 - **Cockpit** — the terminal UI over the same state:
-  [cockpit overview](../website/docs/cockpit/overview.md).
+  [cockpit overview](https://orun.dev/docs/cockpit/overview/).
 
-The full package map is in [internals](../website/docs/architecture/internals.md).
+The full package map is in [internals](https://orun.dev/docs/architecture/internals/).
 Two vocabulary notes for readers of older copies: component configuration is
 declared as `parameters:` (with `parameterDefaults:` on groups and
 environments), not `inputs:`/`defaults:`; and the job templates a component

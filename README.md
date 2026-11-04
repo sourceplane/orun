@@ -166,7 +166,7 @@ docker run --rm -v "$PWD":/work -w /work ghcr.io/sourceplane/orun:v2.73.4 plan
 ```
 
 A release archive can be verified and installed by hand; see
-[Installation](https://orun-docs.pages.dev/start/installation).
+[Installation](https://orun.dev/docs/start/installation/).
 
 ## Quick start
 
@@ -181,7 +181,7 @@ git clone https://github.com/sourceplane/orun.git && cd orun && make build
 ```
 
 The full walkthrough is the
-[quick start](https://orun-docs.pages.dev/start/quick-start).
+[quick start](https://orun.dev/docs/start/quick-start/).
 
 ## Create a workspace and build a product from a baseline
 
@@ -214,10 +214,10 @@ orun baseline new cirrus --local --out ./acme-cloud --run-hooks \
 ```
 
 The guide
-[Create a workspace and build it from a baseline](https://orun-docs.pages.dev/examples/bootstrap-a-product-from-a-baseline)
+[Create a workspace and build it from a baseline](https://orun.dev/docs/examples/bootstrap-a-product-from-a-baseline/)
 covers prerequisites, every flag, what the platform enforces, verification,
 upgrades, and registering your own baseline. The model is explained in
-[Baselines](https://orun-docs.pages.dev/concepts/baselines).
+[Baselines](https://orun.dev/docs/concepts/baselines/).
 
 Or let an agent do all of it. **[SOFTWAREFACTORY.md](SOFTWAREFACTORY.md)**
 explains how to hand a product idea to Claude Code (or any agent that reads a
@@ -240,7 +240,7 @@ orun
 ```
 
 `orun <command> --help` is always current. The
-[CLI reference](https://orun-docs.pages.dev/cli/orun) has one page per
+[CLI reference](https://orun.dev/docs/cli/orun/) has one page per
 command.
 
 ## How it works
@@ -315,22 +315,22 @@ Everything orun records, sources, catalogs, plans, runs, jobs, and task
 contracts, is stored as immutable, content-addressed objects under `.orun/`.
 `orun objects` inspects the graph; Orunbase replicates it for a team.
 
-Read more: [How orun works](https://orun-docs.pages.dev/overview/how-orun-works),
-[the resource model](https://orun-docs.pages.dev/overview/resource-model),
-[design principles](https://orun-docs.pages.dev/principles),
-[architecture](https://orun-docs.pages.dev/architecture/internals).
+Read more: [How orun works](https://orun.dev/docs/overview/how-orun-works/),
+[the resource model](https://orun.dev/docs/overview/resource-model/),
+[design principles](https://orun.dev/docs/principles/),
+[architecture](https://orun.dev/docs/architecture/internals/).
 
 ## Documentation
 
-The documentation site is <https://orun-docs.pages.dev>; its source is
+The documentation site is <https://orun.dev/docs/>; its source is
 [`website/`](website/).
 
-- [What is orun?](https://orun-docs.pages.dev/overview/what-is-orun)
-- [Installation](https://orun-docs.pages.dev/start/installation) and [quick start](https://orun-docs.pages.dev/start/quick-start)
-- [Create a workspace and build it from a baseline](https://orun-docs.pages.dev/examples/bootstrap-a-product-from-a-baseline)
+- [What is orun?](https://orun.dev/docs/overview/what-is-orun/)
+- [Installation](https://orun.dev/docs/start/installation/) and [quick start](https://orun.dev/docs/start/quick-start/)
+- [Create a workspace and build it from a baseline](https://orun.dev/docs/examples/bootstrap-a-product-from-a-baseline/)
 - [Software factory](SOFTWAREFACTORY.md): hand an agent a product idea and get a live product, built on a baseline with the work visible in Orunbase
-- The four pillars: [declare](https://orun-docs.pages.dev/concepts/intent-model), [package and evolve](https://orun-docs.pages.dev/concepts/stacks), [ground agents](https://orun-docs.pages.dev/ai-context/orun-repositories), and [verify, plan, execute](https://orun-docs.pages.dev/overview/how-orun-works)
-- [CLI reference](https://orun-docs.pages.dev/cli/orun)
+- The four pillars: [declare](https://orun.dev/docs/concepts/intent-model/), [package and evolve](https://orun.dev/docs/concepts/stacks/), [ground agents](https://orun.dev/docs/ai-context/orun-repositories/), and [verify, plan, execute](https://orun.dev/docs/overview/how-orun-works/)
+- [CLI reference](https://orun.dev/docs/cli/orun/)
 - [Release notes](https://github.com/sourceplane/orun/releases)
 
 Orunbase, the hosted control plane, is documented at

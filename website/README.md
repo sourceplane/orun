@@ -1,59 +1,24 @@
-# orun documentation site
+# website/ — the retired docs host
 
-This directory is the Docusaurus source for the orun documentation, published
-at <https://orun-docs.pages.dev>. Content lives under `docs/`; the sidebar is
-`sidebars.js`; site settings are `docusaurus.config.js`.
+The orun docs are **https://orun.dev/docs/**. Their source moved to
+[sourceplane/orun-website](https://github.com/sourceplane/orun-website)
+(`apps/web/content/docs/`), the repository that serves orun.dev — the landing
+page, the installer and the docs — and deploys on every merge to its `main`.
 
-The docs are organised around orun's line, **platform discipline as code**, and
-its four pillars: 1 · Declare, 2 · Package & evolve, 3 · Ground agents, and
-4 · Verify → plan → execute. The sidebar groups pages by pillar; file paths, and
-so URLs, do not move when a page changes group. The design of this structure is
-the epic in [`specs/orun-docs-discipline/`](../specs/orun-docs-discipline/).
+What is left here is the old host, `orun-docs.pages.dev` (the `orun-docs`
+Cloudflare Pages project), turned into a redirect so that every link to it —
+in search results, old READMEs, issues — keeps working:
+`functions/_middleware.js` 301s every path to the same page under
+`https://orun.dev/docs/`, query string included (`/cli/orun/` →
+`/docs/cli/orun/`). `public/` holds a one-line page the middleware never lets
+anyone see; Pages needs a directory to deploy.
 
-## Local development
-
-```bash
-cd website
-npm ci
-npm run docs:start
-```
-
-## Production build
+Publish it once, by hand, from this directory (the project has no CI):
 
 ```bash
 cd website
-npm ci
-npm run docs:build     # writes docs-build/; broken links fail the build
-npm run docs:serve
-```
-
-## Deploy
-
-Deployment is a manual Cloudflare Pages publish; there is no CI workflow for
-the site yet.
-
-```bash
-cd website
-npm ci
-npm run docs:build
 wrangler login
-wrangler pages deploy docs-build --project-name orun-docs
+wrangler pages deploy public --project-name orun-docs --branch main
 ```
 
-## Conventions
-
-- One page per CLI command under `docs/cli/`, named `orun-<command>.md`, and
-  listed in `sidebars.js` under its pillar.
-- Open a concept page with why it matters for platform discipline, then the
-  mechanics. State only what the code does: when a declared rule is not
-  enforced, say so and link `concepts/standards.md`.
-- Frontmatter carries `title` and a one-sentence `description`. The title is
-  the H1; do not repeat it in the body.
-- Write "Orunbase" for the hosted control plane and `orun` for the engine.
-- Add a page under `docs/release-notes/` for every release with
-  user-visible changes and put it first in the release-notes sidebar list. The
-  `Releases` navbar link points at the GitHub releases page and needs no update.
-- `.docs-last-version` is being retired in favour of the release notes; if you
-  touch it, keep its version current.
-
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for the documentation policy.
+`wrangler` uploads `functions/` from the directory it runs in, so run it here.
