@@ -37,5 +37,5 @@ To start over, delete `acme-shop/`; it is git-ignored. To see everything
 
 ## Learn more
 
-- [Baselines](https://orun-docs.pages.dev/concepts/baselines): package a product's structure and standards, and evolve products built from them.
-- [`orun new`](https://orun-docs.pages.dev/cli/orun-new): blueprints, inputs, modules and phases.
+- [Baselines](https://orun.dev/docs/concepts/baselines/): package a product's structure and standards, and evolve products built from them.
+- [`orun new`](https://orun.dev/docs/cli/orun-new/): blueprints, inputs, modules and phases.

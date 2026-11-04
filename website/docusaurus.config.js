@@ -5,8 +5,16 @@ const require = createRequire(import.meta.url);
 const config = {
   title: 'orun',
   tagline: 'Platform discipline as code. Declare your platform\'s structure and standards as intent, package them as baselines, ground your agents in them, and let a runner verify, plan, and execute.',
-  url: 'https://orun-docs.pages.dev',
-  baseUrl: '/',
+  // The docs live at https://orun.dev/docs/. orun.dev's Worker (orun-cloud,
+  // apps/website) serves /docs/* from the `orun-docs` Pages project, and the
+  // build is written under docs-build/docs/ so the project serves the same
+  // paths; functions/_middleware.js 301s anyone who reaches the project
+  // directly (orun-docs.pages.dev) to the same page on orun.dev.
+  url: 'https://orun.dev',
+  baseUrl: '/docs/',
+  // Pages serves every page as a directory (`/cli/orun/`) and redirects the
+  // bare form, so links and canonicals use the form that answers 200.
+  trailingSlash: true,
   organizationName: 'sourceplane',
   projectName: 'orun',
   onBrokenLinks: 'throw',

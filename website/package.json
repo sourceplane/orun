@@ -4,8 +4,8 @@
   "description": "Documentation site for orun",
   "scripts": {
     "docs:start": "docusaurus start",
-    "docs:build": "docusaurus build --out-dir docs-build",
-    "docs:serve": "docusaurus serve --dir docs-build"
+    "docs:build": "rm -rf docs-build && docusaurus build --out-dir docs-build/docs",
+    "docs:serve": "docusaurus serve --dir docs-build/docs"
   },
   "repository": {
     "type": "git",

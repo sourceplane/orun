@@ -15,7 +15,7 @@ people can help you quickly.
 
 ## Before you ask
 
-- Check the [documentation](https://orun-docs.pages.dev). The CLI reference and
+- Check the [documentation](https://orun.dev/docs/). The CLI reference and
   the concept pages answer most "how do I" questions.
 - Run `orun <command> --help`. The help text is generated from the same code
   that runs, so it is always current.

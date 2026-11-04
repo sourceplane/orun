@@ -6,7 +6,7 @@ declarations instead of inferring conventions from nearby code. This directory i
 reusable context pack that teaches an agent to do that.
 
 The canonical narrative is the docs page
-[Agents in orun repositories](https://orun-docs.pages.dev/ai-context/orun-repositories);
+[Agents in orun repositories](https://orun.dev/docs/ai-context/orun-repositories/);
 this pack is the same guidance in a form you can copy into another repository.
 
 It is not a guide to modifying the Orun CLI source code. It explains how to understand and safely change an application, platform, or infrastructure repository that uses `intent.yaml`, discovered `component.yaml` files, composition sources, profiles, dependencies, and compiled plans.

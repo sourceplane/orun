@@ -1,8 +1,11 @@
 # orun documentation site
 
-This directory is the Docusaurus source for the orun documentation, published
-at <https://orun-docs.pages.dev>. Content lives under `docs/`; the sidebar is
-`sidebars.js`; site settings are `docusaurus.config.js`.
+This directory is the Docusaurus source for the orun documentation, read at
+<https://orun.dev/docs/>. Content lives under `docs/`; the sidebar is
+`sidebars.js`; site settings are `docusaurus.config.js`. orun.dev's Worker
+serves `/docs/*` from the `orun-docs` Pages project, and
+`functions/_middleware.js` 301s direct visits to `orun-docs.pages.dev` there —
+see [Deploying docs](docs/contributing/deploying-docs.md).
 
 The docs are organised around orun's line, **platform discipline as code**, and
 its four pillars: 1 · Declare, 2 · Package & evolve, 3 · Ground agents, and
@@ -23,8 +26,8 @@ npm run docs:start
 ```bash
 cd website
 npm ci
-npm run docs:build     # writes docs-build/; broken links fail the build
-npm run docs:serve
+npm run docs:build     # writes docs-build/docs/; broken links fail the build
+npm run docs:serve     # http://localhost:3000/docs/
 ```
 
 ## Deploy
@@ -37,8 +40,11 @@ cd website
 npm ci
 npm run docs:build
 wrangler login
-wrangler pages deploy docs-build --project-name orun-docs
+wrangler pages deploy docs-build --project-name orun-docs --branch main
 ```
+
+Run it from `website/` so `functions/` (the pages.dev redirect) is uploaded
+with the build.
 
 ## Conventions
 
