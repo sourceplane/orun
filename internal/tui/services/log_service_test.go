@@ -118,10 +118,16 @@ func TestTailLogs_FollowStreamsLateLogs(t *testing.T) {
 	// Stream the step log only after the follow has started; SetStepLog both
 	// writes the file and re-persists the snapshot with the LogFile set, so the
 	// next follow tick discovers it.
+	// The writer re-persists the snapshot after the line is readable, so the
+	// test waits for it before returning: otherwise t.TempDir's cleanup races
+	// its last write ("directory not empty").
+	wrote := make(chan struct{})
 	go func() {
+		defer close(wrote)
 		time.Sleep(150 * time.Millisecond)
 		_ = wt.SetStepLog("job-b", "step-1", []byte("delayed-line\n"))
 	}()
+	defer func() { <-wrote }()
 
 	select {
 	case ev, ok := <-ch:
