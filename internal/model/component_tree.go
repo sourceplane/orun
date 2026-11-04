@@ -21,6 +21,10 @@ type ComponentTree struct {
 type ComponentTreeMetadata struct {
 	Intent      string `yaml:"intent" json:"intent"`
 	GeneratedAt string `yaml:"generatedAt" json:"generatedAt"`
+	// Format is the cache's shape version. The loader trusts only its own, so
+	// a cache an older orun wrote, without a field added since, is re-read
+	// from the manifests.
+	Format int `yaml:"format,omitempty" json:"format,omitempty"`
 }
 
 // ComponentTreeDiscovery records discovery settings used to build the tree.
@@ -44,58 +48,61 @@ type ComponentTreeComponent struct {
 	// references). Same cache rule: references only, never values.
 	OptionalSecretEnv map[string]string      `yaml:"optionalSecretEnv,omitempty" json:"optionalSecretEnv,omitempty"`
 	Parameters        map[string]interface{} `yaml:"parameters,omitempty" json:"parameters,omitempty"`
-	Overrides   ComponentOverrides     `yaml:"overrides,omitempty" json:"overrides,omitempty"`
-	Labels      map[string]string      `yaml:"labels,omitempty" json:"labels,omitempty"`
-	DependsOn   []Dependency           `yaml:"dependsOn,omitempty" json:"dependsOn,omitempty"`
-	Change      ComponentChange        `yaml:"change,omitempty" json:"change,omitempty"`
-	Lane        string                 `yaml:"lane,omitempty" json:"lane,omitempty"`
-	Source      string                 `yaml:"source" json:"source"`
-	SourcePath  string                 `yaml:"sourcePath,omitempty" json:"sourcePath,omitempty"`
-	FileSize    int64                  `yaml:"fileSize,omitempty" json:"fileSize,omitempty"`
-	FileModTime string                 `yaml:"fileModTime,omitempty" json:"fileModTime,omitempty"`
+	Overrides         ComponentOverrides     `yaml:"overrides,omitempty" json:"overrides,omitempty"`
+	Labels            map[string]string      `yaml:"labels,omitempty" json:"labels,omitempty"`
+	DependsOn         []Dependency           `yaml:"dependsOn,omitempty" json:"dependsOn,omitempty"`
+	Change            ComponentChange        `yaml:"change,omitempty" json:"change,omitempty"`
+	Lane              string                 `yaml:"lane,omitempty" json:"lane,omitempty"`
+	Preview           *ComponentPreview      `yaml:"preview,omitempty" json:"preview,omitempty"`
+	Source            string                 `yaml:"source" json:"source"`
+	SourcePath        string                 `yaml:"sourcePath,omitempty" json:"sourcePath,omitempty"`
+	FileSize          int64                  `yaml:"fileSize,omitempty" json:"fileSize,omitempty"`
+	FileModTime       string                 `yaml:"fileModTime,omitempty" json:"fileModTime,omitempty"`
 }
 
 // ToComponent converts a cache entry back into the internal component model.
 func (entry ComponentTreeComponent) ToComponent() Component {
 	return Component{
-		Name:       entry.Name,
-		Type:       entry.Type,
-		Domain:     entry.Domain,
-		Enabled:    entry.Enabled,
-		Path:       entry.Path,
+		Name:              entry.Name,
+		Type:              entry.Type,
+		Domain:            entry.Domain,
+		Enabled:           entry.Enabled,
+		Path:              entry.Path,
 		Subscribe:         entry.Subscribe,
 		Env:               entry.Env,
 		SecretEnv:         entry.SecretEnv,
 		OptionalSecretEnv: entry.OptionalSecretEnv,
 		Parameters:        entry.Parameters,
-		Overrides:  entry.Overrides,
-		Labels:     entry.Labels,
-		DependsOn:  entry.DependsOn,
-		Change:     entry.Change,
-		Lane:       entry.Lane,
-		SourcePath: entry.SourcePath,
+		Overrides:         entry.Overrides,
+		Labels:            entry.Labels,
+		DependsOn:         entry.DependsOn,
+		Change:            entry.Change,
+		Lane:              entry.Lane,
+		Preview:           entry.Preview,
+		SourcePath:        entry.SourcePath,
 	}
 }
 
 // FromComponent creates a cache entry from the internal component model.
 func FromComponent(component Component, source string) ComponentTreeComponent {
 	return ComponentTreeComponent{
-		Name:       component.Name,
-		Type:       component.Type,
-		Domain:     component.Domain,
-		Enabled:    component.Enabled,
-		Path:       component.Path,
+		Name:              component.Name,
+		Type:              component.Type,
+		Domain:            component.Domain,
+		Enabled:           component.Enabled,
+		Path:              component.Path,
 		Subscribe:         component.Subscribe,
 		Env:               component.Env,
 		SecretEnv:         component.SecretEnv,
 		OptionalSecretEnv: component.OptionalSecretEnv,
 		Parameters:        component.Parameters,
-		Overrides:  component.Overrides,
-		Labels:     component.Labels,
-		DependsOn:  component.DependsOn,
-		Change:     component.Change,
-		Lane:       component.Lane,
-		Source:     source,
-		SourcePath: component.SourcePath,
+		Overrides:         component.Overrides,
+		Labels:            component.Labels,
+		DependsOn:         component.DependsOn,
+		Change:            component.Change,
+		Lane:              component.Lane,
+		Preview:           component.Preview,
+		Source:            source,
+		SourcePath:        component.SourcePath,
 	}
 }

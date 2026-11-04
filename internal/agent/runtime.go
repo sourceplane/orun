@@ -65,6 +65,14 @@ type RunOptions struct {
 	// supplies the run identity (agent type, brief, catalog, principal).
 	Seal *SealInput
 	Refs refstore.RefStore
+	// Notices, when set, carries events the body reports on its own beside
+	// the driver's (preview_changed). The loop appends each as it arrives.
+	Notices *Notices
+	// BeforeEnd, when set, runs once when the loop is about to log its
+	// terminal state (the driver exited, or ctx ended); notices posted by
+	// then are logged first. serve stops the preview here, so its `stopped`
+	// is in the log.
+	BeforeEnd func()
 }
 
 // SessionEvent is one observed session-log entry (the runtime's live view of
@@ -163,6 +171,7 @@ func Run(ctx context.Context, store objectstore.ObjectStore, opts RunOptions) (R
 	for {
 		select {
 		case <-ctx.Done():
+			l.endNotices()
 			log.Append(nodes.SessionEventError, map[string]any{"error": "canceled"}, "")
 			l.outcome.Status = "canceled"
 			if _, err := log.Seal(ctx, store); err != nil {
@@ -171,6 +180,8 @@ func Run(ctx context.Context, store objectstore.ObjectStore, opts RunOptions) (R
 			return finish(ctx, store, opts, log, l.outcome, ctx.Err())
 		case in := <-inputCh:
 			l.handleInput(in)
+		case <-opts.Notices.readyCh():
+			l.drainNotices()
 		case d := <-l.delivered:
 			log.Append(nodes.SessionEventMessageUser,
 				map[string]any{"text": d.text, "principal": d.principal}, "")
@@ -197,6 +208,7 @@ func Run(ctx context.Context, store objectstore.ObjectStore, opts RunOptions) (R
 				}
 				break
 			}
+			l.endNotices()
 			log.Append(nodes.SessionEventStateChanged, map[string]any{"state": l.outcome.Status}, "")
 			if _, sErr := log.Seal(ctx, store); sErr != nil {
 				return RunResult{}, sErr
@@ -204,6 +216,24 @@ func Run(ctx context.Context, store objectstore.ObjectStore, opts RunOptions) (R
 			return finish(ctx, store, opts, log, l.outcome, err)
 		}
 	}
+}
+
+// drainNotices appends every queued body-reported event, in order.
+func (l *runLoop) drainNotices() {
+	if l.opts.Notices == nil {
+		return
+	}
+	for _, n := range l.opts.Notices.take() {
+		l.log.Append(n.Kind, n.Payload, "")
+	}
+}
+
+// endNotices runs BeforeEnd, then logs what it and anyone else posted.
+func (l *runLoop) endNotices() {
+	if l.opts.BeforeEnd != nil {
+		l.opts.BeforeEnd()
+	}
+	l.drainNotices()
 }
 
 // handleInput folds one head input: log it (attributed), forward it to the

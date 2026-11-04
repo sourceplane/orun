@@ -18,8 +18,9 @@ import (
 //
 // Linting is bounded to the structured levels an author edits by hand and
 // where the known vocabulary is closed: the document root, `metadata`, `spec`,
-// and each object entry of `spec.subscribe.environments`. Free-form maps
-// (`spec.parameters`, `spec.labels`, `spec.env`, and per-environment maps) and
+// `spec.preview`, and each object entry of `spec.subscribe.environments`.
+// Free-form maps (`spec.parameters`, `spec.labels`, `spec.env`,
+// `spec.preview.env`, and per-environment maps) and
 // the `spec.dependsOn` list are not linted — their keys or values are
 // author-defined or span a wider plan-engine vocabulary than the catalog
 // models, so flagging them would produce false positives.
@@ -41,6 +42,9 @@ func unknownFields(raw any) []string {
 	if spec, ok := root["spec"].(map[string]any); ok {
 		out = appendUnknown(out, spec, knownKeys(reflect.TypeOf(catalogmodel.ComponentYAMLSpec{})), "/spec")
 		out = append(out, unknownSubscribeFields(spec)...)
+		if pv, ok := spec["preview"].(map[string]any); ok {
+			out = appendUnknown(out, pv, knownKeys(reflect.TypeOf(catalogmodel.ComponentYAMLPreview{})), "/spec/preview")
+		}
 	}
 
 	sort.Strings(out)

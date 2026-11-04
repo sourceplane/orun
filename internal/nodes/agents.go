@@ -70,6 +70,11 @@ const (
 	SessionEventArtifactProduced  = "artifact_produced"
 	SessionEventCostSample        = "cost_sample"
 	SessionEventError             = "error"
+	// SessionEventPreviewChanged reports the session's live preview — the dev
+	// server serve runs from the checkout's declaration: {state: starting |
+	// ready | failed | stopped, port?, component?, path?, detail?}
+	// (saas-parallel-baselining PB-12).
+	SessionEventPreviewChanged = "preview_changed"
 )
 
 // ValidSessionEventKind reports whether k is in the closed session-event
@@ -80,7 +85,8 @@ func ValidSessionEventKind(k string) bool {
 	case SessionEventStateChanged, SessionEventHarness, SessionEventMessageUser,
 		SessionEventMessageAgent, SessionEventToolCall, SessionEventToolResult,
 		SessionEventApprovalRequested, SessionEventApprovalResolved,
-		SessionEventArtifactProduced, SessionEventCostSample, SessionEventError:
+		SessionEventArtifactProduced, SessionEventCostSample, SessionEventError,
+		SessionEventPreviewChanged:
 		return true
 	default:
 		return false

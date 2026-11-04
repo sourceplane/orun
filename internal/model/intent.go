@@ -31,6 +31,8 @@ type Intent struct {
 	// SecretEnv maps env var names to secret:// references (never values —
 	// the planner rejects literals; specs/orun-secrets/data-model.md §2.1).
 	SecretEnv map[string]string `yaml:"secretEnv,omitempty" json:"secretEnv,omitempty"`
+	// Preview names the component whose spec.preview `orun preview` runs.
+	Preview *IntentPreview `yaml:"preview,omitempty" json:"preview,omitempty"`
 }
 
 // IntentExecution holds optional execution-layer configuration in intent.yaml.
@@ -372,10 +374,13 @@ type Component struct {
 	// Lane places this component's jobs: the name of a group declared in
 	// execution.lanes.groups, or LaneIsolated so they never share a runner.
 	// Empty leaves them to execution.lanes.mode (specs/orun-lanes §3.2).
-	Lane                      string `yaml:"lane,omitempty" json:"lane,omitempty"`
-	ResolvedComposition       string `yaml:"-" json:"-"`
-	ResolvedCompositionSource string `yaml:"-" json:"-"`
-	SourcePath                string `yaml:"-" json:"-"`
+	Lane string `yaml:"lane,omitempty" json:"lane,omitempty"`
+	// Preview is how the component runs itself for the live preview
+	// (`orun preview`). Inert to the plan engine.
+	Preview                   *ComponentPreview `yaml:"preview,omitempty" json:"preview,omitempty"`
+	ResolvedComposition       string            `yaml:"-" json:"-"`
+	ResolvedCompositionSource string            `yaml:"-" json:"-"`
+	SourcePath                string            `yaml:"-" json:"-"`
 }
 
 // ComponentSubscribe declares which environments a component participates in.

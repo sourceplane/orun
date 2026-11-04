@@ -6,6 +6,7 @@ import (
 
 	"github.com/sourceplane/orun/internal/catalogmodel"
 	"github.com/sourceplane/orun/internal/inputglob"
+	"github.com/sourceplane/orun/internal/model"
 )
 
 // validate is stage 9 of the resolver. It applies the rule table from
@@ -93,6 +94,20 @@ func validate(authored []AuthoredManifest, manifests []*catalogmodel.ComponentMa
 					Code:     "component.spec.change.inputs.invalid",
 					Message:  err.Error(),
 					Severity: SeverityError,
+				})
+			}
+		}
+
+		// spec.preview — warn default, error strict: a bad preview only
+		// breaks `orun preview`, never the catalog or a plan.
+		if pv := am.Component.Spec.Preview; pv != nil {
+			for _, msg := range model.PreviewProblems(pv.Run, pv.Port, pv.Path) {
+				add(ValidationIssue{
+					File:     file,
+					Pointer:  "/spec/preview",
+					Code:     "component.spec.preview.invalid",
+					Message:  "spec.preview." + msg,
+					Severity: SeverityWarning,
 				})
 			}
 		}

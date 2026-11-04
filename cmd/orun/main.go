@@ -14,13 +14,14 @@ import (
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/expand"
 	"github.com/sourceplane/orun/internal/git"
-	"github.com/sourceplane/orun/internal/loader"
 	"github.com/sourceplane/orun/internal/lanes"
+	"github.com/sourceplane/orun/internal/loader"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/normalize"
 	"github.com/sourceplane/orun/internal/objrun"
 	"github.com/sourceplane/orun/internal/planner"
 	"github.com/sourceplane/orun/internal/preset"
+	"github.com/sourceplane/orun/internal/preview"
 	"github.com/sourceplane/orun/internal/render"
 	"github.com/sourceplane/orun/internal/revkey"
 	"github.com/sourceplane/orun/internal/runbundle"
@@ -828,6 +829,9 @@ func validateFiles() error {
 	}
 	if errs := trigger.ValidatePlanOptions(intent); len(errs) > 0 {
 		return trigger.FormatErrors(errs)
+	}
+	if errs := preview.Validate(intent); len(errs) > 0 {
+		return formatPreviewErrors(errs)
 	}
 
 	fmt.Println("✓ All validation passed")

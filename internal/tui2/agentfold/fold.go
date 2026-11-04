@@ -186,6 +186,8 @@ func (c *Conversation) foldEvent(f attach.Frame) {
 		}
 	case "error":
 		add(Item{Kind: ItemNote, Text: "error: " + str("text")})
+	case "preview_changed":
+		add(Item{Kind: ItemNote, Text: "preview: " + str("state"), Detail: str("detail")})
 	case "child_spawned", "child_completed", "child_failed":
 		add(Item{Kind: ItemNote, Text: strings.ReplaceAll(f.Kind, "_", " ") + ": " + str("sessionId")})
 	}

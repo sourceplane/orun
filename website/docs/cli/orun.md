@@ -48,6 +48,7 @@ Running `orun` with no arguments on an interactive terminal opens the
 | [`orun mcp`](./orun-mcp.md) | Serve the orun MCP: one agent surface over the pen and platform planes |
 | [`orun skills`](./orun-skills.md) | Hosted agent playbooks: list the registry, pull native skill files |
 | [`orun agent`](./orun-agent.md) | The agent runtime: types, base literacy, sessions, drivers, serve, attach, replay |
+| [`orun preview`](./orun-preview.md) | The live preview: run the dev server the repository declares, detached; a coding session keeps it running |
 | [`orun task`](./orun-task.md) | Tasks, epics, and milestones: cloud-issued identity, repo-authored contracts, offline checks |
 | [`orun spec`](./orun-spec.md) | Spec docs: repo-authored markdown annotated to epics, pushed with their commit |
 | [`orun pr`](./orun-pr.md) | The provenance pen: open, preflight, and land task-carrying pull requests |

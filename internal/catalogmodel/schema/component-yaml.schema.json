@@ -249,6 +249,36 @@
         "path": {
           "type": "string"
         },
+        "preview": {
+          "additionalProperties": true,
+          "properties": {
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "needs": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "path": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer"
+            },
+            "run": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
         "providesApis": {
           "items": {
             "type": "string"
