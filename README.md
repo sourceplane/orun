@@ -32,7 +32,7 @@ It is a single Go binary. State lives in your repository. No server is
 required; when a team needs shared state, live runs, agents, or a product
 built from a baseline, the same CLI talks to **[Orunbase](https://orunbase.com)**,
 the hosted control plane, which is itself
-[open source](https://github.com/sourceplane/orun-cloud) and written as orun
+open source and written as orun
 intent.
 
 ```
