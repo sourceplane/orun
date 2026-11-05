@@ -38,7 +38,6 @@ This document explains how the project works day to day. The
 | Requirement | Version | Used for |
 |---|---|---|
 | Go | 1.25 or later (see `go.mod`) | Building and testing the CLI |
-| Node.js and npm | Node 20 or later | Building the documentation site under `website/` |
 | Docker | any recent release | Only when working on the Docker runner |
 | `kiox` | optional | Running orun as a pinned OCI provider |
 
@@ -146,21 +145,26 @@ reviewable on its own.
 
 User-facing documentation lives in two places:
 
-- `website/docs/` is the documentation site (Docusaurus). It is the source of
-  truth for concepts, guides, and the CLI reference.
+- **https://orun.dev/docs/** is the documentation site (Docusaurus). It is
+  the source of truth for concepts, guides, the CLI reference and the release
+  notes, and its source is
+  [sourceplane/orun-website](https://github.com/sourceplane/orun-website),
+  under `apps/web/content/docs/` (it moved out of this repository's `website/`;
+  the old `orun-docs.pages.dev` host now redirects there).
 - `README.md` is the front door. It should stay short and link into the site.
 
 When a change alters a command, a flag, an exit code, a file format, or an
-environment variable, update the matching page under `website/docs/` in the
-same pull request. Add a release-notes entry under
-`website/docs/release-notes/` for user-visible changes.
+environment variable, open the matching docs change in sourceplane/orun-website
+(`apps/web/content/docs/`) alongside the pull request here, and link the two.
+Add a release-notes entry under `apps/web/content/docs/release-notes/` there
+for user-visible changes.
 
-Build the site locally before pushing; broken links fail the build:
+Build the docs locally in that repository before pushing; broken links fail
+the build:
 
 ```bash
-cd website
-npm ci
-npm run docs:build
+pnpm install
+pnpm -F @app/web build
 ```
 
 `docs/` at the repository root holds long-form architecture and design
@@ -186,8 +190,9 @@ Releases are cut by maintainers from `main`.
    `linux` and `darwin` on `amd64` and `arm64`, publishes them as a GitHub
    release with a `checksums.txt`, and pushes the kiox provider image to
    `ghcr.io/sourceplane/orun:vX.Y.Z`.
-4. Release notes for the version are added under
-   `website/docs/release-notes/` and linked from `website/sidebars.js`.
+4. Release notes for the version are added in sourceplane/orun-website,
+   under `apps/web/content/docs/release-notes/`, and linked from
+   `apps/web/sidebars.js`; merging there publishes them on orun.dev.
 
 The project follows [semantic versioning](https://semver.org). Breaking
 changes to intent schemas, `plan.json`, or the `.orun/` object model bump the

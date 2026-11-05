@@ -14,6 +14,6 @@
 
 - [ ] `make fmt lint test` passes locally
 - [ ] Tests cover the change (a regression test for a bug fix)
-- [ ] Documentation under `website/docs/` is updated for any user-visible change
-- [ ] Release notes updated under `website/docs/release-notes/` if user visible
+- [ ] Docs updated in [sourceplane/orun-website](https://github.com/sourceplane/orun-website) (`apps/web/content/docs/`) for any user-visible change, and linked here
+- [ ] Release notes added there under `apps/web/content/docs/release-notes/` if user visible
 - [ ] Commits are signed off (`git commit -s`)

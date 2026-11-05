@@ -91,10 +91,10 @@ a live product within about an hour and a half.
 
 Everything the skill does is plain CLI. If you would rather drive, or you
 want to understand what it is doing, the walkthrough is on the docs site:
-[Create a workspace and build it from a baseline](https://orun-docs.pages.dev/examples/bootstrap-a-product-from-a-baseline),
-with the [`orun baseline`](https://orun-docs.pages.dev/cli/orun-baseline),
-[`orun task`](https://orun-docs.pages.dev/cli/orun-task), and
-[`orun pr`](https://orun-docs.pages.dev/cli/orun-pr) references. The skill
+[Create a workspace and build it from a baseline](https://orun.dev/docs/examples/bootstrap-a-product-from-a-baseline/),
+with the [`orun baseline`](https://orun.dev/docs/cli/orun-baseline/),
+[`orun task`](https://orun.dev/docs/cli/orun-task/), and
+[`orun pr`](https://orun.dev/docs/cli/orun-pr/) references. The skill
 file itself is readable top to bottom and doubles as the checklist.
 
 ## Things we learned the hard way

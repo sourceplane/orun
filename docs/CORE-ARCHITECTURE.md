@@ -5,7 +5,7 @@ This document explains the core runtime flow and how to extend `orun` in a CNCF-
 ## Runtime Flow (Compiler Pipeline)
 
 `orun plan` runs a six-stage compiler (the same six stages named in the README and in
-[the compiler pipeline page](../website/docs/architecture/compiler-pipeline.md)):
+[the compiler pipeline page](https://orun.dev/docs/architecture/compiler-pipeline/)):
 
 | Phase | Name | What it does |
 |---|---|---|
@@ -26,7 +26,7 @@ The pipeline is intentionally split into focused packages under [internal](../in
 - [internal/render](../internal/render/plan.go): materialize — deterministic output rendering.
 
 The full package map, including the subsystems added since this document was
-written, is in [internals](../website/docs/architecture/internals.md).
+written, is in [internals](https://orun.dev/docs/architecture/internals/).
 
 ## Step Phases and Ordering
 

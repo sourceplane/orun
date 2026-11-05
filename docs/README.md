@@ -2,8 +2,10 @@
 
 This directory holds long-form architecture and design documents for people
 working **on** orun. User-facing documentation (concepts, guides, the CLI
-reference, release notes) lives on the documentation site, whose source is
-under [`website/docs/`](../website/docs/).
+reference, release notes) lives on the documentation site,
+[orun.dev/docs](https://orun.dev/docs/), whose source is in
+[sourceplane/orun-website](https://github.com/sourceplane/orun-website)
+(`apps/web/content/docs/`).
 
 | Document | What it covers |
 |---|---|

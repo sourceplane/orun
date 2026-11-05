@@ -15,7 +15,7 @@ Inspect these files and directories first:
 | `compositions/`, `stacks/`, `platform/` | Composition packages | Execution contracts and schemas |
 | `stack.yaml` | Stack package manifest | Composition package metadata and registry target |
 | `.github/workflows/` | CI entrypoints | Look for `orun plan`, `orun run`, and trigger payload usage |
-| `README.md`, `docs/`, `website/docs/` | Human documentation | Must stay aligned with component model |
+| `README.md`, `docs/` (user docs: sourceplane/orun-website, `apps/web/content/docs/`) | Human documentation | Must stay aligned with component model |
 | `services/`, `apps/`, `packages/`, `infra/`, `charts/`, `deploy/`, `website/` | Common component roots | Often contain discovered component manifests |
 
 Do not assume the names above are exhaustive. The actual source of truth is `intent.discovery.roots`.
