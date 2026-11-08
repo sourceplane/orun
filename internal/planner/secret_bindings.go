@@ -115,7 +115,16 @@ func mergeBindingRefs(secretEnv map[string]string, bindings []model.ResolvedSecr
 
 	merged := make(map[string]string, len(secretEnv)+len(bindings))
 	for k, v := range secretEnv {
-		merged[k] = v
+		bound, ok, err := bindContext(v, workspace, project, env)
+		if err != nil {
+			return nil, fmt.Errorf("secretEnv %s: %w", k, err)
+		}
+		if !ok {
+			// No scope to bind from (an unlinked repo planned offline): keep the
+			// reference exactly as authored, as every CLI before SG3 did.
+			bound = v
+		}
+		merged[k] = bound
 	}
 
 	for _, b := range bindings {
@@ -164,7 +173,7 @@ func mergeBindingRefs(secretEnv map[string]string, bindings []model.ResolvedSecr
 // visible here is an env var name the HARD map (secretEnv ∪ profile
 // bindings) also claims — one name cannot be fail-closed and best-effort at
 // once, so that is a compile error naming the key.
-func mergeOptionalRefs(optionalSecretEnv, hardRefs map[string]string) (map[string]string, error) {
+func mergeOptionalRefs(optionalSecretEnv, hardRefs map[string]string, workspace, project, env string) (map[string]string, error) {
 	if len(optionalSecretEnv) == 0 {
 		return nil, nil
 	}
@@ -173,9 +182,63 @@ func mergeOptionalRefs(optionalSecretEnv, hardRefs map[string]string) (map[strin
 		if _, taken := hardRefs[k]; taken {
 			return nil, fmt.Errorf("key %s is bound as both a required reference (secretEnv or a profile secretBinding) and an optionalSecretEnv reference — one env var cannot be fail-closed and best-effort at once", k)
 		}
-		merged[k] = v
+		bound, ok, err := bindContext(v, workspace, project, env)
+		if err != nil {
+			return nil, fmt.Errorf("optionalSecretEnv %s: %w", k, err)
+		}
+		if !ok {
+			bound = v
+		}
+		merged[k] = bound
 	}
 	return merged, nil
+}
+
+// bindContext fills a secret reference's omitted workspace, project and env
+// from the job's own scope (specs/orun-scope-engine SG3, design.md § 2), so one
+// manifest line — `secret://DATABASE_URL`, or `secret://env:prod/WIRING_X` for
+// a job that reads another environment's value — works in every workspace,
+// repository and environment it is planned into.
+//
+// It never overrides an authored dimension and never widens: the server still
+// receives a fully pinned reference and still verifies its workspace and
+// project against the run. A reference that is already pinned is returned in
+// its AUTHORED spelling, so a manifest that did not change keeps its plan
+// digest. The component dimension is left as authored: the server derives it
+// from the lease, and an emitted segment is only an assertion.
+//
+// ok is false when a dimension is omitted and the plan has none to give; the
+// caller then keeps the reference as authored, exactly as before SG3, so a plan
+// that compiles today never stops compiling. A value that is not a secret:// reference, or does not parse, is
+// returned unchanged for the expander's guards to report.
+func bindContext(raw, workspace, project, env string) (string, bool, error) {
+	if !scoperef.IsSchemeRef(raw, scoperef.SchemeSecret) {
+		return raw, true, nil
+	}
+	ref, err := scoperef.Parse(raw)
+	if err != nil {
+		return raw, true, nil
+	}
+	if ref.Workspace != "" && ref.Project != "" && ref.Env != "" {
+		return raw, true, nil
+	}
+	if ref.Workspace == "" {
+		ref.Workspace = workspace
+	}
+	if ref.Project == "" {
+		ref.Project = project
+	}
+	if ref.Env == "" {
+		ref.Env = env
+	}
+	if ref.Workspace == "" || ref.Project == "" || ref.Env == "" {
+		return "", false, nil
+	}
+	bound := ref.String()
+	if _, err := scoperef.Parse(bound); err != nil {
+		return "", false, fmt.Errorf("binding the reference to the run's scope produced an invalid reference: %w", err)
+	}
+	return bound, true, nil
 }
 
 // sameRef reports whether two reference spellings denote the same reference.

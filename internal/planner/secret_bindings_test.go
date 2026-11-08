@@ -165,3 +165,81 @@ func TestPlanJobs_RequiredBindingUnmappableIsCompileError(t *testing.T) {
 		t.Fatal("expected compile error for required-but-unmappable binding")
 	}
 }
+
+// SG3: omitted dimensions bind from the job's scope.
+func TestBindContext(t *testing.T) {
+	cases := []struct {
+		name, in, ws, prj, env, want string
+		ok                          bool
+	}{
+		{"fully contextual", "secret://CLOUDFLARE_API_TOKEN", "ws_ABC", "web", "stage", "secret://ws_ABC/project:web/env:stage/CLOUDFLARE_API_TOKEN", true},
+		{"env pinned keeps its env", "secret://env:prod/WIRING_X", "ws_ABC", "web", "stage", "secret://ws_ABC/project:web/env:prod/WIRING_X", true},
+		{"workspace-wide key", "secret://ws_ABC/NPM_TOKEN", "ws_ABC", "web", "dev", "secret://ws_ABC/project:web/env:dev/NPM_TOKEN", true},
+		{"version kept", "secret://DB@7", "ws_ABC", "web", "prod", "secret://ws_ABC/project:web/env:prod/DB@7", true},
+		{"authored workspace is never overridden", "secret://other/KEY", "ws_ABC", "web", "prod", "secret://other/project:web/env:prod/KEY", true},
+		{"fully pinned positional keeps its spelling", "secret://acme/api/prod/DB", "ws_ABC", "web", "stage", "secret://acme/api/prod/DB", true},
+		{"no workspace to bind", "secret://KEY", "", "web", "prod", "", false},
+		{"not a reference", "plain", "ws_ABC", "web", "prod", "plain", true},
+	}
+	for _, c := range cases {
+		got, ok, err := bindContext(c.in, c.ws, c.prj, c.env)
+		if err != nil {
+			t.Fatalf("%s: unexpected error %v", c.name, err)
+		}
+		if ok != c.ok || (ok && got != c.want) {
+			t.Errorf("%s: bindContext(%q) = %q, %v; want %q, %v", c.name, c.in, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+func TestMergeBindingRefs_BindsContextualSecretEnv(t *testing.T) {
+	got, err := mergeBindingRefs(map[string]string{
+		"TOKEN":       "secret://CLOUDFLARE_API_TOKEN",
+		"PINNED":      "secret://acme/api/stage/KEY",
+		"WIRING_PROD": "secret://env:prod/WIRING_CLOUDFLARE_KV",
+	}, nil, "ws_ABC", "agent-visibility", "stage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"TOKEN":       "secret://ws_ABC/project:agent-visibility/env:stage/CLOUDFLARE_API_TOKEN",
+		"PINNED":      "secret://acme/api/stage/KEY",
+		"WIRING_PROD": "secret://ws_ABC/project:agent-visibility/env:prod/WIRING_CLOUDFLARE_KV",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestMergeBindingRefs_UnboundContextualIsKeptWithoutScope(t *testing.T) {
+	got, err := mergeBindingRefs(map[string]string{"TOKEN": "secret://KEY"}, nil, "", "", "stage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["TOKEN"] != "secret://KEY" {
+		t.Errorf("TOKEN = %q, want it kept as authored", got["TOKEN"])
+	}
+}
+
+func TestMergeBindingRefs_ContextualAgreesWithBinding(t *testing.T) {
+	// A contextual secretEnv entry and a binding for the same key and asEnv bind
+	// to the same reference, so they must not be reported as a conflict.
+	_, err := mergeBindingRefs(map[string]string{"CLOUDFLARE_API_TOKEN": "secret://CLOUDFLARE_API_TOKEN"},
+		[]model.ResolvedSecretBinding{{Key: "CLOUDFLARE_API_TOKEN", AsEnv: "CLOUDFLARE_API_TOKEN", Required: true}},
+		"ws_ABC", "web", "prod")
+	if err != nil {
+		t.Fatalf("unexpected conflict: %v", err)
+	}
+}
+
+func TestMergeOptionalRefs_BindsContextual(t *testing.T) {
+	got, err := mergeOptionalRefs(map[string]string{"ADMIN_TOKEN": "secret://ADMIN_TOKEN"}, nil, "ws_ABC", "web", "prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "secret://ws_ABC/project:web/env:prod/ADMIN_TOKEN"; got["ADMIN_TOKEN"] != want {
+		t.Errorf("ADMIN_TOKEN = %q, want %q", got["ADMIN_TOKEN"], want)
+	}
+}
