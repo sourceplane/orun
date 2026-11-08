@@ -61,6 +61,16 @@
 
 ## SG3 — Contextual omission
 
+> **Status — binding shipped.** `bindContext` binds omitted workspace, project
+> and env in the planner (`internal/planner/secret_bindings.go`) for `secretEnv`
+> and `optionalSecretEnv`, from the same scope the composition `secretBindings`
+> already use. Fully pinned references keep their authored spelling, so their
+> plan digest does not change. Without a workspace or project to bind from (an
+> unlinked repo planned offline) a reference is kept as authored rather than
+> failing the plan, so nothing that compiled before stops compiling. The
+> component dimension is left to the lease. **Still to do:** the `{{…}}`
+> reference-slot deprecation warning.
+
 - **Build.**
   - `bindContext` (`design.md` § 2): omitted dimensions bind from the component
     instance at expand. Never overrides an authored value; a required slot whose

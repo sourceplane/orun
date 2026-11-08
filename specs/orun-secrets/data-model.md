@@ -72,12 +72,15 @@ spec:
   env:                          # existing plaintext env (unchanged)
     LOG_LEVEL: info
   secretEnv:                    # NEW — references only, never values
-    DATABASE_URL: "secret://acme/api/{{env}}/DATABASE_URL"
-    STRIPE_KEY:   "secret://acme/api/{{env}}/STRIPE_KEY"
+    DATABASE_URL: "secret://DATABASE_URL"
+    STRIPE_KEY:   "secret://STRIPE_KEY"
 ```
 
-`{{env}}` interpolates the resolving environment (existing interpolation,
-`internal/expand/expander.go:321-348`). The expander gains `mergeSecretEnv`
+The omitted workspace, project and environment bind from the job's own scope
+when the plan is built (`bindContext`, `internal/planner/secret_bindings.go`;
+`specs/orun-scope-engine` SG3), so the same line resolves in every environment,
+repository and workspace. The earlier `{{env}}` spelling collapsed to `//` and
+never ran. The expander gains `mergeSecretEnv`
 mirroring `mergeEnv`, writing `ComponentInstance.SecretEnv`
 (`internal/model/intent.go:329-358`). **Leak guard:** a literal (non-reference)
 value in `secretEnv` is a compile error.
