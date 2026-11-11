@@ -60,6 +60,16 @@ type platformAuthServer struct {
 	// identity scope on the very poll that would redeem an approved grant.
 	browserRateLimitFirst int
 
+	// browserUnavailable / deviceUnavailable are the number of polls answered
+	// 503 internal_error — the platform's answer to a database blip on the
+	// grant read. Unlike the other failure knobs they apply AFTER the pending
+	// polls, so the blip lands mid-poll, on the very poll that would redeem the
+	// already-approved grant. unavailableRetryAfter, when set, is sent as the
+	// Retry-After header on those 503s.
+	browserUnavailable    int
+	deviceUnavailable     int
+	unavailableRetryAfter string
+
 	// refresh rotation state.
 	currentRefresh string
 	rotateTo       string
@@ -131,9 +141,14 @@ func newPlatformAuthServer(t *testing.T) *platformAuthServer {
 				writeError(w, 429, "rate_limited", "Too many requests")
 				return
 			}
-			if int(n) <= p.browserDropFirst+p.browserRateLimitFirst+p.browserApproveAfter {
+			pendingEnd := p.browserDropFirst + p.browserRateLimitFirst + p.browserApproveAfter
+			if int(n) <= pendingEnd {
 				// Pending: platform returns HTTP 400 "Not yet approved".
 				writeError(w, 400, "validation_failed", "Not yet approved")
+				return
+			}
+			if int(n) <= pendingEnd+p.browserUnavailable {
+				p.writeUnavailable(w)
 				return
 			}
 			writeData(w, 200, p.session)
@@ -174,9 +189,14 @@ func newPlatformAuthServer(t *testing.T) *platformAuthServer {
 			writeError(w, 429, "rate_limited", "Too many requests")
 			return
 		}
-		if int(n) <= p.deviceDropFirst+p.deviceRateLimitFirst+p.deviceApproveAfter {
+		pendingEnd := p.deviceDropFirst + p.deviceRateLimitFirst + p.deviceApproveAfter
+		if int(n) <= pendingEnd {
 			// Pending: status under data, error mirrors RFC-8628.
 			writeData(w, 200, map[string]any{"status": "pending", "error": "authorization_pending"})
+			return
+		}
+		if int(n) <= pendingEnd+p.deviceUnavailable {
+			p.writeUnavailable(w)
 			return
 		}
 		// Complete: the session is NESTED under data.session.
@@ -190,6 +210,16 @@ func newPlatformAuthServer(t *testing.T) *platformAuthServer {
 	p.srv = httptest.NewServer(mux)
 	t.Cleanup(p.srv.Close)
 	return p
+}
+
+// writeUnavailable answers a poll the way the platform answers a database
+// blip on the grant read: 503 internal_error, with Retry-After when the test
+// set one.
+func (p *platformAuthServer) writeUnavailable(w http.ResponseWriter) {
+	if p.unavailableRetryAfter != "" {
+		w.Header().Set("Retry-After", p.unavailableRetryAfter)
+	}
+	writeError(w, 503, "internal_error", "Service temporarily unavailable")
 }
 
 // dropConn hijacks the connection and closes it without writing a response,
@@ -609,6 +639,159 @@ func TestBrowserLogin_RateLimitedRedeemRetried(t *testing.T) {
 	// 2 rate-limited polls + 1 pending + 1 redeem.
 	if got := atomic.LoadInt32(&p.browserPolls); got < 4 {
 		t.Errorf("expected at least 4 polls (2 throttled + pending + redeem), got %d", got)
+	}
+}
+
+func TestBrowserLogin_UnavailableMidPollRetried(t *testing.T) {
+	fileStoreHome(t)
+	p := newPlatformAuthServer(t)
+	p.session = sampleSession()
+	// One pending poll, then the platform's database blips on the grant read
+	// and answers 503 internal_error on the poll that would redeem the
+	// approved grant. The 503 says nothing about the grant, so the CLI must
+	// poll again and redeem rather than end the login.
+	p.browserApproveAfter = 1
+	p.browserUnavailable = 1
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	creds, err := BrowserLogin(ctx, p.srv.URL, "test", nil, func(string) error { return nil })
+	if err != nil {
+		t.Fatalf("BrowserLogin error = %v; a mid-poll 503 must not kill the flow", err)
+	}
+	if creds.AccessToken != "access-tok" {
+		t.Errorf("AccessToken = %q, want access-tok", creds.AccessToken)
+	}
+	// 1 pending + 1 unavailable + 1 redeem.
+	if got := atomic.LoadInt32(&p.browserPolls); got != 3 {
+		t.Errorf("polls = %d, want 3 (pending + 503 + redeem)", got)
+	}
+}
+
+func TestBrowserLogin_UnavailableOutageTerminal(t *testing.T) {
+	fileStoreHome(t)
+	p := newPlatformAuthServer(t)
+	p.session = sampleSession()
+	// Every poll answers 503: a real outage, not a blip. The flow must give
+	// up after maxConsecutivePollFailures with the server's error attached,
+	// not poll silently until the grant expires.
+	p.browserUnavailable = 1 << 20
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err := BrowserLogin(ctx, p.srv.URL, "test", nil, func(string) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "giving up after 4 consecutive poll failures") {
+		t.Fatalf("BrowserLogin error = %v, want a consecutive-poll-failures error", err)
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusServiceUnavailable {
+		t.Errorf("error = %v, want it to wrap the 503 *APIError", err)
+	}
+	if got := atomic.LoadInt32(&p.browserPolls); got != maxConsecutivePollFailures {
+		t.Errorf("polls = %d, want exactly %d before giving up", got, maxConsecutivePollFailures)
+	}
+}
+
+func TestDeviceLogin_UnavailableMidPollRetried(t *testing.T) {
+	fileStoreHome(t)
+	p := newPlatformAuthServer(t)
+	p.session = sampleSession()
+	// One pending poll, then a 503 internal_error carrying Retry-After: 2,
+	// then approval. The CLI must keep polling, and wait the 2s the server
+	// asked for rather than the grant's 1s interval.
+	p.deviceApproveAfter = 1
+	p.deviceUnavailable = 1
+	p.unavailableRetryAfter = "2"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	start := time.Now()
+	creds, err := DeviceLogin(ctx, p.srv.URL, "test", nil)
+	if err != nil {
+		t.Fatalf("DeviceLogin error = %v; a mid-poll 503 must not kill the flow", err)
+	}
+	if creds.AccessToken != "access-tok" {
+		t.Errorf("AccessToken = %q, want access-tok", creds.AccessToken)
+	}
+	// 1 pending + 1 unavailable + 1 complete.
+	if got := atomic.LoadInt32(&p.devicePolls); got != 3 {
+		t.Errorf("polls = %d, want 3 (pending + 503 + complete)", got)
+	}
+	// 1s after the pending poll + 2s Retry-After after the 503.
+	if elapsed := time.Since(start); elapsed < 3*time.Second {
+		t.Errorf("device login took %s, want >= 3s (Retry-After on the 503 not honored)", elapsed)
+	}
+}
+
+func TestDeviceLogin_UnavailableOutageTerminal(t *testing.T) {
+	fileStoreHome(t)
+	p := newPlatformAuthServer(t)
+	p.session = sampleSession()
+	// Every poll answers 503: give up after maxConsecutivePollFailures.
+	p.deviceUnavailable = 1 << 20
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err := DeviceLogin(ctx, p.srv.URL, "test", nil)
+	if err == nil || !strings.Contains(err.Error(), "giving up after 4 consecutive poll failures") {
+		t.Fatalf("DeviceLogin error = %v, want a consecutive-poll-failures error", err)
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusServiceUnavailable {
+		t.Errorf("error = %v, want it to wrap the 503 *APIError", err)
+	}
+	if got := atomic.LoadInt32(&p.devicePolls); got != maxConsecutivePollFailures {
+		t.Errorf("polls = %d, want exactly %d before giving up", got, maxConsecutivePollFailures)
+	}
+}
+
+func TestRetryablePollError(t *testing.T) {
+	cases := []struct {
+		status int
+		code   string
+		want   bool
+	}{
+		{500, "internal_error", true},
+		{502, "HTTP_502", true},
+		{503, "internal_error", true},
+		{504, "HTTP_504", true},
+		{400, "internal_error", true}, // the code alone marks a server-side failure
+		{400, "validation_failed", false},
+		{401, "unauthenticated", false},
+		{401, "internal_error", false}, // grant answers stay terminal whatever the code
+		{403, "access_denied", false},
+		{404, "not_found", false},
+		{410, "expired", false},
+		{422, "validation_failed", false},
+		{429, "rate_limited", false}, // has its own branch in both loops
+	}
+	for _, c := range cases {
+		got := retryablePollError(&APIError{Status: c.status, Code: c.code})
+		if got != c.want {
+			t.Errorf("retryablePollError(%d %s) = %v, want %v", c.status, c.code, got, c.want)
+		}
+	}
+	if retryablePollError(nil) {
+		t.Error("retryablePollError(nil) = true, want false")
+	}
+}
+
+func TestPollRetryWait(t *testing.T) {
+	far := time.Now().Add(time.Hour)
+	if got := pollRetryWait(2*time.Second, 0, far); got != 2*time.Second {
+		t.Errorf("no Retry-After: wait = %v, want the 2s interval", got)
+	}
+	if got := pollRetryWait(2*time.Second, time.Second, far); got != 2*time.Second {
+		t.Errorf("short Retry-After: wait = %v, want the 2s interval floor", got)
+	}
+	if got := pollRetryWait(2*time.Second, 10*time.Second, far); got != 10*time.Second {
+		t.Errorf("long Retry-After: wait = %v, want 10s", got)
+	}
+	if got := pollRetryWait(2*time.Second, time.Hour, time.Now().Add(5*time.Second)); got > 5*time.Second {
+		t.Errorf("Retry-After past the deadline: wait = %v, want <= 5s", got)
+	}
+	if got := pollRetryWait(2*time.Second, 0, time.Now().Add(-time.Second)); got != 0 {
+		t.Errorf("deadline passed: wait = %v, want 0", got)
 	}
 }
 
