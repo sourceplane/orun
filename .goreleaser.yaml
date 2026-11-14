@@ -13,13 +13,14 @@ builds:
     goos:
       - darwin
       - linux
+      - windows
     goarch:
       - amd64
       - arm64
     hooks:
       post:
         - mkdir -p dist/bin/{{ .Os }}/{{ .Arch }}
-        - cp {{ .Path }} dist/bin/{{ .Os }}/{{ .Arch }}/orun
+        - cp {{ .Path }} dist/bin/{{ .Os }}/{{ .Arch }}/orun{{ .Ext }}
 
 archives:
   - id: orun-archive
@@ -27,6 +28,10 @@ archives:
       - orun
     formats:
       - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:

@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/sourceplane/orun/internal/ui"
 )
@@ -54,7 +53,7 @@ func startBackgroundRun(execID string, color bool) error {
 		"ORUN_EXEC_ID="+execID,
 		"ORUN_NO_COLOR=1",
 	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = backgroundSysProcAttr()
 
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
